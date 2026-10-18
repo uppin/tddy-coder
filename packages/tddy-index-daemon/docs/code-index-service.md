@@ -26,13 +26,17 @@ code path rather than a second one.
 | Module | Responsibility |
 |---|---|
 | `service.rs` | The generated trait's methods, each a one-line delegation. `CodeIndexPorts`, `build_code_index_entry`, `EventStream` |
-| `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache, and telling a warm server what changed on disk before a request reaches it (`client_for`), then handing the same changes to `plan_upkeep` |
+| `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache, and telling a warm server what changed on disk before a request reaches it (`client_for`), then handing the same changes to `plan_upkeep`. Holds the root `RootSignals` (`signals()`), fired from `client_for` when a root gains a server or its start fails |
+| `plan_flush.rs` | The per-root plan stores (`SharedPlanStore`, `PlanStores`) and their debounced write-back: a changed plan waits `PLAN_FLUSH_DEBOUNCE` (1 s), checked every `PLAN_FLUSH_TICK` (250 ms), and `flush_eventually` writes it back without queueing behind a run that holds its store, stopping once the index is gone. Its log lines keep the target `tddy_index_daemon::index` so existing filters match |
+| `graph.rs` | `GraphLoad`: the root's progress publisher, a `watch<RootProgress>` folded by an unthrottled `ServerChatter` for the server's whole life — see [Root progress](#root-progress). `state_of_quiescence` |
+| `warm.rs` | `Warm`: start the root's server through `client_for`, then forward the root's progress until its graph is loaded |
+| `watch_root.rs` | `WatchRoot`, and what it shares with `Warm`: `RootSignals` (a `watch<()>` fired when a root is served or fails to start, plus the per-root start-failure record), `next_change` / `Gone` (the one wait on "progress changed, server gone, or caller gone"), and `reported` (a `RootProgress` as the wire's `IndexProgress`) |
 | `plan_upkeep.rs` | Keeping the root's loaded plans current when the tree changes behind the daemon: the Rust files `tree_changes` reports changed are passed to `PlanStore::reresolve_files`, which skips the files the daemon's own runs wrote. A deleted file is not passed on |
 | `tree_changes.rs` | The per-root snapshot of the source tree (`*.rs`, `Cargo.toml`, `Cargo.lock`) and the `workspace/didChangeWatchedFiles` notification built from its difference |
-| `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink. `Check` and `Apply` run the root's loaded plan; `Apply` loads one that is not loaded. A run **queued** behind another on the same root says so on its own stream every heartbeat (`still waiting (Ns) — queued behind another operation on …`), and a send that fails means the caller hung up, which drops the request out of the queue without taking the gate |
+| `operations.rs` | `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink. `Check` and `Apply` run the root's loaded plan; `Apply` loads one that is not loaded. A run **queued** behind another on the same root says so on its own stream every heartbeat (`still waiting (Ns) — queued behind another operation on …`), and a send that fails means the caller hung up, which drops the request out of the queue without taking the gate |
 | `queries.rs` | `Anchors`, `Snapshot`, `PlanStatus`, `Verify`, and the plan store's `LoadPlans`, `UnloadPlans`, `ListPlans` — the unary half. `Snapshot` takes the root's queue (it writes the plan file and reads the tree), acquires a language server through `client_for` **only** when `item_anchor::plan_file_has_item_anchors` says the plan has item anchors, and runs `runner::snapshot_resolving` on a blocking task with a cancellation token that fires when the request is dropped; it answers `{paths, rewritten, stale}`, the stale list as `StaleOp`s in plan order. `PlanStatus` reads the loaded plan and, like `ListPlans`, lists its stale operations (`StaleOp { op, reason }`). `Verify` answers the three excused-statement counts (`repointed`, `visibility_normalised`, `cfg_test_gates`). `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
 | `apply.rs` | The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation (`runner::record_applied_op` also folds the operation into every other loaded plan), refusing a stale operation before anything is read or written (`runner::refuse_a_stale_pending_op`, `StaleOperation`, `FailedPrecondition`), refusing a move of a file git does not track right after each operation is resolved and before its dry-run branch, group entry and in-flight record (`runner::preflight_moves`, `UntrackedMoveSource`), bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event), and gating and rolling back transactional groups through `runner::group_gate` (`GroupRun`), so a group's `OperationApplied` events, each carrying `group`, are sent only once the group compiled |
-| `navigation.rs` | `Definition`, `References`, `Hover` — one `LspClient` query each on the root's warm server, and the translation either side of it. Also the checks every file-taking query shares: `served_source` (the path is inside the root and a Rust source) and `synced_document` (the file's contents sent to the root's server, and its URI), plus the `wire_position` and `code_location` translations |
+| `navigation.rs` | `Definition`, `References`, `Hover` — one `LspClient` query each on the root's warm server, the translation either side of it, and the index state the answer was given in (`index_state_of`). Also the checks every file-taking query shares: `served_source` (the path is inside the root and a Rust source) and `synced_document` (the file's contents sent to the root's server, and its URI), plus the `wire_position` and `code_location` translations |
 | `symbols.rs` | `Symbols`, `Diagnostics` — the same shape as navigation, built on its shared checks and translations |
 | `analyze.rs` | `Coverage`, `Report`, `DuplicateTests`, `Complexity` |
 | `status.rs` | One exhaustive `match` per error type, mapping every variant to a gRPC status |
@@ -78,7 +82,9 @@ enclosing one. An unreadable manifest on the walk is a `FailedPrecondition`, not
 | Open-document versions | `LspClient`, per URI |
 | The source-tree snapshot taken at the previous request | `WorkspaceIndex`, per root, replaced together with the crate-graph latch |
 | Complexity scores | process-wide, keyed by a hash of the content scored |
-| Plan store (`PlanStore`) | `WorkspaceIndex`, per root, across requests; a background tick flushes plans dirty for over a second, and `serve.rs` / `main.rs` flush every plan at shutdown and exit |
+| Plan store (`PlanStore`) | `WorkspaceIndex`, per root, across requests; `plan_flush.rs`'s background tick flushes plans dirty for over a second, and `serve.rs` / `main.rs` flush every plan at shutdown and exit |
+| The root's progress (`RootProgress`) | the root's `GraphLoad`, attached when `record_use` first hands out its server, for that server's life |
+| Why a root's server could not start, or died unasked | `RootSignals`, per root, until the root is served again |
 | Stale operations of the loaded plans | the plan store, in memory, for the life of a load; never serialised into a plan |
 | `Overlay`, `PositionLedger`, `Journal` | per request, never shared |
 
@@ -103,24 +109,75 @@ the apply already folded each operation into every loaded plan. Resolver refusal
 edits made in that window are caught at apply by the resolver's fingerprint refusal rather than by
 `ListPlans`.
 
-**`Warm` streams every phase.** The activity stream is structured events, not a console, so its
-`ServerChatter` is `unthrottled()`: a client that wanted the 50% it was never sent cannot ask again. The
-printed progress of the single-shot console is throttled to one line per token every two seconds.
+## Root progress
 
-**`phase` and `percentage` are the current phase's.** Each `IndexProgress` names the phase the server
-reported on most recently — from its `begin`, at 0% until it reports a number — and the highest
-percentage *that* phase has reached (`ServerChatter::current()`), so a sub-step carrying no number
-never moves it backwards. The cross-phase figure travels separately in `furthest`
-(`ServerChatter::furthest()`): rust-analyzer finishes *Roots Scanned* at 100% within seconds and then
-spends minutes building and indexing, which a single cross-phase maximum would hide behind that first
-100%. A phase that never reports a percentage (running build scripts) is still named, and `line`
-carries what it is doing.
+**One fold per root, for the server's whole life.** When `record_use` first hands out a root's server it
+attaches a `GraphLoad`, which subscribes to the server's notifications and folds every
+`$/progress` and `experimental/serverStatus` through an **unthrottled** `ServerChatter` into a
+`watch<RootProgress>`:
+
+| Field | Meaning |
+|---|---|
+| `quiescent` | the server's **latest** `serverStatus` said `quiescent: true`. Not a latch — an edit that sends rust-analyzer back to work makes it false again. False before any status |
+| `loaded` | the first quiescence, never unset — the crate-graph latch `Warm` answers `ready` on |
+| `phases` | every work-done token in flight, in begin order (`ServerChatter::active_phases`): title from its `begin`, latest message, highest percentage |
+| `current` | the phase reported on most recently and the highest percentage it reached (`ServerChatter::current`) |
+| `furthest` | the last line carrying the furthest percentage any phase reached (`ServerChatter::furthest`) |
+| `line` | the latest line worth showing |
+
+Because the fold starts at spawn, a watcher that arrives mid-load reads the phases already running by
+name rather than reports whose `begin` it never saw. A notification gap (`NotificationEvent::Lost`) calls
+`ServerChatter::lost_sight`, so a phase whose `end` was lost is dropped at the next quiescence unless it
+reported again; its title is kept, so a phase still running reappears named. The subscription is
+taken within `fake_lsp`'s first-notification delay of the handshake, so no `begin` is missed in tests.
+
+**What "loading" means.** Every reading of a root's state — `WatchRoot`, `Warm` and each navigation
+answer — maps `quiescent` through `state_of_quiescence`: `READY` when the latest status was quiescent,
+`LOADING` otherwise, including before any status. A root no live server holds is `IDLE`; one whose server
+could not start, or exited without being let go, is `FAILED` with `error` saying why until the next
+attempt. rust-analyzer always sends the extension because the daemon advertises
+`serverStatusNotification`; a server that never sent one would read `LOADING` for ever.
+
+**`IndexProgress` on the wire** (`reported`): `phase` / `percentage` are `current`'s — the phase the
+server reported on most recently, at 0% until it reports a number, never moving backwards on a sub-step
+carrying no number; `furthest` is the cross-phase figure (rust-analyzer finishes *Roots Scanned* at 100%
+within seconds and then spends minutes building and indexing, which a single cross-phase maximum would
+hide); `line` what it is doing; `state` (`IndexState`); `phases` (`ActivePhase { title, message,
+percentage }`, percentage absent when the phase never reported one); `error` when `FAILED`. `ready` is
+`Warm`'s "this stream is done" flag and is false everywhere else.
+
+**`WatchRoot(workspace_root)` never starts a server.** It opens with the root's current state and sends
+every change after, until the caller leaves:
+
+- a root no server holds sends `IDLE` (or `FAILED` with its reason), then waits on `RootSignals` —
+  fired when anything (a warm, a navigation request, an agent's code tool) attaches a server or a start
+  fails — never on a timer;
+- a held root forwards every change of its `RootProgress`, deduplicated; the progress sender dropping is
+  the server going away, after which the root reports `IDLE` (or `FAILED`) again.
+
+**`Warm` is "start the server, then follow the root until loaded".** It calls `client_for(root)` and
+forwards the root's progress through the same `next_change` wait until `loaded`, which it sends with
+`ready: true`; a server that goes away mid-load ends it `UNAVAILABLE`, and a start that fails is refused
+with the reason (and recorded for `WatchRoot`). Idempotent: a loaded root answers `ready` at once. Three
+things end it — the graph loading, the server going away, the caller hanging up.
+
+The printed progress of the single-shot console is throttled to one line per token every two seconds;
+the streams are structured events, so their chatter is unthrottled — a client that wanted the 50% it
+was never sent cannot ask again.
 
 ## Navigation
 
 `Definition`, `References` and `Hover` take `{workspace_root, file, position}` and answer from the
 warm server `WorkspaceIndex::client_for(root)` hands out, through `LspClient::{definition, references,
 hover}`.
+
+**Index state.** Each answer carries `state` (`LOADING` or `READY`), read from the server's latest
+`serverStatus` through `ServerChatter` (`index_state_of`). `tddy-lsp`'s reader records a status before it
+routes the response that follows it, so the state is the one the answer was given in. rust-analyzer
+answers empty while its crate graph loads, so an empty answer with `LOADING` means "not known yet", and
+only an empty answer with `READY` means the code does not resolve. Navigation never waits for the graph:
+a cold load takes minutes, and holding a query is the caller's choice (the daemon's `CodeSession` holds
+on a stream the pane can cancel).
 
 **Coordinates.** A `SourcePosition` is a one-based line and a one-based **byte** column, the
 coordinates every other RPC in the service uses. The language server speaks zero-based positions, and
@@ -262,6 +319,7 @@ Every suite runs against `fake_lsp`, `tddy-lsp`'s deterministic fake, reached th
 | Suite | Covers |
 |---|---|
 | `code_index_service_acceptance.rs` | Every RPC dispatched at the registered coordinate through `handle_rpc` (navigation answers, root-relative and one-based, come from `fake_lsp` started with `--answers-in-its-workspace`, which reports its canned locations under the client's `rootUri`), plus the coordinate-integrity trio — including one test that reads the `.proto` off disk and asserts the published constant matches the schema — and an `Apply` the compile gate fails |
+| `root_progress_acceptance.rs` | `WatchRoot` and `Warm` over the per-root fold: a root no server holds reports `IDLE` and starts none; a watch reports the load a navigation request started; a server that cannot start reports `FAILED` with the reason; a watch joining mid-load names every phase already running; a warm reports `ready` only once loaded and carries the active phases; a definition asked while loading says `LOADING`, once loaded `READY`. Driven by `fake_lsp --loads-crate-graph-on-signal`, which begins two overlapping phases and holds until a file the test names appears, so "mid-load" is deterministic without sleeps |
 | `dual_transport_acceptance.rs` | The binary as a process: single-shot exit codes, both transports concurrently, stdout silence under `--stdio`, fail-fast with no transport |
 | `tree_changes_acceptance.rs` | A warm server told of a module written since its last request (created and changed), of one removed (deleted), of each change once, and of nothing when the tree has not changed — against `fake_lsp`, which replays the notifications it received as `tddy/watchedFileChanges` |
 | `live_plans_acceptance.rs` | The apply loop folding a test-binary move into another loaded plan's file hint and flushing it, and an unloaded plan staying byte-identical after another plan applies |

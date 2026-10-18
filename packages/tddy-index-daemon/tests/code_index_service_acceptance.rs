@@ -18,7 +18,7 @@ use tddy_index_daemon::proto::code_index::{
     CodeDiagnostic, CodeIndexServiceServer, CodeLocation, CodeSymbol, ComplexityRequest,
     ComplexityResponse, CoverageRequest, DefinitionRequest, DefinitionResponse, DiagnosticsRequest,
     DiagnosticsResponse, DuplicateTestsRequest, Finding, FunctionComplexity, HoverRequest,
-    HoverResponse, IndexProgress, ListPlansRequest, LoadPlansRequest, LoadedPlan,
+    HoverResponse, IndexProgress, IndexState, ListPlansRequest, LoadPlansRequest, LoadedPlan,
     PlanStatusRequest, PlanStatusResponse, PlansResponse, ReferencesRequest, ReferencesResponse,
     ReportRequest, ReportResponse, RestructureEvent, RunOutcome, SnapshotRequest, SnapshotResponse,
     SourcePosition, SourceRange, SymbolsRequest, SymbolsResponse, UnloadPlansRequest,
@@ -1395,13 +1395,45 @@ fn a_host_over_fake_language_servers_answering_in_their_workspace() -> tddy_rpc:
     let mut spec = LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
         .with_capabilities(tddy_code_restructuring::client_capabilities())
         .with_initialization_options(tddy_code_restructuring::server_settings());
-    spec.args = vec!["--answers-in-its-workspace".to_string()];
+    spec.args = vec![
+        "--answers-in-its-workspace".to_string(),
+        "--loads-crate-graph".to_string(),
+    ];
     let mut allow = LspAllowList::new();
     allow.allow(Language::Rust, spec);
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
         wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
     })
+}
+
+/// The workspace root a navigation test asks about, on the host that serves it.
+struct TheGraphOf<'a> {
+    entry: &'a tddy_rpc::ServiceEntry,
+    workspace: &'a tempfile::TempDir,
+}
+
+fn the_graph_of<'a>(
+    entry: &'a tddy_rpc::ServiceEntry,
+    workspace: &'a tempfile::TempDir,
+) -> TheGraphOf<'a> {
+    TheGraphOf { entry, workspace }
+}
+
+impl TheGraphOf<'_> {
+    /// Warm the root to the end: its server has reported the crate graph loaded, so a navigation
+    /// answer after this is a loaded index's.
+    async fn has_loaded(&self) {
+        let _: Vec<IndexProgress> = stream_at(
+            self.entry,
+            "Warm",
+            WarmRequest {
+                workspace_root: root_of(self.workspace),
+            },
+        )
+        .await
+        .expect("warming a reachable root succeeds");
+    }
 }
 
 /// A package whose `src/lib.rs` calls `foo`, the symbol every navigation request points at.
@@ -1441,9 +1473,10 @@ fn a_location_in_the_workspace(file: &str, range: Option<SourceRange>) -> CodeLo
 
 #[tokio::test(flavor = "multi_thread")]
 async fn definition_returns_the_callee_location_in_the_worktree() {
-    // Given a workspace whose language server knows where `foo` is defined
+    // Given a workspace whose language server knows where `foo` is defined, its crate graph loaded
     let workspace = a_workspace_calling_foo();
     let entry = a_host_over_fake_language_servers_answering_in_their_workspace();
+    the_graph_of(&entry, &workspace).has_loaded().await;
 
     // When the definition of the call to `foo` is asked for
     let answer: DefinitionResponse = unary_at(
@@ -1466,15 +1499,17 @@ async fn definition_returns_the_callee_location_in_the_worktree() {
                 "src/lib.rs",
                 a_range_on_line(11, 1, 4)
             )],
+            state: IndexState::Ready as i32,
         }
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn references_returns_every_reference() {
-    // Given a workspace whose language server knows every reference to `foo`
+    // Given a workspace whose language server knows every reference to `foo`, its crate graph loaded
     let workspace = a_workspace_calling_foo();
     let entry = a_host_over_fake_language_servers_answering_in_their_workspace();
+    the_graph_of(&entry, &workspace).has_loaded().await;
 
     // When the references of `foo` are asked for
     let answer: ReferencesResponse = unary_at(
@@ -1497,15 +1532,17 @@ async fn references_returns_every_reference() {
                 a_location_in_the_workspace("src/lib.rs", a_range_on_line(11, 1, 4)),
                 a_location_in_the_workspace("src/main.rs", a_range_on_line(21, 5, 8)),
             ],
+            state: IndexState::Ready as i32,
         }
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn hover_returns_the_type_text() {
-    // Given a workspace whose language server can describe `foo`
+    // Given a workspace whose language server can describe `foo`, its crate graph loaded
     let workspace = a_workspace_calling_foo();
     let entry = a_host_over_fake_language_servers_answering_in_their_workspace();
+    the_graph_of(&entry, &workspace).has_loaded().await;
 
     // When the hover of the call to `foo` is asked for
     let answer: HoverResponse = unary_at(
@@ -1525,6 +1562,7 @@ async fn hover_returns_the_type_text() {
         answer,
         HoverResponse {
             markdown: Some("fn foo() -> u32".to_string()),
+            state: IndexState::Ready as i32,
         }
     );
 }

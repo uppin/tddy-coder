@@ -26,13 +26,17 @@ export const worktreeCodePanePage = {
   indexStatus: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.worktreeCodeIndexStatus, { timeout: 5000, ...options }),
 
-  /** The index strip's headline: phase and percentage, ready, failed, or not warmed. */
+  /** The index strip's headline: phase and percentage, ready, or failed. */
   indexStatusSummary: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.worktreeCodeIndexStatusSummary, { timeout: 5000, ...options }),
 
-  /** The index strip's detail: the index server's own line about what it is doing. */
+  /** The index strip's detail: the message of the phase the headline names. */
   indexStatusDetail: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.worktreeCodeIndexStatusDetail, { timeout: 5000, ...options }),
+
+  /** The strip's `+N more` while several index phases run; its `title` lists every phase. */
+  indexStatusMore: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeIndexStatusMore, { timeout: 5000, ...options }),
 
   /** The directory tree region inside the Code pane. */
   tree: (options?: Parameters<typeof cy.get>[1]) =>
@@ -61,6 +65,36 @@ export const worktreeCodePanePage = {
   /** The hover card showing an identifier's type. */
   hoverCard: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.worktreeCodeHover, { timeout: 5000, ...options }),
+
+  /** The hover card's scrolling body — the rendered hover markdown. */
+  hoverBody: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeHoverBody, { timeout: 5000, ...options }),
+
+  /** Heading elements (`h1`–`h6`) rendered inside the hover card's body. */
+  hoverBodyHeadings: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeHoverBody, { timeout: 5000, ...options }).find(
+      "h1, h2, h3, h4, h5, h6",
+    ),
+
+  /** Paragraph elements rendered inside the hover card's body. */
+  hoverBodyParagraphs: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeHoverBody, { timeout: 5000, ...options }).find("p"),
+
+  /** Code blocks (`pre > code`) rendered inside the hover card's body. */
+  hoverBodyCodeBlocks: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeHoverBody, { timeout: 5000, ...options }).find("pre > code"),
+
+  /** The hover card's loading state while its query is held by a loading index. */
+  hoverLoading: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeHoverLoading, { timeout: 5000, ...options }),
+
+  /** The hover card's Close action. */
+  hoverClose: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeHoverClose, { timeout: 5000, ...options }),
+
+  /** The navigation notice (go-to-definition outcome, held state, failure). */
+  notice: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeNotice, { timeout: 5000, ...options }),
 
   /** The action that lists the references of the hovered identifier. */
   referencesAction: (options?: Parameters<typeof cy.get>[1]) =>

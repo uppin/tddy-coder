@@ -278,14 +278,17 @@ The daemon registers the executor only when `index_daemon:` is configured, and e
 advertises the tools to a session's jail only then, so a session is never offered a tool that cannot be
 served.
 
-A started session also **warms** its index. When a Claude CLI, Cursor CLI or workspace session's
-worktree exists and holds a Rust workspace (a `Cargo.toml` at its root), tddy-daemon calls `Warm` for
-it in the background — which starts the index daemon if nothing has — and keeps the latest progress per
-session; the web's session header follows it
+A worktree's index is **warmed on demand**. Opening a session's Code pane warms its worktree, and so does
+the session agent's first code-tool call; in addition, when a Claude CLI, Cursor CLI or workspace
+session's worktree exists and holds a Rust workspace (a `Cargo.toml` at its root), tddy-daemon calls
+`Warm` for it in the background. Each starts the index daemon if nothing has. The index keeps its
+progress **per worktree root**, folded from rust-analyzer's own notifications from the moment its server
+starts, and `WatchRoot` follows it without starting anything — so the web's session header and Code pane
+show a load whoever started it, including after the host restarted
 ([Indexing indicator](../web/session-code-pane.md#indexing-indicator)). Starting a session never waits
-on it, and a warm that fails is reported with its reason and leaves the session usable. Sandboxed,
-tool and split sessions, and children spawned by a PR-stack orchestrator or a grill-me conversation,
-trigger no warm; their index loads on their first navigation request.
+on it, and a warm that fails is reported with its reason and leaves the session usable. Navigation
+answers carry whether the index had loaded, so an empty answer while loading is never read as "no
+definition"; an agent's `Lsp*` call answered while loading says so.
 
 A developer can equally start the same binary by hand with `run-index-daemon`, which is the only
 path that exists without a daemon installed.

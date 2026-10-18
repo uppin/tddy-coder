@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tddy_code_analysis::complexity_cache::InMemoryComplexityCache;
@@ -31,10 +31,15 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::activity::{reaped_line, Warmth};
 use crate::graph::GraphLoad;
+use crate::plan_flush::flush_eventually;
+use crate::plan_flush::PlanStores;
+use crate::plan_flush::SharedPlanStore;
+use crate::plan_flush::PLAN_FLUSH_DEBOUNCE;
 use crate::plan_upkeep::reresolve_loaded_plans;
 use crate::proto::code_index::WarmWorkspace;
 use crate::status::status_of_lsp;
 use crate::tree_changes::{watched_files_params, FileChange, TreeSnapshot};
+use crate::watch_root::RootSignals;
 
 /// How long one LSP request may go unanswered before the transport gives up on it.
 ///
@@ -49,26 +54,6 @@ use crate::tree_changes::{watched_files_params, FileChange, TreeSnapshot};
 /// the one a one-shot command line installs.
 const REQUEST_BOUND_ABOVE_ANY_COLD_INDEX: Duration = Duration::from_secs(600);
 
-/// How long a changed plan may wait in memory before it is written back.
-///
-/// Short enough that a plan a person opens in an editor a moment after a run sees the run's work,
-/// long enough that a burst of changes is one write. A run's own per-operation writes do not wait
-/// for it, and neither do unload and shutdown.
-const PLAN_FLUSH_DEBOUNCE: Duration = Duration::from_secs(1);
-
-/// How often the flusher looks for plans that have been dirty for longer than the debounce.
-const PLAN_FLUSH_TICK: Duration = Duration::from_millis(250);
-
-/// One root's loaded plans, shared between the requests that load, run and unload them and the
-/// flusher.
-///
-/// A `std` mutex, not a tokio one: every holder is a blocking thread or a handler that has moved to
-/// one, and a run holds it across the language-server calls that refresh its plan. The flusher only
-/// ever `try_lock`s it, so a run in progress is never what it waits on.
-pub type SharedPlanStore = Arc<std::sync::Mutex<PlanStore>>;
-
-type PlanStores = std::sync::Mutex<BTreeMap<PathBuf, SharedPlanStore>>;
-
 /// What this process knows about one workspace root.
 struct RootState {
     /// The queue every operation that touches this root's tree or its `.restructure/` state waits
@@ -77,8 +62,8 @@ struct RootState {
     /// When an operation on this root last reached its language server — what idle reaping is
     /// measured against, and what a client reading [`WarmWorkspace::idle_seconds`] is told.
     last_used: Instant,
-    /// Whether this root's crate graph has been observed loaded, watched from the moment its
-    /// server was reached.
+    /// This root's progress — its crate graph's loaded latch and the phases in flight — watched
+    /// from the moment its server was reached.
     ///
     /// `None` until a server has been reached for this root at all. Replaced rather than reused
     /// when the watcher behind it has ended, because that means the server it was about is gone and
@@ -110,6 +95,8 @@ pub struct WorkspaceIndex {
     plans: Arc<PlanStores>,
     /// Starts the flusher the first time a store exists for it to flush.
     flusher: Arc<std::sync::Once>,
+    /// What followers of a root hear besides its server's progress ([`crate::watch_root`]).
+    signals: RootSignals,
 }
 
 impl WorkspaceIndex {
@@ -122,6 +109,7 @@ impl WorkspaceIndex {
             scores: Arc::new(InMemoryComplexityCache::default()),
             plans: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             flusher: Arc::new(std::sync::Once::new()),
+            signals: RootSignals::default(),
         }
     }
 
@@ -279,11 +267,11 @@ impl WorkspaceIndex {
             root: root.to_path_buf(),
             language: Language::Rust,
         };
-        let service = self
-            .servers
-            .get_or_spawn(key)
-            .await
-            .map_err(|failure| status_of_lsp(&failure))?;
+        let service = self.servers.get_or_spawn(key).await.map_err(|failure| {
+            let refusal = status_of_lsp(&failure);
+            self.signals.failed(root, refusal.message());
+            refusal
+        })?;
         service
             .client
             .set_request_timeout(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX);
@@ -381,13 +369,18 @@ impl WorkspaceIndex {
         warm
     }
 
-    /// Whether `root`'s crate graph has been observed loaded, if a server has been reached for it.
+    /// `root`'s progress and loaded latch, if a server has been reached for it.
     ///
     /// `None` means no server has been asked for yet, which is a different thing from a graph that
     /// is not loaded: nothing has been watched, so there is nothing to report. [`Self::client_for`]
     /// is what turns the first into the second.
     pub(crate) async fn graph_load_of(&self, root: &Path) -> Option<GraphLoad> {
         self.roots.lock().await.get(root)?.graph.clone()
+    }
+
+    /// What followers of a root hear besides its server's progress.
+    pub(crate) fn signals(&self) -> &RootSignals {
+        &self.signals
     }
 
     /// Note that `root`'s index has just served something, which is what its idle timer is read
@@ -418,70 +411,13 @@ impl WorkspaceIndex {
         if !same_server {
             state.graph = Some(GraphLoad::watching(client));
         }
+        self.signals.served(root, !same_server);
         let changes = match (&state.tree, same_server) {
             (Some(earlier), true) => tree.changes_since(earlier),
             _ => Vec::new(),
         };
         state.tree = Some(tree);
         changes
-    }
-}
-
-/// Write each store's plans that have been dirty for longer than the debounce, until the index
-/// that owns the stores is gone.
-///
-/// A store a run is using is skipped for this tick rather than waited for: the run writes its own
-/// plan after every operation, and a flusher that queued behind the run's language-server calls
-/// would hold a thread for as long as they take.
-async fn flush_eventually(plans: Weak<PlanStores>) {
-    let mut tick = tokio::time::interval(PLAN_FLUSH_TICK);
-    // What was last refused per root, so a plan that stays refused is reported once and not on
-    // every tick for as long as it stays so.
-    let mut reported: BTreeMap<PathBuf, String> = BTreeMap::new();
-    loop {
-        tick.tick().await;
-        let Some(plans) = plans.upgrade() else {
-            return;
-        };
-        let stores: Vec<(PathBuf, SharedPlanStore)> = plans
-            .lock()
-            .expect("the table of plan stores")
-            .iter()
-            .map(|(root, store)| (root.clone(), Arc::clone(store)))
-            .collect();
-        drop(plans);
-
-        let outcomes = tokio::task::spawn_blocking(move || {
-            stores
-                .into_iter()
-                .filter_map(|(root, store)| {
-                    let mut held = store.try_lock().ok()?;
-                    Some((
-                        root,
-                        held.flush_dirty().map(|_| ()).map_err(|f| f.to_string()),
-                    ))
-                })
-                .collect::<Vec<_>>()
-        })
-        .await
-        .expect("flushing the plans does not panic");
-
-        for (root, outcome) in outcomes {
-            match outcome {
-                Ok(()) => {
-                    reported.remove(&root);
-                }
-                Err(refusal) => {
-                    if reported.get(&root) != Some(&refusal) {
-                        log::warn!(
-                            target: "tddy_index_daemon::index",
-                            "could not write back a plan of {}: {refusal}", root.display()
-                        );
-                        reported.insert(root, refusal);
-                    }
-                }
-            }
-        }
     }
 }
 

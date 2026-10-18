@@ -209,15 +209,25 @@ export const TEST_IDS = {
   worktreeCodePane: "worktree-code-pane",
   /** The Code pane's bottom strip: the session's code-index status (`data-state` names it). */
   worktreeCodeIndexStatus: "worktree-code-index-status",
-  /** The strip's headline — phase and percentage, ready, failed, or not warmed. */
+  /** The strip's headline — phase and percentage, ready, or failed. */
   worktreeCodeIndexStatusSummary: "worktree-code-index-status-summary",
-  /** The strip's detail — the index server's own line about what it is doing. */
+  /** The strip's detail — the message of the phase the headline names. */
   worktreeCodeIndexStatusDetail: "worktree-code-index-status-detail",
+  /** The strip's `+N more` when several index phases run at once; its `title` lists every phase. */
+  worktreeCodeIndexStatusMore: "worktree-code-index-status-more",
   worktreeFileTree: "worktree-file-tree",
   worktreeFilePreview: "worktree-file-preview",
   worktreeCodeHighlight: "worktree-code-highlight",
   // Code navigation in the preview (docs/ft/web/session-code-pane.md)
   worktreeCodeHover: "worktree-code-hover",
+  /** The hover card's scrolling body: the rendered hover markdown. */
+  worktreeCodeHoverBody: "worktree-code-hover-body",
+  /** The hover card's loading state while its query is held: `Index loading — <phase> <n>%`. */
+  worktreeCodeHoverLoading: "worktree-code-hover-loading",
+  /** The hover card's Close action (in its non-scrolling footer, beside References). */
+  worktreeCodeHoverClose: "worktree-code-hover-close",
+  /** The navigation notice: go-to-definition outcome, held state, or failure. */
+  worktreeCodeNotice: "worktree-code-notice",
   worktreeCodeReferencesAction: "worktree-code-references-action",
   worktreeCodeReferences: "worktree-code-references",
   // Restructure plan dialog (docs/ft/web/1-WIP/PRD-2026-10-03-plan-dialog.md)

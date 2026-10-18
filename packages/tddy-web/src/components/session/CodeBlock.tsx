@@ -1,4 +1,15 @@
-import { createElement, useEffect, useRef, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import {
+  createElement,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useSyncExternalStore,
+  type CSSProperties,
+  type MouseEvent,
+  type MutableRefObject,
+  type ReactNode,
+} from "react";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
@@ -19,6 +30,7 @@ import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
 
 import { codeLanguageForPath } from "../../lib/codeLanguage";
 import type { CodePosition } from "./codeNavigationApi";
+import { NOTHING_DEFINABLE, type DefinableSource } from "./codeProbes";
 
 SyntaxHighlighter.registerLanguage("bash", bash);
 SyntaxHighlighter.registerLanguage("c", c);
@@ -40,12 +52,17 @@ export type CodeBlockProps = {
   content: string;
   relPath: string;
   /**
-   * Ctrl/cmd-click on an identifier: go to its definition. Absent, the block stays a plain
-   * read-only preview.
+   * Go to the definition of an identifier: on ctrl/cmd-click, and on a plain click on one
+   * `definable` reports. Absent, the block stays a plain read-only preview.
    */
   onNavigate?: (at: CodePosition) => void;
-  /** The pointer rests on an identifier: show its hover. Fires once the pointer has dwelt on it. */
+  /** The pointer rests on the identifier at `at`: ask about it. Fires once the pointer has dwelt. */
   onHover?: (at: CodePosition) => void;
+  /**
+   * Which identifiers are known to have a definition: those are underlined and clickable. Each
+   * identifier follows its own flag, so a change re-renders that identifier, not the file.
+   */
+  definable?: DefinableSource;
   /** One-based line to scroll into view and mark as the navigation target. */
   focusLine?: number;
 };
@@ -69,10 +86,20 @@ type SyntaxNode = {
 
 type Stylesheet = Record<string, CSSProperties>;
 
-type Handlers = {
-  navigate?: (at: CodePosition) => void;
-  hoverIdentifier: (at: CodePosition, event: MouseEvent) => void;
-  leaveIdentifier: () => void;
+/**
+ * What a pointer on an identifier does — read through a ref, so the highlighted tree never changes
+ * with it.
+ */
+type IdentifierActions = {
+  click: (at: CodePosition, definable: boolean, event: MouseEvent) => void;
+  hover: (at: CodePosition) => void;
+  leave: () => void;
+};
+
+/** What every identifier of one render reads: its actions and its definability. */
+type IdentifierContext = {
+  actions: MutableRefObject<IdentifierActions>;
+  definable: DefinableSource;
 };
 
 /**
@@ -86,11 +113,11 @@ function renderNode(
   cursor: { bytes: number },
   stylesheet: Stylesheet,
   useInlineStyles: boolean,
-  handlers: Handlers,
+  identifiers: IdentifierContext,
   key: number,
 ): ReactNode {
   if (node.type === "text") {
-    return renderText(node.value ?? "", line, cursor, handlers, key);
+    return renderText(node.value ?? "", line, cursor, identifiers, key);
   }
   const classNames = node.properties?.className ?? [];
   const style = useInlineStyles
@@ -101,9 +128,13 @@ function renderNode(
     : node.properties?.style;
   return createElement(
     node.tagName ?? "span",
-    { key, className: classNames.length > 0 ? classNames.join(" ") : undefined, style },
+    {
+      key,
+      className: classNames.length > 0 ? classNames.join(" ") : undefined,
+      style,
+    },
     (node.children ?? []).map((child, i) =>
-      renderNode(child, line, cursor, stylesheet, useInlineStyles, handlers, i),
+      renderNode(child, line, cursor, stylesheet, useInlineStyles, identifiers, i),
     ),
   );
 }
@@ -112,7 +143,7 @@ function renderText(
   text: string,
   line: number,
   cursor: { bytes: number },
-  handlers: Handlers,
+  identifiers: IdentifierContext,
   key: number,
 ): ReactNode {
   const parts: ReactNode[] = [];
@@ -123,20 +154,13 @@ function renderText(
     if (before !== "") parts.push(before);
     const at = { line, column: cursor.bytes + 1 };
     parts.push(
-      <span
+      <Identifier
         key={`${at.column}`}
-        data-testid={`worktree-code-identifier-${at.line}-${at.column}`}
-        onClick={(e) => {
-          if ((e.ctrlKey || e.metaKey) && handlers.navigate) {
-            e.preventDefault();
-            handlers.navigate(at);
-          }
-        }}
-        onMouseOver={(e) => handlers.hoverIdentifier(at, e)}
-        onMouseOut={handlers.leaveIdentifier}
-      >
-        {match[0]}
-      </span>,
+        line={at.line}
+        column={at.column}
+        text={match[0]}
+        {...identifiers}
+      />,
     );
     cursor.bytes += utf8Length(match[0]);
     consumed = match.index + match[0].length;
@@ -148,26 +172,156 @@ function renderText(
 }
 
 /**
+ * One identifier of the preview, at a one-based line and byte column. It reads its own definability,
+ * so a probe answer re-renders it alone. `data-identifier-at` is how the hover card finds it.
+ */
+function Identifier({
+  line,
+  column,
+  text,
+  actions,
+  definable,
+}: { line: number; column: number; text: string } & IdentifierContext) {
+  const isDefinable = useSyncExternalStore(definable.subscribe, () =>
+    definable.isDefinable({ line, column }),
+  );
+  const at = { line, column };
+  return (
+    <span
+      data-testid={`worktree-code-identifier-${line}-${column}`}
+      data-identifier-at={`${line}:${column}`}
+      data-definable={isDefinable ? "true" : undefined}
+      className={isDefinable ? "cursor-pointer underline" : undefined}
+      onClick={(e) => actions.current.click(at, isDefinable, e)}
+      onMouseOver={() => actions.current.hover(at)}
+      onMouseOut={() => actions.current.leave()}
+    >
+      {text}
+    </span>
+  );
+}
+
+type HighlightedCodeProps = {
+  content: string;
+  language: string;
+  focusLine?: number;
+  focusRef: MutableRefObject<HTMLSpanElement | null>;
+  isDark: boolean;
+} & IdentifierContext;
+
+/**
+ * The syntax-highlighted rows. Memoised: highlighting runs again only for new content, language,
+ * target line, theme or definability source — never because a handler or one identifier's flag
+ * changed.
+ */
+const HighlightedCode = memo(function HighlightedCode({
+  content,
+  language,
+  focusLine,
+  focusRef,
+  isDark,
+  actions,
+  definable,
+}: HighlightedCodeProps) {
+  const identifiers: IdentifierContext = { actions, definable };
+  return (
+    <SyntaxHighlighter
+      language={language}
+      style={isDark ? oneDark : oneLight}
+      customStyle={{
+        margin: 0,
+        background: "transparent",
+        fontSize: "0.875rem",
+      }}
+      wrapLongLines
+      renderer={({ rows, stylesheet, useInlineStyles }) =>
+        (rows as SyntaxNode[]).map((row, index) => {
+          const line = index + 1;
+          const isTarget = line === focusLine;
+          const cursor = { bytes: 0 };
+          return (
+            <span
+              key={line}
+              ref={isTarget ? focusRef : undefined}
+              data-testid={`worktree-code-line-${line}`}
+              data-navigation-target={isTarget ? "true" : undefined}
+              className={isTarget ? "bg-primary/15" : undefined}
+            >
+              {(row.children ?? []).map((child, i) =>
+                renderNode(
+                  child,
+                  line,
+                  cursor,
+                  stylesheet as Stylesheet,
+                  useInlineStyles,
+                  identifiers,
+                  i,
+                ),
+              )}
+            </span>
+          );
+        })
+      }
+    >
+      {content}
+    </SyntaxHighlighter>
+  );
+});
+
+/**
  * Read-only file preview body: syntax-highlights recognized code files and falls back to plain
  * monospace text for anything else. The theme follows the app's dark-mode class on the document.
  *
  * Highlighted code is navigable when `onNavigate` / `onHover` are given: every line and every
- * identifier carries its one-based position.
+ * identifier carries its one-based position. An identifier `definable` reports is underlined
+ * (`data-definable="true"`) and a plain click on it navigates.
  */
-export function CodeBlock({ content, relPath, onNavigate, onHover, focusLine }: CodeBlockProps) {
+export function CodeBlock({
+  content,
+  relPath,
+  onNavigate,
+  onHover,
+  definable = NOTHING_DEFINABLE,
+  focusLine,
+}: CodeBlockProps) {
   const language = codeLanguageForPath(relPath);
   const dwellTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusRef = useRef<HTMLSpanElement | null>(null);
+  const actions = useRef<IdentifierActions>({
+    click: () => {},
+    hover: () => {},
+    leave: () => {},
+  });
 
   const cancelDwell = () => {
     if (dwellTimer.current !== null) clearTimeout(dwellTimer.current);
     dwellTimer.current = null;
   };
-  useEffect(() => cancelDwell, []);
+  // A dwell begun on the previous file must not ask about the same position in this one.
+  useEffect(() => cancelDwell, [content, relPath]);
 
   useEffect(() => {
     focusRef.current?.scrollIntoView({ block: "center" });
   }, [focusLine, content, relPath]);
+
+  // Handlers fire only after a commit, so the identifiers read the latest ones set here.
+  useLayoutEffect(() => {
+    actions.current = {
+      click: (at, isDefinable, event) => {
+        if (!onNavigate) return;
+        if (!(event.ctrlKey || event.metaKey || isDefinable)) return;
+        event.preventDefault();
+        cancelDwell();
+        onNavigate(at);
+      },
+      hover: (at) => {
+        if (!onHover) return;
+        cancelDwell();
+        dwellTimer.current = setTimeout(() => onHover(at), HOVER_DWELL_MS);
+      },
+      leave: cancelDwell,
+    };
+  });
 
   if (language === null) {
     return <pre className="whitespace-pre-wrap font-mono text-sm">{content}</pre>;
@@ -176,46 +330,17 @@ export function CodeBlock({ content, relPath, onNavigate, onHover, focusLine }: 
   const isDark =
     typeof document !== "undefined" && document.documentElement.classList.contains("dark");
 
-  const handlers: Handlers = {
-    navigate: onNavigate,
-    hoverIdentifier: (at) => {
-      if (!onHover) return;
-      cancelDwell();
-      dwellTimer.current = setTimeout(() => onHover(at), HOVER_DWELL_MS);
-    },
-    leaveIdentifier: cancelDwell,
-  };
-
   return (
     <div data-testid="worktree-code-highlight">
-      <SyntaxHighlighter
+      <HighlightedCode
+        content={content}
         language={language}
-        style={isDark ? oneDark : oneLight}
-        customStyle={{ margin: 0, background: "transparent", fontSize: "0.875rem" }}
-        wrapLongLines
-        renderer={({ rows, stylesheet, useInlineStyles }) =>
-          (rows as SyntaxNode[]).map((row, index) => {
-            const line = index + 1;
-            const isTarget = line === focusLine;
-            const cursor = { bytes: 0 };
-            return (
-              <span
-                key={line}
-                ref={isTarget ? focusRef : undefined}
-                data-testid={`worktree-code-line-${line}`}
-                data-navigation-target={isTarget ? "true" : undefined}
-                className={isTarget ? "bg-primary/15" : undefined}
-              >
-                {(row.children ?? []).map((child, i) =>
-                  renderNode(child, line, cursor, stylesheet as Stylesheet, useInlineStyles, handlers, i),
-                )}
-              </span>
-            );
-          })
-        }
-      >
-        {content}
-      </SyntaxHighlighter>
+        focusLine={focusLine}
+        focusRef={focusRef}
+        isDark={isDark}
+        actions={actions}
+        definable={definable}
+      />
     </div>
   );
 }

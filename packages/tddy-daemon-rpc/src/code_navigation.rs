@@ -12,6 +12,10 @@
 //! Without an `index_daemon:` configuration section there is no source, and every method answers
 //! `FAILED_PRECONDITION` naming that section. There is deliberately no fallback to the agent-tool
 //! language server: two indexes answering the same pane would disagree.
+//!
+//! `CodeSession` — the code pane's bidirectional stream — lives in [`crate::code_session`];
+//! `WatchCodeIndex` follows `code_index.WatchRoot` for the session's worktree and never warms it —
+//! it dials only an index daemon that is already running ([`IndexChannelSource::connect_if_running`]).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -20,22 +24,25 @@ use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::code_navigation::{
-    CodeIndexProgress, CodeLocation, CodeNavigationService, CodeNavigationServiceServer,
-    DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, OpenPlanRequest,
-    PlanRunEvent, PlanSnapshot, ReferencesRequest, ReferencesResponse, RunPlanRequest,
-    SourcePosition, SourceRange, WatchCodeIndexRequest, WatchPlanRequest,
+    CodeIndexProgress, CodeNavigationService, CodeNavigationServiceServer, CodeSessionEvent,
+    CodeSessionRequest, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse,
+    OpenPlanRequest, PlanRunEvent, PlanSnapshot, ReferencesRequest, ReferencesResponse,
+    RunPlanRequest, SourcePosition, WatchCodeIndexRequest, WatchPlanRequest,
 };
 use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tddy_worktree_service::WorktreeServiceImpl;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
 
-use crate::code_index_warmup::SessionIndexProgress;
-
 /// How many progress messages `WatchCodeIndex` buffers for a reader that has not drained them yet.
 const WATCH_BUFFER: usize = 8;
 
+pub(crate) mod convert;
 mod plan;
+pub(crate) mod position_query;
+
+use convert::{index_position, web_definition, web_hover, web_progress, web_references};
+use position_query::PositionQuery;
 
 /// The coordinate the web addresses this service at: `package code_navigation` +
 /// `service CodeNavigationService` in `tddy-service/proto/code_navigation.proto`.
@@ -50,6 +57,17 @@ pub type IndexChannelError = Box<dyn std::error::Error + Send + Sync>;
 pub trait IndexChannelSource: Send + Sync {
     /// A channel to the index daemon, starting it if nothing has yet.
     async fn connect(&self) -> Result<Channel, IndexChannelError>;
+
+    /// A channel to the index daemon only if it is already running — `None` otherwise. Never starts
+    /// it: a passive watcher has no business spawning the process it watches.
+    async fn connect_if_running(&self) -> Result<Option<Channel>, IndexChannelError>;
+
+    /// Counts a holder of a channel from [`Self::connect`] as use of the running index daemon, so
+    /// it is not stopped for sitting idle while that holder is open. Never starts it.
+    async fn keep_alive(&self);
+
+    /// How often a holder of a long-lived channel calls [`Self::keep_alive`] to stay counted as use.
+    fn keep_alive_every(&self) -> std::time::Duration;
 }
 
 /// `code_navigation.CodeNavigationService`, over this daemon's worktree authorisation and its
@@ -60,8 +78,6 @@ pub struct CodeNavigationServiceImpl {
     worktrees: Arc<WorktreeServiceImpl>,
     /// The index daemon this runtime manages; `None` when no `index_daemon:` section asked for one.
     index_daemon: Option<Arc<dyn IndexChannelSource>>,
-    /// Each session's latest code-index warm-up progress, which `WatchCodeIndex` follows.
-    index_progress: SessionIndexProgress,
 }
 
 /// An authorised request, ready to be asked of the index: a client on the index daemon's channel
@@ -83,7 +99,6 @@ impl CodeNavigationServiceImpl {
         Self {
             worktrees,
             index_daemon,
-            index_progress: SessionIndexProgress::new(),
         }
     }
 
@@ -102,31 +117,60 @@ impl CodeNavigationServiceImpl {
             self.worktrees
                 .resolve_listed_worktree(session_token, project_id, worktree_path)?;
         let file = validate_rel_path_shape(rel_path)?;
-        let source = self.index_daemon.as_ref().ok_or_else(|| {
-            Status::failed_precondition(
-                "code navigation needs the index daemon, and this daemon has no `index_daemon:` \
-                 configuration section",
-            )
-        })?;
-        let channel = source
-            .connect()
-            .await
-            .map_err(|err| Status::unavailable(format!("index daemon: {err}")))?;
         Ok(Forward {
-            client: CodeIndexServiceClient::new(channel),
+            client: connect_index(self.index_daemon.as_ref()).await?,
             workspace_root: root.display().to_string(),
             file,
             position: position.map(index_position),
         })
     }
+}
 
-    /// The same service, reporting warm-up progress from `index_progress` — the holder
-    /// [`crate::code_index_warmup::warm_for_session`] records into.
-    #[must_use]
-    pub fn with_index_progress(mut self, index_progress: SessionIndexProgress) -> Self {
-        self.index_progress = index_progress;
-        self
+impl Forward {
+    /// The client, and the position question this request asks of it.
+    fn into_position_query(self) -> (CodeIndexServiceClient<Channel>, PositionQuery) {
+        let query = PositionQuery {
+            workspace_root: self.workspace_root,
+            file: self.file,
+            position: self.position,
+        };
+        (self.client, query)
     }
+}
+
+/// `UNAVAILABLE`, naming why the index daemon's channel could not be had.
+pub(crate) fn index_daemon_unavailable(err: &IndexChannelError) -> Status {
+    Status::unavailable(index_daemon_error(err))
+}
+
+/// Why the index daemon's channel could not be had, as one line.
+pub(crate) fn index_daemon_error(err: &IndexChannelError) -> String {
+    format!("index daemon: {err}")
+}
+
+/// A client on the index daemon's channel — dialling it starts the index daemon on first use — or
+/// `FAILED_PRECONDITION` when this daemon has no `index_daemon:` section.
+pub(crate) async fn connect_index(
+    index_daemon: Option<&Arc<dyn IndexChannelSource>>,
+) -> Result<CodeIndexServiceClient<Channel>, Status> {
+    let channel = index_source(index_daemon)?
+        .connect()
+        .await
+        .map_err(|err| index_daemon_unavailable(&err))?;
+    Ok(CodeIndexServiceClient::new(channel))
+}
+
+/// The index daemon's source, or `FAILED_PRECONDITION` when this daemon has no `index_daemon:`
+/// section.
+pub(crate) fn index_source(
+    index_daemon: Option<&Arc<dyn IndexChannelSource>>,
+) -> Result<&Arc<dyn IndexChannelSource>, Status> {
+    index_daemon.ok_or_else(|| {
+        Status::failed_precondition(
+            "code navigation needs the index daemon, and this daemon has no `index_daemon:` \
+             configuration section",
+        )
+    })
 }
 
 #[async_trait::async_trait]
@@ -134,6 +178,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
     type WatchCodeIndexStream = ReceiverStream<Result<CodeIndexProgress, Status>>;
     type WatchPlanStream = ReceiverStream<Result<PlanSnapshot, Status>>;
     type RunPlanStream = ReceiverStream<Result<PlanRunEvent, Status>>;
+    type CodeSessionStream = ReceiverStream<Result<CodeSessionEvent, Status>>;
 
     /// Where the symbol at a position is defined.
     async fn definition(
@@ -141,7 +186,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         request: Request<DefinitionRequest>,
     ) -> Result<Response<DefinitionResponse>, Status> {
         let r = request.into_inner();
-        let mut forward = self
+        let (mut client, query) = self
             .authorise_and_connect(
                 &r.session_token,
                 &r.project_id,
@@ -149,20 +194,13 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 &r.rel_path,
                 r.position,
             )
-            .await?;
-        let answer = forward
-            .client
-            .definition(index::DefinitionRequest {
-                workspace_root: forward.workspace_root,
-                file: forward.file,
-                position: forward.position,
-            })
+            .await?
+            .into_position_query();
+        let answer = query
+            .definition(&mut client)
             .await
-            .map_err(tddy_service::to_rpc_status)?
-            .into_inner();
-        Ok(Response::new(DefinitionResponse {
-            locations: answer.locations.into_iter().map(web_location).collect(),
-        }))
+            .map_err(tddy_service::to_rpc_status)?;
+        Ok(Response::new(web_definition(answer)))
     }
 
     /// Every reference to the symbol at a position.
@@ -171,7 +209,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         request: Request<ReferencesRequest>,
     ) -> Result<Response<ReferencesResponse>, Status> {
         let r = request.into_inner();
-        let mut forward = self
+        let (mut client, query) = self
             .authorise_and_connect(
                 &r.session_token,
                 &r.project_id,
@@ -179,20 +217,13 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 &r.rel_path,
                 r.position,
             )
-            .await?;
-        let answer = forward
-            .client
-            .references(index::ReferencesRequest {
-                workspace_root: forward.workspace_root,
-                file: forward.file,
-                position: forward.position,
-            })
+            .await?
+            .into_position_query();
+        let answer = query
+            .references(&mut client)
             .await
-            .map_err(tddy_service::to_rpc_status)?
-            .into_inner();
-        Ok(Response::new(ReferencesResponse {
-            locations: answer.locations.into_iter().map(web_location).collect(),
-        }))
+            .map_err(tddy_service::to_rpc_status)?;
+        Ok(Response::new(web_references(answer)))
     }
 
     /// The hover text of the symbol at a position.
@@ -201,7 +232,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         request: Request<HoverRequest>,
     ) -> Result<Response<HoverResponse>, Status> {
         let r = request.into_inner();
-        let mut forward = self
+        let (mut client, query) = self
             .authorise_and_connect(
                 &r.session_token,
                 &r.project_id,
@@ -209,60 +240,68 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 &r.rel_path,
                 r.position,
             )
-            .await?;
-        let answer = forward
-            .client
-            .hover(index::HoverRequest {
-                workspace_root: forward.workspace_root,
-                file: forward.file,
-                position: forward.position,
-            })
+            .await?
+            .into_position_query();
+        let answer = query
+            .hover(&mut client)
             .await
-            .map_err(tddy_service::to_rpc_status)?
-            .into_inner();
-        Ok(Response::new(HoverResponse {
-            markdown: answer.markdown,
-        }))
+            .map_err(tddy_service::to_rpc_status)?;
+        Ok(Response::new(web_hover(answer)))
     }
 
-    /// A session's code-index warm-up: its latest progress, then each change, ending after `ready`
-    /// or `error` — or at once, for a session nothing warmed.
+    /// The session's worktree's code index: its current state, then every change, whoever started
+    /// the load — until the client leaves. Never starts a load, nor the index daemon: a session
+    /// whose record names no Rust worktree yet, a daemon without an `index_daemon:` section, or an
+    /// index daemon nothing has started yet ends the stream at once with no message.
     async fn watch_code_index(
         &self,
         request: Request<WatchCodeIndexRequest>,
     ) -> Result<Response<Self::WatchCodeIndexStream>, Status> {
         let r = request.into_inner();
-        // The session must be the caller's, as the worktree service decides it, before any of its
-        // progress — an `error` can carry paths — is looked up.
-        self.worktrees
+        // The session must be the caller's, as the worktree service decides it, before its record
+        // is read or its worktree's progress — an `error` can carry paths — is followed.
+        let session_dir = self
+            .worktrees
             .resolve_owned_session_dir(&r.session_token, &r.session_id)?;
-        let Some(mut watching) = self.index_progress.follow(r.session_id.trim()) else {
-            // Nothing warmed this session: an empty stream, as for any session never warmed.
-            let (_, rx) = tokio::sync::mpsc::channel(1);
+        let worktree = session_worktree(&session_dir)?;
+        let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
+        let (Some(worktree), Some(source)) = (
+            worktree.filter(|root| tddy_index_daemon::is_rust_workspace(root)),
+            self.index_daemon.as_ref(),
+        ) else {
+            // Nothing to follow: an empty stream, so no indicator shows.
             return Ok(Response::new(ReceiverStream::new(rx)));
         };
-        let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
-        tokio::spawn(async move {
-            // The latest value is delivered on joining, then each change; a change is a
-            // replacement, so a slow reader sees the newest rather than every step.
-            loop {
-                let latest = watching.borrow_and_update().clone();
-                if let Some(progress) = latest {
-                    let finished = progress.ready || !progress.error.is_empty();
-                    if tx.send(Ok(progress)).await.is_err() || finished {
-                        return;
-                    }
-                } else {
-                    // Nothing warmed this session: a warm records its first progress before
-                    // `warm_for_session` returns, so there is nothing to wait for.
-                    return;
-                }
-                if watching.changed().await.is_err() {
-                    return;
-                }
-            }
-        });
+        let Some(channel) = source
+            .connect_if_running()
+            .await
+            .map_err(|err| index_daemon_unavailable(&err))?
+        else {
+            // No index daemon running, so no index is loaded or loading: nothing to follow.
+            return Ok(Response::new(ReceiverStream::new(rx)));
+        };
+        let progress = CodeIndexServiceClient::new(channel)
+            .watch_root(index::WatchRootRequest {
+                workspace_root: worktree.display().to_string(),
+            })
+            .await
+            .map_err(tddy_service::to_rpc_status)?
+            .into_inner();
+        tokio::spawn(forward_progress(progress, tx));
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    /// The code pane's conversation with its worktree's index: warms it, streams its progress, and
+    /// answers queries — holding those asked while the index loads. See [`crate::code_session`].
+    async fn code_session(
+        &self,
+        request: Request<tddy_rpc::Streaming<CodeSessionRequest>>,
+    ) -> Result<Response<Self::CodeSessionStream>, Status> {
+        Ok(Response::new(crate::code_session::start(
+            Arc::clone(&self.worktrees),
+            self.index_daemon.clone(),
+            request.into_inner(),
+        )))
     }
 
     /// Open a plan file of the session's worktree: load it into the index's plan store and answer
@@ -364,31 +403,35 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
     }
 }
 
-fn index_position(position: SourcePosition) -> index::SourcePosition {
-    index::SourcePosition {
-        line: position.line,
-        column: position.column,
-    }
+/// The worktree `session_dir`'s `.session.yaml` records, or `None` while it records none — a session
+/// whose worktree does not exist yet has no index to follow.
+fn session_worktree(session_dir: &Path) -> Result<Option<std::path::PathBuf>, Status> {
+    let metadata = tddy_core::read_session_metadata(session_dir).map_err(|err| {
+        Status::failed_precondition(format!("the session's .session.yaml cannot be read: {err}"))
+    })?;
+    Ok(metadata.repo_path.map(std::path::PathBuf::from))
 }
 
-fn web_position(position: index::SourcePosition) -> SourcePosition {
-    SourcePosition {
-        line: position.line,
-        column: position.column,
-    }
-}
-
-/// The index's location in the web's vocabulary: `file` becomes `rel_path` and `outside_root`
-/// becomes `outside_worktree`; the path is already relative to the root when inside it and
-/// absolute otherwise, which is what `rel_path` is documented to hold.
-fn web_location(location: index::CodeLocation) -> CodeLocation {
-    CodeLocation {
-        rel_path: location.file,
-        range: location.range.map(|range| SourceRange {
-            start: range.start.map(web_position),
-            end: range.end.map(web_position),
-        }),
-        outside_worktree: location.outside_root,
+/// Relays a root's `WatchRoot` progress to `tx`, in the web's vocabulary, until the index ends the
+/// stream or the client leaves. A broken stream ends the client's with the index's status.
+async fn forward_progress(
+    mut progress: tonic::Streaming<index::IndexProgress>,
+    tx: tokio::sync::mpsc::Sender<Result<CodeIndexProgress, Status>>,
+) {
+    loop {
+        let next = tokio::select! {
+            next = progress.message() => next,
+            () = tx.closed() => return,
+        };
+        let item = match next {
+            Ok(Some(update)) => Ok(web_progress(update)),
+            Ok(None) => return,
+            Err(status) => Err(tddy_service::to_rpc_status(status)),
+        };
+        let broken = item.is_err();
+        if tx.send(item).await.is_err() || broken {
+            return;
+        }
     }
 }
 
@@ -407,52 +450,6 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-
-    #[test]
-    fn a_location_inside_the_root_maps_field_for_field() {
-        // Given an index location inside the workspace root
-        let inside = index::CodeLocation {
-            file: "src/lib.rs".to_string(),
-            range: Some(index::SourceRange {
-                start: Some(index::SourcePosition { line: 3, column: 1 }),
-                end: Some(index::SourcePosition { line: 3, column: 9 }),
-            }),
-            outside_root: false,
-        };
-
-        // When it is mapped for the web
-        let mapped = web_location(inside);
-
-        // Then it keeps its path and range and is not marked outside the worktree
-        assert_eq!(
-            mapped,
-            CodeLocation {
-                rel_path: "src/lib.rs".to_string(),
-                range: Some(SourceRange {
-                    start: Some(SourcePosition { line: 3, column: 1 }),
-                    end: Some(SourcePosition { line: 3, column: 9 }),
-                }),
-                outside_worktree: false,
-            }
-        );
-    }
-
-    #[test]
-    fn a_location_outside_the_root_is_marked_outside_the_worktree() {
-        // Given an index location in a dependency, which the index names by absolute path
-        let dependency = index::CodeLocation {
-            file: "/home/u/.cargo/registry/src/serde/lib.rs".to_string(),
-            range: None,
-            outside_root: true,
-        };
-
-        // When it is mapped for the web
-        let mapped = web_location(dependency);
-
-        // Then the pane is told not to offer opening it, and still gets the absolute path
-        assert!(mapped.outside_worktree);
-        assert_eq!(mapped.rel_path, "/home/u/.cargo/registry/src/serde/lib.rs");
-    }
 
     #[test]
     fn a_rel_path_that_leaves_the_worktree_is_refused_before_anything_is_forwarded() {

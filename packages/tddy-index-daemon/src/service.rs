@@ -3,8 +3,9 @@
 //! Every method is a routing table entry: it hands the decoded request to [`crate::operations`]
 //! (the streaming restructure half), [`crate::queries`] (the unary restructure half),
 //! [`crate::analyze`] (everything about coverage and complexity), `crate::navigation`
-//! (definition, references and hover) or `crate::symbols` (symbols and diagnostics) and does
-//! nothing else, so this file stays readable as the list of what the coordinate answers to.
+//! (definition, references and hover), `crate::symbols` (symbols and diagnostics), `crate::warm` or
+//! `crate::watch_root` (a root's index progress) and does nothing else, so this file stays readable
+//! as the list of what the coordinate answers to.
 
 use std::sync::Arc;
 
@@ -23,7 +24,7 @@ use crate::proto::code_index::{
     LoadPlansRequest, PlanStatusRequest, PlanStatusResponse, PlansResponse, ReferencesRequest,
     ReferencesResponse, ReportRequest, ReportResponse, RestructureEvent, SnapshotRequest,
     SnapshotResponse, SymbolsRequest, SymbolsResponse, UnloadPlansRequest, VerifyRequest,
-    VerifyResponse, WarmRequest, WorkspacesRequest, WorkspacesResponse,
+    VerifyResponse, WarmRequest, WatchRootRequest, WorkspacesRequest, WorkspacesResponse,
 };
 use crate::queries;
 use crate::symbols;
@@ -77,6 +78,7 @@ impl CodeIndexServiceImpl {
 #[async_trait::async_trait]
 impl CodeIndexService for CodeIndexServiceImpl {
     type WarmStream = EventStream<IndexProgress>;
+    type WatchRootStream = EventStream<IndexProgress>;
     type CheckStream = EventStream<RestructureEvent>;
     type ApplyStream = EventStream<RestructureEvent>;
     type CoverageStream = EventStream<AnalyzeEvent>;
@@ -89,6 +91,17 @@ impl CodeIndexService for CodeIndexServiceImpl {
     ) -> Result<tddy_rpc::Response<Self::WarmStream>, tddy_rpc::Status> {
         let request = request.into_inner();
         crate::warm::serve_warm(&self.index, &request.workspace_root)
+            .await
+            .map(tddy_rpc::Response::new)
+    }
+
+    /// Follow a workspace root's index without starting one.
+    async fn watch_root(
+        &self,
+        request: tddy_rpc::Request<WatchRootRequest>,
+    ) -> Result<tddy_rpc::Response<Self::WatchRootStream>, tddy_rpc::Status> {
+        let request = request.into_inner();
+        crate::watch_root::serve_watch_root(&self.index, &request.workspace_root)
             .await
             .map(tddy_rpc::Response::new)
     }

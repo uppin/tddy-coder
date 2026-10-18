@@ -1,134 +1,93 @@
 /**
- * The Code pane's bottom strip shows where the session's code index stands — the phase running now,
- * its percentage and the index server's own line while it loads, "ready" once it is queryable, and
- * why when the warm failed or nothing warmed it.
+ * The Code pane's bottom strip reads where its worktree's code index stands, as the pane's
+ * `code_navigation.CodeSession` reports it. The loading → ready progression is
+ * `WorktreeCodePaneCodeSession.cy.tsx`'s; this spec pins the strip's other readings: a worktree with
+ * no index, a failed load, an index let go while the pane is open, and a session being reopened.
  *
- * Feature: docs/ft/web/session-code-pane.md (Indexing indicator).
+ * Feature: docs/ft/web/session-code-pane.md (Indexing indicator);
+ * docs/ft/web/session-code-pane.md.
  */
 
-import React from "react";
-import { create } from "@bufbuild/protobuf";
-import { ConnectError, Code, createClient } from "@connectrpc/connect";
-import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { CodeIndexProgressSchema, CodeNavigationService } from "../../src/gen/code_navigation_pb";
-import { WorktreeService } from "../../src/gen/worktree_pb";
-import { WorktreeCodePane } from "../../src/components/session/WorktreeCodePane";
-import { mountWithRpc } from "../support/rpc/inMemory";
+import {
+  anIndexIdle,
+  anIndexLoading,
+  noIndexForTheWorktree,
+} from "../support/rpc/codeSessionBackend";
+import { aCodePaneOn } from "../support/drivers/worktreeCodePaneDriver";
 import { worktreeCodePanePage } from "../support/pages/worktreeCodePanePage";
+import { INDEXING_38, aGeometryWorktreeHost } from "../support/fixtures/geometryWorktree";
 
-const THE_SESSION = "session-indexing-strip";
-
-type Gate = { held: Promise<void>; release: () => void };
-
-function aGate(): Gate {
-  let release: () => void = () => undefined;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  return { held, release: () => release() };
-}
-
-/** A host whose warm reports `progress` messages, waits for `gate`, then ends with `last`. */
-function aHostWarming(
-  progress: Parameters<typeof create<typeof CodeIndexProgressSchema>>[1][],
-  gate: Gate,
-  last: Parameters<typeof create<typeof CodeIndexProgressSchema>>[1] | "fail",
-): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(CodeNavigationService, {
-    async *watchCodeIndex() {
-      for (const message of progress) yield create(CodeIndexProgressSchema, message);
-      await gate.held;
-      if (last === "fail") throw new ConnectError("index daemon unreachable", Code.Unavailable);
-      yield create(CodeIndexProgressSchema, last);
-    },
-  });
-}
-
-/** A host that warms nothing for the session: the watch ends without a message. */
-function aHostWarmingNothing(): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(CodeNavigationService, {
-    async *watchCodeIndex() {},
-  });
-}
-
-function mountTheCodePane(backend: InMemoryRpcBackend) {
-  mountWithRpc(
-    <div style={{ height: 480, width: 900, display: "flex" }}>
-      <WorktreeCodePane
-        client={createClient(WorktreeService, backend.transport())}
-        sessionToken="fake-token"
-        projectId="proj-1"
-        worktreePath="/home/dev/repo/.worktrees/feature"
-        navigationClient={createClient(CodeNavigationService, backend.transport())}
-        sessionId={THE_SESSION}
-      />
-    </div>,
-    backend,
-  );
+/** A pane open on a worktree whose index is indexing, the strip already saying so. */
+function aPaneFollowingAnIndexingIndex() {
+  const host = aGeometryWorktreeHost().startingAt(anIndexLoading(INDEXING_38));
+  aCodePaneOn(host).mount();
+  worktreeCodePanePage.indexStatusSummary().should("have.text", "Indexing — Indexing 38%");
+  return host;
 }
 
 beforeEach(() => {
   cy.viewport(1280, 900);
 });
 
-it("shows the phase running now and what the server is doing, then that the index is ready", () => {
-  // Given a host whose warm finished scanning roots and is now indexing tddy_core
-  const gate = aGate();
-  mountTheCodePane(
-    aHostWarming(
-      [
-        {
-          line: "Indexing: 120/310 (tddy_core)",
-          phase: "Indexing",
-          percentage: 38,
-          furthest: "Indexing: 120/310 (tddy_core); furthest Roots Scanned 100%",
-        },
-      ],
-      gate,
-      { line: "ready", ready: true },
-    ),
+it("says a worktree that is not a Rust worktree has no code index, and why", () => {
+  // Given a worktree the host has no code index for
+  const host = aGeometryWorktreeHost().startingAt(
+    noIndexForTheWorktree("this worktree has no Cargo.toml at its root"),
   );
 
-  // Then the strip names the phase, its percentage and the server's line
-  worktreeCodePanePage.indexStatus().should("have.attr", "data-state", "progress");
-  worktreeCodePanePage.indexStatusSummary().should("have.text", "Indexing — Indexing 38%");
-  worktreeCodePanePage.indexStatusDetail().should("have.text", "Indexing: 120/310 (tddy_core)");
+  // When the pane opens on it
+  aCodePaneOn(host).mount();
 
-  // When the index becomes ready
-  cy.then(() => gate.release());
-
-  // Then the strip stays, saying so
-  worktreeCodePanePage.indexStatus().should("have.attr", "data-state", "ready");
-  worktreeCodePanePage.indexStatusSummary().should("have.text", "Code index ready");
-  worktreeCodePanePage.indexStatusDetail().should("not.exist");
-});
-
-it("says the index is not warmed when nothing on the host warms the session", () => {
-  // Given a host that warms nothing for the session
-  mountTheCodePane(aHostWarmingNothing());
-
-  // Then the strip says the index loads on first use
-  worktreeCodePanePage.indexStatus().should("have.attr", "data-state", "untracked");
+  // Then the strip says there is no index, with the host's reason — never that one is starting
+  worktreeCodePanePage.indexStatus().should("have.attr", "data-state", "none");
+  worktreeCodePanePage.indexStatusSummary().should("have.text", "No code index for this worktree");
   worktreeCodePanePage
-    .indexStatusSummary()
-    .should("have.text", "Code index not warmed for this session");
+    .indexStatusDetail()
+    .should("have.text", "this worktree has no Cargo.toml at its root");
 });
 
-it("names the reason when following the warm fails", () => {
-  // Given a host whose warm watch fails partway
-  const gate = aGate();
-  mountTheCodePane(
-    aHostWarming([{ line: "Fetching", phase: "Fetching", percentage: 10 }], gate, "fail"),
-  );
-  worktreeCodePanePage.indexStatus().should("have.attr", "data-state", "progress");
+it("names the reason when the index fails to load", () => {
+  // Given a pane following an index that is indexing
+  const host = aPaneFollowingAnIndexingIndex();
 
-  // When the watch fails
-  cy.then(() => gate.release());
+  // When the index fails to load
+  cy.then(() => host.failLoading("rust-analyzer exited: no toolchain"));
 
-  // Then the strip names the failure
+  // Then the strip names the failure and its reason
   worktreeCodePanePage.indexStatus().should("have.attr", "data-state", "failed");
   worktreeCodePanePage
     .indexStatusSummary()
-    .should("contain.text", "Indexing failed")
-    .and("contain.text", "index daemon unreachable");
+    .should("have.text", "Indexing failed — rust-analyzer exited: no toolchain");
+  worktreeCodePanePage.indexStatusDetail().should("not.exist");
+});
+
+it("an index let go while the pane is open reads as starting, never as not loaded", () => {
+  // Given a pane following an index that is indexing
+  const host = aPaneFollowingAnIndexingIndex();
+
+  // When the host reports the index idle — its server let go, about to be warmed again
+  cy.then(() => host.reportProgress(anIndexIdle()));
+
+  // Then the strip says the index is starting
+  worktreeCodePanePage.indexStatus().should("have.attr", "data-state", "idle");
+  worktreeCodePanePage.indexStatusSummary().should("have.text", "Code index starting…");
+
+  // When the reload begins
+  cy.then(() => host.reportProgress(anIndexLoading(INDEXING_38)));
+
+  // Then the strip shows its progress
+  worktreeCodePanePage.indexStatusSummary().should("have.text", "Indexing — Indexing 38%");
+});
+
+it("says it is reconnecting, and why, while the code session is down", () => {
+  // Given a pane following an index that is indexing
+  const host = aPaneFollowingAnIndexingIndex();
+
+  // When the host drops the code session
+  cy.then(() => host.dropSessions("index daemon unreachable"));
+
+  // Then the strip says it is reconnecting and names why the session dropped
+  worktreeCodePanePage.indexStatus().should("have.attr", "data-state", "reconnecting");
+  worktreeCodePanePage.indexStatusSummary().should("have.text", "Reconnecting…");
+  worktreeCodePanePage.indexStatusDetail().should("have.text", "index daemon unreachable");
 });

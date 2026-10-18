@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file code_navigation.proto.
  */
 export const file_code_navigation: GenFile = /*@__PURE__*/
-  fileDesc("ChVjb2RlX25hdmlnYXRpb24ucHJvdG8SD2NvZGVfbmF2aWdhdGlvbiJCChVXYXRjaENvZGVJbmRleFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJInQKEUNvZGVJbmRleFByb2dyZXNzEgwKBGxpbmUYASABKAkSDQoFcGhhc2UYAiABKAkSEgoKcGVyY2VudGFnZRgDIAEoDRIQCghmdXJ0aGVzdBgEIAEoCRINCgVyZWFkeRgFIAEoCBINCgVlcnJvchgGIAEoCSIuCg5Tb3VyY2VQb3NpdGlvbhIMCgRsaW5lGAEgASgNEg4KBmNvbHVtbhgCIAEoDSJrCgtTb3VyY2VSYW5nZRIuCgVzdGFydBgBIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbhIsCgNlbmQYAiABKAsyHy5jb2RlX25hdmlnYXRpb24uU291cmNlUG9zaXRpb24imgEKEURlZmluaXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIkYKEkRlZmluaXRpb25SZXNwb25zZRIwCglsb2NhdGlvbnMYASADKAsyHS5jb2RlX25hdmlnYXRpb24uQ29kZUxvY2F0aW9uIpoBChFSZWZlcmVuY2VzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIQCghyZWxfcGF0aBgEIAEoCRIxCghwb3NpdGlvbhgFIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbiJGChJSZWZlcmVuY2VzUmVzcG9uc2USMAoJbG9jYXRpb25zGAEgAygLMh0uY29kZV9uYXZpZ2F0aW9uLkNvZGVMb2NhdGlvbiKVAQoMSG92ZXJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIjMKDUhvdmVyUmVzcG9uc2USFQoIbWFya2Rvd24YASABKAlIAIgBAUILCglfbWFya2Rvd24iZwoMQ29kZUxvY2F0aW9uEhAKCHJlbF9wYXRoGAEgASgJEisKBXJhbmdlGAIgASgLMhwuY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVJhbmdlEhgKEG91dHNpZGVfd29ya3RyZWUYAyABKAgiZQoPT3BlblBsYW5SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJImYKEFdhdGNoUGxhblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkSEAoIcmVsX3BhdGgYBCABKAkiZAoOUnVuUGxhblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkSEAoIcmVsX3BhdGgYBCABKAkiVAoMUGxhblNuYXBzaG90EhAKCHJlbF9wYXRoGAEgASgJEjIKCm9wZXJhdGlvbnMYAiADKAsyHi5jb2RlX25hdmlnYXRpb24uUGxhbk9wZXJhdGlvbiKtAQoNUGxhbk9wZXJhdGlvbhIKCgJpZBgBIAEoCRINCgVpbmRleBgCIAEoDRIKCgJvcBgDIAEoCRIMCgRpdGVtGAQgASgJEgwKBGZpbGUYBSABKAkSDQoFZ3JvdXAYBiABKAkSNAoGc3RhdHVzGAcgASgOMiQuY29kZV9uYXZpZ2F0aW9uLlBsYW5PcGVyYXRpb25TdGF0dXMSFAoMc3RhbGVfcmVhc29uGAggASgJIssBCgxQbGFuUnVuRXZlbnQSOgoJb3BlcmF0aW9uGAEgASgLMiUuY29kZV9uYXZpZ2F0aW9uLlBsYW5PcGVyYXRpb25BcHBsaWVkSAASDgoEbm90ZRgCIAEoCUgAEjIKB291dGNvbWUYAyABKAsyHy5jb2RlX25hdmlnYXRpb24uUGxhblJ1bk91dGNvbWVIABIyCgdmYWlsdXJlGAQgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlBsYW5SdW5GYWlsdXJlSABCBwoFZXZlbnQiYAoUUGxhbk9wZXJhdGlvbkFwcGxpZWQSDQoFb3BfaWQYASABKAkSDQoFaW5kZXgYAiABKA0SDAoEZG9uZRgDIAEoDRINCgV0b3RhbBgEIAEoDRINCgVmaWxlcxgFIAMoCSIwCg5QbGFuUnVuT3V0Y29tZRIPCgdhcHBsaWVkGAEgASgNEg0KBXRvdGFsGAIgASgNIkUKDlBsYW5SdW5GYWlsdXJlEg8KB21lc3NhZ2UYASABKAkSDQoFZ3JvdXAYAiABKAkSEwoLcm9sbGVkX2JhY2sYAyADKAkq8AEKE1BsYW5PcGVyYXRpb25TdGF0dXMSJQohUExBTl9PUEVSQVRJT05fU1RBVFVTX1VOU1BFQ0lGSUVEEAASIQodUExBTl9PUEVSQVRJT05fU1RBVFVTX1BFTkRJTkcQARIjCh9QTEFOX09QRVJBVElPTl9TVEFUVVNfSU5fRkxJR0hUEAISIQodUExBTl9PUEVSQVRJT05fU1RBVFVTX0FQUExJRUQQAxIgChxQTEFOX09QRVJBVElPTl9TVEFUVVNfRkFJTEVEEAQSJQohUExBTl9PUEVSQVRJT05fU1RBVFVTX1JPTExFRF9CQUNLEAUy2AQKFUNvZGVOYXZpZ2F0aW9uU2VydmljZRJVCgpEZWZpbml0aW9uEiIuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXNwb25zZRJVCgpSZWZlcmVuY2VzEiIuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXNwb25zZRJGCgVIb3ZlchIdLmNvZGVfbmF2aWdhdGlvbi5Ib3ZlclJlcXVlc3QaHi5jb2RlX25hdmlnYXRpb24uSG92ZXJSZXNwb25zZRJeCg5XYXRjaENvZGVJbmRleBImLmNvZGVfbmF2aWdhdGlvbi5XYXRjaENvZGVJbmRleFJlcXVlc3QaIi5jb2RlX25hdmlnYXRpb24uQ29kZUluZGV4UHJvZ3Jlc3MwARJLCghPcGVuUGxhbhIgLmNvZGVfbmF2aWdhdGlvbi5PcGVuUGxhblJlcXVlc3QaHS5jb2RlX25hdmlnYXRpb24uUGxhblNuYXBzaG90Ek8KCVdhdGNoUGxhbhIhLmNvZGVfbmF2aWdhdGlvbi5XYXRjaFBsYW5SZXF1ZXN0Gh0uY29kZV9uYXZpZ2F0aW9uLlBsYW5TbmFwc2hvdDABEksKB1J1blBsYW4SHy5jb2RlX25hdmlnYXRpb24uUnVuUGxhblJlcXVlc3QaHS5jb2RlX25hdmlnYXRpb24uUGxhblJ1bkV2ZW50MAFiBnByb3RvMw");
+  fileDesc("ChVjb2RlX25hdmlnYXRpb24ucHJvdG8SD2NvZGVfbmF2aWdhdGlvbiJCChVXYXRjaENvZGVJbmRleFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJItUBChFDb2RlSW5kZXhQcm9ncmVzcxIMCgRsaW5lGAEgASgJEg0KBXBoYXNlGAIgASgJEhIKCnBlcmNlbnRhZ2UYAyABKA0SEAoIZnVydGhlc3QYBCABKAkSDQoFcmVhZHkYBSABKAgSDQoFZXJyb3IYBiABKAkSLgoFc3RhdGUYByABKA4yHy5jb2RlX25hdmlnYXRpb24uQ29kZUluZGV4U3RhdGUSLwoGcGhhc2VzGAggAygLMh8uY29kZV9uYXZpZ2F0aW9uLkNvZGVJbmRleFBoYXNlIlgKDkNvZGVJbmRleFBoYXNlEg0KBXRpdGxlGAEgASgJEg8KB21lc3NhZ2UYAiABKAkSFwoKcGVyY2VudGFnZRgDIAEoDUgAiAEBQg0KC19wZXJjZW50YWdlIrABChJDb2RlU2Vzc2lvblJlcXVlc3QSMAoEb3BlbhgBIAEoCzIgLmNvZGVfbmF2aWdhdGlvbi5PcGVuQ29kZVNlc3Npb25IABIrCgVxdWVyeRgCIAEoCzIaLmNvZGVfbmF2aWdhdGlvbi5Db2RlUXVlcnlIABIyCgZjYW5jZWwYAyABKAsyIC5jb2RlX25hdmlnYXRpb24uQ2FuY2VsQ29kZVF1ZXJ5SABCBwoFZnJhbWUiUwoPT3BlbkNvZGVTZXNzaW9uEhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJIpIBCglDb2RlUXVlcnkSEgoKcmVxdWVzdF9pZBgBIAEoBBIsCgRraW5kGAIgASgOMh4uY29kZV9uYXZpZ2F0aW9uLkNvZGVRdWVyeUtpbmQSEAoIcmVsX3BhdGgYAyABKAkSMQoIcG9zaXRpb24YBCABKAsyHy5jb2RlX25hdmlnYXRpb24uU291cmNlUG9zaXRpb24iJQoPQ2FuY2VsQ29kZVF1ZXJ5EhIKCnJlcXVlc3RfaWQYASABKAQitwEKEENvZGVTZXNzaW9uRXZlbnQSNgoIcHJvZ3Jlc3MYASABKAsyIi5jb2RlX25hdmlnYXRpb24uQ29kZUluZGV4UHJvZ3Jlc3NIABIuCgRoZWxkGAIgASgLMh4uY29kZV9uYXZpZ2F0aW9uLkNvZGVRdWVyeUhlbGRIABIyCgZhbnN3ZXIYAyABKAsyIC5jb2RlX25hdmlnYXRpb24uQ29kZVF1ZXJ5QW5zd2VySABCBwoFZXZlbnQiIwoNQ29kZVF1ZXJ5SGVsZBISCgpyZXF1ZXN0X2lkGAEgASgEInQKC1Byb2JlQW5zd2VyEjMKDGRlZmluYWJpbGl0eRgBIAEoDjIdLmNvZGVfbmF2aWdhdGlvbi5EZWZpbmFiaWxpdHkSMAoJbG9jYXRpb25zGAIgAygLMh0uY29kZV9uYXZpZ2F0aW9uLkNvZGVMb2NhdGlvbiKWAgoPQ29kZVF1ZXJ5QW5zd2VyEhIKCnJlcXVlc3RfaWQYASABKAQSLwoFaG92ZXIYAiABKAsyHi5jb2RlX25hdmlnYXRpb24uSG92ZXJSZXNwb25zZUgAEjkKCmRlZmluaXRpb24YAyABKAsyIy5jb2RlX25hdmlnYXRpb24uRGVmaW5pdGlvblJlc3BvbnNlSAASOQoKcmVmZXJlbmNlcxgEIAEoCzIjLmNvZGVfbmF2aWdhdGlvbi5SZWZlcmVuY2VzUmVzcG9uc2VIABItCgVwcm9iZRgFIAEoCzIcLmNvZGVfbmF2aWdhdGlvbi5Qcm9iZUFuc3dlckgAEg8KBWVycm9yGAYgASgJSABCCAoGcmVzdWx0Ii4KDlNvdXJjZVBvc2l0aW9uEgwKBGxpbmUYASABKA0SDgoGY29sdW1uGAIgASgNImsKC1NvdXJjZVJhbmdlEi4KBXN0YXJ0GAEgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uEiwKA2VuZBgCIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbiKaAQoRRGVmaW5pdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkSEAoIcmVsX3BhdGgYBCABKAkSMQoIcG9zaXRpb24YBSABKAsyHy5jb2RlX25hdmlnYXRpb24uU291cmNlUG9zaXRpb24idgoSRGVmaW5pdGlvblJlc3BvbnNlEjAKCWxvY2F0aW9ucxgBIAMoCzIdLmNvZGVfbmF2aWdhdGlvbi5Db2RlTG9jYXRpb24SLgoFc3RhdGUYAiABKA4yHy5jb2RlX25hdmlnYXRpb24uQ29kZUluZGV4U3RhdGUimgEKEVJlZmVyZW5jZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uInYKElJlZmVyZW5jZXNSZXNwb25zZRIwCglsb2NhdGlvbnMYASADKAsyHS5jb2RlX25hdmlnYXRpb24uQ29kZUxvY2F0aW9uEi4KBXN0YXRlGAIgASgOMh8uY29kZV9uYXZpZ2F0aW9uLkNvZGVJbmRleFN0YXRlIpUBCgxIb3ZlclJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkSEAoIcmVsX3BhdGgYBCABKAkSMQoIcG9zaXRpb24YBSABKAsyHy5jb2RlX25hdmlnYXRpb24uU291cmNlUG9zaXRpb24iYwoNSG92ZXJSZXNwb25zZRIVCghtYXJrZG93bhgBIAEoCUgAiAEBEi4KBXN0YXRlGAIgASgOMh8uY29kZV9uYXZpZ2F0aW9uLkNvZGVJbmRleFN0YXRlQgsKCV9tYXJrZG93biJnCgxDb2RlTG9jYXRpb24SEAoIcmVsX3BhdGgYASABKAkSKwoFcmFuZ2UYAiABKAsyHC5jb2RlX25hdmlnYXRpb24uU291cmNlUmFuZ2USGAoQb3V0c2lkZV93b3JrdHJlZRgDIAEoCCJlCg9PcGVuUGxhblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkSEAoIcmVsX3BhdGgYBCABKAkiZgoQV2F0Y2hQbGFuUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIQCghyZWxfcGF0aBgEIAEoCSJkCg5SdW5QbGFuUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIQCghyZWxfcGF0aBgEIAEoCSJUCgxQbGFuU25hcHNob3QSEAoIcmVsX3BhdGgYASABKAkSMgoKb3BlcmF0aW9ucxgCIAMoCzIeLmNvZGVfbmF2aWdhdGlvbi5QbGFuT3BlcmF0aW9uIq0BCg1QbGFuT3BlcmF0aW9uEgoKAmlkGAEgASgJEg0KBWluZGV4GAIgASgNEgoKAm9wGAMgASgJEgwKBGl0ZW0YBCABKAkSDAoEZmlsZRgFIAEoCRINCgVncm91cBgGIAEoCRI0CgZzdGF0dXMYByABKA4yJC5jb2RlX25hdmlnYXRpb24uUGxhbk9wZXJhdGlvblN0YXR1cxIUCgxzdGFsZV9yZWFzb24YCCABKAkiywEKDFBsYW5SdW5FdmVudBI6CglvcGVyYXRpb24YASABKAsyJS5jb2RlX25hdmlnYXRpb24uUGxhbk9wZXJhdGlvbkFwcGxpZWRIABIOCgRub3RlGAIgASgJSAASMgoHb3V0Y29tZRgDIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5QbGFuUnVuT3V0Y29tZUgAEjIKB2ZhaWx1cmUYBCABKAsyHy5jb2RlX25hdmlnYXRpb24uUGxhblJ1bkZhaWx1cmVIAEIHCgVldmVudCJgChRQbGFuT3BlcmF0aW9uQXBwbGllZBINCgVvcF9pZBgBIAEoCRINCgVpbmRleBgCIAEoDRIMCgRkb25lGAMgASgNEg0KBXRvdGFsGAQgASgNEg0KBWZpbGVzGAUgAygJIjAKDlBsYW5SdW5PdXRjb21lEg8KB2FwcGxpZWQYASABKA0SDQoFdG90YWwYAiABKA0iRQoOUGxhblJ1bkZhaWx1cmUSDwoHbWVzc2FnZRgBIAEoCRINCgVncm91cBgCIAEoCRITCgtyb2xsZWRfYmFjaxgDIAMoCSq/AQoOQ29kZUluZGV4U3RhdGUSIAocQ09ERV9JTkRFWF9TVEFURV9VTlNQRUNJRklFRBAAEhkKFUNPREVfSU5ERVhfU1RBVEVfSURMRRABEhwKGENPREVfSU5ERVhfU1RBVEVfTE9BRElORxACEhoKFkNPREVfSU5ERVhfU1RBVEVfUkVBRFkQAxIbChdDT0RFX0lOREVYX1NUQVRFX0ZBSUxFRBAEEhkKFUNPREVfSU5ERVhfU1RBVEVfTk9ORRAFKqYBCg1Db2RlUXVlcnlLaW5kEh8KG0NPREVfUVVFUllfS0lORF9VTlNQRUNJRklFRBAAEhkKFUNPREVfUVVFUllfS0lORF9IT1ZFUhABEh4KGkNPREVfUVVFUllfS0lORF9ERUZJTklUSU9OEAISHgoaQ09ERV9RVUVSWV9LSU5EX1JFRkVSRU5DRVMQAxIZChVDT0RFX1FVRVJZX0tJTkRfUFJPQkUQBCp5CgxEZWZpbmFiaWxpdHkSHAoYREVGSU5BQklMSVRZX1VOU1BFQ0lGSUVEEAASGgoWREVGSU5BQklMSVRZX0RFRklOQUJMRRABEhUKEURFRklOQUJJTElUWV9OT05FEAISGAoUREVGSU5BQklMSVRZX1VOS05PV04QAyrwAQoTUGxhbk9wZXJhdGlvblN0YXR1cxIlCiFQTEFOX09QRVJBVElPTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIhCh1QTEFOX09QRVJBVElPTl9TVEFUVVNfUEVORElORxABEiMKH1BMQU5fT1BFUkFUSU9OX1NUQVRVU19JTl9GTElHSFQQAhIhCh1QTEFOX09QRVJBVElPTl9TVEFUVVNfQVBQTElFRBADEiAKHFBMQU5fT1BFUkFUSU9OX1NUQVRVU19GQUlMRUQQBBIlCiFQTEFOX09QRVJBVElPTl9TVEFUVVNfUk9MTEVEX0JBQ0sQBTKzBQoVQ29kZU5hdmlnYXRpb25TZXJ2aWNlElUKCkRlZmluaXRpb24SIi5jb2RlX25hdmlnYXRpb24uRGVmaW5pdGlvblJlcXVlc3QaIy5jb2RlX25hdmlnYXRpb24uRGVmaW5pdGlvblJlc3BvbnNlElUKClJlZmVyZW5jZXMSIi5jb2RlX25hdmlnYXRpb24uUmVmZXJlbmNlc1JlcXVlc3QaIy5jb2RlX25hdmlnYXRpb24uUmVmZXJlbmNlc1Jlc3BvbnNlEkYKBUhvdmVyEh0uY29kZV9uYXZpZ2F0aW9uLkhvdmVyUmVxdWVzdBoeLmNvZGVfbmF2aWdhdGlvbi5Ib3ZlclJlc3BvbnNlEl4KDldhdGNoQ29kZUluZGV4EiYuY29kZV9uYXZpZ2F0aW9uLldhdGNoQ29kZUluZGV4UmVxdWVzdBoiLmNvZGVfbmF2aWdhdGlvbi5Db2RlSW5kZXhQcm9ncmVzczABElkKC0NvZGVTZXNzaW9uEiMuY29kZV9uYXZpZ2F0aW9uLkNvZGVTZXNzaW9uUmVxdWVzdBohLmNvZGVfbmF2aWdhdGlvbi5Db2RlU2Vzc2lvbkV2ZW50KAEwARJLCghPcGVuUGxhbhIgLmNvZGVfbmF2aWdhdGlvbi5PcGVuUGxhblJlcXVlc3QaHS5jb2RlX25hdmlnYXRpb24uUGxhblNuYXBzaG90Ek8KCVdhdGNoUGxhbhIhLmNvZGVfbmF2aWdhdGlvbi5XYXRjaFBsYW5SZXF1ZXN0Gh0uY29kZV9uYXZpZ2F0aW9uLlBsYW5TbmFwc2hvdDABEksKB1J1blBsYW4SHy5jb2RlX25hdmlnYXRpb24uUnVuUGxhblJlcXVlc3QaHS5jb2RlX25hdmlnYXRpb24uUGxhblJ1bkV2ZW50MAFiBnByb3RvMw");
 
 /**
  * @generated from message code_navigation.WatchCodeIndexRequest
@@ -52,13 +52,16 @@ export type CodeIndexProgress = Message<"code_navigation.CodeIndexProgress"> & {
   line: string;
 
   /**
-   * The language server's progress phase, e.g. "Indexing" or "Loading".
+   * The phase the language server reported on most recently, e.g. "Indexing" — what is happening
+   * *now*, and what the code pane's strip names; `phases` holds every phase in flight.
    *
    * @generated from field: string phase = 2;
    */
   phase: string;
 
   /**
+   * The highest percentage `phase` has reached.
+   *
    * @generated from field: uint32 percentage = 3;
    */
   percentage: number;
@@ -83,6 +86,20 @@ export type CodeIndexProgress = Message<"code_navigation.CodeIndexProgress"> & {
    * @generated from field: string error = 6;
    */
   error: string;
+
+  /**
+   * Where the worktree's index stands.
+   *
+   * @generated from field: code_navigation.CodeIndexState state = 7;
+   */
+  state: CodeIndexState;
+
+  /**
+   * Every phase the language server is running now, in the order it began them.
+   *
+   * @generated from field: repeated code_navigation.CodeIndexPhase phases = 8;
+   */
+  phases: CodeIndexPhase[];
 };
 
 /**
@@ -91,6 +108,294 @@ export type CodeIndexProgress = Message<"code_navigation.CodeIndexProgress"> & {
  */
 export const CodeIndexProgressSchema: GenMessage<CodeIndexProgress> = /*@__PURE__*/
   messageDesc(file_code_navigation, 1);
+
+/**
+ * One phase the language server is running — `code_index.ActivePhase`.
+ *
+ * @generated from message code_navigation.CodeIndexPhase
+ */
+export type CodeIndexPhase = Message<"code_navigation.CodeIndexPhase"> & {
+  /**
+   * e.g. "Indexing", "Roots Scanned", "Fetching".
+   *
+   * @generated from field: string title = 1;
+   */
+  title: string;
+
+  /**
+   * e.g. "120/310 (tddy_core)"; empty when none was given.
+   *
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * Absent when the phase never reported one.
+   *
+   * @generated from field: optional uint32 percentage = 3;
+   */
+  percentage?: number;
+};
+
+/**
+ * Describes the message code_navigation.CodeIndexPhase.
+ * Use `create(CodeIndexPhaseSchema)` to create a new message.
+ */
+export const CodeIndexPhaseSchema: GenMessage<CodeIndexPhase> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 2);
+
+/**
+ * @generated from message code_navigation.CodeSessionRequest
+ */
+export type CodeSessionRequest = Message<"code_navigation.CodeSessionRequest"> & {
+  /**
+   * @generated from oneof code_navigation.CodeSessionRequest.frame
+   */
+  frame: {
+    /**
+     * First frame, exactly once.
+     *
+     * @generated from field: code_navigation.OpenCodeSession open = 1;
+     */
+    value: OpenCodeSession;
+    case: "open";
+  } | {
+    /**
+     * @generated from field: code_navigation.CodeQuery query = 2;
+     */
+    value: CodeQuery;
+    case: "query";
+  } | {
+    /**
+     * @generated from field: code_navigation.CancelCodeQuery cancel = 3;
+     */
+    value: CancelCodeQuery;
+    case: "cancel";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message code_navigation.CodeSessionRequest.
+ * Use `create(CodeSessionRequestSchema)` to create a new message.
+ */
+export const CodeSessionRequestSchema: GenMessage<CodeSessionRequest> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 3);
+
+/**
+ * @generated from message code_navigation.OpenCodeSession
+ */
+export type OpenCodeSession = Message<"code_navigation.OpenCodeSession"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * The worktree root, as `worktree.WorktreeService` names it.
+   *
+   * @generated from field: string worktree_path = 3;
+   */
+  worktreePath: string;
+};
+
+/**
+ * Describes the message code_navigation.OpenCodeSession.
+ * Use `create(OpenCodeSessionSchema)` to create a new message.
+ */
+export const OpenCodeSessionSchema: GenMessage<OpenCodeSession> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 4);
+
+/**
+ * @generated from message code_navigation.CodeQuery
+ */
+export type CodeQuery = Message<"code_navigation.CodeQuery"> & {
+  /**
+   * Chosen by the client; repeated on the query's `held` and `answer`.
+   *
+   * @generated from field: uint64 request_id = 1;
+   */
+  requestId: bigint;
+
+  /**
+   * @generated from field: code_navigation.CodeQueryKind kind = 2;
+   */
+  kind: CodeQueryKind;
+
+  /**
+   * Relative to the session's worktree.
+   *
+   * @generated from field: string rel_path = 3;
+   */
+  relPath: string;
+
+  /**
+   * @generated from field: code_navigation.SourcePosition position = 4;
+   */
+  position?: SourcePosition;
+};
+
+/**
+ * Describes the message code_navigation.CodeQuery.
+ * Use `create(CodeQuerySchema)` to create a new message.
+ */
+export const CodeQuerySchema: GenMessage<CodeQuery> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 5);
+
+/**
+ * @generated from message code_navigation.CancelCodeQuery
+ */
+export type CancelCodeQuery = Message<"code_navigation.CancelCodeQuery"> & {
+  /**
+   * @generated from field: uint64 request_id = 1;
+   */
+  requestId: bigint;
+};
+
+/**
+ * Describes the message code_navigation.CancelCodeQuery.
+ * Use `create(CancelCodeQuerySchema)` to create a new message.
+ */
+export const CancelCodeQuerySchema: GenMessage<CancelCodeQuery> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 6);
+
+/**
+ * @generated from message code_navigation.CodeSessionEvent
+ */
+export type CodeSessionEvent = Message<"code_navigation.CodeSessionEvent"> & {
+  /**
+   * @generated from oneof code_navigation.CodeSessionEvent.event
+   */
+  event: {
+    /**
+     * The index's progress: first its current state, then every change.
+     *
+     * @generated from field: code_navigation.CodeIndexProgress progress = 1;
+     */
+    value: CodeIndexProgress;
+    case: "progress";
+  } | {
+    /**
+     * The query waits for the index to finish loading; its answer follows.
+     *
+     * @generated from field: code_navigation.CodeQueryHeld held = 2;
+     */
+    value: CodeQueryHeld;
+    case: "held";
+  } | {
+    /**
+     * @generated from field: code_navigation.CodeQueryAnswer answer = 3;
+     */
+    value: CodeQueryAnswer;
+    case: "answer";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message code_navigation.CodeSessionEvent.
+ * Use `create(CodeSessionEventSchema)` to create a new message.
+ */
+export const CodeSessionEventSchema: GenMessage<CodeSessionEvent> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 7);
+
+/**
+ * @generated from message code_navigation.CodeQueryHeld
+ */
+export type CodeQueryHeld = Message<"code_navigation.CodeQueryHeld"> & {
+  /**
+   * @generated from field: uint64 request_id = 1;
+   */
+  requestId: bigint;
+};
+
+/**
+ * Describes the message code_navigation.CodeQueryHeld.
+ * Use `create(CodeQueryHeldSchema)` to create a new message.
+ */
+export const CodeQueryHeldSchema: GenMessage<CodeQueryHeld> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 8);
+
+/**
+ * @generated from message code_navigation.ProbeAnswer
+ */
+export type ProbeAnswer = Message<"code_navigation.ProbeAnswer"> & {
+  /**
+   * @generated from field: code_navigation.Definability definability = 1;
+   */
+  definability: Definability;
+
+  /**
+   * Where the definition is, when `DEFINABLE` — so a click goes there without asking again.
+   *
+   * @generated from field: repeated code_navigation.CodeLocation locations = 2;
+   */
+  locations: CodeLocation[];
+};
+
+/**
+ * Describes the message code_navigation.ProbeAnswer.
+ * Use `create(ProbeAnswerSchema)` to create a new message.
+ */
+export const ProbeAnswerSchema: GenMessage<ProbeAnswer> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 9);
+
+/**
+ * @generated from message code_navigation.CodeQueryAnswer
+ */
+export type CodeQueryAnswer = Message<"code_navigation.CodeQueryAnswer"> & {
+  /**
+   * @generated from field: uint64 request_id = 1;
+   */
+  requestId: bigint;
+
+  /**
+   * @generated from oneof code_navigation.CodeQueryAnswer.result
+   */
+  result: {
+    /**
+     * @generated from field: code_navigation.HoverResponse hover = 2;
+     */
+    value: HoverResponse;
+    case: "hover";
+  } | {
+    /**
+     * @generated from field: code_navigation.DefinitionResponse definition = 3;
+     */
+    value: DefinitionResponse;
+    case: "definition";
+  } | {
+    /**
+     * @generated from field: code_navigation.ReferencesResponse references = 4;
+     */
+    value: ReferencesResponse;
+    case: "references";
+  } | {
+    /**
+     * @generated from field: code_navigation.ProbeAnswer probe = 5;
+     */
+    value: ProbeAnswer;
+    case: "probe";
+  } | {
+    /**
+     * The query failed: why. The session stays open.
+     *
+     * @generated from field: string error = 6;
+     */
+    value: string;
+    case: "error";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message code_navigation.CodeQueryAnswer.
+ * Use `create(CodeQueryAnswerSchema)` to create a new message.
+ */
+export const CodeQueryAnswerSchema: GenMessage<CodeQueryAnswer> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 10);
 
 /**
  * One-based line, one-based column counted in bytes — the coordinates `code_index` speaks.
@@ -114,7 +419,7 @@ export type SourcePosition = Message<"code_navigation.SourcePosition"> & {
  * Use `create(SourcePositionSchema)` to create a new message.
  */
 export const SourcePositionSchema: GenMessage<SourcePosition> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 2);
+  messageDesc(file_code_navigation, 11);
 
 /**
  * @generated from message code_navigation.SourceRange
@@ -136,7 +441,7 @@ export type SourceRange = Message<"code_navigation.SourceRange"> & {
  * Use `create(SourceRangeSchema)` to create a new message.
  */
 export const SourceRangeSchema: GenMessage<SourceRange> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 3);
+  messageDesc(file_code_navigation, 12);
 
 /**
  * @generated from message code_navigation.DefinitionRequest
@@ -177,7 +482,7 @@ export type DefinitionRequest = Message<"code_navigation.DefinitionRequest"> & {
  * Use `create(DefinitionRequestSchema)` to create a new message.
  */
 export const DefinitionRequestSchema: GenMessage<DefinitionRequest> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 4);
+  messageDesc(file_code_navigation, 13);
 
 /**
  * @generated from message code_navigation.DefinitionResponse
@@ -187,6 +492,13 @@ export type DefinitionResponse = Message<"code_navigation.DefinitionResponse"> &
    * @generated from field: repeated code_navigation.CodeLocation locations = 1;
    */
   locations: CodeLocation[];
+
+  /**
+   * Where the index stood when this was answered: an empty answer while `LOADING` is not final.
+   *
+   * @generated from field: code_navigation.CodeIndexState state = 2;
+   */
+  state: CodeIndexState;
 };
 
 /**
@@ -194,7 +506,7 @@ export type DefinitionResponse = Message<"code_navigation.DefinitionResponse"> &
  * Use `create(DefinitionResponseSchema)` to create a new message.
  */
 export const DefinitionResponseSchema: GenMessage<DefinitionResponse> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 5);
+  messageDesc(file_code_navigation, 14);
 
 /**
  * @generated from message code_navigation.ReferencesRequest
@@ -231,7 +543,7 @@ export type ReferencesRequest = Message<"code_navigation.ReferencesRequest"> & {
  * Use `create(ReferencesRequestSchema)` to create a new message.
  */
 export const ReferencesRequestSchema: GenMessage<ReferencesRequest> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 6);
+  messageDesc(file_code_navigation, 15);
 
 /**
  * @generated from message code_navigation.ReferencesResponse
@@ -241,6 +553,13 @@ export type ReferencesResponse = Message<"code_navigation.ReferencesResponse"> &
    * @generated from field: repeated code_navigation.CodeLocation locations = 1;
    */
   locations: CodeLocation[];
+
+  /**
+   * Where the index stood when this was answered: an empty answer while `LOADING` is not final.
+   *
+   * @generated from field: code_navigation.CodeIndexState state = 2;
+   */
+  state: CodeIndexState;
 };
 
 /**
@@ -248,7 +567,7 @@ export type ReferencesResponse = Message<"code_navigation.ReferencesResponse"> &
  * Use `create(ReferencesResponseSchema)` to create a new message.
  */
 export const ReferencesResponseSchema: GenMessage<ReferencesResponse> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 7);
+  messageDesc(file_code_navigation, 16);
 
 /**
  * @generated from message code_navigation.HoverRequest
@@ -285,7 +604,7 @@ export type HoverRequest = Message<"code_navigation.HoverRequest"> & {
  * Use `create(HoverRequestSchema)` to create a new message.
  */
 export const HoverRequestSchema: GenMessage<HoverRequest> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 8);
+  messageDesc(file_code_navigation, 17);
 
 /**
  * @generated from message code_navigation.HoverResponse
@@ -297,6 +616,13 @@ export type HoverResponse = Message<"code_navigation.HoverResponse"> & {
    * @generated from field: optional string markdown = 1;
    */
   markdown?: string;
+
+  /**
+   * Where the index stood when this was answered: no markdown while `LOADING` is not final.
+   *
+   * @generated from field: code_navigation.CodeIndexState state = 2;
+   */
+  state: CodeIndexState;
 };
 
 /**
@@ -304,7 +630,7 @@ export type HoverResponse = Message<"code_navigation.HoverResponse"> & {
  * Use `create(HoverResponseSchema)` to create a new message.
  */
 export const HoverResponseSchema: GenMessage<HoverResponse> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 9);
+  messageDesc(file_code_navigation, 18);
 
 /**
  * A place in the worktree a navigation answer points at.
@@ -338,7 +664,7 @@ export type CodeLocation = Message<"code_navigation.CodeLocation"> & {
  * Use `create(CodeLocationSchema)` to create a new message.
  */
 export const CodeLocationSchema: GenMessage<CodeLocation> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 10);
+  messageDesc(file_code_navigation, 19);
 
 /**
  * @generated from message code_navigation.OpenPlanRequest
@@ -372,7 +698,7 @@ export type OpenPlanRequest = Message<"code_navigation.OpenPlanRequest"> & {
  * Use `create(OpenPlanRequestSchema)` to create a new message.
  */
 export const OpenPlanRequestSchema: GenMessage<OpenPlanRequest> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 11);
+  messageDesc(file_code_navigation, 20);
 
 /**
  * @generated from message code_navigation.WatchPlanRequest
@@ -404,7 +730,7 @@ export type WatchPlanRequest = Message<"code_navigation.WatchPlanRequest"> & {
  * Use `create(WatchPlanRequestSchema)` to create a new message.
  */
 export const WatchPlanRequestSchema: GenMessage<WatchPlanRequest> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 12);
+  messageDesc(file_code_navigation, 21);
 
 /**
  * @generated from message code_navigation.RunPlanRequest
@@ -436,7 +762,7 @@ export type RunPlanRequest = Message<"code_navigation.RunPlanRequest"> & {
  * Use `create(RunPlanRequestSchema)` to create a new message.
  */
 export const RunPlanRequestSchema: GenMessage<RunPlanRequest> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 13);
+  messageDesc(file_code_navigation, 22);
 
 /**
  * A plan as the dialog shows it: every operation, in plan order.
@@ -462,7 +788,7 @@ export type PlanSnapshot = Message<"code_navigation.PlanSnapshot"> & {
  * Use `create(PlanSnapshotSchema)` to create a new message.
  */
 export const PlanSnapshotSchema: GenMessage<PlanSnapshot> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 14);
+  messageDesc(file_code_navigation, 23);
 
 /**
  * One operation of a plan.
@@ -531,7 +857,7 @@ export type PlanOperation = Message<"code_navigation.PlanOperation"> & {
  * Use `create(PlanOperationSchema)` to create a new message.
  */
 export const PlanOperationSchema: GenMessage<PlanOperation> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 15);
+  messageDesc(file_code_navigation, 24);
 
 /**
  * What happened while a plan ran. Exactly one field is set.
@@ -580,7 +906,7 @@ export type PlanRunEvent = Message<"code_navigation.PlanRunEvent"> & {
  * Use `create(PlanRunEventSchema)` to create a new message.
  */
 export const PlanRunEventSchema: GenMessage<PlanRunEvent> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 16);
+  messageDesc(file_code_navigation, 25);
 
 /**
  * @generated from message code_navigation.PlanOperationApplied
@@ -621,7 +947,7 @@ export type PlanOperationApplied = Message<"code_navigation.PlanOperationApplied
  * Use `create(PlanOperationAppliedSchema)` to create a new message.
  */
 export const PlanOperationAppliedSchema: GenMessage<PlanOperationApplied> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 17);
+  messageDesc(file_code_navigation, 26);
 
 /**
  * @generated from message code_navigation.PlanRunOutcome
@@ -643,7 +969,7 @@ export type PlanRunOutcome = Message<"code_navigation.PlanRunOutcome"> & {
  * Use `create(PlanRunOutcomeSchema)` to create a new message.
  */
 export const PlanRunOutcomeSchema: GenMessage<PlanRunOutcome> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 18);
+  messageDesc(file_code_navigation, 27);
 
 /**
  * @generated from message code_navigation.PlanRunFailure
@@ -676,7 +1002,136 @@ export type PlanRunFailure = Message<"code_navigation.PlanRunFailure"> & {
  * Use `create(PlanRunFailureSchema)` to create a new message.
  */
 export const PlanRunFailureSchema: GenMessage<PlanRunFailure> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 19);
+  messageDesc(file_code_navigation, 28);
+
+/**
+ * Where a worktree's index stands — `code_index.IndexState`.
+ *
+ * @generated from enum code_navigation.CodeIndexState
+ */
+export enum CodeIndexState {
+  /**
+   * @generated from enum value: CODE_INDEX_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Nothing holds the worktree's index.
+   *
+   * @generated from enum value: CODE_INDEX_STATE_IDLE = 1;
+   */
+  IDLE = 1,
+
+  /**
+   * Loading: an answer now may be empty only because the index is not loaded yet.
+   *
+   * @generated from enum value: CODE_INDEX_STATE_LOADING = 2;
+   */
+  LOADING = 2,
+
+  /**
+   * Loaded and queryable.
+   *
+   * @generated from enum value: CODE_INDEX_STATE_READY = 3;
+   */
+  READY = 3,
+
+  /**
+   * The index could not start, or went away: `CodeIndexProgress.error` says why.
+   *
+   * @generated from enum value: CODE_INDEX_STATE_FAILED = 4;
+   */
+  FAILED = 4,
+
+  /**
+   * The worktree has no code index at all — it is not a Rust worktree — so nothing will load:
+   * `CodeIndexProgress.error` says why. Distinct from `IDLE`, which is an index about to load.
+   *
+   * @generated from enum value: CODE_INDEX_STATE_NONE = 5;
+   */
+  NONE = 5,
+}
+
+/**
+ * Describes the enum code_navigation.CodeIndexState.
+ */
+export const CodeIndexStateSchema: GenEnum<CodeIndexState> = /*@__PURE__*/
+  enumDesc(file_code_navigation, 0);
+
+/**
+ * @generated from enum code_navigation.CodeQueryKind
+ */
+export enum CodeQueryKind {
+  /**
+   * @generated from enum value: CODE_QUERY_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CODE_QUERY_KIND_HOVER = 1;
+   */
+  HOVER = 1,
+
+  /**
+   * @generated from enum value: CODE_QUERY_KIND_DEFINITION = 2;
+   */
+  DEFINITION = 2,
+
+  /**
+   * @generated from enum value: CODE_QUERY_KIND_REFERENCES = 3;
+   */
+  REFERENCES = 3,
+
+  /**
+   * Whether the symbol at the position has a definition — what the pane underlines. Never held.
+   *
+   * @generated from enum value: CODE_QUERY_KIND_PROBE = 4;
+   */
+  PROBE = 4,
+}
+
+/**
+ * Describes the enum code_navigation.CodeQueryKind.
+ */
+export const CodeQueryKindSchema: GenEnum<CodeQueryKind> = /*@__PURE__*/
+  enumDesc(file_code_navigation, 1);
+
+/**
+ * @generated from enum code_navigation.Definability
+ */
+export enum Definability {
+  /**
+   * @generated from enum value: DEFINABILITY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The symbol has a definition the pane can go to.
+   *
+   * @generated from enum value: DEFINABILITY_DEFINABLE = 1;
+   */
+  DEFINABLE = 1,
+
+  /**
+   * The loaded index knows of no definition.
+   *
+   * @generated from enum value: DEFINABILITY_NONE = 2;
+   */
+  NONE = 2,
+
+  /**
+   * The index is still loading, so it cannot say yet.
+   *
+   * @generated from enum value: DEFINABILITY_UNKNOWN = 3;
+   */
+  UNKNOWN = 3,
+}
+
+/**
+ * Describes the enum code_navigation.Definability.
+ */
+export const DefinabilitySchema: GenEnum<Definability> = /*@__PURE__*/
+  enumDesc(file_code_navigation, 2);
 
 /**
  * Where an operation's journal says it is.
@@ -721,7 +1176,7 @@ export enum PlanOperationStatus {
  * Describes the enum code_navigation.PlanOperationStatus.
  */
 export const PlanOperationStatusSchema: GenEnum<PlanOperationStatus> = /*@__PURE__*/
-  enumDesc(file_code_navigation, 0);
+  enumDesc(file_code_navigation, 3);
 
 /**
  * CodeNavigationService: go-to-definition, references and hover over a session's worktree, for the
@@ -770,14 +1225,13 @@ export const CodeNavigationService: GenService<{
     output: typeof HoverResponseSchema;
   },
   /**
-   * The warm-up of a session's code index, for the session header's indexing indicator.
+   * The session's worktree's code index, for the session header's indexing indicator.
    *
-   * Once a session's worktree exists the daemon starts `code_index.Warm` for it in the background
-   * and keeps the latest progress per session. This stream opens with that latest progress (when
-   * there is any), follows it, and ends after the message carrying `ready` or `error`. A session
-   * nothing warmed — no `index_daemon:` section, or not a Rust worktree — ends with no message, so
-   * no indicator shows. Warming never blocks the session: navigation answers whenever the index
-   * can, and a failed warm is only reported here.
+   * Follows `code_index.WatchRoot` for the session's worktree: opens with its current state and sends
+   * every change, whoever started the load — a session start, the code pane, the agent's code tools.
+   * It never starts a load itself. A session with no Rust worktree, or a daemon with no
+   * `index_daemon:` section, ends with no message, so no indicator shows. Runs until the client
+   * leaves.
    *
    * @generated from rpc code_navigation.CodeNavigationService.WatchCodeIndex
    */
@@ -785,6 +1239,24 @@ export const CodeNavigationService: GenService<{
     methodKind: "server_streaming";
     input: typeof WatchCodeIndexRequestSchema;
     output: typeof CodeIndexProgressSchema;
+  },
+  /**
+   * The code pane's conversation with its worktree's index, for as long as the pane is open.
+   *
+   * The first frame is `open`, naming the worktree, authorised like every other method; opening
+   * **warms** the worktree's index. The daemon then sends the index's progress — first its current
+   * state, then every change — for as long as the stream is open. Queries carry a client-chosen
+   * `request_id` that their answer repeats. A hover, definition or references query asked while the
+   * index is loading is **held** (`held`) and answered once the index is ready; a probe never waits
+   * and answers `UNKNOWN` instead. `cancel` drops a held query. A query before `open`, or a second
+   * `open`, ends the stream with `INVALID_ARGUMENT`.
+   *
+   * @generated from rpc code_navigation.CodeNavigationService.CodeSession
+   */
+  codeSession: {
+    methodKind: "bidi_streaming";
+    input: typeof CodeSessionRequestSchema;
+    output: typeof CodeSessionEventSchema;
   },
   /**
    * Open a restructure plan file of the session's worktree as a plan: load it into the index's plan

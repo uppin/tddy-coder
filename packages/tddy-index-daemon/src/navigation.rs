@@ -9,13 +9,15 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use tddy_code_restructuring::backends::rust::ServerChatter;
 use tddy_lsp::{Location, LspClient, Position};
 use tddy_rpc::Status;
 
 use crate::activity::Activity;
+use crate::graph::state_of_quiescence;
 use crate::index::WorkspaceIndex;
 use crate::proto::code_index::{
-    CodeLocation, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse,
+    CodeLocation, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, IndexState,
     ReferencesRequest, ReferencesResponse, SourcePosition, SourceRange,
 };
 use crate::status::status_of_lsp;
@@ -41,7 +43,10 @@ pub(crate) async fn serve_definition(
         Query::Definition,
     )
     .await
-    .map(|locations| DefinitionResponse { locations });
+    .map(|(locations, state)| DefinitionResponse {
+        locations,
+        state: state as i32,
+    });
     activity.recorded(outcome)
 }
 
@@ -59,7 +64,10 @@ pub(crate) async fn serve_references(
         Query::References,
     )
     .await
-    .map(|locations| ReferencesResponse { locations });
+    .map(|(locations, state)| ReferencesResponse {
+        locations,
+        state: state as i32,
+    });
     activity.recorded(outcome)
 }
 
@@ -86,17 +94,18 @@ async fn locations_at(
     file: &str,
     position: Option<SourcePosition>,
     query: Query,
-) -> Result<Vec<CodeLocation>, Status> {
+) -> Result<(Vec<CodeLocation>, IndexState), Status> {
     let asked = asked_document(index, root, file, position).await?;
     let answered = match query {
         Query::Definition => asked.client.definition(&asked.uri, asked.at).await,
         Query::References => asked.client.references(&asked.uri, asked.at).await,
     }
     .map_err(|failure| status_of_lsp(&failure))?;
-    answered
+    let locations = answered
         .iter()
         .map(|location| code_location(root, location))
-        .collect()
+        .collect::<Result<_, _>>()?;
+    Ok((locations, index_state_of(&asked.client)))
 }
 
 async fn hover_at(
@@ -111,7 +120,26 @@ async fn hover_at(
         .hover(&asked.uri, asked.at)
         .await
         .map_err(|failure| status_of_lsp(&failure))?;
-    Ok(HoverResponse { markdown })
+    Ok(HoverResponse {
+        markdown,
+        state: index_state_of(&asked.client) as i32,
+    })
+}
+
+/// Where the root's index stood when `client` answered: `READY` when the server's latest
+/// `experimental/serverStatus` said it is quiescent, `LOADING` otherwise — including a server that
+/// has said nothing yet. Never `IDLE`: a server answered.
+///
+/// Read from the client's own record of the latest status rather than from the root's progress
+/// watcher: the reader records a status before it routes the response that follows it, so the
+/// state is the one the answer was given in — the watcher may not have folded it in yet. Read
+/// through [`ServerChatter`], the one reading of that notification.
+fn index_state_of(client: &LspClient) -> IndexState {
+    let mut chatter = ServerChatter::default();
+    if let Some(status) = client.server_status() {
+        chatter.absorb(&status);
+    }
+    state_of_quiescence(chatter.quiescent())
 }
 
 /// What a navigation query is put to: the root's warm server, which has been told the file's

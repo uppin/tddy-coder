@@ -84,3 +84,12 @@ against the 1,479-line tree, before this merge.
 **Regressed, split deferred with consent:** 1781 → 1794 production lines. +13: `build` starts the daemon's one `AskpassEndpoint` on the registry and keypair the host service already owns, and installs it on the session host (`with_askpass_endpoint`). The change's own
 modules are all small and new; only this unavoidable wiring landed in the file. Not claimed by any PR.
 Deferred in `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring.md`.
+
+## Measurement update 2026-10-18 — code index warms on demand
+
+**Touched and smaller:** 1,831 production lines on `master` → **1,822** on `feat/code-index-warm-on-demand`
+(−9, `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`). Inside `build` (1,056 → 1,047 by brace
+matching): the `SessionIndexProgress` holder and its comment, its argument to `IndexWarmupObserver::new`,
+and `.with_index_progress(..)` on `CodeNavigationServiceImpl` are removed — a root's index progress is kept
+by the index daemon and followed through `code_index.WatchRoot`. Still ~3.6× over budget; the split is not
+attempted. Not claimed by any PR.

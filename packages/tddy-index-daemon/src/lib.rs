@@ -21,6 +21,7 @@ mod graph;
 pub mod index;
 mod navigation;
 pub mod operations;
+mod plan_flush;
 mod plan_upkeep;
 pub mod queries;
 pub mod service;
@@ -28,6 +29,7 @@ pub mod status;
 mod symbols;
 mod tree_changes;
 mod warm;
+mod watch_root;
 
 pub use service::{build_code_index_entry, CodeIndexPorts, CodeIndexServiceImpl, EventStream};
 
@@ -53,6 +55,17 @@ pub mod proto {
 /// coordinates whose served and addressed ends sit in different crates belong in the shared
 /// catalog.
 pub const CODE_INDEX_SERVICE: &str = "code_index.CodeIndexService";
+
+/// The manifest whose presence at a root makes it a Rust workspace — the one kind of root this
+/// index serves.
+pub const RUST_WORKSPACE_MANIFEST: &str = "Cargo.toml";
+
+/// Whether `root` is a Rust workspace this index can serve: it has a [`RUST_WORKSPACE_MANIFEST`]
+/// at its top. Callers ask before warming a root or dialling the index daemon for it.
+#[must_use]
+pub fn is_rust_workspace(root: &std::path::Path) -> bool {
+    root.join(RUST_WORKSPACE_MANIFEST).is_file()
+}
 
 /// The proto's file-descriptor set, so a host can merge this service into gRPC reflection without
 /// re-parsing the schema.

@@ -177,6 +177,7 @@ fn not_part_of_this_fake() -> tddy_rpc::Status {
 #[async_trait::async_trait]
 impl CodeIndexService for AFakeIndex {
     type WarmStream = EventStream<index::IndexProgress>;
+    type WatchRootStream = EventStream<index::IndexProgress>;
     type CheckStream = EventStream<index::RestructureEvent>;
     type ApplyStream = EventStream<index::RestructureEvent>;
     type CoverageStream = EventStream<index::AnalyzeEvent>;
@@ -219,6 +220,13 @@ impl CodeIndexService for AFakeIndex {
         &self,
         _request: tddy_rpc::Request<index::WarmRequest>,
     ) -> Result<tddy_rpc::Response<Self::WarmStream>, tddy_rpc::Status> {
+        Err(not_part_of_this_fake())
+    }
+
+    async fn watch_root(
+        &self,
+        _request: tddy_rpc::Request<index::WatchRootRequest>,
+    ) -> Result<tddy_rpc::Response<Self::WatchRootStream>, tddy_rpc::Status> {
         Err(not_part_of_this_fake())
     }
 

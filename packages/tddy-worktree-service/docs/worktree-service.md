@@ -60,7 +60,7 @@ go-to-definition can never reach a worktree this service would refuse to read.
 session of another user and one that does not exist are the same `NotFound`, so the answer does not
 reveal which ids exist. `RestoreSessionWorktree` resolves its session directory through the same
 helper (`session_dir_for`), so there is one ownership model. `tddy-daemon-rpc`'s `WatchCodeIndex` calls
-it before looking up a session's index progress.
+it before reading the session's record to follow its worktree's index.
 
 **Agent context files are a separate reader, deliberately.** `tddy-daemon`'s `context_files` serves
 a session's agent configuration, which is routinely gitignored (`.claude/settings.local.json`,
