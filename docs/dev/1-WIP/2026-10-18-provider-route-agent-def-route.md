@@ -84,6 +84,7 @@ Def parse/validation unit tests; launch acceptance for a claude-cli profile and 
 |---|---|---|
 | `a_profile_parses_from_its_yaml` / `a_profile_with_a_base_url_is_rejected_at_load` / `profiles_and_openai_definitions_load_side_by_side` / `profiles_appear_in_the_agent_list` | `packages/tddy-discovery/tests/harness_profile_def.rs` (new) | profile type, loaders side by side, rows |
 | `a_claude_cli_profile_starts_claude_cli_on_its_account_and_model` / `a_codex_profile_starts_a_tool_session_with_the_codex_agent` / `a_profile_naming_no_known_harness_is_refused` / `a_session_level_account_overrides_the_profiles` | `packages/tddy-agent-launch/src/harness_profile_start_tests.rs` (new) | start mapping, precedence |
+| `a_codex_profile_hands_its_tool_session_the_profiles_account` | same (`through_the_tool_session_route`) | a profile's tool session runs through #665's route file on the profile's account — the real edge n4 → n8 |
 
 ## Technical Debt & Production Readiness
 
@@ -102,6 +103,7 @@ Def parse/validation unit tests; launch acceptance for a claude-cli profile and 
 Scoped: `tddy-discovery`, `tddy-agent-launch` — clippy `-D warnings` clean.
 
 - `harness_profile_def` 4/4 and `harness_profile_start_tests` 4/4 fail at this node's `todo!()`.
+- Added at the wave-order check (third commit): `a_codex_profile_hands_its_tool_session_the_profiles_account`, the planned codex tool-session profile test, which the contract commit had left out. It fails first at node 1's `preset()`, and exercises #663's `choose_route` and #665's `tool_session_route_json` — without it this node's tests needed only node 2, which would have put it in wave 3 behind two wave-4 nodes.
 
 ## Validation Results
 ### /validate-changes
