@@ -184,6 +184,8 @@ impl LaunchSessions {
                 project_id: Some(metadata.project_id.clone()).filter(|id| !id.is_empty()),
                 agent: resume_agent,
                 agent_def_json: resume_agent_def,
+                // TODO(tool-route): carry the route through this path
+                provider_route_json: None,
                 recipe: resume_recipe,
                 stack_parent: None,
                 stack_node_id: None,

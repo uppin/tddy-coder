@@ -399,6 +399,10 @@ pub struct SpawnOptions<'a> {
     /// It does **not** travel on argv: see [`write_agent_def_file`]. The child is passed
     /// `--agent-def-path <file>`.
     pub agent_def_json: Option<&'a str>,
+    /// The session's provider route (`tddy_core::provider_route_file`), as JSON. Like
+    /// `agent_def_json` it carries a credential, so it never travels on argv or in the environment:
+    /// see [`write_provider_route_file`]. The child is passed `--provider-route-path <file>`.
+    pub provider_route_json: Option<&'a str>,
     pub mouse: bool,
     /// Passed to spawned `tddy-coder` as `--recipe` when non-empty (e.g. `bugfix`).
     pub recipe: Option<&'a str>,
@@ -851,6 +855,19 @@ pub struct SessionChildPlan {
 /// The file a session's resolved agent def is handed over in, inside that session's own directory.
 #[cfg(unix)]
 pub const AGENT_DEF_FILENAME: &str = "agent-def.json";
+
+/// Write a tool session's provider route (`tddy_core::provider_route_file`) to
+/// `<session_dir>/provider-route.json`, owner-only and owned by `os_user`, and return its path —
+/// the same treatment the agent definition's file gets, because it carries a credential too.
+pub fn write_provider_route_file(
+    session_dir: &Path,
+    route_json: &str,
+    os_user: &str,
+) -> anyhow::Result<PathBuf> {
+    let _ = (session_dir, route_json, os_user);
+    // TODO(tool-route): implement
+    todo!()
+}
 
 /// Write the resolved agent def where the child can read it, and nobody else can.
 ///

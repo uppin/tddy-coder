@@ -10,6 +10,7 @@ pub mod claude_hooks;
 pub mod cli_harness;
 pub mod cursor_hooks;
 pub mod provider_route;
+pub mod provider_route_file;
 pub mod spawn_env;
 pub mod stream;
 pub mod token_accounting;

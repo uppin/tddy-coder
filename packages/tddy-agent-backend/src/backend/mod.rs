@@ -7,6 +7,7 @@ pub mod codex_acp;
 mod cursor;
 mod mock;
 pub mod model_catalog;
+mod routed;
 mod stub;
 mod tool_executor;
 

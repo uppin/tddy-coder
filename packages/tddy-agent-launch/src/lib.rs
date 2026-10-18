@@ -51,6 +51,7 @@ pub mod svc_start_claude_cli_session;
 pub mod svc_start_sandboxed_claude_cli_session;
 pub mod svc_start_sandboxed_cursor_cli_session;
 pub mod svc_start_session_core;
+pub mod tool_session_route;
 pub mod tool_session_spawn;
 pub mod tool_spawn_plan;
 pub mod workspace_branch_start;
@@ -69,5 +70,7 @@ mod session_acting_identity_tests;
 mod session_provider_route_tests;
 #[cfg(test)]
 mod start_request_checks_unit_tests;
+#[cfg(test)]
+mod tool_session_route_tests;
 
 pub use start_request_checks::start_forward_deadline;

@@ -489,6 +489,9 @@ pub struct Args {
     /// validated. A path rather than the JSON itself because the def carries the provider
     /// credential, and argv is world-readable.
     pub agent_def_path: Option<PathBuf>,
+    /// File holding the session's provider route (`--provider-route-path`): the account endpoint,
+    /// model and key the backend's child runs on. Owner-only, written by `tddy-daemon`.
+    pub provider_route_path: Option<PathBuf>,
     pub prompt: Option<String>,
     /// When Some(port), gRPC server runs alongside TUI on the given port.
     pub grpc: Option<u16>,
@@ -648,6 +651,13 @@ pub struct CoderArgs {
     /// world-readable through `/proc/<pid>/cmdline`.
     #[arg(long, value_name = "PATH")]
     pub agent_def_path: Option<PathBuf>,
+
+    /// File holding the session's provider route, as JSON (`tddy_core::provider_route_file`):
+    /// what the backend's child is given to run on a model-provider account instead of its vendor.
+    /// Written `0600` by `tddy-daemon`; refused when anyone else can read it. A path, not the JSON:
+    /// it carries the account's key.
+    #[arg(long, value_name = "PATH")]
+    pub provider_route_path: Option<PathBuf>,
 
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
     #[arg(long)]
@@ -1017,6 +1027,7 @@ impl From<CoderArgs> for Args {
             log_level: parse_log_level(a.log_level.as_deref()),
             agent: a.agent,
             agent_def_path: a.agent_def_path,
+            provider_route_path: a.provider_route_path,
             prompt: a.prompt,
             grpc: a.grpc,
             session_id: a.session_id,
@@ -1074,6 +1085,7 @@ impl From<DemoArgs> for Args {
             log_level: parse_log_level(a.log_level.as_deref()),
             agent: a.agent.or(Some("stub".to_string())),
             agent_def_path: None,
+            provider_route_path: None,
             prompt: a.prompt,
             grpc: a.grpc,
             session_id: a.session_id,
@@ -4317,6 +4329,7 @@ mod resume_session_config_tests {
             log_level: None,
             agent: None,
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: None,
@@ -4390,6 +4403,7 @@ mod resume_session_identity_tests {
             log_level: None,
             agent: Some("claude".to_string()),
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: None,
@@ -4464,6 +4478,7 @@ mod session_dir_sync_tests {
             log_level: None,
             agent: Some("claude".to_string()),
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: Some(sid.to_string()),
@@ -4554,6 +4569,7 @@ mod changeset_agent_resume_tests {
             log_level: None,
             agent: Some("claude".to_string()),
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: Some(sid.to_string()),
@@ -4661,6 +4677,7 @@ mod post_tui_workflow_exit_tests {
             log_level: None,
             agent: None,
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: Some(session_id.to_string()),

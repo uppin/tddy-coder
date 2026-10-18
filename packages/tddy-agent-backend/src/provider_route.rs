@@ -461,3 +461,10 @@ fn opencode_config(model: &str, wire: OpenAiWire<'_>) -> RouteFile {
             .expect("a serde_json::Value always serializes"),
     }
 }
+
+/// The provider id a Codex route declares the account under (`-c model_providers.<id>.*`), so the
+/// person's own `~/.codex/config.toml` providers are never shadowed.
+pub const CODEX_ROUTE_PROVIDER_ID: &str = "tddy-route";
+
+/// The variable a Codex route's key is delivered in; the route names it as the provider's `env_key`.
+pub const CODEX_ROUTE_KEY_ENV: &str = "TDDY_ROUTE_API_KEY";

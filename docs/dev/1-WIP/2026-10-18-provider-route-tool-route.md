@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: #provider-route 4/9. Base: `feature/provider-route/opencode-cli`.
+**Stack**: #provider-route 4/9. Base: `feature/provider-route/opencode-cli`. PR: [#665](https://github.com/uppin/tddy-coder/pull/665).
 
 ## Initial Discovery
 
@@ -43,18 +43,29 @@ constructor equivalent wave 2 settles on), route application in `ClaudeCodeBacke
 ## Draft PR contract
 
 ```rust
-// tddy-agent-backend
-impl HarnessRoute { pub fn to_file_json(&self) -> String; pub fn from_file_json(s: &str) -> Result<HarnessRoute, String>; }
-pub struct InvokeRequest { /* … */ pub provider_route: Option<std::sync::Arc<HarnessRoute>> }
-// provider_route.rs — Codex arm owned here
-// codex: args = ["-c", "model_provider=\"tddy-route\"", "-c", "model_providers.tddy-route.base_url=\"<responses root>\"",
-//                "-c", "model_providers.tddy-route.env_key=\"TDDY_ROUTE_API_KEY\"", "-c", "model_providers.tddy-route.wire_api=\"responses\""]
+// tddy-agent-backend/src/provider_route.rs — Codex arm owned here
+pub const CODEX_ROUTE_PROVIDER_ID: &str = "tddy-route";
+pub const CODEX_ROUTE_KEY_ENV: &str = "TDDY_ROUTE_API_KEY";
+// route for codex / codex-acp: args = -c model_provider="tddy-route", -c model_providers.tddy-route.{name,base_url,env_key,wire_api="responses"}, -m <model>; secret_env = [(TDDY_ROUTE_API_KEY, key)]
+// tddy-agent-backend/src/provider_route_file.rs
+pub const PROVIDER_ROUTE_FILENAME: &str = "provider-route.json";
+pub fn route_to_json(route: &HarnessRoute) -> String;
+pub fn route_from_json(json: &str) -> Result<HarnessRoute, String>;
+pub fn load_route_file(path: &Path) -> Result<HarnessRoute, String>;   // refuses group/other-readable
+// tddy-agent-backend/src/backend/routed.rs (all builders in one module; the backend files are oversized)
+impl AnyBackend { pub fn with_provider_route(self, route: HarnessRoute) -> Result<Self, String>; } // cursor, stub refused
+impl ClaudeCodeBackend | ClaudeAcpBackend | CodexBackend | CodexAcpBackend { pub fn with_provider_route(self, route: HarnessRoute) -> Self; }
+// tddy-spawn
+pub fn write_provider_route_file(session_dir: &Path, route_json: &str, os_user: &str) -> anyhow::Result<PathBuf>;
+SpawnOptions.provider_route_json: Option<&str>          // never argv or env; child gets --provider-route-path
+// tddy-agent-launch
+ToolSpawnPlan.provider_route_json: Option<String>;
+pub fn tool_session_route_json(access: &SessionAccountAccess, agent: &str, sources: &RouteSources, model: &str) -> Result<Option<String>, Status>;
 // tddy-coder
-#[arg(long)] provider_route_path: Option<PathBuf>
-pub fn load_provider_route(path: &Path) -> anyhow::Result<HarnessRoute>;   // refuses a file not mode 0600
-// tddy-spawn / tool_session_spawn
-// ToolSpawnPlan gains provider_route_json: Option<String>; spawner writes it like agent-def.json and adds the flag.
+Args/CoderArgs.provider_route_path: Option<PathBuf>     // --provider-route-path
 ```
+
+The route is applied through a per-backend builder, not an `InvokeRequest` field: `InvokeRequest` has 32 struct literals across the workspace. The ACP builders hand the route to their worker, which applies it when it spawns the agent.
 
 ## Green wave
 
@@ -116,17 +127,18 @@ loads a route file and drives the stub-recorded command; spawner test for file m
 
 | Test | File | Validates |
 |---|---|---|
-| `codex_on_meta_runs_exec_with_a_responses_provider_and_the_key_in_env` | `packages/tddy-agent-backend/tests/codex_provider_route.rs` (new) | argv `-c …`, env key |
-| `headless_claude_on_fireworks_gets_the_anthropic_route_env` | `packages/tddy-agent-backend/tests/claude_provider_route.rs` (new) | env |
-| `acp_agents_spawn_with_the_route_applied` | same files | `claude-agent-acp` / `codex-acp` child env |
-| `a_route_file_is_written_owner_only_and_named_on_the_command_line` | `packages/tddy-spawn/tests/provider_route_file.rs` (new) | 0600, flag, no key on argv |
-| `tddy_coder_refuses_a_route_file_others_can_read` | `packages/tddy-coder/tests/provider_route_file.rs` (new) | mode check |
-| `a_cursor_tool_session_with_an_account_is_refused` | `packages/tddy-agent-launch/tests/tool_session_provider_route.rs` (new) | refusal |
-| `a_resumed_tool_session_reapplies_its_route` | same | resume |
+| `codex_on_meta_declares_a_responses_provider_through_config_overrides` / `codex_refuses_an_account_without_responses` | `packages/tddy-agent-backend/tests/codex_route_acceptance.rs` (new) | Codex arm |
+| `a_route_round_trips_through_its_file_json` / `an_owner_only_route_file_loads` / `tddy_coder_refuses_a_route_file_others_can_read` | `packages/tddy-agent-backend/tests/provider_route_file.rs` (new) | route file |
+| `codex_on_meta_runs_exec_with_a_responses_provider_and_the_key_in_env` / `headless_claude_on_fireworks_gets_the_anthropic_route_env` / `acp_agents_spawn_with_the_route_applied` / `cursor_and_the_stub_cannot_be_routed` | `packages/tddy-integration-tests/tests/tool_session_provider_route.rs` (new) | stub binaries record argv/env |
+| `a_route_file_is_written_owner_only_in_the_session_directory` / `rewriting_a_route_file_resecures_it` | `packages/tddy-spawn/tests/provider_route_file.rs` (new) | writer |
+| `a_codex_tool_session_on_meta_is_handed_a_route_file_with_its_provider` / `a_cursor_tool_session_with_an_account_is_refused` / `a_specialized_agent_definition_with_an_account_is_refused` / `a_tool_session_that_chooses_nothing_gets_no_route_file` | `packages/tddy-agent-launch/src/tool_session_route_tests.rs` (new) | real vault |
+| Cypress: asks routes for the selected agent / sends the account with a codex session / cursor shows why | `packages/tddy-web/cypress/component/CreateSessionToolProviderAcceptance.cy.tsx` (new) | picker for tool sessions |
 
 ## Technical Debt & Production Readiness
 
 ## Decisions & Trade-offs
+- **Builder, not an `InvokeRequest` field** (wave 2): 32 literals of a non-`Default`-constructed struct; a builder touches the four backends only.
+- **Telegram-started tool sessions pass no route yet** (`TODO(tool-route)` at its `SpawnOptions`): the Telegram start has no account picker; out of scope.
 - **File, not env**: keeps the daemon→coder env allowlist and the supervisor policy closed.
 - **One synthetic Codex provider id** (`tddy-route`), so a person's own `~/.codex/config.toml` providers are untouched.
 
@@ -135,6 +147,15 @@ loads a route file and drives the stub-recorded command; spawner test for file m
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+
+## Red-phase record (wave 2, 2026-10-18)
+
+Scoped: `tddy-agent-backend`, `tddy-agent-launch`, `tddy-spawn`, `tddy-coder`, `tddy-telegram-control`, `tddy-integration-tests` (`tool_session_provider_route` target) — clippy `-D warnings` clean.
+
+- `provider_route_file` 3/3, `tool_session_provider_route` 4/4 (`routed.rs`), `tddy-spawn provider_route_file` 2/2 fail at this node's `todo!()`.
+- `codex_route_acceptance` 2/2 fail first at node 2's `resolve_route` `todo!()` (the Codex arm lives inside it) — green after #663.
+- `tool_session_route_tests` 4/4 fail first at node 1's `preset()` — green after #662.
+- `CreateSessionToolProviderAcceptance.cy.tsx` 3/3 fail: the picker is node 2's to render — green after #663 plus this node's tool-session wiring.
 
 ## Validation Results
 ### /validate-changes
@@ -152,10 +173,10 @@ loads a route file and drives the stub-recorded command; spawner test for file m
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests (per-node gate waived by the developer on 2026-10-18 — "finish remaining waves without stopping"; review at stack hand-off)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

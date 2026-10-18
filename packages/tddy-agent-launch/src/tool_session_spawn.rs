@@ -136,6 +136,8 @@ impl LaunchSessions {
                 project_id: Some(pid_for_spawn),
                 agent: agent_for_spawn,
                 agent_def_json: agent_def_for_spawn,
+                // TODO(tool-route): carry the route through this path
+                provider_route_json: None,
                 recipe: recipe_for_spawn,
                 stack_parent: stack_parent_for_spawn,
                 stack_node_id: stack_node_id_for_spawn,
