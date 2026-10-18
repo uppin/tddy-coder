@@ -99,6 +99,17 @@ export function ScreenSharingOverlay({
           >
             Ctrl+Alt+Esc to close
           </span>
+          {/* TODO(viewer-fullscreen): implement — enter/exit full screen on the overlay root, lock
+              the keyboard while full screen, say "Esc leaves full screen" where it cannot be. */}
+          <button
+            data-testid="screen-sharing-fullscreen"
+            type="button"
+            aria-label="Enter full screen"
+            aria-pressed={false}
+            className="px-3 py-1 text-sm bg-black/60 text-white rounded hover:bg-black/80"
+          >
+            Full screen
+          </button>
           <button
             data-testid="screen-sharing-overlay-close"
             type="button"

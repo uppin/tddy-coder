@@ -24,7 +24,7 @@ import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import {
   exitDocumentFullscreen,
   isTargetInActiveFullscreen,
-  requestFullscreenForConnectedTerminal,
+  requestElementFullscreen,
 } from "../../lib/browserFullscreen";
 import { safeTestIdPart } from "../../lib/testId";
 import { cn } from "../../lib/utils";
@@ -327,7 +327,7 @@ export function SessionRuntime({
     }
     // The request rejects when the browser refuses (an iframe without `allowfullscreen`, a gesture
     // the UA does not count as user-activated). Nothing to recover — the pane stays inline.
-    void requestFullscreenForConnectedTerminal(target).catch(() => undefined);
+    void requestElementFullscreen(target).catch(() => undefined);
   }, []);
 
   // A terminal pane (Agent/bash) is visible only when its tab is active AND nothing else holds the

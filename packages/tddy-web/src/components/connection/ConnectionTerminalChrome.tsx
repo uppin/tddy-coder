@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef, useState } from "react";
 import {
   exitDocumentFullscreen,
   isTargetInActiveFullscreen,
-  requestFullscreenForConnectedTerminal,
+  requestElementFullscreen,
 } from "../../lib/browserFullscreen";
 import { tddyDevDebug } from "../../lib/tddyDevLog";
 import { confirmRemoteSessionTermination } from "../../lib/remoteTerminateConfirm";
@@ -199,7 +199,7 @@ export function ConnectionTerminalChrome({
       void exitDocumentFullscreen();
       return;
     }
-    void requestFullscreenForConnectedTerminal(target);
+    void requestElementFullscreen(target);
   };
 
   const statusAttr = dataConnectionStatusValue(overlayStatus);

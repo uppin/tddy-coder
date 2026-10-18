@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
-**PR**: (opened in wave 1; number recorded in wave 2)
+**PR**: [#657](https://github.com/uppin/tddy-coder/pull/657)
 **Type**: Feature
 **Stack**: `#host-desktops` 5/8. Base: `feature/host-desktops/hosts-mount`.
 
@@ -68,9 +68,9 @@ The desktop can take the whole screen, and keys the browser would otherwise keep
 
 ## Scope
 
-- [ ] Generalised fullscreen helper; terminal callers renamed
-- [ ] Keyboard Lock helper
-- [ ] Overlay toggle, hint, cleanup
+- [x] Generalised fullscreen helper; terminal callers renamed (`useElementFullscreen` pending)
+- [~] Keyboard Lock helper (surface + failing tests)
+- [~] Overlay toggle, hint, cleanup (inert toggle rendered; behaviour pending)
 
 ## Technical Changes
 
@@ -100,16 +100,34 @@ Browser-reserved behaviour itself is not testable; the specs pin what tddy asks 
 
 ## Acceptance Tests
 
-| Test | File | Validates |
-|---|---|---|
-| `hands the desktop viewer to the fullscreen api and not the page` | `packages/tddy-web/cypress/component/ScreenSharingFullscreenAcceptance.cy.tsx` (new) | request target |
-| `offers to exit full screen while full screen` | same | label + exit call |
-| `locks the keyboard on entering full screen where the browser can` | same | `navigator.keyboard.lock()` |
-| `unlocks the keyboard when the browser leaves full screen` | same | unlock on `fullscreenchange` |
-| `says escape leaves full screen where the keyboard cannot be locked` | same | hint |
-| `leaves full screen when the desktop is closed` | same | exit on close |
+| Status | Test | File | Validates |
+|---|---|---|---|
+| ❌ failing | `hands the desktop viewer to the fullscreen api and not the page` | `packages/tddy-web/cypress/component/ScreenSharingFullscreenAcceptance.cy.tsx` (new) | `requestFullscreen` called once, on the overlay root (`screen-sharing-overlay`) |
+| ❌ failing | `offers to exit full screen while full screen` | same | toggle `aria-label`/`aria-pressed` flip to "Exit full screen"; second click calls `exitFullscreen` |
+| ❌ failing | `locks the keyboard on entering full screen where the browser can` | same | `navigator.keyboard.lock()` called once with no arguments |
+| ❌ failing | `unlocks the keyboard when the browser leaves full screen` | same | `navigator.keyboard.unlock()` on a `fullscreenchange` the page did not ask for |
+| ❌ failing | `says escape leaves full screen where the keyboard cannot be locked` | same | `screen-sharing-fullscreen-escape-hint` visible, mentions Esc, on a browser without `navigator.keyboard` |
+| ❌ failing | `leaves full screen when the desktop is closed` | same | close unmounts the overlay, calls `exitFullscreen` and `unlock` |
 
-Unit: `src/lib/keyboardLock.test.ts` — `reports keyboard lock as unsupported where the browser has none`, `locks every key`; `src/lib/browserFullscreen.test.ts` — existing test renamed to `requestElementFullscreen`.
+Unit (`bun test`, the runner `browserFullscreen.test.ts` already uses):
+
+| Status | Test | File |
+|---|---|---|
+| ❌ failing | `reports keyboard lock as unsupported where the browser has none` | `packages/tddy-web/src/lib/keyboardLock.test.ts` (new) |
+| ❌ failing | `locks every key` | same |
+| ✅ passing | `delegates the fullscreen request to Element.requestFullscreen on the target element` (describe renamed to `requestElementFullscreen`) | `packages/tddy-web/src/lib/browserFullscreen.test.ts` |
+
+Test support added: `packages/tddy-web/cypress/support/fullscreenBrowser.ts` (fake Fullscreen +
+Keyboard Lock APIs on the AUT window: `givenABrowserThatCanLockTheKeyboard`,
+`givenABrowserWithoutKeyboardLock`, `theBrowserLeavesFullScreenOnItsOwn`, `forgetTheFakeBrowser`);
+`desktopPage` gained `fullscreenToggle`, `escapeLeavesFullScreenHint`, `toggleFullScreen`,
+`expectOffersToEnterFullScreen`, `expectOffersToExitFullScreen`.
+
+Contract deviations from `## Draft PR contract`, both widenings so existing callers compile unchanged:
+- `requestElementFullscreen(target: Element | null)` — not `HTMLElement`: the renamed function keeps
+  its existing parameter, since both terminal callers pass a ref's `current` (possibly `null`).
+- `useElementFullscreen(ref: RefObject<HTMLElement | null>)` — React 19's `useRef<T>(null)` yields
+  `RefObject<T | null>`. Return type is exported as `ElementFullscreen`.
 
 ## Decisions & Trade-offs
 - **Lock all keys** (`lock()` with no list) — the desktop expects every key; the closing chord is still caught by tddy before forwarding.
@@ -117,6 +135,9 @@ Unit: `src/lib/keyboardLock.test.ts` — `reports keyboard lock as unsupported w
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
+### From @red (TDD Red Phase)
+- `SessionTerminalFullscreenAcceptance.cy.tsx` has its own local `stubFullscreenApi()`; it could use
+  `cypress/support/fullscreenBrowser.ts` instead (left alone here — out of this node's surface).
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
@@ -134,10 +155,10 @@ Unit: `src/lib/keyboardLock.test.ts` — `reports keyboard lock as unsupported w
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

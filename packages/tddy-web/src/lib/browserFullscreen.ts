@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { emitTddyMarker } from "./tddyMarker";
 
 type FullscreenElement = Element & {
@@ -22,44 +23,45 @@ function logInfo(...args: unknown[]): void {
 }
 
 /**
- * Enter browser fullscreen for the connected terminal subtree (standard + vendor-prefixed APIs).
+ * Enter browser fullscreen for `target` (standard + vendor-prefixed APIs) — a connected terminal
+ * subtree, a remote desktop viewer, any element that should take the whole screen.
  */
-export async function requestFullscreenForConnectedTerminal(
+export async function requestElementFullscreen(
   target: Element | null,
 ): Promise<void> {
-  emitTddyMarker("M001", "browserFullscreen::requestFullscreenForConnectedTerminal", {
+  emitTddyMarker("M001", "browserFullscreen::requestElementFullscreen", {
     hasTarget: target !== null,
   });
-  logDebug("requestFullscreenForConnectedTerminal", { hasTarget: target !== null });
+  logDebug("requestElementFullscreen", { hasTarget: target !== null });
   if (!target) {
-    logInfo("requestFullscreenForConnectedTerminal: missing target, skipping");
+    logInfo("requestElementFullscreen: missing target, skipping");
     return;
   }
   const el = target as FullscreenElement;
   try {
     if (typeof el.requestFullscreen === "function") {
       await el.requestFullscreen();
-      logInfo("requestFullscreenForConnectedTerminal: entered via requestFullscreen");
+      logInfo("requestElementFullscreen: entered via requestFullscreen");
       return;
     }
     if (typeof el.webkitRequestFullscreen === "function") {
       el.webkitRequestFullscreen();
-      logInfo("requestFullscreenForConnectedTerminal: entered via webkitRequestFullscreen");
+      logInfo("requestElementFullscreen: entered via webkitRequestFullscreen");
       return;
     }
     if (typeof el.mozRequestFullScreen === "function") {
       el.mozRequestFullScreen();
-      logInfo("requestFullscreenForConnectedTerminal: entered via mozRequestFullScreen");
+      logInfo("requestElementFullscreen: entered via mozRequestFullScreen");
       return;
     }
     if (typeof el.msRequestFullscreen === "function") {
       el.msRequestFullscreen();
-      logInfo("requestFullscreenForConnectedTerminal: entered via msRequestFullscreen");
+      logInfo("requestElementFullscreen: entered via msRequestFullscreen");
       return;
     }
-    logInfo("requestFullscreenForConnectedTerminal: no supported fullscreen API on element");
+    logInfo("requestElementFullscreen: no supported fullscreen API on element");
   } catch (e) {
-    logInfo("requestFullscreenForConnectedTerminal: request failed", e);
+    logInfo("requestElementFullscreen: request failed", e);
     throw e;
   }
 }
@@ -107,4 +109,22 @@ export function isTargetInActiveFullscreen(target: Element | null): boolean {
   const active = document.fullscreenElement;
   if (!active) return false;
   return active === target || target.contains(active);
+}
+
+/** Full-screen state of one element, and the two ways to change it. */
+export interface ElementFullscreen {
+  /** Whether the element behind `ref` is (or contains) the document's fullscreen element. */
+  isFullscreen: boolean;
+  /** Hand the element behind `ref` to the Fullscreen API. */
+  enter(): Promise<void>;
+  /** Leave document fullscreen. */
+  exit(): Promise<void>;
+}
+
+/**
+ * Track whether the element behind `ref` is full screen, following `fullscreenchange` — so a leave
+ * the browser performed on its own (Escape, a system gesture) is reported as well as one asked for.
+ */
+export function useElementFullscreen(_ref: RefObject<HTMLElement | null>): ElementFullscreen {
+  throw new Error("TODO(viewer-fullscreen): implement");
 }
