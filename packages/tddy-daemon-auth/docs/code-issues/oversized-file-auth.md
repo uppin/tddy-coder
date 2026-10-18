@@ -18,6 +18,7 @@
 | 2026-09-24 | 576 → 622 | #510 at wrap: `+3` more, the vaults built through `pending_logins::credential_vaults_in` so they carry `github.pending_login_ttl_seconds` (the lifetime's startup logs and the expiry sweep live in the new `pending_logins.rs`, not here) |
 | 2026-09-24 | 622 → 622 | #510's post-wrap follow-up, net `0`: `pending_logins.rs` became `vault_lifetimes.rs` when its sweep took on idle open vaults; the `let ttl` line went, and one came back — `let lifetimes = VaultLifetimes::of(github)?`, which applies both lifetimes' defaults and ceilings and stops the daemon past one, before the `auth_storage` arm. The resolution, the startup logs and the sweep live in `vault_lifetimes.rs` (167 lines), not here |
 | 2026-10-07 | 622 → 622 | #515 (`#keyring` 8/9), unchanged: its new `github_account_linking_provider` (+25) lives in its own module, `account_linking_provider.rs`, so this file only widened `GitHubProviderKind` and `github_provider_kind` to `pub(crate)` for it. Same `awk` count on `origin/master` and HEAD. Split remains deferred |
+| 2026-10-18 | 622 → 619 | #626 (`#satellite` 4/13), −3: the `TokenGenerator` construction in `build_token_service_entry` and `mint_live_kit_token` leaves for the injected `RoomTokenMinter`, offset by the `minter` parameters. Improved, not clean; split remains deferred |
 
 ## Why it grew, and why it is not split in #510
 

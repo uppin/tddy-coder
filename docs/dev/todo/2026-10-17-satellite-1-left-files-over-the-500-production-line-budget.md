@@ -31,3 +31,13 @@ Deferred with the developer's consent (2026-10-17, "file sizes can be deferred")
 
 `packages/tddy-host-service/src/service.rs` (937 → 936) shrank and is recorded in
 `packages/tddy-host-service/docs/code-issues/oversized-file-service.md`.
+
+## Grown by #626 (`#satellite` 4/13, room tokens)
+
+| File | Production lines | Grown by #626 | Record |
+|---|---|---|---|
+| `packages/tddy-daemon/src/runtime.rs` | 1,813 → 1,820 | +7 | `packages/tddy-daemon/docs/code-issues/oversized-file-runtime.md` |
+| `packages/tddy-screen-sharing/src/screen_sharing_service.rs` | 967 → 983 | +16 | `packages/tddy-screen-sharing/docs/code-issues/oversized-file-screen-sharing-service.md` |
+
+`packages/tddy-daemon-auth/src/auth.rs` (622 → 619) shrank and is recorded in
+`packages/tddy-daemon-auth/docs/code-issues/oversized-file-auth.md`.

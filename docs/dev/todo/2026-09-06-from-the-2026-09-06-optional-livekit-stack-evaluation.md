@@ -31,6 +31,10 @@ these are the design costs it *exposed*, not defects it introduced.
   `common_room_supervisor.rs`, `config.rs`, `session_room.rs` (its own credentials check) and the two
   web readers (`clientConfig`, `liveKitIsConfigured`) each still decide "configured" themselves.
   Moving them is owned by nodes 2–5 of the `#satellite` stack.
+  **Narrowed by `#satellite` 4/13 ([#626](https://github.com/uppin/tddy-coder/pull/626)).** Screen
+  sharing and `tddy-daemon-auth` no longer re-read `api_key` / `api_secret` to mint: the daemon builds
+  one `RoomTokenMinter` from the `livekit:` block and they ask it. Screen sharing still reads the LiveKit
+  *URL*, and `mint_live_kit_token` still checks that the credentials are present before minting.
 - **`packages/tddy-web/src/components/GhosttyTerminalSession.tsx` lands at 960 lines.** The terminal
   convergence removed a duplicate path (`GhosttyTerminalLiveKit` 736 + `GhosttyTerminalGrpc` 631) but
   produced one file above any comfortable review size. The cheapest extraction is the history/offset

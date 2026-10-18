@@ -1,5 +1,5 @@
-//! The token service mints through the daemon's `RoomTokenMinter` — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-room-tokens.md`.
+//! The token service mints through the daemon's `RoomTokenMinter` — see
+//! `packages/tddy-daemon-extensions/docs/extension-ports.md` (the room-tokens port).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

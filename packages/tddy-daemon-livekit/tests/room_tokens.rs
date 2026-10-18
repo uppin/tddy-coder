@@ -1,5 +1,5 @@
-//! The plugin's room-token minter, built from the `livekit:` block — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-room-tokens.md`.
+//! The plugin's room-token minter, built from the `livekit:` block — see
+//! `packages/tddy-daemon-extensions/docs/extension-ports.md` (the room-tokens port).
 
 use std::time::Duration;
 
