@@ -1,0 +1,169 @@
+# Changeset: RDP desktops that require NLA sign in, with a domain
+
+**Date**: 2026-10-18
+**Status**: 🚧 In Progress
+**PR**: (opened in wave 1; number recorded in wave 2)
+**Type**: Feature
+**Stack**: `#host-desktops` 2/8. Base: `feature/host-desktops/service-split`.
+
+## Initial Discovery
+
+[2026-10-18-host-desktops-rdp-nla-initial-discovery.md](./2026-10-18-host-desktops-rdp-nla-initial-discovery.md)
+
+## Responsibility
+
+- `tddy_screenshare::Credentials { username, domain, password }` (all `Option<String>`) and the
+  `ScreenSharingClient::connect(host, port, &Credentials)` signature — owned here, consumed by node 3
+  and node 8.
+- `BridgeConfig.domain` (`#[serde(default)]`) and `run_bridge` building `Credentials` from the config.
+- `tddy-rdp`: CredSSP enabled with a real `NetworkClient` (NTLM, no KDC), the domain passed to
+  IronRDP, and the security protocol following the server's negotiation (TLS or HYBRID).
+- `tddy-vnc`: the mechanical adaptation of its `connect` to the new signature (no behaviour).
+
+## Boundaries
+
+- Does not add any daemon, proto or web field for the domain — node 8 fills it.
+- Does not classify authentication failures for the daemon (node 6's readiness protocol). This node
+  makes an NLA refusal surface as an error from `connect`; node 6 maps it.
+- Does not add an inspect mode (node 8).
+- Does not touch VNC security negotiation (node 3).
+
+## Dependencies
+
+| Parent | What it delivers | How this PR consumes it | This PR does NOT |
+|---|---|---|---|
+| n1 `service-split` | module layout of `tddy-screen-sharing` | nothing (line predecessor only) | touch `tddy-screen-sharing` |
+
+## Draft PR contract
+
+```rust
+// packages/tddy-screenshare/src/client.rs
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Credentials {
+    pub username: Option<String>,
+    pub domain: Option<String>,
+    pub password: Option<String>,
+}
+pub trait ScreenSharingClient {
+    async fn connect(host: &str, port: u16, credentials: &Credentials) -> anyhow::Result<Self>;
+    // … unchanged …
+}
+// packages/tddy-screenshare/src/bridge.rs
+pub struct BridgeConfig { …, #[serde(default)] pub domain: String, … }
+impl BridgeConfig { pub fn credentials(&self) -> Credentials; }   // empty string → None
+```
+
+Both bridges compile against the new signature in the contract commit (tddy-vnc's body unchanged
+apart from reading `credentials.password`); tddy-rdp's NLA body is `todo!()`-free but still
+TLS-only until green. Failing tests below.
+
+## Green wave
+
+**Wave:** 1 of 3
+**Greenable independently:** yes — the tests drive `tddy-rdp` against an in-process `ironrdp-server` and `BridgeConfig` parsing; nothing from another node.
+**Concurrent with:** nodes 1 (after #626), 3, 4, 5
+**Blocks:** node 3 `vnc-security` consumes the `Credentials` **signature** (available from this node's contract commit — not a behaviour wait); node 8 `sign-in-form` offers NLA only once it works here.
+
+    #626 → n1      n1 → n6, n7, n8      n2 ⇢ n3 (signature only)      n2, n3, n6 → n8
+
+## Affected Packages
+
+- `tddy-screenshare` — [README](../../../packages/tddy-screenshare/README.md)
+- `tddy-rdp` — [README](../../../packages/tddy-rdp/README.md)
+- `tddy-vnc` — [README](../../../packages/tddy-vnc/README.md) (signature only)
+
+## Related Feature Documentation
+
+- PRD: `docs/ft/web/1-WIP/PRD-2026-10-18-host-desktops-rdp-nla.md`
+
+## Summary
+
+Windows desktops with NLA on (the default) can be opened; the bridge credential carries a domain.
+
+## Scope
+
+- [ ] `Credentials` + new `connect` signature; both bridges adapted
+- [ ] `BridgeConfig.domain`, back-compatible
+- [ ] tddy-rdp CredSSP (NTLM) with domain; protocol from negotiation
+- [ ] NLA test server in the integration suite
+
+## Technical Changes
+
+### State A
+- `packages/tddy-screenshare/src/client.rs:10-15` `connect(host, port, username: Option<&str>, password: Option<&str>)`.
+- `packages/tddy-screenshare/src/bridge.rs:30-62` `BridgeConfig` has `username` (`#[serde(default)]`) and `password`; `run_bridge` maps empty → `None`.
+- `packages/tddy-rdp/src/rdp_client.rs:31-41` `NoNetworkClient` ("no CredSSP is performed in TLS-only mode"); L64-109 `Config { credentials: UsernamePassword, enable_tls: true, enable_credssp: false, domain: None, … }`.
+- `packages/tddy-rdp/tests/rdp_client_integration.rs`: `ironrdp-server` with `with_no_client_auth`.
+- IronRDP: `ironrdp-connector 0.9`, `ironrdp-tokio 0.9`, `ironrdp-server 0.12` (dev).
+
+### State B
+`connect` takes `&Credentials`; tddy-rdp negotiates HYBRID when the server requires it and runs
+CredSSP via `ironrdp_tokio::connect_finalize` with a NetworkClient that needs no network for NTLM.
+
+### Delta
+| Package | Change |
+|---|---|
+| `tddy-screenshare` | `client.rs` `Credentials` + signature; `bridge.rs` `domain`, `credentials()` |
+| `tddy-rdp` | `rdp_client.rs` CredSSP, domain; `tests/rdp_nla_integration.rs` (new) |
+| `tddy-vnc` | `vnc_client.rs` signature adaptation |
+
+## Implementation Milestones
+- [ ] M1 Signature + config (contract commit), both bridges build
+- [ ] M2 NLA sign-in against the test server
+- [ ] M3 Wrong-password and TLS-only regressions green
+
+## Testing Plan
+
+Integration level, in-process: `ironrdp-server` configured for HYBRID (CredSSP) with known
+credentials; the client signs in and receives a frame. Unit tests for `BridgeConfig` parsing and
+`credentials()`. If `ironrdp-server 0.12` cannot act as a CredSSP acceptor, stop and raise it —
+do not test NLA against a mock of IronRDP itself.
+
+## Acceptance Tests
+
+| Test | File | Validates |
+|---|---|---|
+| `signs_in_to_a_server_that_requires_nla_with_username_domain_and_password` | `packages/tddy-rdp/tests/rdp_nla_integration.rs` (new) | CredSSP sign-in streams a frame |
+| `a_wrong_password_on_an_nla_server_fails_to_connect_as_an_authentication_error` | same | refusal is an error from `connect`, not a hang |
+| `still_signs_in_to_a_server_that_offers_only_tls` | same | TLS-only path preserved |
+| `a_bridge_config_without_a_domain_still_parses` | `packages/tddy-screenshare/src/bridge.rs` (`tests`) | back-compat of stdin JSON |
+| `empty_config_fields_become_absent_credentials` | same | `""` → `None` for each field |
+
+## Decisions & Trade-offs
+- **One `Credentials` value** instead of growing positional `Option<&str>` parameters: node 3 needs the username, node 8 the domain, and a fourth positional would be unreadable.
+- **NTLM only** — no KDC lookup; Kerberos stays out of scope (umbrella PRD).
+
+## Technical Debt & Production Readiness
+
+## Refactoring Needed
+### From /validate-changes
+### From /validate-tests
+### From /validate-prod-ready
+### From /analyze-clean-code
+
+## Validation Results
+### /validate-changes
+### /validate-tests
+### /validate-prod-ready
+### /analyze-clean-code
+
+## TODO
+
+- [x] Record initial discovery (`2026-10-18-host-desktops-rdp-nla-initial-discovery.md`)
+- [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
+- [x] Create/update PRD documentation
+- [x] Create changeset (this document)
+- [ ] Create failing acceptance tests
+- [ ] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests
+- [ ] TDD Red — write failing unit/integration tests
+- [ ] TDD Green — implement with quality code
+- [ ] Update documentation with progress
+- [ ] Run scoped tests for touched packages; full-workspace result from CI
+- [ ] Validate changes (/validate-changes)
+- [ ] Validate tests (/validate-tests)
+- [ ] Validate production readiness (/validate-prod-ready)
+- [ ] Analyze code quality (/analyze-clean-code)
+- [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-18-host-desktops-rdp-nla-initial-discovery.md`
+- [ ] USER REVIEW — work complete
