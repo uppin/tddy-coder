@@ -152,6 +152,7 @@ fn not_part_of_this_fake() -> tddy_rpc::Status {
 #[async_trait::async_trait]
 impl CodeIndexService for AFakeIndex {
     type WarmStream = EventStream<index::IndexProgress>;
+    type WatchRootStream = EventStream<index::IndexProgress>;
     type CheckStream = EventStream<index::RestructureEvent>;
     type ApplyStream = EventStream<index::RestructureEvent>;
     type CoverageStream = EventStream<index::AnalyzeEvent>;
@@ -201,6 +202,13 @@ impl CodeIndexService for AFakeIndex {
         &self,
         _request: tddy_rpc::Request<index::WarmRequest>,
     ) -> Result<tddy_rpc::Response<Self::WarmStream>, tddy_rpc::Status> {
+        Err(not_part_of_this_fake())
+    }
+
+    async fn watch_root(
+        &self,
+        _request: tddy_rpc::Request<index::WatchRootRequest>,
+    ) -> Result<tddy_rpc::Response<Self::WatchRootStream>, tddy_rpc::Status> {
         Err(not_part_of_this_fake())
     }
 
@@ -514,6 +522,7 @@ fn the_index_s_definition_of_foo() -> index::DefinitionResponse {
             range: an_index_range_on_line(11, 4, 7),
             outside_root: false,
         }],
+        state: index::IndexState::Ready as i32,
     }
 }
 
@@ -554,6 +563,18 @@ fn the_index_s_diagnostics_of_main() -> index::DiagnosticsResponse {
     }
 }
 
+/// What a definition asked while the crate graph loads answers: nothing yet, and the index says so.
+fn an_empty_definition_while_the_graph_loads() -> index::DefinitionResponse {
+    index::DefinitionResponse {
+        locations: vec![],
+        state: index::IndexState::Loading as i32,
+    }
+}
+
+/// The note a loading answer carries, so the agent neither trusts the empty answer nor gives up.
+const THE_INDEX_IS_STILL_LOADING: &str =
+    "The code index is still loading, so this empty answer is not final; ask again once it is ready.";
+
 // ---------------------------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -593,6 +614,40 @@ async fn lsp_definition_is_answered_by_the_index_for_the_session_worktree() {
         }))
     );
     // And no language server of the existing executor's was asked
+    assert_eq!(existing.what_it_was_asked(), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lsp_definition_while_the_index_loads_tells_the_agent_it_is_loading() {
+    // Given a session worktree and an index still loading its crate graph, which answers the
+    // definition with nothing yet and says it is loading
+    let worktree = a_session_worktree();
+    let fake = a_fake_index()
+        .answering_definitions_with(an_empty_definition_while_the_graph_loads());
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent asks for the definition of the call to `foo`
+    let answer = the_agent_calls(
+        &executor,
+        LspTool::Definition,
+        worktree.root(),
+        a_query_at("src/main.rs", 1, 4),
+    )
+    .await;
+
+    // Then the agent is told the index is loading and that the empty answer is not final — rather
+    // than a bare `{"locations": []}` it would read as "no definition". The tool's own key stays
+    // (`locations`, empty), beside `index: "loading"` and a `note`.
+    assert_eq!(
+        answer,
+        Ok(json!({
+            "locations": [],
+            "index": "loading",
+            "note": THE_INDEX_IS_STILL_LOADING,
+        }))
+    );
+    // And no language server of the existing executor's was asked in the index's place
     assert_eq!(existing.what_it_was_asked(), Vec::<String>::new());
 }
 
@@ -719,6 +774,7 @@ async fn lsp_references_are_answered_by_the_index() {
     let worktree = a_session_worktree();
     let fake = a_fake_index().answering_references_with(index::ReferencesResponse {
         locations: vec![the_index_s_location_of_foo()],
+        state: index::IndexState::Ready as i32,
     });
     let existing = the_existing_executor();
     let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
@@ -761,6 +817,7 @@ async fn lsp_hover_is_answered_by_the_index() {
     let worktree = a_session_worktree();
     let fake = a_fake_index().answering_hovers_with(index::HoverResponse {
         markdown: Some("fn foo()".to_string()),
+        state: index::IndexState::Ready as i32,
     });
     let existing = the_existing_executor();
     let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
@@ -861,6 +918,7 @@ async fn a_one_based_byte_column_from_the_index_comes_back_as_a_zero_based_utf16
             range: an_index_range_on_line(1, 11, 14),
             outside_root: false,
         }],
+        state: index::IndexState::Ready as i32,
     });
     let existing = the_existing_executor();
     let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
@@ -900,6 +958,7 @@ async fn a_location_outside_the_index_root_is_answered_by_its_own_file_uri() {
             range: an_index_range_on_line(1, 8, 11),
             outside_root: true,
         }],
+        state: index::IndexState::Ready as i32,
     });
     let existing = the_existing_executor();
     let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);

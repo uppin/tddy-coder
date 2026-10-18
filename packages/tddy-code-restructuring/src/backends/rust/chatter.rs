@@ -22,6 +22,17 @@ pub(super) const NOTHING_REPORTED: &str = "nothing reported";
 /// a phase reaching 100% are shown regardless.
 pub const PROGRESS_INTERVAL: Duration = Duration::from_secs(2);
 
+/// One work-done progress token the server has in flight: begun, not yet ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivePhase {
+    /// The title its `begin` gave; `working` when the `begin` was never seen.
+    pub title: String,
+    /// The latest message it reported; empty when it has given none.
+    pub message: String,
+    /// The highest percentage it has reported; `None` when it has reported none.
+    pub percentage: Option<u64>,
+}
+
 /// What the server has said about its own progress while a request was in flight.
 ///
 /// `request` used to drop every message it was not waiting for, which is why a run that spent two
@@ -90,6 +101,10 @@ pub struct ServerChatter {
     /// number never goes backwards when a sub-step arrives without one. Per token, for the reason
     /// the titles are.
     reached_by_token: HashMap<String, u64>,
+    /// Every token in flight, in the order it began, with what it has said so far. Ordered — not
+    /// keyed like the fields above — because a display lists the phases in the order the server
+    /// started them.
+    in_flight: Vec<(String, ActivePhase)>,
     /// When the server last said anything *new*: a different progress line, a flip of its
     /// quiescence, or a change of its health.
     ///
@@ -172,6 +187,7 @@ impl ServerChatter {
                 }
             }
             "end" => {
+                self.in_flight.retain(|(key, _)| *key != token);
                 self.titles.remove(&token);
                 self.reached_by_token.remove(&token);
                 self.shown.remove(&token);
@@ -194,6 +210,7 @@ impl ServerChatter {
             self.reached(percentage, phase);
         }
         self.reported_on(&token, percentage, phase);
+        self.track_in_flight(&token, kind, phase, value);
 
         let key = match percentage {
             Some(percentage) => percentage.to_string(),
@@ -222,6 +239,37 @@ impl ServerChatter {
             *reached = (*reached).max(percentage);
         }
         self.current = Some((*reached, phase.to_string()));
+    }
+
+    /// Fold one `begin` or `report` into the token's active phase, opening it on its first sight.
+    ///
+    /// A `begin` starts the phase afresh; a `report` keeps the latest message it gave and the
+    /// highest percentage the token has reached, so a sub-step without a number does not erase it.
+    fn track_in_flight(&mut self, token: &str, kind: &str, phase: &str, value: &Value) {
+        let position = match self.in_flight.iter().position(|(key, _)| key == token) {
+            Some(position) if kind != "begin" => position,
+            found => {
+                if let Some(position) = found {
+                    self.in_flight.remove(position);
+                }
+                self.in_flight.push((
+                    token.to_string(),
+                    ActivePhase {
+                        title: phase.to_string(),
+                        message: String::new(),
+                        percentage: None,
+                    },
+                ));
+                self.in_flight.len() - 1
+            }
+        };
+        let active = &mut self.in_flight[position].1;
+        if let Some(message) = value.get("message").and_then(Value::as_str) {
+            active.message = message.to_string();
+        }
+        if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
+            active.percentage = Some(active.percentage.map_or(percentage, |p| p.max(percentage)));
+        }
     }
 
     /// Keep `percentage` of `phase` as the furthest the index got, unless it has been further.
@@ -351,6 +399,18 @@ impl ServerChatter {
             .as_ref()
             .map(|(percentage, phase)| (*percentage, phase.as_str()))
     }
+
+    /// Every phase the server has in flight — begun and not yet ended — in the order it began them.
+    ///
+    /// rust-analyzer runs several at once (`Fetching`, `Roots Scanned`, `Indexing`), and a display
+    /// that names only [`Self::current`] hides the others. Folded from every report, shown or
+    /// throttled: the throttle decides what is printed, not what is known.
+    pub fn active_phases(&self) -> Vec<ActivePhase> {
+        self.in_flight
+            .iter()
+            .map(|(_, active)| active.clone())
+            .collect()
+    }
 }
 
 /// A progress token as a map key. The specification allows a string or a number.
@@ -401,6 +461,126 @@ mod tests {
 
     fn at(start: Instant, millis: u64) -> Instant {
         start + Duration::from_millis(millis)
+    }
+
+    fn phase(title: &str, message: &str, percentage: Option<u64>) -> ActivePhase {
+        ActivePhase {
+            title: title.to_string(),
+            message: message.to_string(),
+            percentage,
+        }
+    }
+
+    #[test]
+    fn active_phases_lists_every_token_between_begin_and_end_in_begin_order() {
+        // Given a server that began fetching, then indexing, and reported on indexing first
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        chatter.progress_at(&begin("fetch", "Fetching"), t0);
+        chatter.progress_at(&begin("index", "Indexing"), at(t0, 1));
+        chatter.progress_at(
+            &report("index", Some("120/310 (tddy_core)"), Some(38)),
+            at(t0, 2),
+        );
+        chatter.progress_at(
+            &report("fetch", Some("crates.io index"), Some(20)),
+            at(t0, 3),
+        );
+
+        // When its active phases are read
+        let active = chatter.active_phases();
+
+        // Then both are there, in the order they began
+        assert_eq!(
+            active,
+            vec![
+                phase("Fetching", "crates.io index", Some(20)),
+                phase("Indexing", "120/310 (tddy_core)", Some(38)),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_active_phase_keeps_its_highest_percentage_and_latest_message() {
+        // Given an indexing phase that reached 40%, then reported a sub-step with no percentage
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        chatter.progress_at(&begin("index", "Indexing"), t0);
+        chatter.progress_at(
+            &report("index", Some("124/310 (tddy_core)"), Some(40)),
+            at(t0, 1),
+        );
+        chatter.progress_at(
+            &report("index", Some("tddy_desktop (lib)"), None),
+            at(t0, 2),
+        );
+
+        // When its active phases are read
+        let active = chatter.active_phases();
+
+        // Then the phase carries the latest message and the 40% it reached, not nothing
+        assert_eq!(
+            active,
+            vec![phase("Indexing", "tddy_desktop (lib)", Some(40))]
+        );
+    }
+
+    #[test]
+    fn a_report_whose_begin_was_not_seen_is_an_untitled_active_phase() {
+        // Given a report on a token whose `begin` arrived before anyone was listening
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        chatter.progress_at(
+            &report("late", Some("build script num-bigint run"), None),
+            t0,
+        );
+
+        // When its active phases are read
+        let active = chatter.active_phases();
+
+        // Then it is there under the untitled phase, with no percentage
+        assert_eq!(
+            active,
+            vec![phase(UNTITLED_PHASE, "build script num-bigint run", None)]
+        );
+    }
+
+    #[test]
+    fn an_ended_token_is_no_longer_active() {
+        // Given fetching and indexing in flight, and fetching then ended
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        chatter.progress_at(&begin("fetch", "Fetching"), t0);
+        chatter.progress_at(&begin("index", "Indexing"), at(t0, 1));
+        chatter.progress_at(
+            &report("index", Some("10/310 (subject)"), Some(3)),
+            at(t0, 2),
+        );
+        chatter.progress_at(&end("fetch"), at(t0, 3));
+
+        // When its active phases are read
+        let active = chatter.active_phases();
+
+        // Then only indexing remains
+        assert_eq!(active, vec![phase("Indexing", "10/310 (subject)", Some(3))]);
+    }
+
+    #[test]
+    fn active_phases_fold_reports_the_throttle_does_not_show() {
+        // Given a throttled chatter that showed a phase's begin, then received a report within the
+        // interval it suppresses
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&begin("index", "Indexing"), t0);
+        let suppressed = chatter.progress_at(
+            &report("index", Some("57/310 (subject)"), Some(18)),
+            at(t0, 10),
+        );
+
+        // When its active phases are read
+        let active = chatter.active_phases();
+
+        // Then the report was not shown, but the phase knows where it got to
+        assert_eq!(suppressed, None);
+        assert_eq!(
+            active,
+            vec![phase("Indexing", "57/310 (subject)", Some(18))]
+        );
     }
 
     #[test]

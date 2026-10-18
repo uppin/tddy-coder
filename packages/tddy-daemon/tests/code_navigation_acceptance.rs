@@ -31,8 +31,8 @@ use tddy_index_daemon::proto::code_index::{CodeIndexService, CodeIndexServiceTon
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_server::CodeIndexServiceServer as TonicCodeIndexServiceServer;
 use tddy_index_daemon::EventStream;
 use tddy_service::proto::code_navigation::{
-    CodeLocation, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse,
-    ReferencesRequest, ReferencesResponse, SourcePosition, SourceRange,
+    CodeIndexState, CodeLocation, DefinitionRequest, DefinitionResponse, HoverRequest,
+    HoverResponse, ReferencesRequest, ReferencesResponse, SourcePosition, SourceRange,
 };
 use tddy_task::TaskRegistry;
 use tddy_worktree_service::project_storage::{self, ProjectData};
@@ -151,7 +151,8 @@ fn canonical(path: &Path) -> String {
 // The index daemon: a stand-in process in front of a fake `code_index` server
 
 /// A `code_index` server that answers `Definition` and `References` with one canned location list
-/// and `Hover` with one canned text, and records every request it was asked. Nothing else on the
+/// and `Hover` with one canned text — each from a loaded index (`READY`) — and records every request
+/// it was asked. Nothing else on the
 /// service is part of what this suite exercises.
 #[derive(Clone)]
 struct AFakeIndex {
@@ -200,6 +201,7 @@ fn not_part_of_this_fake() -> tddy_rpc::Status {
 #[async_trait::async_trait]
 impl CodeIndexService for AFakeIndex {
     type WarmStream = EventStream<index::IndexProgress>;
+    type WatchRootStream = EventStream<index::IndexProgress>;
     type CheckStream = EventStream<index::RestructureEvent>;
     type ApplyStream = EventStream<index::RestructureEvent>;
     type CoverageStream = EventStream<index::AnalyzeEvent>;
@@ -226,6 +228,7 @@ impl CodeIndexService for AFakeIndex {
             .push(request.into_inner());
         Ok(tddy_rpc::Response::new(index::ReferencesResponse {
             locations: self.definition_answer.locations.clone(),
+            state: index::IndexState::Ready as i32,
         }))
     }
 
@@ -239,6 +242,7 @@ impl CodeIndexService for AFakeIndex {
             .push(request.into_inner());
         Ok(tddy_rpc::Response::new(index::HoverResponse {
             markdown: Some(THE_INDEX_S_HOVER_OF_FOO.to_string()),
+            state: index::IndexState::Ready as i32,
         }))
     }
 
@@ -246,6 +250,13 @@ impl CodeIndexService for AFakeIndex {
         &self,
         _request: tddy_rpc::Request<index::WarmRequest>,
     ) -> Result<tddy_rpc::Response<Self::WarmStream>, tddy_rpc::Status> {
+        Err(not_part_of_this_fake())
+    }
+
+    async fn watch_root(
+        &self,
+        _request: tddy_rpc::Request<index::WatchRootRequest>,
+    ) -> Result<tddy_rpc::Response<Self::WatchRootStream>, tddy_rpc::Status> {
         Err(not_part_of_this_fake())
     }
 
@@ -486,7 +497,8 @@ fn a_definition_request(project: &AProjectWithAWorktree, worktree_path: &str) ->
     }
 }
 
-/// What the fake index answers every definition with: `src/lib.rs`, line 11, bytes 4 to 7.
+/// What the fake index answers every definition with, from a loaded index: `src/lib.rs`, line 11,
+/// bytes 4 to 7.
 fn the_index_s_definition_of_foo() -> index::DefinitionResponse {
     index::DefinitionResponse {
         locations: vec![index::CodeLocation {
@@ -503,6 +515,7 @@ fn the_index_s_definition_of_foo() -> index::DefinitionResponse {
             }),
             outside_root: false,
         }],
+        state: index::IndexState::Ready as i32,
     }
 }
 
@@ -534,7 +547,7 @@ async fn a_definition_request_is_forwarded_to_the_index_daemon_for_the_session_w
             position: Some(index::SourcePosition { line: 2, column: 5 }),
         }]
     );
-    // And its answer reaches the pane as a worktree-relative location
+    // And its answer reaches the pane as a worktree-relative location, from a loaded index
     assert_eq!(
         answer,
         DefinitionResponse {
@@ -552,6 +565,7 @@ async fn a_definition_request_is_forwarded_to_the_index_daemon_for_the_session_w
                 }),
                 outside_worktree: false,
             }],
+            state: CodeIndexState::Ready as i32,
         }
     );
 }
@@ -666,6 +680,7 @@ async fn a_references_request_is_forwarded_and_answered_as_worktree_locations() 
     .expect("a listed worktree's references are answered");
 
     // Then the index was asked about that file, rooted at the worktree, and its locations arrive
+    // with the index's state
     assert_eq!(
         fake.references_it_was_asked(),
         vec![index::ReferencesRequest {
@@ -682,6 +697,7 @@ async fn a_references_request_is_forwarded_and_answered_as_worktree_locations() 
             .collect::<Vec<_>>(),
         vec!["src/lib.rs"]
     );
+    assert_eq!(answer.state(), CodeIndexState::Ready);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -707,7 +723,8 @@ async fn a_hover_request_is_forwarded_and_its_markdown_returned() {
     .await
     .expect("a listed worktree's hover is answered");
 
-    // Then the index was asked about that file, rooted at the worktree, and its text arrives
+    // Then the index was asked about that file, rooted at the worktree, and its text arrives with
+    // the index's state
     assert_eq!(
         fake.hovers_it_was_asked(),
         vec![index::HoverRequest {
@@ -717,6 +734,7 @@ async fn a_hover_request_is_forwarded_and_its_markdown_returned() {
         }]
     );
     assert_eq!(answer.markdown.as_deref(), Some(THE_INDEX_S_HOVER_OF_FOO));
+    assert_eq!(answer.state(), CodeIndexState::Ready);
 }
 
 #[tokio::test(flavor = "multi_thread")]

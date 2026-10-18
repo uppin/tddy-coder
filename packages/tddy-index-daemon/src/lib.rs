@@ -28,6 +28,7 @@ pub mod status;
 mod symbols;
 mod tree_changes;
 mod warm;
+mod watch_root;
 
 pub use service::{build_code_index_entry, CodeIndexPorts, CodeIndexServiceImpl, EventStream};
 

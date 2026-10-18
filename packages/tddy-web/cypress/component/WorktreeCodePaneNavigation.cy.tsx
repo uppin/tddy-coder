@@ -4,32 +4,22 @@
  *
  * Feature: docs/ft/web/session-code-pane.md (Code navigation).
  *
- * All RPC calls flow through the in-memory backend — no HTTP intercepts. Navigation is answered by
- * `code_navigation.CodeNavigationService`; positions on the wire are one-based lines and one-based
- * byte columns.
+ * All RPC calls flow through the in-memory backend — no HTTP intercepts. Navigation travels on the
+ * pane's `code_navigation.CodeSession`, answered by `CodeIndexHost` with the index loaded;
+ * positions on the wire are one-based lines and one-based byte columns. What a loading index does
+ * to these queries is `WorktreeCodePaneCodeSession.cy.tsx`'s.
  */
 
 import React from "react";
-import { create } from "@bufbuild/protobuf";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import {
-  CodeLocationSchema,
-  CodeNavigationService,
-  DefinitionResponseSchema,
-  HoverResponseSchema,
-  ReferencesResponseSchema,
-  SourcePositionSchema,
-  SourceRangeSchema,
-} from "../../src/gen/code_navigation_pb";
-import {
-  ListWorktreeDirectoryResponseSchema,
-  ReadWorktreeFileResponseSchema,
-  WorktreeDirEntrySchema,
-  WorktreeService,
-} from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
-import { requestFields } from "../support/rpc/recordedRequests";
+import {
+  aCodeIndexHost,
+  aCodeLocation,
+  anIndexReady,
+  type CodeIndexHost,
+} from "../support/rpc/codeSessionBackend";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { worktreeCodePanePage } from "../support/pages/worktreeCodePanePage";
@@ -83,62 +73,30 @@ const GEOMETRY_RS = [
 
 const AREA_TYPE = "fn area(width: u32, height: u32) -> u32";
 
-function aLocation(relPath: string, line: number, startColumn: number, endColumn: number) {
-  return create(CodeLocationSchema, {
-    relPath,
-    range: create(SourceRangeSchema, {
-      start: create(SourcePositionSchema, { line, column: startColumn }),
-      end: create(SourcePositionSchema, { line, column: endColumn }),
-    }),
-    outsideWorktree: false,
-  });
-}
+const THE_DEFINITION_OF_AREA = aCodeLocation("src/geometry.rs", DEFINITION_LINE, 8, 12);
+const THE_CALL_IN_MAIN = aCodeLocation("src/main.rs", 4, 26, 30);
 
-const THE_DEFINITION_OF_AREA = aLocation("src/geometry.rs", DEFINITION_LINE, 8, 12);
-const THE_CALL_IN_MAIN = aLocation("src/main.rs", 4, 26, 30);
-
-// A worktree holding `src/main.rs` and `src/geometry.rs`, whose navigation service knows where
-// `area` is defined, what it is, and where it is referenced.
-function aNavigableWorktreeBackend() {
-  const directories: Record<string, Array<{ name: string; isDir: boolean }>> = {
-    "": [{ name: "src", isDir: true }],
-    src: [
-      { name: "geometry.rs", isDir: false },
-      { name: "main.rs", isDir: false },
-    ],
-  };
-  const files: Record<string, string> = {
-    "src/main.rs": MAIN_RS,
-    "src/geometry.rs": GEOMETRY_RS,
-  };
-
-  return aSessionsDrawerBackend([SESSION])
-    .onUnary(WorktreeService.method.listWorktreeDirectory, (req) =>
-      create(ListWorktreeDirectoryResponseSchema, {
-        entries: (directories[req.relPath] ?? []).map((e) => create(WorktreeDirEntrySchema, e)),
-      }),
-    )
-    .onUnary(WorktreeService.method.readWorktreeFile, (req) =>
-      create(ReadWorktreeFileResponseSchema, {
-        contentUtf8: files[req.relPath] ?? "",
-        truncated: false,
-        byteSize: BigInt((files[req.relPath] ?? "").length),
-      }),
-    )
-    .onUnary(CodeNavigationService.method.definition, () =>
-      create(DefinitionResponseSchema, { locations: [THE_DEFINITION_OF_AREA] }),
-    )
-    .onUnary(CodeNavigationService.method.hover, () =>
-      create(HoverResponseSchema, { markdown: AREA_TYPE }),
-    )
-    .onUnary(CodeNavigationService.method.references, () =>
-      create(ReferencesResponseSchema, { locations: [THE_DEFINITION_OF_AREA, THE_CALL_IN_MAIN] }),
-    );
+// A worktree holding `src/main.rs` and `src/geometry.rs`, whose loaded index knows where `area` is
+// defined, what it is, and where it is referenced.
+function aNavigableWorktreeHost(): CodeIndexHost {
+  return aCodeIndexHost()
+    .withFile("src/main.rs", MAIN_RS)
+    .withFile("src/geometry.rs", GEOMETRY_RS)
+    .startingAt(anIndexReady())
+    .knowing({
+      at: { relPath: "src/main.rs", ...THE_CALL_TO_AREA },
+      hover: AREA_TYPE,
+      definition: [THE_DEFINITION_OF_AREA],
+      references: [THE_DEFINITION_OF_AREA, THE_CALL_IN_MAIN],
+    });
 }
 
 /** Mount the drawer, open the session's Code pane and preview `src/main.rs`. */
-function previewMainRsIn(backend: ReturnType<typeof aNavigableWorktreeBackend>) {
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+function previewMainRsIn(host: CodeIndexHost) {
+  mountWithRpc(
+    withSelectedDaemon(<SessionsDrawerScreen />),
+    host.backend(aSessionsDrawerBackend([SESSION])),
+  );
   sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
   worktreeCodePanePage.toggle().click();
   worktreeCodePanePage.node("src").click();
@@ -162,8 +120,8 @@ beforeEach(() => {
 
 it("ctrl-click on an identifier opens the definition scrolled to its line", () => {
   // Given
-  const backend = aNavigableWorktreeBackend();
-  previewMainRsIn(backend);
+  const host = aNavigableWorktreeHost();
+  previewMainRsIn(host);
 
   // When
   worktreeCodePanePage
@@ -176,18 +134,14 @@ it("ctrl-click on an identifier opens the definition scrolled to its line", () =
     .should("be.visible")
     .and("have.attr", "data-navigation-target", "true")
     .and("contain.text", "pub fn area(width: u32, height: u32) -> u32 {");
-  // And the daemon was asked about the clicked position in the session's worktree.
+  // And the pane's code session is on the session's worktree and was asked about the clicked position.
   cy.wrap(null).should(() => {
-    const calls = backend.callsTo(CodeNavigationService.method.definition);
-    expect(calls).to.have.length(1);
-    const { position, ...request } = calls[0];
-    expect(requestFields(request)).to.deep.equal({
-      sessionToken: SESSION_TOKEN,
-      projectId: PROJECT_ID,
-      worktreePath: WORKTREE_PATH,
-      relPath: "src/main.rs",
-    });
-    expect(requestFields(position!)).to.deep.equal(THE_CALL_TO_AREA);
+    expect(host.openedWorktrees()).to.deep.equal([
+      { sessionToken: SESSION_TOKEN, projectId: PROJECT_ID, worktreePath: WORKTREE_PATH },
+    ]);
+    expect(host.queriesAsked().filter((query) => query.kind === "DEFINITION")).to.deep.equal([
+      { kind: "DEFINITION", relPath: "src/main.rs", ...THE_CALL_TO_AREA },
+    ]);
   });
 });
 
@@ -197,8 +151,7 @@ it("ctrl-click on an identifier opens the definition scrolled to its line", () =
 
 it("hovering an identifier shows its type", () => {
   // Given
-  const backend = aNavigableWorktreeBackend();
-  previewMainRsIn(backend);
+  previewMainRsIn(aNavigableWorktreeHost());
 
   // When
   worktreeCodePanePage
@@ -215,8 +168,7 @@ it("hovering an identifier shows its type", () => {
 
 it("the references list navigates to a reference", () => {
   // Given — the references of `area` are listed from its hover card.
-  const backend = aNavigableWorktreeBackend();
-  previewMainRsIn(backend);
+  previewMainRsIn(aNavigableWorktreeHost());
   worktreeCodePanePage
     .identifier(THE_CALL_TO_AREA.line, THE_CALL_TO_AREA.column)
     .trigger("mouseover");

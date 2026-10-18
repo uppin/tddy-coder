@@ -14,7 +14,10 @@
 //!
 //! The tools' names, argument schemas and result JSON are [`crate::TddyLspExecutor`]'s, unchanged:
 //! zero-based LSP positions in and out, `file://` URIs, the same top-level keys. The coordinate
-//! translation to the index's one-based byte positions is this module's.
+//! translation to the index's one-based byte positions is this module's. One addition: a
+//! definition, references or hover answer given while the index is still loading its crate graph
+//! carries `"index": "loading"` and a `note` beside the tool's own (empty) key, so the agent does not
+//! read "not loaded yet" as "nothing there".
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -106,13 +109,19 @@ impl LspExecutor for IndexLspExecutor {
     }
 
     fn definition(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
-        let locations = self.navigate(repo_dir, query, Navigation::Definition)?;
-        Ok(json!({ "locations": locations }))
+        let (locations, state) = self.navigate(repo_dir, query, Navigation::Definition)?;
+        Ok(noting_the_index_state(
+            json!({ "locations": locations }),
+            state,
+        ))
     }
 
     fn references(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
-        let locations = self.navigate(repo_dir, query, Navigation::References)?;
-        Ok(json!({ "references": locations }))
+        let (locations, state) = self.navigate(repo_dir, query, Navigation::References)?;
+        Ok(noting_the_index_state(
+            json!({ "references": locations }),
+            state,
+        ))
     }
 
     fn hover(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
@@ -129,7 +138,11 @@ impl LspExecutor for IndexLspExecutor {
                 .map_err(message_of)
         })?
         .into_inner();
-        Ok(json!({ "hover": answered.markdown }))
+        let state = answered.state();
+        Ok(noting_the_index_state(
+            json!({ "hover": answered.markdown }),
+            state,
+        ))
     }
 
     fn symbols(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
@@ -216,13 +229,14 @@ impl IndexLspExecutor {
         })
     }
 
-    /// The index's answer to a definition or references query, as the tool's location JSON.
+    /// The index's answer to a definition or references query, as the tool's location JSON, with
+    /// the state the index answered it in.
     fn navigate(
         &self,
         repo_dir: &Path,
         query: &LspQuery,
         navigation: Navigation,
-    ) -> Result<Vec<Value>, String> {
+    ) -> Result<(Vec<Value>, code_index::IndexState), String> {
         let request = self.position_request(repo_dir, query)?;
         let answered = block_on(async {
             let mut client = self.client().await?;
@@ -234,7 +248,10 @@ impl IndexLspExecutor {
                         position: request.position,
                     })
                     .await
-                    .map(|answer| answer.into_inner().locations),
+                    .map(|answer| {
+                        let answer = answer.into_inner();
+                        (answer.state(), answer.locations)
+                    }),
                 Navigation::References => client
                     .references(code_index::ReferencesRequest {
                         workspace_root: request.workspace_root,
@@ -242,16 +259,37 @@ impl IndexLspExecutor {
                         position: request.position,
                     })
                     .await
-                    .map(|answer| answer.into_inner().locations),
+                    .map(|answer| {
+                        let answer = answer.into_inner();
+                        (answer.state(), answer.locations)
+                    }),
             }
             .map_err(message_of)
         })?;
+        let (state, locations) = answered;
         let mut columns = Columns::within(repo_dir);
-        answered
+        let locations = locations
             .iter()
             .map(|location| Ok(location_json(&columns.lsp_location(location)?)))
-            .collect()
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok((locations, state))
     }
+}
+
+/// What a loading answer tells the agent beside its empty result.
+const THE_INDEX_IS_STILL_LOADING: &str =
+    "The code index is still loading, so this empty answer is not final; ask again once it is ready.";
+
+/// `answer` as the tool returns it: unchanged, unless the index gave it while loading — then it also
+/// says so (`"index": "loading"`) and that the answer is not final (`note`).
+fn noting_the_index_state(mut answer: Value, state: code_index::IndexState) -> Value {
+    if state == code_index::IndexState::Loading {
+        if let Some(fields) = answer.as_object_mut() {
+            fields.insert("index".to_string(), json!("loading"));
+            fields.insert("note".to_string(), json!(THE_INDEX_IS_STILL_LOADING));
+        }
+    }
+    answer
 }
 
 /// The index's severity code as the LSP's one-byte one.

@@ -1,10 +1,19 @@
-import type { ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
+
+/** `#` … `######` followed by a space: the heading's level and its text. */
+const HEADING = /^(#{1,6}) (.*)$/;
+
+const HEADING_CLASS = ["text-xl", "text-lg", "text-base", "text-sm", "text-sm", "text-sm"];
+
+/** A fence line opening or closing a code block: three backticks, optionally naming a language. */
+const isFence = (line: string) => line.trimStart().startsWith("```");
 
 /**
- * Minimal safe Markdown: block headings, lists, and paragraphs. Inline/raw HTML is emitted as
- * React text nodes (escaped), not parsed as DOM — no script injection.
+ * Minimal safe Markdown: block headings (`#` to `######`), fenced code blocks, lists, and
+ * paragraphs. Inline/raw HTML is emitted as React text nodes (escaped), not parsed as DOM — no
+ * script injection.
  *
- * Shared by the session workflow files panel and the worktree Code pane preview.
+ * Shared by the session workflow files panel, the worktree Code pane preview and its hover card.
  */
 export function renderSimpleMarkdown(content: string): ReactNode {
   const lines = content.split(/\r?\n/);
@@ -22,13 +31,33 @@ export function renderSimpleMarkdown(content: string): ReactNode {
       continue;
     }
 
-    if (trimmed.startsWith("# ")) {
+    const heading = HEADING.exec(trimmed);
+    if (heading !== null) {
+      const level = heading[1].length;
       blocks.push(
-        <h1 key={key()} className="text-xl font-semibold">
-          {trimmed.slice(2)}
-        </h1>,
+        createElement(
+          `h${level}`,
+          { key: key(), className: `${HEADING_CLASS[level - 1]} font-semibold` },
+          heading[2],
+        ),
       );
       i += 1;
+      continue;
+    }
+
+    if (isFence(trimmed)) {
+      const code: string[] = [];
+      i += 1;
+      while (i < lines.length && !isFence(lines[i] ?? "")) {
+        code.push(lines[i] ?? "");
+        i += 1;
+      }
+      i += 1; // the closing fence, or past the end when it is missing
+      blocks.push(
+        <pre key={key()} className="overflow-x-auto font-mono text-sm">
+          <code>{code.join("\n")}</code>
+        </pre>,
+      );
       continue;
     }
 

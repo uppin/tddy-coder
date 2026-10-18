@@ -45,6 +45,14 @@
 //!   prove that a wait bounded on silence never ends a server that is still talking.
 //! - `--hover-never-answers` — receive `textDocument/hover` and send no response, as
 //!   `tddy/neverAnswers` does for its method. Every other request is answered.
+//! - `--loads-crate-graph-on-signal <path>` — on `initialized`, report `experimental/serverStatus`
+//!   with `quiescent: false` and begin two overlapping `$/progress` phases — `Fetching` at
+//!   `metadata` 40% and `Indexing` at `120/310 (subject)` 38% — and then hold the load until a file
+//!   exists at `<path>`, at which point both phases end and `quiescent: true` follows. The test
+//!   decides when the graph is loaded, so "a watcher joined mid-load" and "a request was held until
+//!   ready" need no sleeps. The load runs on a thread of its own, so every request is answered while
+//!   it waits — as `--answers-in-its-workspace` says when combined with it. Wins over
+//!   `--loads-crate-graph`.
 //!
 //! All three are off unless asked for, so every other mode is byte-identical to what it was.
 //!
@@ -102,6 +110,11 @@ fn main() {
     // `--never-quiescent` wins: a server that never finishes loading must not narrate a finished one.
     let loads_crate_graph = !never_quiescent
         && (args.iter().any(|a| a == "--loads-crate-graph") || goes_busy_after_hovers);
+    *LOADS_CRATE_GRAPH_ON_SIGNAL.lock().unwrap() = args
+        .iter()
+        .position(|a| a == "--loads-crate-graph-on-signal")
+        .and_then(|at| args.get(at + 1))
+        .map(std::path::PathBuf::from);
     NEVER_QUIESCENT.store(never_quiescent, std::sync::atomic::Ordering::SeqCst);
     HOVER_NEVER_ANSWERS.store(
         args.iter().any(|a| a == "--hover-never-answers"),
@@ -147,6 +160,10 @@ fn main() {
 /// Set by `--answers-in-its-workspace`: locations are reported under the client's `rootUri`.
 static ANSWERS_IN_ITS_WORKSPACE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+
+/// Set by `--loads-crate-graph-on-signal <path>`: the file whose appearance ends the crate-graph load.
+static LOADS_CRATE_GRAPH_ON_SIGNAL: std::sync::Mutex<Option<std::path::PathBuf>> =
+    std::sync::Mutex::new(None);
 
 /// Set by `--narrates-while-loading`: a busy server reports a new build script on a timer.
 static NARRATES_WHILE_LOADING: std::sync::atomic::AtomicBool =
@@ -387,6 +404,64 @@ fn narrate_a_crate_graph_load() {
     });
 }
 
+/// How often a load held on a signal file (`--loads-crate-graph-on-signal`) looks for it.
+const BETWEEN_SIGNAL_CHECKS: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Begin a crate-graph load with two overlapping phases, hold it until `signal` exists, then end
+/// both phases and report the graph queryable.
+///
+/// Waits [`BEFORE_THE_FIRST_PHASE`] before its first word, for the same reason the narrated load
+/// does: a host attaches its watcher only once the handshake has returned. Each phase opens with a
+/// title and no message, then reports a message and a percentage — the shape a real rust-analyzer's
+/// `Fetching` and `Indexing` take, overlapping as theirs do.
+fn load_the_crate_graph_once_signalled(signal: std::path::PathBuf) {
+    const FETCHING_TOKEN: &str = "fake-lsp-fetching";
+    const INDEXING_TOKEN: &str = "fake-lsp-indexing-on-signal";
+    std::thread::spawn(move || {
+        std::thread::sleep(BEFORE_THE_FIRST_PHASE);
+        send(&json!({
+            "jsonrpc": "2.0",
+            "method": "experimental/serverStatus",
+            "params": { "health": "ok", "quiescent": false }
+        }));
+        send(&progress(
+            FETCHING_TOKEN,
+            json!({ "kind": "begin", "title": "Fetching", "percentage": 0 }),
+        ));
+        send(&progress(
+            INDEXING_TOKEN,
+            json!({ "kind": "begin", "title": "Indexing", "percentage": 0 }),
+        ));
+        send(&progress(
+            FETCHING_TOKEN,
+            json!({ "kind": "report", "message": "metadata", "percentage": 40 }),
+        ));
+        send(&progress(
+            INDEXING_TOKEN,
+            json!({ "kind": "report", "message": "120/310 (subject)", "percentage": 38 }),
+        ));
+        while !signal.exists() {
+            std::thread::sleep(BETWEEN_SIGNAL_CHECKS);
+        }
+        send(&progress(FETCHING_TOKEN, json!({ "kind": "end" })));
+        send(&progress(INDEXING_TOKEN, json!({ "kind": "end" })));
+        send(&json!({
+            "jsonrpc": "2.0",
+            "method": "experimental/serverStatus",
+            "params": { "health": "ok", "quiescent": true }
+        }));
+    });
+}
+
+/// A `$/progress` notification carrying `value` for `token`.
+fn progress(token: &str, value: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "$/progress",
+        "params": { "token": token, "value": value }
+    })
+}
+
 /// Whether the server has gone busy ([`go_busy_on_a_build_script`]), behind the lock both it and
 /// the narrated load send under — so no line of the load can slip out after the busy report.
 static GONE_BUSY: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
@@ -554,6 +629,8 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
                 // to find a server that has already said it is busy, or it would take the silence
                 // before the first status for a ready one.
                 go_busy_on_a_build_script();
+            } else if let Some(signal) = LOADS_CRATE_GRAPH_ON_SIGNAL.lock().unwrap().clone() {
+                load_the_crate_graph_once_signalled(signal);
             } else if loads_crate_graph {
                 narrate_a_crate_graph_load();
             }

@@ -24,15 +24,25 @@ service CodeNavigationService {
   // The hover text — signature and docs — of the symbol at a position.
   rpc Hover(HoverRequest) returns (HoverResponse);
 
-  // The warm-up of a session's code index, for the session header's indexing indicator.
+  // The session's worktree's code index, for the session header's indexing indicator.
   //
-  // Once a session's worktree exists the daemon starts `code_index.Warm` for it in the background
-  // and keeps the latest progress per session. This stream opens with that latest progress (when
-  // there is any), follows it, and ends after the message carrying `ready` or `error`. A session
-  // nothing warmed — no `index_daemon:` section, or not a Rust worktree — ends with no message, so
-  // no indicator shows. Warming never blocks the session: navigation answers whenever the index
-  // can, and a failed warm is only reported here.
+  // Follows `code_index.WatchRoot` for the session's worktree: opens with its current state and sends
+  // every change, whoever started the load — a session start, the code pane, the agent's code tools.
+  // It never starts a load itself. A session with no Rust worktree, or a daemon with no
+  // `index_daemon:` section, ends with no message, so no indicator shows. Runs until the client
+  // leaves.
   rpc WatchCodeIndex(WatchCodeIndexRequest) returns (stream CodeIndexProgress);
+
+  // The code pane's conversation with its worktree's index, for as long as the pane is open.
+  //
+  // The first frame is `open`, naming the worktree, authorised like every other method; opening
+  // **warms** the worktree's index. The daemon then sends the index's progress — first its current
+  // state, then every change — for as long as the stream is open. Queries carry a client-chosen
+  // `request_id` that their answer repeats. A hover, definition or references query asked while the
+  // index is loading is **held** (`held`) and answered once the index is ready; a probe never waits
+  // and answers `UNKNOWN` instead. `cancel` drops a held query. A query before `open`, or a second
+  // `open`, ends the stream with `INVALID_ARGUMENT`.
+  rpc CodeSession(stream CodeSessionRequest) returns (stream CodeSessionEvent);
 
   // Open a restructure plan file of the session's worktree as a plan: load it into the index's plan
   // store for that worktree (`code_index.LoadPlans`) and answer its operations, each with its
@@ -62,8 +72,10 @@ message WatchCodeIndexRequest {
 message CodeIndexProgress {
   // The index's own one-line account of what it is doing.
   string line       = 1;
-  // The language server's progress phase, e.g. "Indexing" or "Loading".
+  // The phase the language server reported on most recently, e.g. "Indexing" — what is happening
+  // *now*, and what the code pane's strip names; `phases` holds every phase in flight.
   string phase      = 2;
+  // The highest percentage `phase` has reached.
   uint32 percentage = 3;
   // The highest percentage seen in any phase.
   string furthest   = 4;
@@ -71,6 +83,116 @@ message CodeIndexProgress {
   bool   ready      = 5;
   // Set on the last message of a warm that failed: why. The session itself is unaffected.
   string error      = 6;
+  // Where the worktree's index stands.
+  CodeIndexState          state  = 7;
+  // Every phase the language server is running now, in the order it began them.
+  repeated CodeIndexPhase phases = 8;
+}
+
+// Where a worktree's index stands — `code_index.IndexState`.
+enum CodeIndexState {
+  CODE_INDEX_STATE_UNSPECIFIED = 0;
+  // Nothing holds the worktree's index.
+  CODE_INDEX_STATE_IDLE        = 1;
+  // Loading: an answer now may be empty only because the index is not loaded yet.
+  CODE_INDEX_STATE_LOADING     = 2;
+  // Loaded and queryable.
+  CODE_INDEX_STATE_READY       = 3;
+  // The index could not start, or went away: `CodeIndexProgress.error` says why.
+  CODE_INDEX_STATE_FAILED      = 4;
+}
+
+// One phase the language server is running — `code_index.ActivePhase`.
+message CodeIndexPhase {
+  // e.g. "Indexing", "Roots Scanned", "Fetching".
+  string          title      = 1;
+  // e.g. "120/310 (tddy_core)"; empty when none was given.
+  string          message    = 2;
+  // Absent when the phase never reported one.
+  optional uint32 percentage = 3;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Code session
+
+message CodeSessionRequest {
+  oneof frame {
+    // First frame, exactly once.
+    OpenCodeSession open   = 1;
+    CodeQuery       query  = 2;
+    CancelCodeQuery cancel = 3;
+  }
+}
+
+message OpenCodeSession {
+  string session_token = 1;
+  string project_id    = 2;
+  // The worktree root, as `worktree.WorktreeService` names it.
+  string worktree_path = 3;
+}
+
+enum CodeQueryKind {
+  CODE_QUERY_KIND_UNSPECIFIED = 0;
+  CODE_QUERY_KIND_HOVER       = 1;
+  CODE_QUERY_KIND_DEFINITION  = 2;
+  CODE_QUERY_KIND_REFERENCES  = 3;
+  // Whether the symbol at the position has a definition — what the pane underlines. Never held.
+  CODE_QUERY_KIND_PROBE       = 4;
+}
+
+message CodeQuery {
+  // Chosen by the client; repeated on the query's `held` and `answer`.
+  uint64         request_id = 1;
+  CodeQueryKind  kind       = 2;
+  // Relative to the session's worktree.
+  string         rel_path   = 3;
+  SourcePosition position   = 4;
+}
+
+message CancelCodeQuery {
+  uint64 request_id = 1;
+}
+
+message CodeSessionEvent {
+  oneof event {
+    // The index's progress: first its current state, then every change.
+    CodeIndexProgress progress = 1;
+    // The query waits for the index to finish loading; its answer follows.
+    CodeQueryHeld     held     = 2;
+    CodeQueryAnswer   answer   = 3;
+  }
+}
+
+message CodeQueryHeld {
+  uint64 request_id = 1;
+}
+
+enum Definability {
+  DEFINABILITY_UNSPECIFIED = 0;
+  // The symbol has a definition the pane can go to.
+  DEFINABILITY_DEFINABLE   = 1;
+  // The loaded index knows of no definition.
+  DEFINABILITY_NONE        = 2;
+  // The index is still loading, so it cannot say yet.
+  DEFINABILITY_UNKNOWN     = 3;
+}
+
+message ProbeAnswer {
+  Definability          definability = 1;
+  // Where the definition is, when `DEFINABLE` — so a click goes there without asking again.
+  repeated CodeLocation locations    = 2;
+}
+
+message CodeQueryAnswer {
+  uint64 request_id = 1;
+  oneof result {
+    HoverResponse      hover      = 2;
+    DefinitionResponse definition = 3;
+    ReferencesResponse references = 4;
+    ProbeAnswer        probe      = 5;
+    // The query failed: why. The session stays open.
+    string             error      = 6;
+  }
 }
 
 // One-based line, one-based column counted in bytes — the coordinates `code_index` speaks.
@@ -96,6 +218,8 @@ message DefinitionRequest {
 
 message DefinitionResponse {
   repeated CodeLocation locations = 1;
+  // Where the index stood when this was answered: an empty answer while `LOADING` is not final.
+  CodeIndexState state = 2;
 }
 
 message ReferencesRequest {
@@ -108,6 +232,8 @@ message ReferencesRequest {
 
 message ReferencesResponse {
   repeated CodeLocation locations = 1;
+  // Where the index stood when this was answered: an empty answer while `LOADING` is not final.
+  CodeIndexState state = 2;
 }
 
 message HoverRequest {
@@ -121,6 +247,8 @@ message HoverRequest {
 message HoverResponse {
   // The hover markdown; unset when there is nothing to say about the position.
   optional string markdown = 1;
+  // Where the index stood when this was answered: no markdown while `LOADING` is not final.
+  CodeIndexState state = 2;
 }
 
 // A place in the worktree a navigation answer points at.

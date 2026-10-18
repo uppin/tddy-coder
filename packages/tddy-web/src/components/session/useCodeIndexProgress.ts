@@ -1,58 +1,97 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { CodeIndexProgress, CodeNavigationService } from "../../gen/code_navigation_pb";
+import {
+  CodeIndexState,
+  type CodeIndexPhase,
+  type CodeIndexProgress,
+  type CodeNavigationService,
+} from "../../gen/code_navigation_pb";
 
 /**
- * Where a session's code-index warm-up stands, as `WatchCodeIndex(session)` reports it.
+ * Where a worktree's code index stands, as a `CodeIndexProgress` stream reports it — the header's
+ * `WatchCodeIndex(session)` or the Code pane's `CodeSession`.
  *
  * - `waiting` — nothing heard yet.
- * - `progress` — the latest progress message: the phase running now, its percentage, and the
- *   server's own line about what it is doing.
- * - `ready` — the warm finished: the index is loaded and queryable.
- * - `failed` — the warm, or the call following it, failed; the reason.
- * - `untracked` — the stream ended without a message: nothing on the host is warming this session
- *   (no `index_daemon:`, a worktree that is not a Cargo workspace, or a warm the host no longer
- *   remembers), so the index loads on the first navigation request instead.
+ * - `idle` — nothing holds the index (no server for the worktree, or the watch ended unheard).
+ * - `progress` — loading: the latest progress message, naming the phase reported most recently,
+ *   its percentage, and every phase running now.
+ * - `ready` — the index is loaded and queryable.
+ * - `failed` — the index, or the stream following it, failed; the reason.
  */
-export type CodeIndexState =
+export type CodeIndexStatus =
   | { kind: "waiting" }
+  | { kind: "idle" }
   | { kind: "progress"; progress: CodeIndexProgress }
   | { kind: "ready" }
-  | { kind: "failed"; reason: string }
-  | { kind: "untracked" };
+  | { kind: "failed"; reason: string };
+
+const failed = (reason: string): CodeIndexStatus => ({
+  kind: "failed",
+  reason: reason !== "" ? reason : "the code index failed",
+});
+
+/**
+ * Classify one progress message. `state` decides when the host sets it; a host that predates it
+ * (`UNSPECIFIED`) is read from `error` and `ready`.
+ */
+export function codeIndexStatusOf(progress: CodeIndexProgress): CodeIndexStatus {
+  switch (progress.state) {
+    case CodeIndexState.FAILED:
+      return failed(progress.error);
+    case CodeIndexState.READY:
+      return { kind: "ready" };
+    case CodeIndexState.IDLE:
+      return { kind: "idle" };
+    case CodeIndexState.LOADING:
+      return { kind: "progress", progress };
+    case CodeIndexState.UNSPECIFIED:
+      if (progress.error !== "") return failed(progress.error);
+      if (progress.ready) return { kind: "ready" };
+      return { kind: "progress", progress };
+  }
+}
+
+/** The status a failed stream leaves behind. */
+export function codeIndexStatusOfError(err: unknown): CodeIndexStatus {
+  return failed(err instanceof Error ? err.message : String(err));
+}
+
+/** `<phase> <n>%` — the phase reported most recently and its percentage. */
+export function currentPhaseHeadline(progress: CodeIndexProgress): string {
+  return `${progress.phase} ${progress.percentage}%`;
+}
+
+/** `<title> <n>%`, or the bare title for a phase that never reported a percentage. */
+export function phaseHeadline(phase: CodeIndexPhase): string {
+  return phase.percentage === undefined ? phase.title : `${phase.title} ${phase.percentage}%`;
+}
 
 /** Follow `code_navigation.WatchCodeIndex(session)` on `client` until it ends or the deps change. */
 export function useCodeIndexProgress(
   client: Client<typeof CodeNavigationService>,
   sessionToken: string,
   sessionId: string,
-): CodeIndexState {
-  const [state, setState] = useState<CodeIndexState>({ kind: "waiting" });
+): CodeIndexStatus {
+  const [status, setStatus] = useState<CodeIndexStatus>({ kind: "waiting" });
 
   useEffect(() => {
     // Consumed with a `cancelled` flag rather than an `AbortSignal`: the LiveKit transport accepts a
     // signal for server-streaming calls and never reads it.
     let cancelled = false;
     let heard = false;
-    setState({ kind: "waiting" });
+    setStatus({ kind: "waiting" });
     (async () => {
       try {
         for await (const progress of client.watchCodeIndex({ sessionToken, sessionId })) {
           if (cancelled) return;
           heard = true;
-          if (progress.ready) {
-            setState({ kind: "ready" });
-          } else if (progress.error !== "") {
-            setState({ kind: "failed", reason: progress.error });
-          } else {
-            setState({ kind: "progress", progress });
-          }
+          setStatus(codeIndexStatusOf(progress));
         }
-        if (!cancelled && !heard) setState({ kind: "untracked" });
+        // Ended without a message: nothing on the host follows this session's index (no
+        // `index_daemon:`, or a worktree that is not a Cargo workspace).
+        if (!cancelled && !heard) setStatus({ kind: "idle" });
       } catch (err) {
-        if (!cancelled) {
-          setState({ kind: "failed", reason: err instanceof Error ? err.message : String(err) });
-        }
+        if (!cancelled) setStatus(codeIndexStatusOfError(err));
       }
     })();
     return () => {
@@ -60,5 +99,5 @@ export function useCodeIndexProgress(
     };
   }, [client, sessionToken, sessionId]);
 
-  return state;
+  return status;
 }

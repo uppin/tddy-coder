@@ -40,12 +40,17 @@ export type CodeBlockProps = {
   content: string;
   relPath: string;
   /**
-   * Ctrl/cmd-click on an identifier: go to its definition. Absent, the block stays a plain
-   * read-only preview.
+   * Go to the definition of an identifier: on ctrl/cmd-click, and on a plain click on one
+   * `isDefinable` reports. Absent, the block stays a plain read-only preview.
    */
   onNavigate?: (at: CodePosition) => void;
-  /** The pointer rests on an identifier: show its hover. Fires once the pointer has dwelt on it. */
-  onHover?: (at: CodePosition) => void;
+  /**
+   * The pointer rests on an identifier (`anchor` is its element): ask about it. Fires once the
+   * pointer has dwelt on it.
+   */
+  onHover?: (at: CodePosition, anchor: HTMLElement) => void;
+  /** Whether the identifier at `at` is known to have a definition: it is underlined and clickable. */
+  isDefinable?: (at: CodePosition) => boolean;
   /** One-based line to scroll into view and mark as the navigation target. */
   focusLine?: number;
 };
@@ -70,8 +75,9 @@ type SyntaxNode = {
 type Stylesheet = Record<string, CSSProperties>;
 
 type Handlers = {
-  navigate?: (at: CodePosition) => void;
-  hoverIdentifier: (at: CodePosition, event: MouseEvent) => void;
+  isDefinable: (at: CodePosition) => boolean;
+  clickIdentifier: (at: CodePosition, event: MouseEvent) => void;
+  hoverIdentifier: (at: CodePosition, event: MouseEvent<HTMLElement>) => void;
   leaveIdentifier: () => void;
 };
 
@@ -122,16 +128,14 @@ function renderText(
     cursor.bytes += utf8Length(before);
     if (before !== "") parts.push(before);
     const at = { line, column: cursor.bytes + 1 };
+    const definable = handlers.isDefinable(at);
     parts.push(
       <span
         key={`${at.column}`}
         data-testid={`worktree-code-identifier-${at.line}-${at.column}`}
-        onClick={(e) => {
-          if ((e.ctrlKey || e.metaKey) && handlers.navigate) {
-            e.preventDefault();
-            handlers.navigate(at);
-          }
-        }}
+        data-definable={definable ? "true" : undefined}
+        className={definable ? "cursor-pointer underline" : undefined}
+        onClick={(e) => handlers.clickIdentifier(at, e)}
         onMouseOver={(e) => handlers.hoverIdentifier(at, e)}
         onMouseOut={handlers.leaveIdentifier}
       >
@@ -152,9 +156,17 @@ function renderText(
  * monospace text for anything else. The theme follows the app's dark-mode class on the document.
  *
  * Highlighted code is navigable when `onNavigate` / `onHover` are given: every line and every
- * identifier carries its one-based position.
+ * identifier carries its one-based position. An identifier `isDefinable` reports is underlined
+ * (`data-definable="true"`) and a plain click on it navigates.
  */
-export function CodeBlock({ content, relPath, onNavigate, onHover, focusLine }: CodeBlockProps) {
+export function CodeBlock({
+  content,
+  relPath,
+  onNavigate,
+  onHover,
+  isDefinable,
+  focusLine,
+}: CodeBlockProps) {
   const language = codeLanguageForPath(relPath);
   const dwellTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusRef = useRef<HTMLSpanElement | null>(null);
@@ -163,7 +175,8 @@ export function CodeBlock({ content, relPath, onNavigate, onHover, focusLine }: 
     if (dwellTimer.current !== null) clearTimeout(dwellTimer.current);
     dwellTimer.current = null;
   };
-  useEffect(() => cancelDwell, []);
+  // A dwell begun on the previous file must not ask about the same position in this one.
+  useEffect(() => cancelDwell, [content, relPath]);
 
   useEffect(() => {
     focusRef.current?.scrollIntoView({ block: "center" });
@@ -177,11 +190,19 @@ export function CodeBlock({ content, relPath, onNavigate, onHover, focusLine }: 
     typeof document !== "undefined" && document.documentElement.classList.contains("dark");
 
   const handlers: Handlers = {
-    navigate: onNavigate,
-    hoverIdentifier: (at) => {
+    isDefinable: (at) => isDefinable?.(at) ?? false,
+    clickIdentifier: (at, event) => {
+      if (!onNavigate) return;
+      if (!(event.ctrlKey || event.metaKey || isDefinable?.(at))) return;
+      event.preventDefault();
+      cancelDwell();
+      onNavigate(at);
+    },
+    hoverIdentifier: (at, event) => {
       if (!onHover) return;
       cancelDwell();
-      dwellTimer.current = setTimeout(() => onHover(at), HOVER_DWELL_MS);
+      const anchor = event.currentTarget;
+      dwellTimer.current = setTimeout(() => onHover(at, anchor), HOVER_DWELL_MS);
     },
     leaveIdentifier: cancelDwell,
   };

@@ -1142,11 +1142,6 @@ pub async fn build(
             index_daemon_registry = Some(index_daemon);
         }
 
-        // Each session's code-index warm-up progress: written by the warm-ups a started session's
-        // worktree triggers, read by `WatchCodeIndex`. One holder, shared by both.
-        let session_index_progress =
-            tddy_daemon_rpc::code_index_warmup::SessionIndexProgress::new();
-
         // The loopback endpoint a clone's `SSH_ASKPASS` helper asks for a key passphrase. It raises
         // its prompts on the registry the host service streams from and decrypts with the keypair
         // it publishes — the very instances above — so a clone's prompt reaches `StreamHostPrompts`.
@@ -1193,7 +1188,6 @@ pub async fn build(
                 tddy_daemon_rpc::code_index_warmup::IndexWarmupObserver::new(
                     Arc::new(registry)
                         as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>,
-                    session_index_progress.clone(),
                 ),
             ));
         }
@@ -1431,8 +1425,7 @@ pub async fn build(
                         Arc::new(registry)
                             as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>
                     }),
-                )
-                .with_index_progress(session_index_progress.clone()),
+                ),
             ),
         );
 

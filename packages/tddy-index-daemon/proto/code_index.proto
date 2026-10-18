@@ -23,6 +23,12 @@ service CodeIndexService {
   // that is already warm completes immediately.
   rpc Warm(WarmRequest) returns (stream IndexProgress);
 
+  // Follow a workspace root's index without starting one. Opens with the root's current state —
+  // `IDLE` when no server holds it — and sends every change after: a server spawned by anyone (a
+  // warm, a navigation request, an agent's code tool) starts reporting here at once, and a server
+  // that goes away reports `IDLE` again. Runs until the caller leaves.
+  rpc WatchRoot(WatchRootRequest) returns (stream IndexProgress);
+
   // Everything wrong with a plan, without writing anything.
   rpc Check(CheckRequest) returns (stream RestructureEvent);
 
@@ -109,6 +115,43 @@ message IndexProgress {
   string furthest   = 4;
   // True on the final message of the stream, when the index is loaded and queryable.
   bool   ready      = 5;
+  // Where the root's index stands.
+  IndexState           state  = 6;
+  // Every work-done progress token the language server has in flight, in the order it began them.
+  // rust-analyzer runs several at once (`Fetching`, `Roots Scanned`, `Indexing`); empty when idle.
+  repeated ActivePhase phases = 7;
+  // Why, when `state` is `FAILED`.
+  string               error  = 8;
+}
+
+message WatchRootRequest {
+  // Absolute path to the workspace root, as `WarmRequest` names it.
+  string workspace_root = 1;
+}
+
+// Where a workspace root's index stands.
+enum IndexState {
+  INDEX_STATE_UNSPECIFIED = 0;
+  // No language server holds this root.
+  INDEX_STATE_IDLE        = 1;
+  // A language server holds it and is still loading its crate graph: an answer now may be empty
+  // only because the graph is not loaded yet.
+  INDEX_STATE_LOADING     = 2;
+  // The crate graph is loaded and queryable.
+  INDEX_STATE_READY       = 3;
+  // The root's language server could not start, or went away without being asked to: `error` says
+  // why. Distinct from `IDLE`, which is a server let go for being unused.
+  INDEX_STATE_FAILED      = 4;
+}
+
+// One work-done progress token in flight, as the language server titled it.
+message ActivePhase {
+  // The title its `begin` gave, e.g. "Indexing"; "working" when the `begin` was never seen.
+  string          title      = 1;
+  // The latest message it reported, e.g. "120/310 (tddy_core)"; empty when it gave none.
+  string          message    = 2;
+  // The highest percentage it reported; absent when it never reported one.
+  optional uint32 percentage = 3;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -471,6 +514,8 @@ message DefinitionRequest {
 
 message DefinitionResponse {
   repeated CodeLocation locations = 1;
+  // Where the root's index stood when this was answered: an empty answer while `LOADING` is not final.
+  IndexState state = 2;
 }
 
 message ReferencesRequest {
@@ -481,6 +526,8 @@ message ReferencesRequest {
 
 message ReferencesResponse {
   repeated CodeLocation locations = 1;
+  // Where the root's index stood when this was answered: an empty answer while `LOADING` is not final.
+  IndexState state = 2;
 }
 
 message HoverRequest {
@@ -492,6 +539,8 @@ message HoverRequest {
 message HoverResponse {
   // The server's hover markdown; unset when it has nothing to say about the position.
   optional string markdown = 1;
+  // Where the root's index stood when this was answered: no markdown while `LOADING` is not final.
+  IndexState state = 2;
 }
 
 // A place in the source a navigation answer points at.

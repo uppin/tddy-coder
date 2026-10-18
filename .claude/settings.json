@@ -8,7 +8,8 @@
       "Bash(./verify*)",
       "Bash(./release*)",
       "Glob",
-      "Grep"
+      "Grep",
+      "Read(~/.claude/projects/**)"
     ],
     "ask": [
       "Read(//etc/**)",

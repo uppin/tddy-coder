@@ -35,6 +35,7 @@ use crate::plan_upkeep::reresolve_loaded_plans;
 use crate::proto::code_index::WarmWorkspace;
 use crate::status::status_of_lsp;
 use crate::tree_changes::{watched_files_params, FileChange, TreeSnapshot};
+use crate::watch_root::RootSignals;
 
 /// How long one LSP request may go unanswered before the transport gives up on it.
 ///
@@ -77,8 +78,8 @@ struct RootState {
     /// When an operation on this root last reached its language server — what idle reaping is
     /// measured against, and what a client reading [`WarmWorkspace::idle_seconds`] is told.
     last_used: Instant,
-    /// Whether this root's crate graph has been observed loaded, watched from the moment its
-    /// server was reached.
+    /// This root's progress — its crate graph's loaded latch and the phases in flight — watched
+    /// from the moment its server was reached.
     ///
     /// `None` until a server has been reached for this root at all. Replaced rather than reused
     /// when the watcher behind it has ended, because that means the server it was about is gone and
@@ -110,6 +111,8 @@ pub struct WorkspaceIndex {
     plans: Arc<PlanStores>,
     /// Starts the flusher the first time a store exists for it to flush.
     flusher: Arc<std::sync::Once>,
+    /// What followers of a root hear besides its server's progress ([`crate::watch_root`]).
+    signals: RootSignals,
 }
 
 impl WorkspaceIndex {
@@ -122,6 +125,7 @@ impl WorkspaceIndex {
             scores: Arc::new(InMemoryComplexityCache::default()),
             plans: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             flusher: Arc::new(std::sync::Once::new()),
+            signals: RootSignals::default(),
         }
     }
 
@@ -279,11 +283,11 @@ impl WorkspaceIndex {
             root: root.to_path_buf(),
             language: Language::Rust,
         };
-        let service = self
-            .servers
-            .get_or_spawn(key)
-            .await
-            .map_err(|failure| status_of_lsp(&failure))?;
+        let service = self.servers.get_or_spawn(key).await.map_err(|failure| {
+            let refusal = status_of_lsp(&failure);
+            self.signals.failed(root, refusal.message());
+            refusal
+        })?;
         service
             .client
             .set_request_timeout(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX);
@@ -381,13 +385,18 @@ impl WorkspaceIndex {
         warm
     }
 
-    /// Whether `root`'s crate graph has been observed loaded, if a server has been reached for it.
+    /// `root`'s progress and loaded latch, if a server has been reached for it.
     ///
     /// `None` means no server has been asked for yet, which is a different thing from a graph that
     /// is not loaded: nothing has been watched, so there is nothing to report. [`Self::client_for`]
     /// is what turns the first into the second.
     pub(crate) async fn graph_load_of(&self, root: &Path) -> Option<GraphLoad> {
         self.roots.lock().await.get(root)?.graph.clone()
+    }
+
+    /// What followers of a root hear besides its server's progress.
+    pub(crate) fn signals(&self) -> &RootSignals {
+        &self.signals
     }
 
     /// Note that `root`'s index has just served something, which is what its idle timer is read
@@ -418,6 +427,7 @@ impl WorkspaceIndex {
         if !same_server {
             state.graph = Some(GraphLoad::watching(client));
         }
+        self.signals.served(root, !same_server);
         let changes = match (&state.tree, same_server) {
             (Some(earlier), true) => tree.changes_since(earlier),
             _ => Vec::new(),

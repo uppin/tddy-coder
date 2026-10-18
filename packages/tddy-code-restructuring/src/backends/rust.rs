@@ -53,7 +53,7 @@ mod signature;
 mod signature_rewrites;
 mod wait;
 
-pub use chatter::ServerChatter;
+pub use chatter::{ActivePhase, ServerChatter};
 pub use readiness::{SilenceBounds, LOADING_SILENCE_BOUND, READY_HOVER_BOUND};
 pub use wait::WAIT_HEARTBEAT;
 

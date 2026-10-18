@@ -8,9 +8,11 @@ import { createWorktreeFilesApi } from "./worktreeFilesApi";
 import { workflowPreviewKind } from "./sessionWorkflowPreview";
 import { renderSimpleMarkdown } from "./renderSimpleMarkdown";
 import { CodeBlock } from "./CodeBlock";
-import { createCodeNavigationApi, type CodePosition } from "./codeNavigationApi";
+import type { CodePosition } from "./codeNavigationApi";
 import { HoverCard, LocationListCard, NavigationNotice } from "./CodeNavigationOverlays";
 import { useCodeNavigation, type SelectedFile } from "./useCodeNavigation";
+import { useCodeSession } from "./useCodeSession";
+import { currentPhaseHeadline, type CodeIndexStatus } from "./useCodeIndexProgress";
 import { createRestructurePlanApi, isRestructurePlanFile } from "./restructurePlanApi";
 import { RestructurePlanDialog } from "./RestructurePlanDialog";
 import { CodeIndexStatusStrip } from "./CodeIndexStatusStrip";
@@ -22,23 +24,35 @@ export type WorktreeCodePaneProps = {
   /** The session's worktree root (`SessionEntry.repo_path`). */
   worktreePath: string;
   /**
-   * `code_navigation.CodeNavigationService` on the same host as `client` — definition, references
-   * and hover for the preview, and the plan calls behind "Open as plan". Absent, the preview is
-   * read-only text.
+   * `code_navigation.CodeNavigationService` on the same host as `client`. With it the pane holds a
+   * `CodeSession` open on the worktree — warming its code index, showing its progress in a strip
+   * along the bottom, and answering definition, references and hover in the preview — and offers
+   * the plan calls behind "Open as plan". Absent, the preview is read-only text and there is no
+   * strip.
    */
   navigationClient?: Client<typeof CodeNavigationService>;
   /**
-   * The session whose worktree this is. With `navigationClient`, the pane ends in a strip showing
-   * where the session's code index stands (`CodeIndexStatusStrip`); without either, no strip.
+   * The session whose worktree this is. Unused since the strip follows the pane's `CodeSession`
+   * rather than the session's `WatchCodeIndex`.
+   *
+   * TODO: remove, together with the `sessionId` that `SessionMainPane` and the Cypress pane
+   * driver pass.
    */
   sessionId?: string;
 };
 
+/** `Index loading — <phase> <n>%`: what a query the loading index holds shows. */
+function indexLoadingText(status: CodeIndexStatus): string {
+  return status.kind === "progress"
+    ? `Index loading — ${currentPhaseHeadline(status.progress)}`
+    : "Index loading";
+}
+
 /**
  * Split Code pane: a lazy worktree directory tree on the left and a read-only file preview on the
  * right. Markdown renders as sanitized markup, everything else as monospace text. File content is
- * fetched on demand when a file node is selected. With a navigation client and a session, a strip
- * along the bottom shows the session's code-index progress.
+ * fetched on demand when a file node is selected. With a navigation client, a strip along the
+ * bottom shows the worktree's code-index progress from the pane's `CodeSession`.
  */
 export function WorktreeCodePane({
   client,
@@ -46,19 +60,12 @@ export function WorktreeCodePane({
   projectId,
   worktreePath,
   navigationClient,
-  sessionId,
 }: WorktreeCodePaneProps) {
   const api = useMemo(
     () => createWorktreeFilesApi(client, { sessionToken, projectId, worktreePath }),
     [client, sessionToken, projectId, worktreePath],
   );
-  const navigation = useMemo(
-    () =>
-      navigationClient
-        ? createCodeNavigationApi(navigationClient, { sessionToken, projectId, worktreePath })
-        : null,
-    [navigationClient, sessionToken, projectId, worktreePath],
-  );
+  const code = useCodeSession(navigationClient ?? null, { sessionToken, projectId, worktreePath });
   const plans = useMemo(
     () =>
       navigationClient
@@ -66,13 +73,14 @@ export function WorktreeCodePane({
         : null,
     [navigationClient, sessionToken, projectId, worktreePath],
   );
-  const nav = useCodeNavigation(api, navigation);
+  const nav = useCodeNavigation(api, code.session);
+  const loadingText = indexLoadingText(code.status);
   const { selected, openFile } = nav;
   const handleSelectFile = useCallback((relPath: string) => openFile(relPath), [openFile]);
 
   // The index serves Rust only; offering ctrl-click and hover on other languages would ask it
   // questions it refuses.
-  const navigable = navigation !== null && selected !== null && selected.relPath.endsWith(".rs");
+  const navigable = code.session !== null && selected !== null && selected.relPath.endsWith(".rs");
 
   // A restructure plan opens as a plan only where the plan calls are served.
   const [openPlan, setOpenPlan] = useState<string | null>(null);
@@ -118,29 +126,25 @@ export function WorktreeCodePane({
             <FilePreview
               selected={selected}
               onNavigate={navigable ? nav.navigate : undefined}
-              onHover={navigable ? nav.showHover : undefined}
+              onHover={navigable ? nav.dwell : undefined}
+              isDefinable={navigable ? nav.isDefinable : undefined}
             />
           </section>
+          {nav.hover && (
+            <HoverCard
+              hover={nav.hover}
+              loadingText={loadingText}
+              onShowReferences={nav.showReferences}
+              onClose={nav.closeHover}
+            />
+          )}
           <div className="pointer-events-none absolute inset-x-3 bottom-3 flex flex-col gap-2">
-            {nav.notice && <NavigationNotice notice={nav.notice} />}
+            {nav.notice && <NavigationNotice notice={nav.notice} loadingText={loadingText} />}
             {nav.locations && <LocationListCard list={nav.locations} onOpen={nav.openLocation} />}
-            {nav.hover && (
-              <HoverCard
-                hover={nav.hover}
-                onShowReferences={nav.showReferences}
-                onClose={nav.closeHover}
-              />
-            )}
           </div>
         </div>
       </div>
-      {navigationClient && sessionId && (
-        <CodeIndexStatusStrip
-          client={navigationClient}
-          sessionToken={sessionToken}
-          sessionId={sessionId}
-        />
-      )}
+      {navigationClient && <CodeIndexStatusStrip status={code.status} />}
       {plans !== null && openPlan !== null && (
         <RestructurePlanDialog api={plans} relPath={openPlan} onClose={() => setOpenPlan(null)} />
       )}
@@ -152,10 +156,12 @@ function FilePreview({
   selected,
   onNavigate,
   onHover,
+  isDefinable,
 }: {
   selected: SelectedFile | null;
   onNavigate?: (at: CodePosition) => void;
-  onHover?: (at: CodePosition) => void;
+  onHover?: (at: CodePosition, anchor: HTMLElement) => void;
+  isDefinable?: (at: CodePosition) => boolean;
 }) {
   if (selected === null) {
     return <p className="text-sm text-muted-foreground">Select a file to preview</p>;
@@ -172,6 +178,7 @@ function FilePreview({
       relPath={selected.relPath}
       onNavigate={onNavigate}
       onHover={onHover}
+      isDefinable={isDefinable}
       focusLine={selected.focusLine}
     />
   );
