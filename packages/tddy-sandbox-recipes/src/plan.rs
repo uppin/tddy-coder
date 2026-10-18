@@ -28,6 +28,10 @@ pub enum SandboxRecipe {
     Shell,
     /// `tddy-sandbox-runner` hosting a generic `--pty-command` action.
     RunnerPty,
+    /// OpenCode's TUI (`opencode`) in the runner's PTY.
+    OpenCodeCli,
+    /// Muse Code's TUI (`muse`) in the runner's PTY.
+    MuseCli,
 }
 
 /// Infer recipe from sandbox-runner argv (`--claude-binary` → Claude CLI; `--pty-command` → Shell).
@@ -74,6 +78,9 @@ pub struct RunnerPlanRequest {
     pub mounts: Vec<MountSpec>,
     pub recipe: Option<SandboxRecipe>,
     pub host_home: Option<PathBuf>,
+    /// The session's provider route, when it runs on one: its secrets become jail secrets
+    /// (`TDDY_SECRET_<NAME>`), and no host OAuth token is injected beside them.
+    pub route: Option<tddy_core::provider_route::HarnessRoute>,
 }
 
 /// Request to build a plan that runs an arbitrary command directly inside the jail.
@@ -125,6 +132,8 @@ fn collect_reads(
 ) -> Vec<tddy_sandbox::ReadSpec> {
     let mut reads = Vec::new();
     match recipe {
+        // TODO(sandboxed-routes): the harness binary's reads
+        SandboxRecipe::OpenCodeCli | SandboxRecipe::MuseCli => todo!(),
         SandboxRecipe::ClaudeCli => {
             if let Some(claude) = claude_binary {
                 let canon = canonical_binary_path(&claude.to_string_lossy())
@@ -189,6 +198,8 @@ fn policy_for_recipe(recipe: SandboxRecipe) -> PolicySpec {
         SandboxRecipe::Shell => shell_interactive_policy(),
         SandboxRecipe::RunnerPty => runner_pty_policy(),
         SandboxRecipe::Generic => generic_exec_policy(),
+        // TODO(sandboxed-routes): the Node TUIs' policy (OpenCode is Bun/Node, Muse a native binary)
+        SandboxRecipe::OpenCodeCli | SandboxRecipe::MuseCli => todo!(),
     }
 }
 
@@ -226,6 +237,8 @@ fn copies_for_recipe(
             .map(|home| cursor_credentials_copies(home, scratch_home))
             .unwrap_or_default(),
         SandboxRecipe::Generic | SandboxRecipe::Shell | SandboxRecipe::RunnerPty => Vec::new(),
+        // A routed OpenCode or Muse session is handed its key by the route; nothing is copied.
+        SandboxRecipe::OpenCodeCli | SandboxRecipe::MuseCli => Vec::new(),
     }
 }
 
@@ -249,6 +262,18 @@ fn finish_builder(
     }
 
     builder.build()
+}
+
+/// Add `route`'s secret environment to `builder` as jail secrets — delivered to the agent child by
+/// the runner from owner-only files, never in the jail's environment map or on argv.
+pub fn route_secrets(
+    builder: SandboxBuilder,
+    route: &tddy_core::provider_route::HarnessRoute,
+) -> SandboxBuilder {
+    let _ = route;
+    // TODO(sandboxed-routes): implement
+    let _ = &builder;
+    todo!()
 }
 
 /// Build a [`SandboxPlan`] for `tddy-sandbox-runner` inside the jail.

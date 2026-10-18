@@ -28,5 +28,5 @@ pub use cursor_cli::{
 };
 pub use plan::{
     build_process_plan, build_runner_plan, detect_recipe_from_argv, recipe_from_name,
-    shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,
+    route_secrets, shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,
 };

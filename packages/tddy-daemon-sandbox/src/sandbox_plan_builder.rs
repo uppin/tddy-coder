@@ -243,6 +243,8 @@ pub fn build_action_runner_plan(
         mounts,
         recipe: Some(recipe),
         host_home: std::env::var_os("HOME").map(PathBuf::from),
+        // TODO(sandboxed-routes): the session's route
+        route: None,
     })?;
 
     Ok(ActionRunnerArtifacts {

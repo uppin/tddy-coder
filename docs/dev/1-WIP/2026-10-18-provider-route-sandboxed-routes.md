@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: #provider-route 9/9. Base: `feature/provider-route/agent-def-route`.
+**Stack**: #provider-route 9/9. Base: `feature/provider-route/agent-def-route`. PR: [#670](https://github.com/uppin/tddy-coder/pull/670).
 
 ## Initial Discovery
 
@@ -45,13 +45,15 @@ sandbox" refusal.
 
 ```rust
 // tddy-sandbox-recipes
-pub fn route_secrets(builder: SandboxBuilder, route: &HarnessRoute) -> SandboxBuilder;  // each secret_env → builder.secret(name, Value)
-pub enum SandboxRecipe { /* … */ OpenCodeCli, MuseCli }
+pub enum SandboxRecipe { /* … */ OpenCodeCli, MuseCli }            // policy/read arms todo!() until green
+pub struct RunnerPlanRequest { /* … */ pub route: Option<HarnessRoute> }   // 3 daemon call sites pass None + TODO
+pub fn route_secrets(builder: SandboxBuilder, route: &HarnessRoute) -> SandboxBuilder;
 // tddy-sandbox-runner
-// --agent-kind opencode | muse → spawn_opencode_pty / spawn_muse_pty (new module)
-// tddy-sandbox-app
-pub enum AgentKind { Claude, Cursor, OpenCode, Muse }
+pub mod harness_pty;
+pub fn harness_pty_argv(agent_kind: &str, binary: &str, model: &str, initial_prompt: Option<&str>, resume: bool) -> Result<Vec<String>, String>;
 ```
+
+`/green` also: lifts node 2's sandboxed-route refusal and passes the session's route into the three `RunnerPlanRequest` sites; teaches the sandbox app's `AgentKind` `opencode` and `muse` (no surface published — nothing above this node consumes it).
 
 ## Green wave
 
@@ -98,11 +100,9 @@ both new kinds; the macOS VM/cgroups suites are not part of local gates (see CI 
 
 | Test | File | Validates |
 |---|---|---|
-| `a_routed_jail_plan_carries_the_key_as_a_secret_ref_not_in_env` | `packages/tddy-sandbox-recipes/tests/route_secrets.rs` (new) | `TDDY_SECRET_ANTHROPIC_AUTH_TOKEN` ref; env map clean |
-| `a_routed_jail_does_not_inject_the_oauth_token` | same | no `CLAUDE_CODE_OAUTH_TOKEN` |
-| `the_runner_spawns_opencode_with_its_config_inside_the_jail` | `packages/tddy-sandbox-runner/tests/agent_kind_opencode_muse.rs` (new) | argv/env |
-| `the_runner_spawns_muse_with_the_key_resolved_from_its_secret_file` | same | env after `resolve_secret_envs` |
-| `a_sandboxed_claude_cli_start_on_meta_is_no_longer_refused` | `packages/tddy-agent-launch/tests/claude_cli_provider_route_acceptance.rs` | refusal lifted |
+| `a_routed_jail_plan_carries_the_key_as_a_secret_ref_not_in_env` / `a_routed_jail_does_not_inject_the_oauth_token` | `packages/tddy-sandbox-recipes/tests/route_secrets.rs` (new) | secret refs, route env, no OAuth token beside a route |
+| `the_runner_spawns_opencode_with_its_model_inside_the_jail` / `the_runner_resumes_muse_by_continuing_its_session` / `an_agent_kind_the_runner_does_not_host_is_refused` | `packages/tddy-sandbox-runner/tests/agent_kind_opencode_muse.rs` (new) | in-jail argv from the descriptors |
+| `the_runner_spawns_muse_with_the_key_resolved_from_its_secret_file` | same | regression guard: a route secret resolves like the OAuth token (passes today) |
 
 ## Technical Debt & Production Readiness
 
@@ -114,6 +114,14 @@ both new kinds; the macOS VM/cgroups suites are not part of local gates (see CI 
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+
+## Red-phase record (wave 2, 2026-10-18)
+
+Scoped: `tddy-sandbox-recipes`, `tddy-sandbox-runner` clippy `--all-targets -D warnings` clean; `tddy-daemon-sandbox` clippy `--lib` clean.
+
+- ⚠ **Pre-existing, not this node:** `packages/tddy-daemon-sandbox/tests/sandbox_stdio_seatbelt_acceptance.rs` (`#![cfg(target_os = "macos")]`, unchanged from `master`) does not compile on macOS (`SandboxHandle` not in scope), so `--all-targets` for that crate fails locally; Linux CI never compiles it.
+- `route_secrets` 2/2 fail on their assertions (the plan ignores `route`).
+- `agent_kind_opencode_muse`: 3 fail at `harness_pty.rs` `todo!()`; the secret-resolution guard passes.
 
 ## Validation Results
 ### /validate-changes
@@ -127,10 +135,10 @@ both new kinds; the macOS VM/cgroups suites are not part of local gates (see CI 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests (per-node gate waived by the developer on 2026-10-18 — "finish remaining waves without stopping"; review at stack hand-off)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

@@ -774,6 +774,8 @@ pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, San
         mounts: params.mounts,
         recipe: None,
         host_home: params.host_home,
+        // TODO(sandboxed-routes): the session's route
+        route: None,
     })?;
     plan.cgroup = params.cgroup;
     #[cfg(target_os = "macos")]
