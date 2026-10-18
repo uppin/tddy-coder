@@ -142,20 +142,30 @@ fn the_room_mint(config: &DaemonConfig) -> LiveKitTokenServiceImpl {
     LiveKitTokenServiceImpl::new(
         the_identity_function(config),
         std::sync::Arc::new(config.clone()),
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
     )
 }
 
 /// `token.TokenService` — the mint the web UI names its own room and identity on.
 fn the_web_mint(config: &DaemonConfig) -> ServiceEntry {
-    build_token_service_entry(config, Some(&the_identity_function(config)))
-        .expect("a daemon holding livekit credentials registers the mint")
+    build_token_service_entry(
+        config,
+        Some(&the_identity_function(config)),
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a daemon holding livekit credentials registers the mint")
 }
 
 fn the_identity_function(config: &DaemonConfig) -> tddy_daemon_kernel::SessionUserResolver {
-    build_auth_entries(config, "127.0.0.1", 8080)
-        .expect("a configured daemon builds its auth entries")
-        .user_resolver
-        .expect("a configured daemon has an identity function")
+    build_auth_entries(
+        config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a configured daemon builds its auth entries")
+    .user_resolver
+    .expect("a configured daemon has an identity function")
 }
 
 /// An access token for `login`, issued by the daemon `config` describes.

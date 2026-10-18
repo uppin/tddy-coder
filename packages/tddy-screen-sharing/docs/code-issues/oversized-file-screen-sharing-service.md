@@ -6,7 +6,7 @@
 **Metrics:** **967 production lines** (2026-10-07, #514; first measured 2026-09-24) of 2,176 total (`#[cfg(all(test, unix))]` at line 968; 1,209 test lines) · budget 500 · **1.9× over**
 **Thresholds breached:** length 967 > 500
 **Restructure:** not designed
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-10-18 (+16 from #626, `#satellite` 4/13: `with_room_tokens`, the minter parameter threaded through `prepare_bridge` / `build_bridge_spawn_config`, `BRIDGE_TOKEN_TTL`; deferred with the developer's consent) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-24 | 967 | first detection. The size predates #509 (967 at merge-base `4e7157d2`). #509 changed 24 lines (12+/12−), all inside `mod tests`: `Request::new` → `Request::direct` in the request construction. No production line changed, so it did not grow the file |
 | 2026-10-07 | 967 | touched, unchanged: #514 (`#keyring` 7/9) deletes `require_key` and the key-cache plumbing and rewrites the target RPCs over `ScreenSharingTargetStore` (−10 lines), then adds `with_credential_vaults` (+10, a 7-line method, its doc line, and imports) — 967 production lines on `origin/master` and on HEAD. The file was not grown; seam A lost `require_key` |
+| 2026-10-18 | 967 → 983 (+16) | #626 (`#satellite` 4/13): bridge tokens minted through `RoomTokenMinter`; the key and secret re-reads leave `build_bridge_spawn_config` (−12), `with_room_tokens`, the threaded parameter and `BRIDGE_TOKEN_TTL` come in. Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` |
 
 ## What would close it — candidate seams (not proven)
 

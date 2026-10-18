@@ -204,8 +204,13 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
 
     // The daemon's real auth wiring: one resolver verifies the session token everywhere, as in
     // production — the RPCs in the room, the git transport, and the mint the transport calls.
-    let auth = tddy_daemon_auth::auth::build_auth_entries(&config, "127.0.0.1", 0)
-        .expect("the daemon's auth must build");
+    let auth = tddy_daemon_auth::auth::build_auth_entries(
+        &config,
+        "127.0.0.1",
+        0,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("the daemon's auth must build");
     let user_resolver: UserResolver = auth
         .user_resolver
         .clone()

@@ -185,17 +185,27 @@ fn a_config_file(dir: &Path, github_lines: &str, keeps_vaults: bool) -> std::pat
 
 /// How long the built vaults hold a pending sign-in, and an open vault nobody uses.
 fn the_vault_lifetimes_of(daemon: &AConfiguredDaemon) -> (Option<Duration>, Option<Duration>) {
-    let vaults = build_auth_entries(&daemon.config, "127.0.0.1", 0)
-        .expect("the daemon starts")
-        .credential_vaults
-        .expect("an auth_storage builds the credential vaults");
+    let vaults = build_auth_entries(
+        &daemon.config,
+        "127.0.0.1",
+        0,
+        tddy_daemon_livekit::room_tokens::room_token_minter(daemon.config.livekit.as_ref()),
+    )
+    .expect("the daemon starts")
+    .credential_vaults
+    .expect("an auth_storage builds the credential vaults");
     (vaults.pending_lifetime(), vaults.idle_lifetime())
 }
 
 /// Why wiring auth refused to start the daemon — `""` when it started.
 fn startup_error_of(daemon: &AConfiguredDaemon) -> String {
-    build_auth_entries(&daemon.config, "127.0.0.1", 0)
-        .err()
-        .map(|e| format!("{e:#}"))
-        .unwrap_or_default()
+    build_auth_entries(
+        &daemon.config,
+        "127.0.0.1",
+        0,
+        tddy_daemon_livekit::room_tokens::room_token_minter(daemon.config.livekit.as_ref()),
+    )
+    .err()
+    .map(|e| format!("{e:#}"))
+    .unwrap_or_default()
 }

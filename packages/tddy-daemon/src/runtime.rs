@@ -711,6 +711,9 @@ pub async fn build(
         Some(_) => Some(tddy_daemon_auth::load_signing_key(&auth_config)?),
         None => None,
     };
+    // Decided once, here, from the `livekit:` block: everything that mints a room token — the two
+    // auth mints and screen sharing's bridges — asks this one minter.
+    let room_tokens = tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref());
     let auth_result = match &signing_key {
         Some(key) => {
             let directory: Arc<dyn tddy_daemon_auth::KeyDirectory> = match &common_room_peers {
@@ -732,12 +735,14 @@ pub async fn build(
                 web_port,
                 &tddy_daemon_auth::SessionTokens::new(key, directory),
                 first_login_enrolment(&config, &options)?,
+                Arc::clone(&room_tokens),
             )?
         }
         None => tddy_session_lifecycle::auth::build_auth_entries(
             &auth_config,
             web_host.as_str(),
             web_port,
+            Arc::clone(&room_tokens),
         )?,
     };
     // What the common room is told about this daemon's key, so a peer holding one of its tokens
@@ -753,6 +758,7 @@ pub async fn build(
     if let Some(entry) = tddy_session_lifecycle::auth::build_token_service_entry(
         &config,
         auth_result.user_resolver.as_ref(),
+        Arc::clone(&room_tokens),
     ) {
         rpc_entries.push(entry);
     }
@@ -1572,6 +1578,7 @@ pub async fn build(
         let ss_svc =
             tddy_screen_sharing::ScreenSharingServiceImpl::new(ss_user_resolver, ss_sessions_base)
                 .with_config(Arc::clone(&config_arc))
+                .with_room_tokens(Arc::clone(&room_tokens))
                 .with_host_scope(ss_host_targets, ss_host_keypair, Arc::clone(&host_prompts))
                 .with_credential_vaults(auth_result.credential_vaults.clone());
         // The entry comes from `tddy-screen-sharing` rather than being assembled here: the

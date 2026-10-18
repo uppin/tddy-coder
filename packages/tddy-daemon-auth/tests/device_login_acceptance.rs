@@ -34,12 +34,17 @@ async fn a_daemon_holding_only_a_public_client_id_registers_its_auth_service() {
     let (config, _dir) = a_daemon_with_a_client_id_and_no_secret();
 
     // When its auth entries are built
-    let registered: Vec<&str> = build_auth_entries(&config, "127.0.0.1", 8080)
-        .expect("a daemon with github configured builds its auth entries")
-        .entries
-        .iter()
-        .map(|entry| entry.name)
-        .collect();
+    let registered: Vec<&str> = build_auth_entries(
+        &config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a daemon with github configured builds its auth entries")
+    .entries
+    .iter()
+    .map(|entry| entry.name)
+    .collect();
 
     // Then sign-in is served, because the flow it serves needs no secret
     assert!(
@@ -216,12 +221,17 @@ fn a_daemon_configured_with(github: &str) -> (DaemonConfig, tempfile::TempDir) {
 }
 
 fn the_auth_service(config: &DaemonConfig) -> ServiceEntry {
-    build_auth_entries(config, "127.0.0.1", 8080)
-        .expect("a daemon with github configured builds its auth entries")
-        .entries
-        .into_iter()
-        .find(|entry| entry.name == "auth.AuthService")
-        .expect("auth.AuthService is one of the entries")
+    build_auth_entries(
+        config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a daemon with github configured builds its auth entries")
+    .entries
+    .into_iter()
+    .find(|entry| entry.name == "auth.AuthService")
+    .expect("auth.AuthService is one of the entries")
 }
 
 async fn call<Req: prost::Message, Res: prost::Message + Default>(

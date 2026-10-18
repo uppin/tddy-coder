@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use log::{error, info};
@@ -114,6 +115,8 @@ pub struct ScreenSharingServiceImpl {
     sessions_base: SessionsBase,
     /// Optional daemon config — when set, `start_stream` spawns real bridge processes.
     config: Option<Arc<DaemonConfig>>,
+    /// Mints the room token a bridge joins with — see [`Self::with_room_tokens`].
+    room_tokens: Arc<dyn tddy_daemon_extensions::RoomTokenMinter>,
     /// Active bridge PIDs keyed by [`session_bridge_key`] or [`host_bridge_key`], for the matching
     /// stop call.
     active_bridges: Arc<Mutex<HashMap<String, u32>>>,
@@ -134,6 +137,7 @@ impl ScreenSharingServiceImpl {
             user_resolver,
             sessions_base,
             config: None,
+            room_tokens: Arc::new(tddy_daemon_extensions::NoRoomTokens),
             active_bridges: Arc::new(Mutex::new(HashMap::new())),
             host_scope: None,
             target_store: None,
@@ -155,7 +159,17 @@ impl ScreenSharingServiceImpl {
         self.with_target_store(Arc::new(SessionVaultTargetStore::new(vaults, resolver)))
     }
 
-    /// Supply daemon config for bridge binary path resolution and LiveKit token generation.
+    /// Mint bridges' room tokens through `minter` (builder) — the daemon's one minter, built from
+    /// its `livekit:` block.
+    pub fn with_room_tokens(
+        mut self,
+        minter: Arc<dyn tddy_daemon_extensions::RoomTokenMinter>,
+    ) -> Self {
+        self.room_tokens = minter;
+        self
+    }
+
+    /// Supply daemon config for bridge binary path resolution and the LiveKit URL.
     pub fn with_config(mut self, config: Arc<DaemonConfig>) -> Self {
         self.config = Some(config);
         self
@@ -325,6 +339,7 @@ impl ScreenSharingServiceImpl {
             bridge_identity,
             track_name,
             livekit_room,
+            &*self.room_tokens,
         ) {
             Ok(prepared) => prepared.for_password(password),
             Err(e) => {
@@ -441,6 +456,7 @@ fn prepare_bridge(
     bridge_identity: &str,
     track_name: &str,
     livekit_room: &str,
+    room_tokens: &dyn tddy_daemon_extensions::RoomTokenMinter,
 ) -> Result<PreparedBridge, String> {
     let binary = match target.protocol {
         Protocol::Vnc => resolve_vnc_binary_path(config),
@@ -462,11 +478,17 @@ fn prepare_bridge(
             bridge_identity,
             track_name,
             livekit_room,
+            room_tokens,
         )?,
     })
 }
 
-/// Extract LiveKit credentials, mint a token, and assemble a `BridgeSpawnConfig`.
+/// How long a bridge's room token is valid: six hours, the length of a LiveKit access token's own
+/// default, so a published desktop is not cut off by token expiry under normal use (the bridge has
+/// no reconnect loop that fetches another).
+const BRIDGE_TOKEN_TTL: Duration = Duration::from_secs(6 * 3600);
+
+/// Extract the LiveKit URL, mint a token, and assemble a `BridgeSpawnConfig`.
 ///
 /// Says what is missing rather than logging it: a host desktop that cannot be published anywhere
 /// has to be refused, and the caller is the only place that knows whether that refusal reaches an
@@ -481,6 +503,7 @@ fn build_bridge_spawn_config(
     bridge_identity: &str,
     track_name: &str,
     livekit_room: &str,
+    room_tokens: &dyn tddy_daemon_extensions::RoomTokenMinter,
 ) -> Result<BridgeSpawnConfig, String> {
     let lk = config
         .livekit
@@ -497,18 +520,10 @@ fn build_bridge_spawn_config(
     }
 
     let livekit_url_internal = require_field!(lk.url, "no LiveKit URL is configured");
-    let api_key = require_field!(lk.api_key, "no LiveKit API key is configured");
-    let api_secret = require_field!(lk.api_secret, "no LiveKit API secret is configured");
 
-    let token = tddy_livekit::token::TokenGenerator::new(
-        api_key,
-        api_secret,
-        livekit_room.to_string(),
-        bridge_identity.to_string(),
-        std::time::Duration::from_secs(tddy_livekit::token::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-    )
-    .generate()
-    .map_err(|e| format!("minting the bridge's LiveKit token: {e}"))?;
+    let token = room_tokens
+        .mint(livekit_room, bridge_identity, BRIDGE_TOKEN_TTL)
+        .map_err(|refused| refused.message)?;
 
     Ok(BridgeSpawnConfig {
         host: target.host.clone(),
@@ -771,6 +786,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             &bridge_identity,
             &track_name,
             &livekit_room,
+            &*self.room_tokens,
         )
         .map_err(Status::failed_precondition)?;
 
@@ -1410,6 +1426,17 @@ mod tests {
             ..Default::default()
         };
         adjust(&mut config);
+        // The daemon's minter is decided from the same block: one that holds both credentials
+        // mints, one that does not refuses every mint.
+        let holds_credentials = config
+            .livekit
+            .as_ref()
+            .is_some_and(|lk| lk.api_key.is_some() && lk.api_secret.is_some());
+        let minter: Arc<dyn tddy_daemon_extensions::RoomTokenMinter> = if holds_credentials {
+            Arc::new(RecordingMinter::default())
+        } else {
+            Arc::new(tddy_daemon_extensions::NoRoomTokens)
+        };
         let config = Arc::new(config);
 
         let sessions_base = storage.path().to_path_buf();
@@ -1426,6 +1453,7 @@ mod tests {
             Arc::new(move |_user: &str| Some(sessions_base.clone())),
         )
         .with_config(config)
+        .with_room_tokens(minter)
         .with_host_scope(
             targets,
             Arc::clone(&keypair) as Arc<dyn HostKeypair>,
@@ -2245,6 +2273,66 @@ mod tests {
         assert!(
             daemon.the_desktops_of(A_HOST).await.is_empty(),
             "a refused attach must not have attached a desktop anywhere"
+        );
+    }
+
+    /// A minter that answers with a fixed token and records the room and identity it was asked for.
+    #[derive(Default)]
+    struct RecordingMinter {
+        asked: std::sync::Mutex<Vec<(String, String, Duration)>>,
+    }
+
+    impl tddy_daemon_extensions::RoomTokenMinter for RecordingMinter {
+        fn mint(&self, room: &str, identity: &str, ttl: Duration) -> Result<String, Status> {
+            self.asked
+                .lock()
+                .unwrap()
+                .push((room.to_string(), identity.to_string(), ttl));
+            Ok("the-minted-bridge-token".to_string())
+        }
+    }
+
+    #[test]
+    fn the_bridge_is_handed_the_token_minted_for_its_room_and_identity() {
+        // Given a daemon whose LiveKit block is complete, and the daemon's minter
+        let config = DaemonConfig {
+            livekit: Some(LiveKitConfig {
+                url: Some(THE_INTERNAL_LIVEKIT_URL.to_string()),
+                api_key: Some("an-api-key".to_string()),
+                api_secret: Some("an-api-secret".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let minter = RecordingMinter::default();
+        let target = BridgeTarget {
+            id: "desk-1".to_string(),
+            host: "10.0.0.9".to_string(),
+            port: 5900,
+            protocol: Protocol::Vnc,
+        };
+
+        // When a bridge's spawn configuration is assembled
+        let spawn = build_bridge_spawn_config(
+            &config,
+            &target,
+            "operator".to_string(),
+            "screenshare-desk-1",
+            "desk-1-track",
+            "tddy-lobby",
+            &minter,
+        )
+        .expect("a complete block assembles a bridge");
+
+        // Then the bridge joins with the minter's token, minted for its room and identity
+        assert_eq!(spawn.livekit_token, "the-minted-bridge-token");
+        assert_eq!(
+            *minter.asked.lock().unwrap(),
+            vec![(
+                "tddy-lobby".to_string(),
+                "screenshare-desk-1".to_string(),
+                Duration::from_secs(tddy_livekit::token::DEFAULT_LIVEKIT_JWT_TTL_SECS)
+            )]
         );
     }
 }

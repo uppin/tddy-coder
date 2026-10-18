@@ -69,6 +69,24 @@ Code that only needs to close a session's room, or ask whether this daemon hosts
 (`with_session_rooms`, defaulting to `NoSessionRooms`) and `tddy-worktree-service`, which re-exports
 the port as `WorktreeRoomCloser`. Opening a room is not on this port.
 
+## The room-tokens port (`room_tokens`)
+
+Code that needs a LiveKit-style room access token for a room and identity holds a `RoomTokenMinter`
+instead of building a token generator from the `livekit:` block's credentials.
+
+| Item | Role |
+|---|---|
+| `RoomTokenMinter` | `mint(room, identity, ttl)`: a signed room access token, or a `Status`. Performs **no authorization**: hand it only to code that has already decided the caller may have the token. |
+| `NoRoomTokens` | No integration: every mint is a failed precondition. |
+
+`tddy_daemon_livekit::room_tokens::room_token_minter(Option<&LiveKitConfig>)` builds the daemon's one
+minter from the `livekit:` block: a real one when `url`, `api_key` and `api_secret` are all set;
+otherwise one whose every mint fails naming the missing fields (`NoRoomTokens` when there is no block).
+The runtime builds it once and hands it to `tddy-daemon-auth` (`build_auth_entries*`,
+`build_token_service_entry`, `LiveKitTokenServiceImpl`) and to `tddy-screen-sharing`
+(`with_room_tokens`). `MinterTokenProvider` adapts it onto `tddy_service::TokenProvider`, the token
+service's own port, which keeps its fixed TTL and string errors.
+
 ## The satellite rule and its ratchet
 
 **Nothing in this crate may reach a LiveKit crate**, transitively, so a core crate that depends on
@@ -92,8 +110,7 @@ The lists, in the test file:
 - `WIRING` (binaries' composition roots and the end-to-end harness): `tddy-daemon`, `tddy-rdp`,
   `tddy-vnc`, `tddy-e2e`.
 - `KNOWN_OFFENDERS` (library crates that still name a LiveKit crate): `tddy-agent-launch`,
-  `tddy-cli-sessions`, `tddy-coder`, `tddy-daemon-auth`, `tddy-daemon-kernel`, `tddy-daemon-rpc`,
-  `tddy-host-service`, `tddy-remote-git-repo`, `tddy-screen-sharing`,
+  `tddy-cli-sessions`, `tddy-coder`, `tddy-daemon-auth`, `tddy-daemon-rpc`, `tddy-remote-git-repo`,
   `tddy-session-agents`, `tddy-session-files`, `tddy-session-lifecycle`, `tddy-session-split`,
   `tddy-session-sync`, `tddy-session-tool-client`, `tddy-terminal-rpc`.
 

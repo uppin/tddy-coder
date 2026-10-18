@@ -341,6 +341,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             tddy_daemon_auth::auth::LiveKitTokenServiceImpl::new(
                 user_resolver.clone(),
                 Arc::new(config_a.clone()),
+                tddy_daemon_livekit::room_tokens::room_token_minter(config_a.livekit.as_ref()),
             ),
         )) as Arc<dyn RpcService>,
     };

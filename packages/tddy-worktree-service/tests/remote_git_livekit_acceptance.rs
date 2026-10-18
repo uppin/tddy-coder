@@ -42,6 +42,23 @@ const PROJECT_ID: &str = "0198f1b0-0000-7000-8000-00000000e2e0";
 /// mint itself into any room as anybody. Session tokens are signed with the daemon's own key.
 const LK_API_SECRET: &str = "secret";
 
+/// The daemon's room-token minter, signing with the key and secret of the LiveKit testkit.
+struct TheDaemonsMinter;
+
+impl tddy_daemon_extensions::RoomTokenMinter for TheDaemonsMinter {
+    fn mint(&self, room: &str, identity: &str, ttl: Duration) -> Result<String, tddy_rpc::Status> {
+        tddy_livekit::TokenGenerator::new(
+            "devkey".to_string(),
+            LK_API_SECRET.to_string(),
+            room.to_string(),
+            identity.to_string(),
+            ttl,
+        )
+        .generate()
+        .map_err(|e| tddy_rpc::Status::internal(e.to_string()))
+    }
+}
+
 /// The OS user the daemon serves the project as. Unlike the admission suite — which stops before
 /// anything is spawned and can name any string — this suite runs a real `git` child, so the account
 /// has to exist: `git_argv` resolves it through passwd to drop privilege to it.
@@ -258,8 +275,13 @@ async fn a_served_project(suffix: &str) -> AServedProject {
 
     // The daemon's own auth wiring — the OAuth service, the room-token mint, and the resolver both
     // they and `RemoteGitService` verify tokens with. One resolver, as in production.
-    let auth = tddy_daemon_auth::auth::build_auth_entries(&config, "127.0.0.1", 0)
-        .expect("auth must build");
+    let auth = tddy_daemon_auth::auth::build_auth_entries(
+        &config,
+        "127.0.0.1",
+        0,
+        Arc::new(TheDaemonsMinter),
+    )
+    .expect("auth must build");
     let user_resolver: UserResolver = auth
         .user_resolver
         .clone()

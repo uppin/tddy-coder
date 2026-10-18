@@ -69,6 +69,14 @@ not on its dependency path, so neither port can quietly stop being one.
 The same test, on both crates, proves `tddy-daemon` is absent from either dependency path. That is
 what makes each extraction real rather than a re-export.
 
+**Room tokens are minted through one port.** The daemon decides once, from its `livekit:` block,
+whether it can mint LiveKit access tokens. `token.TokenService`, `auth.LiveKitTokenService` and
+screen sharing's desktop bridges all ask that one `RoomTokenMinter`
+([Extension ports](../../../packages/tddy-daemon-extensions/docs/extension-ports.md#the-room-tokens-port-room_tokens)),
+so a block missing its `url`, `api_key` or `api_secret` refuses every mint with the same message
+naming the missing field. The minter performs no authorization; each service keeps its own caller
+gate.
+
 **Which participant's key is believed** is one predicate, `tddy_service::may_be_daemon_discovery_identity`,
 read by both peer discovery and every client-facing LiveKit mint — see
 [LiveKit peer discovery § Trust model](livekit-peer-discovery.md#trust-model).

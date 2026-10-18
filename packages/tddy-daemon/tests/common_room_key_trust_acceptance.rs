@@ -23,15 +23,16 @@ use livekit::Room;
 use serial_test::serial;
 use tddy_daemon::common_room_key_directory::{advertised_signing_key, CommonRoomKeyDirectory};
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon_auth::token_provider::LiveKitTokenProvider;
+use tddy_daemon_auth::token_provider::MinterTokenProvider;
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, SIGNING_KEY_FILE};
+use tddy_daemon_kernel::config::LiveKitConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::{
     daemon_metadata_json, local_instance_id_for_config, parse_peer_daemon_json,
     spawn_common_room_discovery_loop, CommonRoomPeerRegistry, DaemonAdvertisement,
 };
+use tddy_daemon_livekit::room_tokens::room_token_minter;
 use tddy_github::session_token_v2::{SessionClaims, SessionTokenError};
 use tddy_github::GitHubUser;
-use tddy_livekit::TokenGenerator;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::token::{GenerateTokenRequest, TokenService as _};
@@ -211,16 +212,15 @@ impl Fleet {
     }
 
     /// `token.TokenService` as a daemon registers it, for a caller whose session token verifies.
-    fn the_client_facing_mint(&self) -> TokenServiceImpl<LiveKitTokenProvider> {
-        let generator = TokenGenerator::new(
-            LK_API_KEY.to_string(),
-            LK_API_SECRET.to_string(),
-            String::new(),
-            String::new(),
-            Duration::from_secs(600),
-        );
+    fn the_client_facing_mint(&self) -> TokenServiceImpl<MinterTokenProvider> {
+        let minter = room_token_minter(Some(&LiveKitConfig {
+            url: Some(self.ws_url.clone()),
+            api_key: Some(LK_API_KEY.to_string()),
+            api_secret: Some(LK_API_SECRET.to_string()),
+            ..Default::default()
+        }));
         TokenServiceImpl::authenticated(
-            LiveKitTokenProvider(Arc::new(generator)),
+            MinterTokenProvider::new(minter, Duration::from_secs(600)),
             Arc::new(|_session_token: &str| true),
         )
     }
@@ -350,7 +350,7 @@ fn advertisement_json(
 }
 
 async fn mint_room_token(
-    mint: &TokenServiceImpl<LiveKitTokenProvider>,
+    mint: &TokenServiceImpl<MinterTokenProvider>,
     room: &str,
     identity: &str,
 ) -> Result<String, tddy_rpc::Status> {
