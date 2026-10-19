@@ -1,5 +1,4 @@
-//! A mirror joins its session's room through the client room-transport port — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-client-transports.md`.
+//! A mirror joins its session's room through the client room-transport port — see `packages/tddy-room-client/docs/room-client.md`.
 
 use std::sync::Arc;
 use std::time::Duration;

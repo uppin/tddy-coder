@@ -1,5 +1,4 @@
-//! `LiveKitRoomConnector` joins a real LiveKit room and wraps it as a `RoomSession` — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-client-transports.md`.
+//! `LiveKitRoomConnector` joins a real LiveKit room and wraps it as a `RoomSession` — see `packages/tddy-room-client/docs/room-client.md`.
 //!
 //! Run with: cargo test -p tddy-livekit --test room_connector
 

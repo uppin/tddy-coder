@@ -1,5 +1,4 @@
-//! The git relay pipes stdio through a room duplex — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-client-transports.md`.
+//! The git relay pipes stdio through a room duplex — see `packages/tddy-room-client/docs/room-client.md`.
 
 use std::io::Cursor;
 

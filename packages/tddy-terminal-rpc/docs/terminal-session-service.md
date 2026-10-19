@@ -156,8 +156,7 @@ paths resolve unchanged.
 | `pty_runtime` | `PtyRuntime` and `PtySpawnSpec`: spawns an interactive tool as a registered `tddy_task` task. It resolves a target `os_user` up front — uid, gid and home through `tddy_daemon_kernel::privilege_drop` (re-exported here), a front-loaded `setpriv` launcher when the user differs from the daemon's, and the child's `HOME`/`PATH` overrides — then hands the resolved argv and env to `tddy_pty::PtyRuntime`, which has no notion of an OS user. An unresolvable user fails the task and reports the reason, without leaking a PTY pair |
 | `tddy_user_config` | a re-export of `tddy_daemon_kernel::user_paths::{load_tddy_user_config, spawn_path_extra_for_home, TddyUserHomeConfig}`: per-OS-user settings from `~/.tddy/config.yaml` |
 
-They are why this crate depends on `tddy-daemon-kernel`. The dependency is unconditional, unlike
-the optional `livekit` feature.
+They are why this crate depends on `tddy-daemon-kernel`.
 
 **Unix only, as it stands.** `pty_runtime`'s unconditional `pub use` of `privilege_drop` names two
 `#[cfg(unix)]` kernel items (`resolve_pty_os_user`, `ResolvedPtyUser`), so the crate does not build
@@ -167,11 +166,21 @@ on a non-unix target.
 
 `pty_relay`'s LiveKit path (`tddy-tools pty-relay --livekit-url`) waits for the session's
 `daemon-{instance_id}` participant, so it first calls `open_session_room_over_http(daemon_url,
-session_token, session_id)` (the `livekit` feature): a Connect-HTTP POST of `OpenSessionRoomRequest`
+session_token, session_id)`: a Connect-HTTP POST of `OpenSessionRoomRequest`
 to `session_room.SessionRoomService/OpenSessionRoom`, returning the decoded
 `OpenSessionRoomResponse`. `ConnectSession` is not used for this: it opens no room for a caller that
 did not arrive over LiveKit. A daemon whose LiveKit cannot be reached fails the call naming the room.
 `tests/pty_relay_room_opening.rs` pins that only the room service's path is hit, with the request body.
+
+## Joining the room through the client port
+
+`run_pty_relay(config, connector)` takes an `Arc<dyn RoomConnector>` from
+[`tddy-room-client`](../../tddy-room-client/docs/room-client.md) and names no transport; `tddy-tools`
+hands it LiveKit's. `join_terminal_room(config, livekit_url, server_identity, connector)` joins the
+configured room (`tddy-lobby` when none is named) as `client_identity`, minting from the API
+credentials for one hour and waiting thirty seconds for the server participant. The terminal stream
+opens through `RoomSession::open_duplex("terminal.TerminalService", "StreamTerminalIO")`.
+`tests/pty_relay_room_join.rs` pins the join request against an in-memory connector.
 
 ## Login shells
 

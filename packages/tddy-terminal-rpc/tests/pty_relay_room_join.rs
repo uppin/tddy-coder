@@ -1,5 +1,4 @@
-//! `pty-relay` joins its terminal room through the client room-transport port — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-client-transports.md`.
+//! `pty-relay` joins its terminal room through the client room-transport port — see `packages/tddy-room-client/docs/room-client.md`.
 
 use std::path::PathBuf;
 use std::time::Duration;

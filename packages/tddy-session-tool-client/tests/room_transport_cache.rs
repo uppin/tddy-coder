@@ -1,5 +1,4 @@
-//! The tool client joins a destination's room once and reuses the session — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-client-transports.md`.
+//! The tool client joins a destination's room once and reuses the session — see `packages/tddy-room-client/docs/room-client.md`.
 
 use std::sync::Arc;
 use std::time::Duration;
