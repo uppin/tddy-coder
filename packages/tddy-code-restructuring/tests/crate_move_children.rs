@@ -130,6 +130,7 @@ impl AKnownReferenceSet {
         workspace: &AWorkspace,
     ) -> Self {
         let text = workspace.read(from);
+        let declaration = workspace.read(declared_in);
         let referenced_at = text
             .match_indices(item)
             .map(|(offset, _)| Reference {
@@ -143,9 +144,10 @@ impl AKnownReferenceSet {
             .push(ItemReferences {
                 item: item.to_string(),
                 referenced_at,
-                // The widening pass is not what these tests are about; a top-level item at the
-                // file's start is what the reference set stood for before declarations had positions.
-                declared_at: Position { line: 1, col: 1 },
+                declared_at: position_of(
+                    &declaration,
+                    declaration.find(item).expect("the file declares the item"),
+                ),
                 within: Vec::new(),
                 kind: DeclarationKind::Item,
             });

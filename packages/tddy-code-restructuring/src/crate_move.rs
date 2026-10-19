@@ -245,10 +245,11 @@ pub fn cluster_resolution(
     workspace: &Workspace<'_>,
     cluster: &MovingCluster,
 ) -> Result<crate::Resolution> {
-    let edit = resolve_cluster(engine, workspace, cluster)?;
+    let (edit, report) = cluster::resolved_cluster(engine, workspace, cluster)?;
     let mut notes = carried::carried_notes(workspace, cluster)?;
     notes.extend(test_modules::notes_of(engine, workspace, cluster)?);
     Ok(crate::Resolution {
+        report,
         notes,
         ..crate::Resolution::of(edit)
     })
@@ -348,8 +349,7 @@ pub(crate) fn surveyed_in(
         reached_from_outside: reached,
         callers,
         declarations,
-        // TODO(reshape-move-widen): implement — the parent's `use <module>::*;`, read by `widening::glob`
-        reexported_by: None,
+        reexported_by: widening::glob::reexport_of(workspace, &moving.home)?,
     };
 
     Ok((survey, rewrites))
@@ -707,11 +707,15 @@ mod tests {
     /// name and each use of it.
     fn references_to(item: &str, file: &str, workspace: &AWorkspace) -> ItemReferences {
         let text = workspace.read(file);
+        let declaration = workspace.read(MODULE);
         ItemReferences {
             item: item.to_string(),
-            // TODO(reshape-move-widen): the declaration's real position in the moved file, once the
-            // widening pass edits at it — a reached item here is widened in the green phase.
-            declared_at: Position { line: 1, col: 1 },
+            declared_at: manifest_edits::position_of(
+                &declaration,
+                declaration
+                    .find(item)
+                    .expect("the module declares the item"),
+            ),
             within: Vec::new(),
             kind: DeclarationKind::Item,
             referenced_at: text

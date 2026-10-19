@@ -307,8 +307,11 @@ pub fn visibility(widened: &str) -> String {
 /// does. An extraction widens what it relocates, and that is an output of the operation rather
 /// than an implementation detail, so the two accounts of it must agree.
 pub fn widening(change: &VisibilityChange) -> String {
-    // TODO(reshape-move-widen): append ` ({reason})` when the change carries one.
-    format!("`{}` {} -> {}", change.item, change.from, change.to)
+    let stated = format!("`{}` {} -> {}", change.item, change.from, change.to);
+    match &change.reason {
+        Some(reason) => format!("{stated} ({reason})"),
+        None => stated,
+    }
 }
 
 /// Anything else an operation had to say about itself, as a line in the run's account.

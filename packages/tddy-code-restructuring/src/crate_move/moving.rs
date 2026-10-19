@@ -420,7 +420,7 @@ mod table_edits;
 use crate::crate_move::manifest_edits::target_tables;
 use crate::crate_move::moving::table_edits::target_table_edits;
 use crate::crate_move::moving::table_edits::CarriedLines;
-pub(crate) use facade_writer::{declared_in_destination, left_behind};
+pub(crate) use facade_writer::{declared_in_destination, left_behind, parent_reexports_of};
 
 #[cfg(test)]
 mod tests {
