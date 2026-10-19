@@ -19,13 +19,28 @@ impl tddy_rpc::RpcClientTransport for NeverCalled {
     async fn call_unary(&self, _: &str, _: &str, _: Vec<u8>) -> Result<Vec<u8>, Status> {
         unreachable!("no call is made")
     }
-    async fn call_server_stream(&self, _: &str, _: &str, _: Vec<u8>) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
+    async fn call_server_stream(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<u8>,
+    ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
         unreachable!("no call is made")
     }
-    async fn call_client_stream(&self, _: &str, _: &str, _: Vec<Vec<u8>>) -> Result<Vec<u8>, Status> {
+    async fn call_client_stream(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<Vec<u8>>,
+    ) -> Result<Vec<u8>, Status> {
         unreachable!("no call is made")
     }
-    async fn call_bidi_stream(&self, _: &str, _: &str, _: Vec<Vec<u8>>) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
+    async fn call_bidi_stream(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<Vec<u8>>,
+    ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
         unreachable!("no call is made")
     }
 }
@@ -46,8 +61,12 @@ async fn the_tool_client_joins_a_destination_once_and_reuses_the_session() {
     let cache = LiveKitRoomCache::default();
 
     // When two tool calls go to the same destination
-    room_session_via(&cache, &the_destination(), &connector).await.expect("first call joins");
-    room_session_via(&cache, &the_destination(), &connector).await.expect("second call reuses");
+    room_session_via(&cache, &the_destination(), &connector)
+        .await
+        .expect("first call joins");
+    room_session_via(&cache, &the_destination(), &connector)
+        .await
+        .expect("second call reuses");
 
     // Then the room was joined once, with the destination's token, waiting for its daemon
     assert_eq!(

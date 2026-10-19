@@ -57,7 +57,7 @@ futures-util = "0.3"
 pretty_assertions = { workspace = true }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
-tddy-session-tool-client = { path = "../tddy-session-tool-client", features = ["livekit"] }
+tddy-session-tool-client = { path = "../tddy-session-tool-client" }
 # The exec-tool suites that moved here with `ExecToolRpcHandler` — the workspace-jail and seatbelt
 # suites among them, and the session-room test that calls a tool through a room — bring what they
 # already used. All are existing workspace crates; nothing new enters the tree.

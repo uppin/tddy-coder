@@ -49,10 +49,25 @@ connector entry points and tests for `tddy-terminal-rpc` (pty-relay) and `tddy-s
 (room cache), and remote-git's relay test — they land in green with the switch. The ratchet
 assertions wait on #623's `WorkspaceGraph`; the bin-crate decision (Decisions) is still open.
 
+**As built (green, 2026-10-19):** the port crate, `LiveKitRoomConnector`, and the four libraries on the
+port with their binaries wiring the connector. Where the build departs from the contract above:
+`tddy_remote_git_repo::relay::run` now takes the connector (the contract's `run_with` was folded into it,
+since the old entry point had to go) and its stdio pump is `relay_over_duplex`, the seam the relay test
+drives; `tddy_session_sync::attach(credentials, connector)` and `AttachedSession` carry an
+`Arc<dyn RoomSession>` and plain `Vec<u8>` payloads (`AttachError::Token` is gone — a mint failure is
+now a `RoomConnectError::Room`); `tddy_terminal_rpc::pty_relay::run_pty_relay(config, connector)`; the
+tool client takes its connector from `install_room_connector`, a process-wide install the binary makes
+once (its entry points — `dispatch_session_tool`, the roster and the conversation calls — are called from
+too many places for a parameter, and changing them is out of scope here). `RoomConnectError` gained
+`Display`. `RoomAuth::Token` still leaves `RoomJoin.room`/`identity` carrying nothing the token does not
+(tool-client passes the destination's room and an empty identity, as its test pins); aligning with
+#630's credentials-variant shape was left, because it rewrites every `RoomJoin` in four red test files for
+no behaviour.
+
 **Red pass (2026-10-17):** added `join_terminal_room` + `tests/pty_relay_room_join.rs` (2 tests),
 `room_session_via` + `tests/room_transport_cache.rs`, and `in_memory::a_session_with_one_duplex`.
-⚠ **Open:** `the_relay_pipes_stdio_through_a_duplex_to_the_remote_git_service` is not written yet —
-the git relay's room seam remains to be specified (green writes it with the switch). **For green:**
+`the_relay_pipes_stdio_through_a_duplex_to_the_remote_git_service` was written in green, against the
+relay's `relay_over_duplex` seam. **For green:**
 with `RoomAuth::Token`, `RoomJoin.identity`/`room` carry nothing the token does not; align with #630's
 shape (room and identity inside the credentials variant) when the port is implemented.
 
@@ -109,14 +124,14 @@ Client libraries talk to "a room" and only their binaries know it is LiveKit.
 
 ## Scope
 
-- [ ] `tddy-room-client` crate (port + null object + in-memory test connector behind a `test-support` feature)
-- [ ] `LiveKitRoomConnector` in `tddy-livekit`
-- [ ] session-sync `attach` / `sync` on the port; binary wires the connector
-- [ ] remote-git-repo relay on the port (live duplex); binary wires it
-- [ ] terminal-rpc pty-relay LiveKit mode on the port; `livekit` feature removed
-- [ ] tool-client LiveKit transport + room cache on the port; `livekit` feature removed; discovery's feature removed
-- [ ] tddy-tools wires the connector behind its `livekit` feature
-- [ ] Ratchet: strike four entries
+- [x] `tddy-room-client` crate (port + null object + in-memory test connector behind a `test-support` feature)
+- [x] `LiveKitRoomConnector` in `tddy-livekit`
+- [x] session-sync `attach` / `sync` on the port; binary wires the connector
+- [x] remote-git-repo relay on the port (live duplex); binary wires it
+- [x] terminal-rpc pty-relay LiveKit mode on the port; `livekit` feature removed
+- [x] tool-client LiveKit transport + room cache on the port; `livekit` feature removed; discovery's feature removed
+- [x] tddy-tools wires the connector behind its `livekit` feature
+- [x] Ratchet: strike four entries
 
 ## Technical Changes
 
@@ -146,10 +161,10 @@ As listed in Scope. Plus `Cargo.toml` changes: the four libraries −`tddy-livek
 `required-features`/dependency placement). See Decisions.
 
 ## Implementation Milestones
-- [ ] M1 Port crate + in-memory connector; plugin connector over `connect_client`
-- [ ] M2 session-sync and remote-git-repo switched (testkit suites green through the bins)
-- [ ] M3 terminal-rpc and tool-client switched; features removed
-- [ ] M4 Manifests; ratchet green
+- [x] M1 Port crate + in-memory connector; plugin connector over `connect_client`
+- [x] M2 session-sync and remote-git-repo switched (testkit suites green through the bins)
+- [x] M3 terminal-rpc and tool-client switched; features removed
+- [x] M4 Manifests; ratchet green
 
 ## Testing Plan
 
@@ -163,10 +178,12 @@ testkit-backed suites of each tool, which run through the binaries' wiring.
 |---|---|---|
 | `a_mirror_joins_the_session_room_under_its_own_identity_and_waits_for_the_daemon` | `packages/tddy-session-sync/tests/attach_room_join.rs` (new) | `attach` asks the connector for `session-{id}`, identity `syncer-…`, peer `daemon-{instance}`, credentials auth |
 | `a_daemon_that_never_arrives_is_reported_absent` | same | `PeerAbsent` → `AttachError::DaemonAbsent { identity, room, waited }` |
-| `the_relay_pipes_stdio_through_a_duplex_to_the_remote_git_service` | `packages/tddy-remote-git-repo/tests/relay_over_room.rs` (new) | Bytes written to the relay's stdin arrive on the duplex's outbound side, and inbound frames reach stdout |
+| `the_relay_pipes_stdio_through_a_duplex_to_the_remote_git_service` | `packages/tddy-remote-git-repo/tests/relay_over_room.rs` (new) | Bytes written to the relay's stdin arrive on the duplex's outbound side, and inbound frames reach stdout (through `relay_over_duplex`; `relay::run`'s own join is covered by the testkit suites through the binary) |
 | `pty_relay_joins_the_room_it_was_told_as_its_own_identity_and_waits_for_the_server` | `packages/tddy-terminal-rpc/tests/pty_relay_room_join.rs` (new) | Join request (room, identity, server identity) and the `terminal.TerminalService` call through `rpc()` |
 | `the_tool_client_joins_a_destination_once_and_reuses_the_session` | `packages/tddy-session-tool-client/tests/room_transport_cache.rs` (new) | Two dispatches, one `connect`; a gone peer reconnects |
 | `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Four entries struck; both ratchet tests pass |
+| `a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary` | same | The three lib+bin crates on the allowed set keep LiveKit out of their library sources (Decisions) |
+| `a_session_joined_with_credentials_reaches_the_peer_through_rpc`, `a_session_joined_with_a_token_reaches_the_peer`, `a_duplex_carries_frames_both_ways_while_the_stream_is_open`, `a_subscription_receives_what_is_broadcast_on_its_topic`, `a_peer_that_never_joins_is_reported_absent`, `a_server_that_cannot_be_reached_is_a_room_error` | `packages/tddy-livekit/tests/room_connector.rs` (new, written in green) | `LiveKitRoomConnector` against a real LiveKit server: both auth shapes, rpc, duplex, broadcast, the two failures |
 
 Unit (`tddy-room-client/src/lib.rs`): `with_nothing_wired_connecting_fails_naming_the_missing_transport`.
 
@@ -177,10 +194,22 @@ Unit (`tddy-room-client/src/lib.rs`): `with_nothing_wired_connecting_fails_namin
   `tddy-tools` build should not link a daemon-ports crate for its client transport.
 - **Build on `tddy_rpc::RpcClientTransport`.** It already abstracts the calls. Only joining, live
   duplex, broadcast and presence are new.
-- **Binary-only LiveKit edge for lib+bin crates.** The ratchet counts a crate's normal dependencies,
-  and a dependency used only by `[[bin]]` still appears there. Wave 2 must decide between a
-  bin-only crate (e.g. `tddy-session-sync-cli`) and an allowed-set entry for the lib+bin crate with
-  its lib verified clean by a shape test. ⚠ Open: the ratchet tests treat the crate as a unit.
+- **Binary-only LiveKit edge for lib+bin crates: an allowed-set entry, verified by a shape test.**
+  The ratchet counts a crate's normal dependencies, and a dependency used only by `[[bin]]` still
+  appears there — Cargo has no binary-only dependency. Chosen: `tddy-session-sync`,
+  `tddy-remote-git-repo` and `tddy-tools` join the ratchet's allowed set as
+  `WIRING_WITH_A_LIBRARY`, and a new test (`a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary`)
+  reads every source file of those crates but `src/main.rs` and fails on a path into a LiveKit crate,
+  so the allowance stays what it says: the binary's wiring. Rejected: a bin-only crate
+  (`tddy-session-sync-cli`) — a new workspace crate for each of three binaries, three more manifests
+  and the `./install`/`./release` scripts to learn them, for an edge the shape test already holds.
+  `tddy-tools` is on the list too, which the contract did not foresee: it named no LiveKit crate
+  before (its feature forwarded to the libraries'), and now wires the plugin itself.
+- **The tool client's connector is process-wide.** `dispatch_session_tool`, the conversation calls
+  and the roster's `livekit_session` are called from a dozen sites in `tddy-tools` and `tddy-discovery`;
+  a parameter on each is the transport-selection rewrite this PR is told not to make. The binary calls
+  `install_room_connector` once; uninstalled, a join fails with `NoRoomTransport`'s message. `room_session_via`
+  keeps the connector as a parameter, which is what the tests drive.
 - **Size risk.** Five libraries and three binaries make a large review. If wave 2's surface shows it
   is too large, split by capability: 7a (session-sync and remote-git-repo, the joiners holding
   sessions) and 7b (pty-relay, tool-client and discovery, the call-and-go clients). Renumbering the
@@ -208,13 +237,13 @@ Unit (`tddy-room-client/src/lib.rs`): `with_nothing_wired_connecting_fails_namin
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Run scoped tests for touched packages (full-workspace result from CI)
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped)
+- [x] Linting and formatting (scoped)
 - [ ] Wrap documentation (/wrap-context-docs)
 - [ ] USER REVIEW — work complete

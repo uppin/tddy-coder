@@ -5,7 +5,6 @@
 //! LiveKit; the relay reaches the daemon over HTTP, so it asks the LiveKit integration's own
 //! `SessionRoomService.OpenSessionRoom` — PRD
 //! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-integration.md`.
-#![cfg(feature = "livekit")]
 
 use pretty_assertions::assert_eq;
 use prost::Message as _;

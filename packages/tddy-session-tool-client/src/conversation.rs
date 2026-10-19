@@ -13,7 +13,6 @@ use tddy_service::proto::exec_tools::{
     DiffOp, ExecuteToolRequest, PullOp, PullRangeOp, RemoveOp, ResetOp, SyncOp,
 };
 
-#[cfg(feature = "livekit")]
 use crate::livekit_session;
 use crate::{
     clamp_remote_blocking_args, connect_sandbox_ipc, detect_session_tool_transport,
@@ -202,7 +201,6 @@ async fn ask_conversation_worktree(
     }
 }
 
-#[cfg(feature = "livekit")]
 async fn ask_daemon_over_livekit(
     key: &LiveKitRoomKey,
     request: ConversationWorktreeRequest,
@@ -215,19 +213,6 @@ async fn ask_daemon_over_livekit(
         )),
         Err(e) => error_body(e),
     }
-}
-
-/// Without the `livekit` feature a split session cannot reach its daemon at all, and says so.
-#[cfg(not(feature = "livekit"))]
-async fn ask_daemon_over_livekit(
-    _key: &LiveKitRoomKey,
-    _request: ConversationWorktreeRequest,
-) -> String {
-    error_body(
-        "remote worktree dispatch requires the 'livekit' cargo feature; \
-         rebuild with: cargo build -p tddy-tools --features livekit"
-            .to_string(),
-    )
 }
 
 /// `ExecToolService/ConversationWorktree` over an RPC transport, answered with the result JSON.

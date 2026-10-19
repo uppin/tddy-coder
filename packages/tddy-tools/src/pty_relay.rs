@@ -16,12 +16,12 @@
 //!     --session-id <session-id> \
 //!     --session-token <token>
 //!
-//! LiveKit connect-only mode (--server-identity, requires --features livekit):
+//! LiveKit connect-only mode (--server-identity):
 //!   tddy-tools pty-relay \
 //!     --livekit-url ws://127.0.0.1:7880 \
 //!     --livekit-room tddy-lobby --server-identity daemon-udoo-…-<session_id>
 //!
-//! LiveKit start-and-connect mode (--daemon-identity, requires --features livekit):
+//! LiveKit start-and-connect mode (--daemon-identity):
 //!   tddy-tools pty-relay \
 //!     --livekit-url ws://127.0.0.1:7880 \
 //!     --livekit-room tddy-lobby \
@@ -47,7 +47,7 @@ pub struct PtyRelayArgs {
     #[arg(short = 'C', long = "dir", default_value = ".")]
     pub dir: std::path::PathBuf,
 
-    // -- LiveKit shared args (requires --features livekit) --------------------
+    // -- LiveKit shared args --------------------
     /// LiveKit server URL (e.g. ws://127.0.0.1:7880). Enables LiveKit mode.
     #[arg(long)]
     pub livekit_url: Option<String>,
@@ -134,8 +134,11 @@ pub struct PtyRelayArgs {
 
 /// Run the `pty-relay` subcommand: hand the parsed arguments to the relay in
 /// `tddy-terminal-rpc`, which picks its dispatch mode from which of them are set.
-pub async fn run_pty_relay(args: PtyRelayArgs) -> Result<()> {
-    tddy_terminal_rpc::pty_relay::run_pty_relay(args.into_config()).await
+pub async fn run_pty_relay(
+    args: PtyRelayArgs,
+    connector: std::sync::Arc<dyn tddy_room_client::RoomConnector>,
+) -> Result<()> {
+    tddy_terminal_rpc::pty_relay::run_pty_relay(args.into_config(), connector).await
 }
 
 impl PtyRelayArgs {

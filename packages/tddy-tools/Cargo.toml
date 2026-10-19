@@ -62,9 +62,13 @@ bytes = "1"
 # daemon-rpc: Connect-protocol RPC client used by session-hook (default-on).
 tddy-service = { path = "../tddy-service" }
 # Reaching this session's daemon: transport detection and tool dispatch over the sandbox socket,
-# daemon HTTP or LiveKit RPC. Its `livekit` feature is off by default and turned on by this crate's.
+# daemon HTTP or the installed room transport.
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }
 prost = { version = "0.13" }
+# The client room transport port every library below joins rooms through, and — behind `livekit`,
+# named by `src/main.rs` alone — the LiveKit implementation this binary wires into it.
+tddy-room-client = { path = "../tddy-room-client" }
+tddy-livekit = { path = "../tddy-livekit", optional = true }
 # The generated `CodeIndexServiceClient` and the `Status` its refusals arrive as. Transport only:
 # this crate serves no gRPC of its own.
 tonic = { version = "0.12", default-features = false, features = ["transport", "codegen", "prost"] }
@@ -74,19 +78,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 [features]
 # On by default: `--mcp` dispatch for a split session (agent on one host, worktree on another)
 # reaches the remote daemon over LiveKit RPC, so a shipped tddy-tools must carry the SDK. A build
-# that only ever talks stdio (in-jail) can drop it with --no-default-features.
+# that only ever talks stdio (in-jail) can drop it with --no-default-features; its room joins then
+# fail naming that no room transport is wired. Only `src/main.rs` names the plugin.
 default = ["livekit"]
-# No `dep:` entries left: this crate names no LiveKit type of its own since `pty_relay`'s relay
-# moved to tddy-terminal-rpc, `session_tool_client` to tddy-session-tool-client and the roster to
-# tddy-discovery. What the feature does now is turn the SDK on in the three crates that do the
-# connecting — `tddy-discovery`'s roster reaches the facilitating daemon over the same LiveKit
-# room the tool client does, so leaving it out would serve a split session a roster it cannot
-# follow.
-livekit = [
-    "tddy-terminal-rpc/livekit",
-    "tddy-session-tool-client/livekit",
-    "tddy-discovery/livekit",
-]
+livekit = ["dep:tddy-livekit"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
