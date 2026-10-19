@@ -18,12 +18,25 @@ this seam cannot be cut here: rust-analyzer offers no "extract into function" as
 A probe over a single plain `let` statement of `start_host_stream` (`let target = ...?;`) was refused the
 same way, so the range shape (`?`, `.await`, a moved parameter) is not the cause.
 
-## Cause: not confirmed
+## Cause: narrowed by probes (2026-10-19), mechanism still not read from rust-analyzer
 
-The methods sit in `#[async_trait] impl ScreenSharingService for ScreenSharingServiceImpl`. The suspicion is
-that rust-analyzer offers no function extraction for code inside an attribute-macro-expanded item, because the
-range does not map back through the expansion. That was not verified: no experiment was run with the attribute
-removed, nor on another `#[async_trait]` impl.
+`check --deep` over single-operation `extract_method` plans on the same file and the same warm index:
+
+| Probe | Where | Result |
+|---|---|---|
+| P1 | two statements of the plain inherent `resolve_session_dir` | no findings |
+| P2 | a `let ...?;` statement of the inherent `async fn spawn_bridge` (`bridge_lifecycle.rs`) | no findings |
+| P3 | one `self.require_user(...)?;` statement of `stop_host_stream` (`#[async_trait]` impl) | refused: offers only "Extract into variable" |
+| P4 | the tail expression of `stop_host_stream` | refused: no hover at the position, "cannot type this position" |
+| P5 | P3 with `variant: "module"` | refused, same as P3 |
+
+So `async fn`, `?`, `.await` and moved parameters are not the cause; the `#[async_trait]` impl is. Inside it
+rust-analyzer either cannot type positions (P4) or offers no function extraction (P3, P5), consistent with
+the bodies being attribute-macro-expanded. The expansion itself was not inspected.
+
+No other operation in `plan-schema.md` reaches a trait-impl method body: `retarget_impl` refuses a trait impl at
+parse time, `extract_module` over some members of a trait impl would produce a second `impl Trait for Type`
+(`E0119`/`E0046`, documented), and the rest act on inherent items or ranges.
 
 ## Consequence
 
