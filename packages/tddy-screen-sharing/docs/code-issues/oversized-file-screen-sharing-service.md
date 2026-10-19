@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-screen-sharing/src/screen_sharing_service.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-24 — `/pr-wrap` step 3.5 file-length gate on #509 (`#keyring` 2/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **421 production lines** (2026-10-19, #653; was 983 before the split, 967 before #626) of 1,891 total (`#[cfg(all(test, unix))]` at line 422) · budget 500 · **under budget**
+**Metrics:** **421 production lines** (2026-10-19, #653; was 983 before the split, 967 before #626) of 1,777 total (`#[cfg(all(test, unix))]` at line 422) · budget 500 · **under budget**
 **Thresholds breached:** none
 **Restructure:** seams A and B applied by the engine, seam C by hand with the developer's consent, all in #653
 **Status:** **Resolved by #653 (2026-10-19) — delete at wrap**, recording 421 in the change-history entry first
