@@ -7,9 +7,10 @@
  * the response, and this screen says so rather than leaving the operator to wonder.
  */
 
-import { useEffect, useState } from "react";
-import { ConnectError, type Client } from "@connectrpc/connect";
+import { useCallback, useEffect, useState } from "react";
+import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import type { DaemonConfigService } from "../../gen/daemon_config_pb";
+import { integrationStatusText } from "./integrationStatusText";
 import { toFormState, toUpdateSettings, type DaemonSettingsFormState } from "./settingsForm";
 
 export interface DaemonSettingsScreenProps {
@@ -21,6 +22,9 @@ export interface DaemonSettingsScreenProps {
 const inputClass = "w-full rounded border border-border px-2 py-1 text-sm";
 const labelClass = "block text-sm mb-1 text-muted-foreground";
 
+/** How often the LiveKit status line is re-read while the screen is open. */
+const INTEGRATION_STATUS_POLL_MS = 5000;
+
 export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScreenProps) {
   // Null until the daemon has answered: a blank form would read as a daemon with no configuration.
   const [form, setForm] = useState<DaemonSettingsFormState | null>(null);
@@ -28,6 +32,8 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
   const [restartRequired, setRestartRequired] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Null when there is no line to show: an older daemon, or one with no LiveKit entry.
+  const [liveKitStatusText, setLiveKitStatusText] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +52,28 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
     };
   }, [client, sessionToken]);
 
+  const readLiveKitStatus = useCallback(async () => {
+    try {
+      const response = await client.getIntegrationStatus({ sessionToken });
+      const livekit = response.integrations.find((entry) => entry.id === "livekit");
+      setLiveKitStatusText(livekit ? integrationStatusText(livekit, new Date()) : null);
+    } catch (err) {
+      const connectError = ConnectError.from(err);
+      if (connectError.code === Code.Unimplemented) {
+        // A daemon too old to report its integrations is not a broken one: no line, form unaffected.
+        setLiveKitStatusText(null);
+        return;
+      }
+      setError(connectError.rawMessage);
+    }
+  }, [client, sessionToken]);
+
+  useEffect(() => {
+    void readLiveKitStatus();
+    const interval = setInterval(() => void readLiveKitStatus(), INTEGRATION_STATUS_POLL_MS);
+    return () => clearInterval(interval);
+  }, [readLiveKitStatus]);
+
   // Typed per field rather than as `string`, so the LiveKit switch is edited through the same one
   // helper every text field is — a checkbox writing a boolean is not a different kind of edit.
   const edit = <Field extends keyof DaemonSettingsFormState>(
@@ -63,6 +91,8 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
       });
       setRestartRequired(response.restartRequired);
       setError(null);
+      // The save is the operator's cue to look at whether the daemon can now reach the new server.
+      void readLiveKitStatus();
     } catch (err) {
       // The form keeps what was entered: a refused value is the one the operator has to correct.
       setError(ConnectError.from(err).rawMessage);
@@ -87,6 +117,11 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
         <>
           <div className="flex max-w-md flex-col gap-3 rounded-md border border-border p-4">
             <div className="font-medium">LiveKit</div>
+            {liveKitStatusText === null ? null : (
+              <div data-testid="daemon-settings-livekit-status" className="text-sm">
+                {liveKitStatusText}
+              </div>
+            )}
             {/* The operator's switch. Off keeps every field below it, so turning the common room
                 back on is this one checkbox rather than four credentials retyped. */}
             <label className="flex items-center gap-2 text-sm">

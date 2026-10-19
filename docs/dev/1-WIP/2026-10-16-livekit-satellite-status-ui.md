@@ -94,8 +94,8 @@ The screen fetches status alongside the config and renders the line under the Li
 `DaemonSettingsScreen.tsx`, new `integrationStatusText.ts` and test, the driver, and the new spec.
 
 ## Implementation Milestones
-- [ ] M1 Presentation function + unit tests
-- [ ] M2 Screen + spec green
+- [x] M1 Presentation function + unit tests (bun test: 6 pass, 0 fail)
+- [x] M2 Screen + spec green (DaemonSettingsIntegrationStatus.cy.tsx: 6 passing; DaemonSettingsAcceptance.cy.tsx: 9 passing)
 
 ## Testing Plan
 
@@ -147,7 +147,7 @@ minutes, hours).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
