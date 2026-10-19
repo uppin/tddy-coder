@@ -84,6 +84,8 @@ pub use statements::statements;
 mod tokens;
 pub use tokens::token_difference;
 
+mod detach;
+pub use detach::Detach;
 mod rebind;
 pub use rebind::Rebind;
 mod repoint;
@@ -211,7 +213,8 @@ pub fn compare_with(
     let headed =
         retarget::repeated_generic_headers(accounted.missing, accounted.added, &before_statements);
     let rebound = rebind::account(headed.missing, headed.added, declared);
-    let called = repoint::account(rebound.missing, rebound.added, declared);
+    let detached = detach::account(rebound.missing, rebound.added, declared);
+    let called = repoint::account(detached.missing, detached.added, declared);
     let paired = pair_by(called.missing, called.added, re_point_key);
     let reflowed = reflow_pass(paired.missing, paired.added);
 
@@ -224,6 +227,7 @@ pub fn compare_with(
             repointed: accounted.pairs
                 + headed.pairs
                 + rebound.pairs
+                + detached.pairs
                 + called.pairs
                 + paired.pairs
                 + reflowed.pairs,

@@ -899,6 +899,7 @@ async fn holds_a_tree_against_the_ref_it_was_committed_as() {
             retargets: Vec::new(),
             repoints: Vec::new(),
             rebinds: Vec::new(),
+            detaches: Vec::new(),
         },
     )
     .await

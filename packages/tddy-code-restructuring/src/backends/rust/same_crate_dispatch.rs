@@ -1,10 +1,10 @@
-//! The three moves within one crate, routed from one arm of `check` and of `resolve`.
+//! The operations within one crate, routed from one arm of `check` and of `resolve`.
 //!
-//! `move_item`, `reparent_module` and `move_impl_members` are each authored in this backend and
-//! informed by the server; `rust.rs` names them once here rather than once per kind, so a new
-//! same-crate move does not grow the two dispatchers on the function-size list.
+//! `move_item`, `reparent_module`, `move_impl_members` and `detach_method` are each authored in this
+//! backend and informed by the server; `rust.rs` names them once here rather than once per kind, so
+//! a new same-crate operation does not grow the two dispatchers on the function-size list.
 
-use super::{impl_move, item_move, module_reparent, RustBackend};
+use super::{detach_method, impl_move, item_move, module_reparent, RustBackend};
 use crate::edit::Resolution;
 use crate::plan::{RefactorKind, RefactorOp};
 use crate::registry::Workspace;
@@ -14,7 +14,10 @@ use crate::Result;
 pub(super) fn handles(kind: RefactorKind) -> bool {
     matches!(
         kind,
-        RefactorKind::MoveItem | RefactorKind::ReparentModule | RefactorKind::MoveImplMembers
+        RefactorKind::MoveItem
+            | RefactorKind::ReparentModule
+            | RefactorKind::MoveImplMembers
+            | RefactorKind::DetachMethod
     )
 }
 
@@ -23,6 +26,7 @@ pub(super) fn findings(op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Vec
     match op.op {
         RefactorKind::ReparentModule => module_reparent::findings(op, workspace),
         RefactorKind::MoveImplMembers => impl_move::findings(op, workspace),
+        RefactorKind::DetachMethod => detach_method::findings(op, workspace),
         _ => item_move::findings(op, workspace),
     }
 }
@@ -37,6 +41,7 @@ impl RustBackend {
         match op.op {
             RefactorKind::ReparentModule => self.reparent_module(op, workspace),
             RefactorKind::MoveImplMembers => self.move_impl_members(op, workspace),
+            RefactorKind::DetachMethod => detach_method::resolve(self, op, workspace),
             _ => self.move_items(op, workspace),
         }
     }

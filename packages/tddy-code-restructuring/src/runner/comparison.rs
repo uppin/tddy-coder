@@ -30,6 +30,7 @@ pub fn verify(root: &Path, options: Options) -> Result<crate::verify::Comparison
     let declared =
         crate::verify::Declared::from_declarations(&options.retargets, &options.repoints)
             .and_then(|declared| declared.with_rebinds(&options.rebinds))
+            .and_then(|declared| declared.with_detaches(&options.detaches))
             .map_err(usage)?;
     Ok(crate::verify::compare_with(&before, &after, &declared))
 }
