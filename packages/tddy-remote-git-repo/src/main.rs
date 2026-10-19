@@ -7,9 +7,11 @@
 //! ```
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use clap::error::ErrorKind;
 use clap::Parser;
+use tddy_livekit::room_connector::LiveKitRoomConnector;
 use tddy_remote_git_repo::credentials::{resolve_credentials, CredentialArgs};
 use tddy_remote_git_repo::relay::TRANSPORT_FAILURE_EXIT_CODE;
 use tddy_remote_git_repo::{relay, ssh_argv};
@@ -81,7 +83,7 @@ async fn main() {
         }
     };
 
-    match relay::run(request, credentials).await {
+    match relay::run(request, credentials, Arc::new(LiveKitRoomConnector)).await {
         Ok(exit_code) => std::process::exit(exit_code),
         Err(e) => {
             eprintln!("tddy-remote-git-repo: {e}");

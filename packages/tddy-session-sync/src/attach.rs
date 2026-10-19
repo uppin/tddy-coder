@@ -8,7 +8,8 @@
 //! 1. **Connect-HTTP against `--daemon-url`** — exchange a refresh token if that is what was given,
 //!    then `ListSessions` to learn the session's `project_id`, worktree path and
 //!    **`daemon_instance_id`**.
-//! 2. **LiveKit** — mint a token for `session-{session_id}`, join it, and address the RPC client at
+//! 2. **The room** — join `session-{session_id}` through the [`RoomConnector`] the binary hands in
+//!    (minting a token for it from the LiveKit credentials), and address the RPC client at
 //!    `daemon-{daemon_instance_id}`.
 //!
 //! The `daemon_instance_id` is what makes the order forced: a room's RPC client must be addressed
@@ -22,11 +23,12 @@
 //! and what makes an entry unusable — is a pure function below, so it is testable without a daemon
 //! and without a LiveKit server.
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use tddy_livekit::broadcast::BroadcastMessage;
-use tddy_livekit::client_connect::{connect_client, ConnectError, ConnectedClient};
-use tddy_livekit::{BroadcastChannel, TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};
+use tddy_room_client::{
+    RoomAuth, RoomConnectError, RoomConnector, RoomJoin, RoomSession as JoinedRoom,
+};
 use tddy_service::proto::auth::{RefreshSessionRequest, RefreshSessionResponse};
 use tddy_service::proto::session::{ListSessionsRequest, ListSessionsResponse, SessionEntry};
 use tddy_service::proto::session_room::{OpenSessionRoomRequest, OpenSessionRoomResponse};
@@ -69,18 +71,25 @@ pub struct SessionAddress {
     pub daemon_instance_id: String,
 }
 
+/// How long the token a mirror joins with stays valid: six hours, which is LiveKit's own default and
+/// what the LiveKit plugin's `DEFAULT_LIVEKIT_JWT_TTL_SECS` names. Spelled here because this library
+/// names no LiveKit crate; a mirror is not meant to outlive its token's refresh-free life.
+const ROOM_TOKEN_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
 /// The room, the client addressed at the daemon in it, and the two topics the syncer consumes.
 ///
-/// The whole [`ConnectedClient`] is carried rather than only its `client`, because the connection
-/// lives exactly as long as its room handle: dropping it leaves the room, and a syncer that left
-/// the room receives no further broadcast while reporting no failure at all.
+/// The whole joined session is carried rather than only its RPC client, because the connection
+/// lives exactly as long as its session: dropping it leaves the room, and a syncer that left the
+/// room receives no further broadcast while reporting no failure at all.
 pub struct AttachedSession {
     pub address: SessionAddress,
     /// The access token every RPC carries, already exchanged if a refresh token was what was given.
     pub session_token: String,
-    pub connection: ConnectedClient,
-    pub session_activity: mpsc::UnboundedReceiver<BroadcastMessage>,
-    pub worktree_activity: mpsc::UnboundedReceiver<BroadcastMessage>,
+    pub connection: Arc<dyn JoinedRoom>,
+    /// Payloads of the `session.activity` topic.
+    pub session_activity: mpsc::UnboundedReceiver<Vec<u8>>,
+    /// Payloads of the `worktree.activity` topic.
+    pub worktree_activity: mpsc::UnboundedReceiver<Vec<u8>>,
 }
 
 /// Why the syncer could not attach to the session it was asked for.
@@ -104,8 +113,6 @@ pub enum AttachError {
     },
     /// A call to the daemon's HTTP surface did not produce an answer.
     Daemon(DaemonHttpError),
-    /// The LiveKit token could not be minted from the configured key and secret.
-    Token { room: String, reason: String },
     /// The room itself could not be joined.
     Room {
         url: String,
@@ -141,10 +148,6 @@ impl std::fmt::Display for AttachError {
                  mirror it from"
             ),
             AttachError::Daemon(e) => write!(f, "{e}"),
-            AttachError::Token { room, reason } => write!(
-                f,
-                "could not mint a LiveKit token for room \"{room}\": {reason}"
-            ),
             AttachError::Room { url, room, reason } => {
                 write!(f, "could not join room \"{room}\" at {url}: {reason}")
             }
@@ -239,8 +242,12 @@ pub fn resolve_session(
     })
 }
 
-/// Resolve the session over HTTP, then join its room and subscribe to both broadcast topics.
-pub async fn attach(credentials: &Credentials) -> Result<AttachedSession, AttachError> {
+/// Resolve the session over HTTP, then join its room through `connector` and subscribe to both
+/// broadcast topics.
+pub async fn attach(
+    credentials: &Credentials,
+    connector: Arc<dyn RoomConnector>,
+) -> Result<AttachedSession, AttachError> {
     let http = DaemonHttp::new(&credentials.daemon_url, credentials.connect_timeout)?;
 
     // One access token serves every leg from here on. A refresh token is exchanged first because
@@ -261,54 +268,25 @@ pub async fn attach(credentials: &Credentials) -> Result<AttachedSession, Attach
     http.open_session_room(&session_token, &address.session_id)
         .await?;
 
-    let room_name = session_room_name(&address.session_id);
-    let identity = syncer_identity(&address.session_id, &join_nonce());
-    let token = TokenGenerator::new(
-        credentials.livekit.api_key.clone(),
-        credentials.livekit.api_secret.clone(),
-        room_name.clone(),
-        identity,
-        Duration::from_secs(DEFAULT_LIVEKIT_JWT_TTL_SECS),
-    )
-    .generate()
-    .map_err(|e| AttachError::Token {
-        room: room_name.clone(),
-        reason: e.to_string(),
-    })?;
-
-    let daemon = daemon_identity(&address.daemon_instance_id);
-    let connected = connect_client(
-        &credentials.livekit.url,
-        &token,
-        &daemon,
+    let connection = join_session_room(
+        &address,
+        &credentials.livekit,
+        &syncer_identity(&address.session_id, &join_nonce()),
         credentials.connect_timeout,
+        connector.as_ref(),
     )
-    .await
-    .map_err(|e| match e {
-        ConnectError::Room(reason) => AttachError::Room {
-            url: credentials.livekit.url.clone(),
-            room: room_name.clone(),
-            reason,
-        },
-        ConnectError::ParticipantAbsent { identity, waited } => AttachError::DaemonAbsent {
-            identity,
-            room: room_name.clone(),
-            waited,
-        },
-    })?;
+    .await?;
 
     // Subscribed before the first RPC is made, so a record published while the syncer was still
     // resolving the session is delivered rather than missed. Each subscription owns its own event
     // stream, so the two topics and the RPC loop never race for one event.
-    let session_activity =
-        BroadcastChannel::new(connected.room.clone(), SESSION_ACTIVITY_TOPIC).subscribe();
-    let worktree_activity =
-        BroadcastChannel::new(connected.room.clone(), WORKTREE_ACTIVITY_TOPIC).subscribe();
+    let session_activity = connection.subscribe(SESSION_ACTIVITY_TOPIC);
+    let worktree_activity = connection.subscribe(WORKTREE_ACTIVITY_TOPIC);
 
     Ok(AttachedSession {
         address,
         session_token,
-        connection: connected,
+        connection,
         session_activity,
         worktree_activity,
     })
@@ -338,10 +316,35 @@ pub async fn join_session_room(
     livekit: &crate::credentials::LiveKitCredentials,
     identity: &str,
     wait: Duration,
-    connector: &dyn tddy_room_client::RoomConnector,
-) -> Result<std::sync::Arc<dyn tddy_room_client::RoomSession>, AttachError> {
-    let _ = (address, livekit, identity, wait, connector);
-    todo!("join_session_room")
+    connector: &dyn RoomConnector,
+) -> Result<Arc<dyn JoinedRoom>, AttachError> {
+    let room = session_room_name(&address.session_id);
+    let daemon = daemon_identity(&address.daemon_instance_id);
+    let join = RoomJoin {
+        url: livekit.url.clone(),
+        room: room.clone(),
+        identity: identity.to_string(),
+        auth: RoomAuth::Credentials {
+            api_key: livekit.api_key.clone(),
+            api_secret: livekit.api_secret.clone(),
+            ttl: ROOM_TOKEN_TTL,
+        },
+    };
+    connector
+        .connect(&join, &daemon, wait)
+        .await
+        .map_err(|e| match e {
+            RoomConnectError::Room(reason) => AttachError::Room {
+                url: livekit.url.clone(),
+                room,
+                reason,
+            },
+            RoomConnectError::PeerAbsent { identity, waited } => AttachError::DaemonAbsent {
+                identity,
+                room,
+                waited,
+            },
+        })
 }
 
 /// Ask the daemon at `daemon_url` to open `session_id`'s room with itself in it, before a mirror

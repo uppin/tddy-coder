@@ -9,8 +9,10 @@
 //! Product contract: `docs/ft/daemon/session-worktree-sync.md`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Parser;
+use tddy_livekit::room_connector::LiveKitRoomConnector;
 use tddy_session_sync::{attach, layered_environment, resolve_credentials, run, SyncArgs};
 
 /// Every secret carries `hide_env_values`: clap would otherwise print the live token in `--help`,
@@ -119,7 +121,7 @@ async fn main() {
 
     // Resolve the session and join its room before anything is written locally, so a session id
     // nobody knows fails naming itself rather than after a directory has been taken over for it.
-    let attached = match attach(&credentials).await {
+    let attached = match attach(&credentials, Arc::new(LiveKitRoomConnector)).await {
         Ok(attached) => attached,
         Err(e) => {
             eprintln!("tddy-session-sync: {e}");

@@ -40,6 +40,7 @@ use tddy_daemon_extensions::IntegrationStatusBoard;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::session_room::SessionRoomRegistry;
 use tddy_daemon_livekit::{LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
+use tddy_livekit::room_connector::LiveKitRoomConnector;
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_projects::project_storage::{write_projects, ProjectData};
@@ -344,7 +345,7 @@ impl AMirroredSession {
             // before it is declared wedged.
             connect_timeout: MIRROR_TIMEOUT,
         };
-        let attached = tddy_session_sync::attach(&credentials)
+        let attached = tddy_session_sync::attach(&credentials, Arc::new(LiveKitRoomConnector))
             .await
             .unwrap_or_else(|e| panic!("the syncer must attach to {}: {e}", self.session_id));
 
