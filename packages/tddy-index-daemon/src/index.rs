@@ -25,7 +25,7 @@ use tddy_code_restructuring::plan_store::{FlushPolicy, PlanStore};
 use tddy_code_restructuring::spawn_record::SpawnRecorder;
 use tddy_lsp::client::LspClient;
 use tddy_lsp::registry::{workspace_root_for, LspKey};
-use tddy_lsp::{Language, LspRegistry};
+use tddy_lsp::{LanguageId, LspRegistry};
 use tddy_rpc::Status;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
@@ -265,7 +265,7 @@ impl WorkspaceIndex {
         let tree = read_tree(root).await?;
         let key = LspKey {
             root: root.to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         };
         let service = self.servers.get_or_spawn(key).await.map_err(|failure| {
             let refusal = status_of_lsp(&failure);
@@ -318,7 +318,7 @@ impl WorkspaceIndex {
     pub(crate) async fn warmth_of(&self, root: &Path) -> Warmth {
         let key = LspKey {
             root: root.to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         };
         if self.servers.get(&key).await.is_some() {
             Warmth::AlreadyWarm
@@ -346,7 +346,7 @@ impl WorkspaceIndex {
         for (root, idle_seconds) in known {
             let key = LspKey {
                 root: root.clone(),
-                language: Language::Rust,
+                language: LanguageId::RUST,
             };
             if self.servers.get(&key).await.is_none() {
                 reaped.push(root);

@@ -32,7 +32,7 @@ use tddy_code_restructuring::{
     RefactorOp, WorkspaceEdit,
 };
 use tddy_lsp::{
-    Language, LaunchSpec, LspAllowList, LspKey, LspRegistry, NotificationEvent, ProcessOutcome,
+    LanguageId, LaunchSpec, LspAllowList, LspKey, LspRegistry, NotificationEvent, ProcessOutcome,
     ProcessStart, ProcessToken, SpawnObserver,
 };
 use tddy_task::TaskRegistry;
@@ -624,7 +624,7 @@ async fn until_quiescent(client: &tddy_lsp::client::LspClient) {
 async fn a_rust_analyzer_rooted_at(root: &Path) -> Arc<tddy_lsp::client::LspClient> {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new("rust-analyzer")
             .with_capabilities(client_capabilities())
             .with_initialization_options(server_settings()),
@@ -634,7 +634,7 @@ async fn a_rust_analyzer_rooted_at(root: &Path) -> Arc<tddy_lsp::client::LspClie
     let service = registry
         .get_or_spawn(LspKey {
             root: root.to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("rust-analyzer starts — the nix dev shell puts it on PATH");
@@ -1741,7 +1741,7 @@ pub const DESTINATION_LIB: &str = "crates/destination/src/lib.rs";
 async fn a_server_no_operation_asks(root: &Path) -> Arc<tddy_lsp::client::LspClient> {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
             .with_capabilities(client_capabilities())
             .with_initialization_options(server_settings()),
@@ -1750,7 +1750,7 @@ async fn a_server_no_operation_asks(root: &Path) -> Arc<tddy_lsp::client::LspCli
     let service = registry
         .get_or_spawn(LspKey {
             root: root.to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("the fake language server starts");

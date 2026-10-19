@@ -15,7 +15,7 @@ use serde_json::Value;
 use tddy_code_restructuring::spawn_record::JsonlSpawnRecord;
 use tddy_index_daemon::proto::code_index::{IndexProgress, WarmRequest};
 use tddy_index_daemon::{build_code_index_entry, CodeIndexPorts};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry};
 use tddy_task::TaskRegistry;
 
 /// A host whose warm servers are the fake, reporting every one it starts to `record`.
@@ -25,7 +25,7 @@ fn a_host_recording_to(record: &Path) -> tddy_rpc::ServiceEntry {
         .with_initialization_options(tddy_code_restructuring::server_settings());
     spec.args = vec!["--loads-crate-graph".to_string()];
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     let sink = JsonlSpawnRecord::open(record).expect("the record file opens for appending");
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60))

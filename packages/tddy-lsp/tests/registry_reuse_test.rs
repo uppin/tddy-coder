@@ -9,13 +9,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspError, LspKey, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspError, LspKey, LspRegistry};
 use tddy_task::{TaskId, TaskRegistry};
 
 fn fake_allow_list() -> LspAllowList {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")),
     );
     allow
@@ -24,7 +24,7 @@ fn fake_allow_list() -> LspAllowList {
 fn key(root: &str) -> LspKey {
     LspKey {
         root: PathBuf::from(root),
-        language: Language::Rust,
+        language: LanguageId::RUST,
     }
 }
 

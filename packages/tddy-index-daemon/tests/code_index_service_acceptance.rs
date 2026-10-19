@@ -27,7 +27,7 @@ use tddy_index_daemon::proto::code_index::{
 use tddy_index_daemon::{
     build_code_index_entry, CodeIndexPorts, CodeIndexServiceImpl, CODE_INDEX_SERVICE,
 };
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry};
 use tddy_task::TaskRegistry;
 
 /// The concrete server type whose `NAME` a client actually reaches.
@@ -37,7 +37,7 @@ type ServedCoordinate = CodeIndexServiceServer<CodeIndexServiceImpl>;
 fn a_host_over_fake_language_servers() -> tddy_rpc::ServiceEntry {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
             .with_capabilities(tddy_code_restructuring::client_capabilities())
             .with_initialization_options(tddy_code_restructuring::server_settings()),
@@ -60,7 +60,7 @@ fn a_host_over_fake_language_servers_that_load_a_graph() -> tddy_rpc::ServiceEnt
         .with_initialization_options(tddy_code_restructuring::server_settings());
     spec.args = vec!["--loads-crate-graph".to_string()];
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
         wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
@@ -1400,7 +1400,7 @@ fn a_host_over_fake_language_servers_answering_in_their_workspace() -> tddy_rpc:
         "--loads-crate-graph".to_string(),
     ];
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
         wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,

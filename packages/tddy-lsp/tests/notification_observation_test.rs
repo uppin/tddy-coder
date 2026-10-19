@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tddy_lsp::{
-    Language, LaunchSpec, LspAllowList, LspClient, LspKey, LspRegistry, NotificationEvent,
+    LanguageId, LaunchSpec, LspAllowList, LspClient, LspKey, LspRegistry, NotificationEvent,
     NotificationStream, Position,
 };
 use tddy_task::TaskRegistry;
@@ -29,12 +29,12 @@ async fn a_client_on_a_loading_server(cold_hovers: u32) -> Arc<LspClient> {
     let mut spec = LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"));
     spec.args = vec!["--cold-hovers".to_string(), cold_hovers.to_string()];
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     let registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60));
     let service = registry
         .get_or_spawn(LspKey {
             root: PathBuf::from("/workspace"),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("a fake language server");

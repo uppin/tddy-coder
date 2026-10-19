@@ -14,7 +14,7 @@ use tddy_code_restructuring::backends::rust::{ProgressSink, RustBackend};
 use tddy_code_restructuring::registry::{LanguageBackend, Workspace};
 use tddy_code_restructuring::runner::{self, Command, Options};
 use tddy_code_restructuring::{client_capabilities, server_settings, Overlay};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspKey, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
 use tokio_util::sync::CancellationToken;
 
@@ -154,12 +154,12 @@ async fn a_backend_reporting_to(
         NEVER_FINISHES_INDEXING.to_string(),
     ];
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     let registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60));
     let service = registry
         .get_or_spawn(LspKey {
             root: root.to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("the fake language server starts");

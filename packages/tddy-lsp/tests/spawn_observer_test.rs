@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tddy_lsp::{
-    Language, LaunchSpec, LspAllowList, LspError, LspKey, LspRegistry, ProcessOutcome,
+    LanguageId, LaunchSpec, LspAllowList, LspError, LspKey, LspRegistry, ProcessOutcome,
     ProcessStart, ProcessToken, SpawnObserver,
 };
 use tddy_task::TaskRegistry;
@@ -62,7 +62,7 @@ fn a_registry_over_the_fake(args: &[&str], observer: &Collected) -> LspRegistry 
     let mut spec = LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"));
     spec.args = args.iter().map(|arg| arg.to_string()).collect();
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60))
         .with_spawn_observer(Arc::new(observer.clone()))
 }
@@ -75,7 +75,7 @@ fn an_existing_root() -> PathBuf {
 fn the_key_of(root: &Path) -> LspKey {
     LspKey {
         root: root.to_path_buf(),
-        language: Language::Rust,
+        language: LanguageId::RUST,
     }
 }
 
@@ -86,7 +86,7 @@ async fn a_language_server_launch_is_reported_with_its_program_args_cwd_and_pid(
     let tasks = TaskRegistry::new();
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")),
     );
     let registry = LspRegistry::new(allow, tasks.clone(), Duration::from_secs(60))
@@ -176,7 +176,7 @@ async fn a_server_program_that_does_not_exist_is_refused_as_not_found_naming_the
     let observer = Collected::default();
     let missing = std::env::temp_dir().join("tddy-lsp-test-no-such-language-server");
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, LaunchSpec::new(missing.to_string_lossy()));
+    allow.allow(LanguageId::RUST, LaunchSpec::new(missing.to_string_lossy()));
     let registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60))
         .with_spawn_observer(Arc::new(observer.clone()));
 

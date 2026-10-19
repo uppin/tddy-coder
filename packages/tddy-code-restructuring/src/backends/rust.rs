@@ -15,7 +15,7 @@ use crate::edit::{
 };
 use crate::item_anchor::{unlowered_item_anchor, ItemAtResolver, ItemResolver};
 use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
-use crate::registry::{Language, LanguageBackend, Workspace};
+use crate::registry::{LanguageBackend, Workspace};
 use crate::spawn_record::{purpose, SpawnRecorder};
 use crate::{RestructureError, Result};
 use serde_json::{json, Value};
@@ -25,6 +25,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
+use tddy_lsp::LanguageId;
 use tokio_util::sync::CancellationToken;
 
 mod chatter;
@@ -519,10 +520,12 @@ pub fn discard() -> ProgressSink {
 fn discard_line(_line: &str) {}
 
 mod server_process;
+mod support;
 #[cfg(test)]
 use server_process::binds_nothing;
 #[cfg(test)]
 use server_process::without_hollow_imports;
+pub use support::RustSupport;
 
 impl RustBackend {
     pub fn new(
@@ -1129,9 +1132,12 @@ impl Drop for RustBackend {
     }
 }
 
+/// The language this backend answers for, as a `static` so `language()` can lend it out.
+static RUST_LANGUAGE: LanguageId = LanguageId::RUST;
+
 impl LanguageBackend for RustBackend {
-    fn language(&self) -> Language {
-        Language::Rust
+    fn language(&self) -> &LanguageId {
+        &RUST_LANGUAGE
     }
 
     fn handles_extension(&self, extension: &str) -> bool {
@@ -1278,7 +1284,7 @@ impl RustBackend {
     ) -> Result<Resolution> {
         if !self.supports(op.op) {
             return Err(RestructureError::UnsupportedOp {
-                backend: "Rust".to_string(),
+                backend: self.language().to_string(),
                 op: format!("{:?}", op.op),
             });
         }

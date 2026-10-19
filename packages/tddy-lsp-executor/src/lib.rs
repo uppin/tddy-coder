@@ -17,8 +17,8 @@ use tddy_build::service::{build_list_json, BuildListQuery};
 use tddy_core::toolcall::lsp::{register_lsp_executor, LspExecutor, LspQuery};
 use tddy_lsp::registry::workspace_root_for;
 use tddy_lsp::{
-    language_for_target_type, Diagnostic, DocumentSource, Language, Location, LspAllowList, LspKey,
-    LspRegistry, LspService, Position, Range, SymbolInfo,
+    language_for_target_type, Diagnostic, DocumentSource, LanguageId, Location, LspAllowList,
+    LspKey, LspRegistry, LspService, Position, Range, SymbolInfo,
 };
 use tddy_task::TaskRegistry;
 
@@ -56,7 +56,7 @@ impl TddyLspExecutor {
     }
 
     /// The allowed language for a target id, resolved from its `BUILD.yaml` `config.type`.
-    fn language_for_target(&self, repo_dir: &Path, target: &str) -> Option<Language> {
+    fn language_for_target(&self, repo_dir: &Path, target: &str) -> Option<LanguageId> {
         let list = build_list_json(repo_dir, &BuildListQuery::default()).ok()?;
         let targets = list.get("targets")?.as_array()?;
         let type_name = targets
@@ -68,28 +68,28 @@ impl TddyLspExecutor {
 
     /// The first allowed language found among the repo's build targets, if any. Backs both
     /// `is_available` and workspace-level diagnostics.
-    fn first_available_language(&self, repo_dir: &Path) -> Option<Language> {
+    fn first_available_language(&self, repo_dir: &Path) -> Option<LanguageId> {
         let list = build_list_json(repo_dir, &BuildListQuery::default()).ok()?;
         let targets = list.get("targets")?.as_array()?;
         targets.iter().find_map(|t| {
             t.get("type")
                 .and_then(Value::as_str)
                 .and_then(language_for_target_type)
-                .filter(|lang| self.allow.is_allowed(*lang))
+                .filter(|lang| self.allow.is_allowed(lang))
         })
     }
 
     /// Resolve a target to its language + reuse key, rejecting disallowed languages.
-    fn resolve(&self, repo_dir: &Path, target: &str) -> Result<(Language, LspKey), String> {
+    fn resolve(&self, repo_dir: &Path, target: &str) -> Result<(LanguageId, LspKey), String> {
         let language = self
             .language_for_target(repo_dir, target)
             .ok_or_else(|| format!("no language server for target '{target}'"))?;
-        if !self.allow.is_allowed(language) {
-            return Err(format!("language '{}' is not allowed", language.id()));
+        if !self.allow.is_allowed(&language) {
+            return Err(format!("language '{}' is not allowed", language.as_str()));
         }
         let key = LspKey {
             root: workspace_root_for(repo_dir).map_err(|e| e.to_string())?,
-            language,
+            language: language.clone(),
         };
         Ok((language, key))
     }
@@ -105,7 +105,7 @@ impl TddyLspExecutor {
         let text = std::fs::read_to_string(repo_dir.join(&query.file)).unwrap_or_default();
         let srcs = [DocumentSource {
             uri: uri.clone(),
-            language_id: language.id().to_string(),
+            language_id: language.as_str().to_string(),
             text,
         }];
         let service = self

@@ -21,7 +21,7 @@ use tddy_index_daemon::proto::code_index::{
     restructure_event, ApplyRequest, IndexProgress, RestructureEvent, WarmRequest,
 };
 use tddy_index_daemon::{build_code_index_entry, CodeIndexPorts};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry};
 use tddy_task::TaskRegistry;
 
 /// The cadence every test here asks the daemon to beat at.
@@ -43,7 +43,7 @@ fn a_host_over_a_server_that_never_becomes_ready() -> tddy_rpc::ServiceEntry {
         .with_initialization_options(tddy_code_restructuring::server_settings());
     spec.args = vec!["--never-quiescent".to_string()];
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
         wait_heartbeat: THE_CADENCE,

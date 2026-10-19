@@ -25,7 +25,7 @@ use tddy_index_daemon::proto::code_index::{
     WorkspacesResponse,
 };
 use tddy_index_daemon::{build_code_index_entry, CodeIndexPorts};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry};
 use tddy_task::TaskRegistry;
 
 /// How much faster a warm request must be than the cold one that preceded it.
@@ -48,7 +48,7 @@ const A_WARM_REQUEST_SHOULD_BE_IMMEDIATE_FACTOR: u32 = 2;
 fn a_host_over_real_rust_analyzers() -> tddy_rpc::ServiceEntry {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new("rust-analyzer")
             .with_capabilities(tddy_code_restructuring::client_capabilities())
             .with_initialization_options(tddy_code_restructuring::server_settings()),

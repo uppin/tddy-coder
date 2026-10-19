@@ -1,23 +1,39 @@
 //! Language identity, launch specs, and the allow-list that gates which languages may
 //! spawn a server. The two steps are deliberately separate: [`language_for_target_type`]
-//! maps a build-target type to a [`Language`] (pure), and [`LspAllowList`] decides policy
+//! maps a build-target type to a [`LanguageId`] (pure), and [`LspAllowList`] decides policy
 //! (which languages are permitted, and how to launch them).
 
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt;
 
 /// A programming language, decoupled from any specific server binary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Language {
-    Rust,
+///
+/// Open rather than an enum: a built-in language and one an installed extension brings are told
+/// apart by nothing but this name. Two ids are the same language exactly when their strings are
+/// equal, whether either was spelled as a constant or read from a manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LanguageId(Cow<'static, str>);
+
+impl LanguageId {
+    /// The built-in Rust language.
+    pub const RUST: LanguageId = LanguageId(Cow::Borrowed("rust"));
+
+    /// The language named `id`, as a manifest or a caller spells it.
+    pub fn new(id: &str) -> Self {
+        Self(Cow::Owned(id.to_string()))
+    }
+
+    /// The id as a string — also the LSP `languageId` unless a [`LaunchSpec`] says otherwise.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
-impl Language {
-    /// The LSP `languageId` string for this language.
-    pub fn id(&self) -> &'static str {
-        match self {
-            Language::Rust => "rust",
-        }
+impl fmt::Display for LanguageId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -42,6 +58,11 @@ pub struct LaunchSpec {
     ///
     /// Null by default, which leaves the server on its defaults.
     pub initialization_options: Value,
+    /// The LSP `languageId` a document of this language is opened as.
+    ///
+    /// Empty from [`LaunchSpec::new`]; [`LspAllowList::allow`] fills an empty one with the id of the
+    /// language it is allowed for, which is what a server of that language expects to be told.
+    pub language_id: String,
 }
 
 impl LaunchSpec {
@@ -53,6 +74,7 @@ impl LaunchSpec {
             env: Vec::new(),
             capabilities: Value::Object(Default::default()),
             initialization_options: Value::Null,
+            language_id: String::new(),
         }
     }
 
@@ -67,13 +89,19 @@ impl LaunchSpec {
         self.initialization_options = options;
         self
     }
+
+    /// Open documents as `language_id` rather than as the language's own id.
+    pub fn with_language_id(mut self, language_id: impl Into<String>) -> Self {
+        self.language_id = language_id.into();
+        self
+    }
 }
 
 /// The gate: only languages present here may spawn a server. Rust-only by default via
 /// [`LspAllowList::rust_only`], but any language + [`LaunchSpec`] can be added.
 #[derive(Debug, Clone, Default)]
 pub struct LspAllowList {
-    by_language: HashMap<Language, LaunchSpec>,
+    by_language: HashMap<LanguageId, LaunchSpec>,
 }
 
 impl LspAllowList {
@@ -83,35 +111,40 @@ impl LspAllowList {
     }
 
     /// Permit `language`, launching it with `spec`.
-    pub fn allow(&mut self, language: Language, spec: LaunchSpec) -> &mut Self {
+    ///
+    /// A spec that names no `languageId` opens its documents as `language`'s own id.
+    pub fn allow(&mut self, language: LanguageId, mut spec: LaunchSpec) -> &mut Self {
+        if spec.language_id.is_empty() {
+            spec.language_id = language.as_str().to_string();
+        }
         self.by_language.insert(language, spec);
         self
     }
 
     /// Whether a server may be spawned for `language`.
-    pub fn is_allowed(&self, language: Language) -> bool {
-        self.by_language.contains_key(&language)
+    pub fn is_allowed(&self, language: &LanguageId) -> bool {
+        self.by_language.contains_key(language)
     }
 
     /// The launch spec for `language`, if permitted.
-    pub fn launch_spec(&self, language: Language) -> Option<&LaunchSpec> {
-        self.by_language.get(&language)
+    pub fn launch_spec(&self, language: &LanguageId) -> Option<&LaunchSpec> {
+        self.by_language.get(language)
     }
 
     /// The default production allow-list: Rust via `rust-analyzer` on PATH.
     pub fn rust_only() -> Self {
         let mut allow = Self::new();
-        allow.allow(Language::Rust, LaunchSpec::new("rust-analyzer"));
+        allow.allow(LanguageId::RUST, LaunchSpec::new("rust-analyzer"));
         allow
     }
 }
 
 /// Map a build-target `config.type` to the language whose server should serve it.
 ///
-/// `rust_binary` / `rust_library` → [`Language::Rust`]; unknown types → `None`.
-pub fn language_for_target_type(type_name: &str) -> Option<Language> {
+/// `rust_binary` / `rust_library` → [`LanguageId::RUST`]; unknown types → `None`.
+pub fn language_for_target_type(type_name: &str) -> Option<LanguageId> {
     match type_name {
-        "rust_binary" | "rust_library" => Some(Language::Rust),
+        "rust_binary" | "rust_library" => Some(LanguageId::RUST),
         _ => None,
     }
 }
@@ -129,7 +162,7 @@ mod tests {
         let language = language_for_target_type(target_type);
 
         // Then it is Rust
-        assert_eq!(language, Some(Language::Rust));
+        assert_eq!(language, Some(LanguageId::RUST));
     }
 
     #[test]
@@ -141,7 +174,7 @@ mod tests {
         let language = language_for_target_type(target_type);
 
         // Then it is Rust
-        assert_eq!(language, Some(Language::Rust));
+        assert_eq!(language, Some(LanguageId::RUST));
     }
 
     #[test]
@@ -162,7 +195,7 @@ mod tests {
         let allow = LspAllowList::rust_only();
 
         // When we ask whether Rust is permitted
-        let permitted = allow.is_allowed(Language::Rust);
+        let permitted = allow.is_allowed(&LanguageId::RUST);
 
         // Then it is
         assert!(permitted, "expected the default allow-list to permit Rust");

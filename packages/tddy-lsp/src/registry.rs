@@ -13,7 +13,7 @@ use std::time::Duration;
 use tddy_task::{ChannelKind, IdleTimeoutTracker, TaskChannel, TaskId, TaskRegistry};
 use tokio::sync::{oneshot, Mutex};
 
-use crate::allowlist::{Language, LspAllowList};
+use crate::allowlist::{LanguageId, LspAllowList};
 use crate::client::LspClient;
 use crate::error::LspError;
 use crate::server_body::{LspServerBody, ObservedServerBody};
@@ -34,7 +34,7 @@ type SpawnGate = Arc<Mutex<()>>;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LspKey {
     pub root: PathBuf,
-    pub language: Language,
+    pub language: LanguageId,
 }
 
 /// A live, reusable server: its task id plus an initialized client.
@@ -102,8 +102,10 @@ impl LspRegistry {
     /// is spawned and all of them are handed it. Without the gate the second `insert` overwrote
     /// the first, orphaning a live task that nothing could cancel or reap.
     pub async fn get_or_spawn(&self, key: LspKey) -> Result<Arc<LspService>, LspError> {
-        if !self.allow.is_allowed(key.language) {
-            return Err(LspError::LanguageNotAllowed(key.language.id().to_string()));
+        if !self.allow.is_allowed(&key.language) {
+            return Err(LspError::LanguageNotAllowed(
+                key.language.as_str().to_string(),
+            ));
         }
 
         if let Some(live) = self.live_service(&key).await {
@@ -168,9 +170,9 @@ impl LspRegistry {
     async fn spawn_service(&self, key: LspKey) -> Result<Arc<LspService>, LspError> {
         let spec = self
             .allow
-            .launch_spec(key.language)
+            .launch_spec(&key.language)
             .cloned()
-            .ok_or_else(|| LspError::LanguageNotAllowed(key.language.id().to_string()))?;
+            .ok_or_else(|| LspError::LanguageNotAllowed(key.language.as_str().to_string()))?;
 
         let channel = TaskChannel::output_only("0", "lsp", ChannelKind::Combined);
         let (client_tx, client_rx) = oneshot::channel();
@@ -186,7 +188,7 @@ impl LspRegistry {
             .task_registry
             .spawn(
                 body,
-                format!("lsp:{}", key.language.id()),
+                format!("lsp:{}", key.language.as_str()),
                 "",
                 vec![channel],
             )

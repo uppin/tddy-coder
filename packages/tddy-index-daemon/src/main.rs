@@ -28,7 +28,7 @@ use std::time::Duration;
 use clap::Parser;
 use tddy_code_restructuring::spawn_record::JsonlSpawnRecord;
 use tddy_index_daemon::{CodeIndexPorts, CodeIndexServiceImpl};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry, SpawnObserver};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry, SpawnObserver};
 use tddy_task::TaskRegistry;
 
 use crate::cli::{IndexDaemonArgs, Lifetime};
@@ -209,7 +209,7 @@ fn send_stderr_to(path: &std::path::Path) -> anyhow::Result<()> {
 fn rust_analyzer_as_this_crate_needs_it(program: &str) -> LspAllowList {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(program)
             .with_capabilities(tddy_code_restructuring::client_capabilities())
             .with_initialization_options(tddy_code_restructuring::server_settings()),

@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use tddy_lsp::allowlist::{Language, LaunchSpec, LspAllowList};
+use tddy_lsp::allowlist::{LanguageId, LaunchSpec, LspAllowList};
 use tddy_lsp::registry::{LspKey, LspRegistry};
 use tddy_lsp::SpawnObserver;
 use tddy_task::TaskRegistry;
@@ -65,7 +65,7 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
         .with_spawn_observer(observer);
         let key = LspKey {
             root: root.clone(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         };
         (options.progress)("acquiring shared rust-analyzer client (first run may take minutes)");
         let service = lsp_registry
@@ -257,7 +257,7 @@ fn cancelled_on_interrupt() -> CancellationToken {
 fn restructure_allow_list() -> LspAllowList {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new("rust-analyzer")
             .with_capabilities(crate::client_capabilities())
             .with_initialization_options(crate::server_settings()),

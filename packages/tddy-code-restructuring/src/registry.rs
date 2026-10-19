@@ -11,11 +11,7 @@ use crate::plan::ItemPath;
 use crate::plan::{RefactorKind, RefactorOp};
 use crate::Result;
 use std::path::Path;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Language {
-    Rust,
-}
+use tddy_lsp::LanguageId;
 
 /// The workspace a backend resolves against.
 ///
@@ -35,7 +31,8 @@ impl<'a> Workspace<'a> {
 }
 
 pub trait LanguageBackend {
-    fn language(&self) -> Language;
+    /// The language this backend resolves for; an error naming the backend names it by this id.
+    fn language(&self) -> &LanguageId;
 
     /// Extensions this backend claims, without the leading dot.
     fn handles_extension(&self, extension: &str) -> bool;
@@ -103,7 +100,7 @@ pub trait LanguageBackend {
     ) -> Result<crate::edit::Range> {
         let _ = (file, items, workspace);
         Err(crate::RestructureError::UnsupportedOp {
-            backend: format!("{:?}", self.language()),
+            backend: self.language().to_string(),
             op: "anchors".to_string(),
         })
     }
@@ -135,7 +132,7 @@ impl BackendRegistry {
         let backend = self.backend_of(path)?;
         if !backend.supports(kind) {
             return Err(crate::RestructureError::UnsupportedOp {
-                backend: format!("{:?}", backend.language()),
+                backend: backend.language().to_string(),
                 op: format!("{kind:?}"),
             });
         }
@@ -172,7 +169,7 @@ impl ItemResolver for BackendRegistry {
         item: &ItemPath,
     ) -> Result<crate::item_anchor::ResolvedItem> {
         let backend = self.backend_of(Path::new(file))?;
-        let name = format!("{:?}", backend.language());
+        let name = backend.language().to_string();
         backend
             .item_resolver()
             .ok_or(crate::RestructureError::UnsupportedOp {
@@ -190,7 +187,7 @@ impl ItemAtResolver for BackendRegistry {
         range: crate::edit::Range,
     ) -> Result<(ItemPath, crate::item_anchor::ResolvedItem)> {
         let backend = self.backend_of(Path::new(file))?;
-        let name = format!("{:?}", backend.language());
+        let name = backend.language().to_string();
         backend
             .item_locator()
             .ok_or(crate::RestructureError::UnsupportedOp {
@@ -210,14 +207,14 @@ mod tests {
     use std::path::PathBuf;
 
     struct StubBackend {
-        language: Language,
+        language: LanguageId,
         extension: &'static str,
         supported: Vec<RefactorKind>,
     }
 
     impl LanguageBackend for StubBackend {
-        fn language(&self) -> Language {
-            self.language
+        fn language(&self) -> &LanguageId {
+            &self.language
         }
 
         fn handles_extension(&self, extension: &str) -> bool {
@@ -240,7 +237,7 @@ mod tests {
     fn registry() -> BackendRegistry {
         let mut registry = BackendRegistry::new();
         registry.register(Box::new(StubBackend {
-            language: Language::Rust,
+            language: LanguageId::RUST,
             extension: "rs",
             supported: vec![
                 RefactorKind::ExtractMethod,
@@ -258,7 +255,7 @@ mod tests {
             .backend_for(&PathBuf::from("src/lib.rs"), RefactorKind::ExtractMethod)
             .unwrap();
 
-        assert_eq!(backend.language(), Language::Rust);
+        assert_eq!(backend.language(), &LanguageId::RUST);
     }
 
     #[test]
@@ -296,7 +293,7 @@ mod tests {
     fn registering_another_rust_backend_leaves_the_first_dispatch_unchanged() {
         let mut registry = registry();
         registry.register(Box::new(StubBackend {
-            language: Language::Rust,
+            language: LanguageId::RUST,
             extension: "rs",
             supported: vec![RefactorKind::RenameSymbol],
         }));
@@ -305,7 +302,7 @@ mod tests {
             .backend_for(&PathBuf::from("src/lib.rs"), RefactorKind::ExtractMethod)
             .unwrap();
 
-        assert_eq!(backend.language(), Language::Rust);
+        assert_eq!(backend.language(), &LanguageId::RUST);
     }
 
     #[test]
@@ -382,7 +379,7 @@ mod tests {
         // Then it is refused as an unsupported operation, not read as though it were a range
         match resolved {
             Err(RestructureError::UnsupportedOp { backend, op }) => {
-                assert_eq!((backend.as_str(), op.as_str()), ("Rust", "item anchors"));
+                assert_eq!((backend.as_str(), op.as_str()), ("rust", "item anchors"));
             }
             other => panic!("expected UnsupportedOp, got {:?}", other.err()),
         }

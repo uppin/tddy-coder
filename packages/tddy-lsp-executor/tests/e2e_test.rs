@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_core::toolcall::lsp::{LspExecutor, LspQuery};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList};
 use tddy_lsp_executor::TddyLspExecutor;
 use tddy_task::TaskRegistry;
 
@@ -62,7 +62,7 @@ async fn two_targets_in_one_workspace_share_one_server_and_resolve_queries() {
     let repo_path = repo.path().to_path_buf();
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")),
     );
     let tasks = TaskRegistry::new();
