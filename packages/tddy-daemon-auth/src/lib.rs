@@ -30,12 +30,10 @@
 
 pub mod account_linking_provider;
 pub mod auth;
-mod codex_oauth_participant_metadata;
 pub mod codex_oauth_relay;
 pub mod first_login_admission;
 pub mod github_pr_credentials;
 mod local_token;
-pub mod oauth_loopback_tunnel;
 pub mod signing_key;
 pub mod token_provider;
 pub mod vault_lifetimes;

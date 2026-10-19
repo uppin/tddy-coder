@@ -9,7 +9,7 @@ use tddy_service::proto::session_files::ReadHostDocumentRequest;
 
 use crate::session_file_upload::contained_canonical_dir;
 
-use tddy_daemon_livekit::livekit_peer_discovery::PeerRoute;
+use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 
 use crate::session_file_upload::validate_segment;
 
@@ -30,7 +30,7 @@ pub struct AttachmentState<'a> {
     pub config: &'a tddy_daemon_kernel::config::DaemonConfig,
     pub tddy_data_dir: &'a Path,
     pub staging_base_dir: &'a Path,
-    pub peer_routing: &'a tddy_daemon_livekit::peer_routing::PeerRouting,
+    pub peer_routing: &'a tddy_host_service::peer_routing::PeerRouting,
 }
 
 impl AttachmentState<'_> {
@@ -129,7 +129,7 @@ impl AttachmentState<'_> {
     /// bytes staged on the host the browser is connected to, session started on another — it is the
     /// *only* thing between accepting the request and reporting the first byte of work. Reporting
     /// per frame is therefore what keeps a relayed `StreamStartSession` producing inside
-    /// [`tddy_daemon_livekit::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT`], and what makes the row's
+    /// [`tddy_daemon_kernel::peer_forwarding::PEER_FORWARD_STREAM_IDLE_TIMEOUT`], and what makes the row's
     /// progress bar advance instead of sitting at 0% for the whole transfer.
     pub(crate) async fn fetch_peer_staged_attachment(
         &self,
@@ -151,13 +151,12 @@ impl AttachmentState<'_> {
             project_id: String::new(),
             relative_path: staged_relative_path.to_string(),
         };
-        let mut frames =
-            tddy_daemon_livekit::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
-                slot,
-                peer_instance_id,
-                &read_req,
-            )
-            .await?;
+        let mut frames = tddy_daemon_kernel::peer_calls::forward_stream_read_host_document(
+            slot,
+            peer_instance_id,
+            &read_req,
+        )
+        .await?;
 
         // The owning host refuses an over-cap document before its first frame, but a forwarded
         // stream is bytes from a peer — hold the same configured cap here, and stop as soon as it
@@ -226,13 +225,12 @@ impl AttachmentState<'_> {
                         project_id: host_doc.project_id.clone(),
                         relative_path: host_doc.relative_path.clone(),
                     };
-                    let resp =
-                        tddy_daemon_livekit::livekit_peer_discovery::forward_read_host_document_via_livekit(
-                            slot,
-                            &peer_instance_id,
-                            &read_req,
-                        )
-                        .await?;
+                    let resp = tddy_daemon_kernel::peer_calls::forward_read_host_document(
+                        slot,
+                        &peer_instance_id,
+                        &read_req,
+                    )
+                    .await?;
                     crate::host_documents::HostDocumentBytes {
                         data: resp.data,
                         byte_size: resp.byte_size,

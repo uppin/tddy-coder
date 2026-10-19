@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use prost::Message;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
 use tddy_service::proto::project::{
@@ -25,120 +26,267 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::peer_forwarding::CommonRoom;
 
+/// Forward **StartSession** to another daemon in the common room, under the room's forward deadline.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer_within`].
 pub async fn forward_start_session(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &StartSessionRequest,
 ) -> Result<StartSessionResponse, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_start_session")
+    forward_start_session_within(room, peer_instance_id, request, room.forward_timeout()).await
 }
 
+/// [`forward_start_session`] with an explicit deadline.
+///
+/// A start the peer serves by cloning a project and cutting a worktree outlasts the ordinary forward
+/// deadline; see [`CommonRoom::forward_to_peer_within`].
 pub async fn forward_start_session_within(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &StartSessionRequest,
     deadline: Duration,
 ) -> Result<StartSessionResponse, Status> {
-    let _ = (room, peer_instance_id, request, deadline);
-    todo!("peer_calls::forward_start_session_within")
+    let body = request.encode_to_vec();
+    let out = room
+        .forward_to_peer_within(
+            peer_instance_id,
+            "session.SessionService",
+            "StartSession",
+            body,
+            deadline,
+        )
+        .await?;
+    StartSessionResponse::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode StartSessionResponse: {e}")))
 }
 
+/// Forward **StreamStartSession** to another daemon in the common room, yielding the peer's
+/// start-session events (attachment progress, then the terminal result).
+///
+/// Thin decode wrapper around [`CommonRoom::forward_server_stream_to_peer`]. The session — and its
+/// attachments — live on the peer; only the events cross back.
 pub async fn forward_stream_start_session(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &StartSessionRequest,
 ) -> Result<UnboundedReceiver<Result<StartSessionEvent, Status>>, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_stream_start_session")
+    room.forward_server_stream_to_peer(
+        peer_instance_id,
+        "session.SessionService",
+        "StreamStartSession",
+        request.encode_to_vec(),
+        |bytes| {
+            StartSessionEvent::decode(bytes.as_slice())
+                .map_err(|e| Status::internal(format!("decode StartSessionEvent from peer: {e}")))
+        },
+    )
+    .await
 }
 
+/// Forward **DeleteSession** to another daemon in the common room.
+///
+/// `DeleteSessionRequest` carries no `daemon_instance_id`, so the peer is addressed explicitly. Used
+/// to delete the paired `workspace` session that holds a split session's worktree — including the
+/// teardown of a split start that failed after the peer had already created it.
 pub async fn forward_delete_session(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &DeleteSessionRequest,
 ) -> Result<DeleteSessionResponse, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_delete_session")
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            "session.SessionService",
+            "DeleteSession",
+            request.encode_to_vec(),
+        )
+        .await?;
+    DeleteSessionResponse::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode DeleteSessionResponse: {e}")))
 }
 
+/// Forward **StreamExecuteTool** to another daemon in the common room, yielding the peer's result
+/// frames.
+///
+/// Thin decode wrapper around [`CommonRoom::forward_server_stream_to_peer`]: a frame that fails to decode — or a
+/// stream that stops without its `last` frame — terminates the relay with a status, so a caller
+/// reassembling a tool result never mistakes a truncated one for the whole answer.
 pub async fn forward_stream_execute_tool(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &ExecuteToolRequest,
 ) -> Result<UnboundedReceiver<Result<ExecuteToolChunk, Status>>, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_stream_execute_tool")
+    room.forward_server_stream_to_peer(
+        peer_instance_id,
+        "exec_tools.ExecToolService",
+        "StreamExecuteTool",
+        request.encode_to_vec(),
+        |bytes| {
+            ExecuteToolChunk::decode(bytes.as_slice())
+                .map_err(|e| Status::internal(format!("decode ExecuteToolChunk from peer: {e}")))
+        },
+    )
+    .await
 }
 
+/// Forward **AddProjectToHost** to another daemon in the common room.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
 pub async fn forward_add_project_to_host(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &AddProjectToHostRequest,
 ) -> Result<AddProjectToHostResponse, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_add_project_to_host")
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            "project.ProjectService",
+            "AddProjectToHost",
+            request.encode_to_vec(),
+        )
+        .await?;
+    AddProjectToHostResponse::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode AddProjectToHostResponse: {e}")))
 }
 
+/// Forward **SetProjectDefaultBranch** to another daemon in the common room.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
 pub async fn forward_set_project_default_branch(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &SetProjectDefaultBranchRequest,
 ) -> Result<SetProjectDefaultBranchResponse, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_set_project_default_branch")
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            "project.ProjectService",
+            "SetProjectDefaultBranch",
+            request.encode_to_vec(),
+        )
+        .await?;
+    SetProjectDefaultBranchResponse::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode SetProjectDefaultBranchResponse: {e}")))
 }
 
+/// Forward **SetProjectAccounts** to another daemon in the common room.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
 pub async fn forward_set_project_accounts(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &SetProjectAccountsRequest,
 ) -> Result<SetProjectAccountsResponse, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_set_project_accounts")
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            "project.ProjectService",
+            "SetProjectAccounts",
+            request.encode_to_vec(),
+        )
+        .await?;
+    SetProjectAccountsResponse::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode SetProjectAccountsResponse: {e}")))
 }
 
+/// Forward **UploadStagedAttachmentChunk** to another daemon in the common room.
+///
+/// This and the four session-file forwarders below address
+/// [`tddy_service::SESSION_FILES_SERVICE`] rather than spelling the coordinate out: the peer serves
+/// it under that same constant, and a forward addressed at a name the peer does not serve fails on
+/// the peer at runtime — see the constant's own documentation.
 pub async fn forward_upload_staged_attachment_chunk(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &UploadStagedAttachmentChunkRequest,
 ) -> Result<UploadStagedAttachmentChunkResponse, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_upload_staged_attachment_chunk")
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            tddy_service::SESSION_FILES_SERVICE,
+            "UploadStagedAttachmentChunk",
+            request.encode_to_vec(),
+        )
+        .await?;
+    UploadStagedAttachmentChunkResponse::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode UploadStagedAttachmentChunkResponse: {e}")))
 }
 
+/// Forward **ListStagedAttachments** to another daemon in the common room.
 pub async fn forward_list_staged_attachments(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &ListStagedAttachmentsRequest,
 ) -> Result<ListStagedAttachmentsResponse, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_list_staged_attachments")
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            tddy_service::SESSION_FILES_SERVICE,
+            "ListStagedAttachments",
+            request.encode_to_vec(),
+        )
+        .await?;
+    ListStagedAttachmentsResponse::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode ListStagedAttachmentsResponse: {e}")))
 }
 
+/// Forward **DeleteStagedAttachment** to another daemon in the common room.
 pub async fn forward_delete_staged_attachment(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &DeleteStagedAttachmentRequest,
 ) -> Result<DeleteStagedAttachmentResponse, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_delete_staged_attachment")
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            tddy_service::SESSION_FILES_SERVICE,
+            "DeleteStagedAttachment",
+            request.encode_to_vec(),
+        )
+        .await?;
+    DeleteStagedAttachmentResponse::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode DeleteStagedAttachmentResponse: {e}")))
 }
 
+/// Forward **ReadHostDocument** to another daemon in the common room.
 pub async fn forward_read_host_document(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &ReadHostDocumentRequest,
 ) -> Result<ReadHostDocumentResponse, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_read_host_document")
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            tddy_service::SESSION_FILES_SERVICE,
+            "ReadHostDocument",
+            request.encode_to_vec(),
+        )
+        .await?;
+    ReadHostDocumentResponse::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode ReadHostDocumentResponse: {e}")))
 }
 
+/// Forward **StreamReadHostDocument** to another daemon in the common room, yielding the peer's
+/// document frames.
+///
+/// Thin decode wrapper around [`CommonRoom::forward_server_stream_to_peer`]: a frame that fails to decode
+/// terminates the stream with a status, so a caller reassembling the document never treats a
+/// malformed frame as the document's end.
 pub async fn forward_stream_read_host_document(
     room: &CommonRoom,
     peer_instance_id: &str,
     request: &ReadHostDocumentRequest,
 ) -> Result<UnboundedReceiver<Result<HostDocumentChunk, Status>>, Status> {
-    let _ = (room, peer_instance_id, request);
-    todo!("peer_calls::forward_stream_read_host_document")
+    room.forward_server_stream_to_peer(
+        peer_instance_id,
+        tddy_service::SESSION_FILES_SERVICE,
+        "StreamReadHostDocument",
+        request.encode_to_vec(),
+        |bytes| {
+            HostDocumentChunk::decode(bytes.as_slice())
+                .map_err(|e| Status::internal(format!("decode HostDocumentChunk from peer: {e}")))
+        },
+    )
+    .await
 }

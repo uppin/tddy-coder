@@ -12,6 +12,8 @@ path = "src/lib.rs"
 anyhow = "1"
 async-trait = "0.1"
 log = "0.4"
+# The peer-call helpers encode the requests they forward and decode the answers.
+prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -35,8 +37,6 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 libc = "0.2"
 
 [dev-dependencies]
-# Encodes the requests and answers the peer-call tests script.
-prost = "0.13"
 # `test-util`: `tokio::time::pause` drives the stream idle timeout without waiting it out.
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time", "test-util"] }
 rstest = { workspace = true }

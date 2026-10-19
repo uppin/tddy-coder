@@ -136,9 +136,9 @@ and the three manifests drop `tddy-daemon-livekit` / `livekit` / `tddy-livekit`.
 As listed in Scope.
 
 ## Implementation Milestones
-- [ ] M1 Kernel helpers + host-service routing with in-memory-forwarder tests
-- [ ] M2 Consumers repointed
-- [ ] M3 Tunnel moved; manifests; ratchet green
+- [x] M1 Kernel helpers + host-service routing with in-memory-forwarder tests
+- [x] M2 Consumers repointed
+- [x] M3 Tunnel moved; manifests; ratchet green (`livekit_is_a_satellite`: 6/6)
 
 ## Testing Plan
 
@@ -165,6 +165,22 @@ which move with it. The ratchet asserts the strikes.
   them here. Node 11 deletes the re-exports.
 - **The tunnel moves rather than gets a port.** It *is* a LiveKit feature (it follows room
   participants), so a port would only wrap one implementation.
+- **Plain re-exports, not `#[deprecated]`.** CI runs `clippy --workspace -- -D warnings`. A deprecated
+  re-export would fail the crates that still call the old names until node 11 (session-agents,
+  session-split, agent-launch, and session-lifecycle's `svc_peer_routed_session_files`). The old names
+  stay, untouched, and node 11 deletes them.
+- **`ROOM_TOKEN_TTL` in daemon-auth.** `auth.rs` used `tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS`
+  on the minting path, the last `tddy-livekit` use once the tunnel left. The value is unchanged (six
+  hours, LiveKit's own default, `livekit-api` `DEFAULT_TTL`); it is spelled locally, the way
+  `tddy-session-sync` spells it. This moves the constant's source, not the minting behaviour.
+- **Red test files reformatted.** `tests/peer_calls.rs` and `tests/peer_routing.rs` were not
+  rustfmt-clean, and CI runs `cargo fmt --all -- --check`. The change is line breaks only; no
+  assertion changed.
+- **Sandbox suites still red, not from this change.** 16 tests in `tddy-session-lifecycle`
+  (`sandbox_behavior_acceptance`, `sandboxed_claude_cli_acceptance`, `sandboxed_cursor_cli_acceptance`,
+  `sandboxed_session_lifecycle_acceptance`) panic with `sandbox RPC bridge not installed`. The
+  `expect` is unchanged on base, those test files are unchanged, and none of them installs the bridge
+  on base either.
 
 ## Refactoring Needed
 ### From /validate-changes
@@ -188,7 +204,7 @@ which move with it. The ratchet asserts the strikes.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (16 sandbox tests stay red; see Decisions & Trade-offs)
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)

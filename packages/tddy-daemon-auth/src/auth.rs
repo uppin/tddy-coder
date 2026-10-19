@@ -305,6 +305,11 @@ pub fn session_token_authenticator(
     }
 }
 
+/// How long a minted room token stays valid: six hours, LiveKit's own default. Spelled here, not
+/// named from `tddy-livekit`, because this crate names no LiveKit crate; `tddy-session-sync` spells
+/// the same default the same way for the same reason.
+const ROOM_TOKEN_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
 /// Build the `token.TokenService` entry the daemon serves, or `None` when it holds no LiveKit API
 /// credentials to mint with.
 ///
@@ -331,10 +336,7 @@ pub fn build_token_service_entry(
     let authenticate = session_token_authenticator(user_resolver, "token.TokenService");
 
     let service = tddy_service::TokenServiceImpl::authenticated(
-        crate::token_provider::MinterTokenProvider::new(
-            minter,
-            Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-        ),
+        crate::token_provider::MinterTokenProvider::new(minter, ROOM_TOKEN_TTL),
         authenticate,
     );
     let service = CommonRoomSwitch {

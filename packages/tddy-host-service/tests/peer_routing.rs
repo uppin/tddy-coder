@@ -65,5 +65,11 @@ fn forwarding_without_a_common_room_is_a_failed_precondition_naming_the_rpc() {
 
     // Then the refusal says which RPC could not be forwarded
     assert_eq!(refused.code, tddy_rpc::Code::FailedPrecondition);
-    assert!(refused.message.starts_with("cannot forward AddProjectToHost:"), "got: {}", refused.message);
+    assert!(
+        refused
+            .message
+            .starts_with("cannot forward AddProjectToHost:"),
+        "got: {}",
+        refused.message
+    );
 }

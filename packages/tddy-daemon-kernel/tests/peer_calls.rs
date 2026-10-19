@@ -9,7 +9,9 @@ use pretty_assertions::assert_eq;
 use prost::Message;
 use tddy_daemon_extensions::PeerForwarder;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_daemon_kernel::peer_calls::{forward_add_project_to_host, forward_stream_read_host_document};
+use tddy_daemon_kernel::peer_calls::{
+    forward_add_project_to_host, forward_stream_read_host_document,
+};
 use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 use tddy_rpc::{Code, Status};
 use tddy_service::proto::project::{AddProjectToHostRequest, AddProjectToHostResponse};
@@ -26,11 +28,17 @@ struct OnePeerCall {
 
 impl OnePeerCall {
     fn answering_unary(bytes: Vec<u8>) -> Self {
-        Self { answer: Mutex::new(Some(Ok(bytes))), carried: Mutex::new(Vec::new()) }
+        Self {
+            answer: Mutex::new(Some(Ok(bytes))),
+            carried: Mutex::new(Vec::new()),
+        }
     }
 
     fn answering_frames(frames: Vec<Vec<u8>>) -> Self {
-        Self { answer: Mutex::new(Some(Err(frames))), carried: Mutex::new(Vec::new()) }
+        Self {
+            answer: Mutex::new(Some(Err(frames))),
+            carried: Mutex::new(Vec::new()),
+        }
     }
 
     fn carried(&self) -> Vec<(String, String, String, Vec<u8>)> {
@@ -44,9 +52,24 @@ impl PeerForwarder for OnePeerCall {
         true
     }
 
-    async fn call_unary(&self, peer: &str, service: &str, method: &str, body: Vec<u8>) -> Result<Vec<u8>, Status> {
-        self.carried.lock().unwrap().push((peer.into(), service.into(), method.into(), body));
-        Ok(self.answer.lock().unwrap().take().unwrap().expect("scripted for a unary call"))
+    async fn call_unary(
+        &self,
+        peer: &str,
+        service: &str,
+        method: &str,
+        body: Vec<u8>,
+    ) -> Result<Vec<u8>, Status> {
+        self.carried
+            .lock()
+            .unwrap()
+            .push((peer.into(), service.into(), method.into(), body));
+        Ok(self
+            .answer
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .expect("scripted for a unary call"))
     }
 
     async fn call_server_stream(
@@ -56,8 +79,17 @@ impl PeerForwarder for OnePeerCall {
         method: &str,
         body: Vec<u8>,
     ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
-        self.carried.lock().unwrap().push((peer.into(), service.into(), method.into(), body));
-        let frames = self.answer.lock().unwrap().take().unwrap().expect_err("scripted for a stream");
+        self.carried
+            .lock()
+            .unwrap()
+            .push((peer.into(), service.into(), method.into(), body));
+        let frames = self
+            .answer
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .expect_err("scripted for a stream");
         let (tx, rx) = mpsc::channel(frames.len().max(1));
         for frame in frames {
             tx.send(Ok(frame)).await.unwrap();
@@ -116,7 +148,9 @@ async fn a_peer_answering_garbage_is_reported_as_an_internal_decode_error() {
     // own decode message, which is not this crate's to pin.
     assert_eq!(refused.code, Code::Internal);
     assert!(
-        refused.message.starts_with("decode AddProjectToHostResponse:"),
+        refused
+            .message
+            .starts_with("decode AddProjectToHostResponse:"),
         "got: {}",
         refused.message
     );
@@ -125,8 +159,14 @@ async fn a_peer_answering_garbage_is_reported_as_an_internal_decode_error() {
 #[tokio::test]
 async fn reading_a_host_document_from_a_peer_relays_every_frame_decoded() {
     // Given a peer streaming two document chunks
-    let first = HostDocumentChunk { data: b"one".to_vec(), ..Default::default() };
-    let second = HostDocumentChunk { data: b"two".to_vec(), ..Default::default() };
+    let first = HostDocumentChunk {
+        data: b"one".to_vec(),
+        ..Default::default()
+    };
+    let second = HostDocumentChunk {
+        data: b"two".to_vec(),
+        ..Default::default()
+    };
     let peer = Arc::new(OnePeerCall::answering_frames(vec![
         first.encode_to_vec(),
         second.encode_to_vec(),

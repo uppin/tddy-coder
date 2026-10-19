@@ -14,7 +14,6 @@ description = "The daemon's RPC-family handlers, above the session lifecycle the
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
-tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-credentials = { path = "../tddy-credentials" }
@@ -48,6 +47,9 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# The acceptance suites stand up the plugin's own peer and room wiring; dev edges are not counted by
+# the LiveKit ratchet, which only bounds what the crate builds with.
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 tempfile = "3"
 # The catalogue suites that moved here with `CatalogRpcHandler` — the session-agent roster suites

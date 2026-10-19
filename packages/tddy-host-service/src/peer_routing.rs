@@ -1,23 +1,38 @@
 //! Which daemon serves an addressed request, and the common room a request for a peer is forwarded
 //! through — beside the [`EligibleDaemonSource`] it routes by. LiveKit-free: the room forwards
 //! through whatever transport it was built with.
+//!
+//! Shared by the session host and the RPC families served above this crate (`tddy-daemon-rpc`),
+//! so a session RPC and an exec-tool RPC addressed at the same daemon cannot disagree about who
+//! owns the call.
 
 use std::sync::Arc;
 
+use prost::Message;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_daemon_kernel::peer_forwarding::{CommonRoom, PeerRoute};
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_daemon_kernel::peer_forwarding::{classify_peer_route, CommonRoom, PeerRoute};
 use tddy_rpc::Status;
 
 use crate::multi_host::EligibleDaemonSource;
 
-/// Routes requests to the daemon they address.
+/// This daemon's routing identity, the peers it may route to, and the common-room slot a forward
+/// travels through.
+///
+/// Shared, not copied: `Clone` hands out the same roster and the same room, so a handler holding
+/// one routes against the peers the host sees. `config` is the host's own configuration, which
+/// never changes once the host is built.
+#[derive(Clone)]
 pub struct PeerRouting {
     config: DaemonConfig,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
+    /// The common room a forward to a peer travels through, when this process has one.
     common_room: Option<CommonRoom>,
 }
 
 impl PeerRouting {
+    /// Routing for the daemon `config` names, among the peers `eligible_daemon_source` lists.
+    #[must_use]
     pub fn new(
         config: DaemonConfig,
         eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
@@ -30,16 +45,176 @@ impl PeerRouting {
         }
     }
 
+    /// The peer daemons this one may route a request to, and their project rows.
+    #[must_use]
+    pub fn eligible_daemon_source(&self) -> &Arc<dyn EligibleDaemonSource> {
+        &self.eligible_daemon_source
+    }
+
+    /// The common room a request is forwarded to a peer through, when configured; it carries the
+    /// deadline `config.peer_forward_timeout_secs` names.
+    #[must_use]
+    pub fn common_room_livekit_room(&self) -> Option<&CommonRoom> {
+        self.common_room.as_ref()
+    }
+
+    pub fn set_eligible_daemon_source(
+        &mut self,
+        eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
+    ) {
+        self.eligible_daemon_source = eligible_daemon_source;
+    }
+
+    pub fn eligible_instance_ids(&self) -> Vec<String> {
+        self.eligible_daemon_source
+            .list_eligible_daemons()
+            .into_iter()
+            .map(|e| e.instance_id.0)
+            .collect()
+    }
+
     /// `Local` for this daemon (or no daemon named), `Forward` for an eligible peer; an unknown id
     /// is refused.
     pub fn classify_daemon_route(&self, requested_daemon: &str) -> Result<PeerRoute, Status> {
-        let _ = (requested_daemon, &self.config, &self.eligible_daemon_source);
-        todo!("PeerRouting::classify_daemon_route")
+        let local_id = local_instance_id_for_config(&self.config);
+        classify_peer_route(&local_id, requested_daemon, &self.eligible_instance_ids()).map_err(
+            |msg| {
+                log::info!("daemon routing rejected: {msg}");
+                Status::failed_precondition(msg)
+            },
+        )
     }
 
-    /// The common room to forward `rpc_name` through, or a precondition failure without one.
+    /// Route a session-scoped RPC by the daemon its `daemon_instance_id` addresses, before any
+    /// session lookup — a relay holds no sessions of its own and must still be able to forward.
+    ///
+    /// An unaddressed request (empty id) is this daemon's to serve: that is the protocol's other
+    /// spelling for "the daemon this call arrived on".
+    ///
+    /// Unlike [`Self::classify_daemon_route`], an unroutable id is `InvalidArgument`: the caller
+    /// named a daemon that cannot serve the call, which is a bad request rather than a deployment
+    /// that is not ready. Shared by every handler that routes this way — the exec tools, the
+    /// worktree snapshot and the roster RPCs — so they cannot diverge over which daemon owns a
+    /// session's files or its roster.
+    pub fn classify_addressed_daemon_route(
+        &self,
+        rpc_name: &str,
+        requested_daemon: &str,
+    ) -> Result<PeerRoute, Status> {
+        let requested_daemon = requested_daemon.trim();
+        if requested_daemon.is_empty() {
+            return Ok(PeerRoute::Local);
+        }
+        let route = classify_peer_route(
+            &local_instance_id_for_config(&self.config),
+            requested_daemon,
+            &self.eligible_instance_ids(),
+        )
+        .map_err(|msg| {
+            log::info!("{rpc_name}: rejected daemon routing: {msg}");
+            Status::invalid_argument(msg)
+        })?;
+        // A `Forward` classification is **not** a forward. One caller refuses instead of
+        // forwarding — `refuse_if_addressed_at_a_peer`, which answers the two long-lived activity
+        // streams `unimplemented` — so a line logged here would report a forward the daemon never
+        // makes, and would double up wherever the caller logs its own. Each caller that actually
+        // forwards logs it at the point it does.
+        Ok(route)
+    }
+
+    /// The common room a forward for `rpc_name` travels through, or a precondition failure without
+    /// one.
     pub fn common_room_slot(&self, rpc_name: &str) -> Result<&CommonRoom, Status> {
-        let _ = (rpc_name, &self.common_room);
-        todo!("PeerRouting::common_room_slot")
+        self.common_room.as_ref().ok_or_else(|| {
+            Status::failed_precondition(format!(
+                "cannot forward {rpc_name}: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)"
+            ))
+        })
+    }
+
+    /// Serve a unary RPC on the daemon its `daemon_instance_id` names, when that is not this one.
+    ///
+    /// `Ok(None)` means the call is this daemon's own to serve — an empty id, or this daemon's id.
+    /// `rpc_name` is the proto method name, so a forwarded call lands on the same handler there.
+    ///
+    /// `service` is the coordinate the peer is asked at, for the reason
+    /// [`Self::stream_served_by_peer`] takes one: it is not always this one. Family B's four routed
+    /// unaries are `session_agents.SessionAgentService`' since `#unbundle` node 7, and a forward
+    /// addressed to the coordinate the caller happened to reach would be answered by a service that
+    /// no longer declares the method.
+    ///
+    /// Called **before** the session is looked up, and before the caller is authenticated: a relay
+    /// holds neither the session nor, necessarily, an answer about its caller, and the daemon that
+    /// serves the call checks the token itself. A split session's roster and files live on the
+    /// daemon holding the codebase while the agent's tools address the daemon running its loop, so
+    /// resolved out of this daemon's own sessions the session does not exist at all — the in-jail
+    /// roster stays empty, every subagent call is refused, and the main agent is told it has no such
+    /// tool (PRD AC12, AC28).
+    pub async fn rpc_served_by_peer<Req, Resp>(
+        &self,
+        service: &'static str,
+        rpc_name: &str,
+        requested_daemon: &str,
+        req: &Req,
+    ) -> Result<Option<Resp>, Status>
+    where
+        Req: Message,
+        Resp: Message + Default,
+    {
+        let PeerRoute::Forward { peer_instance_id } =
+            self.classify_addressed_daemon_route(rpc_name, requested_daemon)?
+        else {
+            return Ok(None);
+        };
+        log::info!("{rpc_name}: forwarding RPC to remote daemon_instance_id={peer_instance_id}");
+        let room = self.common_room_slot(rpc_name)?;
+        let answered = room
+            .forward_to_peer(&peer_instance_id, service, rpc_name, req.encode_to_vec())
+            .await?;
+        Resp::decode(answered.as_slice())
+            .map(Some)
+            .map_err(|e| Status::internal(format!("decode {rpc_name} response from peer: {e}")))
+    }
+
+    /// [`Self::rpc_served_by_peer`] for a **server-streaming** RPC: the peer's frames are relayed
+    /// one by one, and a stream that stops without its end-of-stream marker terminates as an error
+    /// rather than as a short roster the caller would take for the whole one.
+    ///
+    /// `service` is the coordinate the peer is asked at, which is not always this one: the three
+    /// context reads are `session_files.SessionFilesService`' since `#unbundle` node 6, and a
+    /// forward addressed to the coordinate the caller happened to reach would be answered by a
+    /// service that no longer declares the method.
+    pub async fn stream_served_by_peer<Req, Frame>(
+        &self,
+        service: &'static str,
+        rpc_name: &str,
+        requested_daemon: &str,
+        req: &Req,
+    ) -> Result<Option<tokio::sync::mpsc::UnboundedReceiver<Result<Frame, Status>>>, Status>
+    where
+        Req: Message,
+        Frame: Message + Default + Send + 'static,
+    {
+        let PeerRoute::Forward { peer_instance_id } =
+            self.classify_addressed_daemon_route(rpc_name, requested_daemon)?
+        else {
+            return Ok(None);
+        };
+        log::info!("{rpc_name}: forwarding stream to remote daemon_instance_id={peer_instance_id}");
+        let room = self.common_room_slot(rpc_name)?;
+        let decoding = rpc_name.to_string();
+        room.forward_server_stream_to_peer(
+            &peer_instance_id,
+            service,
+            rpc_name,
+            req.encode_to_vec(),
+            move |bytes| {
+                Frame::decode(bytes.as_slice()).map_err(|e| {
+                    Status::internal(format!("decode {decoding} frame from peer: {e}"))
+                })
+            },
+        )
+        .await
+        .map(Some)
     }
 }
