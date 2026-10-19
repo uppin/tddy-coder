@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 
 use super::super::early_return::masked_to_code;
+use super::super::seam_refusal;
 use super::bindings::Imported;
 use super::scope::Scope;
 use super::text::{enclosing_modules, Edit};
@@ -20,10 +21,6 @@ use crate::Result;
 /// The module the code leaves and the one it arrives in, below the crate root.
 pub(in crate::backends::rust) struct Modules<'a> {
     /// The file the code is written in, as a refusal names it.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-move-item-paths): named by the R8 refusal at green"
-    )]
     pub(in crate::backends::rust) file: &'a str,
     pub(in crate::backends::rust) from: &'a [String],
     pub(in crate::backends::rust) to: &'a [String],
@@ -166,6 +163,9 @@ fn path_edit(
 
 /// The rewrite of the `self::`/`super::` prefix at `prefix`, which reaches the module `arrives_at`
 /// and names `named` there, for code arriving in `to` — rules R1–R8 of the changeset.
+///
+/// A name the module only imports is followed one hop, so the edit then also covers the name when the
+/// import brings in another one (R5) or another crate's path (R7).
 fn respelled(
     masked: &str,
     prefix: Range<usize>,
@@ -174,19 +174,37 @@ fn respelled(
     to: &[String],
     modules: &Modules<'_>,
 ) -> Result<Option<Edit>> {
-    // TODO(reshape-move-item-paths): implement R2 (destination inside the module), R3 (visible
-    // import), R5 (alias: the name is rewritten too), R6 (confirmed glob), R7 (extern path) and R8
-    // (refusal); today an import is followed only when it keeps the written name (R4).
-    let written = &masked[prefix.clone()];
-    let through = modules
-        .imports
-        .and_then(|imports| imports(arrives_at, named, to))
-        .and_then(|imported| match imported {
-            Imported::InCrate { module, name } => (name == named).then_some(module),
-            _ => None,
-        });
-    let respelled = relative_to(through.as_deref().unwrap_or(arrives_at), to);
-    Ok((respelled != written).then(|| Edit::replace(prefix, respelled)))
+    // Inside the module the path reaches, its imports are visible as written (R2).
+    let looked_up = !named.is_empty() && !to.starts_with(arrives_at);
+    let through = looked_up
+        .then(|| {
+            modules
+                .imports
+                .and_then(|imports| imports(arrives_at, named, to))
+        })
+        .flatten();
+    let whole = prefix.start..prefix.end + named.len();
+    let (replacement, span) = match through {
+        None | Some(Imported::Visible) => (relative_to(arrives_at, to), prefix),
+        Some(Imported::InCrate { module, name }) => {
+            (format!("{}{name}", relative_to(&module, to)), whole)
+        }
+        Some(Imported::Extern { path, shadowed }) => {
+            let rooted = if shadowed { "::" } else { "" };
+            (format!("{rooted}{}", path.join("::")), whole)
+        }
+        Some(Imported::Unconfirmed(why)) => {
+            let line = masked[..prefix.start].matches('\n').count() + 1;
+            return Err(seam_refusal(format!(
+                "{}:{line}: `{}` reaches `{named}` through a glob import of `{}` that cannot be \
+                 followed ({why}); write the path to the module that defines it and plan again",
+                modules.file,
+                &masked[whole],
+                arrives_at.join("::"),
+            )));
+        }
+    };
+    Ok((replacement != masked[span.clone()]).then(|| Edit::replace(span, replacement)))
 }
 
 /// The module the code at `at` is written in, before and after the move.
