@@ -53,6 +53,17 @@ exposed — leaves the entry alone. A daemon with no LiveKit configured reports 
 error. A **local session attach does not depend on any of this**: it never waits on, or fails with,
 an unreachable LiveKit; the failure appears here instead ([Session rooms](session-room.md)).
 
+### On the settings screen
+
+The LiveKit block of the settings screen shows the `livekit` entry as one line: **Off**,
+**Missing: url, api_secret**, **Connecting…**, **Connected · 3m** or **Unreachable · 12s: <error>**,
+the duration being how long the integration has been in that state. The screen reads it when it
+opens, every 5 seconds while it stays open, and right after a successful save, so an operator who
+saves a URL sees whether the daemon reached it. A daemon that answers `Unimplemented` (an older one)
+gets no line and is not asked again; any other failed read shows **Status unavailable: <message>**
+on the same line and never lands in the save error. Implementation:
+[daemon-settings-screen.md](../../../packages/tddy-web/docs/daemon-settings-screen.md).
+
 ## What an update means
 
 An update carries the **complete** settings message; a partial one would be indistinguishable from a
