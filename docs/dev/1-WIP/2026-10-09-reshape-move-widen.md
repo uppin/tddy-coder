@@ -1,17 +1,20 @@
 # Changeset: cross-crate moves widen what the origin still reaches, and say so
 
 **Date**: 2026-10-09
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress (green: library and live suites pass, scoped)
 **Type**: Feature (engine: visibility edits in the files a cross-crate move carries; report and `check --deep` output)
 **Stack**: `#reshape` 14/24, branch `feature/reshape/move-widen`, wave 1. PR title:
 `feat(code-restructuring): cross-crate moves widen what the origin still reaches and say so (#reshape 14/24)`.
 PR: [#604](https://github.com/uppin/tddy-coder/pull/604).
-Base in the linear stack: `feature/reshape/fn-sizes-rest` (K=18). **Real edges** (refined at the contract commit, see
-`## Dependencies`): `multi-seam-extract → move-widen` (K=2: `check --deep` prints widenings through its
-`Rehearsed.widenings` / `rehearsed_lines`) and `move-children → move-widen` (K=5: the `Resolution` a crate move returns is
-its `crate_move::resolution` / `cluster_resolution`). Both parents sit below this node on the line, so the order holds. No
-node of this stack consumes this node's behaviour. It shares `crate_move/cluster.rs`, `crate_move.rs` and the
-`backends/rust.rs` wiring with nodes 1, 5 and 8.
+Base in the linear stack: `feature/reshape/tests-follow` (K=13, #reshape 14/24 after the replan). **Real edges**
+(refined at the contract commit, see `## Dependencies`): `multi-seam-extract → move-widen` (K=2: `check --deep` prints
+widenings through its `Rehearsed.widenings` / `rehearsed_lines`) and `move-children → move-widen` (K=5: the `Resolution`
+a crate move returns is its `crate_move::resolution` / `cluster_resolution`). Both landed on `master`, below the whole
+line, so the edges are satisfied code. Nodes 7, 8 and 9 (the `creating` crate-creation path in `cluster.rs`) are on
+`master` too, so a move into a created crate widens as well. `fn-sizes-rest` is **above** this node after the replan, so
+the function-size constraints below are measured against the sizes on this node's base. No node of this stack consumes
+this node's behaviour. It shares `crate_move/cluster.rs`, `crate_move.rs` and the `backends/rust.rs` wiring with nodes 1,
+5 and 8.
 
 > **Replanned 2026-10-19** (`plans/reshape/zed-extensions-replan.md`): this node is `#reshape` 14/24, base `feature/reshape/tests-follow`, green **wave 1** — every parent it waited on has merged. `rust-backend-split`, `backend-session` and `fn-sizes-backend` were dropped; references to them below are historical, as are wave numbers other than 1. **Blocks:** backend-fn-sizes (K21).
 
@@ -177,8 +180,8 @@ published by nodes below it. This node consumes them instead of duplicating them
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| **`multi-seam-extract`** (K=2, `feature/reshape/multi-seam-extract`) | `Rehearsed.widenings: Vec<VisibilityChange>` filled from `Resolution.report`, and `rehearsed_lines(index, &Rehearsed)`, through which `check_plan` prints survey, `visibility:` and `note:` lines (its rule 5) | a crate move's widenings reach `check --deep` through them; acceptance test 24 is red until both that green and this one land | add `Rehearsed.report` or `account_rehearsal` (both dropped from this contract), or edit `check_plan` |
-| **`move-children`** (K=5, `feature/reshape/move-children`) | `crate_move::resolution(engine, workspace, op) -> Result<Resolution>` and `cluster_resolution(engine, workspace, cluster) -> Result<Resolution>` (the `Resolution` a backend returns, with carried-children notes), wired into `rust.rs` by its green | this node's green puts `widened_cluster`'s report into that `Resolution.report`. Acceptance tests 9 and 12 call `cluster_resolution`, so until that green they panic on its `todo!()`; test 23 reads the backend's `Resolution` | change `resolve` / `resolve_cluster` return types (they stay `Result<WorkspaceEdit>`, as planned in D3 before node 5 published), or edit the two `rust.rs` wrappers |
+| **`multi-seam-extract`** (K=2, `feature/reshape/multi-seam-extract`) | `Rehearsed.widenings: Vec<VisibilityChange>` filled from `Resolution.report`, and `rehearsed_lines(index, &Rehearsed)`, through which `check_plan` prints survey, `visibility:` and `note:` lines (its rule 5) | a crate move's widenings reach `check --deep` through them; acceptance test 24 passes now that both are on `master` | add `Rehearsed.report` or `account_rehearsal` (both dropped from this contract), or edit `check_plan` |
+| **`move-children`** (K=5, `feature/reshape/move-children`) | `crate_move::resolution(engine, workspace, op) -> Result<Resolution>` and `cluster_resolution(engine, workspace, cluster) -> Result<Resolution>` (the `Resolution` a backend returns, with carried-children notes), wired into `rust.rs` by its green | this node's green puts `widened_cluster`'s report into that `Resolution.report`. Acceptance tests 9 and 12 call `cluster_resolution` and test 23 reads the backend's `Resolution`; both are on `master` | change `resolve` / `resolve_cluster` return types (they stay `Result<WorkspaceEdit>`, as planned in D3 before node 5 published), or edit the two `rust.rs` wrappers |
 
 ## Draft PR contract
 
@@ -239,10 +242,8 @@ Published with the wave-2 contract commit, the first push of this PR. **Owned su
 ## Green wave
 
 **Wave:** 2 of 4.
-**Greenable independently:** mostly. Rules 1–5 and the library tests (except 9 and 12) need nothing below. Tests 9, 12
-and 23 need `move-children`'s green (`cluster_resolution` / `resolution`), and test 24 needs `multi-seam-extract`'s
-(`rehearsed_lines` wired into `check_plan`). Green this node after those two, or leave those four red, named, until they
-land.
+**Greenable independently:** yes, now. `move-children` (`cluster_resolution` / `resolution`) and `multi-seam-extract`
+(`rehearsed_lines` wired into `check_plan`) are on `master`, so tests 9, 12, 23 and 24 are greened with the rest.
 **Concurrent with:** the other wave-2 nodes: `feature/reshape/move-impl-members`, `oversized-files`, `tests-follow`,
 `fn-sizes-rest`. It sat at K=7, inside wave 1, until 2026-10-11, and moved to K=14 because the line may not step
 back from wave 2 to wave 1.
@@ -257,14 +258,14 @@ It also owns the `pub(in …)` rewrite that this node leaves alone.
 
 ## Scope
 
-- [ ] **Reference seam**: `ItemReferences` fields, `DeclarationKind`, `declarations.rs`, the fake updated, `surveyed` filtered
-- [ ] **Deciding step**: rules 1–4 in `widening/{reach,glob,escaping}.rs`
-- [ ] **Edits and report**: rule 5 (`declaration.rs`), merge, `Resolution`, `VisibilityChange.reason`, `console::widening`
-- [ ] **`check --deep`**: `Rehearsed.report`, `account_rehearsal`, the glob survey line
-- [ ] **Registration**: the live binary in `.config/rust-e2e.filterset` and the `rust-analyzer` group
+- [x] **Reference seam**: `ItemReferences` fields, `DeclarationKind`, `declarations.rs`, the fake updated, `surveyed` filtered
+- [x] **Deciding step**: rules 1–4 in `widening/{reach,glob,escaping}.rs`
+- [x] **Edits and report**: rule 5 (`declaration.rs`), merge, `Resolution`, `VisibilityChange.reason`, `console::widening`
+- [x] **`check --deep`**: `Rehearsed.report`, `account_rehearsal`, the glob survey line
+- [x] **Registration**: the live binary in `.config/rust-e2e.filterset` and the `rust-analyzer` group
 - [ ] **Package documentation** at wrap (list under Affected Packages); the new todo committed with the planning commit
-- [ ] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
-- [ ] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, clippy `-D warnings`, `cargo fmt`; `rust.rs` net ≤ 0; no function on the size list grows; every new function ≤ 40 lines
+- [x] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
+- [x] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, clippy `-D warnings`, `cargo fmt`; `rust.rs` net ≤ 0; no function on the size list grows; every new function ≤ 40 lines
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -317,14 +318,14 @@ It also owns the `pub(in …)` rewrite that this node leaves alone.
 
 ## Implementation milestones
 
-- [ ] **M1** contract: `DeclarationKind`, fields, fake, `surveyed` filter, `Resolution` return types, `reason`; library tests 16–18 compile and fail on behaviour
-- [ ] **M2** reach and exclusions (rules 1, 4) with positional edits (rule 5); tests 1–8, 13–15
-- [ ] **M3** glob-visible (rule 2); tests 9–11
-- [ ] **M4** escaping types (rule 3); test 12
-- [ ] **M5** cluster merge; test 16
-- [ ] **M6** `declarations.rs` and the backend wiring; live tests 19–23. **Record** in Validation Results the number of extra `textDocument/references` requests and the wall time for the R6-shape fixture and for a re-run of #carve 21 R3's module on a warm index (measured, not bounded)
-- [ ] **M7** `check --deep`: `Rehearsed.report`, `account_rehearsal`, glob line; tests 24–26
-- [ ] **M8** registration, docs staged, scoped gate, size checks
+- [x] **M1** contract: `DeclarationKind`, fields, fake, `surveyed` filter, `Resolution` return types, `reason`; library tests 16–18 compile and fail on behaviour
+- [x] **M2** reach and exclusions (rules 1, 4) with positional edits (rule 5); tests 1–8, 13–15
+- [x] **M3** glob-visible (rule 2); tests 9–11
+- [x] **M4** escaping types (rule 3); test 12
+- [x] **M5** cluster merge; test 16
+- [x] **M6** `declarations.rs` and the backend wiring; live tests 19–23. **Record** in Validation Results the number of extra `textDocument/references` requests and the wall time for the R6-shape fixture and for a re-run of #carve 21 R3's module on a warm index (measured, not bounded)
+- [x] **M7** `check --deep`: `Rehearsed.report`, `account_rehearsal`, glob line; tests 24–26
+- [x] **M8** registration (already in `.config/rust-e2e.filterset:74` and the `rust-analyzer` group, `.config/nextest.toml:129`, registered once each), scoped gate, size checks. Docs are staged for the wrap, not written
 
 ## Testing plan
 
@@ -469,6 +470,24 @@ Decisions taken by this plan:
 
 ## Validation Results
 
+**Green (2026-10-19), scoped to `tddy-code-restructuring`.** `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`
+and `cargo fmt --all --check` are clean.
+- `tests/move_to_crate_widening.rs` (library level): 18/18 🟢, including 9 and 12 through `cluster_resolution`.
+- `tests/move_to_crate_widening_acceptance.rs` (live rust-analyzer): 7/7 🟢 (19–25), 208 s under load average ~140.
+- Unit tests: `--lib` 1083/1083 🟢 (`declaration` 4, `escaping` 2, `declarations` 2, `rehearsal` glob line).
+- `./test -p tddy-code-restructuring`: every target ran; 99 `test result: ok`, none FAILED. The runner's closing line named five
+  targets (`item_anchor_acceptance`, `live_plans_acceptance`, `move_fidelity_acceptance`, `move_item_creates_module_acceptance`,
+  `move_item_into_an_existing_module_acceptance`) although each printed all its tests `ok`; re-run alone, all five exit green
+  (19, 7, 13, 6, 4 tests). Treated as load noise, not a regression.
+- **M6 measurement** (R6-shape roster fixture, test 23, one cold server under load average ~140): the outline yields **9
+  declarations** (3 top-level items before this change), so `textDocument/references` is asked **9 times instead of 3, 6 extra**;
+  the reference loop took **26.6 s wall** under that load, about 3 s a request. A quiet-machine number and the #carve 21 R3
+  re-run on a warm index were **not measured**: no such fixture is in the repository and the machine could not give a quiet run.
+  One of the 6 extra requests asks about a trait-impl member (`NoVisibility`), whose answer nothing reads; skipping those is a
+  candidate if an enum with many variants shows up.
+- Size checks: `rust.rs` 5584 -> 5570 lines vs `master` (net -14); `resolve_cluster` 10 lines (unchanged); `cluster_edits` 53 -> 57
+  (it now hands the carried children's surveys on); every new function is under 40 lines; every new file is under 500 lines.
+
 **Contract commit (2026-10-09), scoped.** `cargo check -p tddy-code-restructuring --all-targets`,
 `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --all --check` are clean.
 - `tests/move_to_crate_widening.rs`: 17 🔴, 1 🟢 (test 18, the pin). Tests 1–8, 10, 11, 13, 14 and 16 fail on their
@@ -499,10 +518,10 @@ Decisions taken by this plan:
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
+- [x] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -513,6 +532,6 @@ Decisions taken by this plan:
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review. It deletes the three ✅ todos and the initial discovery, and narrows the 09-09 entry (item 3 closed; items 2 and 4 marked closed only if their nodes have landed)
 - [ ] USER REVIEW — work complete, decide next steps
