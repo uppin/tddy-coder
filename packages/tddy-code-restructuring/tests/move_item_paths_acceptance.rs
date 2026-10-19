@@ -237,7 +237,7 @@ async fn a_path_through_a_glob_that_cannot_confirm_the_name_is_refused_by_check_
 
     // Then both name the file, the line and the path as written, and every file is untouched
     let names_it =
-        |said: &str| said.contains("src/host/worker.rs:1") && said.contains("`super::Elsewhere`");
+        |said: &str| said.contains("src/host/worker.rs:1:") && said.contains("`super::Elsewhere`");
     assert!(
         findings.iter().any(|finding| names_it(finding)),
         "the deep check does not name the path: {findings:?}"
