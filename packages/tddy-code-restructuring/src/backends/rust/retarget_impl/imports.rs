@@ -7,6 +7,7 @@
 
 use super::super::item_move::destination::package_of;
 use super::super::item_move::preflight::names_declared_in;
+use super::super::item_move::use_path::{resolved, UsePath};
 use super::super::seam_refusal;
 use super::preflight::ToType;
 use crate::crate_move::source_scan::items_of_module;
@@ -29,7 +30,8 @@ pub(super) fn the_use(
     // The file that declares the new type needs no import of it.
     let mut declaring = vec![package.crate_name.clone()];
     declaring.extend(named.module.iter().cloned());
-    if module_path_of(workspace.root, file)? == declaring {
+    let here = module_path_of(workspace.root, file)?;
+    if here == declaring {
         return Ok(None);
     }
 
@@ -38,11 +40,21 @@ pub(super) fn the_use(
         .chain(std::iter::once(named.name.clone()))
         .collect();
     let text = workspace.read(file)?;
-    let bound = items_of_module(&text)
+    let items = items_of_module(&text);
+    let target: Vec<String> = named
+        .module
+        .iter()
+        .cloned()
+        .chain(std::iter::once(named.name.clone()))
+        .collect();
+    // S6′: a `use` binds the type when it names it, however it is spelled from this module.
+    let bound = items
         .uses
         .iter()
         .filter(|leaf| leaf.bound_name() == Some(named.name.as_str()))
-        .any(|leaf| !leaf.glob && leaf.segments == path);
+        .any(|leaf| {
+            resolved(&leaf.segments, &here[1..], &items) == Some(UsePath::InCrate(target.clone()))
+        });
 
     if bound {
         return Ok(None);
