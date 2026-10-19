@@ -447,7 +447,8 @@ Decisions taken by this plan: `resolved_from` is replaced, not wrapped; `rebase:
 (empty)
 
 ### From @validate-tests (Test Quality)
-(empty)
+- [ ] Tighten test 6's `:1` match (WARNING)
+- [ ] Optional: split multi-behaviour acceptance tests 1, 7, 8, 9 (WARNING)
 
 ### From @prod-ready (Production Readiness)
 (empty)
@@ -478,6 +479,17 @@ included). Every 🔴 row above is now 🟢. No `TODO(reshape-move-item-paths)` 
 - **Findings:** none critical. INFO: `bindings::through_a_glob` is 37 lines, `item_move/assemble.rs` stays at
   509 production lines (net zero, `oversized-files`' alert). INFO: a name bound only by a glob that lexical reading
   cannot confirm (e.g. via a macro) is now refused (R8) where it used to be written unchecked — the intended contract.
+
+**Test quality (`/validate-tests`, 2026-10-19).** 22 planned tests analysed (7 + 3 live, 12 unit incl. 3 pins): all follow
+Given/When/Then with named fixtures and meaningful values (`peer`/`check`, `Config`/`Settings`, `kernel::util`); no
+`#[ignore]`, sleeps, ports or order dependence; names match bodies. 0 critical, 2 warning, 2 info:
+- WARNING `tests/move_item_paths_acceptance.rs` test 6: `said.contains("src/host/worker.rs:1")` also matches `:12`; assert the
+  `file:line` with a trailing delimiter or the whole prefix.
+- WARNING `tests/move_item_paths_acceptance.rs` tests 1, 7 and `tests/retarget_impl_acceptance.rs` tests 8, 9 assert more than
+  one behaviour (text shape plus defined/bound-once plus compiles). Acceptable as one story each, but could be split.
+- INFO test 1: `!contains("super::kernel::")` is implied by the preceding positive assertion.
+- INFO `item_move/use_path.rs` `a_head_naming_a_child_module…` and `crate_self_and_super_heads…` assert 3–4 cases per test
+  by design (table-shaped); named after the whole group.
 
 | # | Test | Result | Why |
 |---|---|---|---|
