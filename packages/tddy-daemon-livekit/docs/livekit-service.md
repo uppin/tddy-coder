@@ -159,6 +159,16 @@ wins: a session room that opens reports `Connected` while the common room is dow
 An embedder that calls `runtime::spawn_common_room_discovery_task` has no board and reports on a
 private one nobody reads.
 
+## `LiveKitTerminalExposure` — serving a terminal in a room
+
+Implements `TerminalExposure`. `from_config` reads the URL (`public_url` when the block has one, since the
+participant is a client of the server), the API key and the secret from the `livekit:` block, and is `None`
+without them. `expose` mints a participant token with `TokenGenerator` (24 h), joins `at.room` as
+`at.identity` with `LiveKitParticipant::connect`, serves the terminal's RPC surface, and republishes the
+session's metadata block through `spawn_session_metadata_republisher` at join and every 30 s, so a dropped
+`set_metadata` or a rejoin does not lose the session's cross-host association. The returned `ExposedTerminal`
+finishes when the room ends. The exposure does not mint through `RoomTokenMinter`.
+
 ## The direction was already right
 
 `session_room` defines four trait ports — `SessionTerminalBridge`, `WorktreeSource`,

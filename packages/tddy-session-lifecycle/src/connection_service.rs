@@ -206,6 +206,10 @@ pub struct DaemonSessionHost {
     /// [`tddy_daemon_extensions::SessionReach`]. [`tddy_daemon_extensions::NoSessionReach`] until
     /// the composition root installs an integration with [`Self::with_session_reach`].
     session_reach: Arc<dyn tddy_daemon_extensions::SessionReach>,
+    /// What serves a session's terminal to participants outside this host — see
+    /// [`tddy_daemon_extensions::TerminalExposure`]. [`tddy_daemon_extensions::NoTerminalExposure`]
+    /// until the composition root installs an integration with [`Self::with_terminal_exposure`].
+    terminal_exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure>,
     /// Where a clone's `SSH_ASKPASS` helper asks for a key passphrase. `None` on a host the
     /// daemon runtime did not build.
     askpass: Option<Arc<tddy_host_service::askpass::AskpassEndpoint>>,

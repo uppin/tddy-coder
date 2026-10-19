@@ -63,31 +63,19 @@ type ControlRegistry = Arc<RwLock<HashMap<String, ControlLeaseInfo>>>;
 type ManagedWorkflowRegistry =
     Arc<RwLock<HashMap<String, crate::session_toolcall::ManagedWorkflow>>>;
 
-/// Per-session LiveKit exposure of the terminal: `session_id → BridgedTerminal`.
-type LiveKitTerminalRegistry = Arc<RwLock<HashMap<String, BridgedTerminal>>>;
+/// Per-session exposure of the terminal: `session_id → ExposedTerminalRecord`.
+type ExposedTerminalRegistry = Arc<RwLock<HashMap<String, ExposedTerminalRecord>>>;
 
-/// A session's terminal as LiveKit clients see it: what it publishes about itself, and the
-/// participant serving it once one has been put in the room.
-struct BridgedTerminal {
+/// A session's terminal as remote participants see it: what it publishes about itself, and the
+/// exposure serving it once one has been started.
+struct ExposedTerminalRecord {
     /// The `session` block this session publishes about itself. Spawn-time knowledge — nothing on
     /// disk records which planned stack node a child materialized — so it is kept from the start
-    /// rather than re-derived when the bridge is finally wanted.
+    /// rather than re-derived when the exposure is finally wanted.
     metadata: tddy_core::session_participant_metadata::SessionParticipantMetadata,
-    /// The participant bridging the PTY, once a LiveKit consumer has arrived. Its task ends when
-    /// the room or the PTY does, so a finished handle is a bridge that is no longer there.
-    participant: Option<tokio::task::JoinHandle<()>>,
-}
-
-/// Where a session's terminal is served to LiveKit clients.
-///
-/// Every field is a pure function of the deployment config and the session id, so the caller
-/// derives them rather than the manager reading configuration it otherwise knows nothing about.
-pub struct LiveKitTerminalAddress {
-    pub url: String,
-    pub room: String,
-    pub api_key: String,
-    pub api_secret: String,
-    pub identity: String,
+    /// The exposure, once a consumer has arrived. It ends when the room or the PTY does, so a
+    /// finished one is an exposure that is no longer there.
+    exposure: Option<tddy_daemon_extensions::ExposedTerminal>,
 }
 
 /// Manages PTY session tools via the shared [`TaskRegistry`] and per-session control leases.
@@ -103,14 +91,14 @@ pub struct CliSessionManager {
     /// Managed-workflow wiring per session — its toolcall listener + controller must outlive the
     /// spawned process, so the manager owns it and drops it when the main terminal exits.
     managed_workflows: ManagedWorkflowRegistry,
-    /// What each session publishes about itself when its terminal is bridged into LiveKit, and the
-    /// participant doing it once one has been put there.
+    /// What each session publishes about itself when its terminal is exposed to remote
+    /// participants, and the exposure doing it once one has been started.
     ///
     /// An entry is written when a session that is *meant* to be drivable from another host starts;
-    /// the participant is added when a LiveKit consumer first arrives. A session with no entry is
-    /// one that is not exposed over LiveKit at all — which is why the entry, and not the presence
+    /// the exposure is added when a consumer first arrives. A session with no entry is one that is
+    /// not exposed at all — which is why the entry, and not the presence
     /// of a PTY, is what decides whether anything is bridged.
-    livekit_terminals: LiveKitTerminalRegistry,
+    exposed_terminals: ExposedTerminalRegistry,
 }
 
 /// Backward-compatible alias for [`CliSessionManager`].
@@ -138,7 +126,7 @@ impl CliSessionManager {
             control: Arc::new(RwLock::new(HashMap::new())),
             control_tx,
             managed_workflows: Arc::new(RwLock::new(HashMap::new())),
-            livekit_terminals: Arc::new(RwLock::new(HashMap::new())),
+            exposed_terminals: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -150,7 +138,7 @@ impl CliSessionManager {
     // --- terminal control lease (single-screen mutex) ---
 }
 
-mod livekit_terminals;
+mod exposed_terminals;
 
 mod control_lease;
 
@@ -168,8 +156,8 @@ mod pty_spawn;
 // Resize escape parsing
 // ---------------------------------------------------------------------------
 
-mod livekit_bridge;
-pub use livekit_bridge::*;
+mod pty_terminal_service;
+pub use pty_terminal_service::*;
 
 #[cfg(test)]
 mod tests {

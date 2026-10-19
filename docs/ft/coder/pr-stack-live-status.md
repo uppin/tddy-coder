@@ -813,7 +813,7 @@ already host-independent.
 **A claude-cli session publishes no participant metadata at all.** The drawer's cross-host rows come
 from LiveKit presence in the common room, and a participant's `session` metadata block is what
 hydrates them (`crossHostSessions::mergeActiveAndFetchedSessions`). Only `tddy-coder` publishes that
-block; a claude-cli session's LiveKit bridge (`cli_session_manager::spawn_livekit_bridge`) calls
+block; a claude-cli session's LiveKit terminal exposure (`LiveKitTerminalExposure::expose`) calls
 `participant.run()` with no metadata watch. Planned-PR children are claude-cli sessions, so their
 synthesized rows carry **no `branch` and no `orchestrator_session_id`** — the two keys every PR-stack
 join uses (`resolveNodeSession`, `boundChildSession`, `sessionStackGroups`).
@@ -893,7 +893,7 @@ all tolerated as absent by older participants:
 
 `tddy-coder` publishes it as today, seeded with the new fields from its CLI args
 (`--stack-parent`, the new `--stack-node-id`) and its changeset's `branch`. The daemon publishes it
-for a claude-cli session by handing `spawn_livekit_bridge` a metadata watch — carrying the **static**
+for a claude-cli session by handing the terminal exposure the session's metadata block — carrying the **static**
 identity and association fields the daemon knows at spawn (`session_id`, `orchestrator_session_id`,
 `stack_node_id`, `branch`, `agent`, `recipe`, `model`, `repo_path`). The live workflow fields stay
 empty for such a session, exactly as they are today; nothing that renders is lost, and the cross-host

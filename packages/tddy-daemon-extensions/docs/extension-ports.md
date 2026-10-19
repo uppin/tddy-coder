@@ -29,6 +29,31 @@ RPC through `ReachableSessions::resolve`. See
 [LiveKit session reach](../../tddy-daemon-livekit/docs/livekit-service.md#livekitsessionreach--opening-the-room-for-a-reached-session)
 for the implementation of the port.
 
+## The terminal-exposure port (`terminal_exposure`)
+
+Serving a session's PTY to participants outside this host goes through a `TerminalExposure`. The CLI
+session manager hands the port the terminal's RPC service, a room-scoped address and the session's
+metadata block; the integration decides how the terminal becomes reachable.
+
+| Item | Role |
+|---|---|
+| `TerminalAddress` | `room` and `identity`: where the terminal is served. Credentials are not part of it; only the integration needs them. |
+| `TerminalExposure` | `expose(at, terminal, metadata_json)`: serve `terminal` (an `Arc<dyn tddy_rpc::RpcService>`) as `at.identity` in `at.room`, advertising `metadata_json`. |
+| `ExposedTerminal` | A running exposure. `is_finished()` is true once the room or the terminal ended, which is what lets the manager expose again. |
+| `NoTerminalExposure` | Nothing wired: `expose` returns a failed precondition, which callers treat as "not exposed". |
+
+`CliSessionManager::ensure_exposed_terminal(session_id, at, exposure)` keeps the per-session record
+and is single-flight: the registry's write lock is held across `expose`, so two reaches at the same
+moment start one exposure, not two that would evict each other under one identity. It answers
+`Ok(true)` when an exposure is running, `Ok(false)` when the session recorded no terminal, its PTY is
+gone, or the exposure answered with a failed precondition, and an error for any other refusal.
+`pty_terminal_service(handle)` builds the RPC service from a PTY handle.
+
+`LiveKitTerminalExposure` implements the port in `tddy-daemon-livekit`. The daemon builds it once
+from the `livekit:` block, or the null object without credentials, and hands it to the session host
+(`with_terminal_exposure`) and to the Telegram harness, whose start announces its terminal's room at
+once.
+
 ## The integration status board (`integration_status`)
 
 Each integration is handed an `IntegrationReporter` at wiring time and reports into the daemon's one
@@ -110,7 +135,7 @@ The lists, in the test file:
 - `WIRING` (binaries' composition roots and the end-to-end harness): `tddy-daemon`, `tddy-rdp`,
   `tddy-vnc`, `tddy-e2e`.
 - `KNOWN_OFFENDERS` (library crates that still name a LiveKit crate): `tddy-agent-launch`,
-  `tddy-cli-sessions`, `tddy-coder`, `tddy-daemon-auth`, `tddy-daemon-rpc`, `tddy-remote-git-repo`,
+  `tddy-coder`, `tddy-daemon-auth`, `tddy-daemon-rpc`, `tddy-remote-git-repo`,
   `tddy-session-agents`, `tddy-session-files`, `tddy-session-lifecycle`, `tddy-session-split`,
   `tddy-session-sync`, `tddy-session-tool-client`, `tddy-terminal-rpc`.
 

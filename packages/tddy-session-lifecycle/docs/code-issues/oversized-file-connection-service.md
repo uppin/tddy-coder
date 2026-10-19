@@ -6,7 +6,7 @@
 **Metrics:** **525 production lines** by the changeset's counter (2026-10-09; 582 on `origin/master` before #536; the 508 / 503 below are an earlier counter) · budget 500 (the inline-test-block rule; the naive count to the first `#[cfg(test)]` reads 18)
 **Thresholds breached:** length 525 > 500
 **Restructure:** group the facade blocks by receiver (see "What would close it"); #536 has landed the moves, so the re-measure the earlier note waited for is done: 525
-**Status:** Open — narrowed 2026-10-09 by #536 (582 → 525, still over 500) — **unclaimed**; the 2026-10-07 deferral (the stack's other nodes editing this file) is over with #536
+**Status:** Open — regressed 2026-10-19 (+4 from #628, `#satellite` 6/13: the host's `terminal_exposure` field and its doc comment; ≈529 by the changeset's counter, counted from the diff, `loc.py` not re-run; split deferred with the developer's consent); narrowed 2026-10-09 by #536 (582 → 525, still over 500) — **unclaimed**; the 2026-10-07 deferral (the stack's other nodes editing this file) is over with #536
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history

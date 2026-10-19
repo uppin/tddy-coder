@@ -16,7 +16,7 @@ use tddy_rpc::Status;
 
 /// Lifetime of the agent's scoped LiveKit join token.
 ///
-/// Matches the per-session PTY bridge's token (`cli_session_manager::spawn_livekit_bridge`): long
+/// Matches the per-session PTY bridge's token (`LiveKitTerminalExposure`): long
 /// enough that a working day of tool calls never re-authenticates, short enough that a leaked token
 /// expires. A resumed session mints a fresh one rather than reusing what was persisted, so this is a
 /// ceiling on one agent process's life, not on the session's.

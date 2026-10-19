@@ -148,7 +148,7 @@ is already the LiveKit CLI credential set.
     outlived the connection would hold the repository's object database open indefinitely. No
     orphan survives a dropped connection — this is the deliberate difference from the terminal
     path, which leaves its PTY running on disconnect by design
-    (`packages/tddy-session-lifecycle/src/cli_session_manager/livekit_bridge.rs`).
+    (`packages/tddy-cli-sessions/src/cli_session_manager/pty_terminal_service.rs`).
 
 ### End to end
 

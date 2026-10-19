@@ -145,7 +145,7 @@ impl CliSessionManager {
     ) {
         let terminals = Arc::clone(&self.terminals);
         let managed_workflows = Arc::clone(&self.managed_workflows);
-        let livekit_terminals = Arc::clone(&self.livekit_terminals);
+        let exposed_terminals = Arc::clone(&self.exposed_terminals);
         let task_registry = self.task_registry.clone();
         tokio::spawn(async move {
             let task = match task_registry.get(&task_id).await {
@@ -179,7 +179,7 @@ impl CliSessionManager {
             // a dead session's block waiting for a consumer that could only find an empty PTY.
             if terminal_id == MAIN_TERMINAL_ID {
                 managed_workflows.write().await.remove(&session_id);
-                livekit_terminals.write().await.remove(&session_id);
+                exposed_terminals.write().await.remove(&session_id);
             }
         });
     }

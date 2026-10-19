@@ -1,10 +1,8 @@
 use super::CliSessionManager;
 
-use super::livekit_bridge;
+use super::pty_terminal_service::pty_terminal_service;
 
-use super::LiveKitTerminalAddress;
-
-use super::BridgedTerminal;
+use super::ExposedTerminalRecord;
 
 impl CliSessionManager {
     /// Attach a session's [`ManagedWorkflow`](crate::session_toolcall::ManagedWorkflow) so its
@@ -25,7 +23,7 @@ impl CliSessionManager {
     ///
     /// Local and instant, which is the point: a session start says what the session *is*, and
     /// joining a room on its behalf is deferred to the first LiveKit consumer
-    /// ([`Self::ensure_livekit_terminal`]). A session start that reached a LiveKit server cost
+    /// ([`Self::ensure_exposed_terminal`]). A session start that reached a LiveKit server cost
     /// whatever reaching it cost — nothing when the server answered, the caller's whole patience
     /// when it was configured and down.
     ///
@@ -37,62 +35,63 @@ impl CliSessionManager {
         session_id: &str,
         metadata: tddy_core::session_participant_metadata::SessionParticipantMetadata,
     ) {
-        self.livekit_terminals.write().await.insert(
+        self.exposed_terminals.write().await.insert(
             session_id.to_string(),
-            BridgedTerminal {
+            ExposedTerminalRecord {
                 metadata,
-                participant: None,
+                exposure: None,
             },
         );
     }
 
-    /// Put a participant serving `session_id`'s terminal into `at`, unless one is already there or
-    /// there is nothing to bridge.
+    /// Expose `session_id`'s recorded terminal through `exposure` at `at`, unless an exposure is
+    /// still running or there is nothing to expose.
     ///
-    /// Returns whether the session's terminal is drivable over LiveKit once this call is done.
-    /// `false` is not a failure: it means there was nothing to expose — a session type that is
-    /// never reached over LiveKit, or one whose agent has exited and left no PTY behind.
+    /// `Ok(false)` is not a failure: the session recorded no terminal, or its PTY is gone. A
+    /// `FailedPrecondition` from the exposure — nothing wired to expose through — is the same
+    /// answer and is returned as `Ok(false)` for the same reason; every other refusal is an error.
     ///
-    /// The write lock is held across the join deliberately, and that is what makes this
+    /// The write lock is held across the exposure deliberately, and that is what makes this
     /// single-flight. Two clients connecting to one session at the same moment would otherwise each
-    /// find no participant and each connect one under the same identity — and LiveKit resolves a
+    /// find no exposure and each start one under the same identity — and LiveKit resolves a
     /// duplicate identity by disconnecting the participant that was already there, so the second
     /// would evict the first the moment it arrived.
-    pub async fn ensure_livekit_terminal(
+    pub async fn ensure_exposed_terminal(
         &self,
         session_id: &str,
-        at: &LiveKitTerminalAddress,
-    ) -> anyhow::Result<bool> {
-        let mut exposed = self.livekit_terminals.write().await;
-        let Some(terminal) = exposed.get(session_id) else {
+        at: &tddy_daemon_extensions::TerminalAddress,
+        exposure: &dyn tddy_daemon_extensions::TerminalExposure,
+    ) -> Result<bool, tddy_rpc::Status> {
+        let mut recorded = self.exposed_terminals.write().await;
+        let Some(terminal) = recorded.get(session_id) else {
             return Ok(false);
         };
         if terminal
-            .participant
+            .exposure
             .as_ref()
             .is_some_and(|serving| !serving.is_finished())
         {
             return Ok(true);
         }
-        let metadata = terminal.metadata.clone();
-        // A session whose agent has exited keeps its block until the cleanup task removes it, so
-        // the PTY is asked for rather than assumed: a bridge built on a handle that is gone would
-        // serve a terminal nothing writes to.
+        let metadata_json = Some(
+            tddy_core::session_participant_metadata::session_metadata_json(&terminal.metadata),
+        );
+        // A session whose agent has exited keeps its record until the cleanup task removes it, so
+        // the PTY is asked for rather than assumed: an exposure built on a handle that is gone
+        // would serve a terminal nothing writes to.
         let Some(handle) = self.get(session_id).await else {
             return Ok(false);
         };
-        let participant = livekit_bridge::spawn_livekit_bridge(
-            handle,
-            &at.url,
-            &at.room,
-            &at.api_key,
-            &at.api_secret,
-            &at.identity,
-            Some(metadata),
-        )
-        .await?;
-        if let Some(terminal) = exposed.get_mut(session_id) {
-            terminal.participant = Some(participant);
+        let exposed = match exposure
+            .expose(at, pty_terminal_service(handle), metadata_json)
+            .await
+        {
+            Ok(exposed) => exposed,
+            Err(refused) if refused.code == tddy_rpc::Code::FailedPrecondition => return Ok(false),
+            Err(refused) => return Err(refused),
+        };
+        if let Some(terminal) = recorded.get_mut(session_id) {
+            terminal.exposure = Some(exposed);
         }
         Ok(true)
     }

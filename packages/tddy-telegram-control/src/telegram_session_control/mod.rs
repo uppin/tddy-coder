@@ -245,6 +245,13 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     /// on one code path rather than on a branch. `main` injects the daemon's own with
     /// [`Self::with_session_rooms`].
     session_rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
+    /// What serves a started session's terminal to participants outside this host, for the start
+    /// that announces its room and identity straight away.
+    ///
+    /// Defaults to [`tddy_daemon_extensions::NoTerminalExposure`], which exposes nothing — the start
+    /// then reports no room, as it does when the exposure fails. `main` injects the daemon's own
+    /// with [`Self::with_terminal_exposure`].
+    terminal_exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
@@ -344,6 +351,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 TelegramElicitationReplayBridge::default(),
             )),
             session_rooms: Arc::new(tddy_daemon_extensions::NoSessionRooms),
+            terminal_exposure: Arc::new(tddy_daemon_extensions::NoTerminalExposure),
         }
     }
 
@@ -354,6 +362,16 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
     ) -> Self {
         self.session_rooms = rooms;
+        self
+    }
+
+    /// Share the daemon's terminal exposure (builder), so a Telegram-started session's terminal is
+    /// served where the reply says to attach.
+    pub fn with_terminal_exposure(
+        mut self,
+        exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure>,
+    ) -> Self {
+        self.terminal_exposure = exposure;
         self
     }
 

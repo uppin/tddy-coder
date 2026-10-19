@@ -798,12 +798,23 @@ pub async fn build(
         livekit_status.clone(),
     );
 
+    // The LiveKit plugin behind the `TerminalExposure` port, shared by the session host and the
+    // Telegram start that announces its terminal's room at once. Without credentials there is
+    // nothing to join, and the port's null object says so.
+    let terminal_exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure> =
+        match tddy_daemon_livekit::terminal_exposure::LiveKitTerminalExposure::from_config(&config)
+        {
+            Some(exposure) => exposure,
+            None => Arc::new(tddy_daemon_extensions::NoTerminalExposure),
+        };
+
     let telegram = build_telegram(
         &config,
         &tddy_data_dir,
         &options,
         &shared_claude_cli_manager,
         &shared_session_rooms,
+        &terminal_exposure,
     );
     let telegram_hooks = telegram.hooks;
     let lifecycle_telegram = telegram_hooks.as_ref().map(|h| {
@@ -1166,6 +1177,7 @@ pub async fn build(
             .with_session_reach(
                 Arc::clone(&livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
             )
+            .with_terminal_exposure(Arc::clone(&terminal_exposure))
             .with_model_registry(Arc::clone(&model_registry))
             .with_session_notification_bus(session_notification_bus)
             .with_session_tokens(session_tokens.clone())
@@ -1712,6 +1724,7 @@ fn build_telegram(
     options: &RuntimeOptions,
     claude_cli_manager: &Arc<tddy_session_lifecycle::cli_session_manager::CliSessionManager>,
     session_rooms: &Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
+    terminal_exposure: &Arc<dyn tddy_daemon_extensions::TerminalExposure>,
 ) -> TelegramWiring {
     let tg = match config.telegram.as_ref() {
         Some(tg) if tg.enabled && !tg.bot_token.is_empty() => tg,
@@ -1807,7 +1820,8 @@ fn build_telegram(
             Some(active_elicitation),
             Some(telegram_tracked),
         )
-        .with_session_rooms(session_rooms.clone()),
+        .with_session_rooms(session_rooms.clone())
+        .with_terminal_exposure(Arc::clone(terminal_exposure)),
     ));
 
     TelegramWiring {

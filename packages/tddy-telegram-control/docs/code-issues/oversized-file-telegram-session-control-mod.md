@@ -6,7 +6,7 @@
 **Metrics:** **539 production lines** (no `#[cfg(test)]` module) · budget 500 · **+39**, measured to the first `#[cfg(test)]`
 **Thresholds breached:** length 539 > 500
 **Restructure:** required — see *What would close it*
-**Status:** Open — **unclaimed**; produced by a move-only split, deferral consented by the developer (`docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`)
+**Status:** Open — regressed 2026-10-19 (539 → 557 in #628, `#satellite` 6/13) — **unclaimed**; produced by a move-only split, deferral consented by the developer (`docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`)
 
 ## Measurement history
 
@@ -49,3 +49,9 @@ Move-only:
 2026-09-22: counted production lines to the first `#[cfg(test)]` and confirmed it opens the
 file's test module rather than a `#[cfg(test)] use`. Seam notes are from `/analyze-clean-code` on
 #494 and were checked against the item list of the file.
+
+## Measurement — 2026-10-19
+
+| Run | Production lines | Note |
+|---|---|---|
+| 2026-10-19 | 539 → 557 (+18) | `#satellite` 6/13 (#628): the harness's `terminal_exposure` field and `with_terminal_exposure` builder. Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md`. `**Status:** Open — regressed 2026-10-19`; still **unclaimed** |
