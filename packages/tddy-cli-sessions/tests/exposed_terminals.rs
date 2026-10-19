@@ -1,6 +1,6 @@
 //! The session manager exposes a session's terminal through the `TerminalExposure` port — once,
-//! however many reaches arrive together, and again after an exposure has ended. PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-terminal-bridge.md`.
+//! however many reaches arrive together, and again after an exposure has ended. See
+//! `packages/tddy-daemon-extensions/docs/extension-ports.md` (the terminal-exposure port).
 //!
 //! The PTY is real (a stub agent that sleeps); the exposure is in memory, so no LiveKit is needed.
 
