@@ -6,8 +6,9 @@
 //! brings in — one hop, as the import writes it (rules R3–R8 of the `#reshape` 10/19 changeset).
 
 use super::destination::{find_module, Lookup, Package};
-use super::use_path::{resolved, UsePath};
-use crate::crate_move::source_scan::items_of_module;
+use super::scope::Scope;
+use super::use_path::{binds, resolved, UsePath};
+use crate::crate_move::source_scan::{items_of_module, ModuleItems, UseLeaf};
 use crate::registry::Workspace;
 
 /// How a module binds a name it does not define, as seen from the module code arrives in.
@@ -15,10 +16,6 @@ use crate::registry::Workspace;
 pub(in crate::backends::rust) enum Imported {
     /// The module's import is visible at the destination (`pub`, `pub(crate)`, or a `pub(in …)` whose
     /// scope holds it): the path to the module, as written, still works (R3).
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-move-item-paths): answered by `import_target` at green"
-    )]
     Visible,
     /// The import brings in `name` from the module `module` of this crate (below the crate root): a
     /// plain `use` (R4), an aliased one whose real name is `name` (R5), or the one glob whose module
@@ -26,16 +23,8 @@ pub(in crate::backends::rust) enum Imported {
     InCrate { module: Vec<String>, name: String },
     /// The import names another crate: `path` is the crate-rooted path of what it brings in, the
     /// crate's name first; `shadowed` when the destination module binds the crate's name itself (R7).
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-move-item-paths): answered by `import_target` at green"
-    )]
     Extern { path: Vec<String>, shadowed: bool },
     /// The module binds the name only through globs that cannot confirm it, and why (R8).
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-move-item-paths): answered by `import_target` at green"
-    )]
     Unconfirmed(String),
 }
 
@@ -49,31 +38,98 @@ pub(in crate::backends::rust) fn import_target(
     name: &str,
     destination: &[String],
 ) -> Option<Imported> {
-    // TODO(reshape-move-item-paths): implement R3 (visible import), R5 (alias), R6 (confirmed glob),
-    // R7 (extern head) and R8 (unconfirmed glob) over `use_path::resolved`; today only R4.
-    let _ = destination;
-    let Ok(Lookup::Found(found)) = find_module(workspace, package, module) else {
-        return None;
-    };
-    let text = workspace.read(&found.file).ok()?;
-    let items = items_of_module(&text[found.scope]);
+    let items = items_at(workspace, package, module)?;
     if items.defined.iter().any(|defined| defined == name)
         || items.children.iter().any(|child| child.name == name)
     {
         return None;
     }
-    let leaf = items
+    let Some(leaf) = items
         .uses
         .iter()
-        .find(|leaf| leaf.alias.is_none() && leaf.bound_name() == Some(name))?;
-    let UsePath::InCrate(mut target) = resolved(&leaf.segments, module, &items)? else {
+        .find(|leaf| !leaf.glob && leaf.bound_name() == Some(name))
+    else {
+        return through_a_glob(workspace, package, module, &items, name, destination);
+    };
+    if reaches(leaf, module, destination) {
+        return Some(Imported::Visible);
+    }
+    match resolved(&leaf.segments, module, &items)? {
+        UsePath::InCrate(mut target) => {
+            let real = target.pop()?;
+            Some(Imported::InCrate {
+                module: target,
+                name: real,
+            })
+        }
+        UsePath::Extern(path) => {
+            let shadowed = items_at(workspace, package, destination)
+                .is_some_and(|here| binds(&here, &path[0]));
+            Some(Imported::Extern { path, shadowed })
+        }
+    }
+}
+
+/// How `module` binds `name` when only its globs can: `None` without a glob, the one glob whose
+/// module binds the name (R6), otherwise the reason none can be followed (R8).
+fn through_a_glob(
+    workspace: &Workspace<'_>,
+    package: &Package,
+    module: &[String],
+    items: &ModuleItems,
+    name: &str,
+    destination: &[String],
+) -> Option<Imported> {
+    let globs: Vec<&UseLeaf> = items.uses.iter().filter(|leaf| leaf.glob).collect();
+    if globs.is_empty() {
+        return None;
+    }
+    let confirming: Vec<(&UseLeaf, Vec<String>)> = globs
+        .iter()
+        .filter_map(|leaf| match resolved(&leaf.segments, module, items)? {
+            UsePath::InCrate(from) => Some((*leaf, from)),
+            UsePath::Extern(_) => None,
+        })
+        .filter(|(_, from)| {
+            items_at(workspace, package, from).is_some_and(|globbed| binds(&globbed, name))
+        })
+        .collect();
+    match confirming.as_slice() {
+        [(leaf, _)] if reaches(leaf, module, destination) => Some(Imported::Visible),
+        [(_, from)] => Some(Imported::InCrate {
+            module: from.clone(),
+            name: name.to_string(),
+        }),
+        other => {
+            let at = module.join("::");
+            Some(Imported::Unconfirmed(match other.len() {
+                0 => format!("no glob import of `{at}` is known to bind `{name}`"),
+                count => format!("{count} glob imports of `{at}` bind `{name}`"),
+            }))
+        }
+    }
+}
+
+/// The top level of the module at `module`, when its file can be read.
+fn items_at(
+    workspace: &Workspace<'_>,
+    package: &Package,
+    module: &[String],
+) -> Option<ModuleItems> {
+    let Ok(Lookup::Found(found)) = find_module(workspace, package, module) else {
         return None;
     };
-    let real = target.pop()?;
-    Some(Imported::InCrate {
-        module: target,
-        name: real,
-    })
+    let text = workspace.read(&found.file).ok()?;
+    Some(items_of_module(&text[found.scope]))
+}
+
+/// Whether `leaf`, written in the module at `module`, is visible from the module `destination`.
+fn reaches(leaf: &UseLeaf, module: &[String], destination: &[String]) -> bool {
+    match Scope::parse(leaf.visibility.as_deref().unwrap_or(""), module) {
+        Some(Scope::Public) => true,
+        Some(Scope::Within(inside)) => destination.starts_with(&inside),
+        None => false,
+    }
 }
 
 #[cfg(test)]

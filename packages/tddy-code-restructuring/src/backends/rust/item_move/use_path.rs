@@ -42,7 +42,7 @@ pub(in crate::backends::rust) fn resolved(
 
 /// Whether the module whose top level is `local` binds `name`: it declares a child module, defines an
 /// item or imports it by a non-glob `use`.
-fn binds(local: &ModuleItems, name: &str) -> bool {
+pub(in crate::backends::rust) fn binds(local: &ModuleItems, name: &str) -> bool {
     local.defined.iter().any(|defined| defined == name)
         || local.children.iter().any(|child| child.name == name)
         || local
