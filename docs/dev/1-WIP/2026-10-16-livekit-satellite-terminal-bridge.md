@@ -90,12 +90,12 @@ Exposing a terminal over LiveKit stops requiring the session manager to know Liv
 
 ## Scope
 
-- [ ] Port, address, handle, null object
-- [ ] `pty_terminal_service` public and LiveKit-free (`tddy_rpc` types only)
-- [ ] `LiveKitTerminalExposure` in the plugin (today's `spawn_livekit_bridge` body)
-- [ ] `ensure_exposed_terminal`; `LiveKitTerminalAddress` removed
-- [ ] Lifecycle bridge + telegram immediate bridge on the port; daemon wiring
-- [ ] Ratchet: strike `tddy-cli-sessions`
+- [x] Port, address, handle, null object
+- [x] `pty_terminal_service` public and LiveKit-free (`tddy_rpc` types only)
+- [x] `LiveKitTerminalExposure` in the plugin (today's `spawn_livekit_bridge` body)
+- [x] `ensure_exposed_terminal`; `LiveKitTerminalAddress` removed
+- [x] Lifecycle bridge + telegram immediate bridge on the port; daemon wiring
+- [x] Ratchet: strike `tddy-cli-sessions`
 
 ## Technical Changes
 
@@ -133,10 +133,10 @@ pty_terminal_service(handle), metadata_json)` and stores the `ExposedTerminal`. 
 | ratchet | strike `tddy-cli-sessions` |
 
 ## Implementation Milestones
-- [ ] M1 Port and null object
-- [ ] M2 Manager on the port; in-memory exposure tests green
-- [ ] M3 Plugin exposure; terminal-over-LiveKit suites green
-- [ ] M4 Callers switched; manifest trimmed; ratchet green
+- [x] M1 Port and null object
+- [x] M2 Manager on the port; in-memory exposure tests green
+- [x] M3 Plugin exposure; terminal-over-LiveKit suites green
+- [x] M4 Callers switched; manifest trimmed; ratchet green
 
 ## Testing Plan
 
@@ -176,6 +176,18 @@ Unit (`tddy-daemon-extensions/src/terminal_exposure.rs`): `with_nothing_wired_ex
 
 ## Validation Results
 ### /validate-changes
+Scoped to the touched packages (CI owns the whole workspace). Stack gate: rebased onto `origin/master`
+(`0ec8c3c33`), `origin/master..HEAD` is this node's commits only. Boundaries held: `SessionReach` /
+`ReachableSessions` and `tddy-terminal-rpc` untouched; the write lock still spans the join; no
+`RoomTokenMinter`. Responsibility delivered, no `todo!()` left. `cargo build -p` for
+`tddy-daemon-extensions`, `tddy-cli-sessions`, `tddy-daemon-livekit`, `tddy-session-lifecycle`,
+`tddy-telegram-control`, `tddy-daemon`: clean.
+- Critical 0 · Warning 1 · Info 2
+- [WARNING] `telegram_session_control/session_start.rs`: with `NoTerminalExposure` wired, a start logs
+  `log::warn!` "terminal exposure failed" for what the port defines as "not exposed" (`FailedPrecondition`).
+- [INFO] `tddy-cli-sessions` keeps the name `expose_terminal_to_livekit` (called by `tddy-agent-launch`;
+  renaming is outside this node).
+- [INFO] `session_room_acceptance.rs` repeats `runtime.rs`'s from_config-or-null match.
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
@@ -190,7 +202,7 @@ Unit (`tddy-daemon-extensions/src/terminal_exposure.rs`): `with_nothing_wired_ex
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
