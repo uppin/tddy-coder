@@ -46,6 +46,21 @@ pub enum RoomConnectError {
     PeerAbsent { identity: String, waited: Duration },
 }
 
+impl std::fmt::Display for RoomConnectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RoomConnectError::Room(reason) => write!(f, "could not join the room: {reason}"),
+            RoomConnectError::PeerAbsent { identity, waited } => write!(
+                f,
+                "\"{identity}\" did not join the room within {}s",
+                waited.as_secs()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RoomConnectError {}
+
 /// A live bidirectional stream: send frames as they come, receive replies as they arrive.
 pub struct RoomDuplex {
     pub outbound: mpsc::Sender<Vec<u8>>,
@@ -88,7 +103,9 @@ impl RoomConnector for NoRoomTransport {
         _peer_identity: &str,
         _wait: Duration,
     ) -> Result<Arc<dyn RoomSession>, RoomConnectError> {
-        todo!("NoRoomTransport::connect")
+        Err(RoomConnectError::Room(
+            "no room transport is wired into this build".to_string(),
+        ))
     }
 }
 
