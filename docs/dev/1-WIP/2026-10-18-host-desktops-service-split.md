@@ -171,6 +171,22 @@ Line counts: `screen_sharing_service.rs` 537 production (1,890 total), `bridge_c
 **`pub(crate)` widenings by the engine:** seam A — `terminate_bridge`, `require_target_store`, `prompt_for_desktop_password`, `try_spawn_bridge`, `spawn_bridge`. Seam B — `BridgeSpawnConfig` and its 13 fields, `BridgeTarget` and its 4 fields, `PreparedBridge::{binary, spawn_config, for_password}`, `DEFAULT_STREAM_FPS`.
 
 ### /validate-changes
+
+2026-10-19, after rebasing onto `origin/master` @ `c4a71571d` (leak check: `origin/master..HEAD` is this PR's 6 commits only). `./dev cargo build -p tddy-screen-sharing`: clean, no warnings.
+
+| Check | Result |
+|---|---|
+| Changeset items implemented or deferred | ⚠️ A and B delivered; **C deferred** (engine gap, developer decision 2026-10-19), recorded in `docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md` |
+| `## Responsibility` delivered | ⚠️ partly: bridge lifecycle (A) and bridge config/naming (B) moved; host-target RPC bodies (C) stay in the service |
+| `## Dependencies` not implemented here | ✅ the #626 minter threading is moved as merged, not edited |
+| `## Boundaries` respected | ✅ `host_tooling.rs`, bridges, proto and web untouched; no test semantics changed |
+| Diff contains only this PR's files | ✅ |
+
+**Findings**
+- [WARNING] Layout drift against the published seam plan: the lifecycle module is `src/screen_sharing_service/bridge_lifecycle.rs` (nested), `require_target_store` moved with seam A, and `src/host_targets.rs` does not exist. Nodes 6–8 (#658, #659, #660) were told to name these modules; their own documents are on their own branches and were not checked from here — each must be reconciled when it is greened.
+- [INFO] Two `TODO(restructure)` hand-edit markers stand in production code (`bridge_lifecycle.rs:1`, `screen_sharing_service.rs:85`), each describing an engine gap; both are listed under Result above.
+- [INFO] Visibility widened to `pub(crate)` for the moved items (listed under Result); no public API changed.
+
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
@@ -188,7 +204,7 @@ Line counts: `screen_sharing_service.rs` 537 production (1,890 total), `bridge_c
 - [ ] TDD Green — implement with quality code (A and B done; C deferred)
 - [x] Update documentation with progress
 - [x] Run scoped tests for touched packages (full-workspace result from CI still to come)
-- [ ] Validate changes (/validate-changes)
+- [x] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
