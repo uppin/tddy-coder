@@ -8,19 +8,19 @@ use log::{error, info};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use super::PreparedBridge;
+use crate::bridge_config::PreparedBridge;
 
-use super::prepare_bridge;
+use crate::bridge_config::prepare_bridge;
 
 use super::BridgeTarget;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 
-use super::decrypt_desktop_password;
+use crate::bridge_config::decrypt_desktop_password;
 
 use tddy_host_service::host_prompts::answer_before_expiry;
 
-use super::desktop_prompt_subject;
+use crate::bridge_config::desktop_prompt_subject;
 
 use tddy_host_service::host_prompts::PromptKind;
 
