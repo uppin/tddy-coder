@@ -18,7 +18,7 @@ Measured mid-restructure, with only `cargo check` and rust-analyzer having run:
 |---|---:|---|
 | `target/debug/incremental` | **3.1 G** | **pure cache — disposable, costs nothing to lose** |
 | `target/debug/deps` | 1.9 G | real artefacts; deleting forces a rebuild |
-| `target/debug/build` | 555 M | build-script output; `./clean` prunes stale copies |
+| `target/debug/build` | 555 M | build-script output |
 | **total** | **5.5 G** | |
 
 And the peak that caused the crisis:
@@ -43,14 +43,13 @@ And the peak that caused the crisis:
 3. **`CARGO_INCREMENTAL=0` for restructure runs.** rust-analyzer's `cargo check` does not benefit
    from the incremental cache, so the 3 G is pure waste during a restructure. Nothing in the repo
    sets it today.
-4. **`./clean` before reaching for anything destructive.** It keeps the newest artefact per crate in
-   `build`, `deps` and `incremental` and drops the rest — written for exactly this, and it does not
-   cost a cold index.
+4. **`./clean` is `rm -rf target/debug`.** It no longer prunes stale artefacts per crate; it drops
+   the whole debug build, so the next build is a full rebuild. Reach for the cheaper steps first.
 5. **Never a second `CARGO_TARGET_DIR`.** Pointing verification at a separate target directory to
    dodge a cargo lock duplicated 4.5 G of dependency builds. Wait for the lock instead.
 
-Escalation order, cheapest first: `rm -rf target/debug/incremental` → `./clean` →
-`rm -rf target/debug/deps` → `rm -rf target`. Only the last one costs a cold index, and it should be
+Escalation order, cheapest first: `rm -rf target/debug/incremental` →
+`rm -rf target/debug/deps` → `./clean` (all of `target/debug`) → `rm -rf target`. Only the last one costs a cold index, and it should be
 the rarest rather than the reflex.
 
 ## The one-line fix worth landing
