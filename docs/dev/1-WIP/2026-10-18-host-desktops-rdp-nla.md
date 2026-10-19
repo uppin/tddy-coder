@@ -83,8 +83,8 @@ Windows desktops with NLA on (the default) can be opened; the bridge credential 
 ## Scope
 
 - [x] `Credentials` + new `connect` signature; both bridges adapted
-- [ ] `BridgeConfig.domain`, back-compatible
-- [ ] tddy-rdp CredSSP (NTLM) with domain; protocol from negotiation
+- [x] `BridgeConfig.domain`, back-compatible
+- [x] tddy-rdp CredSSP (NTLM) with domain; protocol from negotiation
 - [x] NLA test server in the integration suite
 
 ## Technical Changes
@@ -108,9 +108,9 @@ CredSSP via `ironrdp_tokio::connect_finalize` with a NetworkClient that needs no
 | `tddy-vnc` | `vnc_client.rs` signature adaptation |
 
 ## Implementation Milestones
-- [ ] M1 Signature + config (contract commit), both bridges build
-- [ ] M2 NLA sign-in against the test server
-- [ ] M3 Wrong-password and TLS-only regressions green
+- [x] M1 Signature + config (contract commit), both bridges build
+- [x] M2 NLA sign-in against the test server
+- [x] M3 Wrong-password and TLS-only regressions green
 
 ## Testing Plan
 
@@ -133,7 +133,7 @@ do not test NLA against a mock of IronRDP itself.
 Contract-commit notes:
 - `ironrdp-server 0.12` **can** act as the CredSSP acceptor: `RdpServer::builder().with_hybrid(tls_acceptor, tls_public_key)` plus `server.set_credentials(..)` runs `ironrdp_acceptor::accept_credssp` (NTLM via `sspi`). It matches the account by name and password only — the domain sent in CredSSP is not checked by the acceptor — so the domain is pinned on the TLS-only path instead, where the acceptor compares the whole Client Info `Credentials { username, password, domain }`.
 - The wrong-password test pins the refusal as an error whose `{:#}` chain contains `authentication`; node 6 maps that error.
-- `run_bridge` keeps its inline empty→`None` mapping (with `domain: None`) until `credentials()` is implemented.
+- `run_bridge` builds its credentials from `BridgeConfig::credentials()`.
 
 ## Decisions & Trade-offs
 - **One `Credentials` value** instead of growing positional `Option<&str>` parameters: node 3 needs the username, node 8 the domain, and a fourth positional would be unreadable.
@@ -164,8 +164,8 @@ Contract-commit notes:
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved with the wave-1 batch, 2026-10-18)
-- [~] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Red — write failing unit/integration tests
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)

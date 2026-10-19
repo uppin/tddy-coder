@@ -69,8 +69,12 @@ fn default_fps() -> u32 {
 impl BridgeConfig {
     /// The credentials the bridge signs in with: each empty field becomes absent.
     pub fn credentials(&self) -> Credentials {
-        // TODO(rdp-nla): implement
-        todo!()
+        let present = |value: &str| Some(value.to_owned()).filter(|v| !v.is_empty());
+        Credentials {
+            username: present(&self.username),
+            domain: present(&self.domain),
+            password: present(&self.password),
+        }
     }
 }
 
@@ -140,12 +144,7 @@ pub async fn run_bridge<C: ScreenSharingClient>(config: BridgeConfig) -> Result<
         config.target_id, config.host, config.port, config.livekit_room
     );
 
-    // TODO(rdp-nla): build these with `config.credentials()` once it carries the domain.
-    let credentials = Credentials {
-        username: Some(config.username.clone()).filter(|u| !u.is_empty()),
-        domain: None,
-        password: Some(config.password.clone()).filter(|p| !p.is_empty()),
-    };
+    let credentials = config.credentials();
 
     let mut client = C::connect(&config.host, config.port, &credentials)
         .await
