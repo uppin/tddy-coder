@@ -133,15 +133,17 @@ The lists, in the test file:
   `tddy-livekit-testkit`, `tddy-daemon-livekit`, `tddy-livekit-screen-capture`, `tddy-screenshare`.
 - `PLUGINS` (LiveKit's own workspace crates, which implement the ports): `tddy-livekit`,
   `tddy-livekit-testkit`, `tddy-daemon-livekit`, `tddy-livekit-screen-capture`, `tddy-screenshare`.
-- `WIRING` (binaries' composition roots and the end-to-end harness): `tddy-daemon`, `tddy-rdp`,
-  `tddy-vnc`, `tddy-e2e`.
+- `WIRING` (binaries' composition roots and the end-to-end harness): `tddy-daemon`,
+  `tddy-coder-cli`, `tddy-rdp`, `tddy-vnc`, `tddy-e2e`. `tddy-coder-cli` builds the `tddy-coder`
+  binary and wires `LiveKitParticipantHost` into the library
+  ([participant host](../../tddy-coder/docs/participant-host.md)).
 - `WIRING_WITH_A_LIBRARY` (crates that ship a library *and* a binary wiring LiveKit into it):
   `tddy-remote-git-repo`, `tddy-session-sync`, `tddy-tools`. Cargo has no binary-only dependency, so
   the edge appears on the crate; the shape test above holds the library sources clean, which keeps the
   allowance to the binary's wiring. These libraries join rooms through
   [`tddy-room-client`](../../tddy-room-client/docs/room-client.md).
 - `KNOWN_OFFENDERS` (library crates that still name a LiveKit crate): `tddy-agent-launch`,
-  `tddy-coder`, `tddy-daemon-auth`, `tddy-daemon-rpc`, `tddy-session-agents`,
+  `tddy-daemon-auth`, `tddy-daemon-rpc`, `tddy-session-agents`,
   `tddy-session-files`, `tddy-session-lifecycle`, `tddy-session-split`.
 
 "Names" is a `[dependencies]` or `[build-dependencies]` entry, optional ones included;

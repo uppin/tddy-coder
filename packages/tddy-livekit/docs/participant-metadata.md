@@ -9,7 +9,7 @@ The **`session`** block has **two** publishers — **`tddy-coder`** for the sess
 ## Public API
 
 - **`OWNED_PROJECT_COUNT_METADATA_KEY`**: canonical string **`owned_project_count`** (re-exported from **`participant`**).
-- **`merge_participant_metadata_json(baseline, update)`**: shallow merge of two JSON objects; non-object baseline is treated as **`{}`** with a warning log.
+- **`merge_participant_metadata_json(baseline, update)`**: shallow merge of two JSON objects; non-object baseline is treated as **`{}`** with a warning log. Defined in `tddy-changeset` (`session_participant_metadata`), re-exported here and by `tddy-core`.
 - **`owned_project_count_for_projects_dir(path)`**: returns the number of rows in **`path/projects.yaml`** using the same schema as **`tddy_daemon::project_storage`** (implemented in **`src/projects_registry.rs`**; **tddy-livekit** does not depend on **tddy-daemon** to avoid a crate cycle — keep **`ProjectData`** fields aligned with the daemon when the schema evolves).
 - **`spawn_local_participant_metadata_watcher(rx, local, metadata_publish_lock)`**: on each watch message, merges into **`local.metadata()`** under the lock, then **`set_metadata`**.
 - **`LiveKitParticipant::metadata_publish_lock()`**: **`Arc<tokio::sync::Mutex<()>>`** shared with internal OAuth and registry tasks; **tddy-coder** passes this into the watcher after **`connect`**.
