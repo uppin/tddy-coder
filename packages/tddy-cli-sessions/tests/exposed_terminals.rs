@@ -59,6 +59,24 @@ impl TerminalExposure for RecordingExposure {
     }
 }
 
+/// An exposure that refuses every request with the status it was given.
+struct RefusingExposure(Status);
+
+#[async_trait::async_trait]
+impl TerminalExposure for RefusingExposure {
+    async fn expose(
+        &self,
+        _at: &TerminalAddress,
+        _terminal: Arc<dyn tddy_rpc::RpcService>,
+        _metadata_json: Option<String>,
+    ) -> Result<ExposedTerminal, Status> {
+        Err(Status {
+            code: self.0.code,
+            message: self.0.message.clone(),
+        })
+    }
+}
+
 fn the_address() -> TerminalAddress {
     TerminalAddress {
         room: "tddy-lobby".to_string(),
@@ -184,5 +202,40 @@ async fn the_exposure_advertises_the_session_metadata_block_at_the_given_address
             Some(session_metadata_json(&the_metadata_block()))
         )]
     );
+    manager.kill_all().await;
+}
+
+#[tokio::test]
+async fn an_exposure_with_nothing_wired_leaves_the_terminal_unexposed_without_failing() {
+    // Given a recorded terminal and an exposure that has nothing to expose through
+    let dir = tempfile::tempdir().unwrap();
+    let manager = a_manager_with_a_recorded_terminal(dir.path()).await;
+    let nothing_wired = RefusingExposure(Status::failed_precondition("nothing wired"));
+
+    // When it is reached
+    let exposed = manager
+        .ensure_exposed_terminal(SESSION, &the_address(), &nothing_wired)
+        .await;
+
+    // Then it is simply not exposed
+    assert_eq!(exposed.unwrap(), false);
+    manager.kill_all().await;
+}
+
+#[tokio::test]
+async fn an_exposure_that_fails_for_any_other_reason_reports_the_failure() {
+    // Given a recorded terminal and an exposure whose server cannot be reached
+    let dir = tempfile::tempdir().unwrap();
+    let manager = a_manager_with_a_recorded_terminal(dir.path()).await;
+    let unreachable = RefusingExposure(Status::internal("server unreachable"));
+
+    // When it is reached
+    let refused = manager
+        .ensure_exposed_terminal(SESSION, &the_address(), &unreachable)
+        .await
+        .expect_err("a failure with credentials in hand is reported");
+
+    // Then the caller is told why
+    assert_eq!(refused.message, "server unreachable");
     manager.kill_all().await;
 }

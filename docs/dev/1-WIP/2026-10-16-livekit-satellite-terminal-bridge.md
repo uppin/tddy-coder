@@ -189,7 +189,14 @@ Scoped to the touched packages (CI owns the whole workspace). Stack gate: rebase
   renaming is outside this node).
 - [INFO] `session_room_acceptance.rs` repeats `runtime.rs`'s from_config-or-null match.
 ### /validate-tests
+Scoped: `tddy-cli-sessions/tests/exposed_terminals.rs` (6 tests, all pass), `terminal_exposure.rs` unit.
+Given/When/Then, in-memory doubles, meaningful names; no ignores. Gap found and closed: the
+`FailedPrecondition` → `Ok(false)` mapping and error propagation in `ensure_exposed_terminal` had no test;
+two added. Remaining: [INFO] `end_all` waits a fixed 20 ms for serving tasks to end (margin, not a hazard);
+[INFO] the unit test has no Given/When/Then comments.
 ### /validate-prod-ready
+No TODO/FIXME, debug output, unwraps or mock code in the added production lines; scoped clippy
+`-D warnings` clean for `tddy-cli-sessions`, `tddy-daemon-extensions`, `tddy-daemon-livekit`.
 ### /analyze-clean-code
 
 ## TODO
