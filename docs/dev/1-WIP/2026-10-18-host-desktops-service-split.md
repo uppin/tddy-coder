@@ -1,7 +1,7 @@
 # Changeset: Split the screen-sharing service along its seams
 
 **Date**: 2026-10-18
-**Status**: 🚧 In Progress — seams A and B applied; seam C deferred (engine gap)
+**Status**: 🚧 In Progress — seams A, B (engine) and C (hand move, developer consent) applied
 **PR**: [#653](https://github.com/uppin/tddy-coder/pull/653)
 **Type**: Refactor (restructure, no behaviour change)
 **Stack**: `#host-desktops` 1/8. Base: `master`.
@@ -60,10 +60,10 @@ leaves, and proven with `restructure check --deep` before it is applied.
 |---|---|---|---|
 | A | `src/screen_sharing_service/bridge_lifecycle.rs` (**nested** under the service module — the engine's `extract_module … to_file` places it there) | `ScreenSharingServiceImpl::{terminate_bridge, require_target_store, prompt_for_desktop_password, try_spawn_bridge, spawn_bridge}` — `require_target_store` **travels with A**: it sits between `terminate_bridge` and the rest, and one `extract_module` needs one contiguous run | `extract_module` (`to_file`, `reexport: none`). **Not `retarget_impl`**: that changes an `impl`'s self type and refuses the same type (`there is nothing to retarget`) |
 | B | `src/bridge_config.rs` | `BridgeSpawnConfig`, `PreparedBridge`, `prepare_bridge`, `build_bridge_spawn_config`, `BRIDGE_TOKEN_TTL`, `session_bridge_key`, `host_bridge_key`, `host_bridge_identity`, `screenshare_track_name`, `browser_livekit_url`, `host_livekit_room`, `desktop_prompt_subject`, `decrypt_desktop_password`, `host_target_as_bridge_target`, `host_target_to_proto` | `move_item`, two plans (the first carries `name` and creates the module; `check` refuses a `to` that does not exist yet, so `BridgeSpawnConfig` moved in a second plan) |
-| C | `src/host_targets.rs` — **deferred, not done** | bodies of `list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream` | `extract_method` is refused inside the `#[async_trait]` impl (`offered: Extract into variable`; a plain `let` probe too; cause unconfirmed). Filed as `docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md` |
-| — | stays | struct, builders, `require_{user,host_scope,config}`, `resolve_session_dir`, `BridgeTarget`, `HostScope`, `target_error_to_status`, session (vault) RPCs, and (until C) the host-target RPC bodies | — |
+| C | `src/screen_sharing_service/host_targets.rs` (nested, beside `bridge_lifecycle`) — **done by hand, developer consent 2026-10-19** | bodies of `list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream` as inherent `pub(crate) async fn *_impl` in `impl ScreenSharingServiceImpl`; each trait method is a delegator `self.<name>_impl(request).await` | `extract_method` is refused inside the `#[async_trait]` impl (probes P1–P5 in the backlog entry; no other operation reaches a trait-impl body), so the move was hand-made: the 117 body lines are byte-identical (script-compared). Engine gap stays open: `docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md` |
+| — | stays | struct, builders, `require_{user,host_scope,config}`, `resolve_session_dir`, `BridgeTarget`, `HostScope`, `target_error_to_status`, session (vault) RPCs | — |
 
-Expected result was ~440 production lines. **Achieved: 537** (983 − A − B; C not done), recorded in the code issue, which is narrowed, not closed.
+Expected result was ~440 production lines. **Achieved: 421** (983 → 537 after A and B → 421 after C), recorded in the code issue.
 
 **Baseline (wave 2, 2026-10-18, before #626):** see `## Validation Results` → *Baseline*.
 
@@ -94,8 +94,8 @@ Move the oversized screen-sharing service into named modules once, before three 
 
 - [x] Gate: #626 merged; branch rebased onto `origin/master`
 - [x] Prove seams with `restructure check --deep` (A and B; C refused)
-- [ ] Apply seams A, B, C — A and B applied; **C deferred** (engine gap)
-- [x] Code issue narrowed with the final measurement (537)
+- [x] Apply seams A, B, C — A and B by the engine; C by hand with consent
+- [x] Code issue: final measurement 421, resolved by this PR (delete at wrap)
 
 ## Technical Changes
 
@@ -103,7 +103,7 @@ Move the oversized screen-sharing service into named modules once, before three 
 `packages/tddy-screen-sharing/src/screen_sharing_service.rs`: 983 production lines after #626 (967 before; tests from L984). Seams per the code issue: A L179–374, B L377–622, C L632–773 (line numbers before #626).
 
 ### State B
-`screen_sharing_service.rs` 537 production lines (target ≤ 500, missed by 37 — seam C); two new modules; public API unchanged.
+`screen_sharing_service.rs` 421 production lines (≤ 500); three new modules (`bridge_config`, `bridge_lifecycle`, `host_targets`); public API unchanged.
 
 ### Delta
 | Package | Change |
@@ -112,8 +112,8 @@ Move the oversized screen-sharing service into named modules once, before three 
 
 ## Implementation Milestones
 - [x] M1 #626 merged; rebased; baseline green recorded
-- [ ] M2 Seams proven (`check --deep`) — A and B proven, C refused
-- [ ] M3 Seams applied — A and B applied and green; C not applied
+- [x] M2 Seams proven (`check --deep`) — A and B proven; C refused by the engine, hand-moved with evidence below
+- [x] M3 Seams applied; `./test -p tddy-screen-sharing` green; clippy clean
 
 ## Testing Plan
 
@@ -170,20 +170,38 @@ Line counts: `screen_sharing_service.rs` 537 production (1,890 total), `bridge_c
 
 **`pub(crate)` widenings by the engine:** seam A — `terminate_bridge`, `require_target_store`, `prompt_for_desktop_password`, `try_spawn_bridge`, `spawn_bridge`. Seam B — `BridgeSpawnConfig` and its 13 fields, `BridgeTarget` and its 4 fields, `PreparedBridge::{binary, spawn_config, for_password}`, `DEFAULT_STREAM_FPS`.
 
+### Seam C — hand move (2026-10-19)
+
+Commit `2a251393f`. Hand-made with the developer's consent after `check --deep` refused every engine route (see the backlog entry).
+
+| Evidence | Result |
+|---|---|
+| Moved bodies, before (`HEAD` trait impl) vs after (`*_impl`), script-compared | list 12, add 32, start 62, stop 11 = **117 lines, exact-identical** (and identical ignoring whitespace) |
+| `restructure verify --against HEAD` | 0 statements lost, 16 gained: 4 `*_impl` signatures, 4 delegator bodies, 8 comment lines (the TODO markers and module header). Non-zero exit for that reason alone; `94 cfg(test) gate line(s) excused` |
+| comment-line multiset (`//` lines, trimmed; `screen_sharing_service.rs` before vs `screen_sharing_service.rs` + `host_targets.rs` after) | 361 before, 369 after, **none lost**, 8 gained (4 delegator TODOs + 4 module-header lines) |
+| `cargo fmt --check` | exit 0 |
+| `cargo clippy -p tddy-screen-sharing --all-targets -- -D warnings` | exit 0 |
+| `./test -p tddy-screen-sharing` (`.verify-result.txt`) | 19 + 3 + 3 + 10 + 8 + 6 + 0 = **49 passed, 0 failed, 0 ignored** |
+| `cargo check -p tddy-daemon --all-targets` | not run: only `pub(crate)` methods were added, no public item changed |
+
+Line counts after C: `screen_sharing_service.rs` **421 production**, `bridge_config.rs` 264, `bridge_lifecycle.rs` 243, `host_targets.rs` 160.
+
+Hand edits for C (each marked `TODO(restructure): hand-moved`): the four bodies cut out of the trait impl into `host_targets.rs` (signature renamed `<name>_impl`, `pub(crate)`); the four trait methods reduced to `self.<name>_impl(request).await`; `mod host_targets;`; the explicit `use` list of the new module; removal of the seven imports the parent no longer needs by `cargo fix --lib --tests`, then `rustfmt` on `screen_sharing_service.rs`.
+
 ### /validate-changes
 
 2026-10-19, after rebasing onto `origin/master` @ `c4a71571d` (leak check: `origin/master..HEAD` is this PR's 6 commits only). `./dev cargo build -p tddy-screen-sharing`: clean, no warnings.
 
 | Check | Result |
 |---|---|
-| Changeset items implemented or deferred | ⚠️ A and B delivered; **C deferred** (engine gap, developer decision 2026-10-19), recorded in `docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md` |
-| `## Responsibility` delivered | ⚠️ partly: bridge lifecycle (A) and bridge config/naming (B) moved; host-target RPC bodies (C) stay in the service |
+| Changeset items implemented or deferred | ✅ A, B delivered; C delivered by hand after the engine refused it (see *Seam C*); the engine gap stays in `docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md` — **this finding was written before C and is superseded** |
+| `## Responsibility` delivered | ✅ A, B and C moved (C was outstanding when this check ran) |
 | `## Dependencies` not implemented here | ✅ the #626 minter threading is moved as merged, not edited |
 | `## Boundaries` respected | ✅ `host_tooling.rs`, bridges, proto and web untouched; no test semantics changed |
 | Diff contains only this PR's files | ✅ |
 
 **Findings**
-- [WARNING] Layout drift against the published seam plan: the lifecycle module is `src/screen_sharing_service/bridge_lifecycle.rs` (nested), `require_target_store` moved with seam A, and `src/host_targets.rs` does not exist. Nodes 6–8 (#658, #659, #660) were told to name these modules; their own documents are on their own branches and were not checked from here — each must be reconciled when it is greened.
+- [WARNING] Layout drift against the published seam plan: the lifecycle module is `src/screen_sharing_service/bridge_lifecycle.rs` (nested), `require_target_store` moved with seam A, and `src/host_targets.rs` does not exist (superseded: C landed as `src/screen_sharing_service/host_targets.rs`, nested like the lifecycle module). Nodes 6–8 (#658, #659, #660) were told to name these modules; their own documents are on their own branches and were not checked from here — each must be reconciled when it is greened.
 - [INFO] Two `TODO(restructure)` hand-edit markers stand in production code (`bridge_lifecycle.rs:1`, `screen_sharing_service.rs:85`), each describing an engine gap; both are listed under Result above.
 - [INFO] Visibility widened to `pub(crate)` for the moved items (listed under Result); no public API changed.
 
@@ -201,7 +219,7 @@ Line counts: `screen_sharing_service.rs` 537 production (1,890 total), `bridge_c
 - [x] Run acceptance tests (verify they fail) — N/A; baseline recorded green instead
 - [x] USER REVIEW — acceptance tests — N/A (seam plan reviewed with the wave-1 batch)
 - [x] TDD Red — write failing unit/integration tests — N/A for a restructure
-- [ ] TDD Green — implement with quality code (A and B done; C deferred)
+- [x] TDD Green — implement with quality code
 - [x] Update documentation with progress
 - [x] Run scoped tests for touched packages (full-workspace result from CI still to come)
 - [x] Validate changes (/validate-changes)

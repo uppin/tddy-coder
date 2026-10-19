@@ -40,9 +40,12 @@ parse time, `extract_module` over some members of a trait impl would produce a s
 
 ## Consequence
 
-Seam C (the bodies of the four host-target RPCs moved into a `host_targets` module behind one-line
-delegators) was not done in #653. `screen_sharing_service.rs` stays at 537 production lines against a 500
-budget.
+Seam C of #653 (the bodies of the four host-target RPCs into a `host_targets` module behind delegators) could not
+be planned. With the developer's consent on 2026-10-19 it was **hand-moved** instead: the four bodies (117 lines,
+verified byte-identical by script) now live in inherent `*_impl` methods in
+`packages/tddy-screen-sharing/src/screen_sharing_service/host_targets.rs`, and the trait methods delegate.
+`screen_sharing_service.rs` is at 421 production lines. **The engine gap stays open**: the next trait-impl body
+under `#[async_trait]` that needs the same move will hit the same refusal.
 
 ## What would close it
 
