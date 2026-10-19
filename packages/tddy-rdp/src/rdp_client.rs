@@ -38,10 +38,10 @@ impl ironrdp_tokio::NetworkClient for NoKdcNetworkClient {
         &mut self,
         request: &ironrdp_connector::sspi::generator::NetworkRequest,
     ) -> ironrdp_connector::ConnectorResult<Vec<u8>> {
+        log::warn!("tddy-rdp: refused KDC request to {}", request.url);
         Err(ironrdp_connector::general_err!(
             "Kerberos is not supported: refusing network request to a KDC"
         ))
-        .inspect_err(|_| log::warn!("tddy-rdp: refused KDC request to {}", request.url))
     }
 }
 

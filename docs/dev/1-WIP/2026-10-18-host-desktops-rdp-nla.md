@@ -146,14 +146,57 @@ Contract-commit notes:
 - `tests/rdp_nla_integration.rs` duplicates the QR display and TLS helpers of `tests/rdp_client_integration.rs`; extract a shared `tests/support/` fake-desktop module once both suites are green.
 ### From /validate-changes
 ### From /validate-tests
+- Optional: a wrong-domain refusal test on the TLS-only desktop; shared `tests/support/` module (same item as From @red).
 ### From /validate-prod-ready
+- Warning: `.unwrap_or(&[])` on the TLS server public key (`rdp_client.rs`) masks a missing key now that CredSSP binds to it — carried over from the base; needs consent to change.
 ### From /analyze-clean-code
+- `RdpClient::connect` is 112 lines (must refactor, pre-existing +5): extract the connector `Config` builder. Deferred to a follow-up after the stack lands (node 8 edits the same crate).
 
 ## Validation Results
 ### /validate-changes
+**Run 2026-10-20, base `feature/host-desktops/service-split`** (already current, leak check clean: 4 own commits). Scoped to `tddy-rdp`, `tddy-screenshare`, `tddy-vnc`.
+
+- Build: `cargo check --all-targets` ✅ for all three; `cargo test` ✅ (rdp_client 5, rdp_nla 3, screenshare 6, vnc 5).
+- Changeset sync: all six acceptance tests exist and pass; scope and milestones M1–M3 complete.
+- Boundaries: ✅ no daemon/proto/web field, no failure classification (the error carries `NLA authentication failed` for node 6 to map), no VNC negotiation change, `tddy-screen-sharing` untouched (its stdin JSON has no `domain` key and still parses).
+- No `todo!`/`unimplemented!`/`TODO(rdp-nla)` left in the three packages.
+- [INFO] `Credentials` derives `Debug` with the password in clear (per the draft contract). Nothing logs it today; node 3/8 must not format it into logs.
+- [INFO] `ConnectorErrorKind::Credssp(_)` is labelled "NLA authentication failed" for every CredSSP failure, not only a bad password; node 6 owns the finer mapping.
+- [INFO] The `ironrdp-server` acceptor ignores the CredSSP domain, so the NLA test proves the domain is passed through, not enforced.
+- [INFO] `NoKdcNetworkClient::send` builds an `Err` then `inspect_err`s it; a plain `log::warn!` then `return Err` reads simpler.
 ### /validate-tests
+**Run 2026-10-20** — 14 tests analyzed (rdp_nla 3, bridge 3, rdp_client 5 adapted, vnc 5 untouched); 0 critical, 0 warning, 3 info.
+
+- Fluent-tests: ✅ Given/When/Then in every new test, one behaviour each, named builders (`a_desktop_that_requires_nla`, `alices_credentials`), semantic fixtures, no `#[ignore]`, no sleeps in assertions.
+- Description-body alignment: ✅ all six acceptance tests assert what their names say; the wrong-password test pins the `authentication` chain and a bounded sign-in so a hang fails rather than blocks.
+- Flakiness: ports bound on `:0`; the 10 s sign-in and 5 s frame bounds are named hang guards, not timing assertions.
+- [INFO] The domain is pinned only through the TLS-only desktop (the acceptor ignores it under CredSSP); there is no explicit "wrong domain is refused" test.
+- [INFO] No test for a partly filled `Credentials` (username without password) at the `BridgeConfig` seam.
+- [INFO] `rdp_nla_integration.rs` still duplicates the QR and TLS helpers of `rdp_client_integration.rs` (see Refactoring Needed, From @red).
 ### /validate-prod-ready
+**Run 2026-10-20** — ⚠️ Gaps (0 blockers, 1 warning, 2 info). 4 production files checked (tests excluded).
+
+| Category | Count | Status |
+|----------|-------|--------|
+| Mock code | 0 | ✅ |
+| Dev fallbacks | 1 (carried over) | ⚠️ |
+| TODO/FIXME | 0 (both `TODO(rdp-nla)` markers resolved) | ✅ |
+| Unused code | 0 | ✅ |
+| Debug output | 0 (`log::warn!` only; no `println!`/`dbg!`) | ✅ |
+
+- [WARNING] `packages/tddy-rdp/src/rdp_client.rs` `extract_tls_server_public_key(..).unwrap_or(&[])` — carried over from the base, not added here. With CredSSP on, an empty key no longer just works: CredSSP binds to the server's TLS key, so a certificate that yields no key surfaces as a confusing NLA authentication failure. Fix (separate, behaviour-changing): refuse with a clear error when NLA is negotiated. Not changed here; needs developer consent as a behaviour change on the TLS-only path.
+- [INFO] `username/password .unwrap_or_default()` into the IronRDP `Credentials` — carried over (`unwrap_or("")`); absent RDP credentials are sent as empty strings and the server refuses them.
+- [INFO] `NoKdcNetworkClient` returns an error rather than an empty reply, so Kerberos is refused loudly (no silent fallback).
 ### /analyze-clean-code
+**Run 2026-10-20** — Score **C** (1 must-refactor, pre-existing; 0 needs-attention). 5 production files.
+
+- File length: ✅ all ≤ 500 production lines (largest `rdp_client.rs` 357; `bridge.rs` 301).
+- Must refactor: `packages/tddy-rdp/src/rdp_client.rs` `RdpClient::connect` — **112 lines** (base 107, +5 from this PR: CredSSP flag, domain, error-stage mapping). Pre-existing; this PR grew it slightly. Suggested split: `connector_config(&Credentials) -> Config` and the TLS-upgrade/finalize steps. **Deferred**: node 8 `sign-in-form` also edits `tddy-rdp/src`, so restructuring this file here would conflict with it; split in a follow-up after the stack lands.
+- `run_bridge` 68 lines (base 79): this PR shortened it by moving the credential mapping into `BridgeConfig::credentials()`.
+- Nesting ≤ 3, parameters ≤ 3 everywhere touched.
+- Magic values: none added (256x256, 0x0409 are carried over).
+- Duplication: none in production code; test-helper duplication tracked under Refactoring Needed (From @red).
+- Applied: `NoKdcNetworkClient::send` now logs then returns the error (replaces `Err(..).inspect_err`).
 
 ## TODO
 
