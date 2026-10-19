@@ -6,7 +6,7 @@
 **Metrics:** **711 production lines** (no `#[cfg(test)]` module) · budget 500 · **+211**, measured to the first `#[cfg(test)]`
 **Thresholds breached:** length 711 > 500
 **Restructure:** required — see *What would close it*
-**Status:** Open — regressed 2026-10-08 (711 → 713 in #516, `#keyring` 9/9) — **unclaimed**; produced by a move-only split, deferral consented by the developer (`docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`)
+**Status:** Open — regressed 2026-10-19 (713 → 719 in #628, `#satellite` 6/13); regressed 2026-10-08 (711 → 713 in #516, `#keyring` 9/9) — **unclaimed**; produced by a move-only split, deferral consented by the developer (`docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`)
 
 ## Measurement history
 
@@ -46,3 +46,9 @@ remove no widening, because `pickers` also calls the two `persist_*` helpers.
 2026-09-22: counted production lines to the first `#[cfg(test)]` and confirmed it opens the
 file's test module rather than a `#[cfg(test)] use`. Seam notes are from `/analyze-clean-code` on
 #494 and were checked against the item list of the file.
+
+## Measurement — 2026-10-19
+
+| Run | Production lines | Note |
+|---|---|---|
+| 2026-10-19 | 713 → 719 (+6) | `#satellite` 6/13 (#628): `spawn_livekit_bridge` becomes a port call (`TerminalAddress` + `session_metadata_json`). Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md`. `**Status:** Open — regressed 2026-10-19`; still **unclaimed** |

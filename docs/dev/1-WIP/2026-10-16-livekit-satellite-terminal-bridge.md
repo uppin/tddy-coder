@@ -159,6 +159,11 @@ Unit (`tddy-daemon-extensions/src/terminal_exposure.rs`): `with_nothing_wired_ex
 
 ## Technical Debt & Production Readiness
 
+- The Telegram start logs `warn!` when no exposure is wired (`FailedPrecondition`, the port's "not exposed").
+  Telling the two apart needs `tddy-telegram-control` to depend on `tddy-rpc`; left to the developer.
+  Deferred in `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md`.
+- `expose_terminal_to_livekit` keeps its LiveKit-flavoured name (called by `tddy-agent-launch`).
+
 ## Decisions & Trade-offs
 - **The port takes an `RpcService`, not a PTY.** The PTY type belongs to `tddy-cli-sessions`, and an
   `RpcService` is what any transport needs to serve a terminal.
@@ -198,6 +203,16 @@ two added. Remaining: [INFO] `end_all` waits a fixed 20 ms for serving tasks to 
 No TODO/FIXME, debug output, unwraps or mock code in the added production lines; scoped clippy
 `-D warnings` clean for `tddy-cli-sessions`, `tddy-daemon-extensions`, `tddy-daemon-livekit`.
 ### /analyze-clean-code
+Score **B**. Fixed: `LiveKitTerminalExposure::expose` nested five levels deep and ran ~60 lines (a verbatim
+move of `spawn_livekit_bridge`); the republisher is now `spawn_session_metadata_republisher`, and
+`session_room_acceptance` still passes 29/29 against a real LiveKit server. Remaining: `ensure_exposed_terminal`
+~40 lines, four parameters including `self` (acceptable); `exposed_terminals.rs` keeps the name
+`expose_terminal_to_livekit` (renaming is outside this node).
+**File length gate:** 🔴 three files over 500 production lines grew in this PR — `tddy-daemon/src/runtime.rs`
+1,818 → 1,832, `telegram_session_control/mod.rs` 539 → 557, `session_start.rs` 713 → 719. Split deferred with the
+developer's consent (2026-10-19): the open `#satellite` siblings #629–#635 edit the daemon wiring. Recorded in
+`docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` and in each file's
+`oversized-file-*` record (none claimed).
 
 ## TODO
 

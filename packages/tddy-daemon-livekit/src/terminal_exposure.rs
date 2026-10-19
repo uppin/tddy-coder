@@ -85,27 +85,8 @@ impl TerminalExposure for LiveKitTerminalExposure {
         let local = participant.room().local_participant().clone();
         let publish_lock = participant.metadata_publish_lock();
         let serving = tokio::spawn(async move {
-            // The watcher publishes on *change*, so the channel starts empty and the block is sent
-            // after the receiver exists: a value put into a channel before anyone subscribed is
-            // the subscriber's already-seen initial value and would never reach the room.
-            let republishing = metadata_json.map(|json| {
-                let (tx, rx) = watch::channel(String::new());
-                tddy_livekit::spawn_local_participant_metadata_watcher(rx, local, publish_lock);
-                tokio::spawn(async move {
-                    let mut ticks = tokio::time::interval(SESSION_METADATA_REPUBLISH_INTERVAL);
-                    loop {
-                        // The first tick completes immediately, so the block reaches the room at
-                        // join and every interval thereafter.
-                        ticks.tick().await;
-                        // `watch::Sender::send` marks the value changed whether or not it differs,
-                        // so each tick is a real publish. It fails only once the watcher is gone,
-                        // which is the end of this publisher too.
-                        if tx.send(json.clone()).is_err() {
-                            break;
-                        }
-                    }
-                })
-            });
+            let republishing = metadata_json
+                .map(|json| spawn_session_metadata_republisher(json, local, publish_lock));
             participant.run().await;
             // The room is gone, so there is nothing left to advertise to.
             if let Some(republishing) = republishing {
@@ -118,4 +99,32 @@ impl TerminalExposure for LiveKitTerminalExposure {
         });
         Ok(ExposedTerminal::new(serving))
     }
+}
+
+/// Publish `json` as the local participant's metadata at join and again every
+/// [`SESSION_METADATA_REPUBLISH_INTERVAL`]. The returned task ends when the watcher does.
+fn spawn_session_metadata_republisher(
+    json: String,
+    local: livekit::prelude::LocalParticipant,
+    publish_lock: Arc<tokio::sync::Mutex<()>>,
+) -> tokio::task::JoinHandle<()> {
+    // The watcher publishes on *change*, so the channel starts empty and the block is sent after the
+    // receiver exists: a value put into a channel before anyone subscribed is the subscriber's
+    // already-seen initial value and would never reach the room.
+    let (tx, rx) = watch::channel(String::new());
+    tddy_livekit::spawn_local_participant_metadata_watcher(rx, local, publish_lock);
+    tokio::spawn(async move {
+        let mut ticks = tokio::time::interval(SESSION_METADATA_REPUBLISH_INTERVAL);
+        loop {
+            // The first tick completes immediately, so the block reaches the room at join and every
+            // interval thereafter.
+            ticks.tick().await;
+            // `watch::Sender::send` marks the value changed whether or not it differs, so each tick
+            // is a real publish. It fails only once the watcher is gone, which is the end of this
+            // publisher too.
+            if tx.send(json.clone()).is_err() {
+                break;
+            }
+        }
+    })
 }

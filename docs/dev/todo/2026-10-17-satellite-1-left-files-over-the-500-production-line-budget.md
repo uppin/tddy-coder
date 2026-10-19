@@ -41,3 +41,23 @@ Deferred with the developer's consent (2026-10-17, "file sizes can be deferred")
 
 `packages/tddy-daemon-auth/src/auth.rs` (622 → 619) shrank and is recorded in
 `packages/tddy-daemon-auth/docs/code-issues/oversized-file-auth.md`.
+
+## Grown by #628 (`#satellite` 6/13, terminal exposure)
+
+Deferred with the developer's consent (2026-10-19, "defer"): #629–#635 are open and edit the daemon's wiring,
+so a split here would conflict them.
+
+| File | Production lines | Grown by #628 | Record |
+|---|---|---|---|
+| `packages/tddy-daemon/src/runtime.rs` | 1,818 → 1,832 | +14 | `packages/tddy-daemon/docs/code-issues/oversized-file-runtime.md` |
+| `packages/tddy-telegram-control/src/telegram_session_control/mod.rs` | 539 → 557 | +18 | `packages/tddy-telegram-control/docs/code-issues/oversized-file-telegram-session-control-mod.md` |
+| `packages/tddy-telegram-control/src/telegram_session_control/session_start.rs` | 713 → 719 | +6 | `packages/tddy-telegram-control/docs/code-issues/oversized-file-telegram-session-control-session-start.md` |
+
+The growth is the `terminal_exposure` wiring: the field and its builder in the harness, the port call
+replacing `spawn_livekit_bridge` in the Telegram start, and the exposure built once in `build` and handed to
+the session host and `build_telegram`.
+
+Also open from this node, not a size issue: the Telegram start logs `warn!` ("terminal exposure failed")
+when no exposure is wired, which the port defines as "not exposed" (`FailedPrecondition`). Distinguishing it
+needs `tddy-telegram-control` to depend on `tddy-rpc` (for `Code`) — an external-dependency decision left to
+the developer.
