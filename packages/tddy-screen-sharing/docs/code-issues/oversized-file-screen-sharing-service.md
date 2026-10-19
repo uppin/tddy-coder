@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-screen-sharing/src/screen_sharing_service.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-24 — `/pr-wrap` step 3.5 file-length gate on #509 (`#keyring` 2/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **967 production lines** (2026-10-07, #514; first measured 2026-09-24) of 2,176 total (`#[cfg(all(test, unix))]` at line 968; 1,209 test lines) · budget 500 · **1.9× over**
-**Thresholds breached:** length 967 > 500
-**Restructure:** not designed
-**Status:** Open — regressed 2026-10-18 (+16 from #626, `#satellite` 4/13: `with_room_tokens`, the minter parameter threaded through `prepare_bridge` / `build_bridge_spawn_config`, `BRIDGE_TOKEN_TTL`; deferred with the developer's consent) — **claimed**
+**Metrics:** **537 production lines** (2026-10-19, #653; was 983 before the split, 967 before #626) of 1,890 total (`#[cfg(all(test, unix))]` at line 538) · budget 500 · **1.07× over**
+**Thresholds breached:** length 537 > 500
+**Restructure:** seams A and B applied in #653; seam C not done (engine gap, see below)
+**Status:** Open, **narrowed** 2026-10-19 (983 -> 537) — **claimed**
 **Claimed by:** #653 — `#host-desktops 1/8` (`feature/host-desktops/service-split`)
 **Lands after:** nothing open — #626 (`#satellite 4/13`) and #625 merged 2026-10-18 (`dc84ebe8c`), which was the developer's gate for starting the split
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
@@ -18,19 +18,22 @@
 | 2026-09-24 | 967 | first detection. The size predates #509 (967 at merge-base `4e7157d2`). #509 changed 24 lines (12+/12−), all inside `mod tests`: `Request::new` → `Request::direct` in the request construction. No production line changed, so it did not grow the file |
 | 2026-10-07 | 967 | touched, unchanged: #514 (`#keyring` 7/9) deletes `require_key` and the key-cache plumbing and rewrites the target RPCs over `ScreenSharingTargetStore` (−10 lines), then adds `with_credential_vaults` (+10, a 7-line method, its doc line, and imports) — 967 production lines on `origin/master` and on HEAD. The file was not grown; seam A lost `require_key` |
 | 2026-10-18 | 967 → 983 (+16) | #626 (`#satellite` 4/13): bridge tokens minted through `RoomTokenMinter`; the key and secret re-reads leave `build_bridge_spawn_config` (−12), `with_room_tokens`, the threaded parameter and `BRIDGE_TOKEN_TTL` come in. Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` |
+| 2026-10-19 | 983 → 537 (−446) | #653 (`#host-desktops` 1/8): seams A and B applied by `tddy-tools restructure` (`bridge_lifecycle`, `bridge_config`); seam C refused by the engine, not done |
 
-## What would close it — candidate seams (not proven)
+## Result of #653 (2026-10-19)
 
-| Seam | Items | Out |
-|---|---|---|
-| A | bridge lifecycle, which is inherent and moves without stubs: `terminate_bridge`, `prompt_for_desktop_password`, `try_spawn_bridge`, `spawn_bridge` (L179–374) | ~195 |
-| B | free bridge-config and naming functions: `PreparedBridge`, `prepare_bridge`, `build_bridge_spawn_config`, the `*_bridge_key` / `host_bridge_identity` / `screenshare_track_name` names, `browser_livekit_url`, `host_livekit_room`, `desktop_prompt_subject`, `decrypt_desktop_password`, the target-to-proto conversions (L377–622) | ~245 |
-| C | host-target RPC bodies from the `ScreenSharingService` impl: `list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream` (L632–773) | ~140 |
-| — | stays: `BridgeSpawnConfig`, `HostScope`, struct, builders and `require_*` helpers (L35–178), plus the vault-target RPCs (L774–961) | — |
+| Seam | Done | How | Where it went |
+|---|---|---|---|
+| A | yes | `extract_module` (not `retarget_impl`: that changes an `impl`'s self type and refuses the same type, "there is nothing to retarget") over `terminate_bridge … spawn_bridge`, `require_target_store` included because it sits between them | `src/screen_sharing_service/bridge_lifecycle.rs` (243 lines) — nested under the service module |
+| B | yes | `move_item` | `src/bridge_config.rs` (264 lines) |
+| C | **no** | `extract_method` over the four host-target RPC bodies is refused under `#[async_trait]`: "offered: Extract into variable" | still in `screen_sharing_service.rs`; engine gap filed as `docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md` |
 
-From this first reading, A+B take it to about 525 lines, so Seam C (bodies moved behind delegating stubs) is also needed. The 1,209-line inline test module is a separate question and does not count against the budget. Prove the seams with `restructure check --deep` before applying them.
+**Remaining:** 537 production lines, 37 over budget. What is left is the struct and builders, `BridgeTarget`,
+`HostScope`, `target_error_to_status`, the four host-target RPC bodies (about 140 lines, seam C) and the
+session (vault) RPCs. Moving seam C's bodies would take it to roughly 400.
 
-**Stack constraint:** `#keyring` dependents #515 and #516 are still open and no split lands mid-stack; #514 (`#keyring` 7/9) touched this file without growing it. The vault-target RPCs the table calls "stays" are now the store-backed `list_targets` / `add_target` / `remove_target`.
+**Not hand-verified further:** the members moved by A and the items moved by B were widened to `pub(crate)`
+by the engine (and `HostScope` by hand); that is the cost of the split, not narrowed back.
 
 ## Concurrent changes
 

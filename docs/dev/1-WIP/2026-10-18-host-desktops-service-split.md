@@ -1,7 +1,7 @@
 # Changeset: Split the screen-sharing service along its seams
 
 **Date**: 2026-10-18
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — seams A and B applied; seam C deferred (engine gap)
 **PR**: [#653](https://github.com/uppin/tddy-coder/pull/653)
 **Type**: Refactor (restructure, no behaviour change)
 **Stack**: `#host-desktops` 1/8. Base: `master`.
@@ -52,19 +52,18 @@ wave 2.
 
 ## Seam plan (published in wave 2)
 
-The module layout nodes 6–8 target. Line numbers are today's (`master` @ `515c00149`, before #626);
+The module layout nodes 6–8 target. Line numbers were `master` @ `515c00149`, before #626;
 the `tddy-tools restructure` JSONL is generated at green, **after #626 merges**, against the shape it
 leaves, and proven with `restructure check --deep` before it is applied.
 
-| Seam | New module | Items (today's lines) | How |
+| Seam | New module | Items | How |
 |---|---|---|---|
-| A | `src/bridge_lifecycle.rs` | `ScreenSharingServiceImpl::{terminate_bridge, prompt_for_desktop_password, try_spawn_bridge, spawn_bridge}` (L218–415) | `retarget_impl` into an `impl ScreenSharingServiceImpl` block in the new module |
-| B | `src/bridge_config.rs` | `BridgeSpawnConfig`, `PreparedBridge`, `prepare_bridge`, `build_bridge_spawn_config`, `session_bridge_key`, `host_bridge_key`, `host_bridge_identity`, `screenshare_track_name`, `browser_livekit_url`, `host_livekit_room`, `desktop_prompt_subject`, `decrypt_desktop_password`, `host_target_as_bridge_target`, `host_target_to_proto` (L51–65, L424–656) — plus whatever #626 adds here | `move_items` |
-| C | `src/host_targets.rs` | bodies of `list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream` (L680–820) | `extract_method` to inherent `*_impl` methods, then `retarget_impl`; the trait impl keeps one-line delegators |
-| — | stays | struct, builders, `require_*`, `resolve_session_dir`, `require_target_store`, `BridgeTarget`, `HostScope`, `target_error_to_status`, session (vault) RPCs | — |
+| A | `src/screen_sharing_service/bridge_lifecycle.rs` (**nested** under the service module — the engine's `extract_module … to_file` places it there) | `ScreenSharingServiceImpl::{terminate_bridge, require_target_store, prompt_for_desktop_password, try_spawn_bridge, spawn_bridge}` — `require_target_store` **travels with A**: it sits between `terminate_bridge` and the rest, and one `extract_module` needs one contiguous run | `extract_module` (`to_file`, `reexport: none`). **Not `retarget_impl`**: that changes an `impl`'s self type and refuses the same type (`there is nothing to retarget`) |
+| B | `src/bridge_config.rs` | `BridgeSpawnConfig`, `PreparedBridge`, `prepare_bridge`, `build_bridge_spawn_config`, `BRIDGE_TOKEN_TTL`, `session_bridge_key`, `host_bridge_key`, `host_bridge_identity`, `screenshare_track_name`, `browser_livekit_url`, `host_livekit_room`, `desktop_prompt_subject`, `decrypt_desktop_password`, `host_target_as_bridge_target`, `host_target_to_proto` | `move_item`, two plans (the first carries `name` and creates the module; `check` refuses a `to` that does not exist yet, so `BridgeSpawnConfig` moved in a second plan) |
+| C | `src/host_targets.rs` — **deferred, not done** | bodies of `list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream` | `extract_method` is refused inside the `#[async_trait]` impl (`offered: Extract into variable`; a plain `let` probe too; cause unconfirmed). Filed as `docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md` |
+| — | stays | struct, builders, `require_{user,host_scope,config}`, `resolve_session_dir`, `BridgeTarget`, `HostScope`, `target_error_to_status`, session (vault) RPCs, and (until C) the host-target RPC bodies | — |
 
-Expected result: ~440 production lines in `screen_sharing_service.rs` (967 − ~195 − ~245 − ~140 +
-delegators and `mod`/`use` lines), measured and recorded in the code issue at wrap.
+Expected result was ~440 production lines. **Achieved: 537** (983 − A − B; C not done), recorded in the code issue, which is narrowed, not closed.
 
 **Baseline (wave 2, 2026-10-18, before #626):** see `## Validation Results` → *Baseline*.
 
@@ -93,19 +92,18 @@ Move the oversized screen-sharing service into named modules once, before three 
 
 ## Scope
 
-- [ ] Gate: #626 merged; branch rebased onto `origin/master`
-- [ ] Prove seams with `restructure check --deep`
-- [ ] Apply seams A, B, C
-- [ ] Code issue resolved or narrowed with the final measurement
+- [x] Gate: #626 merged; branch rebased onto `origin/master`
+- [x] Prove seams with `restructure check --deep` (A and B; C refused)
+- [ ] Apply seams A, B, C — A and B applied; **C deferred** (engine gap)
+- [x] Code issue narrowed with the final measurement (537)
 
 ## Technical Changes
 
 ### State A
-`packages/tddy-screen-sharing/src/screen_sharing_service.rs`: 967 production lines (2,250 total; tests
-from L963). Seams per the code issue: A L179–374, B L377–622, C L632–773 (line numbers before #626).
+`packages/tddy-screen-sharing/src/screen_sharing_service.rs`: 983 production lines after #626 (967 before; tests from L984). Seams per the code issue: A L179–374, B L377–622, C L632–773 (line numbers before #626).
 
 ### State B
-`screen_sharing_service.rs` ≤ ~500 production lines; three sibling modules; public API unchanged.
+`screen_sharing_service.rs` 537 production lines (target ≤ 500, missed by 37 — seam C); two new modules; public API unchanged.
 
 ### Delta
 | Package | Change |
@@ -113,9 +111,9 @@ from L963). Seams per the code issue: A L179–374, B L377–622, C L632–773 (
 | `tddy-screen-sharing` | `src/screen_sharing_service.rs` split; new sibling modules; `lib.rs` `mod` lines |
 
 ## Implementation Milestones
-- [ ] M1 #626 merged; rebased; baseline green recorded
-- [ ] M2 Seams proven (`check --deep`)
-- [ ] M3 Seams applied; `./test -p tddy-screen-sharing` green; clippy clean
+- [x] M1 #626 merged; rebased; baseline green recorded
+- [ ] M2 Seams proven (`check --deep`) — A and B proven, C refused
+- [ ] M3 Seams applied — A and B applied and green; C not applied
 
 ## Testing Plan
 
@@ -147,7 +145,30 @@ This node has no planned red tests; any red test is a stop, and a test that chan
 ## Validation Results
 ### Baseline
 
-2026-10-18, wave 2, on `master` @ `515c00149` (**before #626**): `./test -p tddy-screen-sharing` — 7 test binaries, **48 passed, 0 failed, 0 ignored** (10 + 18 + 3 + 3 + 6 + 8 + 0). Re-record after rebasing onto `master` with #626 merged; that run is the restructure's baseline.
+2026-10-18, wave 2, on `master` @ `515c00149` (**before #626**): `./test -p tddy-screen-sharing` — 7 test binaries, **48 passed, 0 failed, 0 ignored** (10 + 18 + 3 + 3 + 6 + 8 + 0). **Re-recorded 2026-10-19 on the rebased tree (#626 merged): 7 binaries, 49 passed, 0 failed, 0 ignored** (the +1 over 48 is #626's test) — the restructure's baseline.
+
+### Result (2026-10-19)
+
+Seams A and B applied by `tddy-tools restructure`; seam C refused. Commits: `fe274c0c0` (A), `b66d583ec` (B), `b63a398b8` (`HostScope` widening).
+
+| Gate (scoped to `tddy-screen-sharing`) | Result |
+|---|---|
+| `cargo fmt --check` | exit 0 |
+| `cargo clippy -p tddy-screen-sharing --all-targets -- -D warnings` | exit 0 (after the `HostScope` fix; before it, `private_interfaces` on `HostScope`) |
+| `./test -p tddy-screen-sharing` (`.verify-result.txt`) | 19 + 3 + 3 + 10 + 8 + 6 + 0 = **49 passed, 0 failed, 0 ignored** — equals the baseline |
+| `restructure verify --against HEAD` after each plan | "every statement accounted for" (A: 5 visibility-normalised before the hand edit; B: 38) |
+| `restructure verify --against 60b895053` | 0 statements lost, 5 gained: the lines of the two hand-edit TODO comments; non-zero exit for that reason alone |
+| comment-line multiset (`//` lines, trimmed, `screen_sharing_service.rs` + `lib.rs` before vs `screen_sharing_service.rs` + `bridge_config.rs` + `bridge_lifecycle.rs` + `lib.rs` after) | 514 before, 519 after; **none lost**, 5 gained (the same two TODO comments) |
+| `cargo check -p tddy-daemon --all-targets` | not run: no public item moved or changed |
+
+Line counts: `screen_sharing_service.rs` 537 production (1,890 total), `bridge_config.rs` 264, `bridge_lifecycle.rs` 243.
+
+**Hand edits** (each marked `TODO(restructure)`):
+1. `bridge_lifecycle.rs`: `use tokio::io::AsyncWriteExt;` — `extract_module` does not carry a trait import used only for its methods; the apply's compile gate failed (`write_all`) and stopped before its tidy and format.
+2. `screen_sharing_service.rs`: `struct HostScope` → `pub(crate) struct HostScope` (clippy `private_interfaces`; the engine widens moved items only).
+3. Tool-driven, outside `apply`: `cargo fix --lib --tests -p tddy-screen-sharing` (unused imports) and `rustfmt` over the two files, because the failed apply never ran its own tidy; `apply --resume` was a no-op.
+
+**`pub(crate)` widenings by the engine:** seam A — `terminate_bridge`, `require_target_store`, `prompt_for_desktop_password`, `try_spawn_bridge`, `spawn_bridge`. Seam B — `BridgeSpawnConfig` and its 13 fields, `BridgeTarget` and its 4 fields, `PreparedBridge::{binary, spawn_config, for_password}`, `DEFAULT_STREAM_FPS`.
 
 ### /validate-changes
 ### /validate-tests
@@ -164,13 +185,13 @@ This node has no planned red tests; any red test is a stop, and a test that chan
 - [x] Run acceptance tests (verify they fail) — N/A; baseline recorded green instead
 - [x] USER REVIEW — acceptance tests — N/A (seam plan reviewed with the wave-1 batch)
 - [x] TDD Red — write failing unit/integration tests — N/A for a restructure
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
+- [ ] TDD Green — implement with quality code (A and B done; C deferred)
+- [x] Update documentation with progress
+- [x] Run scoped tests for touched packages (full-workspace result from CI still to come)
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt --check`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-18-host-desktops-service-split-initial-discovery.md`
 - [ ] USER REVIEW — work complete
