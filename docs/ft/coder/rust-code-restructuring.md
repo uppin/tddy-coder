@@ -1192,6 +1192,24 @@ left, and the destination's manifest. The three cannot disagree about what the f
   `pub(crate)`, `pub(super)`, `pub(in …)` or private, named from outside the moved tree through its own
   path (`crate::a::b::Item`), would be private to the destination after the move. `check --deep` and
   `apply` refuse, naming the child and each referring file; nothing is widened and nothing is written.
+- **A cross-crate move widens what the origin still reaches, and says so.** No visibility is narrower
+  than `pub` across a crate boundary, so only the reached declarations are widened — to `pub`, written
+  over whatever they were (`pub(crate)`, `pub(super)`, `pub(in …)` or none). The survey reads every
+  declaration of a moving file from the server's outline — items, the items of inline modules and the
+  `mod` declarations on their path, child `mod` declarations, struct fields, inherent methods and
+  consts — and a declaration is widened when a file the move does not carry, outside the destination
+  crate, references it. A reference from a co-moving member or from inside the destination widens
+  nothing. Three more cases widen: every non-private item of the moved module when the module's parent
+  re-exports it by glob (`use <module>::*;`, which names no item, so reach alone would miss them);
+  and every `struct`, `enum`, `type` or `trait` of a moving file that a widened declaration's signature
+  names, repeated until nothing new is named, so a `-D warnings` build stays clean. Members of a trait
+  impl, the items of a trait, enum variants and anything already `pub` are never touched. Each edit is
+  addressed by the declaration's position, never by name, so a parameter or a field of another type
+  called the same is left alone. A reached declaration whose keyword is on a line above its name is
+  refused, naming it, with nothing written. `apply` prints each widening as `visibility: …` with its
+  reason where it has one (`` through `<file>`'s glob ``, `` named by the signature of `<item>` ``), the
+  journal records it, and `check --deep` prints the same lines before anything is written; a module with
+  reached items and no callers is explained on its survey line by the glob that reaches it.
 - **The manifest.** Each crate the survey names is copied from the origin's manifest (a path dependency re-anchored) into the
   destination's `[dependencies]`, or `[dev-dependencies]` when only `#[cfg(test)]` code names it. A crate
   the origin declares only under a target table (`[target.'cfg(unix)'.dependencies]`) lands under the same
@@ -1398,6 +1416,12 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   what a string holds is data the suite asserts on, and rewriting it would change the assertion.
 - **`check` has no static preflight for `move_test_binary_to_crate`.** The plan's vocabulary refusals
   are reported; the anchor's path shape and the facade walk are resolved at apply time.
+- **A cross-crate move does not widen what the outline cannot list.** Tuple-struct fields (the server
+  names them `0`, `1`), items a `macro_rules!` generates, `use` re-exports inside the moved file,
+  associated types of an inherent `impl`, and an item that only a macro expansion in the origin names.
+  The compile gate stops the run at the `E0603`/`E0616`/`E0624` site, and the edit stays on disk to roll
+  back. A type of the same name elsewhere that a widened signature seems to name is widened too, which
+  only ever widens.
 - **`move_item` widens the members of a split type only where the source file shows them.** A private
   member used through an `impl` of the moved type that sits in **another file** is not surveyed, and a
   tuple-struct field is widened only if the outline lists it. The edit is applied, the compile gate

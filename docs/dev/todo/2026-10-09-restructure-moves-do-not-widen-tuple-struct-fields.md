@@ -8,7 +8,7 @@
 Two nodes add field widening. `move-widen` widens struct fields that code outside the moved files reaches, for
 `move_module_to_crate` and `move_cluster_to_crate`. `widen-same-crate` does the same for `move_item`. Both enumerate
 fields from rust-analyzer's `textDocument/documentSymbol` tree and keep only symbols whose name is an identifier (the
-filter in `backends/rust.rs` `path_reached_within` / `seam_survey::items_relocated_within`). rust-analyzer names a
+filter in `backends/rust/declarations.rs` `declarations_within` and `seam_survey::items_relocated_within`). rust-analyzer names a
 tuple-struct field by its index (`0`, `1`), which that filter drops. So a tuple-struct field such as
 `pub(crate) struct Token(pub(crate) String);` stays as written when the origin still reads `token.0` after the
 move. The result is E0616 at the next build, which has to be widened by hand.

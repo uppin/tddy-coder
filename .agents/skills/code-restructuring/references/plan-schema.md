@@ -152,6 +152,10 @@ Every operation but two groups is backed by a real assist in the engine that cla
 empty the engine has no equivalent, and the executor refuses the operation rather than approximating
 it. The ⚠️ marks `extract_class` — see **`extract_class` is hand-written** below.
 
+A cross-crate move (`move_module_to_crate`, `move_cluster_to_crate`) widens to `pub` each declaration of the moved
+files that code left behind still reaches, and reports every widening as a `visibility:` line in `apply` and
+`check --deep`; it carries no plan field for it.
+
 `name` on `move_module_to_crate` and `move_cluster_to_crate` is the `[package] name` of a crate the move
 creates at `to`; a later operation of the plan moves into it without `name`. The skeleton is `[package]` with
 the name and the origin's `version` and `edition` lines verbatim, an empty `src/lib.rs`, and a root `members`

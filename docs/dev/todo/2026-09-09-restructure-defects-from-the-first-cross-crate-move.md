@@ -39,9 +39,10 @@ failure that destroys information.
    `#reshape` 9/19 (PR #607): a move of a file git does not track is refused as `UntrackedMoveSource`
    before the operation writes or journals anything, in `apply`, `--dry-run`, `check --deep` and
    static `check`; `git add` it and the same plan applies.
-3. **The `pub(crate)` widening a cross-crate move forces is not reported.** `extract_module` reports
+3. ~~**The `pub(crate)` widening a cross-crate move forces is not reported.** `extract_module` reports
    its widenings; a cross-crate move, where the question actually bites, does not — it surfaced as
-   four `E0603`s at the next build.
+   four `E0603`s at the next build.~~ Fixed by `#reshape` 14/24 (PR #604): a cross-crate move widens each
+   reached declaration to `pub` and reports it in `apply` and `check --deep`.
 4. ~~**A caller re-point can be spliced inside a grouped import**, producing
    `use crate::{a, tddy_daemon_livekit::x::Y, b};`, which never resolves.~~ Fixed by `#reshape` 7/19 (PR #605): a caller's
    group is rewritten as one statement edit, split or re-prefixed by the same rule as a moved header.
