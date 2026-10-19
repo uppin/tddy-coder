@@ -70,8 +70,10 @@ async fn pty_relay_joins_the_room_it_was_told_as_its_own_identity_and_waits_for_
 
 #[tokio::test]
 async fn pty_relay_with_no_room_named_joins_the_lobby() {
+    // Given a relay told no room
     let connector = InMemoryRoomConnector::answering(ScriptedJoin::PeerAbsent);
 
+    // When it joins to drive a session's terminal
     let _ = join_terminal_room(
         &a_relay_config(None),
         "ws://10.0.0.5:7880",
@@ -80,5 +82,11 @@ async fn pty_relay_with_no_room_named_joins_the_lobby() {
     )
     .await;
 
-    assert_eq!(connector.joins()[0].0.room, "tddy-lobby");
+    // Then it asked for the lobby
+    let rooms: Vec<String> = connector
+        .joins()
+        .into_iter()
+        .map(|(join, ..)| join.room)
+        .collect();
+    assert_eq!(rooms, vec!["tddy-lobby".to_string()]);
 }

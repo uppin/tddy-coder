@@ -34,3 +34,9 @@ moved, and the test copies live in the suites that own them. One of the two flak
 above, `common_room_set_metadata_handshake_repro`, is now in `tddy-daemon-livekit` and contends
 with three sibling Docker-backed suites there — see
 [2026-09-10-the-docker-backed-livekit-suites-contend-across-binaries.md](./2026-09-10-the-docker-backed-livekit-suites-contend-across-binaries.md).
+
+**Touched, not closed, 2026-10-19 (#629, `#satellite` 7/13).** The three `connect_client` call sites
+named above now join through `tddy_room_client::RoomConnector` (LiveKit's implementation wraps
+`connect_client`), so the paths cited there are gone. Neither defect this entry records moved: the two
+streamer crates are still near-duplicates, and the test files that roll their own connect-and-wait are
+unchanged.

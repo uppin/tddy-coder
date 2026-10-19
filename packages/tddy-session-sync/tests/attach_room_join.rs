@@ -12,6 +12,9 @@ use tddy_session_sync::{join_session_room, AttachError, SessionAddress};
 
 const A_WAIT: Duration = Duration::from_secs(10);
 
+/// The token lifetime a mirror joins with: six hours, LiveKit's own default.
+const SIX_HOURS: Duration = Duration::from_secs(6 * 3600);
+
 fn the_address() -> SessionAddress {
     SessionAddress {
         session_id: "1780828020298-abc".to_string(),
@@ -56,18 +59,13 @@ async fn a_mirror_joins_the_session_room_under_its_own_identity_and_waits_for_th
                 auth: RoomAuth::Credentials {
                     api_key: "devkey".to_string(),
                     api_secret: "a-secret".to_string(),
-                    ttl: Duration::from_secs(tddy_session_sync_ttl()),
+                    ttl: SIX_HOURS,
                 },
             },
             "daemon-udoo-1780828020298".to_string(),
             A_WAIT,
         )]
     );
-}
-
-/// The token TTL a mirror joins with (`DEFAULT_LIVEKIT_JWT_TTL_SECS` today: six hours).
-fn tddy_session_sync_ttl() -> u64 {
-    6 * 3600
 }
 
 #[tokio::test]

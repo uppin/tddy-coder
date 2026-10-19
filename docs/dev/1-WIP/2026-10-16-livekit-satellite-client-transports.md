@@ -14,7 +14,7 @@
 
 | Item | Verdict | Note |
 |---|---|---|
-| [2026-08-15-livekit-connect-streamer-duplication-still-outstanding.md](../todo/2026-08-15-livekit-connect-streamer-duplication-still-outstanding.md) | ✅ RESOLVED HERE (connect half) | Every client joins through one `RoomConnector`; the streamer half is narrowed, not closed. |
+| [2026-08-15-livekit-connect-streamer-duplication-still-outstanding.md](../todo/2026-08-15-livekit-connect-streamer-duplication-still-outstanding.md) | ⚠ DURING (kept) | Every client joins through one `RoomConnector`, which retires the three `connect_client` call sites the entry cites. Both defects the entry records — the two near-duplicate streamer crates and the ten test files with their own connect-and-wait — are untouched, so the entry is **not** closed and stays (verdict downgraded from ✅ at /pr-wrap, 2026-10-19). |
 | [2026-10-01-session-tool-client-repeats-its-transport-selection-three-times.md](../todo/2026-10-01-session-tool-client-repeats-its-transport-selection-three-times.md) | ⚠ DURING | The LiveKit arm changes in all three copies; de-duplication stays out of scope. |
 | `packages/tddy-session-tool-client/docs/code-issues/oversized-file-lib.md` | ⚠ DURING | The LiveKit arm shrinks (connect + cache move behind the port); no new code in `lib.rs`. |
 | `packages/tddy-session-sync/docs/code-issues/oversized-file-attach.md` | ⚠ DURING | `attach.rs` loses its token and connect code. |
@@ -179,7 +179,8 @@ testkit-backed suites of each tool, which run through the binaries' wiring.
 | `a_mirror_joins_the_session_room_under_its_own_identity_and_waits_for_the_daemon` | `packages/tddy-session-sync/tests/attach_room_join.rs` (new) | `attach` asks the connector for `session-{id}`, identity `syncer-…`, peer `daemon-{instance}`, credentials auth |
 | `a_daemon_that_never_arrives_is_reported_absent` | same | `PeerAbsent` → `AttachError::DaemonAbsent { identity, room, waited }` |
 | `the_relay_pipes_stdio_through_a_duplex_to_the_remote_git_service` | `packages/tddy-remote-git-repo/tests/relay_over_room.rs` (new) | Bytes written to the relay's stdin arrive on the duplex's outbound side, and inbound frames reach stdout (through `relay_over_duplex`; `relay::run`'s own join is covered by the testkit suites through the binary) |
-| `pty_relay_joins_the_room_it_was_told_as_its_own_identity_and_waits_for_the_server` | `packages/tddy-terminal-rpc/tests/pty_relay_room_join.rs` (new) | Join request (room, identity, server identity) and the `terminal.TerminalService` call through `rpc()` |
+| `pty_relay_joins_the_room_it_was_told_as_its_own_identity_and_waits_for_the_server` | `packages/tddy-terminal-rpc/tests/pty_relay_room_join.rs` (new) | Join request (room, identity, server identity, credentials, one-hour TTL, thirty-second wait); the lobby is the default room (`pty_relay_with_no_room_named_joins_the_lobby`). The terminal stream itself opens through `open_duplex` and is covered by the testkit suites through the binary |
+| `a_remote_that_ends_the_stream_without_an_exit_status_is_reported` | `packages/tddy-remote-git-repo/tests/relay_over_room.rs` | A duplex whose far end goes away yields `StreamEndedWithoutExitStatus`, never an invented exit code |
 | `the_tool_client_joins_a_destination_once_and_reuses_the_session` | `packages/tddy-session-tool-client/tests/room_transport_cache.rs` (new) | Two dispatches, one `connect`; a gone peer reconnects |
 | `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Four entries struck; both ratchet tests pass |
 | `a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary` | same | The three lib+bin crates on the allowed set keep LiveKit out of their library sources (Decisions) |
@@ -223,9 +224,38 @@ Unit (`tddy-room-client/src/lib.rs`): `with_nothing_wired_connecting_fails_namin
 
 ## Validation Results
 ### /validate-changes
+2026-10-19, `origin/master..HEAD` is this PR's six commits only (42 files); no parent-owned file removed.
+`cargo check --all-targets` over the touched packages is clean. Boundaries held: nothing of #623's two
+functions is changed, no daemon-side or `tddy-coder` code is touched, tool-client's transport selection is
+not de-duplicated. Info: `ROOM_TOKEN_TTL` (session-sync, six hours) restates LiveKit's own default because
+the library names no LiveKit crate; the test pins it. `run_livekit_session` / `run_livekit_terminal` in
+`tddy-terminal-rpc` keep LiveKit-flavoured private names although the module is transport-free — renaming
+them touches a file that has a standing record, so it is left.
 ### /validate-tests
+Fluent Given/When/Then holds throughout. Fixed: a helper named after the crate that hid a six-hour literal
+became the `SIX_HOURS` constant; `pty_relay_with_no_room_named_joins_the_lobby` gained its Given/When/Then
+and asserts the whole list of rooms instead of indexing. The acceptance table now names the second relay
+test and states what the pty-relay test actually covers.
 ### /validate-prod-ready
+No `todo!`, `unimplemented!`, `TODO`/`FIXME`, `println!` or `dbg!` in this PR's production code. `unwrap`/`expect`
+appear only in the `test-support` in-memory connector (mutex poisoning, an over-scripted join) and at the
+one startup call that installs the connector once. The in-memory module is compiled only under the
+`test-support` feature, which every dependent enables in `[dev-dependencies]` alone.
+### File length (/pr-wrap 3.5) — developer decision needed
+| File (production lines) | Before → after | Other satellite nodes' own commits touching it | `Claimed by:` |
+|---|---|---|---|
+| `packages/tddy-session-sync/src/attach.rs` | 536 → 555 | none (#630–#635) | none |
+| `packages/tddy-session-tool-client/src/lib.rs` | 1,111 → 1,114 (the gate's awk reads 610 → 1,114 on master because of a `cfg(any(feature, test))` attribute this PR removed) | none | none |
+| `packages/tddy-terminal-rpc/src/pty_relay.rs` | 776 → 784 | none | none |
+| `packages/tddy-session-sync/src/sync.rs` | 788 → 788 (not grown; new record `oversized-file-sync.md`) | none | none |
+
+No decomposition was done and no deferral is recorded as consented: the growth is +19, +3 and +8 lines, and
+the developer decides between deferring (a `docs/dev/todo/` entry) and decomposing in this PR.
 ### /analyze-clean-code
+Production changes are small and cohesive: `relay::run` shrank from a connect-and-pump function to a join
+plus `relay_over_duplex`; the three joins are named functions (`join_session_room`, `join_terminal_room`,
+`connect_room_session`) with their constants named. No new function over forty lines, nesting over three
+levels or unnamed magic value; the pre-existing `run_livekit_terminal` length is on the file's standing record.
 
 ## TODO
 
@@ -240,10 +270,10 @@ Unit (`tddy-room-client/src/lib.rs`): `with_nothing_wired_connecting_fails_namin
 - [x] TDD Green — implement with quality code
 - [x] Update documentation with progress
 - [x] Run scoped tests for touched packages (full-workspace result from CI)
-- [ ] Validate changes (/validate-changes)
-- [ ] Validate tests (/validate-tests)
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Analyze code quality (/analyze-clean-code)
+- [x] Validate changes (/validate-changes)
+- [x] Validate tests (/validate-tests)
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Analyze code quality (/analyze-clean-code)
 - [x] Linting and formatting (scoped)
 - [ ] Wrap documentation (/wrap-context-docs)
 - [ ] USER REVIEW — work complete
