@@ -209,12 +209,12 @@ Contract-commit notes:
 - [x] USER REVIEW — acceptance tests (approved with the wave-1 batch, 2026-10-18)
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
-- [ ] Validate changes (/validate-changes)
-- [ ] Validate tests (/validate-tests)
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Update documentation with progress
+- [x] Run scoped tests for touched packages (tddy-rdp, tddy-screenshare, tddy-vnc: 17 pass); full-workspace result from CI, post-wrap
+- [x] Validate changes (/validate-changes)
+- [x] Validate tests (/validate-tests)
+- [~] Validate production readiness (/validate-prod-ready) — 1 warning awaiting approval: carried-over `unwrap_or(&[])` on the TLS public key
+- [~] Analyze code quality (/analyze-clean-code) — score C: `RdpClient::connect` 112 lines, split deferred (node 8 edits the same crate); awaiting approval
+- [x] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-18-host-desktops-rdp-nla-initial-discovery.md`
 - [ ] USER REVIEW — work complete
