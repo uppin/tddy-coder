@@ -212,8 +212,11 @@ pub(super) fn survey_lines(index: usize, survey: &Survey) -> Vec<String> {
             .iter()
             .map(|caller| format!("      {}: {} -> {}", caller.path, caller.from, caller.to)),
     );
-    // TODO(reshape-move-widen): implement — `      reached through a glob re-export, not by path:
-    // <survey.reexported_by>` when the survey names the parent's glob.
+    if let Some(glob) = &survey.reexported_by {
+        lines.push(format!(
+            "      reached through a glob re-export, not by path: {glob}"
+        ));
+    }
     lines
 }
 

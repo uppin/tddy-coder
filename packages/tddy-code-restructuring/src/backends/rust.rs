@@ -9,7 +9,7 @@
 //! that a non-editor client would write straight into the source.
 
 use crate::backends::lsp_bridge::LspClientBridge;
-use crate::crate_move::{self, DeclarationKind, ItemReferences, ModuleReferences, Reference};
+use crate::crate_move::{self, ItemReferences, ModuleReferences, Reference};
 use crate::edit::{
     FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit,
 };
@@ -1509,22 +1509,13 @@ impl RustBackend {
         )?;
 
         let mut found = Vec::new();
-        for item in path_reached_within(&symbols, whole_of(&text)) {
-            // An item nested in an inline module is reached through that module's own name, which
-            // is itself one of these — so re-pointing the outer name carries the inner path with
-            // it, and naming the inner one flat would write a facade line that resolves to nothing.
-            if !item.within.is_empty() {
-                continue;
-            }
-
-            // TODO(reshape-move-widen): walk `declarations::declarations_within` instead, so the
-            // fields, inherent members and inline-module items a widening needs come back too.
+        for declared in declarations::declarations_within(&symbols) {
             found.push(ItemReferences {
-                referenced_at: self.references_outside(&uri, &item.position, workspace)?,
-                declared_at: character_column(&text, LspPoint::read(Some(&item.position))?),
-                within: item.within,
-                kind: DeclarationKind::Item,
-                item: item.name,
+                referenced_at: self.references_outside(&uri, &declared.position, workspace)?,
+                declared_at: character_column(&text, LspPoint::read(Some(&declared.position))?),
+                within: declared.within,
+                kind: declared.kind,
+                item: declared.name,
             });
         }
 
@@ -2775,17 +2766,6 @@ fn collect_path_reached(
                 collect_path_reached(children, range, &inside, found);
             }
         }
-    }
-}
-
-/// The range covering a whole document, for a survey that asks about all of it.
-fn whole_of(text: &str) -> Range {
-    Range {
-        start: Position { line: 1, col: 1 },
-        end: Position {
-            line: text.lines().count() as u32 + 1,
-            col: 1,
-        },
     }
 }
 

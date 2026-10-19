@@ -8,14 +8,20 @@
 
 use serde_json::Value;
 
+use super::{is_identifier, SYMBOL_KIND_MODULE};
 use crate::crate_move::DeclarationKind;
+
+/// The server's symbol kinds that open a container of declarations a visibility can be written on
+/// or not: a struct, an enum and a trait.
+const SYMBOL_KIND_ENUM: u64 = 10;
+const SYMBOL_KIND_TRAIT: u64 = 11;
+const SYMBOL_KIND_STRUCT: u64 = 23;
+/// What an inherent `impl` holds that takes a visibility: methods, functions and constants. Its
+/// associated types are unstable there and are left alone.
+const INHERENT_MEMBER_KINDS: [u64; 3] = [6, 12, 14];
 
 /// One declaration, as the server reported it.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-move-widen): `outside_references_opening` reads it in the green phase"
-)]
 pub(super) struct Declared {
     pub(super) name: String,
     /// Its containers, outermost first, by the names the server gives them (`inner`, `impl Roster`,
@@ -26,20 +32,86 @@ pub(super) struct Declared {
     pub(super) kind: DeclarationKind,
 }
 
+/// What the symbols being read are held by, which decides the kind of each.
+#[derive(Clone, Copy)]
+enum Holder {
+    Module,
+    Struct,
+    InherentImpl,
+    NoVisibility,
+}
+
 /// Every declaration in `symbols` whose name is an identifier, outermost first and in source order.
 ///
 /// A child of a struct is a `Field`, of an inherent `impl` an `InherentMember`; a child of an
 /// `impl … for …`, of a trait or of an enum is `NoVisibility`; everything else — a module-level
 /// item, an inline module's item, a `mod` — is an `Item`. A tuple field, which the server names `0`,
 /// is not an identifier and is skipped.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-move-widen): `outside_references_opening` walks it in the green phase"
-)]
 pub(super) fn declarations_within(symbols: &Value) -> Vec<Declared> {
-    // TODO(reshape-move-widen): implement
-    let _ = symbols;
-    todo!("every declaration of the outline")
+    let mut found = Vec::new();
+    collect(symbols, &[], Holder::Module, &mut found);
+    found
+}
+
+fn collect(symbols: &Value, within: &[String], holder: Holder, found: &mut Vec<Declared>) {
+    for symbol in symbols.as_array().into_iter().flatten() {
+        let name = symbol
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let kind = symbol.get("kind").and_then(Value::as_u64);
+        let position = symbol
+            .pointer("/selectionRange/start")
+            .or_else(|| symbol.pointer("/location/range/start"));
+
+        if let (true, Some(position), Some(declared)) = (
+            is_identifier(name),
+            position,
+            kind.and_then(|kind| kind_in(holder, kind)),
+        ) {
+            found.push(Declared {
+                name: name.to_string(),
+                within: within.to_vec(),
+                position: position.clone(),
+                kind: declared,
+            });
+        }
+
+        if let (Some(children), Some(inside)) = (symbol.get("children"), holds(name, kind)) {
+            let mut containers = within.to_vec();
+            containers.push(name.to_string());
+            collect(children, &containers, inside, found);
+        }
+    }
+}
+
+/// The kind of a declaration of `symbol_kind` held by `holder`, when it takes a visibility or is
+/// one the move has to know it cannot give one.
+fn kind_in(holder: Holder, symbol_kind: u64) -> Option<DeclarationKind> {
+    match holder {
+        Holder::Module => Some(DeclarationKind::Item),
+        Holder::Struct => Some(DeclarationKind::Field),
+        Holder::InherentImpl => INHERENT_MEMBER_KINDS
+            .contains(&symbol_kind)
+            .then_some(DeclarationKind::InherentMember),
+        Holder::NoVisibility => Some(DeclarationKind::NoVisibility),
+    }
+}
+
+/// What the children of the symbol called `name` are held by, or `None` for a symbol whose children
+/// are not declarations of the file's own surface — the items inside a function body.
+fn holds(name: &str, symbol_kind: Option<u64>) -> Option<Holder> {
+    let is_impl = name
+        .strip_prefix("impl")
+        .is_some_and(|rest| rest.starts_with([' ', '<']));
+    match symbol_kind? {
+        _ if is_impl && name.contains(" for ") => Some(Holder::NoVisibility),
+        _ if is_impl => Some(Holder::InherentImpl),
+        SYMBOL_KIND_MODULE => Some(Holder::Module),
+        SYMBOL_KIND_STRUCT => Some(Holder::Struct),
+        SYMBOL_KIND_TRAIT | SYMBOL_KIND_ENUM => Some(Holder::NoVisibility),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
