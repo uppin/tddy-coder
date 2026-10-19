@@ -206,8 +206,60 @@ Hand edits for C (each marked `TODO(restructure): hand-moved`): the four bodies 
 - [INFO] Visibility widened to `pub(crate)` for the moved items (listed under Result); no public API changed.
 
 ### /validate-tests
+
+2026-10-19, scoped to `git diff origin/master...HEAD -- packages/`. Status: no issues introduced.
+
+- Tests analyzed: 18 inline tests in `screen_sharing_service.rs` (`mod tests`, line 423) plus the 5 integration suites of `tddy-screen-sharing`. The PR adds no test and changes no test body: its only edit in `mod tests` is one import, `use crate::bridge_config::build_bridge_spawn_config;` (the function moved). `bridge_config.rs`, `bridge_lifecycle.rs` and `host_targets.rs` hold no `#[cfg(test)]` code.
+- Run: `./test -p tddy-screen-sharing` (scoped, output in `.verify-result.txt`): lib 19 passed, `dead_vnc_service_removed` 3, `screen_sharing_record_propagation` 3, `screen_sharing_records_unit` 10, `screen_sharing_service_acceptance` 8, `session_vault_target_store_acceptance` 6; 0 failed, 0 ignored. `cargo clippy -p tddy-screen-sharing --all-targets -- -D warnings` is clean.
+- Anti-patterns introduced: 0 critical, 0 warning. No `#[ignore]`, `.skip` or commented-out test added. Description-body mismatches introduced: none.
+- Coverage of the moved code: the four host-target RPCs now live in `host_targets.rs` behind delegators; the inline tests still reach them through the trait methods, so the delegation is exercised. I did not check per-test coverage of each moved body.
+- [INFO] Pre-existing, not touched, not proposed for fixing: the inline tests do not follow the fluent-tests Given/When/Then page-object style throughout, and use short literal fixtures; I read the fluent-tests references only for calibration and did not audit the 18 pre-existing tests individually against them. Not a regression.
+
 ### /validate-prod-ready
+
+2026-10-19, scoped to the PR diff. Status: Ready. Files checked: 5 production files (`bridge_config.rs`, `lib.rs`, `screen_sharing_service.rs`, `bridge_lifecycle.rs`, `host_targets.rs`); the inline `mod tests` is excluded. Blockers: 0. Warnings: 0 introduced. Verified: `cargo clippy -p tddy-screen-sharing --all-targets -- -D warnings` clean (no unused imports, dead code or unused variables; the gate for the `pub(crate)` widenings is also clean).
+
+| Category | Count | Status |
+|---|---|---|
+| Mock code | 0 | ok |
+| Dev fallbacks | 0 added | ok |
+| TODO/FIXME | 7 (all this PR's own provenance markers) | acceptable, see below |
+| Unused code | 0 | ok |
+| Debug output | 0 (`println!`, `eprintln!`, `dbg!` none; `log::` calls moved unchanged) | ok |
+
+- [INFO] TODO markers, 7 marker lines in all: `bridge_lifecycle.rs:1` (hand-added trait import `AsyncWriteExt`), `screen_sharing_service.rs:79` (`HostScope` hand-widened), `screen_sharing_service.rs:244,252,260,268` (four delegators) and `host_targets.rs:1` (module header). Each names what was hand-edited and why, and the three async_trait ones point at `docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md`. They carry no issue number, but they are deliberate provenance markers with a tracking document; they delete when the engine gap closes. Acceptable. Note: the /validate-changes entry above cites `screen_sharing_service.rs:85` for the `HostScope` marker; it is now line 79.
+- [INFO] `pub(crate)` widenings (engine for moved items, by hand for `HostScope`, `DEFAULT_STREAM_*`, `BridgeTarget` fields): no public API change, crate-internal only; recorded as the cost of the split.
+- [INFO] No environment-conditional or silent-recovery code added. `spawn_bridge`'s `child.id().unwrap_or(0)` and `let _ = child.kill()` are moved byte for byte and pre-existing; not proposed for change.
+- Not run: `cargo build`/`cargo test` workspace-wide (repo policy: CI's job); only the scoped runs above.
+
 ### /analyze-clean-code
+
+2026-10-19, scoped to the PR diff, measured by hand (no tool run for metrics; function lengths counted from source). Findings below are all in moved-but-unchanged code and are INFO: the no-behaviour-change contract rules out editing them. **Introduced by this PR: none.**
+
+**Overall score by the rubric: F (raw), B-to-C for what the PR changed.** The rubric counts the moved code's pre-existing "must refactor" items (below); none is new, and the PR shrank the file it came from.
+
+| Metric | Excellent | Acceptable | Needs Attention | Must Refactor |
+|---|---|---|---|---|
+| File length (prod files) | - | 4 of 5 at or under 500 | 1 (`screen_sharing_service.rs`, see below) | - |
+| Function length (moved fns) | most | `prompt_for_desktop_password` 34, `try_spawn_bridge` 33, `add_host_target_impl` 37, `build_bridge_spawn_config` 45 (needs attention) | `build_bridge_spawn_config` 45 | `spawn_bridge` 70, `start_host_stream_impl` 67 |
+| Parameter count | - | - | - | `prepare_bridge` 7, `build_bridge_spawn_config` 7, `try_spawn_bridge` 9 incl. `&self` (8 without; carries `#[allow(clippy::too_many_arguments)]`) |
+
+**Must refactor, all pre-existing (INFO, not to be fixed here)**
+- `bridge_lifecycle.rs` `spawn_bridge`: 70 lines. Candidate later: separate the stdin hand-off and the reaper task.
+- `host_targets.rs` `start_host_stream_impl`: 67 lines, moved byte-identical from the trait impl (it was 67 there too; the 116 lines moved out of the god-file are the gain).
+- `prepare_bridge` / `build_bridge_spawn_config` / `try_spawn_bridge`: 7, 7 and 8 parameters. Candidate later: a `BridgeRequest` options struct (also removes the clippy allow).
+
+**Oversized files (more than 500 lines)**
+- `screen_sharing_service.rs` — 1,777 lines whole-file, **pre-existing and shrunk by this change (2,338 on `origin/master`, -561)**. 421 are production, within the 500 budget; the other ~1,350 are the inline `mod tests` (line 423 on). Responsibilities left: service struct and builders, session (vault) target RPCs, the four delegators, tests. Proposed split: `screen_sharing_service/tests.rs` or a `tests/` directory for the inline module. Cost: the tests use `super::*` private items (`ScreenSharingServiceImpl` fields, `HostScope`), so a child module `tests` in its own file keeps access and needs no widening. Recommendation: split later (out of scope for a behaviour-preserving restructure; the production budget, which is what the code issue tracks, is met).
+- `bridge_config.rs` 264, `bridge_lifecycle.rs` 243, `host_targets.rs` 160, all under 500.
+
+**Magic values**: none introduced. `BRIDGE_TOKEN_TTL` (6 x 3600) is a named constant; `DEFAULT_STREAM_WIDTH`/`HEIGHT`/`FPS` are named and shared.
+
+**Duplication**: none introduced. The `Self::spawn_bridge` / `try_spawn_bridge` pair and the repeated "require user, require host scope" preamble across the four `*_impl` bodies are pre-existing (INFO).
+
+**Naming**: the `*_impl` suffix on the four `host_targets.rs` methods is the PR's own, and is the usual delegator convention; the TODO markers explain it. `bridge_lifecycle.rs` has one `use` per line separated by blank lines (the engine's output style); a grouped `use` block would be tidier but was left, since `rustfmt` accepts it and rewriting engine output adds nothing. INFO.
+
+Nothing needs a fix before merge. Not run: any metrics tool (none exists for this rubric); numbers above are counted by hand and may be off by a line or two.
 
 ## TODO
 
@@ -223,9 +275,9 @@ Hand edits for C (each marked `TODO(restructure): hand-moved`): the four bodies 
 - [x] Update documentation with progress
 - [x] Run scoped tests for touched packages (full-workspace result from CI still to come)
 - [x] Validate changes (/validate-changes)
-- [ ] Validate tests (/validate-tests)
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Analyze code quality (/analyze-clean-code)
+- [x] Validate tests (/validate-tests)
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Analyze code quality (/analyze-clean-code)
 - [x] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt --check`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-18-host-desktops-service-split-initial-discovery.md`
 - [ ] USER REVIEW — work complete
