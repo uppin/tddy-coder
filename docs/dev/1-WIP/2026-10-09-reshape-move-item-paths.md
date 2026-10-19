@@ -467,6 +467,18 @@ baseline is node 1's: 1334 passed, 0 failed). Adjacent live suites
 `reparent_module_through_the_old_parents_import_acceptance` and
 `move_item_of_an_item_the_destination_imports_acceptance` still pass (the stubs preserve behaviour).
 
+**Green (2026-10-19), `/validate-changes`, scoped to `tddy-code-restructuring`.** Rebased onto `origin/master` (#607 landed;
+leak check: `origin/master..HEAD` is this PR's commits only). `cargo build`, `cargo check --all-targets`,
+`cargo clippy --all-targets -- -D warnings` and `cargo fmt --all --check` clean. `./test -p tddy-code-restructuring`:
+every binary ok, 0 failed (1093 lib tests; the live `move_item_paths_acceptance` 7/7 and `retarget_impl_acceptance`
+included). Every 🔴 row above is now 🟢. No `TODO(reshape-move-item-paths)` remains in source.
+- **Stack boundary:** responsibility delivered; no `## Dependencies` (none); `## Boundaries` respected
+  (`crate_move::reexports`, `reparent_module` clash check untouched); only deletions are `resolved_from` and its
+  replaced test, as planned.
+- **Findings:** none critical. INFO: `bindings::through_a_glob` is 37 lines, `item_move/assemble.rs` stays at
+  509 production lines (net zero, `oversized-files`' alert). INFO: a name bound only by a glob that lexical reading
+  cannot confirm (e.g. via a macro) is now refused (R8) where it used to be written unchecked — the intended contract.
+
 | # | Test | Result | Why |
 |---|---|---|---|
 | 1 | `move_item_paths_acceptance::a_move_into_a_sibling_keeps_a_path_through_the_parents_facade_of_another_crate` | 🔴 | gate: `super::kernel::util` (`E0433`) |
