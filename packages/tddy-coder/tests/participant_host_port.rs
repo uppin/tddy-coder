@@ -99,6 +99,8 @@ async fn a_session_participant_serves_once_under_its_session_identity_with_its_t
 
 #[test]
 fn a_coder_with_api_credentials_serves_its_surface_with_reconnect() {
+    // Given API credentials and no room token
+    // When the coder decides how to join
     let (join, reconnect) = tddy_coder::participant_host::participant_join_from_cli(
         "ws://10.0.0.5:7880",
         "tddy-lobby",
@@ -107,6 +109,7 @@ fn a_coder_with_api_credentials_serves_its_surface_with_reconnect() {
         Some(("devkey", "a-secret")),
     );
 
+    // Then it joins by minting its own token, and reconnects
     assert_eq!(
         (join, reconnect),
         (
@@ -127,6 +130,8 @@ fn a_coder_with_api_credentials_serves_its_surface_with_reconnect() {
 
 #[test]
 fn a_coder_given_only_a_token_serves_once_with_that_token() {
+    // Given only a room token
+    // When the coder decides how to join
     let (join, reconnect) = tddy_coder::participant_host::participant_join_from_cli(
         "ws://10.0.0.5:7880",
         "tddy-lobby",
@@ -135,6 +140,7 @@ fn a_coder_given_only_a_token_serves_once_with_that_token() {
         None,
     );
 
+    // Then it joins with that token, once, without reconnecting
     assert_eq!(
         (join, reconnect),
         (

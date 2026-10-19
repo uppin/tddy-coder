@@ -191,9 +191,70 @@ real host.
 
 ## Validation Results
 ### /validate-changes
+
+2026-10-19, against `origin/master` (branch current, leak check clean: four own commits).
+Critical 0 · Warning 3 · Info 2.
+
+- Every Scope item and milestone is implemented; no `todo!()` / `unimplemented!()` left in the
+  changed Rust files. `## Dependencies` held: the ratchet's logic is untouched, nothing from #623
+  re-implemented. `## Boundaries` held: CLI flags and the binary name are unchanged, node 7's client
+  crates and the daemon are untouched, `run.rs` shrank (5199 → 5127) instead of growing.
+- ⚠ `tddy-demo` loses room joining: it passes `NoParticipantHost`, so a LiveKit flag is now refused
+  with a logged error. Whether the demo should keep joining (by depending on `tddy-coder-cli`) is the
+  developer's call.
+- ⚠ `participant_join_from_cli` keeps an `unreachable!` for "neither credentials nor a token"; it
+  rests on `validate_livekit_args` having run. The red tests pin its tuple return, so it cannot
+  return a `Result` without changing them.
+- ⚠ `PARTICIPANT_TOKEN_TTL` (6h) restates `livekit_api`'s default TTL that `DEFAULT_LIVEKIT_JWT_TTL_SECS`
+  carries; the library cannot name the LiveKit crate, so the duplicate is inherent. Values match today.
+- ℹ The library's `serve_until_ended` still logs "LiveKit connect failed" — a LiveKit word in a
+  LiveKit-free crate.
+- ℹ Draft PR contract above still shows `room` on `ParticipantJoin`; as published it lives in
+  `ParticipantAuth::Credentials` (see "As published").
+- Behaviour deltas, deliberate: a fixed-token participant now honours the shutdown flag and logs
+  `READY` at every join site; the LiveKit `spawn_session_participant` is gone in favour of
+  `spawn_session_participant_with`.
+
 ### /validate-tests
+
+2026-10-19. Analyzed: `participant_host_port.rs` (3 tests), `NoParticipantHost` unit test, `merge_tests`
+(1), and the moved `tddy-coder-cli/tests/*` (names and bodies unchanged — moved, not rewritten).
+Critical 0 · Warning 1 (fixed) · Info 2.
+
+- Fixed: the two `participant_join_from_cli` tests in `participant_host_port.rs` lacked Given/When/Then
+  separation; the comments are added, assertions untouched.
+- ℹ Moved CLI tests keep their original style (raw `assert!`, `temp_dir` fixtures, one `sleep(200ms)` in
+  `coder_publishes_session_metadata_to_participant.rs`); not rewritten, per "tests were moved".
+- ℹ `coder_publishes_session_metadata_to_participant.rs` still carries a stale "RED PHASE" header
+  comment from its original red commit; left as moved.
+- No `#[ignore]`, `.skip`/`.only`, tautologies or order-dependent tests were introduced.
+
 ### /validate-prod-ready
+
+2026-10-19. Status: ✅ Ready. Blockers 0 · Warnings 0 (the `unreachable!` is already recorded by
+/validate-changes as a developer decision).
+
+- No mock/fake code outside `#[cfg(test)]` (`NoParticipantHost` is a real null host, selected by
+  `tddy-demo` explicitly, not a fallback); no TODO/FIXME/HACK, `dbg!`, `println!`/`eprintln!` in the
+  diff; logging goes through `log::` with named targets.
+- The `unwrap()`s in `run.rs::token_provider_from_args` are the guarded ones the old inline call sites
+  had (`has_key_secret` holds), not new ones.
+
 ### /analyze-clean-code
+
+2026-10-19. Score: A. Must refactor 0 · Needs attention 0 · no applied cleanups.
+
+- New code: `participant_host.rs` (largest fn ~25 lines, depth 2, <=5 params),
+  `livekit_participant_host.rs` (`serve` ~50 lines, 4-arm match, depth 3), `merge_participant_metadata_json`
+  (moved verbatim). No magic values: TTL and shutdown-poll are named constants. No new duplication.
+- File length (step 3.5 gate, production lines, before -> after):
+  - 🔴 `packages/tddy-coder/src/run.rs` 2678 -> 2655 (pre-existing, shrank; alert only — dependent
+    `#satellite` PRs touch it; `oversized-file-run.md` updated, unclaimed).
+  - 🔴 `packages/tddy-livekit/src/participant.rs` 956 -> 907 (pre-existing, shrank; alert only;
+    new record `oversized-file-participant.md`).
+  - 🔴 `packages/tddy-web/cypress.config.ts` 1014 -> 1014 (pre-existing; only two message strings
+    touched; alert only, no record added).
+  - Note: the "5199 -> 5127" figures above are whole-file lines; the gate counts production lines only.
 
 ## TODO
 
@@ -207,11 +268,11 @@ real host.
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
+- [x] Run scoped tests for touched packages; full-workspace result from CI (scoped: 519 passed, 0 failed, 1 ignored)
 - [ ] Validate changes (/validate-changes)
-- [ ] Validate tests (/validate-tests)
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped)
+- [x] Validate tests (/validate-tests)
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Linting and formatting (scoped)
 - [ ] Wrap documentation (/wrap-context-docs)
 - [ ] USER REVIEW — work complete

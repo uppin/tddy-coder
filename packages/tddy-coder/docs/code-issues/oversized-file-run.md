@@ -42,3 +42,7 @@ This file has **three** `#[cfg(test)]` modules (L2683, L2880, L4359). Seam A in 
 ## Measurement update 2026-10-15 — #622 (local gh)
 
 **Regressed, split deferred with consent:** 2,673 → 2,678 production lines. `ToolHostHandlers::from_flags` chains `.with_github_source(TDDY_GITHUB_SOURCE)`. See [2026-10-15-local-gh-oversized-files-deferred.md](../../../../docs/dev/todo/2026-10-15-local-gh-oversized-files-deferred.md).
+
+## Measurement update 2026-10-19 — #satellite 8/13 (#630)
+
+**Shrank, split still deferred:** 2,678 → 2,655 production lines (-23). The coder's room participant now goes through the `SessionParticipantHost` port (`participant_host.rs`): the four per-credential `livekit` join branches and their token-provider plumbing collapse into `participant_join_from_cli`. Dependent PRs (#631+, `feature/satellite/status-ui` and siblings) also touch this file, so no decomposition here. Still unclaimed.
