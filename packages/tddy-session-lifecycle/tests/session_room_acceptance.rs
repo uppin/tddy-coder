@@ -345,6 +345,17 @@ struct FacilitatingDaemon {
     _stubs: tempfile::TempDir,
 }
 
+/// The terminal exposure the daemon installs for `config`: LiveKit's when the block has
+/// credentials, the port's null object otherwise.
+fn terminal_exposure_for(
+    config: &DaemonConfig,
+) -> Arc<dyn tddy_daemon_extensions::TerminalExposure> {
+    match tddy_daemon_livekit::terminal_exposure::LiveKitTerminalExposure::from_config(config) {
+        Some(exposure) => exposure,
+        None => Arc::new(tddy_daemon_extensions::NoTerminalExposure),
+    }
+}
+
 impl FacilitatingDaemon {
     async fn with_livekit() -> Self {
         let livekit = LiveKitTestkit::start()
@@ -428,7 +439,9 @@ impl FacilitatingDaemon {
         .with_staging_base_dir(staging.path().to_path_buf())
         .with_session_rooms(rooms);
         let host = match plugin {
-            ThePlugin::Wired => host.with_session_reach(reach.clone()),
+            ThePlugin::Wired => host
+                .with_session_reach(reach.clone())
+                .with_terminal_exposure(terminal_exposure_for(&config)),
             ThePlugin::NotWired => host,
         };
         // The rooms under test serve none of the families above the lifecycle crate: nothing here

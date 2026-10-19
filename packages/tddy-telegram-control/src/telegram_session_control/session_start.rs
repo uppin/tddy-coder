@@ -488,36 +488,42 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 lk.daemon_instance_id.as_deref(),
                 session_id,
             );
-            match tddy_session_lifecycle::cli_session_manager::spawn_livekit_bridge(
-                Arc::clone(&handle),
-                &lk.url,
-                &room_name,
-                &lk.api_key,
-                &lk.api_secret,
-                &server_identity,
-                // A Telegram-started session is part of no stack, so its block carries the identity
-                // and static fields only — published all the same, so the drawer names it the same
-                // way it names every other session (D37).
-                Some(
-                    tddy_core::session_participant_metadata::SessionParticipantMetadata {
-                        agent: "claude".to_string(),
-                        model: model.clone(),
-                        repo_path: worktree_path.to_string_lossy().to_string(),
-                        session_id: session_id.to_string(),
-                        ..Default::default()
-                    },
-                ),
-            )
-            .await
+            let at = tddy_daemon_extensions::TerminalAddress {
+                room: room_name,
+                identity: server_identity,
+            };
+            match self
+                .terminal_exposure
+                .expose(
+                    &at,
+                    tddy_session_lifecycle::cli_session_manager::pty_terminal_service(Arc::clone(
+                        &handle,
+                    )),
+                    // A Telegram-started session is part of no stack, so its block carries the
+                    // identity and static fields only — published all the same, so the drawer
+                    // names it the same way it names every other session (D37).
+                    Some(
+                        tddy_core::session_participant_metadata::session_metadata_json(
+                            &tddy_core::session_participant_metadata::SessionParticipantMetadata {
+                                agent: "claude".to_string(),
+                                model: model.clone(),
+                                repo_path: worktree_path.to_string_lossy().to_string(),
+                                session_id: session_id.to_string(),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                )
+                .await
             {
-                // The task running the participant is dropped rather than kept: a Telegram-started
-                // session's bridge is announced to a human in the reply below and never asked
-                // about again from here.
-                Ok(_serving) => (room_name, lk.url.clone(), server_identity),
+                // The running exposure is dropped rather than kept: a Telegram-started session's
+                // terminal is announced to a human in the reply below and never asked about again
+                // from here.
+                Ok(_serving) => (at.room, lk.url.clone(), at.identity),
                 Err(e) => {
                     log::warn!(
                         target: "tddy_daemon::telegram_session_control",
-                        "spawn_telegram_claude_cli: LiveKit bridge failed ({e}); gRPC path still works"
+                        "spawn_telegram_claude_cli: terminal exposure failed ({e}); gRPC path still works"
                     );
                     (String::new(), String::new(), String::new())
                 }

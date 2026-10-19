@@ -15,7 +15,6 @@ prost = "0.13"
 uuid = { version = "1", features = ["v4", "v7"] }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
-tddy-livekit = { path = "../tddy-livekit" }
 # `TerminalExposure`: the port a PTY is served to remote participants through.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-pty = { path = "../tddy-pty" }

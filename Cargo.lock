@@ -12026,7 +12026,6 @@ dependencies = [
  "tddy-core",
  "tddy-daemon-extensions",
  "tddy-daemon-sandbox",
- "tddy-livekit",
  "tddy-pty",
  "tddy-rpc",
  "tddy-service",

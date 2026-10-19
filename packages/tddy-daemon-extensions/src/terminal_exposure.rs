@@ -58,7 +58,10 @@ impl TerminalExposure for NoTerminalExposure {
         _terminal: Arc<dyn tddy_rpc::RpcService>,
         _metadata_json: Option<String>,
     ) -> Result<ExposedTerminal, Status> {
-        todo!("NoTerminalExposure::expose")
+        Err(Status::failed_precondition(
+            "no terminal exposure is wired: this daemon's terminals are reachable over its own \
+             connection only",
+        ))
     }
 }
 
