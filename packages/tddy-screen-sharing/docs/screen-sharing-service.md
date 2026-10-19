@@ -12,7 +12,10 @@ Product behaviour: [screen-sharing-sessions.md](../../../docs/ft/web/screen-shar
 |---|---|
 | `screen_sharing_records` | the `screen-sharing` provider's record shape (`record_for`, `target_from`), `TargetError`, and the `ScreenSharingTargetStore` port |
 | `session_vault_target_store` | `SessionVaultTargetStore`, the production store over the daemon's `SessionVaults` |
-| `screen_sharing_service` | `ScreenSharingServiceImpl`: the session-scoped target calls, the host-scoped calls, bridge spawning and termination |
+| `screen_sharing_service` | `ScreenSharingServiceImpl`: the struct and builders, the session-scoped target calls, and the trait impl, whose host-scoped methods delegate to `host_targets` |
+| `screen_sharing_service::bridge_lifecycle` | bridge spawning and termination, the desktop-password prompt and the target-store lookup, as `impl ScreenSharingServiceImpl` members |
+| `screen_sharing_service::host_targets` | the bodies of the host-scoped RPCs (`list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream`) as `*_impl` members |
+| `bridge_config` | `BridgeSpawnConfig` and `PreparedBridge`, how a bridge's spawn configuration is built (`prepare_bridge`, `build_bridge_spawn_config`), and the bridge key, identity, track-name and LiveKit-room naming |
 
 ## A target is a record
 
