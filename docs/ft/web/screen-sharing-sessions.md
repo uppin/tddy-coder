@@ -95,6 +95,23 @@ Clicking Start on a target:
    track name uses the prefix `screenshare:`.
 3. The browser subscribes to the bridge's video track and renders it as a full-screen overlay.
 
+### RDP sign-in
+
+The `tddy-rdp` bridge signs in to Windows desktops that require **Network Level Authentication**
+(CredSSP, the Windows default) as well as to servers that offer only TLS. The security protocol
+follows the server's negotiation: the bridge does not need to be told which one a desktop uses.
+
+- **Credential.** A bridge signs in with a username, an optional Windows **domain** and a password.
+  The bridge's stdin configuration carries them as `username`, `domain` and `password`; `domain` is
+  optional, so a configuration without it parses and signs in with a local account. An empty field
+  is treated as absent, for the bridge's VNC and RDP variants alike.
+- **NLA authenticates with NTLM.** The bridge never contacts a domain controller: a server that
+  negotiates Kerberos is refused with an error rather than answered with an empty reply.
+- **A refused sign-in is an error from the bridge's connect step.** A wrong password on an NLA desktop
+  fails with an authentication error naming NLA; it never hangs.
+- **Certificates are not verified.** The server certificate is accepted as presented, so the bridge
+  trusts the network path to the desktop. Pinning a thumbprint is out of band.
+
 ### AC-SS-6: Overlay remote control
 
 **Specified:** while the overlay is open, mouse pointer events (move, click, scroll) and keyboard
@@ -303,5 +320,5 @@ it is the only thing on that screen that creates a host-scoped target or starts 
 - Migrating desktops saved before targets became credential records: they are not read, and are
   added again once
 - Connection health / reconnect UX beyond initial error display
-- NLA / Kerberos authentication for RDP (password auth only for MVP)
+- Kerberos (KDC) authentication, smart cards and RD Gateway for RDP
 - Discovering non-default desktop ports
