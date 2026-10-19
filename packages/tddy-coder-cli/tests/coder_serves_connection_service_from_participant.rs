@@ -6,7 +6,7 @@
 //! daemon participant (`daemon-{instanceId}`), which owns process teardown (changeset
 //! `2026-07-12-fast-session-change`). This test therefore does not exercise delete/signal.
 //!
-//! Run: `cargo test -p tddy-coder --test coder_serves_connection_service_from_participant`
+//! Run: `cargo test -p tddy-coder-cli --test coder_serves_connection_service_from_participant`
 //! With shared kit: `eval $(./run-livekit-testkit-server | grep '^export ')` then same command.
 
 use anyhow::Result;
@@ -16,9 +16,10 @@ use serial_test::serial;
 use std::sync::Arc;
 use std::time::Duration;
 use tddy_coder::session_participant::{
-    coder_session_tool_catalog, spawn_session_participant, CoderSessionToolExecutor,
+    coder_session_tool_catalog, spawn_session_participant_with, CoderSessionToolExecutor,
     SessionParticipantOptions, ToolDef, ToolExecutor, ToolOutcome,
 };
+use tddy_coder_cli::LiveKitParticipantHost;
 use tddy_livekit::RpcClient;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ListExecToolsRequest};
@@ -107,9 +108,15 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
 
     // When — the coder session participant connects
     let session_token = livekit.generate_token(room_name, SESSION_IDENTITY)?;
-    let _session_handle =
-        spawn_session_participant(&url, &session_token, SESSION_IDENTITY, opts, metadata_rx)
-            .await?;
+    let _session_handle = spawn_session_participant_with(
+        &url,
+        &session_token,
+        SESSION_IDENTITY,
+        opts,
+        metadata_rx,
+        &LiveKitParticipantHost,
+    )
+    .await?;
 
     // And — a client connects and sees the session participant
     let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
@@ -242,9 +249,15 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
 
     let session_identity = "daemon-local-coder-real-aaaaaaaa-0000-4000-8000-000000000003";
     let session_token = livekit.generate_token(room_name, session_identity)?;
-    let _session_handle =
-        spawn_session_participant(&url, &session_token, session_identity, opts, metadata_rx)
-            .await?;
+    let _session_handle = spawn_session_participant_with(
+        &url,
+        &session_token,
+        session_identity,
+        opts,
+        metadata_rx,
+        &LiveKitParticipantHost,
+    )
+    .await?;
 
     let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
     let (client_room, mut client_events) =

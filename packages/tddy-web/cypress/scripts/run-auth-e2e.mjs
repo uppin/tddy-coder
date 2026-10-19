@@ -24,7 +24,7 @@ function findBinary() {
   // Prefer debug (more likely to be up-to-date during development)
   if (fs.existsSync(debug)) return debug;
   if (fs.existsSync(release)) return release;
-  console.error("tddy-coder binary not found. Run: cargo build -p tddy-coder");
+  console.error("tddy-coder binary not found. Run: cargo build -p tddy-coder-cli");
   process.exit(1);
 }
 

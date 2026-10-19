@@ -23,7 +23,7 @@
 //! `ParticipantList.parseCodexOAuthPending` in `packages/tddy-web`), run the ignored test:
 //!
 //! ```text
-//! cargo build -p tddy-coder
+//! cargo build -p tddy-coder-cli
 //! TDDY_CODEX_LOGIN_E2E=1 cargo test -p tddy-integration-tests --test codex_backend \
 //!   codex_login_e2e_captures_authorize_url_for_livekit_web_metadata -- --ignored --nocapture
 //! ```
@@ -429,7 +429,7 @@ async fn codex_login_e2e_captures_authorize_url_for_livekit_web_metadata() {
     let tddy_coder = resolve_tddy_coder_exe_for_tests();
     assert!(
         tddy_coder.exists(),
-        "tddy-coder not found at {:?}; run `cargo build -p tddy-coder` or set CARGO_BIN_EXE_tddy-coder",
+        "tddy-coder not found at {:?}; run `cargo build -p tddy-coder-cli` or set CARGO_BIN_EXE_tddy-coder",
         tddy_coder
     );
 

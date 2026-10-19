@@ -6,6 +6,9 @@
 use std::env;
 
 use clap::Parser;
+use std::sync::Arc;
+
+use tddy_coder::participant_host::NoParticipantHost;
 use tddy_coder::{load_config, merge_config_into_args, run_main, Args, DemoArgs};
 
 fn main() {
@@ -38,5 +41,6 @@ fn main() {
         }
     }
 
-    run_main(args);
+    // The demo wires no room transport: a LiveKit flag is refused when it asks to join.
+    run_main(args, Arc::new(NoParticipantHost));
 }

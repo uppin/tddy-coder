@@ -95,7 +95,7 @@ All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consiste
 | Clean | `./clean` — `rm -rf target/debug`; `target/release` is kept |
 | Lint | `cargo clippy -p <pkg> -- -D warnings` — scoped; the workspace-wide run is CI's |
 | Format | `cargo fmt` |
-| Run CLI | `cargo run -p tddy-coder -- --goal plan` (reads feature from stdin) |
+| Run CLI | `cargo run -p tddy-coder-cli -- --goal plan` (reads feature from stdin) |
 | Web install | `./dev bun install` — workspace JS deps (includes **`@zed-industries/codex-acp`** for **`./install`**) |
 | Web build | `./dev bun run build` (from root or `packages/tddy-web`) |
 | Storybook | `./dev bun run storybook` — dev server at http://localhost:6006 |

@@ -12,7 +12,7 @@
  *
  * Requires:
  *   - LIVEKIT_TESTKIT_WS_URL (with matching internal/external ports for WebRTC ICE)
- *   - tddy-coder built (cargo build -p tddy-coder)
+ *   - tddy-coder built (cargo build -p tddy-coder-cli)
  *   - Web bundle built (bun run build in packages/tddy-web)
  */
 
@@ -38,7 +38,7 @@ function getTddyCoderPath(): string {
   const debug = path.join(REPO_ROOT, "target", "debug", "tddy-coder");
   if (fs.existsSync(debug)) return debug;
   if (fs.existsSync(release)) return release;
-  throw new Error("tddy-coder binary not found. Run: cargo build -p tddy-coder");
+  throw new Error("tddy-coder binary not found. Run: cargo build -p tddy-coder-cli");
 }
 
 function startTddyCoder(wsUrl: string): Promise<ChildProcess> {

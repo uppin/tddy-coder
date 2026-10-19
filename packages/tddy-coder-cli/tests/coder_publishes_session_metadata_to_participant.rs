@@ -5,11 +5,11 @@
 //! Changeset: `2026-07-12-fast-session-change`
 //! PRD: `docs/ft/coder/session-participant-rpc.md` (req 4)
 //!
-//! Run: `cargo test -p tddy-coder --test coder_publishes_session_metadata_to_participant`
+//! Run: `cargo test -p tddy-coder-cli --test coder_publishes_session_metadata_to_participant`
 //! With shared kit: `eval $(./run-livekit-testkit-server | grep '^export ')` then same command.
 //!
 //! ⚠️ RED PHASE — fails to compile until `tddy_coder::session_participant` exists with
-//! `spawn_session_participant`, `SessionParticipantOptions`, `SessionMetadata`, and
+//! `spawn_session_participant_with`, `SessionParticipantOptions`, `SessionMetadata`, and
 //! `session_metadata_json`.
 
 use std::sync::Arc;
@@ -20,9 +20,10 @@ use livekit::prelude::*;
 use serde_json::Value;
 use serial_test::serial;
 use tddy_coder::session_participant::{
-    session_metadata_json, spawn_session_participant, SessionMetadata, SessionParticipantOptions,
-    ToolDef, ToolExecutor, ToolOutcome,
+    session_metadata_json, spawn_session_participant_with, SessionMetadata,
+    SessionParticipantOptions, ToolDef, ToolExecutor, ToolOutcome,
 };
+use tddy_coder_cli::LiveKitParticipantHost;
 use tddy_livekit_testkit::LiveKitTestkit;
 
 const SESSION_IDENTITY: &str = "daemon-local-coder-meta-aaaaaaaa-0000-4000-8000-000000000002";
@@ -98,9 +99,15 @@ async fn coder_publishes_session_metadata_to_participant() -> Result<()> {
     };
 
     let session_token = livekit.generate_token(room_name, SESSION_IDENTITY)?;
-    let _session_handle =
-        spawn_session_participant(&url, &session_token, SESSION_IDENTITY, opts, metadata_rx)
-            .await?;
+    let _session_handle = spawn_session_participant_with(
+        &url,
+        &session_token,
+        SESSION_IDENTITY,
+        opts,
+        metadata_rx,
+        &LiveKitParticipantHost,
+    )
+    .await?;
 
     // And — a client connects and sees the session participant
     let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;

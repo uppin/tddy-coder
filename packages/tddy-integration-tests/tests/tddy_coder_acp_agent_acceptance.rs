@@ -84,7 +84,7 @@ fn spawn_acp_agent(cwd: &PathBuf) -> tokio::process::Child {
     let bin = tddy_coder_bin();
     assert!(
         bin.exists(),
-        "tddy-coder not built. Run: cargo build -p tddy-coder"
+        "tddy-coder not built. Run: cargo build -p tddy-coder-cli"
     );
     tokio::process::Command::new(&bin)
         .arg("--acp")

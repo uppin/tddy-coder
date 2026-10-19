@@ -22,7 +22,7 @@ function findBinary(): string {
   const release = path.join(repoRoot, "target/release/tddy-coder");
   if (fs.existsSync(debug)) return debug;
   if (fs.existsSync(release)) return release;
-  throw new Error("tddy-coder binary not found. Run: cargo build -p tddy-coder");
+  throw new Error("tddy-coder binary not found. Run: cargo build -p tddy-coder-cli");
 }
 
 function findWebBundle(): string {

@@ -12,8 +12,8 @@
 //! merge. What lives here is the coder-specific half — what the snapshot starts as, and how a
 //! `PresenterEvent` moves it forward.
 
+use tddy_core::session_participant_metadata::merge_participant_metadata_json;
 use tddy_core::{AppMode, PresenterEvent};
-use tddy_livekit::merge_participant_metadata_json;
 
 /// The session block published under the `session` key — the one shape both publishers emit, so a
 /// shallow merge of either is lossless. See the module docs.

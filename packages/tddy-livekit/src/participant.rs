@@ -7,7 +7,6 @@
 //! until a remote has connected, and publishing responses in a way that survives reconnection.
 
 use livekit::prelude::*;
-use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,57 +40,9 @@ pub fn owned_project_count_for_projects_dir(path: &Path) -> anyhow::Result<u64> 
     projects_registry::owned_project_row_count(path)
 }
 
-/// Shallow-merge two JSON **objects** for [`LocalParticipant::set_metadata`].
-///
-/// Top-level keys from `update` overwrite or add to `baseline`. Nested values are replaced as a whole (not deep-merged).
-/// Non-object `baseline` (or invalid JSON) is treated as an empty object with a warning.
-pub fn merge_participant_metadata_json(
-    baseline: &str,
-    update: &str,
-) -> Result<String, serde_json::Error> {
-    log::debug!(
-        target: "tddy_livekit::metadata",
-        "merge_participant_metadata_json: baseline_len={} update_len={}",
-        baseline.len(),
-        update.len()
-    );
-
-    let mut base_map = if baseline.trim().is_empty() {
-        serde_json::Map::new()
-    } else {
-        match serde_json::from_str::<Value>(baseline)? {
-            Value::Object(m) => m,
-            other => {
-                log::warn!(
-                    target: "tddy_livekit::metadata",
-                    "merge_participant_metadata_json: baseline is not a JSON object (got {:?}); starting from {{}}",
-                    other
-                );
-                serde_json::Map::new()
-            }
-        }
-    };
-
-    let update_val: Value = if update.trim().is_empty() {
-        Value::Object(serde_json::Map::new())
-    } else {
-        serde_json::from_str(update)?
-    };
-
-    if let Value::Object(up_map) = update_val {
-        for (k, v) in up_map {
-            base_map.insert(k, v);
-        }
-    }
-
-    let merged = Value::Object(base_map);
-    log::debug!(
-        target: "tddy_livekit::metadata",
-        "merge_participant_metadata_json: merged top-level keys={}",
-        merged.as_object().map(|m| m.len()).unwrap_or(0)
-    );
-    serde_json::to_string(&merged)
-}
+/// Shallow-merge two JSON objects for [`LocalParticipant::set_metadata`]; the helper lives in
+/// `tddy-changeset` (re-exported by `tddy-core`) so a consumer need not depend on this crate to reach it.
+pub use tddy_changeset::session_participant_metadata::merge_participant_metadata_json;
 
 /// Applies [`watch::Receiver`] updates to LiveKit participant metadata via [`LocalParticipant::set_metadata`],
 /// shallow-merging each payload into the current wire metadata so other keys (e.g. [`OWNED_PROJECT_COUNT_METADATA_KEY`]) stay intact.
@@ -957,6 +908,7 @@ pub(crate) fn resolve_response_identity(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     /// The connection these test requests were made on.
     const A_CLIENT_EPOCH: u32 = 0x5f3a_91c2;

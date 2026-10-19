@@ -105,12 +105,12 @@ scripts `release`, `test`, `scripts/dev-runtime-binaries.sh`, CI workflow.
 
 ## Scope
 
-- [ ] Port + null object in `tddy-coder`
-- [ ] `merge_participant_metadata_json` → `tddy-core`
-- [ ] `run.rs` four join sites + `session_participant` on the port
-- [ ] `tddy-coder-cli` crate (binary `tddy-coder`) with `LiveKitParticipantHost`; `tddy-coder` library-only
-- [ ] Scripts/CI: `-p tddy-coder` → `-p tddy-coder-cli` where a binary is built
-- [ ] Ratchet: strike `tddy-coder`; `WIRING` += `tddy-coder-cli`
+- [x] Port + null object in `tddy-coder`
+- [x] `merge_participant_metadata_json` → `tddy-changeset` (re-exported by `tddy-core`; `tddy-livekit` re-exports it)
+- [x] `run.rs` four join sites + `session_participant` on the port
+- [x] `tddy-coder-cli` crate (binary `tddy-coder`) with `LiveKitParticipantHost`; `tddy-coder` library-only
+- [x] Scripts/CI: `-p tddy-coder` → `-p tddy-coder-cli` where a binary is built
+- [x] Ratchet: strike `tddy-coder`; `WIRING` += `tddy-coder-cli`
 
 ## Technical Changes
 
@@ -138,9 +138,9 @@ token with metadata watcher).
 As Scope.
 
 ## Implementation Milestones
-- [ ] M1 Port + helper move
-- [ ] M2 Call sites switched; in-memory host tests green
-- [ ] M3 Binary crate; scripts; LiveKit suites green; ratchet green
+- [x] M1 Port + helper move
+- [x] M2 Call sites switched; in-memory host tests green
+- [x] M3 Binary crate; scripts; ratchet green (LiveKit e2e suites: see Decisions)
 
 ## Testing Plan
 
@@ -173,6 +173,16 @@ real host.
 - **Helper to `tddy-core`.** `merge_participant_metadata_json` is pure JSON over the block type
   `tddy-core` already owns.
 
+- **Green-phase shape changes.** (1) The host trait gained `token_provider(api_key, api_secret, ttl)`
+  (default: refuses) because three `run.rs` sites mint tokens for the coder's token service with
+  `TokenGenerator`, which is LiveKit; (2) `ServedParticipant::ended()` and `serve_until_ended` so the
+  two thread-hosted sites can keep their runtime alive; (3) `tddy-coder-cli` also ships a library
+  target (`tddy_coder_cli::LiveKitParticipantHost`) — integration tests cannot import from a
+  binary-only crate; (4) the ten tests that run the built `tddy-coder` (`cargo_bin_cmd!`) and the two
+  LiveKit participant suites moved with the binary to `tddy-coder-cli/tests` (a package's
+  `CARGO_BIN_EXE_*` exists only for its own binaries); (5) `spawn_session_participant` (LiveKit) was
+  removed — only `spawn_session_participant_with` remains; (6) `tddy-demo` passes `NoParticipantHost`.
+
 ## Refactoring Needed
 ### From /validate-changes
 ### From /validate-tests
@@ -195,7 +205,7 @@ real host.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)

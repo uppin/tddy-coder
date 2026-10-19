@@ -10,7 +10,7 @@
 //! The shape lives in `tddy-core` rather than in the publisher because there are now **two**
 //! publishers: `tddy-coder`, for the sessions it runs, and `tddy-daemon`, for a `claude-cli`
 //! session whose LiveKit bridge previously published nothing at all. Participant metadata is merged
-//! **shallowly** ([`tddy_livekit::merge_participant_metadata_json`]), so a `session` object carrying
+//! **shallowly** ([`merge_participant_metadata_json`]), so a `session` object carrying
 //! only one publisher's subset would *replace* the other's rather than merge into it. One owned
 //! shape, with every key always emitted, is what keeps that merge lossless — and it is also what
 //! lets a reader tell "this session has no orchestrator" from "an older publisher omitted the key",
@@ -119,15 +119,59 @@ pub fn session_metadata_json(meta: &SessionParticipantMetadata) -> String {
     }
 }
 
-/// Merge `update`'s top-level keys over `baseline`'s (nested values are replaced whole, not deep
-/// merged). Moved here from `tddy-livekit`: it is pure JSON over the block this module owns, and
-/// its consumer must not depend on the LiveKit crate to reach it.
+/// Shallow-merge two JSON **objects** for a participant's metadata.
+///
+/// Top-level keys from `update` overwrite or add to `baseline`. Nested values are replaced as a whole (not deep-merged).
+/// Non-object `baseline` (or invalid JSON) is treated as an empty object with a warning.
+///
+/// Moved here from `tddy-livekit`: it is pure JSON over the block this module owns, and its
+/// consumers must not depend on the LiveKit crate to reach it.
 pub fn merge_participant_metadata_json(
     baseline: &str,
     update: &str,
 ) -> Result<String, serde_json::Error> {
-    let _ = (baseline, update);
-    todo!("merge_participant_metadata_json")
+    log::debug!(
+        target: "tddy_changeset::metadata",
+        "merge_participant_metadata_json: baseline_len={} update_len={}",
+        baseline.len(),
+        update.len()
+    );
+
+    let mut base_map = if baseline.trim().is_empty() {
+        serde_json::Map::new()
+    } else {
+        match serde_json::from_str::<serde_json::Value>(baseline)? {
+            serde_json::Value::Object(m) => m,
+            other => {
+                log::warn!(
+                    target: "tddy_changeset::metadata",
+                    "merge_participant_metadata_json: baseline is not a JSON object (got {:?}); starting from {{}}",
+                    other
+                );
+                serde_json::Map::new()
+            }
+        }
+    };
+
+    let update_val: serde_json::Value = if update.trim().is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_str(update)?
+    };
+
+    if let serde_json::Value::Object(up_map) = update_val {
+        for (k, v) in up_map {
+            base_map.insert(k, v);
+        }
+    }
+
+    let merged = serde_json::Value::Object(base_map);
+    log::debug!(
+        target: "tddy_changeset::metadata",
+        "merge_participant_metadata_json: merged top-level keys={}",
+        merged.as_object().map(|m| m.len()).unwrap_or(0)
+    );
+    serde_json::to_string(&merged)
 }
 
 #[cfg(test)]

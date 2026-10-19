@@ -41,14 +41,22 @@ pub struct ParticipantOptions {
     pub shutdown: Arc<AtomicBool>,
 }
 
-/// The participant's task; it ends when the room does, or on shutdown.
+/// The participant's task; it ends when the room does, or on shutdown. Dropping it does not stop
+/// the participant.
 pub struct ServedParticipant {
-    _serving: tokio::task::JoinHandle<()>,
+    serving: tokio::task::JoinHandle<()>,
 }
 
 impl ServedParticipant {
     pub fn new(serving: tokio::task::JoinHandle<()>) -> Self {
-        Self { _serving: serving }
+        Self { serving }
+    }
+
+    /// Resolves when the participant's task has ended.
+    pub async fn ended(self) {
+        if let Err(e) = self.serving.await {
+            log::error!(target: "tddy_coder::participant_host", "participant task failed: {e}");
+        }
     }
 }
 
@@ -61,7 +69,41 @@ pub trait SessionParticipantHost: Send + Sync {
         surface: tddy_rpc::MultiRpcService,
         options: ParticipantOptions,
     ) -> Result<ServedParticipant, String>;
+
+    /// A provider that mints room tokens for other participants from API credentials, for the
+    /// token service the coder serves next to its surface. A host with no room transport refuses.
+    fn token_provider(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        ttl: Duration,
+    ) -> Result<Arc<dyn tddy_service::TokenProvider>, String> {
+        let _ = (api_key, api_secret, ttl);
+        Err("no room transport is wired into this build; cannot mint room tokens".to_string())
+    }
 }
+
+/// The host as the run functions share it.
+pub type ParticipantHost = Arc<dyn SessionParticipantHost>;
+
+/// [`SessionParticipantHost::serve`], then waits for the participant to end. A refusal is logged,
+/// not returned: the coder keeps running its workflow without the room.
+pub async fn serve_until_ended(
+    host: ParticipantHost,
+    join: ParticipantJoin,
+    surface: tddy_rpc::MultiRpcService,
+    options: ParticipantOptions,
+) {
+    match host.serve(join, surface, options).await {
+        Ok(served) => served.ended().await,
+        Err(e) => {
+            log::error!(target: "tddy_coder::participant_host", "LiveKit connect failed: {e}")
+        }
+    }
+}
+
+/// How long a token minted from API credentials stays valid.
+pub const PARTICIPANT_TOKEN_TTL: Duration = Duration::from_secs(6 * 3600);
 
 /// The join and reconnect policy the coder's LiveKit flags ask for: with API credentials it
 /// re-mints for `room` and reconnects; with a token it serves once, with that token.
@@ -72,8 +114,27 @@ pub fn participant_join_from_cli(
     token: Option<&str>,
     credentials: Option<(&str, &str)>,
 ) -> (ParticipantJoin, bool) {
-    let _ = (url, room, identity, token, credentials);
-    todo!("participant_join_from_cli")
+    let auth = match (credentials, token) {
+        (Some((api_key, api_secret)), _) => ParticipantAuth::Credentials {
+            api_key: api_key.to_string(),
+            api_secret: api_secret.to_string(),
+            room: room.to_string(),
+            ttl: PARTICIPANT_TOKEN_TTL,
+        },
+        (None, Some(token)) => ParticipantAuth::Token(token.to_string()),
+        (None, None) => unreachable!(
+            "validate_livekit_args requires a token or API credentials before a room is joined"
+        ),
+    };
+    let reconnect = matches!(auth, ParticipantAuth::Credentials { .. });
+    (
+        ParticipantJoin {
+            url: url.to_string(),
+            identity: identity.to_string(),
+            auth,
+        },
+        reconnect,
+    )
 }
 
 /// No transport wired: the coder serves nothing in any room.
@@ -84,11 +145,14 @@ pub struct NoParticipantHost;
 impl SessionParticipantHost for NoParticipantHost {
     async fn serve(
         &self,
-        _join: ParticipantJoin,
+        join: ParticipantJoin,
         _surface: tddy_rpc::MultiRpcService,
         _options: ParticipantOptions,
     ) -> Result<ServedParticipant, String> {
-        todo!("NoParticipantHost::serve")
+        Err(format!(
+            "no room transport is wired into this build; cannot serve {} at {}",
+            join.identity, join.url
+        ))
     }
 }
 

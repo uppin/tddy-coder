@@ -30,6 +30,7 @@ members = [
     "packages/tddy-stdio",
     "packages/tddy-tauri-rpc",
     "packages/tddy-coder",
+    "packages/tddy-coder-cli",
     "packages/tddy-tui",
     "packages/tddy-demo",
     "packages/tddy-demo-tui",
