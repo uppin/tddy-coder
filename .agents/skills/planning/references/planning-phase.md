@@ -168,7 +168,7 @@ Update `docs/ft/{product-area}/1-OVERVIEW.md` with a reference to the new PRD.
 Follow the changeset template from `.cursor/rules/changeset-doc.mdc`.
 
 Include all required sections:
-- Header metadata (date, status: `🚧 In Progress`, type)
+- Header metadata (date, status: `🚧 In Progress`, type, **complexity** — `**Complexity**: 1–5 — <signals>`, scored with the rubric in `.cursor/rules/changeset-doc.mdc` § Header Metadata)
 - **Initial Discovery** — first content section after the header; link to
   `./{changeset-slug}-initial-discovery.md` (see `initial-discovery.md`). The discovery file
   must already exist from Step 2.
