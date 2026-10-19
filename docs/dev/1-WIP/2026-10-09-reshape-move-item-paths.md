@@ -222,15 +222,15 @@ None — no node consumes this one's behaviour.
 
 ## Scope
 
-- [ ] **`use` reading**: `use_path.rs` (U), `UseLeaf.visibility`, `read_use`; callers of `resolved_from` moved over
-- [ ] **One-hop lookup**: `Imported`, `import_target` (R3–R8 answers), both closures
-- [ ] **Rebasing**: `path_edit` R1–R8 via `respelled`, `edits` → `Result`, `Modules.file`
-- [ ] **Destination alias**: D1 in `rewrite_statement` via `destination_import`
-- [ ] **`retarget_impl`**: S6′
+- [x] **`use` reading**: `use_path.rs` (U), `UseLeaf.visibility`, `read_use`; callers of `resolved_from` moved over
+- [x] **One-hop lookup**: `Imported`, `import_target` (R3–R8 answers), both closures
+- [x] **Rebasing**: `path_edit` R1–R8 via `respelled`, `edits` → `Result`, `Modules.file`
+- [x] **Destination alias**: D1 in `rewrite_statement` via `destination_import`
+- [x] **`retarget_impl`**: S6′
 - [x] **Registration**: `move_item_paths_acceptance` in `.config/rust-e2e.filterset` and the `rust-analyzer` group
 - [ ] **Package documentation** at wrap (list under Affected Packages); todos deleted/narrowed; stale marker removed
 - [ ] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
-- [ ] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring -- -D warnings`, `cargo fmt`; no listed function grows; every touched file ≤ 500 production lines
+- [~] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring -- -D warnings`, `cargo fmt`; no listed function grows; every touched file ≤ 500 production lines
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -281,12 +281,12 @@ written; a destination keeps a renamed import of what moves into it.
 
 ## Implementation milestones
 
-- [ ] **M1** `use_path` + `UseLeaf.visibility`; tests 11–14
-- [ ] **M2** S6′; tests 18–20, 8–9, 22
-- [ ] **M3** `Imported` / `import_target`; tests 15–17
-- [ ] **M4** `path_edit` R1–R8, `edits → Result`; tests 10, 1–6
-- [ ] **M5** D1; tests 21, 7
-- [ ] **M6** registration; scoped gate; length and function-size check
+- [x] **M1** `use_path` + `UseLeaf.visibility`; tests 11–14
+- [x] **M2** S6′; tests 18–20, 8–9, 22
+- [x] **M3** `Imported` / `import_target`; tests 15–17
+- [x] **M4** `path_edit` R1–R8, `edits → Result`; tests 10, 1–6
+- [x] **M5** D1; tests 21, 7
+- [x] **M6** registration; scoped gate; length and function-size check
 - [ ] **M7** docs staged; todos narrowed/deleted; stale marker removed
 
 ## Testing plan
