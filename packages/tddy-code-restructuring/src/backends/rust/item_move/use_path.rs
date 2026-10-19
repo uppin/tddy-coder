@@ -15,11 +15,6 @@ use crate::crate_move::source_scan::ModuleItems;
 
 /// What a `use` path names.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-move-item-paths): `preflight`, `bindings` and `retarget_impl::imports` \
-              read it at green, replacing `preflight::resolved_from`"
-)]
 pub(in crate::backends::rust) enum UsePath {
     /// A path below this crate's root, outermost first.
     InCrate(Vec<String>),
@@ -30,19 +25,44 @@ pub(in crate::backends::rust) enum UsePath {
 /// The path `segments`, written in a `use` of the module at `at` (below the crate root), names.
 ///
 /// `local` is that module's own top level. `None` when a `super` climbs above the crate root.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-move-item-paths): called by `preflight`, `bindings` and \
-              `retarget_impl::imports` at green"
-)]
 pub(in crate::backends::rust) fn resolved(
     segments: &[String],
     at: &[String],
     local: &ModuleItems,
 ) -> Option<UsePath> {
-    // TODO(reshape-move-item-paths): implement rule U of the changeset.
-    let _ = (segments, at, local);
-    todo!("TODO(reshape-move-item-paths): the Rust 2018 reading of a `use` path")
+    let head = segments.first()?;
+    let start = match head.as_str() {
+        "crate" => Vec::new(),
+        "self" | "super" => at.to_vec(),
+        name if binds(local, name) => at.to_vec(),
+        _ => return Some(UsePath::Extern(segments.to_vec())),
+    };
+    walked(start, segments).map(UsePath::InCrate)
+}
+
+/// Whether the module whose top level is `local` binds `name`: it declares a child module, defines an
+/// item or imports it by a non-glob `use`.
+fn binds(local: &ModuleItems, name: &str) -> bool {
+    local.defined.iter().any(|defined| defined == name)
+        || local.children.iter().any(|child| child.name == name)
+        || local
+            .uses
+            .iter()
+            .any(|leaf| leaf.bound_name() == Some(name))
+}
+
+/// `start` followed along `segments`: `crate` and `self` stay, `super` climbs, a name descends.
+fn walked(mut path: Vec<String>, segments: &[String]) -> Option<Vec<String>> {
+    for segment in segments {
+        match segment.as_str() {
+            "crate" | "self" => {}
+            "super" => {
+                path.pop()?;
+            }
+            name => path.push(name.to_string()),
+        }
+    }
+    Some(path)
 }
 
 /// A package on disk, for the tests of the backend's lexical readings.

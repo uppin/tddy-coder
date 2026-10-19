@@ -261,10 +261,6 @@ pub(crate) struct UseLeaf {
     /// The `pub…` text of the `use` item that holds the leaf (`pub`, `pub(crate)`, `pub(in crate::a)`),
     /// `None` for a private one. Read only by [`items_of_module`]; every other reader of a `use` tree
     /// leaves it `None`.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-move-item-paths): read by `bindings::import_target` (rule R3) at green"
-    )]
     pub(crate) visibility: Option<String>,
 }
 

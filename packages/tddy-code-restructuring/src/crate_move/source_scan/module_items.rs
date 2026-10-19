@@ -95,11 +95,28 @@ pub(crate) fn items_of_module(text: &str) -> ModuleItems {
 /// Read the top-level `use` item whose keyword is at token `at` into `items`, each leaf stamped with
 /// the item's visibility, and return the index of the token after it.
 fn read_use(scan: &Scan<'_>, at: usize, items: &mut ModuleItems) -> usize {
-    // TODO(reshape-move-item-paths): implement — stamp each new leaf with the `pub…` tokens before
-    // the keyword (`UseLeaf::visibility`); today every leaf reads as private.
+    let visibility = visibility_before(scan, at);
+    let first = items.uses.len();
     let mut cursor = at + 1;
     scan.use_tree(&mut cursor, Vec::new(), &mut items.uses);
+    for leaf in &mut items.uses[first..] {
+        leaf.visibility.clone_from(&visibility);
+    }
     scan.statement_end(cursor) + 1
+}
+
+/// The `pub`, `pub(crate)` or `pub(in …)` text written right before the keyword at token `at`, as
+/// written; `None` for an item with no visibility.
+fn visibility_before(scan: &Scan<'_>, at: usize) -> Option<String> {
+    let first = match at.checked_sub(1)? {
+        closing if scan.is_punct(closing, b')') => (0..closing)
+            .rev()
+            .find(|index| scan.is_punct(*index, b'('))?
+            .checked_sub(1)?,
+        keyword => keyword,
+    };
+    (scan.ident(first) == Some("pub"))
+        .then(|| scan.text[scan.tokens[first].start..scan.tokens[at - 1].end].to_string())
 }
 
 #[cfg(test)]

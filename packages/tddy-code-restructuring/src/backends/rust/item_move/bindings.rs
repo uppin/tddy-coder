@@ -6,7 +6,7 @@
 //! brings in — one hop, as the import writes it (rules R3–R8 of the `#reshape` 10/19 changeset).
 
 use super::destination::{find_module, Lookup, Package};
-use super::preflight::resolved_from;
+use super::use_path::{resolved, UsePath};
 use crate::crate_move::source_scan::items_of_module;
 use crate::registry::Workspace;
 
@@ -66,7 +66,9 @@ pub(in crate::backends::rust) fn import_target(
         .uses
         .iter()
         .find(|leaf| leaf.alias.is_none() && leaf.bound_name() == Some(name))?;
-    let mut target = resolved_from(&leaf.segments, module)?;
+    let UsePath::InCrate(mut target) = resolved(&leaf.segments, module, &items)? else {
+        return None;
+    };
     let real = target.pop()?;
     Some(Imported::InCrate {
         module: target,
