@@ -7,7 +7,7 @@
  * the response, and this screen says so rather than leaving the operator to wonder.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import type { DaemonConfigService } from "../../gen/daemon_config_pb";
 import { integrationStatusText } from "./integrationStatusText";
@@ -52,7 +52,11 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
     };
   }, [client, sessionToken]);
 
+  // Set once the daemon answers `Unimplemented`: an older daemon will not learn the call mid-session.
+  const statusUnsupported = useRef(false);
+
   const readLiveKitStatus = useCallback(async () => {
+    if (statusUnsupported.current) return;
     try {
       const response = await client.getIntegrationStatus({ sessionToken });
       const livekit = response.integrations.find((entry) => entry.id === "livekit");
@@ -61,14 +65,17 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
       const connectError = ConnectError.from(err);
       if (connectError.code === Code.Unimplemented) {
         // A daemon too old to report its integrations is not a broken one: no line, form unaffected.
+        statusUnsupported.current = true;
         setLiveKitStatusText(null);
         return;
       }
-      setError(connectError.rawMessage);
+      // Shown on the status line, not in the save error: a failed poll says nothing about the form.
+      setLiveKitStatusText(`Status unavailable: ${connectError.rawMessage}`);
     }
   }, [client, sessionToken]);
 
   useEffect(() => {
+    statusUnsupported.current = false;
     void readLiveKitStatus();
     const interval = setInterval(() => void readLiveKitStatus(), INTEGRATION_STATUS_POLL_MS);
     return () => clearInterval(interval);

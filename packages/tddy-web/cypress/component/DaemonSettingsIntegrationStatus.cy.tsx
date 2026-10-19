@@ -3,8 +3,10 @@
  * `docs/ft/web/1-WIP/PRD-2026-10-16-livekit-satellite-status-ui.md`.
  */
 
+import { Code } from "@connectrpc/connect";
 import { IntegrationState } from "../../src/gen/daemon_config_pb";
 import {
+  aDaemonFailingIntegrationStatus,
   aDaemonReportingIntegrations,
   aDaemonSettingsScreen,
   aDaemonWithoutIntegrationStatus,
@@ -83,5 +85,12 @@ describe("Daemon settings — LiveKit status", () => {
       .mount()
       .expectLiveKitUrl("ws://127.0.0.1:7880")
       .expectNoLiveKitStatus();
+  });
+
+  it("says the status is unavailable when the call fails, without blaming the form", () => {
+    aDaemonSettingsScreen(aDaemonFailingIntegrationStatus(Code.Unavailable, "daemon is restarting"))
+      .mount()
+      .expectLiveKitStatus("Status unavailable: daemon is restarting")
+      .expectNoError();
   });
 });

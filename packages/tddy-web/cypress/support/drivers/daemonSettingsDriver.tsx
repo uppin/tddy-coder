@@ -76,7 +76,10 @@ export function aDaemonRefusingUpdates(code: Code, message: string) {
   return aDaemonServing().failWith(DaemonConfigService.method.updateConfig, code, message);
 }
 
-/** What `GetIntegrationStatus` answers with: LiveKit in `state`, entered `secondsAgo`. */
+/**
+ * What `GetIntegrationStatus` answers with: LiveKit in `state`, entered `secondsAgo` before the
+ * daemon answers. The timestamp is minted at answer time, so a slow mount cannot age the line.
+ */
 export function aLiveKitIntegration(fields: {
   state: number;
   secondsAgo: number;
@@ -89,7 +92,7 @@ export function aLiveKitIntegration(fields: {
     state: fields.state,
     error: fields.error ?? "",
     missingFields: fields.missingFields ?? [],
-    sinceUnixMs: BigInt(Date.now() - fields.secondsAgo * 1000),
+    secondsAgo: fields.secondsAgo,
   };
 }
 
@@ -99,9 +102,9 @@ export function aDaemonReportingIntegrations(
 ) {
   let read = 0;
   return aDaemonConfigBackend().onUnary(DaemonConfigService.method.getIntegrationStatus, () => {
-    const answer = answers[Math.min(read, answers.length - 1)];
+    const { secondsAgo, ...answer } = answers[Math.min(read, answers.length - 1)];
     read += 1;
-    return { integrations: [answer] };
+    return { integrations: [{ ...answer, sinceUnixMs: BigInt(Date.now() - secondsAgo * 1000) }] };
   });
 }
 
@@ -112,6 +115,11 @@ export function aDaemonWithoutIntegrationStatus() {
     Code.Unimplemented,
     "unknown method GetIntegrationStatus",
   );
+}
+
+/** A daemon whose status call fails with something other than `Unimplemented`. */
+export function aDaemonFailingIntegrationStatus(code: Code, message: string) {
+  return aDaemonConfigBackend().failWith(DaemonConfigService.method.getIntegrationStatus, code, message);
 }
 
 type Backend = ReturnType<typeof aDaemonConfigBackend>;
@@ -175,6 +183,10 @@ export function aDaemonSettingsScreen(backend: Backend) {
     },
     expectNoLiveKitStatus() {
       byTestId(TEST_IDS.daemonSettingsLivekitStatus).should("not.exist");
+      return driver;
+    },
+    expectNoError() {
+      byTestId(TEST_IDS.daemonSettingsError).should("not.exist");
       return driver;
     },
     expectError(fragment: string) {
