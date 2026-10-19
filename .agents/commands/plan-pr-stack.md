@@ -307,6 +307,10 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
   of what the scan found. **Exactly one node claims an entry**, the lowest that fixes it; the others
   keep it as a reference with their own verdict. Never write a ✅ verdict for an entry a *parent* node
   claims.
+- **Every changeset MUST carry a `**Complexity**: 1–5 — <signals>` header line**, scored with the
+  rubric in `.cursor/rules/changeset-doc.mdc` § Header Metadata. It sizes whoever implements the node
+  (`/yolo-pr-stack` picks each subagent's model and effort from it). Re-score it in 6g if the failing
+  tests showed the node is bigger or smaller than planned.
 - **Every changeset MUST carry the five headings** the stack model requires, in every node's
   document:
 
@@ -595,8 +599,9 @@ framework-specific reference for the test type. Fluent-tests style is mandatory 
 
 **6g. Commit 2 — the draft-PR contract — and push.**
 
-- Update this node's changeset: the TODO check-offs from 6e/6f, the PR number and URL noted in 4d, and
-  any `## Dependencies` refinement from 6f. **Own files only** — never a parent's changeset or PRD.
+- Update this node's changeset: the TODO check-offs from 6e/6f, the PR number and URL noted in 4d,
+  any `## Dependencies` refinement from 6f, and the `**Complexity**` line re-scored if 6e/6f showed
+  the node is bigger or smaller than planned. **Own files only** — never a parent's changeset or PRD.
 - Commit surface + tests + these doc updates as **one commit**, the node's second. Never amend commit
   1. If something must change after this commit is pushed, add a third commit — never amend, never
   `--no-verify`.
@@ -917,7 +922,7 @@ actionable the moment some node builds the seam.
 
 ## Related
 
-**Commands**: `/plan-red` (its Steps 6–7 are what wave 2 runs per node), `/add-to-pr-stack` (a node on
+**Commands**: `/yolo-pr-stack` (this command, with each ready node implemented while wave 2 runs), `/plan-red` (its Steps 6–7 are what wave 2 runs per node), `/add-to-pr-stack` (a node on
 top of an **existing** stack tail), `/split-pr-to-stack` (carve an **existing** PR into stacked slices;
 this command plans from requirements), `/follow-up-branch`, `/green`, `/validate-changes`,
 `/pr-stack-rebase` (single mode in wave 2, cascade mode as the completion gate), `/merge-pr-stack`,

@@ -36,11 +36,33 @@ Changeset documents track **delta changes** (State A → State B) to development
 **Date**: YYYY-MM-DD
 **Status**: 🚧 In Progress | ✅ Complete
 **Type**: Feature | Refactor | Bug Fix | Architecture Change
+**Complexity**: 1–5 — <the signals that set it, in one line>
 ```
 
 **Status progression**:
 - `🚧 In Progress` - Active development
 - `✅ Complete` - Ready for wrapping
+
+**`Complexity` is required on every changeset — stacked or standalone, whichever command planned it.**
+It is a planning output, written for whoever sizes the implementer: an orchestrator such as
+`/yolo-pr-stack`, or the developer choosing a model and effort for `/green`, `/pr-wrap` or
+`/code-restructuring` by hand, reads this one line instead of re-deriving the size of the change from
+the diff. Score it when the changeset is written and re-score it in the same commit as the red step if
+the failing tests showed the change is bigger or smaller than planned. Take the **highest** score any
+row reaches, not an average:
+
+| Score | The change, as planned |
+|---|---|
+| **1** | ≤ 3 owned symbols, one crate/package, unit-level tests, no Restructure Prerequisite, no inherited restructure |
+| **2** | One crate/package, a handful of owned symbols, still unit-level or in-memory tests |
+| **3** | One crate/package with integration tests, or an adapter / I/O seam (daemon RPC, LiveKit, sqlx store, a spawned process), or a Restructure Prerequisite inside the crate |
+| **4** | More than one crate/package, **or** concurrency / ordering semantics, **or** a data migration, **or** a proto / contract change, **or** an inherited restructure to repair |
+| **5** | Several of the row-4 signals at once, or a design the changeset itself records as unsettled |
+
+The line names the signals (`3 — one crate, integration tests, sqlx store seam`), never just the
+number: a score nobody can audit is a guess. It sizes the *implementer*; it does not change what the
+change must prove. A score of 5 is a warning that the boundary may be wrong — say so in
+`## Decisions & Trade-offs`.
 
 #### 2. Affected Packages
 
