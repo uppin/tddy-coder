@@ -12,6 +12,7 @@ pub mod client_factory;
 pub mod envelope;
 pub mod participant;
 mod projects_registry;
+pub mod room_connector;
 pub mod room_metadata;
 pub mod room_roster;
 pub mod rpc_log;

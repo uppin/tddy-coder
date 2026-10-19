@@ -20,10 +20,9 @@ tddy-rpc = { path = "../tddy-rpc" }
 # `pty_relay` speaks `connection.ConnectionService` and `auth.AuthService` to attach a session's
 # terminal from outside the daemon; the protos it encodes live in tddy-service.
 tddy-service = { path = "../tddy-service" }
+# The client room transport port: pty-relay joins through it; the binary wires LiveKit.
+tddy-room-client = { path = "../tddy-room-client" }
 tddy-task = { path = "../tddy-task" }
-# LiveKit dispatch mode (`pty-relay --server-identity` / `--daemon-identity`). Off by default so an
-# in-jail build that only ever talks gRPC does not carry the SDK.
-tddy-livekit = { path = "../tddy-livekit", optional = true }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "signal"] }
 tokio-stream = "0.1"
 tonic = "0.12"
@@ -31,9 +30,6 @@ portable-pty = "0.9"
 # `pty_relay`'s connectrpc client: unary POSTs plus one envelope-framed streaming read.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
-
-[features]
-livekit = ["dep:tddy-livekit"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -44,6 +40,7 @@ tddy-codegen = { path = "../tddy-codegen", features = ["tonic"] }
 tonic-build = "0.12"
 
 [dev-dependencies]
+tddy-room-client = { path = "../tddy-room-client", features = ["test-support"] }
 # `stub_http_routed`: a daemon stand-in that records which RPC path a call reached.
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 # `tddy_user_config`'s tests write a `.tddy/config.yaml` under a temporary home.

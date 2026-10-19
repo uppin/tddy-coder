@@ -123,8 +123,9 @@ over the workspace graph read by
 |---|---|
 | `the_extension_ports_reach_the_crates_they_are_built_on` | The walk from this crate sees `tddy-rpc`, so the next test is not vacuous. |
 | `the_extension_ports_reach_no_livekit_crate` | `reaches("tddy-daemon-extensions")` shares nothing with `LIVEKIT_FAMILY`. |
-| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` | Every workspace crate that names a LiveKit crate directly is on `PLUGINS`, `WIRING` or `KNOWN_OFFENDERS`. |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` | Every workspace crate that names a LiveKit crate directly is on `PLUGINS`, `WIRING`, `WIRING_WITH_A_LIBRARY` or `KNOWN_OFFENDERS`. |
 | `every_known_offender_still_names_a_livekit_crate` | A crate that stopped naming one must be struck from `KNOWN_OFFENDERS`, so the list says what the tree does. |
+| `a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary` | The sources of every `WIRING_WITH_A_LIBRARY` crate, apart from `src/main.rs`, contain no path into `livekit`, `livekit_api` or `livekit_protocol`. |
 
 The lists, in the test file:
 
@@ -134,10 +135,14 @@ The lists, in the test file:
   `tddy-livekit-testkit`, `tddy-daemon-livekit`, `tddy-livekit-screen-capture`, `tddy-screenshare`.
 - `WIRING` (binaries' composition roots and the end-to-end harness): `tddy-daemon`, `tddy-rdp`,
   `tddy-vnc`, `tddy-e2e`.
+- `WIRING_WITH_A_LIBRARY` (crates that ship a library *and* a binary wiring LiveKit into it):
+  `tddy-remote-git-repo`, `tddy-session-sync`, `tddy-tools`. Cargo has no binary-only dependency, so
+  the edge appears on the crate; the shape test above holds the library sources clean, which keeps the
+  allowance to the binary's wiring. These libraries join rooms through
+  [`tddy-room-client`](../../tddy-room-client/docs/room-client.md).
 - `KNOWN_OFFENDERS` (library crates that still name a LiveKit crate): `tddy-agent-launch`,
-  `tddy-coder`, `tddy-daemon-auth`, `tddy-daemon-rpc`, `tddy-remote-git-repo`,
-  `tddy-session-agents`, `tddy-session-files`, `tddy-session-lifecycle`, `tddy-session-split`,
-  `tddy-session-sync`, `tddy-session-tool-client`, `tddy-terminal-rpc`.
+  `tddy-coder`, `tddy-daemon-auth`, `tddy-daemon-rpc`, `tddy-session-agents`,
+  `tddy-session-files`, `tddy-session-lifecycle`, `tddy-session-split`.
 
 "Names" is a `[dependencies]` or `[build-dependencies]` entry, optional ones included;
 `[dev-dependencies]` are not counted, because a test may stand up a real LiveKit server. The

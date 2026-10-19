@@ -3,15 +3,14 @@
 //!
 //! Moved out of `tddy-tools` by `#unbundle` node 5. It is a crate of its own rather than part of
 //! `tddy-service` — where the plan first put it — because [`dispatch_session_tool`] selects
-//! between all four transports in one place, and the LiveKit arm needs `tddy-livekit`, which
-//! itself depends on `tddy-service`. Cargo rejects that edge outright (`cyclic package
-//! dependency`), and the alternatives were worse: splitting the selector in two would duplicate
-//! the transport decision, and injecting the LiveKit connector at runtime would reintroduce
-//! exactly the function-pointer transport the same node deleted from `tddy-bsp`.
+//! between all four transports in one place. The LiveKit arm needed `tddy-livekit`, which itself
+//! depends on `tddy-service`, and Cargo rejects that edge (`cyclic package dependency`); it now
+//! joins its room through `tddy_room_client::RoomConnector` instead, which the binary installs
+//! ([`install_room_connector`]) — this crate names no LiveKit crate.
 //!
-//! Sitting above both `tddy-service` and `tddy-livekit` also settles a debt the plan recorded
-//! against the original destination: `tddy-service` depends on `tddy-tui`, so a client hosted
-//! there would have pulled the TUI into every in-jail binary that dispatches a tool call.
+//! Sitting above `tddy-service` also settles a debt the plan recorded against the original
+//! destination: `tddy-service` depends on `tddy-tui`, so a client hosted there would have pulled the
+//! TUI into every in-jail binary that dispatches a tool call.
 //!
 //! `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` reach the daemon through this crate
 //! and no longer depend on `tddy-tools` at all.
@@ -28,6 +27,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+use tddy_room_client::{NoRoomTransport, RoomAuth, RoomConnector, RoomJoin, RoomSession};
 
 /// Read an environment variable, treating unset and blank alike — a blank join token or server
 /// identity configures nothing. One spelling for the whole workspace, in the crate that owns the
@@ -493,6 +494,18 @@ impl LiveKitSession {
     }
 }
 
+/// The session for `key` from `cache`, joining through `connector` on first use: the room in the
+/// key's token, as the token's identity, waiting for `key.server_identity`.
+pub async fn room_session_via(
+    cache: &LiveKitRoomCache,
+    key: &LiveKitRoomKey,
+    connector: &dyn RoomConnector,
+) -> Result<Arc<LiveKitSession>, String> {
+    cache
+        .client_via(key, || connect_room_session(key, connector))
+        .await
+}
+
 impl LiveKitRoomCache {
     /// Return the session for `key`, running `connect` only if this destination has no live one.
     pub async fn client_via<F, Fut>(
@@ -516,54 +529,89 @@ impl LiveKitRoomCache {
 
 /// How long to wait for the remote daemon's RPC-server participant to appear in the room. It is
 /// normally already joined; this only covers the window right after a daemon restart.
-#[cfg(feature = "livekit")]
 const SERVER_PARTICIPANT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// The room transport this process was given by its binary, set once at startup.
+static ROOM_CONNECTOR: std::sync::OnceLock<Arc<dyn RoomConnector>> = std::sync::OnceLock::new();
+
+/// A room transport was already installed in this process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoomConnectorAlreadyInstalled;
+
+impl std::fmt::Display for RoomConnectorAlreadyInstalled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "a room transport is already installed in this process")
+    }
+}
+
+impl std::error::Error for RoomConnectorAlreadyInstalled {}
+
+/// Hand this process's room transport to the tool client: the one every split-session dispatch,
+/// roster stream and conversation call joins its room through.
+///
+/// The binary calls this once at startup, because it is the only thing that knows which transport it
+/// was built with — this library names none. Until it is called, a split session's dispatch fails
+/// with [`NoRoomTransport`]'s message rather than reaching a room.
+pub fn install_room_connector(
+    connector: Arc<dyn RoomConnector>,
+) -> Result<(), RoomConnectorAlreadyInstalled> {
+    ROOM_CONNECTOR
+        .set(connector)
+        .map_err(|_| RoomConnectorAlreadyInstalled)
+}
+
+/// The installed room transport, or the one that refuses every join naming what is missing.
+fn installed_room_connector() -> Arc<dyn RoomConnector> {
+    ROOM_CONNECTOR
+        .get()
+        .cloned()
+        .unwrap_or_else(|| Arc::new(NoRoomTransport))
+}
+
 /// The process-wide connection cache behind [`dispatch_via_livekit`].
-#[cfg(feature = "livekit")]
 fn livekit_room_cache() -> &'static LiveKitRoomCache {
     static CACHE: std::sync::OnceLock<LiveKitRoomCache> = std::sync::OnceLock::new();
     CACHE.get_or_init(LiveKitRoomCache::default)
 }
 
-/// Join `room` and return a client addressed at the remote daemon's RPC-server participant.
+/// Join `key`'s room through `connector` and return a session addressed at the remote daemon's
+/// RPC-server participant.
 ///
-/// The returned client owns the `Arc<Room>`, so the connection lives exactly as long as the cache
-/// keeps the client.
-#[cfg(feature = "livekit")]
-async fn connect_livekit_client(key: &LiveKitRoomKey) -> Result<Arc<LiveKitSession>, String> {
-    use livekit::prelude::*;
-
+/// The returned session owns the room connection, so it lives exactly as long as the cache keeps it.
+async fn connect_room_session(
+    key: &LiveKitRoomKey,
+    connector: &dyn RoomConnector,
+) -> Result<Arc<LiveKitSession>, String> {
     let LiveKitRoomKey {
         url,
         room,
         token,
         server_identity,
     } = key;
-    // The join + participant-wait + factory sequence lives in `tddy_livekit::client_connect`, which
-    // vends through `LiveKitRpcClientFactory` so every client on the room shares one request-id
-    // space and one response loop — the property this cache depends on, since it keeps the room
-    // alive across calls rather than letting each call have a short-lived room of its own.
-    let connected = tddy_livekit::client_connect::connect_client(
-        url,
-        token,
-        server_identity,
-        SERVER_PARTICIPANT_WAIT,
-    )
-    .await
-    .map_err(|e| format!("{e} (room \"{room}\")"))?;
+    // The token was minted by the daemon for this room and carries the identity, so the join names
+    // neither beyond the room it is for. Every client on the room shares one request-id space and one
+    // response loop — the property this cache depends on, since it keeps the room alive across calls
+    // rather than letting each call have a short-lived room of its own.
+    let joined = connector
+        .connect(
+            &RoomJoin {
+                url: url.clone(),
+                room: room.clone(),
+                identity: String::new(),
+                auth: RoomAuth::Token(token.clone()),
+            },
+            server_identity,
+            SERVER_PARTICIPANT_WAIT,
+        )
+        .await
+        .map_err(|e| format!("{e} (room \"{room}\")"))?;
 
-    spawn_worktree_activity_log(Arc::clone(&connected.room));
+    spawn_worktree_activity_log(&joined);
 
-    let presence_room = connected.room;
-    let presence_target: ParticipantIdentity = server_identity.clone().into();
+    let presence = Arc::clone(&joined);
     Ok(Arc::new(LiveKitSession::new(
-        Arc::new(connected.client),
-        Box::new(move || {
-            presence_room
-                .remote_participants()
-                .contains_key(&presence_target)
-        }),
+        joined.rpc(),
+        Box::new(move || presence.peer_present()),
     )))
 }
 
@@ -577,21 +625,15 @@ async fn connect_livekit_client(key: &LiveKitRoomKey) -> Result<Arc<LiveKitSessi
 /// is deliberate — the log is what a `tddy-tools=debug` session leaves behind for someone asking
 /// whether the agent's picture of the worktree was current, and the first consumer that needs more
 /// than that will have this stream to read.
-#[cfg(feature = "livekit")]
-fn spawn_worktree_activity_log(room: std::sync::Arc<livekit::Room>) {
-    let mut activity = tddy_livekit::BroadcastChannel::new(
-        room,
-        tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC,
-    )
-    .subscribe();
+fn spawn_worktree_activity_log(room: &Arc<dyn RoomSession>) {
+    let mut activity = room.subscribe(tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC);
     tokio::spawn(async move {
-        while let Some(message) = activity.recv().await {
-            match worktree_activity_line(&message.payload) {
+        while let Some(payload) = activity.recv().await {
+            match worktree_activity_line(&payload) {
                 Ok(line) => log::debug!(target: "tddy_session_tool_client", "{line}"),
                 Err(e) => log::warn!(
                     target: "tddy_session_tool_client",
-                    "worktree activity payload from {:?} did not decode: {e}",
-                    message.from
+                    "worktree activity payload did not decode: {e}"
                 ),
             }
         }
@@ -604,11 +646,6 @@ fn spawn_worktree_activity_log(room: std::sync::Arc<livekit::Room>) {
 /// the loop around it only chooses which log level to emit at, and a payload that does not decode —
 /// an event from a newer publisher whose schema this build cannot read — must surface as a warning
 /// rather than as one more silent drop on a fire-and-forget topic.
-///
-/// Compiled whenever its caller is, and additionally under `cfg(test)`: a `--no-default-features`
-/// build has no LiveKit and so no `spawn_worktree_activity_log` to call this, but the decoding rule
-/// it holds is the same one either way.
-#[cfg(any(feature = "livekit", test))]
 fn worktree_activity_line(payload: &[u8]) -> Result<String, prost::DecodeError> {
     use prost::Message as _;
     use tddy_service::proto::worktree_activity::WorktreeActivityEvent;
@@ -627,7 +664,6 @@ fn worktree_activity_line(payload: &[u8]) -> Result<String, prost::DecodeError> 
 /// goes nowhere an operator looks; a split session whose dispatch is failing would otherwise leave
 /// no evidence on either host. `tddy-tools`' default filter is `warn`, so anything quieter than
 /// this is invisible by construction.
-#[cfg(feature = "livekit")]
 pub async fn dispatch_via_livekit(
     key: &LiveKitRoomKey,
     envelope: &SessionToolEnvelope,
@@ -638,7 +674,6 @@ pub async fn dispatch_via_livekit(
 }
 
 /// [`dispatch_via_livekit`] for a request already built.
-#[cfg(feature = "livekit")]
 pub(crate) async fn dispatch_request_via_livekit(
     key: &LiveKitRoomKey,
     request: tddy_service::proto::exec_tools::ExecuteToolRequest,
@@ -654,9 +689,12 @@ pub(crate) async fn dispatch_request_via_livekit(
         target: "tddy_session_tool_client",
         "dispatching {tool_name} to \"{server_identity}\" in room \"{room}\" at {url}"
     );
-    let session = match livekit_room_cache()
-        .client_via(key, || connect_livekit_client(key))
-        .await
+    let session = match room_session_via(
+        livekit_room_cache(),
+        key,
+        installed_room_connector().as_ref(),
+    )
+    .await
     {
         Ok(session) => session,
         Err(e) => {
@@ -688,43 +726,6 @@ pub(crate) async fn dispatch_request_via_livekit(
     // Streaming, not unary: this is the one transport whose messages are chunk-framed past
     // MAX_CHUNK_FRAME_BYTES, where a lost chunk frame wedges the call with no error at all.
     dispatch_request_via_streaming_rpc(session.transport(), request).await
-}
-
-/// Without the `livekit` feature the SDK is not linked, so a split session cannot reach its
-/// worktree at all — it says so rather than degrading to a transport that would target the wrong
-/// host's filesystem.
-#[cfg(not(feature = "livekit"))]
-pub async fn dispatch_via_livekit(
-    key: &LiveKitRoomKey,
-    envelope: &SessionToolEnvelope,
-    tool_name: &str,
-    args: &serde_json::Value,
-) -> String {
-    dispatch_request_via_livekit(key, execute_tool_request(envelope, tool_name, args)).await
-}
-
-/// [`dispatch_via_livekit`] for a request already built.
-#[cfg(not(feature = "livekit"))]
-pub(crate) async fn dispatch_request_via_livekit(
-    key: &LiveKitRoomKey,
-    request: tddy_service::proto::exec_tools::ExecuteToolRequest,
-) -> String {
-    let tool_name = request.tool_name.as_str();
-    // A build-time omission, not a runtime fault — but it presents as every tool call failing, so
-    // it is logged where an operator will find it like any other dispatch failure.
-    log::error!(
-        target: "tddy_session_tool_client",
-        "{tool_name} failed: this tddy-tools was built without the 'livekit' feature, so the \
-         codebase daemon \"{}\" in room \"{}\" cannot be reached at all",
-        key.server_identity,
-        key.room
-    );
-    serde_json::json!({
-        "error": "remote worktree dispatch requires the 'livekit' cargo feature; \
-                  rebuild with: cargo build -p tddy-tools --features livekit",
-        "is_error": true
-    })
-    .to_string()
 }
 
 /// `dispatch_via_sandbox_ipc`'s stdio-RPC connection never receives inbound calls from the
@@ -813,11 +814,13 @@ pub async fn connect_sandbox_ipc(
 /// Public so the roster stream rides the *same* room connection tool dispatch uses: one join, one
 /// request-id space and one response loop per destination — which is the property
 /// [`LiveKitRoomCache`] exists to keep.
-#[cfg(feature = "livekit")]
 pub async fn livekit_session(key: &LiveKitRoomKey) -> Result<Arc<LiveKitSession>, String> {
-    livekit_room_cache()
-        .client_via(key, || connect_livekit_client(key))
-        .await
+    room_session_via(
+        livekit_room_cache(),
+        key,
+        installed_room_connector().as_ref(),
+    )
+    .await
 }
 
 /// Forward a tool call via HTTP to `ExecToolService/ExecuteTool`.

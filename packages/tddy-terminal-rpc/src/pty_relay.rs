@@ -13,7 +13,7 @@
 //! | Local PTY | none of the below, `cmd` non-empty | [`crate::local_pty_relay`] in this process |
 //! | gRPC connect-only | `session_id` | `terminal_session.TerminalSessionService` on an existing session |
 //! | gRPC start-and-connect | `project_id` | `StartSession`, then the same terminal RPCs |
-//! | LiveKit session | `server_identity` or `daemon_identity` | a LiveKit room (`livekit` feature) |
+//! | Room session | `server_identity` or `daemon_identity` | a room, joined through the [`RoomConnector`] the caller supplies |
 //!
 //! # What stayed in `tddy-tools`
 //!
@@ -29,6 +29,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
+use tddy_room_client::{RoomAuth, RoomConnectError, RoomConnector, RoomJoin, RoomSession};
 
 use crate::local_terminal::RawMode;
 
@@ -75,7 +76,22 @@ pub struct PtyRelayConfig {
     pub cmd: Vec<String>,
 }
 
-pub async fn run_pty_relay(config: PtyRelayConfig) -> Result<()> {
+/// The room a relay joins when its config names none.
+const LOBBY_ROOM: &str = "tddy-lobby";
+
+/// How long a relay's token stays valid.
+const ROOM_TOKEN_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// How long to wait for the session's RPC-serving participant to appear. It is normally already
+/// joined; this covers the window right after a daemon or session restart.
+const SERVER_PARTICIPANT_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Attach a terminal as `config` says. `connector` joins the room in the room-session mode; the
+/// other modes never use it.
+pub async fn run_pty_relay(
+    config: PtyRelayConfig,
+    connector: Arc<dyn RoomConnector>,
+) -> Result<()> {
     if config.session_id.is_some() && config.project_id.is_some() {
         anyhow::bail!("use either --session-id (connect) or --project-id (start), not both");
     }
@@ -86,17 +102,7 @@ pub async fn run_pty_relay(config: PtyRelayConfig) -> Result<()> {
         return run_grpc_start_and_connect(config).await;
     }
     if config.daemon_identity.is_some() || config.server_identity.is_some() {
-        #[cfg(feature = "livekit")]
-        return run_livekit_session(config).await;
-        #[cfg(not(feature = "livekit"))]
-        {
-            let _ = config;
-            anyhow::bail!(
-                "LiveKit session mode requires the 'livekit' cargo feature.\n\
-                 For gRPC terminal attach use --project-id or --session-id instead.\n\
-                 Rebuild with: cargo build -p tddy-tools --features livekit"
-            );
-        }
+        return run_livekit_session(config, connector.as_ref()).await;
     }
     if config.cmd.is_empty() {
         anyhow::bail!(
@@ -222,9 +228,8 @@ async fn run_grpc_start_and_connect(config: PtyRelayConfig) -> Result<()> {
 // Session mode: auth + StartSession, then route to LiveKit or gRPC terminal
 // ---------------------------------------------------------------------------
 
-/// LiveKit-backed start/connect (--daemon-identity / --server-identity).
-#[cfg(feature = "livekit")]
-async fn run_livekit_session(config: PtyRelayConfig) -> Result<()> {
+/// Room-backed start/connect (--daemon-identity / --server-identity).
+async fn run_livekit_session(config: PtyRelayConfig, connector: &dyn RoomConnector) -> Result<()> {
     use prost::Message as _;
     use tddy_service::proto::session::StartSessionResponse;
 
@@ -234,7 +239,8 @@ async fn run_livekit_session(config: PtyRelayConfig) -> Result<()> {
             .livekit_url
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("--server-identity requires --livekit-url"))?;
-        return run_livekit_terminal(&config, livekit_url.to_string(), server_identity, None).await;
+        return run_livekit_terminal(&config, livekit_url.to_string(), server_identity, connector)
+            .await;
     }
 
     // Start-and-connect path.
@@ -283,7 +289,7 @@ async fn run_livekit_session(config: PtyRelayConfig) -> Result<()> {
                 &config,
                 livekit_url.to_string(),
                 resp.livekit_server_identity,
-                Some(session_token),
+                connector,
             )
             .await;
         }
@@ -293,54 +299,30 @@ async fn run_livekit_session(config: PtyRelayConfig) -> Result<()> {
     run_grpc_terminal(&config.daemon_url, &resp.session_id, &session_token).await
 }
 
-/// Connect to a running session's terminal via LiveKit bidi stream.
-#[cfg(feature = "livekit")]
+/// Connect to a running session's terminal over a room duplex.
 async fn run_livekit_terminal(
     config: &PtyRelayConfig,
     livekit_url: String,
     server_identity: String,
-    _session_token: Option<String>,
+    connector: &dyn RoomConnector,
 ) -> Result<()> {
     use prost::Message as _;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
-    use tddy_livekit::TokenGenerator;
     use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 
-    /// How long to wait for the session's RPC-serving participant to appear. It is normally already
-    /// joined; this covers the window right after a daemon or session restart.
-    const SERVER_PARTICIPANT_WAIT: Duration = Duration::from_secs(30);
-
-    let room_name = config
-        .livekit_room
-        .as_deref()
-        .unwrap_or("tddy-lobby")
-        .to_string();
-    let client_token = TokenGenerator::new(
-        config.livekit_api_key.clone(),
-        config.livekit_api_secret.clone(),
-        room_name,
-        config.client_identity.clone(),
-        Duration::from_secs(3600),
-    )
-    .generate()
-    .map_err(|e| anyhow::anyhow!("token: {}", e))?;
-
     log::info!(target: "tddy_terminal_rpc::pty_relay", "waiting for session server participant \"{}\"…", server_identity);
-    let connected = tddy_livekit::client_connect::connect_client(
-        &livekit_url,
-        &client_token,
-        &server_identity,
-        SERVER_PARTICIPANT_WAIT,
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("{}", e))?;
-    // Holds the room for the whole session: the client owns an `Arc<Room>` of its own, but it is
-    // moved into the bidi task below, and dropping the last handle would leave the room mid-stream.
-    let _room = Arc::clone(&connected.room);
-    let client = connected.client;
+    let session = join_terminal_room(config, &livekit_url, &server_identity, connector).await?;
+    // Holds the room for the whole session: dropping the last handle would leave it mid-stream.
+    let _room = Arc::clone(&session);
 
     log::info!(target: "tddy_terminal_rpc::pty_relay", "server visible — starting terminal bidi stream");
+    let tddy_room_client::RoomDuplex {
+        outbound: terminal_input,
+        inbound: mut terminal_output,
+    } = session
+        .open_duplex("terminal.TerminalService", "StreamTerminalIO")
+        .map_err(|e| anyhow::anyhow!("start_bidi_stream: {e}"))?;
 
     let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
@@ -348,21 +330,12 @@ async fn run_livekit_terminal(
     let shutdown_bidi = Arc::clone(&shutdown);
 
     tokio::spawn(async move {
-        let bidi = client.start_bidi_stream("terminal.TerminalService", "StreamTerminalIO");
-        let (mut sender, mut rx) = match bidi {
-            Ok(p) => p,
-            Err(e) => {
-                log::error!(target: "tddy_terminal_rpc::pty_relay", "start_bidi_stream: {}", e);
-                shutdown_bidi.store(true, Ordering::Relaxed);
-                return;
-            }
-        };
-        let _ = sender
-            .send(TerminalInput { data: vec![] }.encode_to_vec(), false)
+        let _ = terminal_input
+            .send(TerminalInput { data: vec![] }.encode_to_vec())
             .await;
         if let Some(resize) = encode_resize() {
-            let _ = sender
-                .send(TerminalInput { data: resize }.encode_to_vec(), false)
+            let _ = terminal_input
+                .send(TerminalInput { data: resize }.encode_to_vec())
                 .await;
         }
         loop {
@@ -373,12 +346,12 @@ async fn run_livekit_terminal(
                 bytes = key_rx.recv() => {
                     match bytes {
                         Some(bytes) => {
-                            if sender.send(TerminalInput { data: bytes }.encode_to_vec(), false).await.is_err() { break; }
+                            if terminal_input.send(TerminalInput { data: bytes }.encode_to_vec()).await.is_err() { break; }
                         }
                         None => break,
                     }
                 }
-                chunk = rx.recv() => {
+                chunk = terminal_output.recv() => {
                     match chunk {
                         Some(Ok(bytes)) => {
                             if let Ok(out) = TerminalOutput::decode(&bytes[..]) {
@@ -500,13 +473,48 @@ async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String>
     Ok(exchange_resp.session_token)
 }
 
+/// Join the room `config` names (default `tddy-lobby`) as `config.client_identity`, minting from its
+/// API credentials, and wait for `server_identity` to be there — through `connector`, so this crate
+/// names no transport.
+pub async fn join_terminal_room(
+    config: &PtyRelayConfig,
+    livekit_url: &str,
+    server_identity: &str,
+    connector: &dyn RoomConnector,
+) -> Result<Arc<dyn RoomSession>> {
+    let join = RoomJoin {
+        url: livekit_url.to_string(),
+        room: config
+            .livekit_room
+            .as_deref()
+            .unwrap_or(LOBBY_ROOM)
+            .to_string(),
+        identity: config.client_identity.clone(),
+        auth: RoomAuth::Credentials {
+            api_key: config.livekit_api_key.clone(),
+            api_secret: config.livekit_api_secret.clone(),
+            ttl: ROOM_TOKEN_TTL,
+        },
+    };
+    connector
+        .connect(&join, server_identity, SERVER_PARTICIPANT_WAIT)
+        .await
+        .map_err(|e| match e {
+            RoomConnectError::Room(reason) => anyhow::anyhow!("{reason}"),
+            RoomConnectError::PeerAbsent { identity, waited } => anyhow::anyhow!(
+                "\"{identity}\" did not join room \"{}\" within {}s",
+                join.room,
+                waited.as_secs()
+            ),
+        })
+}
+
 /// Ask the daemon at `daemon_url` to open `session_id`'s room — with itself in it and the
 /// session's terminal exposed there — before this relay joins the room to look for it.
 ///
 /// `SessionRoomService.OpenSessionRoom` is the LiveKit integration's own call; `ConnectSession` is
 /// local work and no longer opens a room for a caller that did not arrive over LiveKit. It fails,
 /// naming the room, when the daemon's LiveKit cannot be reached.
-#[cfg(feature = "livekit")]
 pub async fn open_session_room_over_http(
     daemon_url: &str,
     session_token: &str,
@@ -765,7 +773,6 @@ async fn connectrpc_post_streaming(
 /// The delegation is a compile-time identity, so it needs no test of its own — asserting
 /// `encode_resize() == encode_resize_osc()` would stay green through any change to either. The
 /// format itself is pinned by `encode_resize_osc_uses_format_expected_by_daemon`.
-#[cfg(feature = "livekit")]
 fn encode_resize() -> Option<Vec<u8>> {
     encode_resize_osc()
 }

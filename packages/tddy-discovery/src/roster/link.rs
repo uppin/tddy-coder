@@ -29,7 +29,6 @@ pub(crate) async fn connect_facilitating_daemon(
             // call over it, so the envelope stays empty.
             Ok((client, SessionToolEnvelope::default()))
         }
-        #[cfg(feature = "livekit")]
         SessionToolTransport::LiveKit {
             url,
             room,
@@ -60,12 +59,6 @@ pub(crate) async fn connect_facilitating_daemon(
                 },
             ))
         }
-        #[cfg(not(feature = "livekit"))]
-        SessionToolTransport::LiveKit { .. } => Err(
-            "this tddy-tools was built without the 'livekit' feature, so the session's daemon \
-             cannot be reached at all"
-                .to_string(),
-        ),
         // A full `tddy-rpc` client, so unlike the HTTP relay this one *can* carry the roster and
         // conversation RPCs — the same framing the sandbox socket uses, differing only in that the
         // envelope has to be carried: an agent running beside the jail is not identified by the

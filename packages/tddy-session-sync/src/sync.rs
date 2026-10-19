@@ -19,10 +19,10 @@
 //! argv of every git command. A live room decides none of it, so none of it needs one to be tested.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use prost::Message as _;
-use tddy_livekit::RpcClient;
 use tddy_service::proto::activity::{
     AgentActivityDeltaChunk, AgentActivityDeltaRequest, AgentActivityRecord, DeltaScope,
 };
@@ -518,19 +518,19 @@ pub async fn run(credentials: &Credentials, attached: AttachedSession) -> Result
     } = attached;
     // Held for the whole run. Dropping this leaves the room, and a syncer outside the room hears
     // nothing further while failing at nothing.
-    let _room = connection.room;
+    let _room = Arc::clone(&connection);
 
-    let mut syncer = Syncer::open(credentials, address, session_token, connection.client)?;
+    let mut syncer = Syncer::open(credentials, address, session_token, connection.rpc())?;
     syncer.first_attach_if_empty().await?;
 
     loop {
         tokio::select! {
             message = session_activity.recv() => match message {
-                Some(message) => syncer.on_activity(&message.payload).await?,
+                Some(message) => syncer.on_activity(&message).await?,
                 None => return Err(SyncError::RoomClosed),
             },
             message = worktree_activity.recv() => match message {
-                Some(message) => syncer.on_worktree(&message.payload).await?,
+                Some(message) => syncer.on_worktree(&message).await?,
                 None => return Err(SyncError::RoomClosed),
             },
         }
@@ -543,7 +543,7 @@ pub async fn run(credentials: &Credentials, attached: AttachedSession) -> Result
 struct Syncer {
     address: SessionAddress,
     session_token: String,
-    client: RpcClient,
+    client: Arc<dyn tddy_rpc::RpcClientTransport>,
     mirror: Mirror,
     dest: PathBuf,
     transport: GitTransport,
@@ -556,7 +556,7 @@ impl Syncer {
         credentials: &Credentials,
         address: SessionAddress,
         session_token: String,
-        client: RpcClient,
+        client: Arc<dyn tddy_rpc::RpcClientTransport>,
     ) -> Result<Self, SyncError> {
         // Ownership is settled before a single byte is written: an unmarked non-empty destination
         // and one marked for another session are both refused here (AC26).

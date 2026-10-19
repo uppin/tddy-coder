@@ -10,9 +10,12 @@ mod pty_relay;
 mod remote_cli;
 mod session_hook;
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use clap::Parser;
 use rmcp::ServiceExt;
+use tddy_room_client::RoomConnector;
 use tddy_tools::server::PermissionServer;
 
 #[derive(Parser)]
@@ -125,11 +128,29 @@ fn init_logging() {
     let _ = builder.try_init();
 }
 
+/// The room transport this build joins rooms through. This binary is the only place that knows it
+/// is LiveKit: the libraries it calls take a [`RoomConnector`].
+#[cfg(feature = "livekit")]
+fn room_connector() -> Arc<dyn RoomConnector> {
+    Arc::new(tddy_livekit::room_connector::LiveKitRoomConnector)
+}
+
+/// A build without the `livekit` feature wires no room transport, and a join says so.
+#[cfg(not(feature = "livekit"))]
+fn room_connector() -> Arc<dyn RoomConnector> {
+    Arc::new(tddy_room_client::NoRoomTransport)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_logging();
 
     let args = Args::parse();
+    let connector = room_connector();
+    // Once, before anything dispatches: a split session's tool calls, roster and conversation calls
+    // all join their room through the tool client's transport.
+    tddy_tools::session_tool_client::install_room_connector(Arc::clone(&connector))
+        .expect("the room transport is installed once, at startup");
 
     if args.mcp {
         return run_mcp_server().await;
@@ -150,7 +171,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s).await?,
         Some(Subcommand::BuildList(s)) => tddy_bsp::build_cli::run_build_list(s).await?,
         Some(Subcommand::Build(s)) => tddy_bsp::build_cli::run_build(s).await?,
-        Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
+        Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s, connector).await?,
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         Some(Subcommand::ListModels(s)) => tddy_tools::list_models::run_list_models(&s).await?,

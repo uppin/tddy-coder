@@ -32,13 +32,6 @@ prost = "0.13"
 # roster/registry: the conversation id minted for a call that named none.
 uuid = { version = "1", features = ["v4"] }
 
-[features]
-# Off by default, forwarding to the tool client's own: a jail that reaches its daemon over the
-# in-jail socket links no LiveKit SDK to follow the roster. `tddy-tools` turns it on through its
-# own default-on `livekit`.
-default = []
-livekit = ["tddy-session-tool-client/livekit"]
-
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tddy-testing-commons = { path = "../tddy-testing-commons" }

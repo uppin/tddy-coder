@@ -6,7 +6,7 @@
 **Metrics:** **1,047 production lines** of 1,150 total (`#[cfg(test)] mod tests` at line 1048; 103 test lines) · budget 500 · **2.1× over**. The gate's awk reports **602**. That count is wrong, because the gate's regex also matches `#[cfg(any(feature = "livekit", test))]` at L603, which guards one production function (`worktree_activity_line`), and it stops there. The true count runs to the `mod tests` marker
 **Thresholds breached:** length 1,047 > 500 (the gate's undercount, 602, would also breach it)
 **Restructure:** not designed
-**Status:** Open — **unclaimed**
+**Status:** Open — **unclaimed** · 2026-10-19: seam A is now a transport-free room join (`room_session_via`, `connect_room_session`, `install_room_connector`), no longer an SDK arm
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured, and the L603 false stop was checked by reading the file; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -19,6 +19,7 @@
 | 2026-10-01 | gate: 606 → 609 | **worse** by 3 in PR #561 (`#agent-worktree` 2/4): the `pub use` of `reset_conversation_worktree`. **Split deferred**: #560 (parent) and both dependents (#562, #563) also touch this file's export list — decompose after `#agent-worktree` lands. |
 | 2026-10-01 | gate: 609 | **unchanged** in PR #562 (`#agent-worktree` 3/4): `diff_conversation_worktree` joins the existing `pub use` of `conversation`, which rustfmt re-wrapped over the same four lines. Split still deferred until `#agent-worktree` lands |
 | 2026-10-01 | gate: 609 | **unchanged** in PR #563 (`#agent-worktree` 4/4): `pull_conversation_range` joins the existing `pub use` of `conversation`, same lines; the new code is in `conversation.rs` (437 production lines). Split still deferred until `#agent-worktree` lands |
+| 2026-10-19 | 1,111 → 1,114 | `#satellite` 7/13 (#629): the LiveKit arm no longer names the SDK. Gone: both `#[cfg(feature = "livekit")]` / `#[cfg(not(feature = "livekit"))]` dispatch variants, `connect_livekit_client` and the `livekit::Room` log task. Arrived: `room_session_via`, `connect_room_session`, `install_room_connector` with its error type, the `installed_room_connector` read, and the log task over `RoomSession::subscribe`. Net **+3**. The "gate's regex also matches `cfg(any(feature = \"livekit\", test))`" note in Metrics no longer applies — that attribute is gone and the gate's count is the true one. Split deferred with the developer's consent (2026-10-19) — `docs/dev/todo/2026-10-19-satellite-7-client-transports-left-files-over-the-500-line-budget.md` |
 
 ## What would close it — candidate seams (not proven)
 

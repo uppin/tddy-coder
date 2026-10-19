@@ -35,6 +35,19 @@ naming the room, and `attach` fails with it rather than waiting for a daemon nob
 daemon without the room service answers 404, reported as `Refused { method: "OpenSessionRoom" }`. Joining without asking would join a room LiveKit auto-creates on the mirror's
 behalf, with no daemon in it, which is indistinguishable from the `DaemonAbsent` wait timing out.
 
+## Joining through the client port
+
+`attach(credentials, connector)` takes an `Arc<dyn RoomConnector>` from
+[`tddy-room-client`](../../tddy-room-client/docs/room-client.md); the library names no transport and the
+`tddy-session-sync` binary hands it LiveKit's. `join_session_room(address, livekit, identity, wait,
+connector)` is the room half: it asks for `session-{id}` as the `syncer-…` identity, with API
+credentials and a six-hour token lifetime (LiveKit's default), waiting for `daemon-{instance_id}`.
+`RoomConnectError::Room` becomes `AttachError::Room` and `PeerAbsent` becomes `AttachError::DaemonAbsent`;
+a failure to mint the token is a `Room` error too. The room session is carried in `AttachedSession` for
+the whole run and the two broadcast topics are subscribed through it before the first RPC.
+`tests/attach_room_join.rs` pins the join request and the absent-daemon failure against an in-memory
+connector.
+
 ## What the room supplies
 
 | Signal | Carries |

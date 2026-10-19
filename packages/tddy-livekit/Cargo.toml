@@ -9,6 +9,8 @@ name = "tddy_livekit"
 path = "src/lib.rs"
 
 [dependencies]
+# The client-side ports this crate implements (`room_connector`).
+tddy-room-client = { path = "../tddy-room-client" }
 prost = "0.13"
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }

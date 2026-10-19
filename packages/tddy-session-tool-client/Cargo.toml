@@ -24,18 +24,12 @@ prost = "0.13"
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros", "sync", "net", "time", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-# The LiveKit transport, for a split session whose worktree is on another host.
-tddy-livekit = { path = "../tddy-livekit", optional = true }
-livekit = { version = "0.7", optional = true }
-
-[features]
-# Off by default, unlike `tddy-tools`' own: this crate is dev-depended on by `tddy-sandbox-app` and
-# `tddy-sandbox-darwin`, whose suites only ever dispatch over the in-jail socket, and neither should
-# link the LiveKit SDK to do it. The consumers that need a split session — `tddy-tools` and
-# `tddy-daemon` — enable it explicitly, so `tddy-tools`' shipped default is unchanged.
-default = []
-livekit = ["dep:tddy-livekit", "dep:livekit"]
+# The client room transport port: a split session's worktree is on another host, and the room that
+# reaches it is joined through this. The binary installs the transport.
+tddy-room-client = { path = "../tddy-room-client" }
 
 [dev-dependencies]
+pretty_assertions = { workspace = true }
+tddy-room-client = { path = "../tddy-room-client", features = ["test-support"] }
 serial_test = "3"
 tokio = { version = "1", features = ["rt-multi-thread"] }
