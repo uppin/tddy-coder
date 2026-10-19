@@ -82,7 +82,10 @@ impl BridgeTarget {
 /// One value rather than two independent options: a daemon that can store a host's desktop but
 /// cannot read the password prompted for it can start nothing, so "host scope is wired" is a
 /// single fact.
-struct HostScope {
+// TODO(restructure): hand-widened to pub(crate) -- `prompt_for_desktop_password`, now in
+// `bridge_lifecycle` at pub(crate), names this type (E private_interfaces); the engine widens moved
+// items only, and this one did not move.
+pub(crate) struct HostScope {
     targets: Arc<dyn HostDesktopTargetStore>,
     /// `#hosts-screen 6/8`'s keypair, reused rather than reimplemented — one key per host, and one
     /// decryption path for everything the browser encrypts to it.
