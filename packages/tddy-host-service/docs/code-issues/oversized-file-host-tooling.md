@@ -14,6 +14,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-15 | 775 | first detection. 759 at the merge-base; #622 added 16 (`gh_auth_status_args`, per-hostname `probe`). Split deferred with the developer's consent |
+| 2026-10-20 | 775 | #host-desktops 4/8 (hosts-mount): unchanged. The cache lives in `host_tooling_cache.rs` and its call site in `service.rs`, so this file did not grow |
 
 ## What would close it
 

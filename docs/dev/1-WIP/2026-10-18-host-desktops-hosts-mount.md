@@ -79,9 +79,9 @@ The host desktop feature becomes reachable: rows on `#/hosts` show the tooling s
 
 ## Scope
 
-- [ ] Tooling cell on online rows, via `useHostClient(HostService, hostId)`
-- [ ] Cache + in-flight dedup in a new module
-- [ ] Both TODOs closed; code issue measurement updated
+- [x] Tooling cell on online rows, via `useHostClient(HostService, hostId)`
+- [x] Cache + in-flight dedup in a new module
+- [x] Both TODOs closed; code issue measurement updated
 
 ## Technical Changes
 
@@ -102,8 +102,8 @@ from one probe run within the TTL.
 | `tddy-host-service` | `host_tooling_cache.rs` (new), `host_tooling.rs` call site, `lib.rs` |
 
 ## Implementation Milestones
-- [ ] M1 Cache + dedup with unit tests
-- [ ] M2 Tooling cell mounted; Cypress acceptance green
+- [x] M1 Cache + dedup with unit tests
+- [x] M2 Tooling cell mounted; Cypress acceptance green
 
 ## Testing Plan
 
@@ -153,8 +153,8 @@ tests fail on `todo!("TODO(hosts-mount): implement ToolingCache::new")`.
 ## Refactoring Needed
 ### From @red (TDD Red Phase)
 - `aKnownHost` is now defined in four Hosts specs (including `HostsScreen.cy.tsx` and this node's spec) — a shared `knownHosts.ts` builder in `cypress/support/rpc/` would remove the copies.
-- Green: decide whether a **failed** probe answer is cached for the full TTL (the unit tests do not pin it); `list_agent_models` does not cache failures.
-- Green: wiring `ToolingCache` into `get_host_tooling` (`service.rs`, not `host_tooling.rs` — the probe call is in `service.rs:486-495`) needs a TTL constant and a `HostServiceImpl` field; no test pins the call site.
+- Green (decided): every answer is cached for the full TTL, **including a failed reading**. The probe reports failures as readings (`ProbeOutcome`), not as errors, so there is no error answer to exclude, and re-running it per request would reinstate the fan-out. The one error path, a probe that panicked on the blocking pool, is kept as its message for the same TTL (30 s, `HOST_TOOLING_CACHE_TTL` in `service.rs`); `get_or_probe` returns an infallible `T`, so excluding it would need an API change nothing asks for.
+- Green (done): wiring `ToolingCache` into `get_host_tooling` (`service.rs`, not `host_tooling.rs` — the probe call is in `service.rs:486-495`) needs a TTL constant and a `HostServiceImpl` field; no test pins the call site.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
@@ -176,7 +176,7 @@ tests fail on `todo!("TODO(hosts-mount): implement ToolingCache::new")`.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved with the wave-1 batch, 2026-10-18)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)

@@ -13,9 +13,9 @@
 //! "Now" comes from an injected [`Clock`], so expiry is tested by moving a hand-driven clock rather
 //! than by sleeping.
 
+use std::collections::HashMap;
 use std::future::Future;
-use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Where the cache reads "now" from — injected so expiry is testable without sleeping.
@@ -60,17 +60,29 @@ impl ToolingKey {
     }
 }
 
+/// One key's slot: the last answer and when it was taken. The slot's lock is held for the length of
+/// a probe, which is what makes concurrent callers for the key wait for that run instead of
+/// starting their own.
+type Slot<T> = Arc<tokio::sync::Mutex<Option<(T, Instant)>>>;
+
 /// Probe results by [`ToolingKey`], kept for a TTL, with concurrent callers sharing one run.
+///
+/// Every answer is kept for the full TTL, including one that reports a failed reading: the probe
+/// returns its failures as readings (a missing `gh`, an unreachable agent) rather than as an error,
+/// and re-running it per request would reinstate the fan-out the cache exists to bound.
 pub struct ToolingCache<T: Clone> {
-    // TODO(hosts-mount): implement — the entries, the in-flight runs, the TTL and the clock.
-    _answers: PhantomData<T>,
+    slots: Mutex<HashMap<ToolingKey, Slot<T>>>,
+    ttl: Duration,
+    clock: Arc<dyn Clock>,
 }
 
 impl<T: Clone + Send + 'static> ToolingCache<T> {
     pub fn new(ttl: Duration, clock: Arc<dyn Clock>) -> Self {
-        // TODO(hosts-mount): implement
-        let _ = (ttl, clock);
-        todo!("TODO(hosts-mount): implement ToolingCache::new")
+        Self {
+            slots: Mutex::new(HashMap::new()),
+            ttl,
+            clock,
+        }
     }
 
     /// The answer for `key`: a cached one younger than the TTL, the one a probe already running for
@@ -80,9 +92,24 @@ impl<T: Clone + Send + 'static> ToolingCache<T> {
         F: FnOnce() -> Fut,
         Fut: Future<Output = T>,
     {
-        // TODO(hosts-mount): implement
-        let _ = (key, probe);
-        todo!("TODO(hosts-mount): implement ToolingCache::get_or_probe")
+        let slot = Arc::clone(
+            self.slots
+                .lock()
+                .expect("the tooling cache's slot map was poisoned")
+                .entry(key)
+                .or_default(),
+        );
+        // Waiting here is waiting for a probe already running for this key; once it releases the
+        // slot, its answer is fresh and is served below.
+        let mut answer = slot.lock().await;
+        if let Some((cached, taken_at)) = answer.as_ref() {
+            if self.clock.now().saturating_duration_since(*taken_at) < self.ttl {
+                return cached.clone();
+            }
+        }
+        let fresh = probe().await;
+        *answer = Some((fresh.clone(), self.clock.now()));
+        fresh
     }
 }
 
