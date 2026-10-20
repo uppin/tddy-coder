@@ -4,9 +4,9 @@ The daemon-side topic code of a session's agent roster runs over `AgentRoster`, 
 host's roster fields, not over the daemon host. About 6.6k production lines in the crate.
 
 `agent_host_callbacks.rs` defines `trait AgentHostCallbacks` (what the topic needs from the host that is
-not a field), the `AgentRoster` handle with its `state()` (a borrowed `AgentRosterState<'a>` of the twelve
-roster fields: `config`, `tddy_data_dir`, `user_resolver`, `peer_routing`, `room_roster`, `session_rooms`,
-`session_agent_rosters`, `session_agent_clones`, `hosted_agent_clones`, `roster_keepalive_interval`,
+not a field), the `AgentRoster` handle with its `state()` (a borrowed `AgentRosterState<'a>` of the fifteen
+roster fields: `config`, `tddy_data_dir`, `user_resolver`, `peer_routing`, `room_directory`, `session_rooms`,
+`room_broadcast`, `room_tokens`, `room_connector`, `session_agent_rosters`, `session_agent_clones`, `hosted_agent_clones`, `roster_keepalive_interval`,
 `session_admissions`, `model_registry`) and `DaemonSeedCloneClaimant`, which holds the handle and which the
 launch topic hands to the roster as its `SeededAgentClones`. A `self.clone()` handed to a task clones the
 handle. The daemon host implements the callbacks once, in `tddy-session-lifecycle`.

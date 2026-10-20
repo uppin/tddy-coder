@@ -29,10 +29,7 @@ use crate::livekit_peer_discovery::{daemon_rpc_identity, livekit_common_room_con
 use crate::session_room::session_room_name;
 use tddy_daemon_kernel::config::DaemonConfig;
 
-/// The TTL of an admission token. Short on purpose: it is the re-admit cadence and the revocation
-/// window. A daemon whose admission has been revoked keeps its current token only until this
-/// elapses, and no re-admit is granted afterwards.
-pub const ADMISSION_TOKEN_TTL: Duration = Duration::from_secs(300);
+pub use tddy_daemon_extensions::ADMISSION_TOKEN_TTL;
 
 /// The margin before token expiry at which an owning daemon re-asks for admission. Keeps the
 /// re-admit ahead of the wire, so a room connection never drops between expiry and rejoin.

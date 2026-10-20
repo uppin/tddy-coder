@@ -190,8 +190,10 @@ It is still an ordinary listable, deletable `workspace` session.
 ### Room admission
 
 The owning daemon does **not** self-mint its session-room token. The facilitating daemon
-mints a scoped, short-TTL (5 min) admission token in `provision_agent_clone`, records the
-owning daemon in a `SessionAdmissionRegistry`, and forwards the token inside
+mints a scoped, short-TTL (5 min, `ADMISSION_TOKEN_TTL`) admission token in `provision_agent_clone`
+(`room_access::mint_first_admission`, through the `RoomTokenMinter` port, on the server URL from the
+`livekit:` block). Only once the token is minted does it record the owning daemon through the
+`RoomAdmission` port, so a failed mint leaves no admission behind. It forwards the token inside
 `StartSessionRequest.agent_clone` (`AgentClonePlacement.first_admission_token`). The owning
 daemon joins `session-{session_id}` with that token.
 
@@ -265,17 +267,20 @@ state. The parts that need no host capability live here as free functions, which
 | `exec_tool_caller` | `authorize_exec_tool_caller` | lifecycle's `resolve_exec_tool_worktree`, and `tddy-daemon-rpc`'s exec-tool handler through lifecycle's `connection_service` re-export. It authenticates the caller before the hosted-clone branch and names this daemon in both refusals |
 
 Where a function reads host fields, it takes `AgentRosterState<'a>` (`agent_roster_state`): the
-twelve fields the roster, its clones and agent-def resolution read, each borrowed for one call
-rather than cloned:
+fifteen fields the roster, its clones and agent-def resolution read, each borrowed for one call
+rather than cloned. The room-facing ones are
+[extension ports](../../tddy-daemon-extensions/docs/extension-ports.md), so the crate names no LiveKit
+crate:
 
 | Field | What it is |
 |---|---|
 | `config`, `tddy_data_dir`, `user_resolver` | the daemon's configuration, its data root, and the map from a caller's session token to their GitHub login |
-| `peer_routing`, `room_roster` | how the host routes an addressed request to a peer daemon, and who the LiveKit server reports in each room |
-| `session_rooms` | the session rooms this daemon hosts |
+| `peer_routing`, `room_directory` | how the host routes an addressed request to a peer daemon (`tddy_host_service::peer_routing::PeerRouting`), and who the room server reports in each room (`RoomDirectory`; `NotFound` for a room it does not list) |
+| `session_rooms`, `room_broadcast` | the session rooms this daemon hosts (`SessionRooms`), and the roster broadcast in them (`RoomBroadcast`, on `SESSION_AGENTS_TOPIC`) |
+| `room_tokens`, `room_connector` | the `RoomTokenMinter` behind a clone's self-join token and the first admission token, and the client `RoomConnector` a hosted clone joins its session room through |
 | `session_agent_rosters`, `session_agent_clones`, `hosted_agent_clones` | every session's agent roster, the clones peers hold for this daemon's sessions, and the clones this daemon holds for other daemons' sessions |
 | `roster_keepalive_interval` | how often a `StreamSessionAgents` subscription re-sends an unchanged roster |
-| `session_admissions` | the owning daemons this daemon, as the facilitating one, has admitted to its session rooms (read when a clone is torn down) |
+| `session_admissions` | the owning daemons this daemon, as the facilitating one, has admitted to its session rooms (`RoomAdmission`; read when a clone is torn down) |
 | `model_registry` | this daemon's model registry, when one is wired (read when an agent id resolves to a registry assistant) |
 
 Every shared field is lent as the `Arc` the host holds, so code that hands a store to a task clones

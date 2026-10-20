@@ -141,9 +141,10 @@ JSON object — so the wire stays additive and a caller reads the same shape the
   ([`2026-09-26`](../../../docs/dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md)).
 - **`service.rs` is 1,055 production lines**, over this repo's 500-line budget, and was not split. See
   [`docs/dev/todo/2026-09-12-the-two-new-service-rs-files-are-over-budget.md`](../../../docs/dev/todo/2026-09-12-the-two-new-service-rs-files-are-over-budget.md).
-- **`session_agent_clone.rs` is 1,157 production lines** and is the sole reason this crate depends on
-  `tddy-daemon-livekit` and `livekit` — which contradicts `ports.rs`'s own header claim that nothing
-  here reaches for a peer or a room. See
+- **`session_agent_clone.rs` is over 1,100 production lines** and holds both sides of a clone (the
+  facilitating daemon's bookkeeping and the owning daemon's room participant). It reaches its room
+  only through the `RoomConnector` and `RoomTokenMinter` ports, so the crate names no LiveKit crate,
+  but the two sides are not split. See
   [`docs/dev/todo/2026-09-12-session-agent-clone-is-two-daemons-in-one-module.md`](../../../docs/dev/todo/2026-09-12-session-agent-clone-is-two-daemons-in-one-module.md).
 
 ## Related

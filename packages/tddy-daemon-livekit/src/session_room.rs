@@ -47,14 +47,7 @@ pub use tddy_service::session_agents::SESSION_AGENTS_TOPIC;
 /// produces it through one import.
 pub use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 
-/// The name of the room that belongs to the checkout owned by `codebase_session_id`.
-///
-/// Both the daemon holding the worktree and the daemon running the agent derive this from an id they
-/// already exchange, so the room name never has to travel as a field of its own — and the two can
-/// never disagree about it.
-pub fn session_room_name(codebase_session_id: &str) -> String {
-    format!("session-{codebase_session_id}")
-}
+pub use tddy_daemon_kernel::peer_forwarding::session_room_name;
 
 /// Whether a session of this type is *facilitated* by the daemon it was started on — that is,
 /// whether it runs an agent here and therefore has a session room of its own.
@@ -72,55 +65,7 @@ pub fn session_type_is_facilitated_here(session_type: &str) -> bool {
     matches!(session_type.trim(), "claude-cli" | "cursor-cli")
 }
 
-/// Everything one poll of a checkout observed.
-///
-/// `changed_paths` is carried here and published in room metadata but never in an event: an event
-/// says *that* the checkout moved, and reading it is what the file-access RPCs in the same room are
-/// for.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct WorktreeSnapshot {
-    pub head_commit: String,
-    pub branch: String,
-    pub changed_paths: Vec<String>,
-    pub changed_files: u32,
-    pub lines_added: i64,
-    pub lines_removed: i64,
-    pub untracked_files: u32,
-    /// The tree object of the whole working tree as it stands, staged into a **temporary** index.
-    ///
-    /// This is what makes a delta possible: diffing two of these yields an ordinary git patch that
-    /// carries deletions, renames, modes and binary content, and — unlike `git diff HEAD` — it sees
-    /// a newly written *untracked* file, which is exactly what a `Write` produces.
-    ///
-    /// The index is temporary and that is not an optimisation: `git add -A` against the agent's own
-    /// index would rewrite its staging area mid-session.
-    ///
-    /// Empty when the tree could not be written; the tick then produces no delta rather than a
-    /// wrong one.
-    pub wip_tree: String,
-}
-
-impl WorktreeSnapshot {
-    /// True when the two snapshots disagree about the **tracked** diff — the paths and their line
-    /// counts, everything `git diff --numstat HEAD` measures.
-    ///
-    /// HEAD is deliberately excluded: it is the other half of the comparison and gets its own event.
-    ///
-    /// So is `untracked_files`, for two reasons. An event carries counts only, and a HEAD-relative
-    /// diff has no line counts for a path git does not track — so a newly written untracked file
-    /// could only be announced as `files=0 +0 -0`, which tells a receiver nothing it can act on.
-    /// And every write is untracked for the moment between the file appearing and `git add`
-    /// staging it, so treating that as activity would put an empty event in front of the commit
-    /// event that actually describes the work. The fact is not lost: it lives in the room's
-    /// metadata, which [`WorktreeSnapshot`] equality still covers, so a joiner reads the untracked
-    /// count from state rather than from a notification with nothing in it.
-    fn tracked_diff_differs(&self, other: &Self) -> bool {
-        self.changed_paths != other.changed_paths
-            || self.changed_files != other.changed_files
-            || self.lines_added != other.lines_added
-            || self.lines_removed != other.lines_removed
-    }
-}
+pub use tddy_daemon_kernel::worktree_snapshot::WorktreeSnapshot;
 
 /// Measure `worktree_root` as it stands right now, within [`DEFAULT_SESSION_ROOM_GIT_TIMEOUT`].
 ///
@@ -1307,13 +1252,7 @@ pub struct SessionRoomHosting<'a> {
     pub session_dir: &'a Path,
 }
 
-/// Where a hosted room is, for the `StartSessionResponse` that announces it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenedSessionRoom {
-    pub room: String,
-    pub url: String,
-    pub server_identity: String,
-}
+pub use tddy_daemon_extensions::OpenedSessionRoom;
 
 /// What makes a session's terminal drivable over LiveKit, named here so [`SessionRoomRegistry`] can
 /// establish it in the same breath as the room without knowing what a PTY is.
@@ -1377,7 +1316,18 @@ pub struct SessionRoomRegistry {
     /// `tokio::sync::Mutex` rather than `std`: the section it guards creates a room and joins it,
     /// both `await`s.
     openings: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Where roster snapshots queue to be published, in the order they were handed over.
+    ///
+    /// Started by the first [`RoomBroadcast::publish`](tddy_daemon_extensions::RoomBroadcast::publish)
+    /// and drained by one task, because that port is synchronous while a publish is not, and a task
+    /// per publish would let two snapshots of one roster overtake each other — leaving subscribers
+    /// on the older one. See `agent_room_ports`.
+    pub(crate) agents_outbox:
+        std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<QueuedBroadcast>>,
 }
+
+/// One roster snapshot waiting to be published: where, for which session, and what.
+pub(crate) type QueuedBroadcast = (Arc<BroadcastPublisher>, String, Vec<u8>);
 
 /// Whether a session's WIP ref has been released, shared between the tick that publishes it and the
 /// close that deletes it.

@@ -112,6 +112,34 @@ The runtime builds it once and hands it to `tddy-daemon-auth` (`build_auth_entri
 (`with_room_tokens`). `MinterTokenProvider` adapts it onto `tddy_service::TokenProvider`, the token
 service's own port, which keeps its fixed TTL and string errors.
 
+## The agent-roster room ports (`room_broadcast`, `room_admission`, `room_directory`)
+
+The session-agent roster (`tddy-session-agents`) reaches a session's room through three ports, plus
+the room-tokens port above and the client [`RoomConnector`](../../tddy-room-client/docs/room-client.md)
+that a hosted agent clone joins through.
+
+| Item | Role |
+|---|---|
+| `RoomBroadcast` | `publish(session_id, topic, payload)`: publish bytes on a topic in a session's room. Synchronous. A session whose room is not hosted here is `Ok`, published nowhere. |
+| `NoRoomBroadcast` | No rooms: every publish reaches nobody, without failing. |
+| `RoomAdmission` | The owning daemons admitted to this daemon's session rooms: `admit` (`true` when newly admitted), `revoke`, `is_admitted`, `revoke_all_for_session` (how many were withdrawn). |
+| `NoRoomAdmission` | No rooms to admit to: nobody is ever admitted. |
+| `ADMISSION_TOKEN_TTL` | 300 s: the TTL of an admission token, which is also the re-admit cadence and the revocation window. |
+| `RoomDirectory` | `participants(room)`: the identities in a room, from the room server's own listing. `NotFound` when the server has no such room, because a room nobody opened is not the same fact as a room nobody is in. |
+| `NoRoomDirectory` | No room server: every listing is a failed precondition. |
+| `OpenedSessionRoom` | `room`, `url`, `server_identity`: where a hosted room is, for the response that announces it (in `session_rooms`). |
+
+`tddy-daemon-livekit::agent_room_ports` implements them:
+- `SessionRoomRegistry` is the `RoomBroadcast`. It publishes the roster on `SESSION_AGENTS_TOPIC`
+  and refuses any other topic with `InvalidArgument`. It queues each snapshot on **one** task that
+  drains in order, because the port is synchronous and a task per publish would let two snapshots
+  of one roster overtake each other.
+- `SessionAdmissionRegistry` is the `RoomAdmission`.
+- `RosterDirectory(Arc<dyn RoomRoster>)` is the `RoomDirectory`. It answers with sorted identities.
+
+The session host builds the roster's port fields in `tddy-session-lifecycle`'s
+`handler_state::agent_roster`.
+
 ## The satellite rule and its ratchet
 
 **Nothing in this crate may reach a LiveKit crate**, transitively, so a core crate that depends on
@@ -143,9 +171,10 @@ The lists, in the test file:
   allowance to the binary's wiring. These libraries join rooms through
   [`tddy-room-client`](../../tddy-room-client/docs/room-client.md).
 - `KNOWN_OFFENDERS` (library crates that still name a LiveKit crate): `tddy-agent-launch`,
-  `tddy-session-agents`, `tddy-session-lifecycle`, `tddy-session-split`. `tddy-daemon-auth`,
-  `tddy-daemon-rpc` and `tddy-session-files` left it once their peer forwards went through
-  `tddy_daemon_kernel::peer_calls` and the OAuth tunnel moved into the plugin.
+  `tddy-session-lifecycle`, `tddy-session-split`. `tddy-daemon-auth`, `tddy-daemon-rpc` and
+  `tddy-session-files` left it once their peer forwards went through
+  `tddy_daemon_kernel::peer_calls` and the OAuth tunnel moved into the plugin. `tddy-session-agents`
+  left it once the roster and its clones went through the agent-roster room ports.
 
 "Names" is a `[dependencies]` or `[build-dependencies]` entry, optional ones included;
 `[dev-dependencies]` are not counted, because a test may stand up a real LiveKit server. The

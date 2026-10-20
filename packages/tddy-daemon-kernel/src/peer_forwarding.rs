@@ -83,6 +83,15 @@ pub fn daemon_rpc_identity(instance_id: &str) -> String {
     )
 }
 
+/// The name of the room that belongs to the checkout owned by `session_id`: `session-{session_id}`.
+///
+/// Both the daemon holding the worktree and the daemon running the agent derive this from an id they
+/// already exchange, so the room name never has to travel as a field of its own — and the two can
+/// never disagree about it.
+pub fn session_room_name(session_id: &str) -> String {
+    format!("session-{session_id}")
+}
+
 /// Default deadline for one forwarded unary RPC, and for opening a forwarded server stream; the
 /// value `DaemonConfig::peer_forward_timeout_secs` takes when the operator sets nothing. Forwarders
 /// read the configured deadline from their [`CommonRoom`], never this constant.
@@ -258,6 +267,14 @@ fn peer_forward_deadline_status(
 mod common_room_tests {
     use super::*;
     use crate::config::DaemonConfig;
+
+    #[test]
+    fn a_sessions_room_is_named_after_the_session() {
+        assert_eq!(
+            session_room_name("1780828020298-abc"),
+            "session-1780828020298-abc"
+        );
+    }
 
     #[test]
     fn a_common_room_carries_the_deadline_the_config_names() {

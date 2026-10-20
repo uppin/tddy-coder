@@ -4,7 +4,7 @@ use prost::Message as _;
 
 use tddy_service::proto::session_agents_svc::CancelAgentConversationRequest;
 
-use tddy_daemon_livekit::livekit_peer_discovery::CommonRoom;
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 use tddy_rpc::Status;
 
 pub async fn forward_cancel_agent_conversation(
