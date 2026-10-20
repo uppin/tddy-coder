@@ -44,11 +44,27 @@ pub enum FacilitatedCheckout {
     Checkout(PathBuf),
 }
 
+/// Whether a session of this type is *facilitated* by the daemon it was started on — that is,
+/// whether it runs an agent here and therefore has a session room of its own.
+///
+/// The PRD's Roles table as a predicate (`docs/ft/daemon/session-room.md` § Roles): the room
+/// belongs to the daemon running the session's agent. `claude-cli` and `cursor-cli` run one here.
+/// A `workspace` session runs none — it is the codebase half of a split session or a standalone
+/// checkout, and whatever agent it has is on another daemon. A `tool` (tddy-coder) session's
+/// terminal is a room `tddy-coder` joins for itself, which this daemon neither creates nor serves.
+///
+/// Deliberately **not** a statement about whether a session type "uses LiveKit". A `claude-cli`
+/// session also bridges its PTY into the lobby, and `ConnectSession` answers about a *terminal*
+/// room none of these types has. Three different rooms; this names one of them.
+pub fn session_type_is_facilitated_here(session_type: &str) -> bool {
+    matches!(session_type.trim(), "claude-cli" | "cursor-cli")
+}
+
 /// The one rule for "a session this daemon facilitates over a checkout it holds", shared by
 /// `ConnectSession` and an extension's own RPC.
 pub fn facilitated_checkout(metadata: &tddy_core::SessionMetadata) -> FacilitatedCheckout {
     let session_type = metadata.session_type.as_deref().unwrap_or_default();
-    if !tddy_daemon_livekit::session_room::session_type_is_facilitated_here(session_type) {
+    if !session_type_is_facilitated_here(session_type) {
         return FacilitatedCheckout::NotFacilitated;
     }
     match metadata.repo_path.as_deref() {
@@ -285,7 +301,10 @@ impl LaunchSessions {
         let budget = self.config.session_room_git_timeout();
         let measured_root = worktree_root.clone();
         let snapshot = tokio::task::spawn_blocking(move || {
-            tddy_daemon_livekit::session_room::snapshot_worktree_within(&measured_root, budget)
+            tddy_worktree_service::worktree_measurement::snapshot_worktree_within(
+                &measured_root,
+                budget,
+            )
         })
         .await
         .map_err(|e| Status::internal(format!("measuring {worktree_root:?} panicked: {e}")))?;
@@ -334,7 +353,7 @@ impl LaunchSessions {
             // The session, its worktree and its attachments are created on the peer; only its
             // events cross back, so progress still reaches the client for the slowest case there
             // is — attachment bytes moving between two hosts.
-            let rx = tddy_daemon_livekit::livekit_peer_discovery::forward_stream_start_session_via_livekit(
+            let rx = tddy_daemon_kernel::peer_calls::forward_stream_start_session(
                 slot,
                 &peer_instance_id,
                 &req,

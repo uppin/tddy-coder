@@ -6,7 +6,7 @@ use std::path::Path;
 
 use std::path::PathBuf;
 
-use crate::livekit_peer_discovery::PeerRoute;
+use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 
 use tddy_rpc::Status;
 
@@ -86,7 +86,7 @@ impl DaemonSessionHost {
     pub(crate) fn common_room_slot(
         &self,
         rpc_name: &str,
-    ) -> Result<&crate::livekit_peer_discovery::CommonRoom, Status> {
+    ) -> Result<&tddy_daemon_kernel::peer_forwarding::CommonRoom, Status> {
         self.peer_routing.common_room_slot(rpc_name)
     }
 

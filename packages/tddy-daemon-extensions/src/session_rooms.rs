@@ -7,13 +7,9 @@
 
 use std::path::Path;
 
-/// Where a hosted room is, for the response that announces it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenedSessionRoom {
-    pub room: String,
-    pub url: String,
-    pub server_identity: String,
-}
+/// Where a hosted room is, for the response that announces it: the same value the reach port's
+/// `open_now` answers, under the name this port always used.
+pub type OpenedSessionRoom = crate::session_reach::OpenedRoom;
 
 /// The rooms this daemon hosts, by session.
 pub trait SessionRooms: Send + Sync {

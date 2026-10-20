@@ -23,12 +23,12 @@ fn a_daemon_with_no_peers(tddy_data_dir: std::path::PathBuf) -> DaemonSessionHos
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     let user_resolver: SessionUserResolver = Arc::new(|_| Some("u".to_string()));
     DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
         user_resolver,
         None,
-        None,
+        crate::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(CliSessionManager::new()),
     )

@@ -18,13 +18,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tddy_daemon_extensions::{ReachableSessions, SessionReach};
+use tddy_daemon_extensions::{ReachableSessions, RoomAdmission, SessionReach, SessionRooms};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::relay_idle::RpcActivity;
 use tddy_daemon_kernel::SessionUserResolver;
-use tddy_daemon_livekit::peer_routing::PeerRouting;
-use tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry;
-use tddy_daemon_livekit::session_room::SessionRoomRegistry;
+use tddy_host_service::peer_routing::PeerRouting;
 use tddy_rpc::Status;
 use tddy_service::proto::session::SessionAttachment;
 use tddy_session_agents::session_agent_clone::HostedAgentClones;
@@ -115,11 +113,11 @@ pub struct LaunchSessions {
     /// What each agent session's own conversation says its agent is doing, which `ListSessions`
     /// reports.
     pub session_agent_inference: Arc<SessionAgentInferenceStore>,
-    pub session_rooms: Arc<SessionRoomRegistry>,
+    pub session_rooms: Arc<dyn SessionRooms>,
     /// The checkouts this daemon holds on other daemons' behalf; a delete forgets the one it holds
     /// for the session.
     pub hosted_agent_clones: Arc<HostedAgentClones>,
-    pub session_admissions: Arc<SessionAdmissionRegistry>,
+    pub session_admissions: Arc<dyn RoomAdmission>,
     /// Told of each started session's worktree. `None` on a host whose embedder acts on nothing of
     /// the kind.
     pub worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,

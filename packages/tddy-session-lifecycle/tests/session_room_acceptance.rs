@@ -446,7 +446,7 @@ impl FacilitatingDaemon {
             sessions.path().to_path_buf(),
             user_resolver,
             None,
-            None,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             None,
             Arc::clone(&agents),
         )

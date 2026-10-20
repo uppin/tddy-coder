@@ -8,8 +8,8 @@ use tddy_session_agents::opened_session_room::require_opened_room;
 
 #[test]
 fn a_remote_agent_is_refused_as_before_when_no_integration_hosts_rooms() {
-    let refused = require_opened_room("1780828020298-abc", None)
-        .expect_err("a remote agent needs a room");
+    let refused =
+        require_opened_room("1780828020298-abc", None).expect_err("a remote agent needs a room");
 
     assert_eq!(refused.code, Code::FailedPrecondition);
     assert_eq!(

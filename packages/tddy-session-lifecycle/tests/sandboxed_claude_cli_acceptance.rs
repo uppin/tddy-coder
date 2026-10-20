@@ -108,12 +108,12 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessio
         }
     });
     DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
         user_resolver,
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     )

@@ -18,7 +18,6 @@ tddy-core = { path = "../tddy-core" }
 tddy-credentials = { path = "../tddy-credentials" }
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
-tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-host-service = { path = "../tddy-host-service" }

@@ -83,7 +83,7 @@ impl SessionReach for NoSessionReach {
         _session: ReachedSession,
         _host: Arc<dyn ReachableSessions>,
     ) -> Result<Option<OpenedRoom>, Status> {
-        todo!("NoSessionReach::open_now")
+        Ok(None)
     }
 
     async fn session_reached(

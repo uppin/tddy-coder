@@ -14,4 +14,5 @@ mod index_daemon_body;
 pub mod local_socket_server;
 pub mod runtime;
 pub mod server;
+pub mod session_delta_stores;
 pub mod startup;

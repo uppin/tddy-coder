@@ -108,7 +108,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 22] = [
+    const ENDPOINT: [&str; 23] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -167,6 +167,12 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // `tddy-github` nor `tddy-daemon-auth`, so only the crate that depends on all three can
         // join them.
         "account_linking.rs",
+        // The session room's delta ring as `tddy-session-activity`'s `SessionDeltaStores`. Wiring
+        // by the same criterion as `common_room_key_directory.rs` — no RPC method, no session
+        // state, built only by `runtime.rs` — and it can live nowhere else: the activity service
+        // names no LiveKit crate and the LiveKit crate names no activity service, so only the
+        // crate that depends on both can join them.
+        "session_delta_stores.rs",
     ];
 
     let mut files = Vec::new();

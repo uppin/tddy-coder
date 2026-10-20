@@ -56,7 +56,9 @@ impl DaemonSessionHost {
 
     /// The common-room LiveKit slot a request is forwarded to a peer through, when configured.
     #[must_use]
-    pub fn common_room_livekit_room(&self) -> Option<crate::livekit_peer_discovery::CommonRoom> {
+    pub fn common_room_livekit_room(
+        &self,
+    ) -> Option<tddy_daemon_kernel::peer_forwarding::CommonRoom> {
         self.peer_routing.common_room_livekit_room().cloned()
     }
 
@@ -146,20 +148,16 @@ impl DaemonSessionHost {
             tddy_data_dir: self.tddy_data_dir.clone(),
             user_resolver: self.user_resolver.clone(),
             peer_routing: self.peer_routing.clone(),
-            room_directory: Arc::new(tddy_daemon_livekit::agent_room_ports::RosterDirectory(
-                Arc::clone(&self.room_roster),
-            )),
-            session_rooms: Arc::clone(&self.session_rooms) as _,
-            room_broadcast: Arc::clone(&self.session_rooms) as _,
-            room_tokens: tddy_daemon_livekit::room_tokens::room_token_minter(
-                self.config.livekit.as_ref(),
-            ),
-            room_connector: Arc::new(tddy_livekit::room_connector::LiveKitRoomConnector),
+            room_directory: Arc::clone(&self.room_directory),
+            session_rooms: Arc::clone(&self.session_rooms),
+            room_broadcast: Arc::clone(&self.room_broadcast),
+            room_tokens: Arc::clone(&self.room_tokens),
+            room_connector: Arc::clone(&self.room_connector),
             session_agent_rosters: Arc::clone(&self.session_agent_rosters),
             session_agent_clones: Arc::clone(&self.session_agent_clones),
             hosted_agent_clones: Arc::clone(&self.hosted_agent_clones),
             roster_keepalive_interval: self.roster_keepalive_interval,
-            session_admissions: Arc::clone(&self.session_admissions) as _,
+            session_admissions: Arc::clone(&self.session_admissions),
             model_registry: self.model_registry.clone(),
             host: Arc::new(self.clone()),
         }

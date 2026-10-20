@@ -33,12 +33,12 @@ fn make_unit_service(tddy_data_dir: std::path::PathBuf) -> DaemonSessionHost {
         }
     });
     DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
         user_resolver,
         None,
-        None,
+        crate::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(CliSessionManager::new()),
     )

@@ -79,10 +79,10 @@ fn test_service(os_user: &str) -> TestDaemon {
         data_dir,
         user_resolver,
         None,
-        Some(LiveKitDiscoveryHandles {
+        tddy_daemon_livekit::peer_routing::peer_routing_over(&test_config_for_os_user(os_user), Some(LiveKitDiscoveryHandles {
             eligible_daemon_source: Arc::new(PeerProjectsSource),
             common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-        }),
+        })),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     ))

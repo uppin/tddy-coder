@@ -38,7 +38,7 @@ impl AgentRoster {
             .host
             .ensure_session_room(session_id, codebase.session_dir.as_path(), &worktree_root)
             .await?;
-        opened_session_room::require_opened_session_room(session_id, opened)
+        opened_session_room::require_opened_room(session_id, opened)
     }
 
     /// Claim the clone serving `daemon_instance_id`'s agents on this session, and start building it

@@ -309,7 +309,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         sessions_b.path().to_path_buf(),
         user_resolver.clone(),
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
@@ -374,16 +374,19 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     )
     .with_eligible_daemon_source(Arc::clone(&eligible));
     let service_a = DaemonSessionHost::new(
-        config_a,
+        config_a.clone(),
         resolver_a,
         sessions_a.path().to_path_buf(),
         user_resolver,
         None,
-        Some(
-            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles {
-                eligible_daemon_source: eligible,
-                common_room_livekit_room: room_slot,
-            },
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config_a,
+            Some(
+                tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles {
+                    eligible_daemon_source: eligible,
+                    common_room_livekit_room: room_slot,
+                },
+            ),
         ),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),

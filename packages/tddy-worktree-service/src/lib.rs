@@ -11,6 +11,7 @@ pub mod branch_owner;
 pub use tddy_projects::{project_provision, project_storage};
 pub mod remote_git_service;
 pub mod worktree_files;
+pub mod worktree_measurement;
 pub mod worktrees;
 
 pub mod service;

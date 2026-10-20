@@ -95,12 +95,12 @@ fn a_session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSession
     let user_resolver: UserResolver =
         Arc::new(move |token| (token == VALID_TOKEN).then(|| user.clone()));
     DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
         user_resolver,
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     )

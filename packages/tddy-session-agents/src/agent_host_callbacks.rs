@@ -23,14 +23,17 @@ use crate::session_agent_clone::{HostedAgentClones, HostedClone, SessionAgentClo
 use crate::session_agent_roster::SessionAgentRosterStore;
 use crate::AgentRosterState;
 use tddy_daemon_extensions::{
-    OpenedSessionRoom, RoomAdmission, RoomBroadcast, RoomDirectory, RoomTokenMinter, SessionRooms,
+    OpenedRoom, RoomAdmission, RoomBroadcast, RoomDirectory, RoomTokenMinter, SessionRooms,
 };
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::worktree_snapshot::WorktreeSnapshot;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_host_service::peer_routing::PeerRouting;
 use tddy_model_registry::ModelRegistryStore;
-use tddy_room_client::RoomConnector;
+/// The port a room is joined through and the null object for a build with no transport: the types
+/// of [`AgentRoster::room_connector`], named here so the session host that fills it does not need
+/// a dependency of its own on the room client.
+pub use tddy_room_client::{NoRoomTransport, RoomConnector};
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_service::proto::exec_tools::ExecuteToolResponse;
@@ -71,14 +74,14 @@ pub trait AgentHostCallbacks: Send + Sync {
     ) -> ExecuteToolResponse;
 
     /// Open the session's room over a checkout this daemon holds, unless it is open already (the
-    /// host's `ensure_session_room`: the room's roster and its terminal bridge are the host's to
-    /// supply). `Ok(None)` means this daemon has no room integration configured and hosts no rooms.
+    /// host's `ensure_session_room`: the integration behind the host's reach port opens it).
+    /// `Ok(None)` means this daemon has no room integration configured and hosts no rooms.
     async fn ensure_session_room(
         &self,
         session_id: &str,
         session_dir: &Path,
         worktree_root: &Path,
-    ) -> Result<Option<OpenedSessionRoom>, Status>;
+    ) -> Result<Option<OpenedRoom>, Status>;
 }
 
 /// The session host's roster fields, owned, plus its callbacks.

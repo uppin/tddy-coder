@@ -26,14 +26,11 @@ use tddy_service::proto::activity::{
     SessionNotificationEvent, StreamAcpReplayRequest, StreamSessionActivityRequest,
     StreamSessionNotificationsRequest,
 };
-use tddy_session_activity::{
-    ActivityPorts, ActivityServiceImpl, DeltaLookup, DeltaScope, MeasuredDelta, SessionDeltaStores,
-    SessionLabels,
-};
+use tddy_session_activity::{ActivityPorts, ActivityServiceImpl, SessionLabels};
 use tddy_worktree_service::stream::MpscResultStream;
 
 use super::DaemonSessionHost;
-use crate::livekit_peer_discovery::PeerRoute;
+use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 
 /// The coordinate a forward is addressed at on the peer. A forwarded call has to land on the same
 /// method of the same service there, which is where the peer declares these eight.
@@ -94,9 +91,7 @@ impl DaemonSessionHost {
             // tool call and a `claude` hook reach one stream.
             activity: Arc::clone(&self.agent_activity_hub),
             session_labels: Arc::new(SessionsNamedAsListSessionsNamesThem),
-            deltas: Arc::new(RoomsHostedByThisDaemon {
-                connection: self.clone(),
-            }),
+            deltas: Arc::clone(&self.session_delta_stores),
             notifications: self.session_notification_bus.clone(),
         }
     }
@@ -113,61 +108,6 @@ struct SessionsNamedAsListSessionsNamesThem;
 impl SessionLabels for SessionsNamedAsListSessionsNamesThem {
     fn label_for(&self, sessions_base: &std::path::Path, session_id: &str) -> String {
         crate::session_notifications::resolve_session_label(sessions_base, session_id)
-    }
-}
-
-/// The delta rings of the session rooms this daemon hosts.
-///
-/// A patch is a measurement of a live checkout, and only the daemon hosting that room ever took
-/// one — so a session with no room here has no delta and never will, which is the
-/// [`DeltaLookup::NoRoomHere`] the crate reports as an absence rather than a failure.
-struct RoomsHostedByThisDaemon {
-    connection: DaemonSessionHost,
-}
-
-impl SessionDeltaStores for RoomsHostedByThisDaemon {
-    fn delta_for_call(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        scope: DeltaScope,
-    ) -> Result<DeltaLookup, Status> {
-        let Some(store) = self.connection.session_rooms.delta_store(session_id) else {
-            return Ok(DeltaLookup::NoRoomHere);
-        };
-        let room_scope = match scope {
-            DeltaScope::Call => tddy_daemon_livekit::session_room::DeltaScope::Call,
-            DeltaScope::Residual => tddy_daemon_livekit::session_room::DeltaScope::Residual,
-            DeltaScope::Tick => tddy_daemon_livekit::session_room::DeltaScope::Tick,
-        };
-        let looked_up = {
-            let store = store
-                .lock()
-                .map_err(|_| Status::internal("session delta store is poisoned"))?;
-            store.delta_for_call(call_id, room_scope)
-        };
-        Ok(match looked_up {
-            Ok(delta) => DeltaLookup::Found(measured_delta(delta)),
-            Err(tddy_daemon_livekit::session_room::DeltaLookupError::UnknownCall { .. }) => {
-                DeltaLookup::UnknownCall
-            }
-            Err(tddy_daemon_livekit::session_room::DeltaLookupError::AgedOut { seq, .. }) => {
-                DeltaLookup::AgedOut { seq }
-            }
-        })
-    }
-}
-
-/// A session room's delta, as the activity service describes one: the same five fields.
-pub(super) fn measured_delta(
-    delta: tddy_daemon_livekit::session_room::ActivityDelta,
-) -> MeasuredDelta {
-    MeasuredDelta {
-        seq: delta.seq,
-        prev_seq: delta.prev_seq,
-        base_commit: delta.base_commit,
-        patch: delta.patch,
-        scoped_paths: delta.scoped_paths,
     }
 }
 

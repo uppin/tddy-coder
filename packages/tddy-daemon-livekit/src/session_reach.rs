@@ -12,7 +12,8 @@
 use std::sync::Arc;
 
 use tddy_daemon_extensions::{
-    IntegrationReporter, IntegrationState, ReachableSessions, ReachedSession, SessionReach,
+    IntegrationReporter, IntegrationState, OpenedRoom, ReachableSessions, ReachedSession,
+    SessionReach,
 };
 use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
@@ -22,7 +23,7 @@ use tddy_service::proto::session_room::{
 };
 
 use crate::session_room::{
-    session_room_name, DaemonRoomHosting, OpenedSessionRoom, RoomOpenFailure, SessionRoomRegistry,
+    session_room_name, DaemonRoomHosting, RoomOpenFailure, SessionRoomRegistry,
     SessionTerminalBridge,
 };
 
@@ -82,41 +83,11 @@ impl LiveKitSessionReach {
         })
     }
 
-    /// Open `session`'s room (or reuse the open one) and expose its terminal there, now. `Ok(None)`
-    /// when this daemon has no LiveKit credentials. Every outcome is reported on the board.
-    pub async fn open_now(
-        &self,
-        session: &ReachedSession,
-        host: Arc<dyn ReachableSessions>,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
-        match self.open_room(session, host).await {
-            Ok(Some(opened)) => {
-                self.status.report(IntegrationState::Connected);
-                Ok(Some(opened))
-            }
-            // `ensure_open` answers `None` only without credentials, so this is the state the
-            // block alone describes.
-            Ok(None) => {
-                self.status
-                    .report(livekit_integration_state(self.config.livekit.as_ref()));
-                Ok(None)
-            }
-            Err(RoomOpenFailure::Server(failure)) => {
-                self.status.report(IntegrationState::Unreachable {
-                    error: failure.message.clone(),
-                });
-                Err(failure)
-            }
-            // The server was not the problem, so the board says nothing new about it.
-            Err(RoomOpenFailure::Elsewhere(failure)) => Err(failure),
-        }
-    }
-
     async fn open_room(
         &self,
         session: &ReachedSession,
         host: Arc<dyn ReachableSessions>,
-    ) -> Result<Option<OpenedSessionRoom>, RoomOpenFailure> {
+    ) -> Result<Option<OpenedRoom>, RoomOpenFailure> {
         let instance_id = local_instance_id_for_config(&self.config);
         let hosting = DaemonRoomHosting {
             config: &self.config,
@@ -180,14 +151,15 @@ impl SessionRoomService for SessionRoomServer {
             .sessions
             .resolve(&request.session_token, &request.session_id)
             .await?;
+        let session_id = session.session_id.clone();
         let opened = self
             .reach
-            .open_now(&session, Arc::clone(&self.sessions))
+            .open_now(session.clone(), Arc::clone(&self.sessions))
             .await?
             .ok_or_else(|| {
                 Status::failed_precondition(format!(
                     "LiveKit is not configured on this daemon, so {} cannot be opened",
-                    session_room_name(&session.session_id)
+                    session_room_name(&session_id)
                 ))
             })?;
         Ok(tddy_rpc::Response::new(OpenSessionRoomResponse {
@@ -200,13 +172,34 @@ impl SessionRoomService for SessionRoomServer {
 
 #[async_trait::async_trait]
 impl SessionReach for LiveKitSessionReach {
+    /// Open `session`'s room (or reuse the open one) and expose its terminal there, now. `Ok(None)`
+    /// when this daemon has no LiveKit credentials. Every outcome is reported on the board.
     async fn open_now(
         &self,
         session: ReachedSession,
         host: Arc<dyn ReachableSessions>,
-    ) -> Result<Option<tddy_daemon_extensions::OpenedRoom>, Status> {
-        let _ = (session, host);
-        todo!("LiveKitSessionReach::open_now (the trait's)")
+    ) -> Result<Option<OpenedRoom>, Status> {
+        match self.open_room(&session, host).await {
+            Ok(Some(opened)) => {
+                self.status.report(IntegrationState::Connected);
+                Ok(Some(opened))
+            }
+            // `ensure_open` answers `None` only without credentials, so this is the state the
+            // block alone describes.
+            Ok(None) => {
+                self.status
+                    .report(livekit_integration_state(self.config.livekit.as_ref()));
+                Ok(None)
+            }
+            Err(RoomOpenFailure::Server(failure)) => {
+                self.status.report(IntegrationState::Unreachable {
+                    error: failure.message.clone(),
+                });
+                Err(failure)
+            }
+            // The server was not the problem, so the board says nothing new about it.
+            Err(RoomOpenFailure::Elsewhere(failure)) => Err(failure),
+        }
     }
 
     async fn session_reached(
@@ -215,16 +208,17 @@ impl SessionReach for LiveKitSessionReach {
         host: Arc<dyn ReachableSessions>,
     ) -> Result<(), Status> {
         if session.arrived_over == RequestTransport::LiveKit {
-            return self.open_now(&session, host).await.map(drop);
+            return self.open_now(session, host).await.map(drop);
         }
         // Nothing on this host needs the room: open it so the session is reachable from elsewhere,
         // and let the board carry the outcome rather than a caller that never asked for it.
         let reach = self.clone();
         tokio::spawn(async move {
-            if let Err(failure) = reach.open_now(&session, host).await {
+            let session_id = session.session_id.clone();
+            if let Err(failure) = reach.open_now(session, host).await {
                 log::warn!(
                     "session_reach: could not open the room of session {}: {}",
-                    session.session_id,
+                    session_id,
                     failure.message
                 );
             }

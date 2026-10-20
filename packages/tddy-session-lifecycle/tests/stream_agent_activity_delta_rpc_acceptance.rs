@@ -12,12 +12,12 @@
 
 use pretty_assertions::assert_eq;
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
-use tddy_daemon_livekit::session_room::ActivityDelta;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::activity::{
     ActivityService as _, AgentActivityDeltaChunk, AgentActivityDeltaRequest, DeltaScope,
 };
-use tddy_session_lifecycle::connection_service::activity_delta_frames;
+use tddy_session_activity::service::activity_delta_frames;
+use tddy_session_activity::MeasuredDelta;
 use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 
 const A_SESSION: &str = "1780828020298-delta";
@@ -40,8 +40,8 @@ fn a_delta_request() -> AgentActivityDeltaRequest {
 }
 
 /// A tick delta of `patch_len` bytes, credited to one file.
-fn a_delta_of(patch_len: usize) -> ActivityDelta {
-    ActivityDelta {
+fn a_delta_of(patch_len: usize) -> MeasuredDelta {
+    MeasuredDelta {
         seq: 7,
         prev_seq: 6,
         base_commit: A_BASE_COMMIT.to_string(),

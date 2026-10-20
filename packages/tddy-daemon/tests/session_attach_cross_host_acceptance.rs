@@ -17,6 +17,8 @@
 //!
 //! Single-host behavior lives in `tests/session_attach_staging_scope_acceptance.rs`.
 
+mod daemon_rpc_participant;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,7 +44,7 @@ use tddy_service::proto::session_files::{
 };
 use tddy_service::proto::types::HostDocumentScope;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered, TEST_TOKEN};
+use tddy_session_lifecycle::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -183,15 +185,18 @@ async fn a_daemon(
     );
 
     let service = DaemonSessionHost::new(
-        config,
+        config.clone(),
         resolver,
         sessions.path().to_path_buf(),
         user_resolver,
         None,
-        Some(LiveKitDiscoveryHandles {
-            eligible_daemon_source: eligible,
-            common_room_livekit_room: room_slot,
-        }),
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: room_slot,
+            }),
+        ),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
@@ -210,7 +215,7 @@ async fn a_daemon(
 /// Joins the common room as `daemon-{instance_id}` — the identity a caller must address, and the
 /// only one that answers.
 ///
-/// Which coordinates it serves is [`test_util::serve_daemon_rpc_participant`]'s answer rather than
+/// Which coordinates it serves is [`daemon_rpc_participant::serve_daemon_rpc_participant`]'s answer rather than
 /// this suite's: `StartSession` is still `the pre-unbundle monolithic RPC coordinate`'s, while the staging and
 /// host-document RPCs a forward addresses became `session_files.SessionFilesService`'s with
 /// `#unbundle` node 6, and a suite-local list is how one of them stops being served.
@@ -223,7 +228,7 @@ async fn serve_rpc_participant(
     let token = livekit
         .generate_token(room(), &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
-    test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
+    daemon_rpc_participant::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
 
 /// Blocks until `service` lists `peer_instance_id` as eligible, so a route to it classifies as a

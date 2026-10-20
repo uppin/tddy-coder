@@ -127,12 +127,12 @@ fn service_with_known_codebase_peer_and_config(
         common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
     };
     TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
-        config,
+        config.clone(),
         resolver,
         sessions_base,
         user_resolver_valid(),
         None,
-        Some(discovery),
+        tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     )))

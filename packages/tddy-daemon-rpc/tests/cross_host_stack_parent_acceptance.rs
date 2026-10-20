@@ -191,15 +191,15 @@ livekit:
         Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
 
     let service = TestDaemon::from_host(DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         data_dir.path().to_path_buf(),
         user_resolver,
         None,
-        Some(LiveKitDiscoveryHandles {
+        tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(LiveKitDiscoveryHandles {
             eligible_daemon_source: Arc::new(ACommonRoomWithTheOrchestratorHost),
             common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-        }),
+        })),
         None,
         Arc::new(CliSessionManager::new()),
     ));

@@ -45,6 +45,18 @@ impl PeerRouting {
         }
     }
 
+    /// Routing for a daemon with no peers and no common room: this machine is the only host, named
+    /// the way `config` names it — not by its hostname, which is merely the default when no
+    /// `daemon_instance_id` is set.
+    #[must_use]
+    pub fn local_only(config: &DaemonConfig) -> Self {
+        Self::new(
+            config.clone(),
+            Arc::new(crate::multi_host::LocalOnlyEligibleDaemonSource::for_config(config)),
+            None,
+        )
+    }
+
     /// The peer daemons this one may route a request to, and their project rows.
     #[must_use]
     pub fn eligible_daemon_source(&self) -> &Arc<dyn EligibleDaemonSource> {

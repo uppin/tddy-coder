@@ -49,15 +49,15 @@ fn test_service(
         }
     });
     TestDaemon::from_host(DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
         user_resolver,
         None,
-        Some(LiveKitDiscoveryHandles {
+        tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(LiveKitDiscoveryHandles {
             eligible_daemon_source: eligible,
             common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-        }),
+        })),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     ))

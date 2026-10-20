@@ -1,10 +1,10 @@
 use super::super::DaemonSessionHost;
 
-use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
-
-use tddy_rpc::Status;
-
 use std::path::Path;
+use std::sync::Arc;
+
+use tddy_daemon_extensions::{OpenedRoom, ReachedSession};
+use tddy_rpc::{RequestTransport, Status};
 
 impl DaemonSessionHost {
     /// Open the session's room over a checkout this daemon holds, unless it is open already.
@@ -13,28 +13,27 @@ impl DaemonSessionHost {
     /// longer opens one: a room is what a session is reached through, so it is created when
     /// something first reaches for it. Every caller here is such a reach — a client connecting to
     /// the session, an owning daemon being admitted to it — and each of them is already waiting on
-    /// a LiveKit round trip by asking.
+    /// a round trip to the room server by asking. What opens it is the integration behind the
+    /// host's [`SessionReach`](tddy_daemon_extensions::SessionReach) port.
     ///
-    /// `Ok(None)` means this daemon has no LiveKit credentials at all and hosts no rooms; each
-    /// caller decides what that means for it.
+    /// `Ok(None)` means no integration hosts rooms on this daemon; each caller decides what that
+    /// means for it.
     pub(crate) async fn ensure_session_room(
         &self,
         session_id: &str,
         session_dir: &Path,
         worktree_root: &Path,
-    ) -> Result<Option<tddy_daemon_livekit::session_room::OpenedSessionRoom>, Status> {
-        let local_instance_id = local_instance_id_for_config(&self.config);
-        let hosting = tddy_daemon_livekit::session_room::DaemonRoomHosting {
-            config: &self.config,
-            instance_id: &local_instance_id,
-            rooms: &self.session_rooms,
-        }
-        .for_worktree(session_id, worktree_root, session_dir);
-        self.session_rooms
-            .ensure_open(
-                &hosting,
-                || std::sync::Arc::new(self.clone()).session_room_roster(),
-                self,
+    ) -> Result<Option<OpenedRoom>, Status> {
+        self.session_reach
+            .open_now(
+                ReachedSession {
+                    session_id: session_id.to_string(),
+                    session_dir: session_dir.to_path_buf(),
+                    worktree_root: worktree_root.to_path_buf(),
+                    // The core asks, not a client: nothing arrived over a transport.
+                    arrived_over: RequestTransport::Direct,
+                },
+                Arc::new(self.clone()),
             )
             .await
     }

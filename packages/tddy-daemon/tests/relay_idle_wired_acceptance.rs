@@ -30,7 +30,7 @@ fn minimal_service_with_tracker(tracker: Arc<IdleTimeoutTracker>) -> TestDaemon 
             std::env::temp_dir().join("tddy-idle-test"),
             user_resolver,
             None,
-            None,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&DaemonConfig::default()),
             None,
             Arc::new(ClaudeCliSessionManager::new()),
         )

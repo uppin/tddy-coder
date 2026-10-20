@@ -124,7 +124,7 @@ fn make_service(
         tddy_data_dir,
         user_resolver,
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_daemon_config()),
         Some(Arc::clone(&telegram) as _),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )

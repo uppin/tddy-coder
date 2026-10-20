@@ -151,7 +151,7 @@ fn a_service_with_both_subscribers(
         tddy_data_dir,
         user_resolver,
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&a_daemon_config()),
         Some(hooks),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )

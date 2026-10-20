@@ -113,12 +113,12 @@ spawn_startup_poll_interval_ms: 10
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     let base = data_dir.to_path_buf();
     DaemonSessionHost::new(
-        config,
+        config.clone(),
         Arc::new(move |_| Some(base.clone())),
         data_dir.to_path_buf(),
         Arc::new(|token| (token == TEST_TOKEN).then(|| OWNER.to_string())),
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )

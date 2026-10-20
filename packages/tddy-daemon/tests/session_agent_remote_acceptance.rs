@@ -14,6 +14,8 @@
 //! fleet's session id (`a_fleet_with_peers`). Daemon identities are fixed and repeat across
 //! processes, so a room name shared between fleets would let them evict each other.
 
+mod daemon_rpc_participant;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -273,9 +275,16 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             sessions.path().to_path_buf(),
             user_resolver.clone(),
             None,
-            None,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             None,
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+        );
+        let service = daemon_rpc_participant::with_the_livekit_room_ports(
+            service,
+            Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new()),
+            Arc::new(
+                tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry::new(),
+            ),
         );
 
         tddy_daemon::runtime::spawn_common_room_discovery_task(
@@ -296,12 +305,9 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         // whole reason that helper exists.
         let service_arc = Arc::new(tddy_daemon_rpc::RpcHandlers::install(service).0);
         service_arc.install_sandbox_rpc_bridge();
-        let run = tddy_session_lifecycle::test_util::serve_daemon_rpc_participant(
-            &ws_url,
-            &token,
-            &service_arc,
-        )
-        .await;
+        let run =
+            daemon_rpc_participant::serve_daemon_rpc_participant(&ws_url, &token, &service_arc)
+                .await;
 
         running_peers.push(PeerDaemon {
             instance_id: instance_id.to_string(),
@@ -386,14 +392,26 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         sessions_a.path().to_path_buf(),
         user_resolver.clone(),
         None,
-        Some(
-            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles {
-                eligible_daemon_source: eligible,
-                common_room_livekit_room: room_slot,
-            },
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config_a,
+            Some(
+                tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles {
+                    eligible_daemon_source: eligible,
+                    common_room_livekit_room: room_slot,
+                },
+            ),
         ),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
+    );
+    let session_admissions =
+        Arc::new(tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry::new());
+    let session_rooms_for_admissions =
+        Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
+    let service_a = daemon_rpc_participant::with_the_livekit_room_ports(
+        service_a,
+        Arc::clone(&session_rooms_for_admissions),
+        Arc::clone(&session_admissions),
     );
 
     // A's RPC LiveKit participant serving `remote_git.RemoteGitService` and
@@ -410,15 +428,13 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         let serving = os_user.clone();
         Arc::new(move |os_user| (os_user == serving).then(|| dir.clone()))
     };
-    let session_admissions = service_a.session_admissions();
-    let session_rooms_for_admissions = service_a.session_rooms();
     let remote_git_server = RemoteGitServiceServer::new(RemoteGitServiceImpl::new(
         user_resolver.clone(),
         remote_git_resolver,
         Arc::new(config_a.clone()),
     ));
     let admission_server = SessionAdmissionServiceServer::new(
-        tddy_session_lifecycle::session_admission_service::SessionAdmissionServiceImpl::new(
+        tddy_daemon_livekit::session_admission_service::SessionAdmissionServiceImpl::new(
             user_resolver,
             Arc::new(config_a.clone()),
             session_admissions,

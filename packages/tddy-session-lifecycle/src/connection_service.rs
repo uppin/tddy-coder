@@ -6,9 +6,6 @@ use std::time::Duration;
 
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
-use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
-use tddy_daemon_livekit::session_room::ActivityDelta;
-use tddy_service::proto::activity::AgentActivityDeltaChunk;
 use tddy_spawn::spawn_worker;
 use tddy_task::TaskRegistry;
 
@@ -38,8 +35,6 @@ use tddy_service::proto::session::{SessionAttachment, SplitAgentPlacement};
 #[cfg(test)]
 use tddy_service::proto::session::{Signal, SignalSessionRequest, StartSessionRequest};
 
-use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
-
 #[cfg(test)]
 pub(crate) use service_util::*;
 /// The deadlines every clone and supervised spawn runs under — shared with the project handlers in
@@ -57,7 +52,7 @@ pub use tddy_worktree_service::stream::MpscResultStream;
 /// A roster nobody is changing produces no frames for hours, and a *forwarded* subscription — the
 /// split session's case, where the agent runs on one daemon and its roster lives on another — rides
 /// a relay that terminates a stream which stops producing
-/// ([`crate::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT`]). That deadline is
+/// ([`tddy_daemon_kernel::peer_forwarding::PEER_FORWARD_STREAM_IDLE_TIMEOUT`]). That deadline is
 /// deliberate: a stream that goes quiet must never read as one that ended, or a truncated forward
 /// passes for a complete one. So the roster has to keep talking. Re-sending the applied revision is
 /// the cheapest frame there is — applying a revision already held is a defined no-op that announces
@@ -70,7 +65,7 @@ pub const ROSTER_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(8);
 // Checked here rather than in a test so raising either one cannot compile.
 const _: () = assert!(
     ROSTER_KEEPALIVE_INTERVAL.as_millis() * 2
-        < crate::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT.as_millis(),
+        < tddy_daemon_kernel::peer_forwarding::PEER_FORWARD_STREAM_IDLE_TIMEOUT.as_millis(),
     "two roster keepalives must fit inside a relay's idle deadline, or one lost frame ends a \
      forwarded subscription"
 );
@@ -105,7 +100,7 @@ pub struct DaemonSessionHost {
     /// shared across clones so the jail a start provisioned is the one the next handler's
     /// `ExecuteTool` finds.
     workspace_sandboxes: Arc<tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry>,
-    /// What builds those jails. Injected the way `host_stats` and `room_roster` are, so the
+    /// What builds those jails. Injected the way `host_stats` and `room_directory` are, so the
     /// dispatch, refusal and ordering contracts are testable without booting one.
     workspace_sandbox_provisioner:
         Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
@@ -117,10 +112,24 @@ pub struct DaemonSessionHost {
     /// The relay's idle tracker, when it has one — bumped on every RPC call, here and by the
     /// families served above this crate, which hold the same one.
     rpc_activity: crate::relay_idle::RpcActivity,
-    /// Reader for the LiveKit server's rooms and their participants. `StreamLiveKitRooms` left for
-    /// `livekit.LiveKitService`; what still reads the roster here is agent-clone provisioning,
-    /// which needs to know whether a session's room already exists.
-    room_roster: Arc<dyn RoomRoster>,
+    /// Who is in a room, from the room server's own listing. Agent-clone provisioning reads it to
+    /// know whether a session's room already exists.
+    /// [`tddy_daemon_extensions::NoRoomDirectory`] until the composition root installs an
+    /// integration with [`Self::with_room_directory`].
+    room_directory: Arc<dyn tddy_daemon_extensions::RoomDirectory>,
+    /// Mints the access token a participant joins a room with.
+    /// [`tddy_daemon_extensions::NoRoomTokens`] until [`Self::with_room_tokens`].
+    room_tokens: Arc<dyn tddy_daemon_extensions::RoomTokenMinter>,
+    /// How this daemon joins a room as a client. [`tddy_session_agents::agent_host_callbacks::NoRoomTransport`] until
+    /// [`Self::with_room_connector`].
+    room_connector: Arc<dyn tddy_session_agents::agent_host_callbacks::RoomConnector>,
+    /// The delta rings of the session rooms this daemon hosts, which `StreamAgentActivityDelta`
+    /// answers from. Answers "no room here" for every session until
+    /// [`Self::with_session_delta_stores`].
+    session_delta_stores: Arc<dyn tddy_session_activity::service::SessionDeltaStores>,
+    /// Publishes to everyone in a session's room on a topic.
+    /// [`tddy_daemon_extensions::NoRoomBroadcast`] until [`Self::with_room_broadcast`].
+    room_broadcast: Arc<dyn tddy_daemon_extensions::RoomBroadcast>,
     /// Cadence at which a `StreamSessionAgents` subscription re-sends an unchanged roster
     /// (overridable for tests).
     roster_keepalive_interval: Duration,
@@ -156,11 +165,10 @@ pub struct DaemonSessionHost {
     /// cleared by the host restart rather than living in the data dir forever. Defaults to
     /// [`crate::session_attachment_staging::default_staging_base_dir`].
     staging_base_dir: PathBuf,
-    /// The per-worktree LiveKit rooms this daemon hosts, keyed by the session owning each checkout
-    /// (`docs/ft/daemon/session-room.md`). Holding the joined participant
-    /// here is what keeps a room open past the `StartSession` that created it; `DeleteSession`
-    /// closes it again.
-    session_rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
+    /// The per-worktree rooms this daemon hosts, keyed by the session owning each checkout
+    /// (`docs/ft/daemon/session-room.md`); `DeleteSession` closes one again.
+    /// [`tddy_daemon_extensions::NoSessionRooms`] until [`Self::with_session_rooms`].
+    session_rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
     /// This daemon's model registry, whose assistants are selectable agents alongside the
     /// `allowed_agents` config entries. `None` means no registry is wired (a test fixture), in
     /// which case `ListAgents` reports the config entries alone.
@@ -181,7 +189,7 @@ pub struct DaemonSessionHost {
     /// step 3). The admission RPC refreshes entries here; the attach path records the first admit;
     /// the detach path revokes an owning daemon when its last agent in a session goes; the
     /// session-delete path revokes every owning daemon a session admitted at once.
-    session_admissions: Arc<crate::session_admission_service::SessionAdmissionRegistry>,
+    session_admissions: Arc<dyn tddy_daemon_extensions::RoomAdmission>,
     /// Open conversations with roster agents, keyed by conversation id. Local entries hold a live
     /// turn loop here; remote entries hold only the routing, because the loop runs on the owning
     /// daemon.
@@ -401,43 +409,6 @@ mod daemon_rpc_handler;
 
 mod svc_demo_vm_ports;
 pub use crate::connection_service::demo_vm_service::DemoVmServiceImpl;
-
-/// Bytes to leave free in a LiveKit data packet for everything in a frame that is not payload: the
-/// RPC envelope (request id, service/method metadata, sender identity) plus the frame's own fields —
-/// `total_byte_size` for a document chunk, `error_message` / `job_id` / the flags for a tool-result
-/// chunk. Mirrors the web's `UPLOAD_REQUEST_ENVELOPE_HEADROOM`, which sizes the same budget from the
-/// other end of the same transport.
-const FRAME_ENVELOPE_HEADROOM: usize = 8 * 1024;
-
-/// A frame plus its envelope must fit in one LiveKit data packet. Past that budget the transport
-/// splits each frame into chunk frames, and one lost chunk frame leaves the peer's reassembler
-/// permanently incomplete — the call is then never answered and never fails
-/// (`docs/ft/coder/rpc-multi-transport.md`). A build failure here is the point: the doc comment above
-/// asserts "without its own chunk framing", and raising the frame size to 64 KiB would silently make
-/// that false. One assert covers `tddy-daemon-rpc`'s `EXEC_TOOL_FRAME_BYTES` too, which is defined as
-/// this same constant.
-///
-/// [`FRAME_ENVELOPE_HEADROOM`] is a *shared* budget, not a per-field one, and one frame type spends
-/// more of it than the rest: `ContextFileBatchChunk` repeats `rel_path` on every frame, so a deeply
-/// nested `.claude/skills/…/SKILL.md` eats path-length bytes out of the same 8 KiB the RPC envelope
-/// uses. 8 KiB against a path bounded by `PATH_MAX` leaves that comfortable today — this is a note
-/// for whoever narrows the headroom or adds a frame field, not a live risk.
-const _: () = assert!(
-    HOST_DOCUMENT_FRAME_BYTES + FRAME_ENVELOPE_HEADROOM
-        <= tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES,
-    "HOST_DOCUMENT_FRAME_BYTES must fit in one LiveKit data packet with envelope headroom"
-);
-
-/// Split one [`ActivityDelta`]'s patch into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames.
-///
-/// The framing is [`tddy_session_activity::service::activity_delta_frames`], the one the activity
-/// service streams with; this takes the session room's own delta type. Every frame carries the whole
-/// description, and a call that changed nothing is **one** frame with an empty patch — AC9.
-pub fn activity_delta_frames(delta: &ActivityDelta) -> Vec<AgentActivityDeltaChunk> {
-    tddy_session_activity::service::activity_delta_frames(&svc_activity_ports::measured_delta(
-        delta.clone(),
-    ))
-}
 
 pub use stack_seed_validation::*;
 
