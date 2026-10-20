@@ -233,6 +233,9 @@ inspects first and answers `DESKTOP_CREDENTIALS` instead of `DESKTOP_PASSWORD`: 
 
 ## Technical Debt & Production Readiness
 
+- [x] Fingerprint derivation in the sign-in dialog — deferred: [2026-10-21-desktop-sign-in-pins-the-advertised-fingerprint.md](../todo/2026-10-21-desktop-sign-in-pins-the-advertised-fingerprint.md)
+- [x] `HostPromptEvent.offered_auth_methods` unused — deferred: [2026-10-21-host-prompt-offered-auth-methods-is-never-sent.md](../todo/2026-10-21-host-prompt-offered-auth-methods-is-never-sent.md)
+
 ## Refactoring Needed
 ### From @red (TDD Red Phase)
 - `tests/common/mod.rs` (screen-sharing) grows a stand-in that answers `--inspect`, a re-scriptable
@@ -264,7 +267,13 @@ inspects first and answers `DESKTOP_CREDENTIALS` instead of `DESKTOP_PASSWORD`: 
 - ✅ Fixed (back to /green once): VNC inspect dropped every type a server advertised after VeNCrypt (`break` after committing to type 19). VeNCrypt's subtypes are now appended after the other types.
 - Minor, for /pr-wrap: `HostPassphraseDialog.allowEmpty` has no caller left; `PromptKind::DesktopPassword` is raised by nothing (the proto value stays for wire compatibility); `HostKeyContinuityNotices` fragment is over-indented.
 ### From /validate-tests
+- [WARNING] `host_desktop_sign_in_acceptance.rs`: `inspect_host_desktop`'s X11 branch (`target.display.is_some()` → `NONE`, no bridge run) has no test. Add one.
+- [WARNING] `host_desktop_sign_in_acceptance.rs`: no test for an inspection whose bridge fails (non-zero exit → `Unavailable` with its stderr). Add one if the stand-in can be scripted to fail inspect.
+- [DECISION] `HostDesktopConnectAcceptance.cy.tsx` — the approved `says the answer may be left blank when the desktop has no password` is **removed, not restored**: the blank-answer prompt it pinned no longer exists. A desktop advertising `NONE` gets no form at all — the overlay answers the host's question itself — so there is no dialog to say "blank" in. Its intent (an operator is never made to invent a password a desktop does not have) is now pinned by the same spec's `opens a desktop that has no password without asking the operator` and by `HostDesktopSignInAcceptance.cy.tsx`'s `opens a desktop that needs no sign in without asking`. Recorded in State B and *Decisions*.
 ### From /validate-prod-ready
+- [TODO] `HostDesktopSignInDialog.tsx` `TODO(host-desktops)` (pins the advertised fingerprint, `checkHostKey`, rather than one derived from the key, `verifyHostKey`): **deferred** — deriving it makes every question in two approved specs `mismatched`, because they publish a generated key beside a fixed fake fingerprint, so the fix is a spec-fixture change. Recorded in [2026-10-21-desktop-sign-in-pins-the-advertised-fingerprint.md](../todo/2026-10-21-desktop-sign-in-pins-the-advertised-fingerprint.md); the TODO comment links it. The password dialog had the same check before this PR.
+- [UNUSED] `HostPromptEvent.offered_auth_methods` is always sent empty, and its proto comment claims otherwise. **Correct the comment** now; the field's removal is deferred in [2026-10-21-host-prompt-offered-auth-methods-is-never-sent.md](../todo/2026-10-21-host-prompt-offered-auth-methods-is-never-sent.md).
+- [DECISION] When the vault write after a successful start fails (G1), the error is logged with `log::error!` (naming the desktop, never the secret), and the started stream is returned rather than torn down. The next open asks again. This is deliberate: a working sign-in is not thrown away over a storage error. The vault was already checked to be open before the start, so this path is reached only if the vault closes during the start.
 ### From /analyze-clean-code
 
 ## Validation Results
@@ -284,7 +293,9 @@ Builds: `cargo check --all-targets` for `tddy-daemon-extensions`, `tddy-screensh
 
 Findings: 3 warnings fixed through /green (above, *From /validate-changes*); 3 minor cleanups for /pr-wrap. Decisions recorded: the **"Open for green"** choice is the overlay answering itself — the daemon still raises `DESKTOP_CREDENTIALS` on every start (an X11 channel and a `NONE` desktop included; `InspectHostDesktop` answers `NONE` for an X11 display without running a bridge), and the overlay answers a `NONE` desktop's question with an encrypted `{method: NONE}` and no form. Node 7's x11vnc step stays in the host-target start path, between the credential and the bridge spawn. `HostPromptEvent.offered_auth_methods` is sent empty: the methods come from `InspectHostDesktop`, not the prompt.
 ### /validate-tests
+**2026-10-21.** Analyzed: 13 daemon sign-in acceptance tests, 5 VNC inspect, 2 RDP inspect, 5 screenshare/extension-port unit tests, 8 web sign-in specs, the 12 updated connect specs and the touched start-failure / channels / input-scope specs. Fluent-tests: Given/When/Then throughout, builders (`a_credential()…`, `a_daemon_whose_bridge(…)`), page objects (`hostDesktopSignInPage`), decrypted-and-decoded assertions on what the host reads. No `#[ignore]`, `.only`, `.skip`; the one poll (`what_the_client_did`, 5 ms) is bounded by `AN_INSPECTION_FINISHES_WITHIN`. No description/body mismatches. Critical: 0. Warnings: 2 (coverage, above). One approved test removed as superseded, with its reason recorded (above).
 ### /validate-prod-ready
+**2026-10-21 — ⚠️ gaps tracked.** No mock or fake code in production paths, no `println!`/`eprintln!`/`dbg!`/`console.log`, and no environment-conditional code. `expect()` calls appear only in inline tests. TODO markers: 1 added (deferred with a todo entry, above). Unused: `allowEmpty` and `PromptKind::DesktopPassword` were removed in step 1's refactor; `offered_auth_methods` is deferred. Blockers: 0.
 ### /analyze-clean-code
 
 ## TODO
