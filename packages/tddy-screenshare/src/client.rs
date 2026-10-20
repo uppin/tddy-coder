@@ -1,3 +1,16 @@
+/// What a bridge signs in to a remote desktop with.
+///
+/// Every field is absent when the target does not ask for it: a VNC server with
+/// no authentication needs none, a password-only VNC server needs only `password`,
+/// and an RDP desktop needs `username` and `password`, plus `domain` when the
+/// account belongs to a Windows domain.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Credentials {
+    pub username: Option<String>,
+    pub domain: Option<String>,
+    pub password: Option<String>,
+}
+
 /// Protocol-agnostic screen-sharing client trait.
 ///
 /// Implemented by `VncClientState` (tddy-vnc) and `RdpClient` (tddy-rdp).
@@ -6,13 +19,8 @@
 pub trait ScreenSharingClient: Sized + Send + 'static {
     /// Open a connection to the remote desktop at `host:port`.
     ///
-    /// `username` and `password` are `None` for targets that don't require them.
-    async fn connect(
-        host: &str,
-        port: u16,
-        username: Option<&str>,
-        password: Option<&str>,
-    ) -> anyhow::Result<Self>;
+    /// Each field of `credentials` is `None` for targets that don't require it.
+    async fn connect(host: &str, port: u16, credentials: &Credentials) -> anyhow::Result<Self>;
 
     /// Current framebuffer dimensions `(width, height)` in pixels.
     ///

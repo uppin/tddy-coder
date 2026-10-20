@@ -23,7 +23,7 @@ use tddy_service::proto::screen_sharing_input::{
     ScreenSharingInputService, ScreenSharingInputServiceServer,
 };
 
-use crate::client::ScreenSharingClient;
+use crate::client::{Credentials, ScreenSharingClient};
 use crate::streamer::ScreenSharingStreamer;
 
 /// Configuration passed to a bridge binary via stdin as JSON.
@@ -36,6 +36,9 @@ pub struct BridgeConfig {
     /// Login username (required for RDP; empty for VNC/password-only targets).
     #[serde(default)]
     pub username: String,
+    /// Windows domain the RDP account belongs to (empty for local accounts and for VNC).
+    #[serde(default)]
+    pub domain: String,
     /// Decrypted password (empty string for password-less targets).
     pub password: String,
     /// LiveKit server WebSocket URL.
@@ -61,6 +64,18 @@ pub struct BridgeConfig {
 
 fn default_fps() -> u32 {
     30
+}
+
+impl BridgeConfig {
+    /// The credentials the bridge signs in with: each empty field becomes absent.
+    pub fn credentials(&self) -> Credentials {
+        let present = |value: &str| Some(value.to_owned()).filter(|v| !v.is_empty());
+        Credentials {
+            username: present(&self.username),
+            domain: present(&self.domain),
+            password: present(&self.password),
+        }
+    }
 }
 
 /// Input command forwarded from the RPC data channel to the pump loop.
@@ -129,18 +144,9 @@ pub async fn run_bridge<C: ScreenSharingClient>(config: BridgeConfig) -> Result<
         config.target_id, config.host, config.port, config.livekit_room
     );
 
-    let username = if config.username.is_empty() {
-        None
-    } else {
-        Some(config.username.as_str())
-    };
-    let password = if config.password.is_empty() {
-        None
-    } else {
-        Some(config.password.as_str())
-    };
+    let credentials = config.credentials();
 
-    let mut client = C::connect(&config.host, config.port, username, password)
+    let mut client = C::connect(&config.host, config.port, &credentials)
         .await
         .context("screen sharing connect failed")?;
 
@@ -290,5 +296,98 @@ async fn pump_loop<C: ScreenSharingClient>(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use serde_json::{json, Value};
+
+    use super::*;
+
+    /// The stdin JSON a daemon wrote before bridges knew about domains: no `domain` key.
+    fn a_bridge_config_json() -> Value {
+        json!({
+            "host": "10.0.0.5",
+            "port": 3389,
+            "username": "alice",
+            "password": "s3cret",
+            "livekit_url": "ws://127.0.0.1:7880",
+            "livekit_token": "token",
+            "livekit_room": "room",
+            "livekit_identity": "bridge",
+            "track_name": "screenshare:desktop-1",
+            "width": 1280,
+            "height": 720,
+            "target_id": "desktop-1",
+        })
+    }
+
+    fn with_fields(mut config: Value, fields: Value) -> Value {
+        let object = config
+            .as_object_mut()
+            .expect("bridge config is a JSON object");
+        for (key, value) in fields.as_object().expect("fields are a JSON object") {
+            object.insert(key.clone(), value.clone());
+        }
+        config
+    }
+
+    fn parsed(config: Value) -> BridgeConfig {
+        serde_json::from_value(config).expect("bridge config parses")
+    }
+
+    #[test]
+    fn a_bridge_config_without_a_domain_still_parses() {
+        // Given
+        let stdin = a_bridge_config_json();
+
+        // When
+        let config = parsed(stdin);
+
+        // Then
+        assert_eq!(
+            config.credentials(),
+            Credentials {
+                username: Some("alice".into()),
+                domain: None,
+                password: Some("s3cret".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn a_bridge_config_with_a_domain_carries_it_into_the_credentials() {
+        // Given
+        let stdin = with_fields(a_bridge_config_json(), json!({ "domain": "CORP" }));
+
+        // When
+        let config = parsed(stdin);
+
+        // Then
+        assert_eq!(
+            config.credentials(),
+            Credentials {
+                username: Some("alice".into()),
+                domain: Some("CORP".into()),
+                password: Some("s3cret".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn empty_config_fields_become_absent_credentials() {
+        // Given
+        let stdin = with_fields(
+            a_bridge_config_json(),
+            json!({ "username": "", "domain": "", "password": "" }),
+        );
+
+        // When
+        let config = parsed(stdin);
+
+        // Then
+        assert_eq!(config.credentials(), Credentials::default());
     }
 }

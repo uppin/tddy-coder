@@ -11,7 +11,7 @@ use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
 use ironrdp_connector::{
-    BitmapConfig, ClientConnector, Config, Credentials, DesktopSize, ServerName,
+    BitmapConfig, ClientConnector, Config, ConnectorErrorKind, Credentials, DesktopSize, ServerName,
 };
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_pdu::{
@@ -28,15 +28,20 @@ use ironrdp_tokio::{
 };
 use tokio::net::TcpStream;
 
-/// Dummy `NetworkClient` — no CredSSP is performed in TLS-only mode.
-struct NoNetworkClient;
+/// `NetworkClient` for CredSSP without a KDC: NTLM exchanges everything over the RDP
+/// connection, so a request for the network means the server negotiated Kerberos, which is
+/// not supported. Refusing it makes that an error instead of a silent empty reply.
+struct NoKdcNetworkClient;
 
-impl ironrdp_tokio::NetworkClient for NoNetworkClient {
+impl ironrdp_tokio::NetworkClient for NoKdcNetworkClient {
     async fn send(
         &mut self,
-        _request: &ironrdp_connector::sspi::generator::NetworkRequest,
+        request: &ironrdp_connector::sspi::generator::NetworkRequest,
     ) -> ironrdp_connector::ConnectorResult<Vec<u8>> {
-        Ok(vec![])
+        log::warn!("tddy-rdp: refused KDC request to {}", request.url);
+        Err(ironrdp_connector::general_err!(
+            "Kerberos is not supported: refusing network request to a KDC"
+        ))
     }
 }
 
@@ -52,8 +57,7 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
     async fn connect(
         host: &str,
         port: u16,
-        username: Option<&str>,
-        password: Option<&str>,
+        credentials: &tddy_screenshare::Credentials,
     ) -> Result<Self> {
         // 1. TCP
         let stream = TcpStream::connect(format!("{host}:{port}"))
@@ -69,12 +73,12 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
             },
             desktop_scale_factor: 0,
             credentials: Credentials::UsernamePassword {
-                username: username.unwrap_or("").into(),
-                password: password.unwrap_or("").into(),
+                username: credentials.username.clone().unwrap_or_default(),
+                password: credentials.password.clone().unwrap_or_default(),
             },
             enable_tls: true,
-            enable_credssp: false,
-            domain: None,
+            enable_credssp: true,
+            domain: credentials.domain.clone(),
             client_build: 0,
             client_name: "tddy-rdp".into(),
             keyboard_type: KeyboardType::IbmEnhanced,
@@ -135,13 +139,19 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
             upgraded,
             connector,
             &mut framed,
-            &mut NoNetworkClient,
+            &mut NoKdcNetworkClient,
             server_name,
             server_public_key,
             None,
         )
         .await
-        .context("connect_finalize")?;
+        .map_err(|e| {
+            let stage = match e.kind() {
+                ConnectorErrorKind::Credssp(_) => "connect_finalize: NLA authentication failed",
+                _ => "connect_finalize",
+            };
+            anyhow::Error::new(e).context(stage)
+        })?;
 
         let image = DecodedImage::new(
             PixelFormat::RgbA32,

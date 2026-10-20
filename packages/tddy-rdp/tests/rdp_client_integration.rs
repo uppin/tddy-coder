@@ -23,7 +23,7 @@ use ironrdp_server::{
 use tokio::sync::mpsc;
 
 use tddy_rdp::rdp_client::RdpClient;
-use tddy_screenshare::client::ScreenSharingClient as _;
+use tddy_screenshare::client::{Credentials, ScreenSharingClient as _};
 
 // ── Crypto provider ───────────────────────────────────────────────────────────
 
@@ -333,7 +333,7 @@ async fn receive_next_qr_frame(client: &mut RdpClient, prev: Option<&str>) -> St
 async fn streams_qr_coded_frames_with_incrementing_content() {
     // Given: a fake RDP server that delivers QR-coded frames on demand
     let server = FakeRdpServer::start().await;
-    let mut client = RdpClient::connect("127.0.0.1", server.port, None, None)
+    let mut client = RdpClient::connect("127.0.0.1", server.port, &Credentials::default())
         .await
         .expect("RDP connect failed");
 
@@ -358,7 +358,7 @@ async fn framebuffer_dimensions_match_server_desktop_size() {
     let server = FakeRdpServer::start().await;
 
     // When: client completes the connection handshake
-    let client = RdpClient::connect("127.0.0.1", server.port, None, None)
+    let client = RdpClient::connect("127.0.0.1", server.port, &Credentials::default())
         .await
         .expect("RDP connect failed");
 
@@ -370,7 +370,7 @@ async fn framebuffer_dimensions_match_server_desktop_size() {
 async fn pointer_event_is_received_by_server() {
     // Given: connected client and a server ready to record input
     let server = FakeRdpServer::start().await;
-    let mut client = RdpClient::connect("127.0.0.1", server.port, None, None)
+    let mut client = RdpClient::connect("127.0.0.1", server.port, &Credentials::default())
         .await
         .expect("RDP connect failed");
 
@@ -403,7 +403,7 @@ async fn pointer_event_is_received_by_server() {
 async fn keyboard_press_is_received_by_server() {
     // Given: connected client and a server ready to record input
     let server = FakeRdpServer::start().await;
-    let mut client = RdpClient::connect("127.0.0.1", server.port, None, None)
+    let mut client = RdpClient::connect("127.0.0.1", server.port, &Credentials::default())
         .await
         .expect("RDP connect failed");
 
@@ -438,7 +438,7 @@ async fn keyboard_press_is_received_by_server() {
 async fn closes_connection_cleanly_on_stop() {
     // Given: connected client
     let server = FakeRdpServer::start().await;
-    let mut client = RdpClient::connect("127.0.0.1", server.port, None, None)
+    let mut client = RdpClient::connect("127.0.0.1", server.port, &Credentials::default())
         .await
         .expect("RDP connect failed");
 
