@@ -210,22 +210,34 @@ than subscribed to, and only for hosts that are online.
 - [x] A readable config with no explicit aliases reads "No SSH hosts", not a probe failure.
 - [x] An unreadable config reads as "Could not check", never as "No SSH hosts".
 - [x] Wildcard-only `Host` patterns contribute no alias names.
+- [x] In the running app, a reachable desktop on an online host shows Connect on its Hosts row.
+- [x] An offline host makes no tooling call, even when a wire to it exists.
+- [x] A host that does not answer reads "Tooling could not be read", never a blank cell.
+- [x] Two concurrent requests for one host run one probe.
+- [x] A request within the TTL runs no probe, and one after it probes again.
+- [x] Different hosts, different OS users on one host, and different GitHub hostnames are cached separately.
 
-## Not yet reachable in the running app
+## Where the cells appear
 
-⚠ **No screen mounts these cells.** `HostRowTooling` — and with it the ssh-agent and remote-desktop
-sections — is not rendered by `HostsScreen` or any other component in `packages/tddy-web/src`;
-nothing there issues `GetHostTooling` either. Its only call sites are the Cypress component specs,
-which mount it directly.
+Every **online** row on the Hosts screen carries a tooling cell. The cell asks that row's host for
+its tooling — one `GetHostTooling` per online row per visit, addressed to the host the row names —
+and renders the answer as the section described above, remote desktop and its Connect action
+included. While the answer is pending the cell shows a loading marker. When the host does not answer
+the cell says **"Tooling could not be read"**, never a blank: a blank cell reads as a host with no
+tooling, which is a finding nobody made.
 
-So everything above is implemented, tested and reachable over the wire, and **an operator cannot see
-any of it yet**. Mounting the section on the Hosts row belongs to the node that owns that row. Until
-then this page describes a contract rather than a screen someone can open, and the assembled path
-— row → RPC → probe → cells — has never run.
+An **offline** row shows no tooling and asks nothing — a host that has left the roster has nothing
+to answer through.
+
+The daemon bounds the cost of this. It keeps each host's answer for 30 seconds, per OS user and per
+GitHub hostname, and callers that arrive while a probe for the same host is running share that one
+run. A Hosts screen listing many hosts therefore does not start a subprocess fan-out on every visit.
+A failed reading is part of the answer and is kept for the same window, so an operator who fixes a
+host's `gh` login sees it within that window.
 
 The remote-desktop section is mounted by `HostRowTooling` behind an optional prop, the way the
-ssh-agent section is, so it comes along the moment that row is mounted and needs no separate wiring
-of its own. It fetches nothing itself.
+ssh-agent section is, so it appears with the section and needs no wiring of its own. It fetches
+nothing itself.
 
 ## Technical reference
 

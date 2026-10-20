@@ -161,13 +161,11 @@ as it likes. The real cause is written to the host's own log.
   behalf.
 - Removing a key from an agent, and generating one, are not offered.
 
-## What is not reachable yet
+## Where the action appears
 
-⚠ **No screen mounts the row this action lives on.** The add-key control sits in the ssh-agent
-section of the tooling row, and nothing in `packages/tddy-web/src` renders that row — its only call
-sites are the Cypress specs. Everything above is implemented, covered and reachable over the wire, and
-**an operator cannot open a screen that shows it**. Mounting the row belongs to the node that owns it,
-and this page describes a contract until then.
+The add-key control sits in the ssh-agent section of an online host's tooling cell on the Hosts
+screen (see [Hosts screen tooling](./hosts-screen-tooling.md)), so an operator reaches it from that
+row. An offline host shows no tooling and so offers no add-key action.
 
 ## Acceptance criteria
 

@@ -55,6 +55,7 @@ act on right now belong at the top, and the rest stay listed rather than disappe
 | Host | The host's label, with a `(local)` marker on the daemon serving the page |
 | Status | Online / Offline, offline rendered muted |
 | Last seen | A short relative phrase: "just now", "3 minutes ago", "2 hours ago", "5 days ago" |
+| Tooling | On an online row, what that host has installed and configured, with its remote desktop and Connect action; nothing on an offline row. See [Hosts screen tooling](./hosts-screen-tooling.md) |
 | Instance ID | The id every host-addressed RPC is keyed on |
 | Repos base path | Where that host keeps its checkouts |
 

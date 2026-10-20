@@ -546,6 +546,35 @@ resolution order along with them. Opening a host's desktop is a separate action 
 makes that noticeable, the fix is a short-TTL cache in front of the block; it is recorded rather than
 pre-optimised.
 
+## The tooling cache
+
+`GetHostTooling` shells out — `git config`, `gh auth status` (which can reach the network), the ssh
+agent, a TCP connect per desktop protocol — and every online row on the Hosts screen asks on every
+visit. `host_tooling_cache.rs` puts a `ToolingCache` in front of the probe so that is not a
+subprocess fan-out per page load per operator.
+
+- **Key.** `ToolingKey { daemon_instance_id, os_user, github_hostname }`. The probe is per OS user
+  (`git config --global` and `gh auth status` read that user's `$HOME`), so the OS user is part of
+  the key: one operator's git identity or `gh` login is never served to another. A different
+  `github_hostname` is a different question and a different key.
+- **TTL.** An answer is served without probing again for `HOST_TOOLING_CACHE_TTL` (30 s, in
+  `service.rs`). "Now" comes from an injected `Clock` (`SystemClock` in the daemon), so expiry is
+  tested by moving a hand-driven clock rather than by sleeping.
+- **In-flight dedup.** Each key has one slot whose lock is held for the length of a probe, so a
+  caller arriving while a probe for the same key runs waits for that run's answer instead of starting
+  another. Different keys probe in parallel. A caller dropped mid-probe stores nothing.
+- **Failures are cached.** The probe reports its failures as readings (`ProbeOutcome`), not as
+  errors, so a failed reading is part of the answer and is kept for the TTL; probing again per
+  request would reinstate the fan-out the cache bounds. The one error path, a probe that panicked on
+  the blocking pool, is kept as its message for the same window and answers `Status::internal`.
+  `warn_if_failed` therefore logs once per probe run, not once per request.
+- **Bounded.** The key carries a caller-supplied `github_hostname`, so slots that are expired and
+  held by nobody are dropped whenever a slot is looked up; the map does not grow with the number of
+  distinct hostnames ever asked about.
+
+`get_host_tooling` reaches the cache through a private `cached_tooling` method on `HostServiceImpl`;
+the cache holds `Result<HostTooling, String>`.
+
 ## Failures are logged
 
 `Failed` is the one outcome whose cause lives on the daemon's side of the wire — a missing tool, a
@@ -585,8 +614,9 @@ a Unix host can never honestly give for them.
 | Unit | `ssh_agent.rs` `#[cfg(test)]` | the protocol exchange, the four outcomes, fingerprint derivation |
 | Unit | `remote_desktop_probe.rs` `#[cfg(test)]` | a real socket's behaviour: reachable, refused, no bytes written, and the bridge check against a configured path |
 | Integration | `host_tooling.rs` `#[cfg(test)]` | the desktop block arriving **beside** the other three rather than instead of them, and the two facts staying apart |
-| Integration | `host_tooling_handler_unit_tests.rs` | auth rejection, the OS user the probe is handed, peer routing, the agent block reaching the wire whole |
-| Component | `packages/tddy-web/cypress/component/HostsScreenToolingAcceptance.cy.tsx`, `HostsScreenSshAgentAcceptance.cy.tsx`, `HostsScreenRemoteDesktopAcceptance.cy.tsx` | the states rendering distinguishably |
+| Integration | `host_tooling_handler_unit_tests.rs` | auth rejection, the OS user the probe is handed, peer routing, the agent block reaching the wire whole, and the cache wiring: two calls within the TTL run one probe, a different `github_hostname` is probed separately |
+| Unit | `host_tooling_cache.rs` `#[cfg(test)]` | dedup of concurrent callers, hit within the TTL, expiry, isolation by host, OS user and `github_hostname`, a dropped caller storing nothing, failed answers held, eviction of expired unheld slots |
+| Component | `packages/tddy-web/cypress/component/HostsScreenToolingMountAcceptance.cy.tsx`, `HostsScreenToolingAcceptance.cy.tsx`, `HostsScreenSshAgentAcceptance.cy.tsx`, `HostsScreenRemoteDesktopAcceptance.cy.tsx` | the states rendering distinguishably |
 
 Shelling out to the real `git` / `gh` was rejected: CI has an arbitrary `gh` state, and a suite that
 asserts against it is environment-dependent by construction. Talking to the developer's own
