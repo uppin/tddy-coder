@@ -15,11 +15,11 @@
 pub(super) mod assemble;
 pub(super) mod bindings;
 mod canonical_paths;
-mod creation;
+pub(super) mod creation;
 pub(super) mod destination;
 pub(super) mod doc_links;
 pub(super) mod facade;
-mod imports;
+pub(super) mod imports;
 pub(crate) mod members;
 pub(crate) mod outline;
 pub(super) mod outside;

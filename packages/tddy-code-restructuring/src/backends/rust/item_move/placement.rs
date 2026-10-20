@@ -12,7 +12,11 @@ use crate::Result;
 /// A file module takes the items at its end, or above its trailing `#[cfg(test)]` module: items
 /// after a test module are what `clippy::items_after_test_module` fails the lint gate for. An inline
 /// module takes them on the lines before its closing brace, indented to match.
-pub(super) fn insertion(text: &str, scope: &Range<usize>, moved: &str) -> Result<Edit> {
+pub(in crate::backends::rust) fn insertion(
+    text: &str,
+    scope: &Range<usize>,
+    moved: &str,
+) -> Result<Edit> {
     if scope.start == 0 {
         return Ok(match test_module_start(text, scope) {
             Some(at) => Edit::insert(at, format!("{moved}\n")),

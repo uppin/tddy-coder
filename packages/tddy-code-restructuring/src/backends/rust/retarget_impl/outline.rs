@@ -52,9 +52,22 @@ impl Run {
     }
 }
 
+/// The operation a run is read for. The refusals that name the operation differ between them; the
+/// rest of the reading is the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::backends::rust) enum Operation {
+    RetargetImpl,
+    MoveImplMembers,
+}
+
 /// The `impl` block `range` lands in and the run of members it moves, or the refusal for why none
 /// can be.
-pub(in crate::backends::rust) fn read(symbols: &Value, text: &str, range: Range) -> Result<Run> {
+pub(in crate::backends::rust) fn read(
+    symbols: &Value,
+    text: &str,
+    range: Range,
+    operation: Operation,
+) -> Result<Run> {
     let overlapping: Vec<&Value> = symbols
         .as_array()
         .into_iter()
@@ -69,18 +82,29 @@ pub(in crate::backends::rust) fn read(symbols: &Value, text: &str, range: Range)
              `impl`",
             range.start.line, range.end.line
         ))),
-        [one] => block(one, text, range),
-        many => Err(seam_refusal(format!(
-            "the members anchored sit in more than one `impl` block ({} of them): a retarget changes \
-             one block's self type, and one operation cannot change {}",
-            many.len(),
-            many.len()
-        ))),
+        [one] => {
+            refuse_a_trait_impl(one, operation)?;
+            block(one, text, range, operation)
+        }
+        many => Err(seam_refusal(two_blocks_reason(operation, many.len()))),
     }
 }
 
+/// S1: the members anchored sit in more than one block, which one operation cannot change.
+fn two_blocks_reason(operation: Operation, count: usize) -> String {
+    let change = match operation {
+        Operation::RetargetImpl => {
+            "a retarget changes one block's self type, and one operation cannot change"
+        }
+        Operation::MoveImplMembers => {
+            "a member move takes one run from one block, and one operation cannot take from"
+        }
+    };
+    format!("the members anchored sit in more than one `impl` block ({count} of them): {change} {count}")
+}
+
 /// The members of one `impl` block, and which run of them `range` moves.
-fn block(impl_node: &Value, text: &str, range: Range) -> Result<Run> {
+fn block(impl_node: &Value, text: &str, range: Range, operation: Operation) -> Result<Run> {
     let members: Vec<Member> = impl_node
         .get("children")
         .and_then(Value::as_array)
@@ -106,6 +130,9 @@ fn block(impl_node: &Value, text: &str, range: Range) -> Result<Run> {
     };
 
     refuse_a_cut_member(&members, &moved, range)?;
+    if operation == Operation::MoveImplMembers {
+        refuse_a_non_member(text, &members, first_moved, last_moved)?;
+    }
 
     Ok(Run {
         members,
@@ -129,6 +156,51 @@ fn refuse_a_cut_member(members: &[Member], moved: &[usize], range: Range) -> Res
             return Err(seam_refusal(format!(
                 "the range cuts `{}` in half: it ends at line {} and the member goes on",
                 member.name, range.end.line
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// S3: a member move cannot take a member of a trait `impl`, which moves whole with `move_item`.
+fn refuse_a_trait_impl(impl_node: &Value, operation: Operation) -> Result<()> {
+    let label = label_of(impl_node);
+    match operation {
+        Operation::MoveImplMembers if is_trait_impl(&label) => Err(seam_refusal(format!(
+            "`{label}` is a member of a trait `impl`, and a trait `impl` moves whole with `move_item`"
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// Whether an `impl` label names a trait: `impl Display for Host`, not `impl<T> Host<T>`.
+fn is_trait_impl(label: &str) -> bool {
+    let rest = label.strip_prefix("impl").unwrap_or(label).trim_start();
+    let rest = if rest.starts_with('<') {
+        after_generics(rest).unwrap_or(rest)
+    } else {
+        rest
+    };
+    rest.contains(" for ")
+}
+
+/// S4: the lines from a run's first member to its last hold nothing but blank lines and comments
+/// between the members. A macro invocation, or any item the outline does not list, cannot move with
+/// the run, so it refuses the run rather than leave it behind.
+fn refuse_a_non_member(text: &str, members: &[Member], first: usize, last: usize) -> Result<()> {
+    for line in members[first].first_line..=members[last].last_line {
+        let covered = members
+            .iter()
+            .any(|member| (member.first_line..=member.last_line).contains(&line));
+        let code = text
+            .lines()
+            .nth(line as usize - 1)
+            .unwrap_or_default()
+            .trim();
+        let trivia = code.is_empty() || code.starts_with("//") || code.starts_with('*');
+        if !covered && !trivia {
+            return Err(seam_refusal(format!(
+                "line {line} is `{code}`, which is not a member of the `impl`: it would move with the run"
             )));
         }
     }
@@ -238,7 +310,7 @@ mod tests {
             end: crate::edit::Position { line: 7, col: 1 },
         };
 
-        let refused = read(&symbols, "", range);
+        let refused = read(&symbols, "", range, Operation::RetargetImpl);
 
         assert!(refused
             .map(|_| ())

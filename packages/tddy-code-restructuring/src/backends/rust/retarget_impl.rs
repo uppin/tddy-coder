@@ -71,7 +71,7 @@ impl RustBackend {
         self.ensure_indexed(&uri)?;
         let symbols = self.settled_outline(&uri)?;
 
-        let run = outline::read(&symbols, &text, range)?;
+        let run = outline::read(&symbols, &text, range, outline::Operation::RetargetImpl)?;
         if run.self_type == new_name {
             return Err(seam_refusal(format!(
                 "`{}` is already the self type of this `impl`: there is nothing to retarget",

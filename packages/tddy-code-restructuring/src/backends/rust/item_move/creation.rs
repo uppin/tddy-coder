@@ -33,7 +33,7 @@ impl Destination {
 }
 
 /// The findings for creating `name` in `parent`, and the destination it would be.
-pub(super) fn within(
+pub(in crate::backends::rust) fn within(
     workspace: &Workspace<'_>,
     named: &Named,
     name: &str,
@@ -74,7 +74,7 @@ pub(super) fn within(
 }
 
 /// The parent's lines that declare the new module: where they go, and what to write.
-pub(super) fn declaration(
+pub(in crate::backends::rust) fn declaration(
     parent_text: &str,
     scope: &Range<usize>,
     visibility: &str,

@@ -3,6 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Feature (new restructure operation, engine-authored text edits informed by the server)
+**Complexity**: 3/5 — one crate, live rust-analyzer integration tests
 **Stack**: `#reshape` 12/24, branch `feature/reshape/move-impl-members`, green wave 2. PR title:
 `feat(code-restructuring): move_impl_members moves impl members into another module (#reshape 12/24)`.
 Base in the linear stack: `feature/reshape/anchors-outline` (K=16). **Real edges**: `widen-same-crate` (K=1 → 13, the
@@ -460,6 +461,6 @@ or excuses a repeated header, and the developer decides which.
 - [x] Changeset written
 - [x] Developer review of F1–F7 (all recommendations approved, 2026-10-09)
 - [x] First push: owned surface and failing tests 1–22 ([#610](https://github.com/uppin/tddy-coder/pull/610))
-- [ ] USER REVIEW — acceptance tests
+- [x] USER REVIEW — acceptance tests
 - [ ] Green: milestones 1–5
 - [ ] `/validate-changes`, `/pr-wrap`: docs, todo narrowing, history row
