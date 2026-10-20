@@ -14,11 +14,9 @@
  * | online, answered               | `HostRowTooling` with the readings — which brings Connect |
  */
 
-import { useEffect, useState, type JSX } from "react";
-import { HostService, type GetHostToolingResponse } from "../../gen/host_pb";
-import { useAuthContext } from "../../hooks/authProvider";
-import { useHostClient } from "../../rpc/connections/registry";
+import type { JSX } from "react";
 import { HostRowTooling } from "./HostRowTooling";
+import { useHostTooling } from "./useHostTooling";
 
 export interface HostRowToolingCellProps {
   /** The host to ask. */
@@ -27,41 +25,13 @@ export interface HostRowToolingCellProps {
   online: boolean;
 }
 
-/** What the one call has come to: not yet answered, answered, or failed. */
-type Reading =
-  | { state: "loading" }
-  | { state: "answered"; tooling: GetHostToolingResponse }
-  | { state: "failed" };
-
 export function HostRowToolingCell({ instanceId, online }: HostRowToolingCellProps): JSX.Element | null {
-  // Hooks cannot be conditional, so "do not ask" is said by naming no host: an offline row resolves
-  // no client and nothing is called.
-  const client = useHostClient(HostService, online ? instanceId : null);
-  const { sessionToken } = useAuthContext();
-  const [reading, setReading] = useState<Reading>({ state: "loading" });
-
-  useEffect(() => {
-    if (!client) return;
-    let current = true;
-    setReading({ state: "loading" });
-    client
-      .getHostTooling({ sessionToken: sessionToken ?? "", daemonInstanceId: instanceId })
-      .then((tooling) => {
-        if (current) setReading({ state: "answered", tooling });
-      })
-      .catch((error: unknown) => {
-        console.debug("[HostRowToolingCell] host did not report its tooling", instanceId, error);
-        if (current) setReading({ state: "failed" });
-      });
-    return () => {
-      current = false;
-    };
-  }, [client, instanceId, sessionToken]);
+  const reading = useHostTooling(instanceId, online);
 
   if (!online) return null;
 
   // An online row with no client has no wire to ask through: said so, not left blank.
-  if (!client || reading.state === "failed") {
+  if (reading.state === "failed") {
     return (
       <span
         data-testid={`hosts-row-${instanceId}-tooling-failed`}

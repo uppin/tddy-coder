@@ -373,3 +373,61 @@ async fn host_tooling_hands_the_probe_no_github_host_when_the_request_names_none
     // Then the probe was handed no host
     assert_eq!(probe.probed_github_hostnames(), vec![None]);
 }
+
+/// The cache is wired in front of the probe: a second question inside the TTL is answered from
+/// the first run.
+#[tokio::test]
+async fn two_host_tooling_calls_within_the_ttl_run_one_probe() {
+    // Given a daemon whose probe records every run
+    let probe = RecordingHostToolingProbe::answering(a_host_committing_as(
+        "Ada Lovelace",
+        "ada@example.com",
+        "hubot",
+    ));
+    let service = a_daemon_probing_with(Arc::clone(&probe)).build();
+
+    // When a verified session asks this daemon about itself twice, back to back
+    for _ in 0..2 {
+        tooling_asked_of(&service, VERIFIABLE_TOKEN, THIS_DAEMON)
+            .await
+            .expect("a verified session is answered");
+    }
+
+    // Then the probe ran once
+    assert_eq!(
+        probe.probed_os_users(),
+        vec![MAPPED_OS_USER.to_string()],
+        "the second question must be served from the cache"
+    );
+}
+
+/// The GitHub host is part of the cache key: an answer about one host is not another host's.
+#[tokio::test]
+async fn host_tooling_calls_naming_different_github_hosts_are_probed_separately() {
+    // Given a daemon whose probe records the GitHub host of every run
+    let probe = RecordingHostToolingProbe::answering(a_host_committing_as(
+        "Ada Lovelace",
+        "ada@example.com",
+        "hubot",
+    ));
+    let service = a_daemon_probing_with(Arc::clone(&probe)).build();
+
+    // When a verified session asks about github.com's `gh`, then an enterprise host's, then
+    // github.com's again
+    for github_hostname in ["", "github.example.com", ""] {
+        tooling_asked_of_about_github_host(
+            &service,
+            VERIFIABLE_TOKEN,
+            THIS_DAEMON,
+            github_hostname,
+        )
+        .await
+        .expect("a verified session is answered");
+    }
+
+    // Then each host was probed once for itself, and the repeat was served from the cache
+    assert_eq!(
+        probe.probed_github_hostnames(),
+        vec![None, Some("github.example.com".to_string())]
+    );
+}

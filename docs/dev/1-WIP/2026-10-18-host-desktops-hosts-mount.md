@@ -99,7 +99,7 @@ from one probe run within the TTL.
 | Package | Change |
 |---|---|
 | `tddy-web` | `HostsScreen.tsx`, `HostRowToolingCell.tsx` (new), page object additions |
-| `tddy-host-service` | `host_tooling_cache.rs` (new), `host_tooling.rs` call site, `lib.rs` |
+| `tddy-host-service` | `host_tooling_cache.rs` (new), `service.rs` call site (`get_host_tooling`), `lib.rs` |
 
 ## Implementation Milestones
 - [x] M1 Cache + dedup with unit tests
@@ -156,16 +156,59 @@ tests fail on `todo!("TODO(hosts-mount): implement ToolingCache::new")`.
 - Green (decided): every answer is cached for the full TTL, **including a failed reading**. The probe reports failures as readings (`ProbeOutcome`), not as errors, so there is no error answer to exclude, and re-running it per request would reinstate the fan-out. The one error path, a probe that panicked on the blocking pool, is kept as its message for the same TTL (30 s, `HOST_TOOLING_CACHE_TTL` in `service.rs`); `get_or_probe` returns an infallible `T`, so excluding it would need an API change nothing asks for.
 - Green (done): wiring `ToolingCache` into `get_host_tooling` (`service.rs`, not `host_tooling.rs` — the probe call is in `service.rs:486-495`) needs a TTL constant and a `HostServiceImpl` field; no test pins the call site.
 ### From /validate-changes
+- W1 evict expired, unheld slots in `ToolingCache` so a caller-supplied `github_hostname` cannot grow the map without bound.
+- W2 pin the `get_host_tooling` wiring with a service-level test (one probe per TTL; a different `github_hostname` is probed separately).
 ### From /validate-tests
+- Make `asks an offline host for nothing` discriminating: register the offline host as reachable (verify it fails when the `online` gate is removed).
+- Add cache tests: `github_hostname` isolation; dropped caller stores nothing; failed answer held for the TTL.
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+- Extract `useHostTooling` from `HostRowToolingCell`; extract the keyed cache call out of `get_host_tooling`; compute the instance id once.
 
 ## Validation Results
 ### /validate-changes
+
+**Run 2026-10-20 on the rebased branch** (base `origin/master` — #655 merged, this PR retargeted; leak check clean, 4 own commits). Risk summary: **0 critical, 3 warning, 3 info.**
+
+Build: `cargo check -p tddy-host-service --all-targets` ✅ (scoped; `cargo build` not run). Tests at green: 5/5 cache tests, 4/4 Cypress mount spec, 58/58 Hosts component specs.
+
+Changeset sync: Scope ✅, M1 ✅, M2 ✅ (all implemented). Delta row corrected: the call site is `service.rs`, not `host_tooling.rs` (untouched). The two `docs/dev/todo/2026-09-06-*` entries still exist — their deletion belongs to the wrap.
+
+Stack boundary: Responsibility ✅ delivered, no `todo!`/stub left · Dependencies ✅ none consumed · Boundaries ✅ (no probe-content, Connect-gating or overlay change; no refresh control) · files ✅ only this PR's · parent-owned files ✅ intact.
+
+- ⚠ **W1** `service.rs` — the cache key carries the request's `github_hostname`, so each distinct value an authenticated caller sends leaves a slot in `ToolingCache` for the process lifetime (slots are never evicted). Bounded in practice, unbounded in principle.
+- ⚠ **W2** `service.rs` `get_host_tooling` — the wiring (key = local instance + OS user + hostname; one probe per TTL) is pinned by no test; only the cache module and the UI are.
+- ⚠ **W3** a probe that panicked is cached as its message for the full TTL (decided at green, documented); the operator sees `Status::internal` for 30 s after a one-off panic.
+- ℹ `local_instance_id_for_config(&self.config)` is computed twice in `get_host_tooling`.
+- ℹ `HostRowToolingCell` returns `JSX.Element | null`; the contract said `JSX.Element` (null is needed for offline rows).
+- ℹ `.expect` on the slot-map mutex carries a message; a poisoned map is unrecoverable by design.
 ### /validate-tests
+
+**Run 2026-10-20.** 9 tests analyzed (5 Rust unit in `host_tooling_cache.rs`, 4 Cypress in `HostsScreenToolingMountAcceptance.cy.tsx`) plus the `hostToolingCellPage` page object. 0 critical, 2 warning, 2 info. No `.skip`/`.only`/`#[ignore]`, no sleeps (the Rust clock is hand-driven; the dedup test is ordered by `join!` and guarded by a 5 s patience timeout), no raw `cy.get` in test bodies, Given/When/Then throughout, domain-named fixtures.
+
+- ⚠ **`asks an offline host for nothing`** (`HostsScreenToolingMountAcceptance.cy.tsx`) cannot tell a cell that honours `online` from one that ignores it: the offline host is not in the registry (`openTheHostsScreen(backend, [ONLINE_HOST])`), so `useHostClient` resolves no client for it and nothing is called either way. Register the offline host as reachable too, so the `online` flag is the only thing keeping it quiet.
+- ⚠ **Missing cache edges** (`host_tooling_cache.rs`): no test that a different `github_hostname` is a different key (the field exists for exactly that), none that a caller dropped mid-probe stores nothing (the cancellation-safety the implementation claims), none that a failed answer is held for the TTL (a decision recorded at green).
+- ℹ `says the tooling could not be read…` asserts two things (the message, and no Connect) — one behaviour, two facets; acceptable.
+- ℹ `aKnownHost` is defined in four Hosts specs (already recorded at red).
 ### /validate-prod-ready
+
+**Run 2026-10-20.** Status ✅ Ready. 4 production files checked (`host_tooling_cache.rs`, `service.rs`, `HostRowToolingCell.tsx`, `HostsScreen.tsx`), 0 blockers, 0 warnings. Mock/fake: none outside `#[cfg(test)]`. Fallbacks: none (an online row with no routed client says so rather than showing a blank cell). TODO/FIXME: none added. Unused code: none. Debug output: no `println!`/`dbg!`; one `console.debug` on the failure path of `HostRowToolingCell`, the same pattern `HostRowSshConfig` and `HostAddKeyAction` use — acceptable. The mutex `.expect` carries a reason.
 ### /analyze-clean-code
 
+**Run 2026-10-20.** Score **C** (1 must-refactor, 1 needs-attention). 4 non-test source files.
+
+| Metric | Result |
+|---|---|
+| File length | `service.rs` 961 (pre-existing 936, **+25 in this change**) — 🔴 deferred with consent, see the Restructuring note below; the other three are 96–124 lines |
+| Function length | `HostRowToolingCell` 61 lines — **must refactor** (>60); `get_host_tooling` 60 lines — needs attention; the rest ≤ 20 |
+| Nesting / parameters | within bounds |
+| Magic values | none (`HOST_TOOLING_CACHE_TTL` is named and explained) |
+| Duplication | `local_instance_id_for_config(&self.config)` computed twice in `get_host_tooling` |
+
+- **`HostRowToolingCell.tsx:38`** — the effect that asks and the three-way render share one function. Extract the asking into a `useHostTooling(instanceId, online)` hook returning the client and the reading; the component keeps only the render.
+- **`service.rs` `get_host_tooling`** — move the keyed cache call into a private method, which also shrinks the function and this PR's growth of the file.
+
+**Oversized file (🔴, deferred with developer consent 2026-10-20):** `service.rs` 936 → 961 production lines, +25, all of it the cache wiring. Not decomposed here; recorded in `oversized-file-service.md` and `docs/dev/todo/2026-10-20-hosts-mount-service-rs-grew-while-over-budget.md`.
 ## TODO
 
 - [x] Record initial discovery (`2026-10-18-host-desktops-hosts-mount-initial-discovery.md`)

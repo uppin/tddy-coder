@@ -250,6 +250,33 @@ impl HostServiceImpl {
         local_instance_id_for_config(&self.config)
     }
 
+    /// `os_user`'s tooling on this host, served from the cache when a probe for the same
+    /// (host, OS user, GitHub host) ran within the TTL, or shared with one already running.
+    ///
+    /// An empty `github_hostname` is the protocol's spelling for "none named". The probe shells
+    /// out and waits, so it runs on the blocking pool rather than parking a runtime worker for
+    /// however long `gh` takes to reach the network.
+    async fn cached_tooling(
+        &self,
+        local_instance_id: &str,
+        os_user: &str,
+        github_hostname: &str,
+    ) -> Result<HostTooling, String> {
+        let github_hostname = Some(github_hostname.to_string()).filter(|h| !h.is_empty());
+        let key = ToolingKey::new(local_instance_id, os_user, github_hostname.clone());
+        let probe = Arc::clone(&self.host_tooling);
+        let probed_user = os_user.to_string();
+        self.host_tooling_cache
+            .get_or_probe(key, move || async move {
+                tokio::task::spawn_blocking(move || {
+                    probe.probe(&probed_user, github_hostname.as_deref())
+                })
+                .await
+                .map_err(|e| format!("host tooling probe panicked: {e}"))
+            })
+            .await
+    }
+
     /// How many `StreamHostPrompts` pumps are running right now.
     ///
     /// A leaked pump is invisible from the outside — the feed is silent by design — so this is what
@@ -497,30 +524,14 @@ impl HostService for HostServiceImpl {
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
-        // Both probes shell out and wait, so they run on the blocking pool rather than parking a
-        // runtime worker for however long `gh` takes to reach the network.
-        let probe = Arc::clone(&self.host_tooling);
-        let probed_user = os_user.to_string();
-        let github_hostname = Some(req.github_hostname.clone()).filter(|h| !h.is_empty());
-        let key = ToolingKey::new(
-            local_instance_id_for_config(&self.config),
-            os_user.as_str(),
-            github_hostname.clone(),
-        );
+        let local_instance_id = local_instance_id_for_config(&self.config);
         let tooling = self
-            .host_tooling_cache
-            .get_or_probe(key, move || async move {
-                tokio::task::spawn_blocking(move || {
-                    probe.probe(&probed_user, github_hostname.as_deref())
-                })
-                .await
-                .map_err(|e| format!("host tooling probe panicked: {e}"))
-            })
+            .cached_tooling(&local_instance_id, os_user, &req.github_hostname)
             .await
             .map_err(Status::internal)?;
 
         Ok(Response::new(GetHostToolingResponse {
-            daemon_instance_id: local_instance_id_for_config(&self.config),
+            daemon_instance_id: local_instance_id,
             git: Some(crate::host_messages::git_identity_message(&tooling.git)),
             github_cli: Some(crate::host_messages::github_cli_message(
                 &tooling.github_cli,

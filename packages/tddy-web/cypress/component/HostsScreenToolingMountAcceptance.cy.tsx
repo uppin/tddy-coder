@@ -185,14 +185,15 @@ describe("Hosts screen tooling mount", () => {
   });
 
   it("asks an offline host for nothing", () => {
-    // Given one online host beside one that has left the roster
+    // Given one online host beside one that has left the roster — both reachable over the wire,
+    // so the only thing keeping the offline one from being asked is that it is offline
     const backend = aDaemonWhoseHostsReportAReachableVnc([
       anOnlineHost(ONLINE_HOST),
       anOfflineHost(OFFLINE_HOST),
     ]);
 
     // When the Hosts screen is opened and the online row has shown its report
-    openTheHostsScreen(backend, [ONLINE_HOST]);
+    openTheHostsScreen(backend, [ONLINE_HOST, OFFLINE_HOST]);
     hostsScreenPage.row(OFFLINE_HOST).should("exist");
     hostToolingPage.gitIdentity(ONLINE_HOST).should("contain.text", "Ada Lovelace");
 
