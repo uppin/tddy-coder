@@ -61,24 +61,26 @@ pub struct SessionParticipantOptions {
     pub worktree: std::path::PathBuf,
 }
 
-/// Handle returned by `spawn_session_participant`. Dropping it does **not** cancel the participant —
-/// the connection + metadata watcher run in spawned tasks. The handle keeps the `JoinHandle` for a
-/// future graceful-shutdown wiring.
+/// Handle returned by [`spawn_session_participant_with`]. Dropping it does **not** cancel the
+/// participant — the connection + metadata watcher run in spawned tasks. The handle keeps the
+/// served participant for a future graceful-shutdown wiring.
 pub struct SessionParticipantHandle {
-    _run: tokio::task::JoinHandle<()>,
+    _served: crate::participant_host::ServedParticipant,
 }
 
-/// Spawn the session's LiveKit participant, serving the session-scoped RPC coordinates and
-/// publishing `session` metadata from `metadata_rx`.
+/// Spawn the session's room participant through `host`, serving the session-scoped RPC coordinates
+/// and publishing `session` metadata from `metadata_rx`.
 ///
-/// The participant identity is `session-{daemon_instance_id}-{session_id}` (built by the caller and
-/// passed as `identity`). The token must authorize that identity for the target room.
-pub async fn spawn_session_participant(
+/// Joins `ws_url` as `identity` with `session_token`, once (no reconnect). The identity is
+/// `session-{daemon_instance_id}-{session_id}` (built by the caller), and the token must authorize
+/// it for the target room.
+pub async fn spawn_session_participant_with(
     ws_url: &str,
     session_token: &str,
     identity: &str,
     opts: SessionParticipantOptions,
     metadata_rx: watch::Receiver<String>,
+    host: &dyn crate::participant_host::SessionParticipantHost,
 ) -> anyhow::Result<SessionParticipantHandle> {
     // The agent-activity log lives alongside `tool-calls.jsonl` in the session directory.
     let agent_activity_dir = opts
@@ -104,21 +106,24 @@ pub async fn spawn_session_participant(
     entries.push(tddy_service::reflection_entry_from(&names));
     let multi = tddy_rpc::MultiRpcService::new(entries);
 
-    let participant = tddy_livekit::LiveKitParticipant::connect(
-        ws_url,
-        session_token,
-        multi,
-        tddy_livekit::RoomOptions::default(),
-        None,
-        None,
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("session participant connect (identity={identity}): {e}"))?;
-
-    let local = participant.room().local_participant().clone();
-    let lock = participant.metadata_publish_lock();
-    let _meta_handle =
-        tddy_livekit::spawn_local_participant_metadata_watcher(metadata_rx, local, lock);
+    let served = host
+        .serve(
+            crate::participant_host::ParticipantJoin {
+                url: ws_url.to_string(),
+                identity: identity.to_string(),
+                auth: crate::participant_host::ParticipantAuth::Token(session_token.to_string()),
+            },
+            multi,
+            crate::participant_host::ParticipantOptions {
+                metadata: Some(metadata_rx),
+                codex_oauth_watch: None,
+                projects_registry_dir: None,
+                reconnect: false,
+                shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            },
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("session participant connect (identity={identity}): {e}"))?;
 
     log::info!(
         target: "tddy_coder::session_participant",
@@ -127,16 +132,13 @@ pub async fn spawn_session_participant(
         opts.session_id
     );
 
-    let run = tokio::spawn(async move {
-        participant.run().await;
-    });
-    Ok(SessionParticipantHandle { _run: run })
+    Ok(SessionParticipantHandle { _served: served })
 }
 
 /// The three [`ServiceEntry`]s a coder session participant registers, backed by one `svc`.
 ///
 /// Used by `run.rs`, where the coder's own participant identity *is* the session participant
-/// (`daemon-{instanceId}-{sessionId}`), and by [`spawn_session_participant`].
+/// (`daemon-{instanceId}-{sessionId}`), and by [`spawn_session_participant_with`].
 ///
 /// One entry per coordinate rather than one service registered under three names, because each
 /// dispatches on the method alone: a single service answering at every coordinate would serve

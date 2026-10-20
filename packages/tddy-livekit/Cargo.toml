@@ -11,6 +11,8 @@ path = "src/lib.rs"
 [dependencies]
 # The client-side ports this crate implements (`room_connector`).
 tddy-room-client = { path = "../tddy-room-client" }
+# `merge_participant_metadata_json`, re-exported so metadata publishers need not name this crate.
+tddy-changeset = { path = "../tddy-changeset" }
 prost = "0.13"
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }

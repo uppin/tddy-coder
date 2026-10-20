@@ -21,6 +21,10 @@ use tddy_core::{
 use tddy_discovery;
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
 
+use crate::participant_host::{
+    participant_join_from_cli, serve_until_ended, ParticipantHost, ParticipantJoin,
+    ParticipantOptions, SessionParticipantHost, PARTICIPANT_TOKEN_TTL,
+};
 use crate::plain;
 use crate::tty::should_run_tui;
 use tddy_core::Presenter;
@@ -66,18 +70,45 @@ fn apply_recipe_from_changeset_if_needed(args: &mut Args) -> anyhow::Result<()> 
     Ok(())
 }
 
-/// TokenProvider that delegates to TokenGenerator. Used when the daemon has API key/secret.
-struct LiveKitTokenProvider(std::sync::Arc<tddy_livekit::TokenGenerator>);
+/// TokenProvider that delegates to the host's provider. Used when the coder has API key/secret.
+struct HostTokenProvider(Arc<dyn tddy_service::TokenProvider>);
 
-impl tddy_service::TokenProvider for LiveKitTokenProvider {
+impl tddy_service::TokenProvider for HostTokenProvider {
     fn generate_token(&self, room: &str, identity: &str) -> Result<String, String> {
-        self.0
-            .generate_for(room, identity)
-            .map_err(|e| e.to_string())
+        self.0.generate_token(room, identity)
     }
     fn ttl_seconds(&self) -> u64 {
-        self.0.ttl().as_secs()
+        self.0.ttl_seconds()
     }
+}
+
+/// The token provider the coder's API credentials ask for, from `host`. Callers hold
+/// `has_key_secret`, so both are set.
+fn token_provider_from_args(
+    args: &Args,
+    host: &dyn SessionParticipantHost,
+) -> anyhow::Result<HostTokenProvider> {
+    host.token_provider(
+        args.livekit_api_key.as_deref().unwrap(),
+        args.livekit_api_secret.as_deref().unwrap(),
+        PARTICIPANT_TOKEN_TTL,
+    )
+    .map(HostTokenProvider)
+    .map_err(anyhow::Error::msg)
+}
+
+/// The join and reconnect policy the coder's LiveKit flags ask for. Callers hold `livekit_enabled`,
+/// so the URL, room and identity are set.
+fn participant_join_from_args(args: &Args) -> (ParticipantJoin, bool) {
+    participant_join_from_cli(
+        args.livekit_url.as_deref().unwrap(),
+        args.livekit_room.as_deref().unwrap(),
+        args.livekit_identity.as_deref().unwrap(),
+        args.livekit_token.as_deref(),
+        args.livekit_api_key
+            .as_deref()
+            .zip(args.livekit_api_secret.as_deref()),
+    )
 }
 
 /// Virtual terminal + in-memory Codex OAuth state and LiveKit metadata channel for `codex_oauth` JSON.
@@ -282,7 +313,7 @@ fn resolve_agent_repo_root(args: &Args) -> std::io::Result<PathBuf> {
 
 /// Shared main entry: panic hook, Ctrl+C handler, run_with_args, exit logic.
 /// Use from both tddy-coder and tddy-demo binaries.
-pub fn run_main(mut args: Args) {
+pub fn run_main(mut args: Args, host: ParticipantHost) {
     assign_default_session_id(&mut args);
 
     // Initial resolve (args.tddy_data_dir set from CLI; config may override it below).
@@ -411,7 +442,7 @@ pub fn run_main(mut args: Args) {
     })
     .expect("failed to set Ctrl+C handler");
 
-    let result = run_with_args(&args, shutdown);
+    let result = run_with_args(&args, shutdown, host);
 
     match result {
         Err(e) => {
@@ -1269,7 +1300,11 @@ fn run_codex_oauth_login(args: &Args) -> anyhow::Result<()> {
 }
 
 /// Main entry point. Run the workflow with the given args.
-pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
+pub fn run_with_args(
+    args: &Args,
+    shutdown: Arc<AtomicBool>,
+    host: ParticipantHost,
+) -> anyhow::Result<()> {
     validate_web_args(args)?;
     validate_livekit_args(args)?;
     validate_recipe_cli(args)?;
@@ -1283,7 +1318,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
     // `StackPlanned` state before the start goal is resolved from the changeset.
     seed_pr_stack_from_base_session_if_requested(args)?;
     if args.daemon {
-        return run_daemon(args, shutdown);
+        return run_daemon(args, shutdown, host);
     }
     if args.acp {
         return run_acp_agent(args, shutdown);
@@ -1295,7 +1330,7 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         let use_tui =
             args.stdio || should_run_tui(io::stdin().is_terminal(), io::stderr().is_terminal());
         if use_tui {
-            return run_full_workflow_tui(args, shutdown);
+            return run_full_workflow_tui(args, shutdown, host);
         }
         return run_full_workflow_plain(args, shutdown);
     }
@@ -1715,7 +1750,7 @@ pub fn seed_pr_stack_from_base_session_if_requested(args: &Args) -> anyhow::Resu
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
-fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
+fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> anyhow::Result<()> {
     // Logger is already initialized in `run_main` with `effective_log_config(args)`.
     // Do not call `init_tddy_logger` again: `log::set_logger` only succeeds once; a second
     // init would skip `set_max_level` and can leave FILE_OUTPUTS / routing inconsistent.
@@ -1977,14 +2012,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             let path = web_bundle_path.clone();
             let web_host = args.web_host.as_deref().unwrap_or("0.0.0.0").to_string();
             let rpc_router = if has_key_secret {
-                let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
-                    args.livekit_api_key.as_ref().unwrap().clone(),
-                    args.livekit_api_secret.as_ref().unwrap().clone(),
-                    args.livekit_room.as_ref().unwrap().clone(),
-                    args.livekit_identity.as_ref().unwrap().clone(),
-                    std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-                ));
-                let token_provider = LiveKitTokenProvider(token_generator);
+                let token_provider = token_provider_from_args(args, host.as_ref())?;
                 // Unauthenticated on purpose. A session coder holds no session-token signer —
                 // `build_auth_service_entry` gives it an *unsigned* `AuthServiceImpl` — so it can
                 // verify no `session_token`, and an authenticator here would refuse every caller
@@ -2053,7 +2081,6 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         }
 
         if livekit_enabled {
-            let url = args.livekit_url.as_ref().unwrap().clone();
             let (agent_working_dir, session_artifact_dir, _) = livekit_daemon_workflow_paths(
                 &tddy_data_dir,
                 args.resume_from.as_deref(),
@@ -2225,70 +2252,20 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     .clone()
                     .expect("view_factory present when livekit_enabled"),
             );
-            if has_key_secret {
-                let token_generator = tddy_livekit::TokenGenerator::new(
-                    args.livekit_api_key.as_ref().unwrap().clone(),
-                    args.livekit_api_secret.as_ref().unwrap().clone(),
-                    args.livekit_room.as_ref().unwrap().clone(),
-                    args.livekit_identity.as_ref().unwrap().clone(),
-                    std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-                );
-                let codex_oauth_watch_for_reconnect = codex_oauth_watch.clone();
-                tokio::spawn(async move {
-                    tddy_livekit::LiveKitParticipant::run_with_reconnect_metadata(
-                        &url,
-                        &token_generator,
-                        livekit_multi,
-                        tddy_livekit::RoomOptions::default(),
-                        shutdown_clone,
-                        Some(metadata_rx),
-                        codex_oauth_watch_for_reconnect,
-                        None,
-                    )
-                    .await
-                });
-            } else {
-                let token = args.livekit_token.as_ref().unwrap().clone();
-                tokio::spawn(async move {
-                    let participant = match tddy_livekit::LiveKitParticipant::connect(
-                        &url,
-                        &token,
-                        livekit_multi,
-                        tddy_livekit::RoomOptions::default(),
-                        codex_oauth_watch,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(p) => {
-                            log::info!("LiveKit participant connected to room");
-                            p
-                        }
-                        Err(e) => {
-                            log::error!("LiveKit connect failed: {}", e);
-                            return;
-                        }
-                    };
-                    let local = participant.room().local_participant().clone();
-                    let meta_lock = participant.metadata_publish_lock();
-                    let meta_task = tddy_livekit::spawn_local_participant_metadata_watcher(
-                        metadata_rx,
-                        local,
-                        meta_lock,
-                    );
-                    tokio::select! {
-                        _ = participant.run() => {
-                            log::info!("LiveKit participant disconnected");
-                        }
-                        _ = async {
-                            while !shutdown_clone.load(Ordering::Relaxed) {
-                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                            }
-                        } => {}
-                    }
-                    meta_task.abort();
-                });
-            }
+            let (join, reconnect) = participant_join_from_args(args);
+            let host = host.clone();
+            tokio::spawn(serve_until_ended(
+                host,
+                join,
+                livekit_multi,
+                ParticipantOptions {
+                    metadata: Some(metadata_rx),
+                    codex_oauth_watch,
+                    projects_registry_dir: None,
+                    reconnect,
+                    shutdown: shutdown_clone,
+                },
+            ));
         }
 
         let shutdown_fut = async {
@@ -3305,7 +3282,11 @@ fn print_goal_output(
         .map_err(|e| anyhow::anyhow!(e))
 }
 
-fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
+fn run_full_workflow_tui(
+    args: &Args,
+    shutdown: Arc<AtomicBool>,
+    host: ParticipantHost,
+) -> anyhow::Result<()> {
     std::env::set_var("TDDY_QUIET", "1");
     log::set_max_level(log::LevelFilter::Debug);
 
@@ -3491,7 +3472,6 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     if livekit_enabled {
         let (terminal_service, _metadata_tx, metadata_rx) =
             terminal_and_codex_oauth_for_livekit(view_factory.clone(), args.mouse);
-        let url = args.livekit_url.clone().unwrap();
         let codex_oauth_watch = args
             .session_dir
             .clone()
@@ -3546,15 +3526,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         // this session reports is the activity it replays.
         let session_entries =
             crate::session_participant::session_service_entries(session_connection_svc);
-        if has_key_secret {
-            let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
-                args.livekit_api_key.as_ref().unwrap().clone(),
-                args.livekit_api_secret.as_ref().unwrap().clone(),
-                args.livekit_room.as_ref().unwrap().clone(),
-                args.livekit_identity.as_ref().unwrap().clone(),
-                std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-            ));
-            let token_provider = LiveKitTokenProvider(token_generator.clone());
+        let livekit_entries = if has_key_secret {
+            let token_provider = token_provider_from_args(args, host.as_ref())?;
             // Unauthenticated on purpose. This registration is served *inside*
             // `args.livekit_room` over the coder's own LiveKit participant, so every caller has
             // already been admitted to that room by a token the daemon minted. As above, the coder
@@ -3587,33 +3560,8 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 },
             ];
             multi_entries.extend(session_entries);
-            // Mount the Presenter View-adapter (TddyRemote) onto the LiveKit surface too, not just
-            // the local gRPC port — a browser View reaches the Presenter over LiveKit, and via
-            // connect_view each opened stream replays the current state snapshot.
-            let multi_service =
-                tddy_service::session_view_adapter_surface(multi_entries, view_factory.clone());
-            let codex_oauth_watch_for_reconnect = codex_oauth_watch.clone();
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("tokio runtime");
-                rt.block_on(async {
-                    tddy_livekit::LiveKitParticipant::run_with_reconnect_metadata(
-                        &url,
-                        token_generator.as_ref(),
-                        multi_service,
-                        tddy_livekit::RoomOptions::default(),
-                        shutdown,
-                        Some(metadata_rx),
-                        codex_oauth_watch_for_reconnect,
-                        None,
-                    )
-                    .await
-                });
-            });
+            multi_entries
         } else {
-            let token = args.livekit_token.clone().unwrap();
             let mut livekit_entries2 = vec![
                 tddy_rpc::ServiceEntry {
                     name: "terminal.TerminalService",
@@ -3631,60 +3579,40 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 },
             ];
             livekit_entries2.extend(session_entries);
-            // Mount the Presenter View-adapter (TddyRemote) onto the LiveKit surface too, not just
-            // the local gRPC port — a browser View reaches the Presenter over LiveKit, and via
-            // connect_view each opened stream replays the current state snapshot.
-            let livekit_multi =
-                tddy_service::session_view_adapter_surface(livekit_entries2, view_factory.clone());
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("tokio runtime");
-                rt.block_on(async {
-                    match tddy_livekit::LiveKitParticipant::connect(
-                        &url,
-                        &token,
-                        livekit_multi,
-                        tddy_livekit::RoomOptions::default(),
-                        codex_oauth_watch,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(participant) => {
-                            log::info!("READY");
-                            let local = participant.room().local_participant().clone();
-                            let meta_lock = participant.metadata_publish_lock();
-                            let meta_task = tddy_livekit::spawn_local_participant_metadata_watcher(
-                                metadata_rx,
-                                local,
-                                meta_lock,
-                            );
-                            participant.run().await;
-                            meta_task.abort();
-                        }
-                        Err(e) => {
-                            log::error!("LiveKit connect failed: {}", e);
-                        }
-                    }
-                });
-            });
-        }
+            livekit_entries2
+        };
+        // Mount the Presenter View-adapter (TddyRemote) onto the LiveKit surface too, not just
+        // the local gRPC port — a browser View reaches the Presenter over LiveKit, and via
+        // connect_view each opened stream replays the current state snapshot.
+        let livekit_multi =
+            tddy_service::session_view_adapter_surface(livekit_entries, view_factory.clone());
+        let (join, reconnect) = participant_join_from_args(args);
+        let host = host.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(serve_until_ended(
+                host,
+                join,
+                livekit_multi,
+                ParticipantOptions {
+                    metadata: Some(metadata_rx),
+                    codex_oauth_watch,
+                    projects_registry_dir: None,
+                    reconnect,
+                    shutdown,
+                },
+            ));
+        });
     }
 
     if let (Some(web_port), Some(ref web_bundle_path)) = (args.web_port, &args.web_bundle_path) {
         let path = web_bundle_path.clone();
         let web_host = args.web_host.as_deref().unwrap_or("0.0.0.0").to_string();
         let rpc_router = if has_key_secret {
-            let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
-                args.livekit_api_key.as_ref().unwrap().clone(),
-                args.livekit_api_secret.as_ref().unwrap().clone(),
-                args.livekit_room.as_ref().unwrap().clone(),
-                args.livekit_identity.as_ref().unwrap().clone(),
-                std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-            ));
-            let token_provider = LiveKitTokenProvider(token_generator);
+            let token_provider = token_provider_from_args(args, host.as_ref())?;
             // Unauthenticated on purpose, for the same reason as the coder's other `--web-port`
             // registration above: no session-token signer, so an authenticator here would refuse
             // every caller. The `daemon-*` identity refusal is enforced inside the service.

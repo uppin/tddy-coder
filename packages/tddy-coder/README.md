@@ -6,7 +6,7 @@ TDD-driven coder CLI for PRD-based development workflow.
 
 ### Development
 ```bash
-cargo build -p tddy-coder
+cargo build -p tddy-coder-cli
 ```
 
 ### Testing
@@ -16,7 +16,7 @@ cargo test -p tddy-coder
 
 ### Run
 ```bash
-echo "Build a user authentication system" | cargo run -p tddy-coder -- --goal plan --output-dir ./plans
+echo "Build a user authentication system" | cargo run -p tddy-coder-cli -- --goal plan --output-dir ./plans
 ```
 
 ## Architecture

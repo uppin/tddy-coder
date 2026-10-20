@@ -58,7 +58,7 @@ function getTddyCoderPath(): string {
   const repoRoot = path.resolve(__dirname, "../..");
   const release = path.join(repoRoot, "target", "release", "tddy-coder");
   const debug = path.join(repoRoot, "target", "debug", "tddy-coder");
-  // Prefer debug: it is what `cargo build -p tddy-coder` updates; stale release can miss RPC
+  // Prefer debug: it is what `cargo build -p tddy-coder-cli` updates; stale release can miss RPC
   // services (e.g. auth.AuthService) and break Connect e2e.
   if (fs.existsSync(debug)) return debug;
   if (fs.existsSync(release)) return release;
@@ -479,7 +479,7 @@ export default defineConfig({
           const binaryPath = getTddyCoderPath();
           if (!fs.existsSync(binaryPath)) {
             throw new Error(
-              `tddy-coder binary not found. Run: cargo build -p tddy-coder`
+              `tddy-coder binary not found. Run: cargo build -p tddy-coder-cli`
             );
           }
 
@@ -573,7 +573,7 @@ export default defineConfig({
           const binaryPath = getTddyCoderPath();
           if (!fs.existsSync(binaryPath)) {
             throw new Error(
-              `tddy-coder binary not found. Run: cargo build -p tddy-coder`
+              `tddy-coder binary not found. Run: cargo build -p tddy-coder-cli`
             );
           }
 
@@ -840,7 +840,7 @@ export default defineConfig({
           }
           const toolPath = getTddyCoderPath();
           if (!fs.existsSync(toolPath)) {
-            throw new Error(`tddy-coder not found at ${toolPath}. Run: cargo build -p tddy-coder`);
+            throw new Error(`tddy-coder not found at ${toolPath}. Run: cargo build -p tddy-coder-cli`);
           }
           const webBundlePath = getWebBundlePath();
           if (!fs.existsSync(webBundlePath)) {

@@ -6,7 +6,7 @@
 //! **Keyboard Ctrl+C** in the full-screen TUI: `tddy-coder` and `tddy-demo` share
 //! [`tddy_tui::run_event_loop`]. In raw terminal mode, Ctrl+C is usually a key event (not SIGINT);
 //! the event loop sets the same `shutdown` flag there so the process exits without hanging. Rebuild
-//! the binary after `tddy-tui` changes: `cargo build -p tddy-coder`.
+//! the binary after `tddy-tui` changes: `cargo build -p tddy-coder-cli`.
 
 mod common;
 

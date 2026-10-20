@@ -1,7 +1,10 @@
 //! tddy-coder CLI binary.
 
+use std::sync::Arc;
+
 use clap::Parser;
 use tddy_coder::{load_config, merge_config_into_args, run_main, Args, CoderArgs};
+use tddy_coder_cli::LiveKitParticipantHost;
 
 /// When Codex runs `BROWSER <url>` with `TDDY_CODEX_OAUTH_OUT` set (during `codex exec` or
 /// `codex login`), write the authorize URL and exit without starting the full CLI (see
@@ -51,5 +54,5 @@ fn main() {
         }
     }
 
-    run_main(args);
+    run_main(args, Arc::new(LiveKitParticipantHost));
 }

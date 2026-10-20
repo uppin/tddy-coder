@@ -57,7 +57,7 @@ in_shell() {
 }
 
 in_shell cargo build --release \
-  -p tddy-coder \
+  -p tddy-coder-cli \
   -p tddy-tools \
   -p tddy-sandbox-darwin \
   -p tddy-sandbox-app \

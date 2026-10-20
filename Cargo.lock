@@ -12093,7 +12093,6 @@ version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
- "assert_cmd",
  "async-trait",
  "axum 0.8.9",
  "chrono",
@@ -12101,14 +12100,10 @@ dependencies = [
  "crossterm",
  "ctor 0.2.9",
  "ctrlc",
- "env_logger",
- "futures-util",
  "libc",
- "livekit",
  "log",
  "pretty_assertions",
  "prost 0.13.5",
- "reqwest 0.12.28",
  "rstest 0.24.0",
  "serde",
  "serde_json",
@@ -12126,8 +12121,6 @@ dependencies = [
  "tddy-core",
  "tddy-discovery",
  "tddy-github",
- "tddy-livekit",
- "tddy-livekit-testkit",
  "tddy-pty",
  "tddy-rpc",
  "tddy-service",
@@ -12147,6 +12140,37 @@ dependencies = [
  "tower-http",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "tddy-coder-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "async-trait",
+ "clap",
+ "env_logger",
+ "libc",
+ "livekit",
+ "log",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "reqwest 0.12.28",
+ "serde_json",
+ "serial_test",
+ "tddy-coder",
+ "tddy-core",
+ "tddy-livekit",
+ "tddy-livekit-testkit",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-task",
+ "tddy-terminal-rpc",
+ "tddy-tool-engine",
+ "tddy-workflow-recipes",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -12812,6 +12836,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-changeset",
  "tddy-core",
  "tddy-livekit-testkit",
  "tddy-room-client",

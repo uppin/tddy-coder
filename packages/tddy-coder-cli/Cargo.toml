@@ -1,0 +1,45 @@
+[package]
+name = "tddy-coder-cli"
+version = "0.1.0"
+edition = "2021"
+description = "The tddy-coder binary: the coder library wired to the LiveKit room participant"
+
+# The binary keeps the name `tddy-coder`: scripts, the daemon and every config resolve
+# `target/{debug,release}/tddy-coder`. Only the package that builds it is named differently, so the
+# coder library (`tddy-coder`) can stay free of a LiveKit dependency.
+[lib]
+name = "tddy_coder_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-coder"
+path = "src/main.rs"
+
+[dependencies]
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
+log = "0.4"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
+tddy-coder = { path = "../tddy-coder" }
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+
+[dev-dependencies]
+anyhow = "1"
+assert_cmd = "2"
+env_logger = "0.11"
+libc = "0.2"
+livekit = "0.7"
+prost = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
+serde_json = "1"
+serial_test = "3"
+tempfile = "3"
+pretty_assertions = { workspace = true }
+tddy-core = { path = "../tddy-core" }
+tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+tddy-task = { path = "../tddy-task" }
+tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
+tddy-tool-engine = { path = "../tddy-tool-engine" }
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
