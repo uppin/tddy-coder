@@ -353,7 +353,7 @@ fn rewrite_statement(
             ));
         }
         let replacement = if drop {
-            String::new()
+            destination_import(head, name, &alias)
         } else {
             format!("{head}use {qualifier}::{name}{alias};")
         };
@@ -379,14 +379,38 @@ fn rewrite_statement(
     if !kept.is_empty() {
         lines.push(format!("{head}use {prefix}{{{}}};", kept.join(", ")));
     }
-    if !drop {
-        lines.extend(
-            moved
-                .iter()
-                .map(|member| format!("{head}use {qualifier}::{member};")),
-        );
-    }
+    lines.extend(moved_uses(head, qualifier, &moved, drop));
     Ok(Edit::replace(statement.clone(), lines.join("\n")))
+}
+
+/// The `use` of each group member that moved: one pointing at the new home, or for the destination
+/// itself (`drop`) what [`destination_import`] keeps of it.
+fn moved_uses(head: &str, qualifier: &str, moved: &[&str], drop: bool) -> Vec<String> {
+    moved
+        .iter()
+        .map(|member| {
+            if !drop {
+                return format!("{head}use {qualifier}::{member};");
+            }
+            let (name, alias) = member
+                .split_once(" as ")
+                .map_or((*member, String::new()), |(name, alias)| {
+                    (name.trim(), format!(" as {}", alias.trim()))
+                });
+            destination_import(head, name, &alias)
+        })
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// What the destination keeps of its own `use` of a name that moves into it: nothing for an
+/// un-renamed import (it now defines the name), `{head}use self::{name}{alias};` for an aliased one,
+/// whose alias the module still names (D1). `alias` is the written ` as other`, or empty.
+fn destination_import(head: &str, name: &str, alias: &str) -> String {
+    if alias.is_empty() {
+        return String::new();
+    }
+    format!("{head}use self::{name}{alias};")
 }
 
 #[cfg(test)]
@@ -433,6 +457,30 @@ mod tests {
                 false
             ),
             "pub(crate) use crate::answers::name as other;"
+        );
+    }
+
+    #[test]
+    fn the_destination_keeps_an_aliased_import_of_the_moved_item_as_a_self_import() {
+        // Given the destination's own imports of the moving `name`: plain, aliased, and an aliased
+        // member of a group
+        let plain = "use crate::pairing::name;";
+        let aliased = "pub(crate) use crate::pairing::name as other;";
+        let grouped = "use crate::pairing::{name as other, kept};";
+
+        // When each is rewritten for the module the item arrives in
+        let (plain, aliased, grouped) = (
+            rewritten(plain, "name", true),
+            rewritten(aliased, "name", true),
+            rewritten(grouped, "name", true),
+        );
+
+        // Then the plain import goes, and each alias stays bound to the item, now the module's own
+        assert_eq!(plain, "");
+        assert_eq!(aliased, "pub(crate) use self::name as other;");
+        assert_eq!(
+            grouped,
+            "use crate::pairing::{kept};\nuse self::name as other;"
         );
     }
 

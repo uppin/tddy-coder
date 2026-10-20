@@ -11,36 +11,46 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 
 use super::super::early_return::masked_to_code;
+use super::super::seam_refusal;
+use super::bindings::Imported;
 use super::scope::Scope;
 use super::text::{enclosing_modules, Edit};
 use crate::crate_move::use_group::is_identifier_byte;
+use crate::Result;
 
 /// The module the code leaves and the one it arrives in, below the crate root.
 pub(in crate::backends::rust) struct Modules<'a> {
+    /// The file the code is written in, as a refusal names it.
+    pub(in crate::backends::rust) file: &'a str,
     pub(in crate::backends::rust) from: &'a [String],
     pub(in crate::backends::rust) to: &'a [String],
     /// A module that moves whole with the code, when it does: a relative path that reaches into it
     /// still reaches the same place, and the visibilities written in the code keep their meaning.
     pub(in crate::backends::rust) travelling: Option<&'a [String]>,
-    /// Where a name a module imports really lives: the module and the name, and the path below the
-    /// crate root the import brings in. `super::Name` is respelled through it when the module the
-    /// path named only imports `Name`, which nothing outside that module may name.
+    /// How a module binds a name it only imports, asked with the module, the name and the module the
+    /// code arrives in. `super::Name` is respelled through it when the module the path named only
+    /// imports `Name`, which nothing outside that module may name.
     pub(in crate::backends::rust) imports: Option<&'a Imports<'a>>,
 }
 
 /// The lookup behind [`Modules::imports`].
 pub(in crate::backends::rust) type Imports<'a> =
-    dyn Fn(&[String], &str) -> Option<Vec<String>> + 'a;
+    dyn Fn(&[String], &str, &[String]) -> Option<Imported> + 'a;
 
 /// The edits over `region` of `text` that keep every relative path and visibility meaning what it
 /// meant. `claimed` are spans another edit owns — an item's own visibility — and are left alone.
+///
+/// # Errors
+///
+/// Refuses a path through a glob import that cannot be followed (R8): naming it as written would name
+/// a private import from outside the module that holds it.
 pub(in crate::backends::rust) fn edits(
     text: &str,
     region: Range<usize>,
     modules: &Modules<'_>,
     moved_names: &BTreeSet<String>,
     claimed: &[Range<usize>],
-) -> Vec<Edit> {
+) -> Result<Vec<Edit>> {
     let masked = masked_to_code(text);
     let visibilities = visibility_spans(&masked, &region);
     let mut found = Vec::new();
@@ -57,7 +67,7 @@ pub(in crate::backends::rust) fn edits(
         let in_visibility = visibilities.iter().any(|span| span.contains(&at));
         let claimed_by_another = claimed.iter().any(|span| span.contains(&at));
         if !in_visibility && !claimed_by_another {
-            if let Some(edit) = path_edit(&masked, at, modules, moved_names) {
+            if let Some(edit) = path_edit(&masked, at, modules, moved_names).transpose()? {
                 at = edit.end.max(at + 1);
                 found.push(edit);
                 continue;
@@ -65,7 +75,7 @@ pub(in crate::backends::rust) fn edits(
         }
         at += 1;
     }
-    found
+    Ok(found)
 }
 
 fn overlaps(one: &Range<usize>, other: &Range<usize>) -> bool {
@@ -105,7 +115,7 @@ fn path_edit(
     at: usize,
     modules: &Modules<'_>,
     moved_names: &BTreeSet<String>,
-) -> Option<Edit> {
+) -> Option<Result<Edit>> {
     let bytes = masked.as_bytes();
     let continues = (at >= 2 && &bytes[at - 2..at] == b"::")
         || (at > 0 && (is_identifier_byte(bytes[at - 1]) || bytes[at - 1] == b'.'));
@@ -148,17 +158,53 @@ fn path_edit(
     if arrives_at == from && moved_names.contains(&named) {
         return None;
     }
+    respelled(masked, at..cursor, &named, &arrives_at, &to, modules).transpose()
+}
 
-    let written = &masked[at..cursor];
-    let through = modules
-        .imports
-        .and_then(|imports| imports(&arrives_at, &named))
-        .and_then(|target| {
-            let (last, module) = target.split_last()?;
-            (*last == named).then(|| module.to_vec())
-        });
-    let respelled = relative_to(through.as_ref().unwrap_or(&arrives_at), &to);
-    (respelled != written).then(|| Edit::replace(at..cursor, respelled))
+/// The rewrite of the `self::`/`super::` prefix at `prefix`, which reaches the module `arrives_at`
+/// and names `named` there, for code arriving in `to` — rules R1–R8 of the changeset.
+///
+/// A name the module only imports is followed one hop, so the edit then also covers the name when the
+/// import brings in another one (R5) or another crate's path (R7).
+fn respelled(
+    masked: &str,
+    prefix: Range<usize>,
+    named: &str,
+    arrives_at: &[String],
+    to: &[String],
+    modules: &Modules<'_>,
+) -> Result<Option<Edit>> {
+    // Inside the module the path reaches, its imports are visible as written (R2).
+    let looked_up = !named.is_empty() && !to.starts_with(arrives_at);
+    let through = looked_up
+        .then(|| {
+            modules
+                .imports
+                .and_then(|imports| imports(arrives_at, named, to))
+        })
+        .flatten();
+    let whole = prefix.start..prefix.end + named.len();
+    let (replacement, span) = match through {
+        None | Some(Imported::Visible) => (relative_to(arrives_at, to), prefix),
+        Some(Imported::InCrate { module, name }) => {
+            (format!("{}{name}", relative_to(&module, to)), whole)
+        }
+        Some(Imported::Extern { path, shadowed }) => {
+            let rooted = if shadowed { "::" } else { "" };
+            (format!("{rooted}{}", path.join("::")), whole)
+        }
+        Some(Imported::Unconfirmed(why)) => {
+            let line = masked[..prefix.start].matches('\n').count() + 1;
+            return Err(seam_refusal(format!(
+                "{}:{line}: `{}` reaches `{named}` through a glob import of `{}` that cannot be \
+                 followed ({why}); write the path to the module that defines it and plan again",
+                modules.file,
+                &masked[whole],
+                arrives_at.join("::"),
+            )));
+        }
+    };
+    Ok((replacement != masked[span.clone()]).then(|| Edit::replace(span, replacement)))
 }
 
 /// The module the code at `at` is written in, before and after the move.
@@ -206,20 +252,44 @@ mod tests {
     }
 
     fn rebased(text: &str, from: &str, to: &str) -> String {
+        rebased_through(text, from, to, None).expect("the rebase is not refused")
+    }
+
+    /// `text`, written in `src/host/worker.rs` as the module `from`, rebased for `to`, with the module
+    /// `host` answering `imported` for every name it is asked about.
+    fn rebased_through(
+        text: &str,
+        from: &str,
+        to: &str,
+        imported: Option<Imported>,
+    ) -> Result<String> {
         let (from, to) = (module(from), module(to));
+        let answer = |at: &[String], _: &str, _: &[String]| {
+            (at == module("host").as_slice())
+                .then(|| imported.clone())
+                .flatten()
+        };
         let found = edits(
             text,
             0..text.len(),
             &Modules {
+                file: "src/host/worker.rs",
                 from: &from,
                 to: &to,
                 travelling: None,
-                imports: None,
+                imports: Some(&answer),
             },
             &BTreeSet::new(),
             &[],
-        );
-        applied(text, &found).unwrap()
+        )?;
+        Ok(applied(text, &found).unwrap())
+    }
+
+    fn in_crate(module_path: &str, name: &str) -> Option<Imported> {
+        Some(Imported::InCrate {
+            module: module(module_path),
+            name: name.to_string(),
+        })
     }
 
     #[test]
@@ -262,27 +332,139 @@ mod tests {
 
     #[test]
     fn follows_an_import_of_the_module_a_super_path_names() {
-        let (from, to) = (module("host::worker"), module("split::worker"));
-        let imported = |at: &[String], name: &str| {
-            (at == module("host").as_slice() && name == "Config").then(|| module("types::Config"))
-        };
+        // Given `host` binding `Config` by a private `use crate::types::Config;` (R4)
         let text = "use super::Config;\n";
-        let found = edits(
+
+        // When the code leaves `host::worker` for `split::worker`
+        let moved = rebased_through(
             text,
-            0..text.len(),
-            &Modules {
-                from: &from,
-                to: &to,
-                travelling: None,
-                imports: Some(&imported),
-            },
-            &BTreeSet::new(),
-            &[],
+            "host::worker",
+            "split::worker",
+            in_crate("types", "Config"),
         );
 
+        // Then the path reaches `Config` where the import brings it from
+        assert_eq!(moved.unwrap(), "use super::super::types::Config;\n");
+    }
+
+    #[test]
+    fn keeps_a_super_path_when_the_destination_is_inside_the_module_it_reaches() {
+        // Given `host` binding `service_util` by a facade of another crate, the `#carve` 21/21 shape,
+        // and a lookup that would follow the import somewhere else entirely
+        let text = "fn f() { super::service_util::find(); }\n";
+        let facade = in_crate("types", "service_util");
+
+        // When the code leaves `host::observer` for its sibling `host::wiring` (R2)
+        let moved = rebased_through(text, "host::observer", "host::wiring", facade);
+
+        // Then the path is byte-identical: `host`'s imports are visible below it
+        assert_eq!(moved.unwrap(), text);
+    }
+
+    #[test]
+    fn keeps_a_super_path_through_an_import_visible_at_the_destination() {
+        // Given `host` binding `Config` by a `pub(crate) use` (R3)
+        let text = "fn f() -> super::Config { todo!() }\n";
+
+        // When the code leaves `host::worker` for `split::worker`
+        let moved = rebased_through(
+            text,
+            "host::worker",
+            "split::worker",
+            Some(Imported::Visible),
+        );
+
+        // Then the path reaches `host` and names `Config` there
         assert_eq!(
-            applied(text, &found).unwrap(),
-            "use super::super::types::Config;\n"
+            moved.unwrap(),
+            "fn f() -> super::super::host::Config { todo!() }\n"
+        );
+    }
+
+    #[test]
+    fn follows_an_aliased_import_and_writes_the_name_it_brings_in() {
+        // Given `host` binding `Settings` by `use crate::types::Config as Settings;` (R5)
+        let text = "fn f(settings: &super::Settings) {}\n";
+
+        // When the code leaves `host::worker` for `split::worker`
+        let moved = rebased_through(
+            text,
+            "host::worker",
+            "split::worker",
+            in_crate("types", "Config"),
+        );
+
+        // Then the path names `Config` in `types`, prefix and name both rewritten
+        assert_eq!(
+            moved.unwrap(),
+            "fn f(settings: &super::super::types::Config) {}\n"
+        );
+    }
+
+    #[test]
+    fn follows_a_confirmed_glob_import_to_the_module_that_binds_the_name() {
+        // Given `host` binding `Config` by `use crate::types::*;`, which `types` confirms (R6)
+        let text = "fn f(config: super::Config) {}\n";
+
+        // When the code leaves `host::worker` for `split`
+        let moved = rebased_through(text, "host::worker", "split", in_crate("types", "Config"));
+
+        // Then the path reaches `types`
+        assert_eq!(moved.unwrap(), "fn f(config: super::types::Config) {}\n");
+    }
+
+    #[test]
+    fn writes_an_extern_import_as_the_crates_own_path() {
+        // Given `host` binding `util` by a private `use kernel::util;` (R7)
+        let text = "fn f() -> u32 { super::util::answer() }\n";
+        let kernel = Some(Imported::Extern {
+            path: module("kernel::util"),
+            shadowed: false,
+        });
+
+        // When the code leaves `host::worker` for `split`
+        let moved = rebased_through(text, "host::worker", "split", kernel);
+
+        // Then the path is the crate's own, never `super::host::kernel::`
+        assert_eq!(moved.unwrap(), "fn f() -> u32 { kernel::util::answer() }\n");
+    }
+
+    #[test]
+    fn roots_an_extern_path_when_the_destination_shadows_the_crate_name() {
+        // Given the same import, and a destination that binds a name `kernel` of its own (R7)
+        let text = "fn f() -> u32 { super::util::answer() }\n";
+        let kernel = Some(Imported::Extern {
+            path: module("kernel::util"),
+            shadowed: true,
+        });
+
+        // When the code leaves `host::worker` for `split`
+        let moved = rebased_through(text, "host::worker", "split", kernel);
+
+        // Then the path is rooted at the extern prelude
+        assert_eq!(
+            moved.unwrap(),
+            "fn f() -> u32 { ::kernel::util::answer() }\n"
+        );
+    }
+
+    #[test]
+    fn refuses_a_path_through_an_unconfirmed_glob_naming_the_file_and_the_line() {
+        // Given `host` binding `Config` only through globs that cannot confirm it (R8)
+        let text = "fn g() {}\nfn f(config: super::Config) {}\n";
+        let unconfirmed = Some(Imported::Unconfirmed(
+            "no glob of `host` binds `Config`".to_string(),
+        ));
+
+        // When the code leaves `host::worker` for `split`
+        let refusal = rebased_through(text, "host::worker", "split", unconfirmed)
+            .expect_err("the rebase refuses")
+            .to_string();
+
+        // Then the refusal names the file, the line and the path as written
+        assert!(
+            refusal.contains("src/host/worker.rs:2") && refusal.contains("`super::Config`"),
+            "unexpected refusal: {refusal}"
         );
     }
 }

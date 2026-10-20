@@ -460,7 +460,29 @@ files vacated in the same way, and recreates the directory of a file it puts bac
 crate root, anything the destination already binds left out, an import of a module the destination cannot
 see dropped, or that module's declaration widened when the moved code names it). A trait import has no
 name in the moved text, so the copy is whole, and a **complete** run's [tidy](#the-tidy) removes the
-unused ones; a run stopped early leaves them as warnings and says so.
+unused ones; a run stopped early leaves them as warnings and says so. An import of the moving item
+that the destination holds under an alias (`use crate::pairing::peer as check;`, alone or as a group
+member) stays bound as `use self::peer as check;`, with its visibility; an un-renamed one is removed,
+because the destination now defines the name.
+
+**Relative paths through an import.** A `use` path is read as rustc 2018 reads it: `crate`, `self` and
+`super` resolve against the module that writes it, any other head is a name that module binds (a `mod`
+it declares, an item it defines, a name it imports) and an **extern crate** otherwise. On that reading,
+a `self::`/`super::` path in moved code that reaches module `M` and names `Name` is written as follows:
+
+| `M` and the destination | Written |
+|---|---|
+| `M` defines `Name` or declares it as a child module | the path to `M` from the destination |
+| the destination is `M` or inside `M` | the path as written, respelled only when the `super::` count changes |
+| `M` binds `Name` by an import visible at the destination (`pub`, `pub(crate)`, a `pub(in …)` that covers it) | the path to `M` |
+| `M` binds `Name` by a private `use p::Name;` of this crate | the path to `p` |
+| … a private aliased `use p::Real as Name;` | the path to `p`, with `Name` rewritten to `Real` |
+| … a private `use p::*;` of this crate, exactly one glob of `M` whose module binds `Name` | the path to `p` |
+| … a private `use` of another crate (`use kernel::util;`) | the crate's own path, `kernel::util::`; `::kernel::util::` when the destination binds the name `kernel` itself |
+| `M` binds `Name` only through globs that none, or more than one, can confirm | **refused**, naming the file, line, the path as written and why; nothing is written |
+
+An import is followed one hop: a target that is itself a re-export is written as the import names it.
+`check --deep` and `apply` refuse alike.
 
 **What a caller keeps, and what the moved text says.** A caller that reached the item through
 `use crate::old;` and wrote `old::f(…)` keeps that shape: the destination's last segment is imported
@@ -496,7 +518,9 @@ with optional generic arguments on the last segment. A `range` or `symbol` ancho
 server starts.
 
 The members, their attributes and comments are byte ranges of the source: the only text the engine
-authors is the header's self type, the repeated `impl` headers and one `use crate::<module>::<Name>;`.
+authors is the header's self type, the repeated `impl` headers and one `use crate::<module>::<Name>;`,
+which is left out when the file already imports the new type under any spelling that resolves to it
+(`crate::m::T`, `self::m::T`, `super::m::T`, or the child-relative `m::T`).
 A run that is a proper subset of the block becomes up to three blocks **in place, in source order** —
 `[Old: P] [New: M] [Old: A]`, an empty piece omitted — so the free-standing comments and blank lines
 before the run stay with the block that precedes it, and the comments attached to the run's first
@@ -505,7 +529,7 @@ set, are re-pointed to `New::`; a member that stayed, a method call (`self.m()`)
 type position are left as written. The generic parameter list and `where` clause of the header are
 kept. `check --deep` rehearses the operation the way `apply` does: a moved member that reads a field
 the new type lacks (S4), a declaration whose fields cannot be read (S5), a retarget to the type the
-block already is (S3), a `use` that would clash with a name the file already binds (S6), and an anchor
+block already is (S3), a `use` that would clash with a different item the file already binds under the name (S6), and an anchor
 whose members sit in two blocks (S1) are all refused before anything is written. Callers of a moved
 member are **not** re-pointed: an outside caller breaks (`E0599`) and the compile gate names it, which
 is the documented outcome — pair the operation with `repoint_call` in one `group`, leave a delegator, or
@@ -1280,9 +1304,7 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
 - **`move_item` copies the source module's whole `use` header.** A trait import has no name in the moved
   text, so no reading of it can say which imports to leave out. A complete run's tidy removes the unused
   ones on the compiler's evidence; a run stopped early with `--stop-after` leaves `unused_imports`
-  warnings. An import of the moving item through an aliased `use` (`use a::X as Y`) is not recognised by
-  the name-clash check, so a destination that imports it under an alias is refused as a clash; a
-  `super::Name` that names a module's own glob import is not followed.
+  warnings.
 - **`move_item` refusals and blind spots.** A moved name inside a nested `use` group, a declaration
   whose keyword is on a line above its name, and an inline destination written on one line
   (`mod answers {}`) are refused. A `use` inside a function body that names a moved item counts as an

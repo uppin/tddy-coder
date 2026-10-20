@@ -31,7 +31,7 @@ server.
 | `fields.rs` | S4/S5: the fields a moved member reads through `self` or names in a `Self { … }`, read with `syn`, against the fields the new type declares. A declaration the file does not write plainly as a struct is refused only when a field is read |
 | `rewrite.rs` | the header's self type (generics and `where` clause left as bytes), the split into up to three blocks in place, the `[chain::]Old::` → `New::` replacement, and `Layout::with_delegators`, the text of the block when delegators are left |
 | `delegator.rs` | `variant: "leave_delegator"`: S7 (the members no forwarding method can be written for), the forwarding text of one member, and the delegators nothing calls |
-| `imports.rs` | the one `use crate::<module>::<Name>;`, unless the file already binds the name to that path or declares the type; S6 when the file binds the name to something else |
+| `imports.rs` | the one `use crate::<module>::<Name>;`, unless the file already binds the name to that path or declares the type; S6 when the file binds the name to a different item. A `use` leaf counts as binding the type when it resolves to it from the file's module (`crate::`, `self::`, `super::` or child-relative spelling), read with the shared `use`-path reading of `item_move/use_path.rs` |
 
 ## The split
 

@@ -196,6 +196,7 @@ impl<'a> Scan<'a> {
                         segments: path,
                         alias: None,
                         glob: true,
+                        visibility: None,
                     });
                     return;
                 }
@@ -225,6 +226,7 @@ impl<'a> Scan<'a> {
             segments: path,
             alias,
             glob: false,
+            visibility: None,
         });
     }
 
@@ -256,6 +258,10 @@ pub(crate) struct UseLeaf {
     pub(crate) segments: Vec<String>,
     pub(crate) alias: Option<String>,
     pub(crate) glob: bool,
+    /// The `pub…` text of the `use` item that holds the leaf (`pub`, `pub(crate)`, `pub(in crate::a)`),
+    /// `None` for a private one. Read only by [`items_of_module`]; every other reader of a `use` tree
+    /// leaves it `None`.
+    pub(crate) visibility: Option<String>,
 }
 
 impl UseLeaf {

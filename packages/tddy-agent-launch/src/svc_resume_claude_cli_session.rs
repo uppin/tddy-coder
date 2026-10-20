@@ -12,8 +12,6 @@ use std::path::PathBuf;
 
 use crate::hooks_and_urls;
 
-// TODO(restructure-retarget-impl-s6): spelled `crate::` by hand so `retarget_impl` does not read it as a clash
-// with the `use` it adds; see docs/dev/todo/2026-10-07-restructure-retarget-impl-refuses-a-relative-import-of-its-target-type.md.
 use crate::launch_ports::LaunchSessions;
 
 impl LaunchSessions {

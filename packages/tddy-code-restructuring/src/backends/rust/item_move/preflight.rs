@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use super::super::{failure, is_identifier};
 use super::creation::{self, Destination};
 use super::destination::{find_module, package_of, Lookup, Module, Package};
+use super::use_path::{resolved, UsePath};
 use super::written_in;
 use crate::crate_move::source_scan::items_of_module;
 use crate::plan::{Anchor, ItemPath, RefactorOp};
@@ -185,7 +186,8 @@ fn taken_by_something_else(
             .iter()
             .filter(|leaf| leaf.bound_name() == Some(name.as_str()))
         {
-            let Some(path) = resolved_from(&leaf.segments, &module.path) else {
+            let Some(UsePath::InCrate(path)) = resolved(&leaf.segments, &module.path, &items)
+            else {
                 only_imports_the_moved = false;
                 continue;
             };
@@ -216,37 +218,17 @@ fn reexports(
     };
     let text = workspace.read(&module.file)?;
     let moved_path: Vec<String> = source.iter().cloned().chain([name.to_string()]).collect();
-    Ok(items_of_module(&text[module.scope.clone()])
-        .uses
-        .iter()
-        .any(|leaf| {
-            let Some(reached) = resolved_from(&leaf.segments, &module.path) else {
-                return false;
-            };
-            if leaf.glob {
-                reached == source
-            } else {
-                leaf.bound_name() == Some(name) && reached == moved_path
-            }
-        }))
-}
-
-/// The path below the crate root that `segments`, written in a `use` of the module at `at`, names.
-pub(super) fn resolved_from(segments: &[String], at: &[String]) -> Option<Vec<String>> {
-    let mut path = match segments.first().map(String::as_str) {
-        Some("crate") => Vec::new(),
-        _ => at.to_vec(),
-    };
-    for segment in segments {
-        match segment.as_str() {
-            "crate" | "self" => {}
-            "super" => {
-                path.pop()?;
-            }
-            name => path.push(name.to_string()),
+    let items = items_of_module(&text[module.scope.clone()]);
+    Ok(items.uses.iter().any(|leaf| {
+        let Some(UsePath::InCrate(reached)) = resolved(&leaf.segments, &module.path, &items) else {
+            return false;
+        };
+        if leaf.glob {
+            reached == source
+        } else {
+            leaf.bound_name() == Some(name) && reached == moved_path
         }
-    }
-    Some(path)
+    }))
 }
 
 /// The finding for a destination whose path stops existing at segment `at` of the module path.
@@ -281,24 +263,4 @@ pub(in crate::backends::rust) fn names_declared_in(module_text: &str) -> BTreeSe
             .filter_map(|leaf| leaf.bound_name().map(str::to_string)),
     );
     names
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn path(text: &str) -> Vec<String> {
-        text.split("::")
-            .filter(|segment| !segment.is_empty())
-            .map(str::to_string)
-            .collect()
-    }
-
-    #[test]
-    fn reads_a_super_import_against_the_module_it_is_written_in() {
-        assert_eq!(
-            resolved_from(&path("super::guard::Route"), &path("svc::exec")),
-            Some(path("svc::guard::Route"))
-        );
-    }
 }

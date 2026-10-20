@@ -32,7 +32,8 @@ The assembly is a function of texts, so it is unit-tested without a server.
 | `outline.rs` | the run of items an anchor covers, from the outline; refuses a range inside an `impl`, a cut item, a module among the items, and a keyword on a line above its name |
 | `sites.rs` | the places that name a moved item, read around each reference position (a `use`, a qualified path, a bare name through an import); refuses a name in a nested `use` group. A caller that wrote a one-segment module qualifier bound by a `use` in scope keeps that shape — the destination's last segment is bound with a new `use` and the qualifier rewritten to it — unless that name is already taken, when today's full path is written and noted |
 | `scope.rs`, `reach.rs` | visibility read as a module subtree, so a keyword is respelled for the module it lands in and widened only as far as callers, imports and the moved code's own reach need; a created module's declaration and the declarations on the path to the destination are widened the same way |
-| `rebase.rs`, `bindings.rs` | relative spellings in moved code (`super::f()`, `pub(super)`) keep meaning what they meant; a `super::Name` that reached a plain private `use` is respelled to the item it stands for |
+| `rebase.rs`, `bindings.rs` | relative spellings in moved code (`super::f()`, `pub(super)`) keep meaning what they meant. A `super::Name` that reaches a module which only imports `Name` is kept when the import is visible at the destination or the destination is inside the module, and otherwise followed one hop to what the import brings in: a plain, aliased or confirmed-glob import of this crate, or another crate's path (rooted with `::` when the destination binds the crate's name). A glob that cannot confirm the name is refused, naming the file and line |
+| `use_path.rs` | the one Rust 2018 reading of a `use` path: `crate`/`self`/`super` against the module that writes it, a head the module binds as local, any other head an extern crate. Read by the clash check, the one-hop lookup and `retarget_impl`'s S6 |
 | `imports.rs` | the source module's `use` header copied across (head from the crate root, bound names left out, unreachable modules dropped or widened, a group split per unbound name) |
 | `placement.rs`, `text.rs` | where the text lands in the destination (a file or an inline module; one written on one line is refused) and the byte-offset editing and masked-text readings shared by both operations |
 | `facade.rs` | the `pub use` a move leaves: `glob` is one line over the destination, `named` and `outside` one grouped line per visibility |
@@ -137,6 +138,7 @@ a generated workspace and a live rust-analyzer, with `assert_compiles_with_its_t
 `assert_lints_clean` as oracles: `move_item_acceptance`, `move_item_beyond_the_basics_acceptance`,
 `move_item_creates_module_acceptance`, `move_item_into_an_existing_module_acceptance`,
 `move_item_of_an_item_the_destination_imports_acceptance`, `move_item_outside_facade_acceptance`,
+`move_item_paths_acceptance`,
 `reparent_module_acceptance`, `reparent_module_beyond_the_basics_acceptance`,
 `reparent_module_through_the_old_parents_import_acceptance`, `same_crate_deep_check_acceptance`,
 `same_crate_widening_acceptance`, `move_fidelity_acceptance` and
@@ -152,5 +154,4 @@ Each is a refusal or a compile-gate failure; none is silent. They are listed in 
 [Known limitations](../../../docs/ft/coder/rust-code-restructuring.md#known-limitations): members are
 surveyed in the source file only (an `impl` of the moved type in another file, and a tuple-struct field the
 outline does not list, are not), a re-parented tree's reach is surveyed in the root items of the old parent
-and its ancestors (an item inside a sibling module is not), the `use` header is copied whole, an aliased
-import of the moving item reads as a name clash, and `outside` reads the default target layout only.
+and its ancestors (an item inside a sibling module is not), the `use` header is copied whole, and `outside` reads the default target layout only.
