@@ -80,6 +80,14 @@ pub enum RestructureError {
     NoBackend { extension: String },
     #[error("backend `{backend}` does not support operation `{op}`")]
     UnsupportedOp { backend: String, op: String },
+    /// The language has a server, and the command that starts it is not configured.
+    ///
+    /// Refused before any process starts, and never answered by guessing a command (no `PATH`
+    /// lookup — `#reshape` extension-language-server, R2/R3). `reason` is the support's own words,
+    /// naming the server and the setting to write — for an installed extension:
+    /// `language server <id> (extension <ext>) has no command: set lsp.<id>.binary.path in <file>`.
+    #[error("{reason}")]
+    ServerNotConfigured { language: String, reason: String },
     #[error("{path} is not inside a git worktree — `git mv` is required to preserve history")]
     NotAGitWorktree { path: String },
     #[error("journal is indeterminate at op {op}: files match neither the pre- nor post-operation state")]

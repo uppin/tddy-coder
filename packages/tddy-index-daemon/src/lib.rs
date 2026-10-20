@@ -70,7 +70,132 @@ pub fn is_rust_workspace(root: &std::path::Path) -> bool {
     root.join(RUST_WORKSPACE_MANIFEST).is_file()
 }
 
+/// Whether this index can serve `root`: a Rust workspace ([`is_rust_workspace`]), or a tree holding
+/// a file one of `supports` claims whose support launches a server — an extension-only worktree
+/// whose language has a configured server (`#reshape` extension-language-server, R7). The
+/// predicate a caller asks in place of [`is_rust_workspace`] before warming a root or reporting it
+/// has no index.
+///
+/// Walks the tree for a claimed file, skipping `.git` and `target`; a support with no server
+/// (outline only) never makes a root servable.
+#[must_use]
+pub fn serves_workspace(
+    root: &std::path::Path,
+    supports: &tddy_code_restructuring::SupportRegistry,
+) -> bool {
+    let _ = (root, supports);
+    // TODO(reshape-extension-language-server): implement
+    todo!("serves_workspace")
+}
+
 /// The proto's file-descriptor set, so a host can merge this service into gRPC reflection without
 /// re-parsing the schema.
 pub static CODE_INDEX_DESCRIPTOR_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/code_index_descriptors.bin"));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use tddy_code_restructuring::{
+        LanguageBackend, LanguageSupport, ServerHandle, SupportRegistry,
+    };
+    use tddy_lsp::{LanguageId, LaunchSpec};
+
+    /// A support claiming files by suffix, launching `launch` — a stand-in for an installed
+    /// extension's, so this predicate is pinned without loading a grammar.
+    struct ASupport {
+        id: LanguageId,
+        suffix: &'static str,
+        launch: Option<LaunchSpec>,
+    }
+
+    impl LanguageSupport for ASupport {
+        fn id(&self) -> &LanguageId {
+            &self.id
+        }
+
+        fn claims(&self, path: &Path) -> bool {
+            path.to_string_lossy().ends_with(self.suffix)
+        }
+
+        fn launch(&self) -> Option<LaunchSpec> {
+            self.launch.clone()
+        }
+
+        fn workspace_root(&self, _file: &Path, root: &Path) -> PathBuf {
+            root.to_path_buf()
+        }
+
+        fn backend(&self, _server: ServerHandle<'_>, _root: &Path) -> Box<dyn LanguageBackend> {
+            unreachable!("the predicate builds no backend")
+        }
+    }
+
+    fn supports_of(support: ASupport) -> SupportRegistry {
+        let mut supports = SupportRegistry::new();
+        supports.register(Box::new(support));
+        supports
+    }
+
+    fn a_toml_support_launching(launch: Option<LaunchSpec>) -> ASupport {
+        ASupport {
+            id: LanguageId::new("demo-toml"),
+            suffix: ".toml",
+            launch,
+        }
+    }
+
+    /// A tree with no `Cargo.toml`, holding `config/app.toml` and a `target/` the walk skips.
+    fn an_extension_only_tree() -> tempfile::TempDir {
+        let tree = tempfile::tempdir().expect("a temporary tree");
+        std::fs::create_dir_all(tree.path().join("config")).expect("config dir");
+        std::fs::write(tree.path().join("config/app.toml"), "[server]\n").expect("a toml file");
+        tree
+    }
+
+    #[test]
+    fn a_tree_whose_files_a_server_launching_support_claims_is_served() {
+        // Given an extension-only tree, and a support with a server that claims its TOML file
+        let tree = an_extension_only_tree();
+        let supports = supports_of(a_toml_support_launching(Some(LaunchSpec::new(
+            "/opt/fake-ls",
+        ))));
+
+        // When the index is asked whether it serves the tree
+        let served = (
+            is_rust_workspace(tree.path()),
+            serves_workspace(tree.path(), &supports),
+        );
+
+        // Then it is no Rust workspace, and served all the same
+        assert_eq!(served, (false, true));
+    }
+
+    #[test]
+    fn a_tree_claimed_only_by_a_support_without_a_server_is_not_served() {
+        // Given an extension-only tree, and an outline-only support claiming its TOML file
+        let tree = an_extension_only_tree();
+        let supports = supports_of(a_toml_support_launching(None));
+
+        // When the index is asked whether it serves the tree
+        let served = serves_workspace(tree.path(), &supports);
+
+        // Then it is not: there is no server to hold it
+        assert!(!served, "an outline-only language made the tree servable");
+    }
+
+    #[test]
+    fn a_rust_workspace_is_served_with_no_supports() {
+        // Given a tree with a Cargo manifest, and no supports beyond Rust
+        let tree = tempfile::tempdir().expect("a temporary tree");
+        std::fs::write(tree.path().join(RUST_WORKSPACE_MANIFEST), "[workspace]\n")
+            .expect("a manifest");
+
+        // When the index is asked whether it serves the tree
+        let served = serves_workspace(tree.path(), &SupportRegistry::new());
+
+        // Then it is, as it always was
+        assert!(served, "a Rust workspace stopped being served");
+    }
+}

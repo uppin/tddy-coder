@@ -25,6 +25,7 @@ use crate::grammar::{GrammarLoadError, GrammarStore};
 use crate::language::ExtensionLanguage;
 use crate::manifest::ExtensionManifest;
 use crate::outline::{Outline, OutlineEntry};
+use crate::server::ServerChoice;
 
 /// What loading the installed extensions found: a support per language whose grammar loaded, and
 /// one report per grammar that did not (R8).
@@ -182,6 +183,9 @@ pub struct ExtensionSupport {
     outline: Option<Arc<Query>>,
     /// The process's one store, shared by every extension language.
     store: Arc<Mutex<GrammarStore>>,
+    /// What serves the language (`#reshape` extension-language-server, R1–R3):
+    /// [`ServerChoice::Undeclared`] until [`ExtensionSupport::with_server`] says otherwise.
+    server: ServerChoice,
 }
 
 impl ExtensionSupport {
@@ -283,6 +287,28 @@ impl LanguageSupport for ExtensionSupport {
     fn backend(&self, server: ServerHandle<'_>, root: &Path) -> Box<dyn LanguageBackend> {
         let _ = server;
         Box::new(self.outline_backend(root))
+    }
+}
+
+/// What serves an extension language (`#reshape` extension-language-server).
+///
+/// Green makes the support read it: [`LanguageSupport::launch`] is the configured server's launch
+/// ([`ServerChoice::launch`]); [`LanguageSupport::backend`] over a live server is a
+/// [`tddy_code_restructuring::backends::ServerBackend`] composed with
+/// [`ExtensionSupport::outline_backend`], and with no server for an
+/// [`ServerChoice::Unconfigured`] language one built `without_command`, carrying the
+/// [`crate::server::NoServerCommand`] text (R3); and [`load_installed`] reads
+/// [`crate::settings::ExtensionSettings::load`] once and gives every support its
+/// [`ServerChoice::for_language`].
+impl ExtensionSupport {
+    /// This support, served as `server` says.
+    pub fn with_server(self, server: ServerChoice) -> Self {
+        Self { server, ..self }
+    }
+
+    /// What serves this support's language.
+    pub fn server(&self) -> &ServerChoice {
+        &self.server
     }
 }
 

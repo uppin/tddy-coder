@@ -81,3 +81,22 @@ every node has its companion (ask the developer first). Not a changeset companio
 ## Exploration 2 — node notes
 
 Node-specific exploration is carried by the PRD's Background and the whole-work Exploration 1 above; the contract commit adds what its tests need.
+
+## Exploration 3 — contract stage (2026-10-20)
+
+- `LspClient::initialize` (`tddy-lsp/src/client.rs:112`) has one caller (`server_body.rs:227`); the reader's
+  `server_request_reply` (`client/dispatch.rs`) answers `workspace/configuration` with nulls and has no access to the
+  spec. Green threads `LaunchSpec::workspace_configuration` from `server_body` through `initialize` to `read_loop`.
+- `LaunchSpec` is built only through `LaunchSpec::new` everywhere (no struct literals), so the new field breaks no
+  caller.
+- `fake_lsp` already replays `initialize` params (`tddy/initializeParams`), so init options need no new mode; it treated
+  a client response as an unknown request (answered `null`) — the new `--requests-configuration` mode intercepts it.
+- The daemon is Rust-only in `navigation.rs` (`LANGUAGE_ID`, `SOURCE_EXTENSION`), `index.rs` (`client_for`,
+  `warmth_of`, `warm_workspaces` all key `LanguageId::RUST`) and has no registry of supports: `CodeIndexPorts` holds
+  only the `LspRegistry`. `CodeIndexState::None` is produced in `tddy-daemon-rpc/src/code_session/without_an_index.rs`
+  when `is_rust_workspace` is false (also `code_navigation.rs:269`, `code_index_warmup.rs:36`,
+  `tddy-lsp-executor/src/index_backed.rs:78`).
+- `RestructureError` is matched exhaustively in `tddy-index-daemon/src/status.rs::status_of`; the new
+  `ServerNotConfigured` joins the `failed_precondition` class.
+- K19's `LanguageServerEntry` carries `name`, `language`, `languages`, `language_ids` — no `opt_in_languages`.
+

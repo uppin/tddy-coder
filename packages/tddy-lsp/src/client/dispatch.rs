@@ -118,6 +118,26 @@ fn server_request_reply(method: &str, params: Option<&Value>, id: Value) -> Valu
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
+/// The answer to a `workspace/configuration` request, from the launch's settings: one entry per
+/// requested item, each the value at the item's dot-separated `section` path in `settings`, the
+/// whole of `settings` for an item that names no section, and null where the path is absent
+/// (`#reshape` extension-language-server, R4).
+///
+/// With `settings` null this is one null per item — what [`server_request_reply`] answers today,
+/// and what Rust's launch keeps getting.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "TODO(reshape-extension-language-server): server_request_reply answers from it once implemented"
+    )
+)]
+pub(super) fn configuration_answer(settings: &Value, params: Option<&Value>) -> Value {
+    let _ = (settings, params);
+    // TODO(reshape-extension-language-server): implement
+    todo!("configuration_answer")
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::notifications::{NotificationSink, NOTIFICATION_BACKLOG};
@@ -303,5 +323,70 @@ mod tests {
             reply,
             json!({ "jsonrpc": "2.0", "id": 3, "result": [null, null, null] })
         );
+    }
+
+    /// The settings a launch answers `workspace/configuration` from in the tests below.
+    fn a_servers_settings() -> Value {
+        json!({ "fake": { "mode": "strict", "lint": { "level": 2 } } })
+    }
+
+    /// A `workspace/configuration` request's params asking for `sections`, one item each.
+    fn a_configuration_request_for(sections: &[Option<&str>]) -> Value {
+        let items: Vec<Value> = sections
+            .iter()
+            .map(|section| match section {
+                Some(section) => json!({ "section": section }),
+                None => json!({}),
+            })
+            .collect();
+        json!({ "items": items })
+    }
+
+    #[test]
+    fn answers_each_configuration_item_from_its_section_path() {
+        // Given a request for a leaf and for a table of the settings
+        let params = a_configuration_request_for(&[Some("fake.mode"), Some("fake.lint")]);
+
+        // When it is answered from the settings
+        let answer = configuration_answer(&a_servers_settings(), Some(&params));
+
+        // Then each item gets the value at its dot-separated path
+        assert_eq!(answer, json!(["strict", { "level": 2 }]));
+    }
+
+    #[test]
+    fn answers_null_for_a_section_the_settings_lack() {
+        // Given a request for a path the settings do not hold
+        let params = a_configuration_request_for(&[Some("fake.missing"), Some("other")]);
+
+        // When it is answered from the settings
+        let answer = configuration_answer(&a_servers_settings(), Some(&params));
+
+        // Then each absent path is null, one per item
+        assert_eq!(answer, json!([null, null]));
+    }
+
+    #[test]
+    fn answers_the_whole_settings_for_an_item_without_a_section() {
+        // Given a request whose one item names no section
+        let params = a_configuration_request_for(&[None]);
+
+        // When it is answered from the settings
+        let answer = configuration_answer(&a_servers_settings(), Some(&params));
+
+        // Then the item gets the settings whole
+        assert_eq!(answer, json!([a_servers_settings()]));
+    }
+
+    #[test]
+    fn answers_one_null_per_item_when_the_launch_has_no_settings() {
+        // Given a launch with no settings — Rust's — and a request for two items
+        let params = a_configuration_request_for(&[Some("rust-analyzer"), None]);
+
+        // When it is answered
+        let answer = configuration_answer(&Value::Null, Some(&params));
+
+        // Then every item is null, as before settings existed
+        assert_eq!(answer, json!([null, null]));
     }
 }

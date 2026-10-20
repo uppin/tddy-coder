@@ -4,7 +4,9 @@
 //!
 //! An installed extension's languages become language supports ([`support`]): each claims its
 //! `path_suffixes`, loads its grammar from `grammars/<grammar>.wasm` ([`grammar`]) and answers item
-//! anchors from its `outline.scm` ([`outline`]), with no language server.
+//! anchors from its `outline.scm` ([`outline`]), with no language server — unless one of the
+//! extension's `[language_servers.<id>]` names it and `<extensions dir>/settings.json` gives that
+//! server a command ([`settings`], [`server`]): then it has `rename_symbol` and references too.
 //!
 //! Library functions take the [`ExtensionsDir`] and the [`Registry`] explicitly; only
 //! [`cli::run`] resolves them from the environment (`TDDY_DATA_DIR`, `TDDY_ZED_EXTENSIONS_API`).
@@ -19,6 +21,8 @@ pub mod language;
 pub mod manifest;
 pub mod outline;
 pub mod registry;
+pub mod server;
+pub mod settings;
 pub mod support;
 
 mod archive;
@@ -35,6 +39,8 @@ pub use language::{ExtensionLanguage, LanguageConfig};
 pub use manifest::{ExtensionManifest, GrammarEntry, LanguageServerEntry, LibEntry, LibKind};
 pub use outline::{Outline, OutlineEntry};
 pub use registry::Registry;
+pub use server::{client_capabilities, NoServerCommand, ServerChoice};
+pub use settings::{BinarySettings, ExtensionSettings, ServerSettings};
 pub use support::{
     load_installed, ExtensionSupport, InstalledExtensions, InstalledLanguages, OutlineBackend,
 };
