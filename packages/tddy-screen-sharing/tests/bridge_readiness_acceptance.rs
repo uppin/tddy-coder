@@ -22,6 +22,9 @@ use tddy_rpc::Code;
 
 const THE_DESKTOPS_REASON: &str = "the password is not right for this desktop";
 
+/// A desktop that is not full HD, so its size cannot be mistaken for the old 1920×1080 guess.
+const A_DESKTOP_THAT_IS_NOT_FULL_HD: (u32, u32) = (1280, 800);
+
 /// Short against the 30 s default, so a test about a bridge that never reports costs seconds rather
 /// than the default wait. The stand-in is warmed up first (`tests/common`), so this budget is spent
 /// on the readiness wait and not on the first exec of a fresh script.
@@ -42,10 +45,7 @@ async fn a_desktop_that_refuses_the_sign_in_fails_the_start_as_unauthenticated()
 
     // Then
     assert_eq!(refusal.code, Code::Unauthenticated, "{refusal:?}");
-    assert!(
-        refusal.message.contains(THE_DESKTOPS_REASON),
-        "the refusal does not carry the desktop's reason: {refusal:?}"
-    );
+    assert_eq!(refusal.message, THE_DESKTOPS_REASON, "{refusal:?}");
 }
 
 #[tokio::test]
@@ -68,7 +68,11 @@ async fn a_refused_start_leaves_no_bridge_running() {
 #[tokio::test]
 async fn a_started_desktop_reports_the_size_its_bridge_saw() {
     // Given
-    let daemon = a_daemon_whose_bridge(TheBridge::ready_at(1280, 800)).start();
+    let daemon = a_daemon_whose_bridge(TheBridge::ready_at(
+        A_DESKTOP_THAT_IS_NOT_FULL_HD.0,
+        A_DESKTOP_THAT_IS_NOT_FULL_HD.1,
+    ))
+    .start();
     let target_id = daemon.attach_a_desktop_to(A_HOST).await;
 
     // When
@@ -78,7 +82,7 @@ async fn a_started_desktop_reports_the_size_its_bridge_saw() {
         .expect("a desktop whose bridge reported ready starts");
 
     // Then
-    assert_eq!((stream.width, stream.height), (1280, 800));
+    assert_eq!((stream.width, stream.height), A_DESKTOP_THAT_IS_NOT_FULL_HD);
 }
 
 #[tokio::test]
@@ -119,7 +123,11 @@ async fn a_bridge_that_never_reports_fails_the_start_and_is_stopped() {
 #[tokio::test]
 async fn a_session_desktop_reports_its_real_size_too() {
     // Given
-    let daemon = a_daemon_whose_bridge(TheBridge::ready_at(1280, 800)).start();
+    let daemon = a_daemon_whose_bridge(TheBridge::ready_at(
+        A_DESKTOP_THAT_IS_NOT_FULL_HD.0,
+        A_DESKTOP_THAT_IS_NOT_FULL_HD.1,
+    ))
+    .start();
     let target_id = daemon.a_session_holding_a_desktop().await;
 
     // When
@@ -129,5 +137,5 @@ async fn a_session_desktop_reports_its_real_size_too() {
         .expect("a session desktop whose bridge reported ready starts");
 
     // Then
-    assert_eq!((stream.width, stream.height), (1280, 800));
+    assert_eq!((stream.width, stream.height), A_DESKTOP_THAT_IS_NOT_FULL_HD);
 }

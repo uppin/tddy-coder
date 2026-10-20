@@ -6,7 +6,10 @@ use std::process::Stdio;
 
 use log::{error, info, warn};
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
+use tokio::process::{Child, ChildStdout, Command};
+use tokio::sync::Mutex;
+
+use std::collections::HashMap;
 
 use crate::bridge_config::PreparedBridge;
 
@@ -50,7 +53,7 @@ impl ScreenSharingServiceImpl {
                 pid, bridge_key
             );
             #[cfg(unix)]
-            // SAFETY: pid > 0 is enforced by the `if pid > 0` guard in `spawn_bridge`
+            // SAFETY: pid > 0 is enforced by the `if pid > 0` guard in `record_bridge_pid`
             // that filters out the zero sentinel before inserting into `active_bridges`.
             // Sending SIGTERM to a pid is safe — the signal is delivered to the process
             // group and the call does not affect memory safety.
@@ -187,86 +190,140 @@ impl ScreenSharingServiceImpl {
         // ever signal — running against a desktop nobody is watching.
         self.terminate_bridge(&bridge_key).await;
 
-        let mut child = Command::new(&binary)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| Status::internal(format!("spawning the bridge binary '{binary}': {e}")))?;
-
-        let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            let _ = child.kill().await;
-            return Err(Status::internal(
-                "the bridge's stdin and stdout are not piped",
-            ));
-        };
-
-        // Write the JSON config to the bridge's stdin, then close it: the bridge reads to EOF.
-        let written = stdin.write_all(&config_json).await;
-        drop(stdin);
-        if let Err(e) = written {
-            let _ = child.kill().await;
-            return Err(Status::internal(format!(
-                "writing the bridge's config to its stdin: {e}"
-            )));
-        }
-
-        // Store the PID so the matching stop call can send SIGTERM. Recorded before the readiness
-        // wait, so a stop that arrives while the bridge is still starting reaches it.
-        let pid = child.id().unwrap_or(0);
-        if pid > 0 {
-            self.active_bridges
-                .lock()
-                .await
-                .insert(bridge_key.clone(), pid);
-        }
+        let (mut child, stdout) = start_bridge_process(&binary, &config_json).await?;
+        let pid = self.record_bridge_pid(&bridge_key, &child).await;
 
         info!(
             "bridge spawned: binary={} pid={} key={}",
             binary, pid, bridge_key
         );
 
+        let started = self
+            .await_bridge_started(&mut child, stdout, &bridge_key, pid)
+            .await?;
+        reap_bridge(Arc::clone(&self.active_bridges), child, bridge_key, pid);
+        Ok(started)
+    }
+
+    /// Wait for the bridge's readiness line, stopping the bridge if it never says it came up.
+    ///
+    /// The bridge is stopped here, not by the caller, so no failed start can return with its
+    /// process still running.
+    async fn await_bridge_started(
+        &self,
+        child: &mut Child,
+        stdout: ChildStdout,
+        bridge_key: &str,
+        pid: u32,
+    ) -> Result<BridgeStarted, Status> {
         let started = match await_bridge_readiness(stdout, self.bridge_ready_timeout).await {
             Ok(started) => started,
             Err(status) => {
-                // A bridge that refused, failed, or never reported must not outlive the start.
-                if let Err(e) = child.kill().await {
-                    warn!(
-                        "bridge stop after a failed start: key={} err={}",
-                        bridge_key, e
-                    );
-                }
-                let mut bridges = self.active_bridges.lock().await;
-                if bridges.get(&bridge_key) == Some(&pid) {
-                    bridges.remove(&bridge_key);
-                }
+                self.stop_failed_bridge(child, bridge_key, pid).await;
                 return Err(status);
             }
         };
-
         info!(
             "bridge started: key={} desktop={}x{}",
             bridge_key, started.width, started.height
         );
-
-        // Background task: wait for the process to exit (prevents zombie processes) and
-        // forget the PID when it does.
-        let active_bridges = Arc::clone(&self.active_bridges);
-        tokio::spawn(async move {
-            match child.wait().await {
-                Ok(status) => {
-                    info!("bridge exited: key={} status={}", bridge_key, status)
-                }
-                Err(e) => error!("bridge wait error: key={} err={}", bridge_key, e),
-            }
-            // Only while the key still names *this* bridge. A restart records a newer pid under
-            // the same key, and forgetting that one would leave the running process unstoppable.
-            let mut bridges = active_bridges.lock().await;
-            if bridges.get(&bridge_key) == Some(&pid) {
-                bridges.remove(&bridge_key);
-            }
-        });
-
         Ok(started)
+    }
+
+    /// Store the bridge's PID so the matching stop call can send SIGTERM, and return it.
+    ///
+    /// Recorded before the readiness wait, so a stop that arrives while the bridge is still
+    /// starting reaches it. A child with no PID yields the zero sentinel, which is never recorded:
+    /// signalling pid 0 would reach the daemon's whole process group, not the bridge.
+    async fn record_bridge_pid(&self, bridge_key: &str, child: &Child) -> u32 {
+        let pid = child.id().unwrap_or(0);
+        if pid > 0 {
+            self.active_bridges
+                .lock()
+                .await
+                .insert(bridge_key.to_string(), pid);
+        }
+        pid
+    }
+
+    /// Stop a bridge whose start failed, and forget its PID.
+    ///
+    /// A bridge that refused, failed, or never reported must not outlive the start.
+    async fn stop_failed_bridge(&self, child: &mut Child, bridge_key: &str, pid: u32) {
+        if let Err(e) = child.kill().await {
+            warn!(
+                "bridge stop after a failed start: key={} err={}",
+                bridge_key, e
+            );
+        }
+        forget_bridge_pid(&self.active_bridges, bridge_key, pid).await;
+    }
+}
+
+/// Spawn the bridge binary and hand it its config, returning the child and its stdout.
+///
+/// The JSON config is written to the bridge's stdin, which is then closed: the bridge reads to
+/// EOF. A child whose pipes are missing, or that cannot be handed its config, is killed rather
+/// than left running with nothing to do.
+async fn start_bridge_process(
+    binary: &str,
+    config_json: &[u8],
+) -> Result<(Child, ChildStdout), Status> {
+    let mut child = Command::new(binary)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| Status::internal(format!("spawning the bridge binary '{binary}': {e}")))?;
+
+    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        let _ = child.kill().await;
+        return Err(Status::internal(
+            "the bridge's stdin and stdout are not piped",
+        ));
+    };
+
+    let written = stdin.write_all(config_json).await;
+    drop(stdin);
+    if let Err(e) = written {
+        let _ = child.kill().await;
+        return Err(Status::internal(format!(
+            "writing the bridge's config to its stdin: {e}"
+        )));
+    }
+    Ok((child, stdout))
+}
+
+/// Background task: wait for the process to exit (prevents zombie processes) and forget the PID
+/// when it does.
+fn reap_bridge(
+    active_bridges: Arc<Mutex<HashMap<String, u32>>>,
+    mut child: Child,
+    bridge_key: String,
+    pid: u32,
+) {
+    tokio::spawn(async move {
+        match child.wait().await {
+            Ok(status) => {
+                info!("bridge exited: key={} status={}", bridge_key, status)
+            }
+            Err(e) => error!("bridge wait error: key={} err={}", bridge_key, e),
+        }
+        forget_bridge_pid(&active_bridges, &bridge_key, pid).await;
+    });
+}
+
+/// Forget `bridge_key`'s PID — only while the key still names *this* bridge.
+///
+/// A restart records a newer pid under the same key, and forgetting that one would leave the
+/// running process unstoppable.
+async fn forget_bridge_pid(
+    active_bridges: &Mutex<HashMap<String, u32>>,
+    bridge_key: &str,
+    pid: u32,
+) {
+    let mut bridges = active_bridges.lock().await;
+    if bridges.get(bridge_key) == Some(&pid) {
+        bridges.remove(bridge_key);
     }
 }

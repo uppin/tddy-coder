@@ -944,8 +944,5 @@ async fn a_refused_vnc_password_is_reported_as_an_authentication_failure() {
                 error_text(&err)
             )
         });
-    assert!(
-        refusal.0.contains(WRONG_PASSWORD_REASON),
-        "the refusal does not carry the server's reason: {refusal}"
-    );
+    assert_eq!(refusal.0, WRONG_PASSWORD_REASON);
 }

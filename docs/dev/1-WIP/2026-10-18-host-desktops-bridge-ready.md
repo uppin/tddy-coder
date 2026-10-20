@@ -167,14 +167,19 @@ Unit (`tddy-screenshare/src/readiness.rs`): `a_ready_line_round_trips`, `a_failu
 
 ## Refactoring Needed
 ### From @red (TDD Red Phase)
-- `tests/common/mod.rs` re-creates a minimal copy of the inline `mod tests` fixtures in `screen_sharing_service.rs` (stand-in bridge script, prompt-answering operator, in-memory session credential store, daemon builder). Once node 1 splits the file, fold the inline suite onto `tests/common/` (or a shared `testing` module) so there is one stand-in bridge.
-- The inline suite's `FakeBridge` prints nothing on stdout: once `spawn_bridge` waits for readiness, every inline test that expects a start to succeed needs its stand-in to print a `ready` line (green must update it, or those tests hit the readiness timeout).
-- `tddy-screen-sharing` gained `tddy-screenshare` as a **dev**-dependency (stand-ins print the real `BridgeReadiness` serialisation). Green moves it to `[dependencies]` when `await_bridge_readiness` parses with `read_readiness`.
+- Deferred ([todo](../todo/2026-10-20-screen-sharing-two-stand-in-bridges.md)): `tests/common/mod.rs` re-creates a minimal copy of the inline `mod tests` fixtures in `screen_sharing_service.rs` (stand-in bridge script, prompt-answering operator, in-memory session credential store, daemon builder). Once node 1 splits the file, fold the inline suite onto `tests/common/` (or a shared `testing` module) so there is one stand-in bridge.
+- ✅ (done in green) The inline suite's `FakeBridge` prints nothing on stdout: once `spawn_bridge` waits for readiness, every inline test that expects a start to succeed needs its stand-in to print a `ready` line (green must update it, or those tests hit the readiness timeout).
+- ✅ (done in green) `tddy-screen-sharing` gained `tddy-screenshare` as a **dev**-dependency (stand-ins print the real `BridgeReadiness` serialisation). Green moves it to `[dependencies]` when `await_bridge_readiness` parses with `read_readiness`.
 
 ### From /validate-changes
 ### From /validate-tests
+- Exact equality for the refusal reason in `bridge_readiness_acceptance.rs` and the tddy-vnc refusal test; name the `1280×800` desktop.
+- Two stand-in bridges: deferred, see the todo entry above.
 ### From /validate-prod-ready
+- None.
 ### From /analyze-clean-code
+- `spawn_bridge` split into helpers (refactor subagent).
+- `start_stream`, `start_bridge`: deferred, stack-shared files ([todo](../todo/2026-10-20-screen-sharing-start-functions-over-length.md)).
 
 ## Validation Results
 ### /validate-changes
@@ -216,8 +221,64 @@ Findings:
   module of the library, so merging them needs a shared testing module or feature: left to
   /validate-tests.
 ### /validate-tests
+**2026-10-20.** Checked against fluent-tests (generic guidelines, `rust/std-test.md`,
+`typescript/cypress-component.md`). Tests analyzed: 13 new or changed (6 daemon acceptance, 1 tddy-vnc,
+1 tddy-rdp, 2 readiness unit, 3 Cypress) plus the inline `FakeBridge` change. Critical 0, Warning 3, Info 2.
+No `#[ignore]`, `.only` or `.skip`; no branching in a test body; Given/When/Then throughout; Cypress
+goes through page objects and `mountWithRpc`. Timeouts over budget (`A_SHORT_READINESS_WAIT` 5 s,
+`A_START_FINISHES_WITHIN` 20 s) carry a justifying comment.
+
+- **[WARNING]** `tests/bridge_readiness_acceptance.rs` `a_desktop_that_refuses_the_sign_in_fails_the_start_as_unauthenticated`:
+  `refusal.message.contains(THE_DESKTOPS_REASON)` is a loose matcher; the daemon passes the bridge's
+  message on verbatim, so assert equality.
+- **[WARNING]** `packages/tddy-vnc/tests/vnc_security_integration.rs` `a_refused_vnc_password_is_reported_as_an_authentication_failure`:
+  `refusal.0.contains(WRONG_PASSWORD_REASON)`, likewise (the reason is read verbatim off the wire).
+- **[WARNING]** `tests/bridge_readiness_acceptance.rs`: `1280, 800` appears four times unnamed.
+- **[INFO]** Two stand-in bridges (inline `FakeBridge` records argv and stdin; `tests/common`
+  `StandInBridge` records a pid and scripts readiness). Merging is not mechanical: an integration-test
+  crate cannot reach the library's `#[cfg(test)]` module, so it needs a shared testing module or
+  feature, and the inline suite lives in `screen_sharing_service.rs`, which #659 and #660 also touch.
+  Deferred: [2026-10-20-screen-sharing-two-stand-in-bridges.md](../todo/2026-10-20-screen-sharing-two-stand-in-bridges.md).
+- **[INFO]** `common/mod.rs` `#![allow(dead_code)]` is the usual shared-`tests/common` allowance.
 ### /validate-prod-ready
+**2026-10-20 — ✅ Ready.** 15 production files checked (test files, `tests/`, `cypress/` excluded).
+Blockers 0, Warnings 0.
+
+| Category | Count | Status |
+|---|---|---|
+| Mock code | 0 | ✅ |
+| Dev fallbacks | 0 | ✅ (the old 1920×1080 guess is removed; the no-bridge `0×0` is filed as a todo, not a fallback) |
+| TODO/FIXME added | 0 | ✅ (the `TODO(restructure)` markers in `screen_sharing_service*.rs` are n1's, with their todo link) |
+| Unused code | 0 | ✅ |
+| Debug output | 0 | ✅ (the bridge's stdout is the readiness line only; logging stays on stderr) |
+
+Acceptable: `packages/tddy-vnc/src/security.rs` `vnc_auth_response` `.expect("a chunk of the DES block length is a DES block")`
+is infallible (`chunks_exact_mut(8)` of a 16-byte array).
 ### /analyze-clean-code
+**2026-10-20 — score C before cleanup** (2 must-refactor that this PR grew, 1 pre-existing).
+15 non-test source files; none over 500 lines of production code (file-length gate below).
+
+| Function | Lines (base → now) | Verdict |
+|---|---|---|
+| `bridge_lifecycle.rs` `spawn_bridge` | 70 → 102 | must refactor → split into helpers in place (file not touched by #659/#660) |
+| `screen_sharing_service.rs` `start_stream` | 63 → 72 | must refactor → **deferred**, stack-shared file ([todo](../todo/2026-10-20-screen-sharing-start-functions-over-length.md)) |
+| `host_targets.rs` `start_host_stream` | 67 → 67 | pre-existing, not grown |
+| `tddy-screenshare` `bridge.rs` `start_bridge` / `run_bridge` | — → 58 / 68 → 56 | needs attention; stack-shared, deferred (same todo) |
+| `bridge_readiness.rs` `await_bridge_readiness` | new, 33 | acceptable |
+| `security.rs` `sign_in_vnc_authentication` / `vnc_auth_response` | new, 24 / 20 | acceptable / excellent |
+| `bridge.rs` `classify` | new, 18 | excellent |
+
+Parameters: `try_spawn_bridge` keeps its pre-existing 8 parameters (`#[allow(clippy::too_many_arguments)]`, not
+grown here). Nesting ≤ 3 in every new function. Magic values: none unnamed (`DEFAULT_BRIDGE_READY_TIMEOUT`,
+`VNC_AUTH_CHALLENGE_LEN`, `VNC_AUTH_KEY_LEN`; the `0×0` no-bridge size is commented). Duplication: the two
+stand-in bridges (see /validate-tests). Naming: consistent with the modules' prose style.
+Minor: `security.rs` module doc line 17 runs past 100 columns (rustfmt leaves comments alone), and #659 and
+#660 rewrite this file, so it is left alone.
+
+**File-length gate (3.5):** production lines base → now, none ≥ 500. `screen_sharing_service.rs` 421 → 439,
+`bridge.rs` 301 → 397, `security.rs` ≈ 449 (production lines up to `mod tests`), `vnc_client.rs` 336 → 349,
+`rdp_client.rs` 357 → 360, `bridge_lifecycle.rs` 243 → 272, `SessionScreenSharingTab.tsx` 337 → 356; new
+files `bridge_readiness.rs` 74, `readiness.rs` 68, `screenSharingStartFailure.ts` 20. No decomposition needed.
 
 ## TODO
 
