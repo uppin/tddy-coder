@@ -7,7 +7,7 @@
  * desktop refused the sign-in rather than "Connecting…" for ever, and scale a click into the size
  * the host reported rather than an assumed 1920×1080.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-18-host-desktops-bridge-ready.md
+ * Feature doc: docs/ft/web/screen-sharing-sessions.md (AC-SS-5, AC-SS-11)
  */
 
 import { create } from "@bufbuild/protobuf";

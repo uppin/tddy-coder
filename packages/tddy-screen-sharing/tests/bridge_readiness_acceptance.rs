@@ -1,6 +1,6 @@
 //! Acceptance tests: a start waits for its bridge to say whether the desktop came up.
 //!
-//! PRD: `docs/ft/web/1-WIP/PRD-2026-10-18-host-desktops-bridge-ready.md` (`#host-desktops` 6/8).
+//! Feature doc: `docs/ft/web/screen-sharing-sessions.md` § The bridge's start report (`#host-desktops` 6/8).
 //!
 //! A bridge writes one readiness line to its stdout (`tddy_screenshare::readiness`). The daemon
 //! reads it with a bounded wait: a refused sign-in fails the start as `Unauthenticated` with the

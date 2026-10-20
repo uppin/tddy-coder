@@ -93,7 +93,20 @@ Clicking Start on a target:
    for RDP targets), which connects to the remote desktop server and publishes a video track
    to the session's LiveKit room. The bridge identity uses the prefix `screenshare-` and the
    track name uses the prefix `screenshare:`.
-3. The browser subscribes to the bridge's video track and renders it as a full-screen overlay.
+3. The start returns once the bridge has signed in to the desktop and published its track, and the
+   reply carries the desktop's **real** framebuffer size. Pointer input is scaled into that size.
+4. The browser subscribes to the bridge's video track and renders it as a full-screen overlay.
+
+A start that does not come up fails, and no bridge process is left running after it:
+
+- **A refused sign-in** fails `Unauthenticated` carrying the desktop's own reason. The target's row
+  says "The desktop refused the sign-in: <reason>" and clears it on the next Start.
+- **Any other bridge failure** (the desktop cannot be reached, the protocol exchange fails, the
+  bridge cannot join LiveKit) fails `Unavailable` with the bridge's reason, shown on the row.
+- **A bridge that exits before reporting** fails `Unavailable`; **one that reports nothing within
+  30 seconds** fails `DeadlineExceeded` and is stopped.
+
+See [The bridge's start report](#the-bridges-start-report) for how the daemon learns the outcome.
 
 ### RDP sign-in
 
@@ -108,7 +121,8 @@ follows the server's negotiation: the bridge does not need to be told which one 
 - **NLA authenticates with NTLM.** The bridge never contacts a domain controller: a server that
   negotiates Kerberos is refused with an error rather than answered with an empty reply.
 - **A refused sign-in is an error from the bridge's connect step.** A wrong password on an NLA desktop
-  fails with an authentication error naming NLA; it never hangs.
+  fails with an authentication error naming NLA; it never hangs. The bridge reports it as a refused
+  sign-in, so the start fails `Unauthenticated`.
 - **Certificates are not verified.** The server certificate is accepted as presented, so the bridge
   trusts the network path to the desktop. Pinning a thumbprint is out of band.
 
@@ -131,9 +145,10 @@ authenticated connection to the VNC client library from ServerInit onward. It si
 - **Unknown security types are tolerated.** A server that advertises types the bridge does not know is
   still signed in to when it also advertises a known one; a server advertising only unknown types is
   refused with an error naming their numbers. RFB 3.3, 3.7 and 3.8 servers are handled.
-- **A refused sign-in is an error from the bridge's connect step** carrying the server's reason. For
-  VeNCrypt and Apple Remote Desktop it is the bridge's own refusal error. For VNC Authentication it is
-  the VNC client library's error, which also carries the reason.
+- **A refused sign-in is the bridge's own refusal error** carrying the server's reason, for VNC
+  Authentication, VeNCrypt and Apple Remote Desktop alike. The bridge answers the VNC Authentication
+  challenge (DES) and reads the SecurityResult itself, on RFB 3.3, 3.7 and 3.8. The bridge reports a
+  refusal as a refused sign-in, so the start fails `Unauthenticated` with that reason.
 - **Sign-in has a 30 second timeout.** A server that stops answering ends the connect step with a
   timeout error instead of stalling it. The Apple Remote Desktop exchange rejects a degenerate
   generator or server public key.
@@ -149,8 +164,6 @@ authenticated connection to the VNC client library from ServerInit onward. It si
 - **Open limit: the VeNCrypt accept byte.** After the subtype choice the bridge expects an accept byte
   for TLSPlain and none for Plain. That matches the test server and has not been confirmed against a
   real TigerVNC server, so Plain against one may behave differently.
-- **Open limit: VNC Authentication refusals are not the bridge's refusal error.** Moving them into it
-  needs a DES implementation, which is not a dependency.
 
 ### AC-SS-6: Overlay remote control
 
@@ -220,7 +233,9 @@ connection carries media offers a **connect** action in its Hosts row's remote-d
 
 Connecting opens the same full-screen overlay on that host's desktop, streaming the bridge's video
 track. The overlay opens on the click rather than on the reply, so the interval a remote spawn takes
-is visible and a failure has somewhere to be reported.
+is visible and a failure has somewhere to be reported. A failed start replaces "Connecting…" with
+its reason: "The desktop refused the sign-in: <reason>" for a refused password, otherwise the
+daemon's reason. Pointer input is scaled into the size the host reported for that desktop.
 
 ### AC-SS-12: Closing a host desktop
 
@@ -350,6 +365,21 @@ is the separate action described above, offered on the same row where those fact
 it is the only thing on that screen that creates a host-scoped target or starts a bridge. See
 [`hosts-screen-tooling.md`](./hosts-screen-tooling.md).
 
+## The bridge's start report
+
+A bridge writes **one JSON line to its stdout** once its start has settled, and nothing else there:
+
+- `{"ready":{"width":W,"height":H}}`, after it has signed in, published its track and asked for the
+  first frame. `W×H` is the desktop's framebuffer size as the server reported it.
+- `{"failed":{"kind":"authentication"|"connect"|"live_kit","message":…}}`, when the start failed.
+  `authentication` is a refused sign-in, `connect` is any other failure to reach or talk to the
+  desktop, and `live_kit` is a failure to join the room or publish the track.
+
+The daemon waits for that line (30 seconds by default) and maps it: `ready` → the reply's size,
+`authentication` → `Unauthenticated`, the other kinds → `Unavailable`, an exit before the line →
+`Unavailable`, no line in time → `DeadlineExceeded`. It stops the bridge on every failure. A bridge's
+own logs go to stderr. The configuration still travels to the bridge as JSON on its stdin.
+
 ## Current limits
 
 - **A remote desktop cannot be scrolled.** Pointer and keyboard are forwarded
@@ -358,6 +388,11 @@ it is the only thing on that screen that creates a host-scoped target or starts 
   missing.
 - A bridge process runs per open desktop. That is the same resource profile on both scopes, and on
   the host scope it is reachable from a screen that lists every host at once.
+- **A desktop's size is read once, at the start.** A desktop that changes resolution afterwards stops
+  updating: the streamer refuses a frame of another size.
+- **A session desktop with nothing to start still answers.** A daemon with no bridge configuration,
+  or a target that is not in the session's store, returns the stream's coordinates with a `0×0` size
+  and spawns no bridge, so its viewer waits on a track that never arrives.
 - Only the default ports are probed, so a host serving on another display is not offered a connect
   action even though a target pointed at that port would work.
 
