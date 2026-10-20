@@ -68,9 +68,9 @@ The desktop can take the whole screen, and keys the browser would otherwise keep
 
 ## Scope
 
-- [x] Generalised fullscreen helper; terminal callers renamed (`useElementFullscreen` pending)
-- [~] Keyboard Lock helper (surface + failing tests)
-- [~] Overlay toggle, hint, cleanup (inert toggle rendered; behaviour pending)
+- [x] Generalised fullscreen helper; terminal callers renamed; `useElementFullscreen` implemented
+- [x] Keyboard Lock helper
+- [x] Overlay toggle, hint, cleanup
 
 ## Technical Changes
 
@@ -88,8 +88,8 @@ The overlay's root element goes full screen on request; Keyboard Lock follows fu
 | `tddy-web` | `src/lib/browserFullscreen.ts`, `src/lib/keyboardLock.ts` (new), `ScreenSharingOverlay.tsx`, terminal callers, `screenSharingOverlayPage.ts` |
 
 ## Implementation Milestones
-- [ ] M1 Helpers + unit tests
-- [ ] M2 Overlay toggle + Cypress acceptance
+- [x] M1 Helpers + unit tests
+- [x] M2 Overlay toggle + Cypress acceptance
 
 ## Testing Plan
 
@@ -145,6 +145,7 @@ Contract deviations from `## Draft PR contract`, both widenings so existing call
 
 ## Validation Results
 ### /validate-changes
+Stack gate clean (base current, four own commits). Boundaries respected; all changeset items implemented. 0 critical, 0 warning. Scoped: bun test keyboardLock + browserFullscreen 3/3; Cypress 4 specs 31/31.
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
@@ -159,10 +160,10 @@ Contract deviations from `## Draft PR contract`, both widenings so existing call
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved with the wave-1 batch, 2026-10-18)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
-- [ ] Validate changes (/validate-changes)
+- [x] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
