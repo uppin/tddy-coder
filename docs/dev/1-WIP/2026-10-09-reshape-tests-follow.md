@@ -3,6 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Feature (engine capability for `move_module_to_crate` / `move_cluster_to_crate`) plus one defect fix
+**Complexity**: 3/5 — one crate, integration tests
 **Stack**: `#reshape` 13/24, branch `feature/reshape/tests-follow`, green wave 2. PR title:
 `feat(code-restructuring): crate moves take the test modules that test only moved code (#reshape 13/24)`.
 **PR**: [#611](https://github.com/uppin/tddy-coder/pull/611).
@@ -332,7 +333,7 @@ Test 13's fixture gives `b` no `super::recipe`: through an earlier operation's f
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point, not edited while planning)
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
+- [x] USER REVIEW — acceptance tests (approved 2026-10-09)
 - [x] TDD Red — write failing unit/integration tests (contract surface + its unit tests)
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
