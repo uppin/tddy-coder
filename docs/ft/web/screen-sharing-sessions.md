@@ -112,6 +112,46 @@ follows the server's negotiation: the bridge does not need to be told which one 
 - **Certificates are not verified.** The server certificate is accepted as presented, so the bridge
   trusts the network path to the desktop. Pinning a thumbprint is out of band.
 
+### VNC sign-in
+
+The `tddy-vnc` bridge performs the RFB version and security negotiation itself and hands the
+authenticated connection to the VNC client library from ServerInit onward. It signs in with:
+
+- **None** (no authentication).
+- **VNC Authentication** (password only).
+- **VeNCrypt Plain** (username and password) and **VeNCrypt TLSPlain** (the same exchange inside TLS).
+  A server that offers both gets TLSPlain.
+- **Apple Remote Desktop** (security type 30, username and password, Diffie-Hellman), which is what
+  macOS Screen Sharing offers.
+
+- **The method follows the credentials.** The bridge picks the strongest method the server advertises
+  that it holds credentials for; a method that needs a username is not chosen when none was given. A
+  server advertising `[30, 2]` signs in with VNC Authentication when only a password is given and with
+  Apple Remote Desktop when a username is given.
+- **Unknown security types are tolerated.** A server that advertises types the bridge does not know is
+  still signed in to when it also advertises a known one; a server advertising only unknown types is
+  refused with an error naming their numbers. RFB 3.3, 3.7 and 3.8 servers are handled.
+- **A refused sign-in is an error from the bridge's connect step** carrying the server's reason. For
+  VeNCrypt and Apple Remote Desktop it is the bridge's own refusal error. For VNC Authentication it is
+  the VNC client library's error, which also carries the reason.
+- **Sign-in has a 30 second timeout.** A server that stops answering ends the connect step with a
+  timeout error instead of stalling it. The Apple Remote Desktop exchange rejects a degenerate
+  generator or server public key.
+- **TLSPlain does not verify the server certificate.** It is accepted as presented (the TLS handshake
+  signature is still checked against the presented key), so the bridge trusts the network path to the
+  desktop, as it does for RDP. It works with servers that present a certificate, verified or not. It
+  does **not** work with servers that offer only anonymous Diffie-Hellman TLS suites (TigerVNC's
+  GnuTLS default): the TLS library in use does not implement them.
+- **VeNCrypt Plain sends the password unencrypted** when it is the only subtype the server offers. The
+  bridge signs in anyway and logs a warning.
+- **A server whose VeNCrypt subtypes include neither Plain nor TLSPlain is refused**, naming VeNCrypt
+  (type 19); the bridge does not fall back to another method once VeNCrypt is chosen.
+- **Open limit: the VeNCrypt accept byte.** After the subtype choice the bridge expects an accept byte
+  for TLSPlain and none for Plain. That matches the test server and has not been confirmed against a
+  real TigerVNC server, so Plain against one may behave differently.
+- **Open limit: VNC Authentication refusals are not the bridge's refusal error.** Moving them into it
+  needs a DES implementation, which is not a dependency.
+
 ### AC-SS-6: Overlay remote control
 
 **Specified:** while the overlay is open, mouse pointer events (move, click, scroll) and keyboard
@@ -321,4 +361,5 @@ it is the only thing on that screen that creates a host-scoped target or starts 
   added again once
 - Connection health / reconnect UX beyond initial error display
 - Kerberos (KDC) authentication, smart cards and RD Gateway for RDP
+- VeNCrypt X509 client certificates, RA2 / RA2ne, Tight security and SASL for VNC
 - Discovering non-default desktop ports

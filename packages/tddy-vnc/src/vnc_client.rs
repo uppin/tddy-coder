@@ -7,6 +7,9 @@ use vnc::{
 };
 
 use tddy_screenshare::common::char_to_keysym;
+use tddy_screenshare::Credentials;
+
+use crate::security;
 
 /// State of an active VNC client connection.
 pub struct VncClientState {
@@ -20,12 +23,33 @@ pub struct VncClientState {
 impl VncClientState {
     /// Connect to a VNC server at `host:port`, optionally authenticating with `password`.
     pub async fn connect(host: &str, port: u16, password: Option<&str>) -> Result<Self> {
+        let credentials = Credentials {
+            password: password.map(str::to_owned),
+            ..Credentials::default()
+        };
+        Self::connect_with_credentials(host, port, &credentials).await
+    }
+
+    /// Connect to a VNC server at `host:port`, signing in with the method `credentials` allow.
+    ///
+    /// The RFB version and security handshake runs in [`security::negotiate`]; vnc-rs takes over
+    /// the authenticated stream from ClientInit.
+    pub async fn connect_with_credentials(
+        host: &str,
+        port: u16,
+        credentials: &Credentials,
+    ) -> Result<Self> {
         let tcp = tokio::net::TcpStream::connect(format!("{}:{}", host, port))
             .await
             .with_context(|| format!("failed to connect to VNC at {}:{}", host, port))?;
+        let stream = security::negotiate(tcp, credentials, host)
+            .await
+            .context("VNC sign-in failed")?;
 
-        let password = password.unwrap_or("").to_owned();
-        let client = VncConnector::new(tcp)
+        // VNC Authentication is the only path that still asks vnc-rs for the password, and
+        // `choose_sign_in` guarantees a password there, so the default is never sent.
+        let password = credentials.password.clone().unwrap_or_default();
+        let client = VncConnector::new(stream)
             .set_auth_method(async move { Ok(password) })
             .add_encoding(VncEncoding::Tight)
             .add_encoding(VncEncoding::Zrle)
@@ -277,12 +301,8 @@ impl VncClientState {
 
 #[async_trait::async_trait]
 impl tddy_screenshare::ScreenSharingClient for VncClientState {
-    async fn connect(
-        host: &str,
-        port: u16,
-        credentials: &tddy_screenshare::Credentials,
-    ) -> anyhow::Result<Self> {
-        VncClientState::connect(host, port, credentials.password.as_deref()).await
+    async fn connect(host: &str, port: u16, credentials: &Credentials) -> anyhow::Result<Self> {
+        VncClientState::connect_with_credentials(host, port, credentials).await
     }
 
     fn framebuffer_dimensions(&self) -> (u32, u32) {
