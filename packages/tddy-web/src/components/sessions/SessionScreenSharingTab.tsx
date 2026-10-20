@@ -12,6 +12,7 @@
 import React, { useEffect, useReducer, useState } from "react";
 import type { Room } from "livekit-client";
 import { Protocol } from "../../gen/screen_sharing_pb";
+import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
 import { ScreenSharingOverlay } from "./ScreenSharingOverlay";
 import { applyScreenSharingTabAction, initialScreenSharingTabState } from "./screenSharingTabState";
 
@@ -110,6 +111,8 @@ export function SessionScreenSharingTab({
   const [activeStreamResult, setActiveStreamResult] = useState<StartStreamResult | null>(null);
   // Transient error message shown below the form.
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Why each target's last start failed, shown on that target's row.
+  const [startErrors, setStartErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     onListTargets()
@@ -173,6 +176,11 @@ export function SessionScreenSharingTab({
 
   const handleStart = (targetId: string) => {
     setErrorMsg(null);
+    setStartErrors((held) => {
+      const next = { ...held };
+      delete next[targetId];
+      return next;
+    });
     dispatch({ type: "set_stream_status", targetId, status: "starting" });
     onStartStream(targetId)
       .then((result) => {
@@ -182,7 +190,8 @@ export function SessionScreenSharingTab({
       })
       .catch((e: unknown) => {
         dispatch({ type: "set_stream_status", targetId, status: "error" });
-        setErrorMsg(e instanceof Error ? e.message : "Failed to start stream");
+        // On the row that was asked to start: the reason belongs beside the desktop it is about.
+        setStartErrors((held) => ({ ...held, [targetId]: screenSharingStartFailureText(e) }));
       });
   };
 
@@ -217,32 +226,42 @@ export function SessionScreenSharingTab({
         )}
         <div data-testid="sessions-screen-sharing-target-list" className="flex flex-col gap-1">
           {state.targets.map((t) => (
-            <div
-              key={t.id}
-              data-testid={`sessions-screen-sharing-target-row-${t.id}`}
-              className="flex items-center justify-between border border-border rounded px-2 py-1 gap-2"
-            >
-              <span className="text-xs flex-1 truncate">
-                {t.label} — {t.host}:{t.port} ({t.protocol.toUpperCase()})
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  data-testid={`sessions-screen-sharing-start-${t.id}`}
-                  type="button"
-                  className="px-2 py-0.5 text-xs bg-foreground text-background rounded hover:opacity-90"
-                  onClick={() => handleStart(t.id)}
-                >
-                  Start
-                </button>
-                <button
-                  data-testid={`sessions-screen-sharing-remove-${t.id}`}
-                  type="button"
-                  className="px-2 py-0.5 text-xs border border-destructive text-destructive rounded hover:bg-destructive/10"
-                  onClick={() => handleRemove(t.id)}
-                >
-                  Remove
-                </button>
+            <div key={t.id} className="flex flex-col gap-1">
+              <div
+                data-testid={`sessions-screen-sharing-target-row-${t.id}`}
+                className="flex items-center justify-between border border-border rounded px-2 py-1 gap-2"
+              >
+                <span className="text-xs flex-1 truncate">
+                  {t.label} — {t.host}:{t.port} ({t.protocol.toUpperCase()})
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    data-testid={`sessions-screen-sharing-start-${t.id}`}
+                    type="button"
+                    className="px-2 py-0.5 text-xs bg-foreground text-background rounded hover:opacity-90"
+                    onClick={() => handleStart(t.id)}
+                  >
+                    Start
+                  </button>
+                  <button
+                    data-testid={`sessions-screen-sharing-remove-${t.id}`}
+                    type="button"
+                    className="px-2 py-0.5 text-xs border border-destructive text-destructive rounded hover:bg-destructive/10"
+                    onClick={() => handleRemove(t.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
+              {startErrors[t.id] && (
+                <p
+                  data-testid={`sessions-screen-sharing-start-error-${t.id}`}
+                  role="alert"
+                  className="text-xs text-destructive px-1"
+                >
+                  {startErrors[t.id]}
+                </p>
+              )}
             </div>
           ))}
         </div>

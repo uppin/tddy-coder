@@ -1,7 +1,5 @@
 use crate::screen_sharing_service::BridgeTarget;
 use crate::screen_sharing_service::DEFAULT_STREAM_FPS;
-use crate::screen_sharing_service::DEFAULT_STREAM_HEIGHT;
-use crate::screen_sharing_service::DEFAULT_STREAM_WIDTH;
 use std::time::Duration;
 use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
@@ -116,8 +114,10 @@ pub(crate) fn build_bridge_spawn_config(
         livekit_room: livekit_room.to_string(),
         livekit_identity: bridge_identity.to_string(),
         track_name: track_name.to_string(),
-        width: DEFAULT_STREAM_WIDTH,
-        height: DEFAULT_STREAM_HEIGHT,
+        // No size is hinted: the desktop's size is known only once the bridge has connected, and it
+        // reports that size back on its readiness line.
+        width: 0,
+        height: 0,
         target_id: target.id.clone(),
         fps: DEFAULT_STREAM_FPS,
     })

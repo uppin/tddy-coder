@@ -29,6 +29,7 @@
 - Does not re-ask for credentials (node 8 consumes `Unauthenticated` for that).
 - Does not handle a resize after the start (TODO filed).
 - Does not change the prompt flow or the media gate.
+- **2026-10-20 (widened):** negotiation's SecurityResult read for VNC Authentication moves into this PR by developer decision 2026-10-20, because vnc-rs reads that result itself and returns an untyped `VncError::General(reason)` on RFB 3.8 (`WrongPassword` on 3.7), so a refused password cannot be tagged `AuthenticationRefused` without it. The rest of negotiation (version, type choice, VeNCrypt, ARD, CredSSP) stays out of scope.
 
 ## Dependencies
 
@@ -104,10 +105,10 @@ A wrong password says so; clicks land right on any desktop size.
 
 - [~] Testing — acceptance and unit tests written and failing (draft PR contract)
 
-- [ ] Readiness protocol + `run_bridge` emission
-- [ ] Authentication tagging in both bridges
-- [ ] Daemon waits, maps, reaps; real size in replies
-- [ ] Web shows start errors; resize TODO filed
+- [x] Readiness protocol + `run_bridge` emission
+- [ ] Authentication tagging in both bridges (VNC password path open: see the FIXME in `packages/tddy-vnc/src/vnc_client.rs`)
+- [x] Daemon waits, maps, reaps; real size in replies
+- [x] Web shows start errors; resize TODO filed
 
 ## Technical Changes
 
@@ -130,9 +131,9 @@ Daemon reads one stdout line from the bridge within a bounded wait (configurable
 | `tddy-web` | `HostDesktopOverlay.tsx`, session target row error; page objects |
 
 ## Implementation Milestones
-- [ ] M1 Readiness types + bridge emission
-- [ ] M2 Daemon wait/map/reap with stand-in bridges
-- [ ] M3 Web error surface
+- [x] M1 Readiness types + bridge emission
+- [x] M2 Daemon wait/map/reap with stand-in bridges
+- [x] M3 Web error surface
 
 ## Testing Plan
 
@@ -160,6 +161,7 @@ Unit (`tddy-screenshare/src/readiness.rs`): `a_ready_line_round_trips`, `a_failu
 ## Decisions & Trade-offs
 - **stdout line, not a new channel** — the bridge's stdout is unused (`Stdio::null()`), JSON-on-stdin already sets the precedent, and it needs no new RPC between daemon and bridge.
 - **Both scopes** — the bug and the silent failure are the same on the session scope.
+- **VNC Authentication SecurityResult (2026-10-20, developer decision: own the read)** — tddy-vnc reads the SecurityResult in `security::negotiate`, so a refusal is the typed `SecurityError::Refused` on RFB 3.7 and 3.8. vnc-rs's DES (`client::security::des`) and its `AuthHelper` are private, so this crate has no DES primitive for the challenge/response. Done: `des` is a direct dependency of tddy-vnc (already in Cargo.lock at 0.9.0, via picky-krb) and write the response in `security`, then hand vnc-rs the RFB 3.3 None replay that the VeNCrypt/ARD path already uses. Rejected: copying vnc-rs's DES (a reimplementation), forking vnc-rs (larger change), observing vnc-rs's SecurityResult read on the wire (protocol-coupled). The new direct dependency (`des = "0.9"`, already locked) was approved by the developer 2026-10-20; `Cargo.lock` changes only by tddy-vnc gaining it.
 
 ## Technical Debt & Production Readiness
 

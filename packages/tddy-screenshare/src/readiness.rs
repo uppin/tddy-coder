@@ -41,16 +41,14 @@ pub fn write_readiness(
     out: &mut impl std::io::Write,
     readiness: &BridgeReadiness,
 ) -> std::io::Result<()> {
-    // TODO(bridge-ready): implement
-    let _ = (out, readiness);
-    todo!()
+    let line = serde_json::to_string(readiness).map_err(std::io::Error::other)?;
+    writeln!(out, "{line}")?;
+    out.flush()
 }
 
 /// Parse one line a bridge wrote with [`write_readiness`].
 pub fn read_readiness(line: &str) -> Result<BridgeReadiness, serde_json::Error> {
-    // TODO(bridge-ready): implement
-    let _ = line;
-    todo!()
+    serde_json::from_str(line)
 }
 
 /// The marker a bridge's `connect` error carries when the desktop refused the sign-in.

@@ -4,11 +4,13 @@ use super::ScreenSharingServiceImpl;
 
 use std::process::Stdio;
 
-use log::{error, info};
+use log::{error, info, warn};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::bridge_config::PreparedBridge;
+
+use crate::bridge_readiness::{await_bridge_readiness, BridgeStarted};
 
 use crate::bridge_config::prepare_bridge;
 
@@ -48,7 +50,7 @@ impl ScreenSharingServiceImpl {
                 pid, bridge_key
             );
             #[cfg(unix)]
-            // SAFETY: pid > 0 is enforced by the `if pid > 0` guard in `try_spawn_bridge`
+            // SAFETY: pid > 0 is enforced by the `if pid > 0` guard in `spawn_bridge`
             // that filters out the zero sentinel before inserting into `active_bridges`.
             // Sending SIGTERM to a pid is safe — the signal is delivered to the process
             // group and the call does not affect memory safety.
@@ -124,12 +126,11 @@ impl ScreenSharingServiceImpl {
         decrypt_desktop_password(scope.keypair.as_ref(), &encrypted_password)
     }
 
-    /// Spawn a bridge for the given target, logging every failure and reporting none.
+    /// Spawn a bridge for the given target, and report whether its desktop came up.
     ///
-    /// The **session-scoped** spawn, and deliberately silent: `start_stream` hands back its
-    /// pre-computed LiveKit coordinates whether or not a bridge came up, which is the behaviour
-    /// AC-9 pins and its callers depend on. The host path does not reuse this — it reports —
-    /// see [`Self::spawn_bridge`] and `start_host_stream`.
+    /// The **session-scoped** spawn. It reports a failed start the way the host path does
+    /// ([`Self::spawn_bridge`]): a desktop that refused the sign-in, or a bridge that never came up,
+    /// is not handed back as a stream that will carry no frame.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn try_spawn_bridge(
         &self,
@@ -143,8 +144,8 @@ impl ScreenSharingServiceImpl {
         // Built by `session_bridge_key` or `host_bridge_key`: the scope decides how a running
         // bridge is addressed, the spawn itself does not care which.
         bridge_key: String,
-    ) {
-        let prepared = match prepare_bridge(
+    ) -> Result<BridgeStarted, Status> {
+        let prepared = prepare_bridge(
             config,
             target,
             username,
@@ -152,38 +153,34 @@ impl ScreenSharingServiceImpl {
             track_name,
             livekit_room,
             &*self.room_tokens,
-        ) {
-            Ok(prepared) => prepared.for_password(password),
-            Err(e) => {
-                info!("bridge spawn skipped: {e}");
-                return;
-            }
-        };
+        )
+        .map_err(Status::failed_precondition)?
+        .for_password(password);
 
-        if let Err(e) = self.spawn_bridge(prepared, bridge_key).await {
-            error!("bridge spawn failed: {e}");
-        }
+        self.spawn_bridge(prepared, bridge_key).await
     }
 
-    /// Start a bridge process, and say so when it does not start.
+    /// Start a bridge process, and wait for it to say whether the desktop came up.
     ///
     /// Takes a [`PreparedBridge`], so everything knowable without the desktop's password has
-    /// already been settled: what is left here is the spawn itself, and the only failures it can
-    /// report are real ones.
+    /// already been settled. What is left is the spawn and the bridge's readiness line: a refused
+    /// sign-in, a bridge that exits, or one silent past [`Self::bridge_ready_timeout`] fails the
+    /// start with the status [`await_bridge_readiness`] maps it to, and the bridge is stopped
+    /// before this returns.
     pub(crate) async fn spawn_bridge(
         &self,
         prepared: PreparedBridge,
         // Built by `session_bridge_key` or `host_bridge_key`: the scope decides how a running
         // bridge is addressed, the spawn itself does not care which.
         bridge_key: String,
-    ) -> Result<(), String> {
+    ) -> Result<BridgeStarted, Status> {
         let PreparedBridge {
             binary,
             spawn_config,
         } = prepared;
 
         let config_json = serde_json::to_vec(&spawn_config)
-            .map_err(|e| format!("encoding the bridge's config: {e}"))?;
+            .map_err(|e| Status::internal(format!("encoding the bridge's config: {e}")))?;
 
         // A second start for the same desktop must not strand the first process. `active_bridges`
         // holds one pid per key, so a spawn that overwrote one would leave a bridge nothing can
@@ -192,21 +189,30 @@ impl ScreenSharingServiceImpl {
 
         let mut child = Command::new(&binary)
             .stdin(Stdio::piped())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .map_err(|e| format!("spawning the bridge binary '{binary}': {e}"))?;
+            .map_err(|e| Status::internal(format!("spawning the bridge binary '{binary}': {e}")))?;
 
-        // Write the JSON config to the bridge's stdin, then close it.
-        if let Some(mut stdin) = child.stdin.take() {
-            if let Err(e) = stdin.write_all(&config_json).await {
-                let _ = child.kill().await;
-                return Err(format!("writing the bridge's config to its stdin: {e}"));
-            }
-            // stdin dropped here → pipe closed → bridge reads EOF and proceeds
+        let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            let _ = child.kill().await;
+            return Err(Status::internal(
+                "the bridge's stdin and stdout are not piped",
+            ));
+        };
+
+        // Write the JSON config to the bridge's stdin, then close it: the bridge reads to EOF.
+        let written = stdin.write_all(&config_json).await;
+        drop(stdin);
+        if let Err(e) = written {
+            let _ = child.kill().await;
+            return Err(Status::internal(format!(
+                "writing the bridge's config to its stdin: {e}"
+            )));
         }
 
-        // Store the PID so the matching stop call can send SIGTERM.
+        // Store the PID so the matching stop call can send SIGTERM. Recorded before the readiness
+        // wait, so a stop that arrives while the bridge is still starting reaches it.
         let pid = child.id().unwrap_or(0);
         if pid > 0 {
             self.active_bridges
@@ -218,6 +224,29 @@ impl ScreenSharingServiceImpl {
         info!(
             "bridge spawned: binary={} pid={} key={}",
             binary, pid, bridge_key
+        );
+
+        let started = match await_bridge_readiness(stdout, self.bridge_ready_timeout).await {
+            Ok(started) => started,
+            Err(status) => {
+                // A bridge that refused, failed, or never reported must not outlive the start.
+                if let Err(e) = child.kill().await {
+                    warn!(
+                        "bridge stop after a failed start: key={} err={}",
+                        bridge_key, e
+                    );
+                }
+                let mut bridges = self.active_bridges.lock().await;
+                if bridges.get(&bridge_key) == Some(&pid) {
+                    bridges.remove(&bridge_key);
+                }
+                return Err(status);
+            }
+        };
+
+        info!(
+            "bridge started: key={} desktop={}x{}",
+            bridge_key, started.width, started.height
         );
 
         // Background task: wait for the process to exit (prevents zombie processes) and
@@ -238,6 +267,6 @@ impl ScreenSharingServiceImpl {
             }
         });
 
-        Ok(())
+        Ok(started)
     }
 }

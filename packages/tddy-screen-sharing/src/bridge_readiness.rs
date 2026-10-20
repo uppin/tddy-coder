@@ -11,7 +11,8 @@
 use std::time::Duration;
 
 use tddy_rpc::Status;
-use tokio::io::AsyncRead;
+use tddy_screenshare::readiness::{read_readiness, BridgeReadiness, FailureKind};
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 
 /// How long a start waits for a bridge's readiness line when nothing else is configured.
 ///
@@ -42,7 +43,32 @@ pub async fn await_bridge_readiness<R>(stdout: R, within: Duration) -> Result<Br
 where
     R: AsyncRead + Unpin + Send,
 {
-    // TODO(bridge-ready): implement
-    let _ = (stdout, within);
-    todo!()
+    let mut line = String::new();
+    let read = tokio::time::timeout(within, BufReader::new(stdout).read_line(&mut line))
+        .await
+        .map_err(|_| {
+            Status::deadline_exceeded(format!(
+                "the desktop did not report whether it came up within {within:?}"
+            ))
+        })?
+        .map_err(|e| Status::unavailable(format!("reading the bridge's report: {e}")))?;
+    if read == 0 {
+        return Err(Status::unavailable(
+            "the bridge exited before reporting whether the desktop came up",
+        ));
+    }
+
+    match read_readiness(line.trim_end())
+        .map_err(|e| Status::unavailable(format!("the bridge's report is unreadable: {e}")))?
+    {
+        BridgeReadiness::Ready { width, height } => Ok(BridgeStarted { width, height }),
+        BridgeReadiness::Failed {
+            kind: FailureKind::Authentication,
+            message,
+        } => Err(Status::unauthenticated(message)),
+        BridgeReadiness::Failed {
+            kind: FailureKind::Connect | FailureKind::LiveKit,
+            message,
+        } => Err(Status::unavailable(message)),
+    }
 }

@@ -59,6 +59,9 @@ pub const A_STOPPED_BRIDGE_EXITS_WITHIN: Duration = Duration::from_secs(10);
 /// How a start that should end on its own is kept from hanging the suite when it does not.
 pub const A_START_FINISHES_WITHIN: Duration = Duration::from_secs(20);
 
+/// The argument that makes the stand-in exit at once, before it records anything.
+const WARM_UP_ARGUMENT: &str = "--warm-up";
+
 /// What the stand-in bridge does once the daemon has written its config to it.
 #[derive(Debug, Clone)]
 pub enum TheBridge {
@@ -117,6 +120,7 @@ impl StandInBridge {
             &bridge.binary,
             format!(
                 "#!/bin/sh\n\
+                 [ \"$1\" = {WARM_UP_ARGUMENT} ] && exit 0\n\
                  echo $$ > \"{pid}.part\"\n\
                  mv -f \"{pid}.part\" \"{pid}\"\n\
                  cat > /dev/null\n\
@@ -125,7 +129,21 @@ impl StandInBridge {
         )
         .expect("writing the stand-in bridge");
         make_executable(&bridge.binary);
+        bridge.warm_up();
         bridge
+    }
+
+    /// Run the freshly written script once, to completion, before any test clock starts.
+    ///
+    /// The first exec of a new executable can take seconds on a loaded macOS machine (the system
+    /// scans it first); without this, a start with a short readiness budget gave up on, and killed,
+    /// a stand-in that had not yet begun to run, and the test saw no pid ever recorded.
+    fn warm_up(&self) {
+        let status = std::process::Command::new(&self.binary)
+            .arg(WARM_UP_ARGUMENT)
+            .status()
+            .expect("warming up the stand-in bridge");
+        assert!(status.success(), "the stand-in bridge warm-up: {status}");
     }
 
     /// The pid the stand-in recorded when the daemon spawned it.

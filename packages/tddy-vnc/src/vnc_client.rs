@@ -2,14 +2,14 @@
 
 use anyhow::{Context, Result};
 use vnc::{
-    ClientKeyEvent, ClientMouseEvent, PixelFormat, VncClient, VncConnector, VncEncoding, VncEvent,
-    X11Event,
+    ClientKeyEvent, ClientMouseEvent, PixelFormat, VncClient, VncConnector, VncEncoding, VncError,
+    VncEvent, X11Event,
 };
 
 use tddy_screenshare::common::char_to_keysym;
-use tddy_screenshare::Credentials;
+use tddy_screenshare::{AuthenticationRefused, Credentials};
 
-use crate::security;
+use crate::security::{self, SecurityError};
 
 /// State of an active VNC client connection.
 pub struct VncClientState {
@@ -44,13 +44,17 @@ impl VncClientState {
             .with_context(|| format!("failed to connect to VNC at {}:{}", host, port))?;
         let stream = security::negotiate(tcp, credentials, host)
             .await
+            .map_err(tag_refused_sign_in)
             .context("VNC sign-in failed")?;
 
-        // VNC Authentication is the only path that still asks vnc-rs for the password, and
-        // `choose_sign_in` guarantees a password there, so the default is never sent.
-        let password = credentials.password.clone().unwrap_or_default();
+        // Every sign-in is finished by `security::negotiate`, so vnc-rs is never asked for a
+        // password; the connector requires the callback, and answering it is an error, not a guess.
         let client = VncConnector::new(stream)
-            .set_auth_method(async move { Ok(password) })
+            .set_auth_method(async {
+                Err(VncError::General(
+                    "vnc-rs asked for a password after the sign-in had finished".to_owned(),
+                ))
+            })
             .add_encoding(VncEncoding::Tight)
             .add_encoding(VncEncoding::Zrle)
             .add_encoding(VncEncoding::CopyRect)
@@ -296,6 +300,15 @@ impl VncClientState {
                 src_i += 4;
             }
         }
+    }
+}
+
+/// Tag a refused sign-in by type, so the bridge reports an authentication failure without matching
+/// on the words the server refused with. Every other sign-in failure passes through unchanged.
+fn tag_refused_sign_in(error: SecurityError) -> anyhow::Error {
+    match error {
+        SecurityError::Refused { reason } => AuthenticationRefused(reason).into(),
+        other => other.into(),
     }
 }
 

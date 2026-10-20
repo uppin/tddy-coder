@@ -22,8 +22,10 @@ use tddy_rpc::Code;
 
 const THE_DESKTOPS_REASON: &str = "the password is not right for this desktop";
 
-/// Short, so a test about a bridge that never reports costs a moment rather than the default wait.
-const A_SHORT_READINESS_WAIT: Duration = Duration::from_millis(500);
+/// Short against the 30 s default, so a test about a bridge that never reports costs seconds rather
+/// than the default wait. The stand-in is warmed up first (`tests/common`), so this budget is spent
+/// on the readiness wait and not on the first exec of a fresh script.
+const A_SHORT_READINESS_WAIT: Duration = Duration::from_secs(5);
 
 #[tokio::test]
 async fn a_desktop_that_refuses_the_sign_in_fails_the_start_as_unauthenticated() {

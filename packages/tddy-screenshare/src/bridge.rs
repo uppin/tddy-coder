@@ -24,6 +24,7 @@ use tddy_service::proto::screen_sharing_input::{
 };
 
 use crate::client::{Credentials, ScreenSharingClient};
+use crate::readiness::{write_readiness, AuthenticationRefused, BridgeReadiness, FailureKind};
 use crate::streamer::ScreenSharingStreamer;
 
 /// Configuration passed to a bridge binary via stdin as JSON.
@@ -138,50 +139,41 @@ impl ScreenSharingInputService for InputForwarder {
 /// Connects to the remote desktop and joins LiveKit as a single participant that publishes
 /// the video track and serves `ScreenSharingInputService` over the data channel.
 /// The `BridgeConfig` is typically read from stdin as JSON by the bridge binary.
+///
+/// Stdout carries the readiness line the daemon waits on (`crate::readiness`): exactly one, written
+/// once the start has settled, reporting either the desktop's size or why it never came up.
 pub async fn run_bridge<C: ScreenSharingClient>(config: BridgeConfig) -> Result<()> {
     info!(
         "bridge starting: target={} host={}:{} room={}",
         config.target_id, config.host, config.port, config.livekit_room
     );
 
-    let credentials = config.credentials();
+    let started = match start_bridge::<C>(&config).await {
+        Ok(started) => started,
+        Err(failure) => {
+            let readiness = BridgeReadiness::Failed {
+                kind: failure.kind,
+                message: failure.message,
+            };
+            if let Err(e) = report_readiness(&readiness) {
+                warn!("bridge: could not report the failed start: {e}");
+            }
+            return Err(failure.error);
+        }
+    };
 
-    let mut client = C::connect(&config.host, config.port, &credentials)
-        .await
-        .context("screen sharing connect failed")?;
+    report_readiness(&BridgeReadiness::Ready {
+        width: started.width,
+        height: started.height,
+    })
+    .context("reporting the desktop ready")?;
 
-    let (width, height) = wait_for_dimensions(&mut client).await?;
-    info!("bridge: framebuffer {}x{}", width, height);
-
-    // Channel: input RPC handler → pump loop
-    let (input_tx, input_rx) = mpsc::channel::<InputCmd>(128);
-
-    // Single LiveKit connection: serves ScreenSharingInputService over data channel
-    let input_svc = ScreenSharingInputServiceServer::new(InputForwarder { tx: input_tx });
-    let participant = LiveKitParticipant::connect(
-        &config.livekit_url,
-        &config.livekit_token,
-        input_svc,
-        RoomOptions::default(),
-        None,
-        None,
-    )
-    .await
-    .context("LiveKit connect failed")?;
-
-    // Publish the video track on the same room connection
-    let local = participant.room().local_participant().clone();
-    let streamer =
-        ScreenSharingStreamer::from_local_participant(local, &config.track_name, width, height)
-            .await
-            .context("failed to publish video track")?;
-
-    info!("bridge: LiveKit track '{}' published", config.track_name);
-
-    // Drive the RPC event loop in the background
-    tokio::spawn(async move { participant.run().await });
-
-    client.request_frame_update(false).await?;
+    let StartedBridge {
+        mut client,
+        streamer,
+        input_rx,
+        ..
+    } = started;
 
     let frame_interval = Duration::from_millis(1000 / config.fps.max(1) as u64);
     let mut sigterm =
@@ -205,6 +197,110 @@ pub async fn run_bridge<C: ScreenSharingClient>(config: BridgeConfig) -> Result<
 
     info!("bridge: exiting target={}", config.target_id);
     result
+}
+
+/// A bridge that has signed in, published its track, and asked for its first frame.
+struct StartedBridge<C> {
+    client: C,
+    streamer: ScreenSharingStreamer,
+    input_rx: mpsc::Receiver<InputCmd>,
+    width: u32,
+    height: u32,
+}
+
+/// A start that did not come up: the kind the daemon is told, what it is told, and the error the
+/// bridge exits with.
+struct StartFailure {
+    kind: FailureKind,
+    message: String,
+    error: anyhow::Error,
+}
+
+/// Classify a start failure. A refused sign-in is [`FailureKind::Authentication`] wherever it sits in
+/// the error chain, and its message is the desktop's own reason; anything else is `otherwise`, and
+/// its message is the whole chain.
+fn classify(error: anyhow::Error, otherwise: FailureKind) -> StartFailure {
+    let refusal = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<AuthenticationRefused>())
+        .map(|refusal| refusal.0.clone());
+    match refusal {
+        Some(reason) => StartFailure {
+            kind: FailureKind::Authentication,
+            message: reason,
+            error,
+        },
+        None => StartFailure {
+            kind: otherwise,
+            message: format!("{error:#}"),
+            error,
+        },
+    }
+}
+
+/// Write the readiness line the daemon is waiting on, to stdout.
+fn report_readiness(readiness: &BridgeReadiness) -> std::io::Result<()> {
+    write_readiness(&mut std::io::stdout().lock(), readiness)
+}
+
+/// Sign in to the desktop, publish its track, and request its first frame.
+async fn start_bridge<C: ScreenSharingClient>(
+    config: &BridgeConfig,
+) -> Result<StartedBridge<C>, StartFailure> {
+    let credentials = config.credentials();
+
+    let mut client = C::connect(&config.host, config.port, &credentials)
+        .await
+        .context("screen sharing connect failed")
+        .map_err(|e| classify(e, FailureKind::Connect))?;
+
+    let (width, height) = wait_for_dimensions(&mut client)
+        .await
+        .map_err(|e| classify(e, FailureKind::Connect))?;
+    info!("bridge: framebuffer {}x{}", width, height);
+
+    // Channel: input RPC handler → pump loop
+    let (input_tx, input_rx) = mpsc::channel::<InputCmd>(128);
+
+    // Single LiveKit connection: serves ScreenSharingInputService over data channel
+    let input_svc = ScreenSharingInputServiceServer::new(InputForwarder { tx: input_tx });
+    let participant = LiveKitParticipant::connect(
+        &config.livekit_url,
+        &config.livekit_token,
+        input_svc,
+        RoomOptions::default(),
+        None,
+        None,
+    )
+    .await
+    .context("LiveKit connect failed")
+    .map_err(|e| classify(e, FailureKind::LiveKit))?;
+
+    // Publish the video track on the same room connection
+    let local = participant.room().local_participant().clone();
+    let streamer =
+        ScreenSharingStreamer::from_local_participant(local, &config.track_name, width, height)
+            .await
+            .context("failed to publish video track")
+            .map_err(|e| classify(e, FailureKind::LiveKit))?;
+
+    info!("bridge: LiveKit track '{}' published", config.track_name);
+
+    // Drive the RPC event loop in the background
+    tokio::spawn(async move { participant.run().await });
+
+    client
+        .request_frame_update(false)
+        .await
+        .map_err(|e| classify(e, FailureKind::Connect))?;
+
+    Ok(StartedBridge {
+        client,
+        streamer,
+        input_rx,
+        width,
+        height,
+    })
 }
 
 /// Poll events until the client reports non-zero framebuffer dimensions.

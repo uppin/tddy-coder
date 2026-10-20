@@ -14086,6 +14086,7 @@ dependencies = [
  "aes 0.8.4",
  "anyhow",
  "async-trait",
+ "des",
  "env_logger",
  "image",
  "log",

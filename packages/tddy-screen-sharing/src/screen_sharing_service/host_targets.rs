@@ -2,7 +2,7 @@
 //
 // The bodies of the four host-target RPCs, moved out of the `#[async_trait]` impl byte for byte; the
 // trait methods in `screen_sharing_service.rs` delegate here.
-use super::{ScreenSharingServiceImpl, DEFAULT_STREAM_HEIGHT, DEFAULT_STREAM_WIDTH};
+use super::ScreenSharingServiceImpl;
 use crate::bridge_config::{
     browser_livekit_url, host_bridge_identity, host_bridge_key, host_livekit_room,
     host_target_as_bridge_target, host_target_to_proto, prepare_bridge, screenshare_track_name,
@@ -121,23 +121,23 @@ impl ScreenSharingServiceImpl {
             .prompt_for_desktop_password(scope, &operator, &target)
             .await?;
 
-        // Reported, unlike the session path's deliberately silent spawn: these coordinates tell a
-        // browser to mount an overlay on a room, and a bridge that never joined it leaves the
-        // operator watching nothing having already typed a secret.
-        self.spawn_bridge(
-            prepared.for_password(password),
-            host_bridge_key(&req.daemon_instance_id, &req.target_id),
-        )
-        .await
-        .map_err(Status::internal)?;
+        // Reported: these coordinates tell a browser to mount an overlay on a room, and a bridge that
+        // never joined it leaves the operator watching nothing having already typed a secret. The
+        // size is the one the bridge measured, so input lands where the operator aimed.
+        let started = self
+            .spawn_bridge(
+                prepared.for_password(password),
+                host_bridge_key(&req.daemon_instance_id, &req.target_id),
+            )
+            .await?;
 
         Ok(Response::new(StartStreamResponse {
             livekit_room,
             livekit_url: browser_livekit_url(config),
             bridge_identity,
             track_name,
-            width: DEFAULT_STREAM_WIDTH,
-            height: DEFAULT_STREAM_HEIGHT,
+            width: started.width,
+            height: started.height,
         }))
     }
 
