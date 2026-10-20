@@ -32,6 +32,8 @@ const THE_DESKTOP_PASSWORD: &str = "correct horse battery staple";
 const THE_OPERATORS_ACCOUNT: &str = "ada";
 const THE_WINDOWS_DOMAIN: &str = "CORP";
 const THE_DESKTOPS_REASON: &str = "the password has changed on this desktop";
+const THE_BRIDGES_INSPECT_FAILURE: &str = "connection refused by the desktop";
+const AN_X11_DISPLAY: u32 = 1;
 
 /// Where a remembered host-desktop credential lives in the operator's vault: the `screen-sharing`
 /// provider, under an account naming the host and the target, so it never collides with a session
@@ -95,6 +97,58 @@ async fn inspecting_a_desktop_tells_its_bridge_only_where_the_desktop_is() {
     assert_eq!(
         daemon.bridge.inspect_request(),
         serde_json::json!({ "host": "127.0.0.1", "port": A_VNC_PORT })
+    );
+}
+
+#[tokio::test]
+async fn inspecting_an_x11_display_reports_no_sign_in_without_running_the_bridge() {
+    // Given an X11 display, which the x11vnc this host starts for it serves with no sign-in
+    let daemon = a_daemon_whose_bridge(a_desktop_that_accepts_the_sign_in()).start();
+    let target_id = daemon
+        .attach_an_x11_display_to(A_HOST, AN_X11_DISPLAY)
+        .await;
+
+    // When
+    let inspected = daemon
+        .inspect_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect("an X11 display is inspected");
+
+    // Then — it offers no sign-in…
+    assert_eq!(
+        inspected,
+        InspectHostDesktopResponse {
+            offered: vec![DesktopAuthMethod::None as i32],
+            unsupported_vnc_types: vec![],
+            remembered: false,
+        }
+    );
+    // …and that was known without asking a bridge
+    assert!(
+        !daemon.bridge.was_ever_inspected(),
+        "the bridge was run in inspect mode for an X11 display"
+    );
+}
+
+#[tokio::test]
+async fn an_inspection_whose_bridge_fails_is_unavailable_with_the_bridges_reason() {
+    // Given a desktop the bridge cannot read the advertisement of
+    let daemon = a_daemon_whose_bridge(a_desktop_that_accepts_the_sign_in())
+        .whose_desktop_cannot_be_inspected(THE_BRIDGES_INSPECT_FAILURE)
+        .start();
+    let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+    // When
+    let failure = daemon
+        .inspect_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect_err("an inspection whose bridge fails is not reported as a result");
+
+    // Then — unavailable, carrying what the bridge said
+    assert_eq!(failure.code, Code::Unavailable, "{failure:?}");
+    assert!(
+        failure.message.contains(THE_BRIDGES_INSPECT_FAILURE),
+        "the bridge's reason is not in the failure: {failure:?}"
     );
 }
 

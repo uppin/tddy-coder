@@ -139,9 +139,9 @@ impl TheBridge {
 /// daemon signals it — a forked `sleep` would outlive a signalled shell and the assertion would be
 /// about the wrong process.
 ///
-/// Run with `--inspect` it instead records the request on its stdin, prints the [`InspectReport`]
-/// line it was installed with and exits — the bridge's inspect mode — without touching the pid or
-/// config it records as a bridge.
+/// Run with `--inspect` it instead records the request on its stdin and does what the
+/// [`TheInspection`] it was installed with says — the bridge's inspect mode — without touching the
+/// pid or config it records as a bridge.
 pub struct StandInBridge {
     pub binary: PathBuf,
     pid_file: PathBuf,
@@ -151,19 +151,46 @@ pub struct StandInBridge {
     configs_log: PathBuf,
     /// What the daemon wrote to the bridge's stdin in inspect mode.
     inspect_request_file: PathBuf,
-    /// The report line it prints in inspect mode.
-    inspection_line: String,
+    /// What it does in inspect mode once it has recorded the request: the shell lines that report.
+    inspect_mode: String,
+}
+
+/// What the stand-in bridge does when it is run in inspect mode.
+pub enum TheInspection {
+    /// Prints this report line and exits zero, as a bridge that read the desktop's advertisement.
+    Reports(InspectReport),
+    /// Prints this reason to stderr and exits non-zero, as a bridge that could not reach the
+    /// desktop. The reason is single-quoted into the script, so it must not hold a `'`.
+    FailsWith(String),
+}
+
+impl TheInspection {
+    fn shell(&self) -> String {
+        match self {
+            Self::Reports(report) => {
+                let line = serde_json::to_string(report).expect("an inspect report line");
+                format!("printf '%s\\n' '{line}'\nexit 0\n")
+            }
+            Self::FailsWith(reason) => {
+                assert!(
+                    !reason.contains('\''),
+                    "a reason the script can quote: {reason:?}"
+                );
+                format!("printf '%s\\n' '{reason}' >&2\nexit 1\n")
+            }
+        }
+    }
 }
 
 impl StandInBridge {
-    fn installed_in(dir: &Path, behaviour: &TheBridge, inspection: &InspectReport) -> Self {
+    fn installed_in(dir: &Path, behaviour: &TheBridge, inspection: &TheInspection) -> Self {
         let bridge = Self {
             binary: dir.join("tddy-vnc-stand-in"),
             pid_file: dir.join("bridge-pid"),
             config_file: dir.join("bridge-config.json"),
             configs_log: dir.join("bridge-configs.jsonl"),
             inspect_request_file: dir.join("bridge-inspect-request.json"),
-            inspection_line: serde_json::to_string(inspection).expect("an inspect report line"),
+            inspect_mode: inspection.shell(),
         };
         bridge.now_does(behaviour);
         bridge.warm_up();
@@ -177,7 +204,7 @@ impl StandInBridge {
         let config = self.config_file.display();
         let configs = self.configs_log.display();
         let inspect_request = self.inspect_request_file.display();
-        let inspection = &self.inspection_line;
+        let inspect_mode = &self.inspect_mode;
         let after_config = match behaviour {
             TheBridge::Reports(readiness) => {
                 let line = serde_json::to_string(readiness).expect("a readiness line");
@@ -222,8 +249,7 @@ impl StandInBridge {
                  [ \"$1\" = {WARM_UP_ARGUMENT} ] && exit 0\n\
                  if [ \"$1\" = \"--inspect\" ]; then\n\
                  cat > \"{inspect_request}\"\n\
-                 printf '%s\\n' '{inspection}'\n\
-                 exit 0\n\
+                 {inspect_mode}\
                  fi\n\
                  echo $$ > \"{pid}.part\"\n\
                  mv -f \"{pid}.part\" \"{pid}\"\n\
@@ -267,6 +293,11 @@ impl StandInBridge {
             )
         });
         serde_json::from_slice(&written).expect("the inspect request is JSON")
+    }
+
+    /// Whether the daemon has ever run this bridge in inspect mode.
+    pub fn was_ever_inspected(&self) -> bool {
+        self.inspect_request_file.exists()
     }
 
     /// Run the freshly written script once, to completion, before any test clock starts.
@@ -742,7 +773,7 @@ pub struct DaemonBuilder {
     ready_timeout: Duration,
     x11vnc: TheX11vnc,
     x11vnc_accept_timeout: Duration,
-    inspection: InspectReport,
+    inspection: TheInspection,
     operator: TheOperator,
     the_operators_vault: bool,
     /// Whether the operator's vault, when wired, is left sealed rather than unlocked.
@@ -756,9 +787,9 @@ pub fn a_daemon_whose_bridge(bridge: TheBridge) -> DaemonBuilder {
         ready_timeout: DEFAULT_BRIDGE_READY_TIMEOUT,
         x11vnc: TheX11vnc::AcceptsConnections,
         x11vnc_accept_timeout: DEFAULT_X11VNC_ACCEPT_TIMEOUT,
-        inspection: InspectReport {
+        inspection: TheInspection::Reports(InspectReport {
             methods: vec![AdvertisedMethod::VncPassword],
-        },
+        }),
         operator: TheOperator::TypesNoPassword,
         the_operators_vault: false,
         the_operators_vault_locked: false,
@@ -768,7 +799,13 @@ pub fn a_daemon_whose_bridge(bridge: TheBridge) -> DaemonBuilder {
 impl DaemonBuilder {
     /// The bridge, run in inspect mode, reports that the desktop advertises `methods`.
     pub fn whose_desktop_advertises(mut self, methods: Vec<AdvertisedMethod>) -> Self {
-        self.inspection = InspectReport { methods };
+        self.inspection = TheInspection::Reports(InspectReport { methods });
+        self
+    }
+
+    /// The bridge, run in inspect mode, fails: it prints `reason` to stderr and exits non-zero.
+    pub fn whose_desktop_cannot_be_inspected(mut self, reason: &str) -> Self {
+        self.inspection = TheInspection::FailsWith(reason.to_string());
         self
     }
 

@@ -269,9 +269,11 @@ message HostPromptEvent {
   string host_public_key_fingerprint = 6;
   // When this prompt stops being answerable. An unanswered prompt must not pin an operation forever.
   int64 expires_at_unix_ms = 7;
-  // DESKTOP_CREDENTIALS only: the sign-in methods the desktop advertises, as screen_sharing.proto's
-  // `DesktopAuthMethod` values (an int rather than the enum, as `HostRemoteDesktop.protocol` reuses
-  // `Protocol`). Empty for every other kind.
+  // Unpopulated, pending removal: the daemon always sends this empty, for every kind. It was meant
+  // to carry a DESKTOP_CREDENTIALS desktop's advertised sign-in methods (screen_sharing.proto's
+  // `DesktopAuthMethod` values), but the viewer reads those on demand from
+  // `ScreenSharingService.InspectHostDesktop` before it opens a desktop, so no prompt carries them.
+  // See docs/dev/todo/2026-10-21-host-prompt-offered-auth-methods-is-never-sent.md.
   repeated int32 offered_auth_methods = 8;
 }
 

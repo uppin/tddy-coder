@@ -1,10 +1,11 @@
 /**
- * Asks the operator for a secret, on behalf of a host that is waiting on it.
+ * Asks the operator for an SSH key's passphrase, on behalf of a host that is waiting on it
+ * (`#hosts-screen 6/8`).
  *
- * One dialog for every question on `StreamHostPrompts` — a key passphrase (`#hosts-screen 6/8`) and
- * a desktop password (`#hosts-screen 8/8`) — because what has to be got right is the same for both:
- * the fingerprint is shown, a changed key blocks the answer, and the plaintext never leaves this
- * component. Only the words differ, and they are the caller's to supply.
+ * The `KEY_PASSPHRASE` question on `StreamHostPrompts`. A desktop's credentials are the other
+ * question on that feed, and are answered by `HostDesktopSignInDialog` (`#host-desktops 8/8`), which
+ * keeps this dialog's guarantees: the fingerprint is shown, a changed key blocks the answer, and the
+ * plaintext never leaves the component.
  *
  * Server-initiated: the host raised the question on `StreamHostPrompts` and is blocked until an
  * answer comes back. It is the last place in this app that asks a person for a secret before a
@@ -26,22 +27,6 @@ import React, { useState } from "react";
 import { encryptForHost } from "../../lib/encryptForHost";
 import type { KeyPinVerdict } from "../../lib/hostKeyPinning";
 import { HostKeyContinuityNotices, keyContinuityBlocks } from "./HostKeyContinuityNotices";
-
-/**
- * The words one question is asked in.
- *
- * The dialog is the same on both of this feed's flows — a host is waiting, and the answer leaves as
- * ciphertext — but what it is waiting *for* is not, and an operator told a desktop password is going
- * into an ssh-agent has been told something untrue.
- */
-export interface HostPromptWording {
-  /** The line the dialog leads with. */
-  title: string;
-  /** One sentence saying what the host will do with the answer. */
-  explanation: string;
-  /** What the operator is being asked to type. */
-  placeholder: string;
-}
 
 export interface HostPassphraseDialogProps {
   hostId: string;
@@ -74,11 +59,6 @@ export interface HostPassphraseDialogProps {
    * here would make the feature unusable in any browser that will not store a pin.
    */
   keyContinuity: KeyPinVerdict;
-  /**
-   * The words to ask in. Defaults to the key passphrase this dialog was built for
-   * (`#hosts-screen 6/8`), so a caller answering that question says nothing.
-   */
-  wording?: HostPromptWording;
   /** Receives the RSA-OAEP ciphertext — the answer itself never leaves this component. */
   onSubmit: (encryptedAnswer: Uint8Array) => void;
   /**
@@ -99,24 +79,18 @@ export function HostPassphraseDialog({
   fingerprint,
   spkiDer,
   keyContinuity,
-  wording,
   onSubmit,
   onAcceptChangedKey,
   onCancel,
 }: HostPassphraseDialogProps): React.ReactElement {
-  const words = wording ?? {
-    title: `Passphrase for ${subject}`,
-    explanation: `${hostId} is waiting to unlock ${subject} and load it into its ssh-agent.`,
-    placeholder: "Passphrase",
-  };
   const [passphrase, setPassphrase] = useState("");
   const [encrypting, setEncrypting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
   // Empty is refused because an empty answer only wastes the host's single-use prompt: an empty
-  // passphrase unlocks no encrypted key. (A desktop with no password is answered by
-  // HostDesktopSignInDialog, which does not go through this dialog.) `encrypting` is refused because one prompt accepts exactly one answer. Each blocking key state
-  // is refused for a reason of its own, spelled out beside its notice below.
+  // passphrase unlocks no encrypted key. `encrypting` is refused because one prompt accepts exactly
+  // one answer. Each blocking key state is refused for a reason of its own, spelled out beside its
+  // notice below.
   const keyBlocks = keyContinuityBlocks(keyContinuity);
   const answerMissing = passphrase.length === 0;
   const blocked = keyBlocks || encrypting || answerMissing;
@@ -154,8 +128,10 @@ export function HostPassphraseDialog({
         onSubmit={handleSubmit}
         className="bg-background border border-border rounded-md p-4 w-96 flex flex-col gap-3"
       >
-        <p className="text-sm font-medium">{words.title}</p>
-        <p className="text-xs text-muted-foreground">{words.explanation}</p>
+        <p className="text-sm font-medium">Passphrase for {subject}</p>
+        <p className="text-xs text-muted-foreground">
+          {hostId} is waiting to unlock {subject} and load it into its ssh-agent.
+        </p>
         <HostKeyContinuityNotices
           hostId={hostId}
           fingerprint={fingerprint}
@@ -175,7 +151,7 @@ export function HostPassphraseDialog({
           disabled={keyBlocks}
           onChange={(e) => setPassphrase(e.target.value)}
           className="border border-border rounded px-2 py-1 text-sm bg-background"
-          placeholder={words.placeholder}
+          placeholder="Passphrase"
         />
         <div className="flex gap-2 justify-end">
           <button

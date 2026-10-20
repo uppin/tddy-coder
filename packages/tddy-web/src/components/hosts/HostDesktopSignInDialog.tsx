@@ -116,8 +116,9 @@ export function HostDesktopSignInDialog({
   // The fingerprint pinned is the one the question advertised, as `HostDesktopOverlay`'s password
   // question always did; deriving it from `hostPublicKey` (`verifyHostKey`) is the stronger check
   // `HostAddKeyAction` makes.
-  // TODO(host-desktops): derive the fingerprint from the published key here too, so the pin cannot
-  // be satisfied by a substituted key advertising the pinned string.
+  // TODO(host-desktops): docs/dev/todo/2026-10-21-desktop-sign-in-pins-the-advertised-fingerprint.md
+  // — derive the fingerprint from the published key here too, so the pin cannot be satisfied by a
+  // substituted key advertising the pinned string.
   const [checked, setChecked] = useState<{
     question: HostPromptEventLike;
     verdict: KeyPinVerdict;
