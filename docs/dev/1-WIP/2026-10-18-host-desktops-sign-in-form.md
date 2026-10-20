@@ -275,10 +275,10 @@ inspects first and answers `DESKTOP_CREDENTIALS` instead of `DESKTOP_PASSWORD`: 
 - [UNUSED] `HostPromptEvent.offered_auth_methods` is always sent empty, and its proto comment claims otherwise. ✅ Comment corrected (proto + regenerated `host_pb.ts`); the field's removal is deferred in [2026-10-21-host-prompt-offered-auth-methods-is-never-sent.md](../todo/2026-10-21-host-prompt-offered-auth-methods-is-never-sent.md).
 - [DECISION] When the vault write after a successful start fails (G1), the error is logged with `log::error!` (naming the desktop, never the secret), and the started stream is returned rather than torn down. The next open asks again. This is deliberate: a working sign-in is not thrown away over a storage error. The vault was already checked to be open before the start, so this path is reached only if the vault closes during the start.
 ### From /analyze-clean-code
-- [NEEDS ATTENTION → fix] `host_desktop_sign_in.rs` `inspect_host_desktop` (58 lines, nesting 4): extract the target look-up and the protocol → bridge-binary resolution.
-- [NEEDS ATTENTION → fix] `host_desktop_sign_in.rs` `run_inspect_bridge` (53 lines): split the spawn-and-send step from reading the report line.
-- [MUST REFACTOR, partly this PR's] `host_targets.rs` `start_host_stream_impl`: 70 → 95 lines. The 70 are recorded in [2026-10-20-screen-sharing-start-functions-over-length.md](../todo/2026-10-20-screen-sharing-start-functions-over-length.md). This PR's 25 (the refused-marking around the spawn and the remember after it) go into one helper, so the function is back to its pre-PR length. The rest of the split stays with that entry, because `host_targets.rs` is node 7's file too.
-- [NEEDS ATTENTION → fix] `HostDesktopOverlay.tsx` start effect: the inspect → start → re-ask loop sits inside the effect. Extract it into a named function in the module.
+- ✅ [NEEDS ATTENTION → fixed] `host_desktop_sign_in.rs` `inspect_host_desktop` (58 lines, nesting 4): extract the target look-up and the protocol → bridge-binary resolution.
+- ✅ [NEEDS ATTENTION → fixed] `host_desktop_sign_in.rs` `run_inspect_bridge` (53 lines): split the spawn-and-send step from reading the report line.
+- ✅ [MUST REFACTOR, partly this PR's] `host_targets.rs` `start_host_stream_impl`: 70 → 95 lines. The 70 are recorded in [2026-10-20-screen-sharing-start-functions-over-length.md](../todo/2026-10-20-screen-sharing-start-functions-over-length.md). This PR's 25 (the refused-marking around the spawn and the remember after it) go into one helper, so the function is back to its pre-PR length. The rest of the split stays with that entry, because `host_targets.rs` is node 7's file too.
+- ✅ [NEEDS ATTENTION → fixed] `HostDesktopOverlay.tsx` start effect: the inspect → start → re-ask loop sits inside the effect. Extract it into a named function in the module.
 - Pre-existing, untouched by this PR: `rdp_client.rs` `connect` (115) and `keysym_to_scancode` (89), and `bridge_lifecycle.rs` `reap_bridge` (nesting 5).
 
 ## Validation Results
@@ -304,6 +304,9 @@ Findings: 3 warnings fixed through /green (above, *From /validate-changes*); 3 m
 ### /analyze-clean-code
 **2026-10-21 — B before cleanup.** File length (3.5 gate, production lines to the first `#[cfg(test)]`, whole PR range): none of the touched non-test files reaches 500. The largest are `screen_sharing_service.rs` 450 → 482, `rdp_client.rs` 360 → 446, `bridge_lifecycle.rs` 344 → 406, `HostDesktopOverlay.tsx` 335 → 403 and `host_desktop_sign_in.rs` 0 → 380. Functions: 1 must-refactor (`start_host_stream_impl` 95, of which 70 pre-existing) and 3 needs-attention (above). No magic values: timeouts and metadata keys are named constants. Duplication: the key-continuity notices are now a shared component (`HostKeyContinuityNotices`).
 
+### Final /validate-changes and scoped gates (2026-10-21)
+Stack gate still current and leak-free (n7 tip `0dcb4ffd0`). No new findings after the refactors; `inspect_host_desktop` 38 lines, `run_inspect_bridge` 18, `start_host_stream_impl` 95 → 76 (the remainder is node 7's, in the 2026-10-20 todo entry). `cargo fmt --check` and `cargo clippy --all-targets -D warnings` clean for `tddy-daemon-extensions`, `tddy-screenshare`, `tddy-screen-sharing`, `tddy-vnc`, `tddy-rdp`, `tddy-host-service`, `tddy-service`. `./test -p`: daemon-extensions 28/28 (incl. `livekit_is_a_satellite`), screenshare 9/9, screen-sharing 79/79, vnc 50/50, rdp 11/11, service 157/157, host-service 197/199 — the two `github_cli_unit_tests` failures are `gh … did not answer within 5s` load timeouts in code this PR does not touch, and both pass alone. `x11_channels_acceptance` three runs: 9/9 each. Cypress (single specs): HostDesktopSignIn 8/8, HostDesktopConnect 12/12, HostDesktopStartFailure 3/3, HostsScreenDesktopChannels 5/5, ScreenSharingInputScopes 2/2, HostAddKey 15/15, and the other `HostPassphraseDialog` mounts (CreateSessionClonePassphrase 7+3, HostAddKeySelector 6, HostsScreenAddKey 14). Full-workspace health: CI.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-18-host-desktops-sign-in-form-initial-discovery.md`)
@@ -315,12 +318,12 @@ Findings: 3 warnings fixed through /green (above, *From /validate-changes*); 3 m
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
-- [ ] Validate changes (/validate-changes)
-- [ ] Validate tests (/validate-tests)
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Update documentation with progress
+- [x] Run scoped tests for touched packages; full-workspace result from CI
+- [x] Validate changes (/validate-changes)
+- [x] Validate tests (/validate-tests)
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-18-host-desktops-sign-in-form-initial-discovery.md`
 - [ ] USER REVIEW — work complete
