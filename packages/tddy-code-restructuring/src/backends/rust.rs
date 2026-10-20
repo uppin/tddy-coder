@@ -29,6 +29,7 @@ use tddy_lsp::LanguageId;
 use tokio_util::sync::CancellationToken;
 
 mod chatter;
+mod code_action_op;
 mod declarations;
 pub mod detach_method;
 mod documents;
@@ -79,7 +80,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 28] = [
+const SUPPORTED: [RefactorKind; 29] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -108,6 +109,7 @@ const SUPPORTED: [RefactorKind; 28] = [
     RefactorKind::ReadFieldsThrough,
     RefactorKind::MoveImplMembers,
     RefactorKind::DetachMethod,
+    RefactorKind::ApplyCodeAction,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -1352,6 +1354,12 @@ impl RustBackend {
         // delegated — every caller it re-points still comes from the server's own reference set,
         // which is what this backend supplies it. It opens the module for itself, so the document
         // is deliberately not opened here first.
+        // Any code action rust-analyzer offers, through the path every server's takes; it opens
+        // the document for itself.
+        if op.op == RefactorKind::ApplyCodeAction {
+            return self.apply_code_action(op, workspace);
+        }
+
         if op.op == RefactorKind::MoveModuleToCrate {
             (self.progress)("cross-crate move: surveying callers and building edits");
             return crate_move::resolution(self, workspace, op);

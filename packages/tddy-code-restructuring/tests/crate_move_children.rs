@@ -231,6 +231,7 @@ fn a_move_of(file: &str, path: &str) -> RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

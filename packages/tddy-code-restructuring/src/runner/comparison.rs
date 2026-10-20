@@ -35,6 +35,22 @@ pub fn verify(root: &Path, options: Options) -> Result<crate::verify::Comparison
     Ok(crate::verify::compare_with(&before, &after, &declared))
 }
 
+/// R5: every file the working tree changed against `--against` that one of `options.verifies`
+/// claims, handed to the first that claims it — `before` as the ref has it (empty for a file the
+/// ref lacks), `after` as the tree has it (empty for a file it deleted) — and everything they
+/// found, by path. Rust files are [`verify`]'s and are never handed over.
+///
+/// No verifies is no findings, without reading the tree: what a run that registered no language
+/// beyond Rust always got.
+pub fn verify_sources(root: &Path, options: &Options) -> Result<Vec<crate::verify::SourceFinding>> {
+    if options.verifies.is_empty() {
+        return Ok(Vec::new());
+    }
+    let _ = root;
+    // TODO(reshape-extension-code-actions): implement
+    todo!("verify_sources")
+}
+
 fn sources_at(
     root: &Path,
     git_ref: &str,

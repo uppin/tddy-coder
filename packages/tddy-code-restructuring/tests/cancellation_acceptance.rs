@@ -190,6 +190,7 @@ fn an_extraction_of_the_function_body() -> RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

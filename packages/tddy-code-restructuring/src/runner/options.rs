@@ -150,6 +150,11 @@ pub struct Options {
     /// to its server only when one is here, and builds its backend without one otherwise
     /// (`#reshape` extension-language-server, R6). Empty by default.
     pub installed_clients: Vec<(LanguageId, Arc<LspClient>)>,
+    /// The verifies `verify` hands the changed files of a language beyond Rust to — an installed
+    /// extension's, built by the front end for the same reason [`Self::installed`] is (`#reshape`
+    /// extension-code-actions, R5). Empty by default: `verify` compares Rust files only, as it
+    /// always did.
+    pub verifies: Vec<Arc<dyn crate::verify::SourceVerify>>,
 }
 
 impl Default for Options {
@@ -181,6 +186,7 @@ impl Default for Options {
             wait_heartbeat: WAIT_HEARTBEAT,
             installed: Arc::new(SupportRegistry::new()),
             installed_clients: Vec::new(),
+            verifies: Vec::new(),
         }
     }
 }

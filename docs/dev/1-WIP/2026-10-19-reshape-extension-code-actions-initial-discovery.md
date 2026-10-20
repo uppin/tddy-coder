@@ -81,3 +81,17 @@ every node has its companion (ask the developer first). Not a changeset companio
 ## Exploration 2 — node notes
 
 Node-specific exploration is carried by the PRD's Background and the whole-work Exploration 1 above; the contract commit adds what its tests need.
+
+## Exploration 3 — contract (2026-10-20)
+
+- `RefactorOp` is built as a full struct literal in 24 places (5 in `tests/harness/mod.rs`), so `action` is added to
+  each as `action: None`.
+- `RestructureError` is matched exhaustively in `tddy-index-daemon/src/status.rs`; the new variant is mapped there.
+- `runner::verify` returns the Rust-only `Comparison`, which `tddy-tools` and the daemon rebuild from a proto; a field
+  there would ripple into both, so extension findings come from a sibling, `runner::verify_sources`.
+- `ExtensionSupport` exposes no parse (K20's grammar and store are private); `ExtensionSupport::parse` is added beside it.
+- `LanguageSupport` (K11) has no verify hook; rather than widen K11's trait, the seam is `SourceVerify` in
+  `Options::verifies`, which the front end builds as it builds `Options::installed`.
+- `resolve_opening` is 167 lines before this node (K21's to split); the `ApplyCodeAction` arm adds 6.
+- `fake_lsp` already answered `textDocument/codeAction` with `ContentModified`; `--code-actions` replaces that only
+  when given, so `client_roundtrip_test` is unchanged.

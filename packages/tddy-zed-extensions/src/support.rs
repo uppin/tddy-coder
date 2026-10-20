@@ -320,6 +320,18 @@ impl LanguageSupport for ExtensionSupport {
     }
 }
 
+/// The parse a verify reads (`#reshape` extension-code-actions, R5): owned by that node, beside
+/// the support whose private grammar and store it parses with.
+impl ExtensionSupport {
+    /// `text` parsed with this language's grammar, through the process's one store; `None` only
+    /// when tree-sitter gives up on the text altogether.
+    pub fn parse(&self, text: &str) -> Option<tree_sitter::Tree> {
+        let _ = text;
+        // TODO(reshape-extension-code-actions): implement
+        todo!("ExtensionSupport::parse")
+    }
+}
+
 /// The backend of an extension language with no server: item anchors from the outline, every
 /// operation unsupported (R5, R7).
 pub struct OutlineBackend {

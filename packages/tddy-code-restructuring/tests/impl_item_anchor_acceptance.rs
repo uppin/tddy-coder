@@ -66,6 +66,7 @@ fn a_move_to_a_file_of(anchor: Anchor) -> RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

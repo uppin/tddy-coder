@@ -4,6 +4,7 @@
 //! notifications are cached per document URI, and every other notification goes to the
 //! [`notifications`] sink, which serves a drainer and any number of observers at once.
 
+mod commands;
 mod dispatch;
 mod documents;
 pub mod notifications;
@@ -29,6 +30,7 @@ use dispatch::{read_loop, Routes};
 use documents::DocumentVersions;
 use notifications::NotificationSink;
 
+pub use commands::ExecutedCommand;
 pub use notifications::{NotificationEvent, NotificationStream};
 pub use types::{Diagnostic, Location, Position, Range, ResponseError, SymbolInfo};
 

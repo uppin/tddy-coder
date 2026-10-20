@@ -273,6 +273,7 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     // refusal it makes.
     impl_move_fields::rules(&op)?;
     detach_fields::rules(&op)?;
+    code_action_fields::rules(&op)?;
 
     // Silently ignoring the field would be worse than refusing it: the plan author asked for a
     // facade, would not get one, and would read the resulting stranded-reference refusal as the
@@ -455,6 +456,7 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 }
 
 mod canonical_paths;
+mod code_action_fields;
 mod crate_move_fields;
 mod detach_fields;
 mod facade_imports_fields;
