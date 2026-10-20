@@ -2,31 +2,30 @@
 //! (`#reshape` extension-outline, PRD: "the same anchors come back through the index daemon as
 //! through the cold CLI").
 //!
-//! Spawns the real binary, as `dual_transport_acceptance` does, with `TDDY_DATA_DIR` naming a data
-//! dir whose extensions dir holds `tddy-zed-extensions`' `demo-toml` fixture (the vendored
-//! tree-sitter-toml grammar) in Zed's installed layout. The rust-analyzer it is given does not
-//! exist: a file an extension language claims must need no language server.
+//! The host is built as production builds it — the built-ins, then the installed extensions, the
+//! allow-list from that registry, the entry through [`build_code_index_entry_with_supports`] — over
+//! a data dir whose extensions dir holds `tddy-zed-extensions`' `demo-toml` fixture (the vendored
+//! tree-sitter-toml grammar) in Zed's installed layout. The rust-analyzer the built-in Rust support
+//! launches does not exist: a file an extension language claims must need no language server.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::sync::Arc;
+use std::time::Duration;
 
-use tddy_code_restructuring::{Anchor, Fingerprint, ItemPath};
+use prost::Message;
+use tddy_code_restructuring::backends::rust::RustSupport;
+use tddy_code_restructuring::{Anchor, Fingerprint, ItemPath, SupportRegistry};
+use tddy_index_daemon::proto::code_index::{AnchorsRequest, AnchorsResponse};
+use tddy_index_daemon::{build_code_index_entry_with_supports, CodeIndexPorts};
+use tddy_lsp::LspRegistry;
+use tddy_task::TaskRegistry;
+use tddy_zed_extensions::{ExtensionsDir, InstalledExtensions};
 
 const APP: &str = "config/app.toml";
 const APP_TOML: &str = "[server]\nhost = \"localhost\"\nport = 8080\n\n[database]\nurl = \"postgres://localhost/app\"\npool = 4\n\n[logging]\nlevel = \"info\"\n";
 
-/// The binary under test, resolved as `dual_transport_acceptance` resolves it.
-fn the_index_daemon() -> PathBuf {
-    if let Some(from_cargo) = std::env::var_os("CARGO_BIN_EXE_tddy-index-daemon") {
-        return PathBuf::from(from_cargo);
-    }
-    let mut candidate = std::env::current_exe().expect("the test executable's own path");
-    candidate.pop();
-    if candidate.ends_with("deps") {
-        candidate.pop();
-    }
-    candidate.join("tddy-index-daemon")
-}
+/// A rust-analyzer that is not there: any request that needed a server would fail to start it.
+const NO_RUST_ANALYZER: &str = "/nonexistent/rust-analyzer";
 
 fn the_extension_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../tddy-zed-extensions/tests/fixtures")
@@ -68,16 +67,56 @@ fn a_workspace_holding_the_app_config() -> tempfile::TempDir {
     workspace
 }
 
-/// What the daemon's single-shot run said, without the log prefix.
-fn rendered(stderr: &[u8]) -> Vec<String> {
-    const RENDERED_BY: &str = "[tddy_index_daemon::main] ";
-    String::from_utf8_lossy(stderr)
-        .lines()
-        .filter_map(|line| {
-            line.split_once(RENDERED_BY)
-                .map(|(_, said)| said.to_string())
-        })
-        .collect()
+/// The built-ins — Rust launching [`NO_RUST_ANALYZER`] — then the extensions installed under
+/// `data`: the registry a host builds.
+fn the_supports_installed_under(data: &Path) -> SupportRegistry {
+    let mut supports = SupportRegistry::with_builtin_rust(RustSupport::launching(NO_RUST_ANALYZER));
+    let failures = supports
+        .with_installed_extensions(&ExtensionsDir::under_data_dir(data))
+        .expect("the extensions register");
+    assert!(
+        failures.is_empty(),
+        "a grammar failed to load: {failures:?}"
+    );
+    supports
+}
+
+/// A host over `supports`, its servers allowed exactly as the registry launches them.
+fn a_host_over(supports: SupportRegistry) -> tddy_rpc::ServiceEntry {
+    let servers = LspRegistry::new(
+        supports.allow_list(),
+        TaskRegistry::new(),
+        Duration::from_secs(60),
+    );
+    build_code_index_entry_with_supports(
+        CodeIndexPorts {
+            servers,
+            wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
+        },
+        Arc::new(supports),
+    )
+}
+
+/// Dispatch `Anchors` at the registered coordinate and decode its answer.
+async fn the_anchor_asked_of(
+    entry: &tddy_rpc::ServiceEntry,
+    request: AnchorsRequest,
+) -> Result<AnchorsResponse, tddy_rpc::Status> {
+    let message = tddy_rpc::RpcMessage::new(
+        request.encode_to_vec(),
+        tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+    );
+    match entry
+        .service
+        .handle_rpc(entry.name, "Anchors", &message)
+        .await
+    {
+        tddy_rpc::RpcResult::Unary(Ok(payload)) => {
+            Ok(AnchorsResponse::decode(payload.as_slice()).expect("the answer decodes"))
+        }
+        tddy_rpc::RpcResult::Unary(Err(status)) => Err(status),
+        tddy_rpc::RpcResult::ServerStream(_) => panic!("expected a unary answer from Anchors"),
+    }
 }
 
 /// Lines `first..=last` of the app config, fingerprinted as every item anchor is.
@@ -102,34 +141,26 @@ fn the_anchor_the_cli_prints() -> String {
     })
 }
 
-#[test]
-fn the_daemon_answers_the_same_anchors_as_the_cli() {
-    // Given a workspace with a TOML file, and the demo-toml extension installed
+#[tokio::test(flavor = "multi_thread")]
+async fn the_daemon_answers_the_same_anchors_as_the_cli() {
+    // Given a workspace with a TOML file, and a host with the demo-toml extension installed
     let data = a_data_dir_with_demo_toml_installed();
     let workspace = a_workspace_holding_the_app_config();
+    let entry = a_host_over(the_supports_installed_under(data.path()));
 
-    // When the daemon is asked, in process, for an anchor over two adjacent tables
-    let run = Command::new(the_index_daemon())
-        .env("TDDY_DATA_DIR", data.path())
-        .args([
-            "--rust-analyzer",
-            "/nonexistent/rust-analyzer",
-            "restructure",
-            "anchors",
-            "--workspace-root",
-            &workspace.path().to_string_lossy(),
-            APP,
-            "--items",
-            "server,database",
-        ])
-        .output()
-        .expect("the binary runs");
+    // When the daemon is asked for an anchor over two adjacent tables
+    let answer = the_anchor_asked_of(
+        &entry,
+        AnchorsRequest {
+            workspace_root: workspace.path().to_string_lossy().into_owned(),
+            file: APP.to_string(),
+            items: vec!["server".to_string(), "database".to_string()],
+            at: None,
+        },
+    )
+    .await
+    .expect("an extension-language file is anchored without a language server");
 
-    // Then it prints the anchor the cold CLI prints, and succeeds without a language server
-    assert_eq!(
-        (rendered(&run.stderr), run.status.success()),
-        (vec![the_anchor_the_cli_prints()], true),
-        "stderr was: {}",
-        String::from_utf8_lossy(&run.stderr)
-    );
+    // Then it answers the anchor the cold CLI prints
+    assert_eq!(answer.anchor_json, the_anchor_the_cli_prints());
 }

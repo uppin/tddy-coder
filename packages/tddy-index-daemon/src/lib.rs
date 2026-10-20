@@ -31,7 +31,10 @@ mod tree_changes;
 mod warm;
 mod watch_root;
 
-pub use service::{build_code_index_entry, CodeIndexPorts, CodeIndexServiceImpl, EventStream};
+pub use service::{
+    build_code_index_entry, build_code_index_entry_with_supports, CodeIndexPorts,
+    CodeIndexServiceImpl, EventStream,
+};
 
 pub mod proto {
     /// The canonical message types, the `tddy-rpc` service trait and server, and the tonic adapter

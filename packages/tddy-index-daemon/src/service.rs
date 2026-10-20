@@ -310,3 +310,25 @@ pub fn build_code_index_entry(ports: CodeIndexPorts) -> tddy_rpc::ServiceEntry {
         service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
     }
 }
+
+/// [`build_code_index_entry`] for a host that registered languages beyond Rust — the built-ins,
+/// then the installed extensions: anchors and a static check on a file one of `supports` claims
+/// answer from that support's grammar (`#reshape` extension-outline, R8), and definition,
+/// references and hover go to its server (extension-language-server, R7). `ports.servers` must
+/// allow each support's launch.
+#[must_use]
+pub fn build_code_index_entry_with_supports(
+    ports: CodeIndexPorts,
+    supports: Arc<tddy_code_restructuring::SupportRegistry>,
+) -> tddy_rpc::ServiceEntry {
+    let service = CodeIndexServiceImpl {
+        index: WorkspaceIndex::new(ports.servers)
+            .with_wait_heartbeat(ports.wait_heartbeat)
+            .with_supports(supports),
+    };
+    let server = CodeIndexServiceServer::from_arc(Arc::new(service));
+    tddy_rpc::ServiceEntry {
+        name: CODE_INDEX_SERVICE,
+        service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
+    }
+}

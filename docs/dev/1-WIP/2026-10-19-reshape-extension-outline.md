@@ -18,7 +18,8 @@
   `restructure_cli::run_with_installed` — and, at green, routing `anchors` / static `check` / `items_anchor` through
   them. It **cannot** call `with_installed_extensions` itself: `tddy-zed-extensions` implements its `LanguageSupport`,
   so the dependency runs the other way (plan correction, see below).
-- `packages/tddy-index-daemon`: depends on `tddy-zed-extensions`; registration in `main.rs` (`installed_languages`).
+- `packages/tddy-index-daemon`: depends on `tddy-zed-extensions`; registration in `main.rs` (`installed_languages`);
+  the installed-registry seam `WorkspaceIndex::with_supports` / `build_code_index_entry_with_supports`.
 - `packages/tddy-tools` (green only): the cold CLI's registration — `index_client.rs` calls
   `restructure_cli::run_with_installed` with `SupportRegistry::new().with_installed_extensions(..)`. Not touched at the
   contract commit.
@@ -47,6 +48,13 @@ anchors from tree-sitter + `outline.scm`, through the same item-anchor traits Ru
 | `runner::Options::installed: Arc<SupportRegistry>` (empty by default) | `tddy-code-restructuring/src/runner/options.rs` |
 | `restructure_cli::run_with_installed(args, installed)` | `tddy-code-restructuring/src/restructure_cli.rs` |
 | `installed_languages()` (the daemon's registration) | `tddy-index-daemon/src/main.rs` |
+| `WorkspaceIndex::with_supports(supports: Arc<SupportRegistry>) -> Self` (the index's installed-registry seam; real body) | `tddy-index-daemon/src/index.rs` |
+| `build_code_index_entry_with_supports(ports, supports: Arc<SupportRegistry>) -> ServiceEntry` (the host's entry over that registry; real body), re-exported from `lib.rs` | `tddy-index-daemon/src/service.rs` |
+
+2026-10-20: K20 owns the daemon's installed-registry seam (`WorkspaceIndex::with_supports`,
+`build_code_index_entry_with_supports`), moved down from K22 (developer decision). The daemon acceptance test builds
+its host through it — the built-ins (Rust launching a nonexistent rust-analyzer), the installed extensions, the
+allow-list from that registry — and asks `Anchors` in process, as a host that registers the service will.
 
 ### The rules (the contract)
 
@@ -138,7 +146,8 @@ anchors from tree-sitter + `outline.scm`, through the same item-anchor traits Ru
   `an_items_anchor_over_adjacent_entries_resolves`, `non_adjacent_entries_are_refused`,
   `check_reports_a_stale_fingerprint`, `a_rename_is_unsupported_without_a_server`,
   `a_broken_grammar_is_reported_once_and_spares_other_languages`, `a_grammar_load_failure_says_which_extension_and_grammar`;
-  `packages/tddy-index-daemon/tests/extension_anchors.rs`: `the_daemon_answers_the_same_anchors_as_the_cli`.
+  `packages/tddy-index-daemon/tests/extension_anchors.rs`: `the_daemon_answers_the_same_anchors_as_the_cli` (in process, through
+  `build_code_index_entry_with_supports`; red on `SupportRegistry::with_installed_extensions`' `todo!()`).
 - Unit tests: `tddy-zed-extensions` `language::tests` (4: R1 id, languages dir scan, manifest-listed languages,
   missing config), `grammar::tests` (3: vendored grammar loads and parses, loaded once per store, missing file names
   extension and grammar); `tddy-code-restructuring` `registry::tests` (2: `module_of` routes to the claiming backend,
