@@ -1152,9 +1152,9 @@ export enum HostPromptKind {
   SSH_KEY_PASSPHRASE = 1,
 
   /**
-   * The password of a host's remote desktop, asked for while StartHostStream is blocked on it.
-   * Reuses this channel rather than storing the password: a host desktop password is prompted,
-   * encrypted under the host's key, used and dropped (#hosts-screen 8/8, AC-7).
+   * No longer raised since #host-desktops 8/8: DESKTOP_CREDENTIALS replaced it. Kept so the value
+   * is never reused — it was the password of a host's remote desktop, asked for while
+   * StartHostStream was blocked on it (#hosts-screen 8/8, AC-7).
    *
    * @generated from enum value: HOST_PROMPT_KIND_DESKTOP_PASSWORD = 2;
    */

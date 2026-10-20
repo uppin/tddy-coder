@@ -36,84 +36,84 @@ export function HostKeyContinuityNotices({
 
   return (
     <>
-        {fingerprint !== null && !keyMismatched && (
-          <p className="text-xs text-muted-foreground break-all">
-            Answer encrypted for host key <span className="font-mono">{fingerprint}</span>
-          </p>
-        )}
-        {keyChanged && (
-          <>
-            <p
-              data-testid="host-key-changed-warning"
-              className="text-xs text-destructive border border-destructive rounded px-2 py-1"
-            >
-              This host&apos;s key has changed since you last answered a prompt from it. Verify the
-              fingerprint above with the host before sending anything.
-            </p>
-            <div className="flex flex-col gap-1 border border-border rounded px-2 py-1">
-              <label className="text-xs flex items-start gap-2">
-                <input
-                  data-testid="host-key-accept-confirm"
-                  type="checkbox"
-                  checked={changeVerified}
-                  onChange={(e) => setChangeVerified(e.target.checked)}
-                />
-                <span>
-                  I checked the fingerprint above with {hostId} itself, and its key changed because
-                  the host changed it.
-                </span>
-              </label>
-              <button
-                type="button"
-                data-testid="host-key-accept-submit"
-                disabled={!changeVerified}
-                onClick={onAcceptChangedKey}
-                className="self-end px-3 py-1 text-xs border border-destructive rounded hover:bg-muted disabled:opacity-50"
-              >
-                Accept this key for {hostId}
-              </button>
-            </div>
-          </>
-        )}
-        {keyMismatched && (
+      {fingerprint !== null && !keyMismatched && (
+        <p className="text-xs text-muted-foreground break-all">
+          Answer encrypted for host key <span className="font-mono">{fingerprint}</span>
+        </p>
+      )}
+      {keyChanged && (
+        <>
           <p
-            data-testid="host-key-mismatch-warning"
+            data-testid="host-key-changed-warning"
             className="text-xs text-destructive border border-destructive rounded px-2 py-1"
           >
-            This prompt contradicts itself: it advertises host key{" "}
-            <span className="font-mono break-all">{keyContinuity.advertisedFingerprint}</span>, but
-            the key it carries is{" "}
-            <span className="font-mono break-all">{keyContinuity.derivedFingerprint}</span>. A host
-            describing its own key gets it right, so something rewrote this in flight. Nothing can be
-            sent to it.
-          </p>
-        )}
-        {keyUnderivable && (
-          <p
-            data-testid="host-key-underivable-notice"
-            className="text-xs text-destructive border border-destructive rounded px-2 py-1"
-          >
-            This host&apos;s key cannot be checked or encrypted to from this page:{" "}
-            {keyContinuity.reason}. Nothing has been sent.
-          </p>
-        )}
-        {keyUnchecked && (
-          <p
-            data-testid="host-key-unchecked-notice"
-            className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
-          >
-            Checking the key this host is presenting. Nothing can be sent until it is checked.
-          </p>
-        )}
-        {keyUnverified && (
-          <p
-            data-testid="host-key-unverified-notice"
-            className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
-          >
-            Could not check whether this host&apos;s key has changed since last time. Verify the
+            This host&apos;s key has changed since you last answered a prompt from it. Verify the
             fingerprint above with the host before sending anything.
           </p>
-        )}
+          <div className="flex flex-col gap-1 border border-border rounded px-2 py-1">
+            <label className="text-xs flex items-start gap-2">
+              <input
+                data-testid="host-key-accept-confirm"
+                type="checkbox"
+                checked={changeVerified}
+                onChange={(e) => setChangeVerified(e.target.checked)}
+              />
+              <span>
+                I checked the fingerprint above with {hostId} itself, and its key changed because
+                the host changed it.
+              </span>
+            </label>
+            <button
+              type="button"
+              data-testid="host-key-accept-submit"
+              disabled={!changeVerified}
+              onClick={onAcceptChangedKey}
+              className="self-end px-3 py-1 text-xs border border-destructive rounded hover:bg-muted disabled:opacity-50"
+            >
+              Accept this key for {hostId}
+            </button>
+          </div>
+        </>
+      )}
+      {keyMismatched && (
+        <p
+          data-testid="host-key-mismatch-warning"
+          className="text-xs text-destructive border border-destructive rounded px-2 py-1"
+        >
+          This prompt contradicts itself: it advertises host key{" "}
+          <span className="font-mono break-all">{keyContinuity.advertisedFingerprint}</span>, but
+          the key it carries is{" "}
+          <span className="font-mono break-all">{keyContinuity.derivedFingerprint}</span>. A host
+          describing its own key gets it right, so something rewrote this in flight. Nothing can be
+          sent to it.
+        </p>
+      )}
+      {keyUnderivable && (
+        <p
+          data-testid="host-key-underivable-notice"
+          className="text-xs text-destructive border border-destructive rounded px-2 py-1"
+        >
+          This host&apos;s key cannot be checked or encrypted to from this page:{" "}
+          {keyContinuity.reason}. Nothing has been sent.
+        </p>
+      )}
+      {keyUnchecked && (
+        <p
+          data-testid="host-key-unchecked-notice"
+          className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
+        >
+          Checking the key this host is presenting. Nothing can be sent until it is checked.
+        </p>
+      )}
+      {keyUnverified && (
+        <p
+          data-testid="host-key-unverified-notice"
+          className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
+        >
+          Could not check whether this host&apos;s key has changed since last time. Verify the
+          fingerprint above with the host before sending anything.
+        </p>
+      )}
     </>
   );
 }

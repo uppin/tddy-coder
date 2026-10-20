@@ -79,19 +79,6 @@ export interface HostPassphraseDialogProps {
    * (`#hosts-screen 6/8`), so a caller answering that question says nothing.
    */
   wording?: HostPromptWording;
-  /**
-   * Whether nothing is a real answer to this question.
-   *
-   * Defaults to `false`, which is the key passphrase (`#hosts-screen 6/8`): an empty passphrase
-   * unlocks no encrypted key, so sending one only spends the single-use prompt the host is blocked
-   * on. A desktop password (`#hosts-screen 8/8`) is the opposite case — plenty of desktops have
-   * none, and the host asks on every start because it cannot know in advance which — so refusing an
-   * empty answer there refuses the desktop itself.
-   *
-   * Whether an empty answer means anything is a property of the question, and only the caller knows
-   * which question it asked; this dialog cannot read it off the prompt.
-   */
-  allowEmpty?: boolean;
   /** Receives the RSA-OAEP ciphertext — the answer itself never leaves this component. */
   onSubmit: (encryptedAnswer: Uint8Array) => void;
   /**
@@ -113,7 +100,6 @@ export function HostPassphraseDialog({
   spkiDer,
   keyContinuity,
   wording,
-  allowEmpty = false,
   onSubmit,
   onAcceptChangedKey,
   onCancel,
@@ -127,12 +113,12 @@ export function HostPassphraseDialog({
   const [encrypting, setEncrypting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
-  // Empty is refused because an empty answer only wastes the host's single-use prompt — unless the
-  // caller said that nothing IS a real answer here, which is true of a desktop with no password.
-  // `encrypting` is refused because one prompt accepts exactly one answer. Each blocking key state
+  // Empty is refused because an empty answer only wastes the host's single-use prompt: an empty
+  // passphrase unlocks no encrypted key. (A desktop with no password is answered by
+  // HostDesktopSignInDialog, which does not go through this dialog.) `encrypting` is refused because one prompt accepts exactly one answer. Each blocking key state
   // is refused for a reason of its own, spelled out beside its notice below.
   const keyBlocks = keyContinuityBlocks(keyContinuity);
-  const answerMissing = !allowEmpty && passphrase.length === 0;
+  const answerMissing = passphrase.length === 0;
   const blocked = keyBlocks || encrypting || answerMissing;
 
   const handleSubmit = async (event: React.FormEvent) => {

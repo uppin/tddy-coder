@@ -153,7 +153,6 @@ fn forward(
 fn wire_kind(kind: PromptKind) -> HostPromptKind {
     match kind {
         PromptKind::SshKeyPassphrase => HostPromptKind::SshKeyPassphrase,
-        PromptKind::DesktopPassword => HostPromptKind::DesktopPassword,
         PromptKind::DesktopCredentials => HostPromptKind::DesktopCredentials,
     }
 }
