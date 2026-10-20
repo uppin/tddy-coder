@@ -213,8 +213,10 @@ pub fn cluster_resolution(
     cluster: &MovingCluster,
 ) -> Result<crate::Resolution> {
     let edit = resolve_cluster(engine, workspace, cluster)?;
+    let mut notes = carried::carried_notes(workspace, cluster)?;
+    notes.extend(test_modules::notes_of(engine, workspace, cluster)?);
     Ok(crate::Resolution {
-        notes: carried::carried_notes(workspace, cluster)?,
+        notes,
         ..crate::Resolution::of(edit)
     })
 }

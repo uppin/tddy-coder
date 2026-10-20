@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use super::malformed;
 use super::new_crate;
 
-use crate::crate_move::{carried, cluster, header, manifest_edits, module_home, moving, survey};
+use crate::crate_move::{
+    carried, cluster, header, manifest_edits, module_home, moving, survey, test_modules,
+};
 
 use super::Result;
 
@@ -62,17 +64,28 @@ pub(crate) fn unrunnable(
             root: workspace.root,
             overlay: &overlay,
         };
+        let mut refused = false;
         for anchor in op.anchors() {
             let earlier = moved_by_earlier_operations(workspace, ops, index, anchor);
             let member = member_op(op, anchor);
             match move_preconditions(workspace, &member, &earlier) {
-                Err(refusal) => findings.push((index, refusal.to_string())),
+                Err(refusal) => {
+                    refused = true;
+                    findings.push((index, refusal.to_string()));
+                }
                 Ok(()) => findings.extend(
                     carried::uncarriable(workspace, ops, index, &member)?
                         .into_iter()
                         .map(|finding| (index, finding)),
                 ),
             }
+        }
+        if !refused {
+            findings.extend(
+                test_modules::unfollowable(workspace, ops, index, op)?
+                    .into_iter()
+                    .map(|finding| (index, finding)),
+            );
         }
     }
     Ok(findings)

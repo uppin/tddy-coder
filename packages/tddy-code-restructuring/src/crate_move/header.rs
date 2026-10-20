@@ -82,7 +82,7 @@ pub(crate) fn repointed_header_at(
 ///
 /// # Errors
 ///
-/// Refuses for every reason [`repointed_header`] does.
+/// Refuses for every reason [`repointed_header_at`] does.
 pub(crate) fn repointed_header_in(
     workspace: &Workspace<'_>,
     text: &str,

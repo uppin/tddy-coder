@@ -375,10 +375,6 @@ pub(crate) fn attached_trivia_starts_at(text: &str, line: u32) -> u32 {
 }
 
 mod test_declarations;
-#[allow(
-    unused_imports,
-    reason = "TODO(reshape-tests-follow): implement — `test_modules::sorted` reads the candidates"
-)]
 pub(crate) use test_declarations::{test_declarations, TestDeclaration};
 
 #[cfg(test)]

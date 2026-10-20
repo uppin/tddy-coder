@@ -57,7 +57,13 @@ pub(crate) fn test_declarations(text: &str) -> Vec<TestDeclaration> {
             Kind::Ident if depth == 0 && scan.text(scan.tokens[at]) == "mod" => {
                 if let (Some(name), true) = (scan.ident(at + 1), scan.is_punct(at + 2, b';')) {
                     if pending.test {
-                        found.push(declaration_at(text, &scan, at, name, pending.placed_by_path));
+                        found.push(declaration_at(
+                            text,
+                            &scan,
+                            at,
+                            name,
+                            pending.placed_by_path,
+                        ));
                     }
                     pending = Pending::default();
                     at += 3;
