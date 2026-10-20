@@ -8,7 +8,8 @@
 //!   `DesktopCredentialAnswer`, RSA-OAEP-encrypted under the host's published key exactly as a
 //!   password answer is.
 //! - **Remember.** An answer with `remember` set is a `screen-sharing` record in the operator's own
-//!   credential vault, account `host:<daemon_instance_id>:<target_id>`. The next start uses it
+//!   credential vault, account `host:<daemon_instance_id>:<target_id>`, written once the desktop
+//!   has accepted it — a credential the desktop refuses is never kept. The next start uses it
 //!   without asking; a desktop that refuses it marks it refused, and a refused one is not used again
 //!   until the operator replaces it. An answer without `remember` is kept nowhere.
 //!
@@ -250,14 +251,16 @@ impl RememberedDesktopCredentials {
     /// The credential `operator` remembered for this desktop, unless there is none or the desktop
     /// refused it.
     ///
-    /// An operator with no vault yet has remembered nothing.
+    /// An operator with no vault yet has remembered nothing, and one whose vault is sealed has
+    /// nothing usable remembered right now: either way they are asked, so opening a host desktop
+    /// never depends on the vault being open.
     pub fn usable(
         &self,
         operator: &str,
         daemon_instance_id: &str,
         target_id: &str,
     ) -> Result<Option<DesktopCredentialAnswer>, TargetError> {
-        if self.vaults.state(operator) == VaultState::Uninitialized {
+        if self.vaults.state(operator) != VaultState::Open {
             return Ok(None);
         }
         let Some(record) = self.record(operator, daemon_instance_id, target_id)? else {
@@ -267,6 +270,14 @@ impl RememberedDesktopCredentials {
             return Ok(None);
         }
         answer_from(&record).map(Some)
+    }
+
+    /// Whether `operator`'s vault is open to take a remembered credential, without writing one.
+    ///
+    /// Asked before a bridge starts, so an operator who ticked Remember with a sealed vault is
+    /// told it cannot be done rather than finding out at the next open.
+    pub fn can_remember(&self, operator: &str) -> Result<(), TargetError> {
+        open_vault(&self.vaults, operator).map(drop)
     }
 
     /// Seal `answer` in `operator`'s vault as this desktop's remembered credential, replacing any

@@ -190,10 +190,12 @@ where
 /// Read the sign-in methods the server at the other end of `stream` advertises, and stop before
 /// any sign-in begins: no credential is sent and no sign-in method is selected.
 ///
-/// The methods come back in the server's order. VeNCrypt is not itself a method an operator can
-/// choose, so it is replaced by the subtypes tddy can sign in with (its subtype list is only
-/// learnt by choosing type 19, the one selection inspect makes); a VeNCrypt offer over RFB 3.3,
-/// which has no selectable types, contributes nothing. Bounded by [`SIGN_IN_TIMEOUT`].
+/// The methods come back in the server's order, except VeNCrypt's. VeNCrypt is not itself a
+/// method an operator can choose, so it is replaced by the subtypes tddy can sign in with — and
+/// those come last, whatever its place in the offer: its subtype list is only learnt by choosing
+/// type 19, the one selection inspect makes, which commits the connection to VeNCrypt, so every
+/// other type is read off the offer first. A VeNCrypt offer over RFB 3.3, which has no selectable
+/// types, contributes nothing. Bounded by [`SIGN_IN_TIMEOUT`].
 pub async fn inspect<S>(mut stream: S) -> Result<Vec<AdvertisedMethod>, SecurityError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -201,8 +203,8 @@ where
     tokio::time::timeout(SIGN_IN_TIMEOUT, async {
         let (version, offered) = exchange_version_and_types(&mut stream).await?;
         let mut methods = Vec::with_capacity(offered.len());
-        for security_type in offered {
-            match security_type {
+        for security_type in &offered {
+            match *security_type {
                 VncSecurityType::None => methods.push(AdvertisedMethod::None),
                 VncSecurityType::VncAuth => methods.push(AdvertisedMethod::VncPassword),
                 VncSecurityType::AppleRemoteDesktop => {
@@ -211,19 +213,18 @@ where
                 VncSecurityType::Unknown(security_type) => {
                     methods.push(AdvertisedMethod::UnsupportedVnc { security_type })
                 }
-                VncSecurityType::VeNCrypt if version != RfbVersion::V33 => {
-                    let subtypes = commit_to_vencrypt(&mut stream).await?;
-                    methods.extend(subtypes.into_iter().filter_map(|subtype| match subtype {
-                        VENCRYPT_PLAIN => Some(AdvertisedMethod::VencryptPlain),
-                        VENCRYPT_TLS_PLAIN => Some(AdvertisedMethod::VencryptTlsPlain),
-                        _ => None,
-                    }));
-                    // Type 19 is on the wire: the server is in the VeNCrypt phase, so nothing
-                    // else can be selected on this connection.
-                    break;
-                }
                 VncSecurityType::VeNCrypt => {}
             }
+        }
+        if version != RfbVersion::V33 && offered.contains(&VncSecurityType::VeNCrypt) {
+            // Type 19 goes on the wire here, after every other type has been read off the offer:
+            // the server is then in the VeNCrypt phase, and nothing else can be selected.
+            let subtypes = commit_to_vencrypt(&mut stream).await?;
+            methods.extend(subtypes.into_iter().filter_map(|subtype| match subtype {
+                VENCRYPT_PLAIN => Some(AdvertisedMethod::VencryptPlain),
+                VENCRYPT_TLS_PLAIN => Some(AdvertisedMethod::VencryptTlsPlain),
+                _ => None,
+            }));
         }
         Ok(methods)
     })

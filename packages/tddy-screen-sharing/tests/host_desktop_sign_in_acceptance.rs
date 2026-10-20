@@ -316,3 +316,100 @@ async fn a_remembered_credential_the_desktop_refuses_is_not_used_again() {
     // Then they were asked again, rather than the refused credential being tried a second time
     assert_eq!(daemon.questions_asked().len(), 2);
 }
+
+#[tokio::test]
+async fn a_credential_the_desktop_refuses_is_not_remembered() {
+    // Given an operator who types a password the desktop does not accept, with Remember ticked
+    let daemon = a_daemon_whose_bridge(TheBridge::refusing_the_sign_in_with(THE_DESKTOPS_REASON))
+        .with_the_operators_vault()
+        .whose_operator_signs_in_with(
+            a_credential()
+                .with_password(THE_DESKTOP_PASSWORD)
+                .remembered(),
+        )
+        .start();
+    let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+    // When
+    let refusal = daemon
+        .open_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect_err("the desktop refuses the credential the operator typed");
+
+    // Then the refusal reaches the operator…
+    assert_eq!(refusal.code, Code::Unauthenticated, "{refusal:?}");
+    // …and nothing they typed was kept in their vault
+    assert_eq!(daemon.the_operators_screen_sharing_records(), vec![]);
+}
+
+// ── A locked vault ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_locked_vault_still_lets_the_operator_sign_in() {
+    // Given an operator whose vault is sealed, signing in without Remember
+    let daemon = a_daemon_whose_bridge(a_desktop_that_accepts_the_sign_in())
+        .with_the_operators_vault_locked()
+        .whose_operator_signs_in_with(a_credential().with_password(THE_DESKTOP_PASSWORD))
+        .start();
+    let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+    // When
+    daemon
+        .open_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect("a sealed vault does not stand between the operator and the desktop");
+
+    // Then they were asked, and the bridge signed in with what they typed
+    assert_eq!(daemon.questions_asked().len(), 1);
+    assert_eq!(
+        daemon.bridge.nth_config_read_from_its_stdin(0).await["password"],
+        serde_json::json!(THE_DESKTOP_PASSWORD)
+    );
+}
+
+#[tokio::test]
+async fn inspecting_a_desktop_behind_a_locked_vault_reports_nothing_remembered() {
+    // Given
+    let daemon = a_daemon_whose_bridge(a_desktop_that_accepts_the_sign_in())
+        .with_the_operators_vault_locked()
+        .start();
+    let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+    // When
+    let inspected = daemon
+        .inspect_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect("a sealed vault does not stand between the operator and the inspection");
+
+    // Then
+    assert!(
+        !inspected.remembered,
+        "a sealed vault has nothing usable remembered: {inspected:?}"
+    );
+}
+
+#[tokio::test]
+async fn remember_with_a_locked_vault_is_refused_before_the_bridge_starts() {
+    // Given an operator whose vault is sealed, ticking Remember
+    let daemon = a_daemon_whose_bridge(a_desktop_that_accepts_the_sign_in())
+        .with_the_operators_vault_locked()
+        .whose_operator_signs_in_with(
+            a_credential()
+                .with_password(THE_DESKTOP_PASSWORD)
+                .remembered(),
+        )
+        .start();
+    let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+    // When
+    daemon
+        .open_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect_err("a credential cannot be remembered in a sealed vault");
+
+    // Then no bridge was started for a credential that could not be kept as asked
+    assert!(
+        !daemon.bridge.was_ever_started(),
+        "the bridge was started although Remember could not be honoured"
+    );
+}

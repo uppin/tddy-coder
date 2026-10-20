@@ -41,13 +41,22 @@ use crate::screen_sharing_records::ScreenSharingTargetStore;
 
 use std::sync::Arc;
 
-/// The credential a host-desktop start signs in with, and whether it is held in the operator's
-/// vault.
+/// The credential a host-desktop start signs in with, and how it relates to the operator's vault.
 pub(crate) struct SignIn {
     pub(crate) answer: DesktopCredentialAnswer,
-    /// Whether this credential is a record in the operator's vault: remembered earlier, or written
-    /// by this start. A desktop that refuses a remembered credential marks it refused.
-    pub(crate) remembered: bool,
+    pub(crate) remembering: Remembering,
+}
+
+/// Where a [`SignIn`]'s credential stands with the operator's vault.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Remembering {
+    /// Typed without Remember: kept nowhere.
+    Nothing,
+    /// Read from the vault, remembered at an earlier open. A desktop that refuses it marks it
+    /// refused.
+    AlreadyRemembered,
+    /// Typed with Remember: written to the vault once the desktop has accepted it, and not before.
+    AfterStart,
 }
 
 impl ScreenSharingServiceImpl {
@@ -119,7 +128,7 @@ impl ScreenSharingServiceImpl {
             {
                 return Ok(SignIn {
                     answer,
-                    remembered: true,
+                    remembering: Remembering::AlreadyRemembered,
                 });
             }
         }
@@ -127,17 +136,22 @@ impl ScreenSharingServiceImpl {
         let answer = self
             .prompt_for_desktop_credentials(scope, operator, target)
             .await?;
-        if answer.remember {
-            // Refused while nobody is yet signed in, so an operator who asked to remember is told
-            // it cannot be done rather than finding out at the next open.
-            self.remembered_desktop_credentials()
-                .ok_or_else(|| Status::failed_precondition("no credential store is wired"))?
-                .remember(operator, daemon_instance_id, &target.target_id, &answer)
-                .map_err(target_error_to_status)?;
+        if !answer.remember {
+            return Ok(SignIn {
+                answer,
+                remembering: Remembering::Nothing,
+            });
         }
+        // Checked, not written: the credential is written only once the desktop accepts it. Refused
+        // while nobody is yet signed in, so an operator who asked to remember is told it cannot be
+        // done rather than finding out at the next open.
+        self.remembered_desktop_credentials()
+            .ok_or_else(|| Status::failed_precondition("no credential store is wired"))?
+            .can_remember(operator)
+            .map_err(target_error_to_status)?;
         Ok(SignIn {
-            remembered: answer.remember,
             answer,
+            remembering: Remembering::AfterStart,
         })
     }
 

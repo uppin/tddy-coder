@@ -745,6 +745,8 @@ pub struct DaemonBuilder {
     inspection: InspectReport,
     operator: TheOperator,
     the_operators_vault: bool,
+    /// Whether the operator's vault, when wired, is left sealed rather than unlocked.
+    the_operators_vault_locked: bool,
 }
 
 /// A daemon whose bridge does `bridge` once it is spawned.
@@ -759,6 +761,7 @@ pub fn a_daemon_whose_bridge(bridge: TheBridge) -> DaemonBuilder {
         },
         operator: TheOperator::TypesNoPassword,
         the_operators_vault: false,
+        the_operators_vault_locked: false,
     }
 }
 
@@ -780,6 +783,14 @@ impl DaemonBuilder {
     /// `with_credential_vaults`.
     pub fn with_the_operators_vault(mut self) -> Self {
         self.the_operators_vault = true;
+        self
+    }
+
+    /// Wire the operator's real credential vault, sealed on disk but not unlocked — the state it is
+    /// in after a restart, before the operator has opened it again.
+    pub fn with_the_operators_vault_locked(mut self) -> Self {
+        self.the_operators_vault = true;
+        self.the_operators_vault_locked = true;
         self
     }
 
@@ -836,9 +847,13 @@ impl DaemonBuilder {
             answers_with: self.operator,
             asked: Mutex::new(Vec::new()),
         });
-        let vaults = self
-            .the_operators_vault
-            .then(|| the_operators_unlocked_vault_in(storage.path()));
+        let vaults = self.the_operators_vault.then(|| {
+            if self.the_operators_vault_locked {
+                the_operators_locked_vault_in(storage.path())
+            } else {
+                the_operators_unlocked_vault_in(storage.path())
+            }
+        });
 
         let service = ScreenSharingServiceImpl::new(
             Arc::new(|token: &str| (token == A_SESSION_TOKEN).then(|| THE_OS_USER.to_string())),
@@ -880,6 +895,15 @@ fn the_operators_unlocked_vault_in(storage: &Path) -> Arc<SessionVaults> {
     vaults
         .unlock(THE_OS_USER, &passphrase)
         .expect("the operator's passphrase opens the vault");
+    vaults
+}
+
+/// The operator's credential vault, created on disk under `storage` and left sealed.
+fn the_operators_locked_vault_in(storage: &Path) -> Arc<SessionVaults> {
+    let vaults = Arc::new(SessionVaults::new(storage.join("auth")));
+    let passphrase = SecretString::new(THE_OPERATORS_VAULT_PASSPHRASE);
+    CredentialStore::create(&vaults.path_for(THE_OS_USER), &passphrase, THE_OS_USER)
+        .expect("the operator's vault is created");
     vaults
 }
 

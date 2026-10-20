@@ -231,3 +231,25 @@ async fn inspect_selects_no_sign_in_method() {
         TheClient::SelectedNothing
     );
 }
+
+#[tokio::test]
+async fn inspect_reports_the_types_a_vnc_server_offers_after_vencrypt() {
+    // Given a server that offers VeNCrypt first and VNC Authentication after it
+    let server = a_vnc_server_offering(&[VENCRYPT, VNC_AUTH])
+        .with_vencrypt_subtypes(&[VENCRYPT_PLAIN])
+        .start()
+        .await;
+
+    // When
+    let methods = server.inspected().await;
+
+    // Then — learning VeNCrypt's subtypes commits the connection, so they come last, and the type
+    // offered after it is still reported
+    assert_eq!(
+        methods,
+        vec![
+            AdvertisedMethod::VncPassword,
+            AdvertisedMethod::VencryptPlain,
+        ]
+    );
+}

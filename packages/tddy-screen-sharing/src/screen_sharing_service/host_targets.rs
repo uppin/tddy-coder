@@ -2,6 +2,7 @@
 //
 // The bodies of the four host-target RPCs, moved out of the `#[async_trait]` impl byte for byte; the
 // trait methods in `screen_sharing_service.rs` delegate here.
+use super::bridge_lifecycle::Remembering;
 use super::ScreenSharingServiceImpl;
 use crate::bridge_config::{
     browser_livekit_url, host_bridge_identity, host_bridge_key, host_livekit_room,
@@ -14,8 +15,9 @@ use tddy_daemon_kernel::config::{resolve_x11vnc_binary_path, DaemonConfig, Scree
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
 use tddy_rpc::{Code, Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
-    AddHostTargetRequest, AddHostTargetResponse, ListHostTargetsRequest, ListHostTargetsResponse,
-    StartHostStreamRequest, StartStreamResponse, StopHostStreamRequest, StopHostStreamResponse,
+    AddHostTargetRequest, AddHostTargetResponse, DesktopCredentialAnswer, ListHostTargetsRequest,
+    ListHostTargetsResponse, StartHostStreamRequest, StartStreamResponse, StopHostStreamRequest,
+    StopHostStreamResponse,
 };
 
 impl ScreenSharingServiceImpl {
@@ -125,7 +127,9 @@ impl ScreenSharingServiceImpl {
         let sign_in = self
             .desktop_credential_for(scope, &operator, &req.daemon_instance_id, &target)
             .await?;
-        let remembered = sign_in.remembered;
+        let remembering = sign_in.remembering;
+        // Held only until the desktop has answered: written to the vault if it accepts the sign-in.
+        let to_remember = (remembering == Remembering::AfterStart).then(|| sign_in.answer.clone());
 
         // Reported: these coordinates tell a browser to mount an overlay on a room, and a bridge that
         // never joined it leaves the operator watching nothing having already typed a secret. The
@@ -141,7 +145,9 @@ impl ScreenSharingServiceImpl {
         let started = match self.spawn_host_bridge(prepared, bridge_key).await {
             Ok(started) => started,
             Err(status) => {
-                if remembered && status.code == Code::Unauthenticated {
+                if remembering == Remembering::AlreadyRemembered
+                    && status.code == Code::Unauthenticated
+                {
                     self.mark_remembered_desktop_refused(
                         &operator,
                         &req.daemon_instance_id,
@@ -151,6 +157,14 @@ impl ScreenSharingServiceImpl {
                 return Err(status);
             }
         };
+        if let Some(answer) = to_remember {
+            self.remember_accepted_desktop_credential(
+                &operator,
+                &req.daemon_instance_id,
+                &req.target_id,
+                &answer,
+            );
+        }
 
         Ok(Response::new(StartStreamResponse {
             livekit_room,
@@ -201,6 +215,34 @@ impl ScreenSharingServiceImpl {
                 self.x11vnc.stop(&bridge_key).await;
                 Err(status)
             }
+        }
+    }
+
+    /// The desktop accepted a credential the operator asked to remember: seal it in their vault.
+    ///
+    /// Failing to write it does not fail the start. The stream is already up, the operator is
+    /// watching it, and stopping it would throw away a working sign-in to report a vault problem;
+    /// so the failure is logged — naming the desktop, never the secret — and the next open simply
+    /// asks again.
+    fn remember_accepted_desktop_credential(
+        &self,
+        operator: &str,
+        daemon_instance_id: &str,
+        target_id: &str,
+        answer: &DesktopCredentialAnswer,
+    ) {
+        let Some(remembered) = self.remembered_desktop_credentials() else {
+            log::error!(
+                target: "tddy_screen_sharing",
+                "could not remember the credential for {daemon_instance_id}:{target_id}: no credential store is wired"
+            );
+            return;
+        };
+        if let Err(error) = remembered.remember(operator, daemon_instance_id, target_id, answer) {
+            log::error!(
+                target: "tddy_screen_sharing",
+                "could not remember the credential for {daemon_instance_id}:{target_id}: {error:?}"
+            );
         }
     }
 
