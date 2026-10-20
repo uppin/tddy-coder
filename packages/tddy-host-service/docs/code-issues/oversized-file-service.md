@@ -34,3 +34,7 @@ Seams B, C and D sit inside a trait impl. Their bodies move to free functions an
 ## Measurement update 2026-10-15 — #622 (local gh)
 
 **Regressed, split deferred with consent:** 934 → 937 production lines. `get_host_tooling` forwards `github_hostname` to the probe. See [2026-10-15-local-gh-oversized-files-deferred.md](../../../../docs/dev/todo/2026-10-15-local-gh-oversized-files-deferred.md).
+
+## Measurement update 2026-10-20 — #656 (`#host-desktops` 4/8)
+
+**Regressed, split deferred with consent:** 936 → 961 production lines (+25). `get_host_tooling` goes through the new `ToolingCache` (`host_tooling_cache.rs`); the growth is the TTL constant, the `HostServiceImpl` field and the keyed call. Still unclaimed. See [2026-10-20-hosts-mount-service-rs-grew-while-over-budget.md](../../../../docs/dev/todo/2026-10-20-hosts-mount-service-rs-grew-while-over-budget.md).

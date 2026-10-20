@@ -175,12 +175,15 @@ keyboard onto it — the same overlay, and so the same behaviour, on this scope 
 Escape goes to the desktop; `Ctrl+Alt+Esc` is the one chord the overlay keeps. See
 [`remote-desktop-input.md`](./remote-desktop-input.md).
 
-⚠ **Nothing mounts `HostRowTooling`.** No component in `src/` renders it, and nothing in `src/`
-issues `GetHostTooling`; its only call sites are the Cypress component specs. The section's states
-are covered, and the assembled path — row → RPC → probe → cells — has never run. Mounting it belongs
-to the node that owns the row. Everything `HostRowTooling` mounts inherits that limit —
-`HostRowSshAgent`, `HostRowRemoteDesktop`, and the add-key action below: each is wired, covered and
-reachable over the wire, and an operator cannot yet open a screen that shows it.
+**`HostRowToolingCell`** mounts `HostRowTooling` on every online row. `HostRowTooling` renders a report it
+is handed and fetches nothing; the cell is what asks. `useHostTooling(instanceId, online)` owns the
+call: it resolves a client through `useHostClient(HostService, online ? instanceId : null)` — an
+offline row names no host, so no client resolves and nothing is called — and issues one
+`GetHostTooling { sessionToken, daemonInstanceId }` per mount, re-issuing only when the client, the
+host or the session token changes. Its reading is `loading`, `answered` or `failed`; a row with no
+routed client is `failed` too, so the cell is never blank. The cell renders `hosts-row-<id>-tooling-loading`,
+`hosts-row-<id>-tooling-failed` ("Tooling could not be read") or `HostRowTooling` with the readings,
+which brings `HostRowSshAgent`, `HostRowRemoteDesktop` and the add-key action with it.
 
 ## Adding a key to a host's agent
 
@@ -340,6 +343,7 @@ One `<tr>` per host, in a `hosts-table`, columns left to right:
 | Host | `label`, plus a `(local)` marker when `isLocal` |
 | Status | `Online` / `Offline` (offline is muted) |
 | Last seen | `formatLastSeen(lastSeenUnixMs, nowUnixMs)` |
+| Tooling | `HostRowToolingCell` — see above; empty on an offline row |
 | Instance ID | `instanceId`, monospaced |
 | Repos base path | `reposBasePath`, monospaced |
 
@@ -394,6 +398,8 @@ as a plain `number`; millisecond stamps are far below 2^53, so widening loses no
 `mountWithRpc(withSelectedDaemon(<HostsAppPage />), backend)` against the in-memory backend, and
 covers online, offline-with-last-seen, the sort, the local marker in both its positive and negative
 case, reaching the screen from the nav menu, and the one-RPC-per-visit boundary.
+
+`cypress/component/HostsScreenToolingMountAcceptance.cy.tsx` mounts the assembled screen (`HostsAppPage`) and lets each row fetch its own `GetHostTooling`: Connect on an online row, one call per online row per visit, **no call for an offline host even when its wire is reachable** (so only the `online` flag keeps it quiet), and the "could not be read" state when the host does not answer.
 
 `cypress/component/HostsScreenToolingAcceptance.cy.tsx` mounts `HostRowTooling` directly and covers
 the six tooling states. One behaviour per test, and each state also **denies** the neighbouring state

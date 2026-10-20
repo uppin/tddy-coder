@@ -273,3 +273,26 @@ export const hostDesktopPage = {
    */
   inlineAncestorsOfOverlay: (instanceId: string) => hostDesktopPage.overlay(instanceId).parents("span"),
 };
+
+/**
+ * The tooling cell each Hosts-screen row asks its host through — added by `#host-desktops 4/8`.
+ *
+ * `hostToolingPage` addresses the report once it is on screen; this addresses the cell's own states
+ * around it — still asking, or the asking failed. A failed read must say so: a blank cell reads as
+ * a host with no tooling, which is a finding nobody made.
+ */
+export const hostToolingCellPage = {
+  /** Asked, and waiting for the host's answer. */
+  loading: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-tooling-loading`),
+  /** The host was asked and did not answer. */
+  failed: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-tooling-failed`),
+
+  /** Assert the row says its tooling could not be read, rather than showing a report or nothing. */
+  expectCouldNotBeRead: (instanceId: string) => {
+    hostToolingCellPage
+      .failed(instanceId)
+      .invoke("text")
+      .should("match", /could not (be )?read/i);
+    hostToolingPage.section(instanceId).should("not.exist");
+  },
+};

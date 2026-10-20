@@ -31,7 +31,8 @@ use crate::host_keypair::HostKeypair;
 use crate::host_prompts::{answer_before_expiry, HostPromptRegistry, PromptKind};
 use crate::host_registry::{FileHostRegistry, HostRegistry};
 use crate::host_stats::{HostStats, SysinfoHostStats};
-use crate::host_tooling::{HostToolingProbe, SubprocessHostToolingProbe};
+use crate::host_tooling::{HostTooling, HostToolingProbe, SubprocessHostToolingProbe};
+use crate::host_tooling_cache::{SystemClock, ToolingCache, ToolingKey};
 use crate::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
 use crate::ssh_agent_add::SshAgentKeyAdder;
 use crate::stream::{MpscHostPromptStream, MpscHostStatsStream};
@@ -42,6 +43,11 @@ use crate::stream::{MpscHostPromptStream, MpscHostStatsStream};
 /// method that exists on the peer but is not this one, and the mismatch is invisible until a peer
 /// answers the wrong question.
 const SERVICE_NAME: &str = "host.HostService";
+
+/// How long a tooling answer is served without probing again. Short enough that an operator who
+/// fixes a host's `gh` login sees it on the next visit; long enough that a page load per operator
+/// does not re-run `gh auth status` and a TCP connect per desktop protocol each time.
+const HOST_TOOLING_CACHE_TTL: Duration = Duration::from_secs(30);
 
 /// Default cadence for refreshing per-core CPU utilization on the host-stats sampling loop.
 pub(crate) const HOST_CPU_INTERVAL: Duration = Duration::from_secs(5);
@@ -70,6 +76,10 @@ pub struct HostServiceImpl {
     host_registry: Arc<dyn HostRegistry>,
     /// Probes what this host has installed and configured, behind `GetHostTooling`.
     host_tooling: Arc<dyn HostToolingProbe>,
+    /// The tooling probe's answers, kept for [`HOST_TOOLING_CACHE_TTL`] and shared by concurrent
+    /// callers, because every online Hosts-screen row asks on every visit. A probe that panicked is
+    /// kept as its message for the same window.
+    host_tooling_cache: Arc<ToolingCache<Result<HostTooling, String>>>,
     /// Questions this host is waiting on an operator to answer, behind `StreamHostPrompts` and
     /// `AnswerHostPrompt`. Shared across clones, so the answer arriving on one connection reaches
     /// the prompt raised on another.
@@ -117,6 +127,10 @@ impl HostServiceImpl {
             // bridge-availability flag is an existence check on the path `screen_sharing` resolves
             // to, and an operator who set that path explicitly must have it checked.
             host_tooling: Arc::new(SubprocessHostToolingProbe::for_config(&config)),
+            host_tooling_cache: Arc::new(ToolingCache::new(
+                HOST_TOOLING_CACHE_TTL,
+                Arc::new(SystemClock),
+            )),
             host_prompts: Arc::new(crate::host_prompts::InMemoryHostPromptRegistry::new()),
             // Alongside the host registry, and generated on first use rather than here: a host
             // whose operator never adds a key never pays for an RSA keygen.
@@ -234,6 +248,33 @@ impl HostServiceImpl {
     #[must_use]
     pub fn local_instance_id(&self) -> String {
         local_instance_id_for_config(&self.config)
+    }
+
+    /// `os_user`'s tooling on this host, served from the cache when a probe for the same
+    /// (host, OS user, GitHub host) ran within the TTL, or shared with one already running.
+    ///
+    /// An empty `github_hostname` is the protocol's spelling for "none named". The probe shells
+    /// out and waits, so it runs on the blocking pool rather than parking a runtime worker for
+    /// however long `gh` takes to reach the network.
+    async fn cached_tooling(
+        &self,
+        local_instance_id: &str,
+        os_user: &str,
+        github_hostname: &str,
+    ) -> Result<HostTooling, String> {
+        let github_hostname = Some(github_hostname.to_string()).filter(|h| !h.is_empty());
+        let key = ToolingKey::new(local_instance_id, os_user, github_hostname.clone());
+        let probe = Arc::clone(&self.host_tooling);
+        let probed_user = os_user.to_string();
+        self.host_tooling_cache
+            .get_or_probe(key, move || async move {
+                tokio::task::spawn_blocking(move || {
+                    probe.probe(&probed_user, github_hostname.as_deref())
+                })
+                .await
+                .map_err(|e| format!("host tooling probe panicked: {e}"))
+            })
+            .await
     }
 
     /// How many `StreamHostPrompts` pumps are running right now.
@@ -483,19 +524,14 @@ impl HostService for HostServiceImpl {
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
-        // Both probes shell out and wait, so they run on the blocking pool rather than parking a
-        // runtime worker for however long `gh` takes to reach the network.
-        let probe = Arc::clone(&self.host_tooling);
-        let probed_user = os_user.to_string();
-        let github_hostname = Some(req.github_hostname.clone()).filter(|h| !h.is_empty());
-        let tooling = tokio::task::spawn_blocking(move || {
-            probe.probe(&probed_user, github_hostname.as_deref())
-        })
-        .await
-        .map_err(|e| Status::internal(format!("host tooling probe panicked: {e}")))?;
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        let tooling = self
+            .cached_tooling(&local_instance_id, os_user, &req.github_hostname)
+            .await
+            .map_err(Status::internal)?;
 
         Ok(Response::new(GetHostToolingResponse {
-            daemon_instance_id: local_instance_id_for_config(&self.config),
+            daemon_instance_id: local_instance_id,
             git: Some(crate::host_messages::git_identity_message(&tooling.git)),
             github_cli: Some(crate::host_messages::github_cli_message(
                 &tooling.github_cli,
