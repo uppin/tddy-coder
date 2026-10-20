@@ -1,6 +1,6 @@
 //! A split session reaches its room through the split-room port: the room is hosted over the
-//! remote checkout, and the agent is spawned with the join the port issued — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-split-transport.md`.
+//! remote checkout, and the agent is spawned with the join the port issued — see
+//! `docs/ft/daemon/remote-managed-worktree.md` and `tddy-daemon-extensions/docs/extension-ports.md`.
 //!
 //! In memory: the port records what it is asked for, and the codebase host is a scripted peer on
 //! the common room.

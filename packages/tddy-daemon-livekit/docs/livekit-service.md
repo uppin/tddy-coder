@@ -176,8 +176,9 @@ finishes when the room ends. The exposure does not mint through `RoomTokenMinter
 
 ## The direction was already right
 
-`session_room` defines four trait ports — `SessionTerminalBridge`, `WorktreeSource`,
-`SessionTokenMinter`, `RemoteSnapshotSource` — and `ConnectionServiceImpl` *implements* two of them.
+`session_room` names four trait ports — `SessionTerminalBridge` and `WorktreeSource`, which it
+defines, and `SessionTokenMinter` and `RemoteSnapshotSource`, which it re-exports from
+`tddy_daemon_extensions::split_rooms` — and the core crates *implement* them.
 The god object depended on this subsystem's abstractions rather than the reverse, which is the
 direction extraction wants and the reason this move is relocation rather than redesign.
 

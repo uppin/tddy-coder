@@ -61,3 +61,19 @@ Also open from this node, not a size issue: the Telegram start logs `warn!` ("te
 when no exposure is wired, which the port defines as "not exposed" (`FailedPrecondition`). Distinguishing it
 needs `tddy-telegram-control` to depend on `tddy-rpc` (for `Code`) — an external-dependency decision left to
 the developer.
+
+## Grown by #634 (`#satellite` 12/13, split-placement transport)
+
+Deferred under the stack run's pre-approved consent (2026-10-20). `connection_service.rs` is touched
+by #633 and #635 as well, so a split there would conflict them. `runtime.rs` is not touched by #635;
+it is deferred because decomposing the composition root (1,858 production lines, `build` alone 1,071)
+is a restructure-engine plan of its own, which this node's +26 does not change the shape of.
+
+| File | Production lines | Grown by #634 | Record |
+|---|---|---|---|
+| `packages/tddy-daemon/src/runtime.rs` | 1,832 → 1,858 | +26 | `packages/tddy-daemon/docs/code-issues/oversized-file-runtime.md` |
+| `packages/tddy-session-lifecycle/src/connection_service.rs` | +5 by `git diff --numstat` | +5 | `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-connection-service.md` |
+
+The growth is the split-rooms port: `split_room_hosting` in the runtime (+19), its call and
+`.with_split_rooms(..)` in `build` (+7), and the host's `split_rooms` field.
+`packages/tddy-daemon-livekit/src/session_room.rs` shrank (2,885 → 2,857).

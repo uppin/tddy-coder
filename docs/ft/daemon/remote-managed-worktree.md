@@ -64,6 +64,12 @@ A fourth placement is requested by its own field rather than by a host id:
 that still has native filesystem tools has nothing to proxy through. A split placement without
 `managed_codebase` is a request error, not a silently co-located session.
 
+A split placement needs a room integration (LiveKit): the agent's only route to its checkout is the
+session room the agent's daemon hosts. A daemon without one refuses the start with
+`FailedPrecondition` "cannot place a session's codebase on another daemon: …", before anything is
+created on the codebase daemon. The split-session code reaches the room through the daemon's
+extension ports, and the LiveKit integration implements them.
+
 ### Co-located: SSH Host alias (`ssh_config_host`)
 
 On a co-located managed `claude-cli` session, `StartSessionRequest.ssh_config_host` names an

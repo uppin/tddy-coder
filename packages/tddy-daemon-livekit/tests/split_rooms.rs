@@ -1,5 +1,5 @@
-//! The plugin's split-room port: the join a split session's agent is spawned with — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-split-transport.md`.
+//! The plugin's split-room port: the join a split session's agent is spawned with — see
+//! `docs/ft/daemon/remote-managed-worktree.md` and `tddy-daemon-extensions/docs/extension-ports.md`.
 
 use std::sync::Arc;
 use std::time::Duration;

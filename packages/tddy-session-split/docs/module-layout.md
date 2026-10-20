@@ -1,11 +1,19 @@
 # `tddy-session-split`: module layout
 
 Split and sandboxed-codebase sessions: an agent paired with a codebase on a sandboxed checkout, with its
-LiveKit room, its context read from the codebase host, and its teardown. About **3.4k production lines**
+session room, its context read from the codebase host, and its teardown. About **3.4k production lines**
 in 17 modules, none over 500. Standing findings are in [`code-issues/`](code-issues/).
 
+The crate names no LiveKit crate. A split session's room is hosted, and its agent's join issued,
+through the `SplitRoomHosting` port in
+[`tddy-daemon-extensions`](../../tddy-daemon-extensions/docs/extension-ports.md#the-split-rooms-port-split_rooms);
+`split_session::SplitAgentRoom::issued_by` asks it for the join (`SplitAgentJoin`) before the
+`StartSession` forward, so a daemon with no room integration refuses the placement before anything
+is created on the peer. `RoomPollTokenMinter` (`agent_credentials.rs`) and `HostWorktreeSnapshots` (`split_ports.rs`) implement the port
+module's `SessionTokenMinter` and `RemoteSnapshotSource`.
+
 The topic runs over `SplitSessions` (`split_ports.rs`), an owned handle over the host's split fields
-(`config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`, `session_rooms`, `workspace_sandboxes`,
+(`config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`, `split_rooms`, `reachable_sessions`, `workspace_sandboxes`,
 `workspace_sandbox_provisioner`, `claude_cli_manager`, `session_tokens`), plus the agent topic's
 `AgentRoster` handle and `host: Arc<dyn SplitHost>`. `SplitSessions` is `Clone` and built per call by
 `DaemonSessionHost::split_sessions()` in `tddy-session-lifecycle`. `trait SplitHost: AgentHostCallbacks`
@@ -15,7 +23,7 @@ implements it once.
 | Module | Holds |
 |---|---|
 | `split_ports.rs` | `SplitSessions`, `trait SplitHost`, and the two aliases of the service surfaces its callbacks return (`SplitSessionFiles`, `SplitSessionAgents`) |
-| `svc_spawn_split_agent.rs` | `spawn_split_agent` (the agent half of a split session), cut into `join_split_livekit_room`, `split_agent_context_and_args` and `write_split_agent_metadata`, with `SplitAgentProcess<'a>` |
+| `svc_spawn_split_agent.rs` | `spawn_split_agent` (the agent half of a split session), cut into `host_split_room` (the session room over the remote checkout, through `SplitRoomHosting::host_remote_worktree`; a jailed-codebase start opens none), `split_agent_context_and_args` and `write_split_agent_metadata`, with `SplitAgentProcess<'a>` |
 | `svc_paired_codebase_teardown.rs` | `delete_paired_codebase_session`: tearing down the paired codebase session through `SplitHost::delete_session` |
 | `split_claude_cli_start.rs`, `split_start.rs` | `start_split_claude_cli_session`; `SplitStartFailure` and split-placement resolution |
 | `svc_split_context_from_codebase_host.rs` | the split agent's context read from the codebase host |
