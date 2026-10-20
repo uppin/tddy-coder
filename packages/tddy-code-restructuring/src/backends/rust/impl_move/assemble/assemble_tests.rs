@@ -170,6 +170,7 @@ fn moving_into_the_roster(origin_text: &str, run: &Run, destination_text: &str) 
         destination: &destination,
         destination_text,
         created: None,
+        texts: &std::collections::BTreeMap::new(),
         reached: &reached,
         widening: &widening,
     })

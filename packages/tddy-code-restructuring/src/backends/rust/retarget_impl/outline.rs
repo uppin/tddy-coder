@@ -84,7 +84,7 @@ pub(in crate::backends::rust) fn read(
         ))),
         [one] => {
             refuse_a_trait_impl(one, operation)?;
-            block(one, text, range, operation)
+            block(one, text, range)
         }
         many => Err(seam_refusal(two_blocks_reason(operation, many.len()))),
     }
@@ -104,7 +104,7 @@ fn two_blocks_reason(operation: Operation, count: usize) -> String {
 }
 
 /// The members of one `impl` block, and which run of them `range` moves.
-fn block(impl_node: &Value, text: &str, range: Range, operation: Operation) -> Result<Run> {
+fn block(impl_node: &Value, text: &str, range: Range) -> Result<Run> {
     let members: Vec<Member> = impl_node
         .get("children")
         .and_then(Value::as_array)
@@ -130,9 +130,6 @@ fn block(impl_node: &Value, text: &str, range: Range, operation: Operation) -> R
     };
 
     refuse_a_cut_member(&members, &moved, range)?;
-    if operation == Operation::MoveImplMembers {
-        refuse_a_non_member(text, &members, first_moved, last_moved)?;
-    }
 
     Ok(Run {
         members,
@@ -182,29 +179,6 @@ fn is_trait_impl(label: &str) -> bool {
         rest
     };
     rest.contains(" for ")
-}
-
-/// S4: the lines from a run's first member to its last hold nothing but blank lines and comments
-/// between the members. A macro invocation, or any item the outline does not list, cannot move with
-/// the run, so it refuses the run rather than leave it behind.
-fn refuse_a_non_member(text: &str, members: &[Member], first: usize, last: usize) -> Result<()> {
-    for line in members[first].first_line..=members[last].last_line {
-        let covered = members
-            .iter()
-            .any(|member| (member.first_line..=member.last_line).contains(&line));
-        let code = text
-            .lines()
-            .nth(line as usize - 1)
-            .unwrap_or_default()
-            .trim();
-        let trivia = code.is_empty() || code.starts_with("//") || code.starts_with('*');
-        if !covered && !trivia {
-            return Err(seam_refusal(format!(
-                "line {line} is `{code}`, which is not a member of the `impl`: it would move with the run"
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// One outline child as a member, when it carries the name and range a member needs.

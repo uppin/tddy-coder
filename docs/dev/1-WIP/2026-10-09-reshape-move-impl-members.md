@@ -398,10 +398,42 @@ All seven were **decided 2026-10-09**: the developer approved every recommendati
   Moving `outline.rs` to a shared parent with `reparent_module` gives it a vaguer home (`backends::rust::outline`) and
   collides textually with node 11.
 
+**Green decisions (2026-10-20, milestones 1–5, taken without a developer review; each one is open to challenge):**
+
+- **F8. Created module's declaration (`name`, test 18).** `MovingMembers` gained `texts`, the text of each other file the
+  move edits (the parent that declares a created module, and each ancestor the widening changes). `assemble` writes the
+  declaration with `creation::declaration`, as `move_item` does, and the declared module is private (`mod name;`): an
+  inherent method resolves through its type, so the module's own visibility is not needed. The alternative, the caller
+  emitting the declaration as a widening edit, would split one file's edits across two places. The published surface
+  changed by one field; the milestone-3 unit helper sets it to an empty map.
+- **F9. Ancestor widenings (R6 b, test 17).** `item_move::members::MemberWidening` gained `other_files`, the edits to
+  files other than the origin's, keyed by path. `item_move` never sets it, so its behaviour is unchanged.
+- **F10. Reached-item widening (R6 d) is restated in `impl_move/survey.rs`, not called.** The engine's extraction
+  (`item_move/assemble.rs::widen_reached_items`) takes `&Moving`, which is `item_move`'s whole move (workspace, run,
+  reach and sites), and `impl_move` has no such value. The rule is therefore re-expressed over `Item`s (about 20 lines,
+  reusing `Scope` and `visibility_edit`). This departs from the R6 (d) wording "by the reached-item half of
+  `assemble::visibilities`, extracted". A developer may prefer a generic signature for the extracted function instead.
+- **F11. S4 moved out of the shared reader.** The macro-invocation check is `impl_move/preflight.rs::refuse_a_non_member`,
+  run after `retarget_impl::outline::read`. `block` lost its unused `operation` parameter. The wording is unchanged.
+- **F12. S5 rule.** A reached name is refused when the destination declares it, or binds it by a `use` whose path is
+  not `crate::<origin>::<name>`. A `use` of the same item spelled another way (`super::step`) is refused too, which
+  over-refuses rather than binding silently.
+- **F13. Lowered anchors.** Run open lowers every item anchor to a range before the operation runs. The origin module is
+  therefore the file's module for a lowered anchor, as `move_item` reads it, and the item path's module otherwise.
+- **Files added beyond the Delta.** `impl_move/cut.rs` (R2 cut and widening split, moved out of `assemble.rs`) and
+  `impl_move/survey/stayed.rs` (R6 b, c), so that each file stays at or under 300 lines and each function under 40.
+- **Known limits, marked FIXME in code.** (1) An ancestor file's members are the top-level ones `members_of` reads; a
+  type's impl inside an inline `mod` of an ancestor is not surveyed. (2) A self type the origin imports, rather than
+  defines, is not carried into the destination's `use` (the compile gate would catch it).
+
 ## Refactoring needed
 
-- Engine `extract_method` of the reached-item widening out of `item_move/assemble.rs::visibilities` (lines 206–276),
-  before milestone 4.
+**Engine extraction (done 2026-10-20).** `tddy-tools restructure apply` ran `extract_method` on
+`item_move/assemble.rs::visibilities` (the `for` over `moving.reached.items`, lines 258–275), default variant, name
+`widen_reached_items`. Its `check --deep` reported `no findings` and its compile gate passed. The extracted function is
+private, takes `&Moving`, and `visibilities` now ends with `widen_reached_items(...)?; Ok(landing)`. The file grew from
+509 to 519 lines (the extraction adds a 12-line signature and tail), so the checklist's `below 507` is not met: it was
+already not met at the base (509). Shrinking it below 507 needs a further engine move or a developer decision.
 
 ## Final Checklist
 

@@ -8,21 +8,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use super::super::crate_move::source_scan::attached_trivia_starts_at;
 use super::super::early_return::masked_to_code;
 use super::super::item_move::assemble::written_from_the_root;
+use super::super::item_move::creation;
 use super::super::item_move::destination::Module;
 use super::super::item_move::imports::{self, Source};
 use super::super::item_move::members::MemberWidening;
 use super::super::item_move::outline::Item;
 use super::super::item_move::preflight::names_declared_in;
 use super::super::item_move::rebase::{self, Modules};
-use super::super::item_move::text::{
-    applied, line_end, line_start, next_line_start, use_insertion, Edit,
-};
+use super::super::item_move::text::{applied, line_start, use_insertion, Edit};
 use super::super::retarget_impl::outline::Run;
 use super::super::{failure, seam_refusal};
-use super::landing::{attributes_start, destination_edits, line_start_of, placed, Landing, Origin};
+use super::cut::{cut_span, members_region, split_widening};
+use super::landing::{attributes_start, destination_edits, placed, Landing, Origin};
 use crate::edit::VisibilityChange;
 use crate::Result;
 
@@ -40,6 +39,10 @@ pub(in crate::backends::rust) struct MovingMembers<'a> {
     pub(in crate::backends::rust) destination_text: &'a str,
     /// The parent that declares the destination, and its name, when the move creates it.
     pub(in crate::backends::rust) created: Option<(&'a Module, &'a str)>,
+    /// The text of each other file the move edits, by path: the parent that declares a created
+    /// module, and each ancestor module the widening changes. The origin and the destination are
+    /// read from their own fields.
+    pub(in crate::backends::rust) texts: &'a BTreeMap<String, String>,
     /// The root items of the origin the moved members name (the self type among them when the
     /// origin defines it): each gets a `use` in the destination.
     pub(in crate::backends::rust) reached: &'a [Item],
@@ -65,13 +68,6 @@ struct OriginBlock {
 
 /// The new text of each file a member move changes, with the report and the notes of the move.
 pub(in crate::backends::rust) fn assemble(moving: &MovingMembers<'_>) -> Result<Assembled> {
-    // TODO(reshape-move-impl-members): the parent that declares a created module is not one of the
-    // inputs; milestone 4 settles how that declaration reaches the assembly.
-    if moving.created.is_some() {
-        return Err(failure(
-            "a member move that creates its module (`name`) is not assembled yet",
-        ));
-    }
     let origin = origin_block(moving.source_text, moving.run)?;
     let members = members_region(moving.source_text, moving.run)?;
     let (inside, outside) = split_widening(&moving.widening.edits, &members);
@@ -89,12 +85,42 @@ pub(in crate::backends::rust) fn assemble(moving: &MovingMembers<'_>) -> Result<
         .entry(moving.destination.file.clone())
         .or_default()
         .extend(destination_edits(imports, landed));
+    for (path, edits) in &moving.widening.other_files {
+        by_file
+            .entry(path.clone())
+            .or_default()
+            .extend(edits.iter().cloned());
+    }
+    if let Some((parent, name)) = moving.created {
+        let text = text_of(moving, &parent.file)?;
+        let (at, written) = creation::declaration(text, &parent.scope, "", name);
+        by_file
+            .entry(parent.file.clone())
+            .or_default()
+            .push(Edit::insert(at, written));
+    }
 
     Ok(Assembled {
         files: changed_files(moving, by_file)?,
         report: moving.widening.report.clone(),
         notes,
     })
+}
+
+/// The text of a file the move edits: the origin's, the destination's (empty for a created module),
+/// or one of `texts`.
+fn text_of<'a>(moving: &MovingMembers<'a>, path: &str) -> Result<&'a str> {
+    if path == moving.source_file {
+        return Ok(moving.source_text);
+    }
+    if path == moving.destination.file {
+        return Ok(moving.destination_text);
+    }
+    moving
+        .texts
+        .get(path)
+        .map(String::as_str)
+        .ok_or_else(|| failure(format!("the text of `{path}` was not read")))
 }
 
 /// The members' landing in the destination, and which landing it was.
@@ -162,53 +188,6 @@ fn origin_block(text: &str, run: &Run) -> Result<OriginBlock> {
         indent,
         label,
     })
-}
-
-/// The one-based first and last lines of the moved members (attached trivia included).
-fn member_lines(run: &Run) -> Result<(u32, u32)> {
-    let (Some(first), Some(last)) = (run.moved().first(), run.moved().last()) else {
-        return Err(seam_refusal("the run moves no member"));
-    };
-    Ok((first.first_line, last.last_line))
-}
-
-/// The bytes of the moved members, from the first one's first line to the last one's end.
-fn members_region(text: &str, run: &Run) -> Result<Range<usize>> {
-    let (first, last) = member_lines(run)?;
-    Ok(line_start(text, first)..line_end(text, last))
-}
-
-/// The span the origin loses (R2): the moved lines, or the whole block, and one blank line.
-fn cut_span(text: &str, run: &Run) -> Result<Range<usize>> {
-    let (first, last) = if run.whole_block() {
-        (
-            attached_trivia_starts_at(text, run.header_line),
-            run.close_line,
-        )
-    } else {
-        member_lines(run)?
-    };
-    let mut span = line_start(text, first)..line_end(text, last);
-    if is_blank_line_at(text, span.end) {
-        span.end = next_line_start(text, span.end);
-    } else if span.start > 0 && is_blank_line_at(text, line_start_of(text, span.start - 1)) {
-        span.start = line_start_of(text, span.start - 1);
-    }
-    Ok(span)
-}
-
-fn is_blank_line_at(text: &str, offset: usize) -> bool {
-    text.get(offset..)
-        .and_then(|rest| rest.lines().next())
-        .is_some_and(|line| line.trim().is_empty())
-}
-
-/// The widenings that touch the moved lines, and the rest (which stay in the origin file).
-fn split_widening(edits: &[Edit], members: &Range<usize>) -> (Vec<Edit>, Vec<Edit>) {
-    edits
-        .iter()
-        .cloned()
-        .partition(|edit| members.start <= edit.start && edit.end <= members.end)
 }
 
 /// The moved lines with their relative spellings kept (R5) and their widenings applied (R6), at
@@ -282,11 +261,7 @@ fn changed_files(
 ) -> Result<BTreeMap<String, (String, String)>> {
     let mut files = BTreeMap::new();
     for (path, mut edits) in by_file {
-        let old = if path == moving.source_file {
-            moving.source_text
-        } else {
-            moving.destination_text
-        };
+        let old = text_of(moving, &path)?;
         edits.sort_by_key(|edit| (edit.start, edit.end));
         let new = applied(old, &edits)?;
         if new != old {
