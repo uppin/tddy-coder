@@ -46,7 +46,8 @@ impl VncClientState {
             .await
             .context("VNC sign-in failed")?;
 
-        // Only VNC Authentication still asks vnc-rs for the password.
+        // VNC Authentication is the only path that still asks vnc-rs for the password, and
+        // `choose_sign_in` guarantees a password there, so the default is never sent.
         let password = credentials.password.clone().unwrap_or_default();
         let client = VncConnector::new(stream)
             .set_auth_method(async move { Ok(password) })

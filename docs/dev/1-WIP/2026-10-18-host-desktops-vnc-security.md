@@ -152,9 +152,12 @@ all written, failing on `todo!()`. `parse_security_types` takes the whole securi
 - The fake RFB server in `vnc_security_integration.rs` duplicates the ServerInit/event loop of the one in `vnc_client_integration.rs`; a shared `tests/common` fake server would serve both.
 
 ### From /validate-changes
+- [x] `negotiate`, `apple_remote_desktop`, `choose_sign_in` split into named helpers; magic values named; `plain`/`finish` renamed (2026-10-20)
 ### From /validate-tests
+- [x] Vacuous `first_pixel_of_a_frame`, weak VeNCrypt second-byte test, wrong-credential, RFB 3.3/3.7/3.889 and `security.rs` unit coverage added (2026-10-20)
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+- [x] Items above; moving the fake server to `tests/support` is deferred
 
 ## Validation Results
 ### /validate-changes
@@ -171,9 +174,9 @@ outcome reporting, no inspect mode, only the approved crates added. No `todo!()`
   fail with `NothingSupported` naming `[19]` once VeNCrypt is chosen.
 - ✅ (fixed 2026-10-20: `log::warn!` + module docs, behaviour unchanged) **VeNCrypt Plain sends the password in the clear** when it is the only subtype offered, with
   no log line. Not a fallback to add silently; at least `log::warn!` and name it in the docs.
-- ⚠️ `security.rs` is 697 production lines (budget 500) — step 3.5 of `/pr-wrap`.
-- ℹ️ `negotiate` has no timeout around its reads; a silent server stalls `connect`.
-- ℹ️ ARD accepts a zero `generator`; harmless but unvalidated.
+- ⚠️ `security.rs` is 889 production lines (budget 500) after the clean-code pass added named helpers and docs — the engine-driven split (step 3.5 of `/pr-wrap`) is still pending.
+- ✅ (fixed 2026-10-20: `SIGN_IN_TIMEOUT` 30s, `SecurityError::TimedOut`; test `a_server_that_never_answers_ends_the_sign_in_with_a_timeout`) `negotiate` had no timeout around its reads; a silent server stalled `connect`.
+- ✅ (fixed 2026-10-20: generator and public key below 2 and `server_public >= prime - 1` refused; credentials block keeps random padding after each NUL) ARD accepted a zero `generator` and a `prime - 1` public key.
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
