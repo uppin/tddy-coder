@@ -5,17 +5,34 @@
  * for itself (Escape, Alt+Tab, Cmd+W …) reach the page — here, the remote desktop.
  */
 
+/** The part of `navigator.keyboard` this module uses; absent from older TypeScript DOM typings. */
+interface KeyboardLockApi {
+  lock(keyCodes?: string[]): Promise<void>;
+  unlock(): void;
+}
+
+function keyboardLockApi(): KeyboardLockApi | undefined {
+  const keyboard = (navigator as Navigator & { keyboard?: KeyboardLockApi }).keyboard;
+  if (keyboard === undefined || keyboard === null) return undefined;
+  if (typeof keyboard.lock !== "function" || typeof keyboard.unlock !== "function") return undefined;
+  return keyboard;
+}
+
 /** Whether this browser exposes `navigator.keyboard.lock`. */
 export function isKeyboardLockSupported(): boolean {
-  throw new Error("TODO(viewer-fullscreen): implement");
+  return keyboardLockApi() !== undefined;
 }
 
 /** Lock every key (no key list), so the remote desktop receives all of them. */
 export async function lockKeyboard(): Promise<void> {
-  throw new Error("TODO(viewer-fullscreen): implement");
+  const keyboard = keyboardLockApi();
+  if (!keyboard) {
+    throw new Error("Keyboard Lock API is not supported in this browser");
+  }
+  await keyboard.lock();
 }
 
 /** Release a lock taken by `lockKeyboard`. */
 export function unlockKeyboard(): void {
-  throw new Error("TODO(viewer-fullscreen): implement");
+  keyboardLockApi()?.unlock();
 }

@@ -13,6 +13,8 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { RoomEvent, type Room, type VideoTrack } from "livekit-client";
+import { exitDocumentFullscreen, isTargetInActiveFullscreen, useElementFullscreen } from "../../lib/browserFullscreen";
+import { isKeyboardLockSupported, lockKeyboard, unlockKeyboard } from "../../lib/keyboardLock";
 import { useScreenSharingInput } from "./useScreenSharingInput";
 
 export interface ScreenSharingOverlayProps {
@@ -32,8 +34,49 @@ export function ScreenSharingOverlay({
   height,
   onClose,
 }: ScreenSharingOverlayProps): React.ReactElement {
+  const overlayRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoTrack, setVideoTrack] = useState<VideoTrack | null>(null);
+  const { isFullscreen, enter, exit } = useElementFullscreen(overlayRef);
+  const [keyboardLocked, setKeyboardLocked] = useState(false);
+
+  // Lock every key while full screen, and release it on leaving full screen by any route.
+  useEffect(() => {
+    if (!isFullscreen || !isKeyboardLockSupported()) return;
+    let active = true;
+    lockKeyboard().then(
+      () => {
+        if (active) setKeyboardLocked(true);
+      },
+      (e: unknown) => {
+        console.warn("[tddy][ScreenSharingOverlay] keyboard lock failed", e);
+      },
+    );
+    return () => {
+      active = false;
+      setKeyboardLocked(false);
+      unlockKeyboard();
+    };
+  }, [isFullscreen]);
+
+  // Closing the desktop must not leave the document full screen on an empty page. The root is
+  // captured at mount: by the time this cleanup runs, React may already have detached the ref.
+  useEffect(() => {
+    const root = overlayRef.current;
+    return () => {
+      if (!isTargetInActiveFullscreen(root)) return;
+      exitDocumentFullscreen().catch((e: unknown) => {
+        console.warn("[tddy][ScreenSharingOverlay] leaving full screen failed", e);
+      });
+    };
+  }, []);
+
+  const toggleFullScreen = () => {
+    const change = isFullscreen ? exit() : enter();
+    change.catch((e: unknown) => {
+      console.warn("[tddy][ScreenSharingOverlay] full screen change failed", e);
+    });
+  };
 
   useEffect(() => {
     if (!room) return;
@@ -80,6 +123,7 @@ export function ScreenSharingOverlay({
 
   return (
     <div
+      ref={overlayRef}
       data-testid="screen-sharing-overlay"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black"
       onMouseDown={(e) => {
@@ -99,17 +143,26 @@ export function ScreenSharingOverlay({
           >
             Ctrl+Alt+Esc to close
           </span>
-          {/* TODO(viewer-fullscreen): implement — enter/exit full screen on the overlay root, lock
-              the keyboard while full screen, say "Esc leaves full screen" where it cannot be. */}
           <button
             data-testid="screen-sharing-fullscreen"
             type="button"
-            aria-label="Enter full screen"
-            aria-pressed={false}
+            aria-label={isFullscreen ? "Exit full screen" : "Enter full screen"}
+            aria-pressed={isFullscreen}
             className="px-3 py-1 text-sm bg-black/60 text-white rounded hover:bg-black/80"
+            onClick={toggleFullScreen}
           >
-            Full screen
+            {isFullscreen ? "Exit full screen" : "Full screen"}
           </button>
+          {/* Where the keyboard cannot be locked, Escape reaches the browser and leaves full screen
+              instead of reaching the desktop. Say so. */}
+          {isFullscreen && !keyboardLocked && (
+            <span
+              data-testid="screen-sharing-fullscreen-escape-hint"
+              className="px-2 py-1 text-xs bg-black/60 text-white rounded"
+            >
+              Esc leaves full screen
+            </span>
+          )}
           <button
             data-testid="screen-sharing-overlay-close"
             type="button"

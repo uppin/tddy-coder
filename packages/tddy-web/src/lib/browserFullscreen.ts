@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useCallback, useEffect, useState, type RefObject } from "react";
 import { emitTddyMarker } from "./tddyMarker";
 
 type FullscreenElement = Element & {
@@ -125,6 +125,21 @@ export interface ElementFullscreen {
  * Track whether the element behind `ref` is full screen, following `fullscreenchange` — so a leave
  * the browser performed on its own (Escape, a system gesture) is reported as well as one asked for.
  */
-export function useElementFullscreen(_ref: RefObject<HTMLElement | null>): ElementFullscreen {
-  throw new Error("TODO(viewer-fullscreen): implement");
+export function useElementFullscreen(ref: RefObject<HTMLElement | null>): ElementFullscreen {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(isTargetInActiveFullscreen(ref.current));
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+    };
+  }, [ref]);
+
+  const enter = useCallback(() => requestElementFullscreen(ref.current), [ref]);
+  const exit = useCallback(() => exitDocumentFullscreen(), []);
+
+  return { isFullscreen, enter, exit };
 }
