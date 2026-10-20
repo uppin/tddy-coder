@@ -45,7 +45,7 @@ and session-split's switch. Strikes `tddy-session-split`.
 **moved** into `tddy_daemon_extensions::split_rooms` (verbatim; `WorktreeSnapshot::tracked_diff_differs`
 moved with its type and became `pub`, since an inherent method cannot stay behind in the plugin) and
 re-exported from `tddy_daemon_livekit::session_room`, so every caller compiles unchanged — the plugin's
-lib suite is 77 passing, its only 6 failures being #623's own red tests. New: `SplitRoomHosting`,
+whole suite (lib and integration, with the LiveKit testkit) is 208 passing and 0 failing as of milestone 1 (2026-10-20; the wave-2 count of 77 passing and 6 red is superseded). New: `SplitRoomHosting`,
 `SplitAgentJoin`, `NoSplitRooms` (`todo!()`) with a failing unit test. **Not yet published:** the plugin's
 `SplitRoomHosting` impl and session-split's acceptance tests (`split_room_hosting_port.rs`) — they drive
 `SplitSessions` paths that switch in green. The ratchet strike waits on #623's `WorkspaceGraph`.
@@ -105,9 +105,9 @@ depends on LiveKit.
 
 ## Scope
 
-- [ ] Move `WorktreeSnapshot`, `SessionTokenMinter`, `RemoteSnapshotSource` → extensions (plugin re-exports)
-- [ ] `SplitRoomHosting` + `SplitAgentJoin` + `NoSplitRooms`
-- [ ] Plugin `SplitRoomHosting` over registry + `RemoteCheckout` + `RoomTokenMinter`
+- [x] Move `WorktreeSnapshot`, `SessionTokenMinter`, `RemoteSnapshotSource` → extensions (plugin re-exports)
+- [x] `SplitRoomHosting` + `SplitAgentJoin` + `NoSplitRooms`
+- [x] Plugin `SplitRoomHosting` over registry + `RemoteCheckout` + `RoomTokenMinter`
 - [ ] session-split on the port and kernel forwards
 - [ ] Ratchet: strike `tddy-session-split`
 
@@ -135,8 +135,8 @@ extensions crate.
 As listed in Scope.
 
 ## Implementation Milestones
-- [ ] M1 Trait and type moves (re-exports keep everything compiling)
-- [ ] M2 Port + plugin implementation
+- [x] M1 Trait and type moves (re-exports keep everything compiling)
+- [x] M2 Port + plugin implementation (`NoSplitRooms` refusal; `LiveKitSplitRooms` in `tddy-daemon-livekit`)
 - [ ] M3 Split switched; suites green; ratchet green
 
 ## Testing Plan
@@ -162,6 +162,12 @@ lifecycle's split tests) remain the testkit-backed integration proof.
   definition.
 - **Split placement still requires LiveKit.** `NoSplitRooms` keeps today's loud refusal; this is not
   a fallback.
+- **`WorktreeSnapshot` is defined in `tddy_daemon_extensions::split_rooms`, not the kernel.** n11
+  (#633) placed it in `tddy_daemon_kernel::worktree_snapshot`, but the kernel depends on
+  `tddy-daemon-extensions`, so `RemoteSnapshotSource` (which returns it) cannot name a kernel type.
+  Developer decision (2026-10-20, option A): the struct and its `tracked_diff_differs` move to
+  extensions verbatim, and the kernel module becomes a `pub use` re-export, so the kernel's path
+  and the plugin's `session_room` re-export are unchanged.
 
 ## Refactoring Needed
 ### From /validate-changes

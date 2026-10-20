@@ -66,7 +66,6 @@ impl WorktreeSnapshot {
     }
 }
 
-
 /// The credential one poll authenticates with.
 ///
 /// A minter rather than a token, because a token is a thing that expires: a session token lives
@@ -97,7 +96,6 @@ pub trait RemoteSnapshotSource: Send + Sync {
     ) -> Result<WorktreeSnapshot, Status>;
 }
 
-
 /// The room join a split agent is spawned with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitAgentJoin {
@@ -123,12 +121,30 @@ pub trait SplitRoomHosting: Send + Sync {
     ) -> Result<(), Status>;
 
     /// The join a split agent is spawned with: `room`, as `identity`, for `ttl`.
-    fn agent_join(&self, room: &str, identity: &str, ttl: Duration) -> Result<SplitAgentJoin, Status>;
+    fn agent_join(
+        &self,
+        room: &str,
+        identity: &str,
+        ttl: Duration,
+    ) -> Result<SplitAgentJoin, Status>;
 }
 
 /// No room integration: split placement is refused, as before.
+///
+/// Both halves refuse, not only the join: the agent's only route to a checkout on another daemon is
+/// the room, so a room that cannot be hosted is as fatal to the placement as a join that cannot be
+/// issued. This is the precondition a daemon without one has always failed the start with — not a
+/// fallback to some other placement.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoSplitRooms;
+
+impl NoSplitRooms {
+    fn refusal() -> Status {
+        Status::failed_precondition(
+            "cannot place a session's codebase on another daemon: this daemon has no room integration configured",
+        )
+    }
+}
 
 #[async_trait::async_trait]
 impl SplitRoomHosting for NoSplitRooms {
@@ -142,11 +158,16 @@ impl SplitRoomHosting for NoSplitRooms {
         _minter: Arc<dyn SessionTokenMinter>,
         _services: Arc<dyn ReachableSessions>,
     ) -> Result<(), Status> {
-        todo!("NoSplitRooms::host_remote_worktree")
+        Err(Self::refusal())
     }
 
-    fn agent_join(&self, _room: &str, _identity: &str, _ttl: Duration) -> Result<SplitAgentJoin, Status> {
-        todo!("NoSplitRooms::agent_join")
+    fn agent_join(
+        &self,
+        _room: &str,
+        _identity: &str,
+        _ttl: Duration,
+    ) -> Result<SplitAgentJoin, Status> {
+        Err(Self::refusal())
     }
 }
 

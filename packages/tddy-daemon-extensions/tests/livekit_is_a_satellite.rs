@@ -65,10 +65,7 @@ const WIRING: &[&str] = &[
 const WIRING_WITH_A_LIBRARY: &[&str] = &["tddy-remote-git-repo", "tddy-session-sync", "tddy-tools"];
 
 /// Library crates that still name a LiveKit crate. Strike a crate off when it stops.
-const KNOWN_OFFENDERS: &[&str] = &[
-    "tddy-agent-launch",
-    "tddy-session-lifecycle",
-];
+const KNOWN_OFFENDERS: &[&str] = &["tddy-agent-launch", "tddy-session-lifecycle"];
 
 fn set_of(names: &[&str]) -> BTreeSet<String> {
     names.iter().map(|name| name.to_string()).collect()
