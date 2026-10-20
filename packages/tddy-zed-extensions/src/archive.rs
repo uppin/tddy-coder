@@ -1,8 +1,10 @@
 //! Unpacks a registry archive into a staged extension directory (R2, R3). Each entry is checked
 //! before anything is written: a path that is absolute or climbs out of the extension is refused,
 //! and so is a link whose target is absolute or climbs out, and any entry whose path, or whose link
-//! target, already runs through a symlink in the tree. `tar`'s `unpack_in` is not used, because it
-//! reports a different refusal.
+//! target, already runs through a symlink in the tree. Once everything is written, every symlink is
+//! resolved for real and refused unless it lands inside the tree: a chain of links that each look
+//! contained can still resolve outside. `tar`'s `unpack_in` is not used, because it reports a
+//! different refusal.
 
 use std::fs;
 use std::io::{self, Read};
@@ -30,38 +32,83 @@ pub(crate) fn unpack<R: Read>(
         if !is_contained(&name) || crosses_symlink(staged, &name)? {
             return Err(unsafe_entry(extension, &name));
         }
-        let dest = staged.join(&name);
-        let kind = entry.header().entry_type();
-        if kind.is_dir() {
-            fs::create_dir_all(&dest).map_err(|e| ExtensionError::io(&dest, e))?;
-        } else if kind.is_symlink() {
-            let target = link_target(&entry, staged, extension, &name)?;
-            if !link_stays_inside(&name, &target, false) {
-                return Err(unsafe_entry(extension, &name));
+        write_entry(&mut entry, staged, extension, &name)?;
+    }
+    let root = fs::canonicalize(staged).map_err(|e| ExtensionError::io(staged, e))?;
+    check_links_resolve_inside(&root, Path::new(""), extension)
+}
+
+/// Writes one already-contained entry: a directory, a regular file, or a link whose target stays
+/// inside. Anything else is refused.
+fn write_entry<R: Read>(
+    entry: &mut tar::Entry<'_, R>,
+    staged: &Path,
+    extension: &str,
+    name: &Path,
+) -> Result<(), ExtensionError> {
+    let dest = staged.join(name);
+    let kind = entry.header().entry_type();
+    if kind.is_dir() {
+        fs::create_dir_all(&dest).map_err(|e| ExtensionError::io(&dest, e))?;
+    } else if kind.is_symlink() {
+        let target = link_target(entry, staged, extension, name)?;
+        if !link_stays_inside(name, &target, false) {
+            return Err(unsafe_entry(extension, name));
+        }
+        create_parent(&dest)?;
+        entry
+            .unpack(&dest)
+            .map_err(|e| ExtensionError::io(&dest, e))?;
+    } else if kind.is_hard_link() {
+        let target = link_target(entry, staged, extension, name)?;
+        if !link_stays_inside(name, &target, true) || crosses_symlink(staged, &target)? {
+            return Err(unsafe_entry(extension, name));
+        }
+        create_parent(&dest)?;
+        // `Entry::unpack` resolves a hard link's target against the working directory, so the
+        // link is made here, against the staged tree.
+        fs::hard_link(staged.join(&target), &dest).map_err(|e| ExtensionError::io(&dest, e))?;
+    } else if kind.is_file() {
+        create_parent(&dest)?;
+        entry
+            .unpack(&dest)
+            .map_err(|e| ExtensionError::io(&dest, e))?;
+    } else {
+        return Err(ExtensionError::io(
+            &dest,
+            io::Error::new(io::ErrorKind::Unsupported, "not a file, directory or link"),
+        ));
+    }
+    Ok(())
+}
+
+/// Refuses the first symlink under `root.join(rel)` that does not resolve to a path inside `root`;
+/// a dangling link cannot be shown to stay inside, so it is refused too.
+fn check_links_resolve_inside(
+    root: &Path,
+    rel: &Path,
+    extension: &str,
+) -> Result<(), ExtensionError> {
+    let dir = root.join(rel);
+    let mut entries = fs::read_dir(&dir)
+        .and_then(|entries| {
+            entries
+                .map(|entry| entry.map(|e| e.file_name()))
+                .collect::<io::Result<Vec<_>>>()
+        })
+        .map_err(|e| ExtensionError::io(&dir, e))?;
+    entries.sort();
+    for name in entries {
+        let entry = rel.join(&name);
+        let path = root.join(&entry);
+        let meta = fs::symlink_metadata(&path).map_err(|e| ExtensionError::io(&path, e))?;
+        if meta.file_type().is_symlink() {
+            match fs::canonicalize(&path) {
+                Ok(resolved) if resolved.starts_with(root) => {}
+                _ => return Err(unsafe_entry(extension, &entry)),
             }
-            create_parent(&dest)?;
-            entry
-                .unpack(&dest)
-                .map_err(|e| ExtensionError::io(&dest, e))?;
-        } else if kind.is_hard_link() {
-            let target = link_target(&entry, staged, extension, &name)?;
-            if !link_stays_inside(&name, &target, true) || crosses_symlink(staged, &target)? {
-                return Err(unsafe_entry(extension, &name));
-            }
-            create_parent(&dest)?;
-            // `Entry::unpack` resolves a hard link's target against the working directory, so the
-            // link is made here, against the staged tree.
-            fs::hard_link(staged.join(&target), &dest).map_err(|e| ExtensionError::io(&dest, e))?;
-        } else if kind.is_file() {
-            create_parent(&dest)?;
-            entry
-                .unpack(&dest)
-                .map_err(|e| ExtensionError::io(&dest, e))?;
-        } else {
-            return Err(ExtensionError::io(
-                &dest,
-                io::Error::new(io::ErrorKind::Unsupported, "not a file, directory or link"),
-            ));
+        } else if meta.is_dir() {
+            check_links_resolve_inside(root, &entry, extension)?;
         }
     }
     Ok(())

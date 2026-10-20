@@ -14,6 +14,7 @@ pub mod manifest;
 pub mod registry;
 
 mod archive;
+mod staging;
 
 pub use dir::ExtensionsDir;
 pub use error::ExtensionError;

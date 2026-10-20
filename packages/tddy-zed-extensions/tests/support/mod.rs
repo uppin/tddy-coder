@@ -101,6 +101,7 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
 pub struct AnArchive {
     files: BTreeMap<String, Vec<u8>>,
     raw_entries: Vec<(Vec<u8>, Vec<u8>)>,
+    symlinks: Vec<(String, String)>,
 }
 
 /// The demo-lang fixture, as an archive.
@@ -118,6 +119,7 @@ pub fn the_demo_lang_archive() -> AnArchive {
     AnArchive {
         files,
         raw_entries: Vec::new(),
+        symlinks: Vec::new(),
     }
 }
 
@@ -149,6 +151,18 @@ impl AnArchive {
         self
     }
 
+    /// Replaces (or adds) one file's content.
+    pub fn with_file(mut self, file: &str, bytes: &[u8]) -> Self {
+        self.files.insert(file.to_string(), bytes.to_vec());
+        self
+    }
+
+    /// Adds a symlink entry at `name` pointing at `target`, written after every file, in call order.
+    pub fn with_symlink(mut self, name: &str, target: &str) -> Self {
+        self.symlinks.push((name.to_string(), target.to_string()));
+        self
+    }
+
     pub fn build(self) -> Vec<u8> {
         let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
         for (name, bytes) in &self.files {
@@ -168,6 +182,14 @@ impl AnArchive {
             header.set_cksum();
             tar.append(&header, bytes.as_slice())
                 .expect("append raw entry");
+        }
+        for (name, target) in &self.symlinks {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Symlink);
+            header.set_size(0);
+            header.set_mode(0o777);
+            tar.append_link(&mut header, name, target)
+                .expect("append symlink");
         }
         tar.into_inner()
             .expect("finish tar")

@@ -163,6 +163,69 @@ async fn refuses_an_archive_entry_that_climbs_out() {
 }
 
 #[tokio::test]
+async fn refuses_a_chain_of_symlinks_that_resolves_outside() {
+    // Given: `a/b/up` -> `../..` (the extension root) and `out` -> `a/b/up/..`, each contained on
+    // its face, together resolving to the directory above the extension.
+    let data = a_data_dir();
+    let registry = a_fixture_registry()
+        .await
+        .serving_latest(
+            DEMO,
+            the_demo_lang_archive()
+                .with_symlink("a/b/up", "../..")
+                .with_symlink("out", "a/b/up/..")
+                .build(),
+        )
+        .await;
+
+    // When
+    let refusal = install_from_registry(&data.extensions, &registry.registry(), DEMO, None).await;
+
+    // Then
+    assert_eq!(
+        (refusal, data.installed_dir_names()),
+        (
+            Err(ExtensionError::UnsafeArchiveEntry {
+                extension: DEMO.into(),
+                entry: PathBuf::from("out"),
+            }),
+            Vec::<String>::new()
+        )
+    );
+}
+
+#[tokio::test]
+async fn refuses_a_language_config_that_does_not_parse() {
+    // Given
+    let data = a_data_dir();
+    let registry = a_fixture_registry()
+        .await
+        .serving_latest(
+            DEMO,
+            the_demo_lang_archive()
+                .with_file("languages/demo/config.toml", b"name = [unclosed")
+                .build(),
+        )
+        .await;
+
+    // When
+    let refusal = install_from_registry(&data.extensions, &registry.registry(), DEMO, None).await;
+
+    // Then
+    assert_eq!(
+        (
+            matches!(
+                &refusal,
+                Err(ExtensionError::ManifestUnparsable { extension, file, .. })
+                    if extension == DEMO && file == &PathBuf::from("languages/demo/config.toml")
+            ),
+            data.installed_dir_names()
+        ),
+        (true, Vec::<String>::new())
+    );
+}
+
+#[tokio::test]
 async fn refuses_a_grammar_the_archive_does_not_ship() {
     // Given
     let data = a_data_dir();

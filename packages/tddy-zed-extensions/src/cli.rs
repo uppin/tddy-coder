@@ -47,36 +47,44 @@ pub struct RemoveArgs {
 /// Resolves the extensions dir and registry from the environment and runs the command.
 pub async fn run(args: ExtensionsArgs) -> anyhow::Result<()> {
     let dir = ExtensionsDir::resolve()?;
-    match args.command {
+    for line in execute(&dir, &Registry::from_env(), args.command).await? {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// Runs `command` against `dir` and `registry`, returning the lines `run` prints.
+pub async fn execute(
+    dir: &ExtensionsDir,
+    registry: &Registry,
+    command: ExtensionsCommand,
+) -> anyhow::Result<Vec<String>> {
+    Ok(match command {
         ExtensionsCommand::Install(install) => {
             let outcome = match install.path {
-                Some(path) => install_from_path(&dir, &path)?,
+                Some(path) => install_from_path(dir, &path)?,
                 None => {
                     let spec = install
                         .spec
                         .context("expected <id>[@<version>], or --path <dir>")?;
                     let (id, version) = split_spec(&spec)?;
-                    install_from_registry(&dir, &Registry::from_env(), id, version).await?
+                    install_from_registry(dir, registry, id, version).await?
                 }
             };
-            println!("{}", describe_outcome(&outcome));
+            vec![describe_outcome(&outcome)]
         }
         ExtensionsCommand::List => {
-            let installed = list(&dir)?;
+            let installed = list(dir)?;
             if installed.is_empty() {
-                println!("no extensions installed");
+                vec!["no extensions installed".to_string()]
             } else {
-                for extension in &installed {
-                    println!("{}", extension.line());
-                }
+                installed.iter().map(|extension| extension.line()).collect()
             }
         }
         ExtensionsCommand::Remove(remove_args) => {
-            let removed = remove(&dir, &remove_args.id)?;
-            println!("removed {}", removed.id);
+            vec![format!("removed {}", remove(dir, &remove_args.id)?.id)]
         }
-    }
-    Ok(())
+    })
 }
 
 /// `<id>` or `<id>@<version>`, split on the first `@`.

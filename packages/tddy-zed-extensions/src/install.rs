@@ -8,7 +8,7 @@ use std::fmt::Display;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use flate2::read::GzDecoder;
 use reqwest::Url;
@@ -20,10 +20,14 @@ use crate::error::ExtensionError;
 use crate::index::{ExtensionSource, Index, IndexEntry};
 use crate::manifest::ExtensionManifest;
 use crate::registry::Registry;
+use crate::staging::{copy_tree, remove_tree, swap_in, Staging};
 
 const MANIFEST: &str = "extension.toml";
 const WASM: &str = "extension.wasm";
 const LANGUAGE_CONFIG: &str = "config.toml";
+
+/// How long one registry download may take, connect to last byte, before it is refused.
+const REGISTRY_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The R4 query: schema 0..=1 and Zed's `since_v0_6_0` WASM API range.
 const REGISTRY_QUERY: [(&str, &str); 4] = [
@@ -181,6 +185,7 @@ async fn fetch(id: &str, url: &Url) -> Result<Vec<u8>, ExtensionError> {
         message,
     };
     let client = reqwest::Client::builder()
+        .timeout(REGISTRY_TIMEOUT)
         .build()
         .map_err(|e| unreachable(e.to_string()))?;
     let response = client
@@ -257,6 +262,8 @@ fn validate(staged: &Path, requested: &str) -> Result<ExtensionManifest, Extensi
                 file,
             });
         }
+        // Parsed here, so `list` never meets an installed config it cannot read.
+        read_language_name(staged, &file, requested)?;
     }
     Ok(manifest)
 }
@@ -300,18 +307,14 @@ fn commit(
     {
         return Ok(InstallOutcome::AlreadyInstalled(existing.clone()));
     }
-    let installed_at = now_secs(dir)?;
-    let target = dir.extension(&manifest.id);
-    remove_tree(&target)?;
-    staging.promote(&target)?;
     let entry = IndexEntry {
         id: manifest.id.clone(),
         version: manifest.version.clone(),
         source,
-        installed_at,
+        installed_at: now_secs(dir)?,
     };
     index.extensions.insert(manifest.id.clone(), entry.clone());
-    index.save(dir)?;
+    swap_in(dir, staging, &manifest.id, || index.save(dir))?;
     Ok(match previous {
         Some(previous) => InstallOutcome::Replaced {
             previous_version: previous.version,
@@ -332,11 +335,7 @@ fn describe(dir: &ExtensionsDir, entry: IndexEntry) -> Result<InstalledExtension
     let mut languages = Vec::new();
     for language in language_dir_names(&root)? {
         let file = Path::new("languages").join(&language).join(LANGUAGE_CONFIG);
-        let path = root.join(&file);
-        let text = fs::read_to_string(&path).map_err(|e| ExtensionError::io(&path, e))?;
-        let config: LanguageConfig =
-            toml::from_str(&text).map_err(|e| unparsable(&entry.id, &file, e))?;
-        languages.push(config.name);
+        languages.push(read_language_name(&root, &file, &entry.id)?);
     }
     Ok(InstalledExtension {
         languages,
@@ -347,93 +346,19 @@ fn describe(dir: &ExtensionsDir, entry: IndexEntry) -> Result<InstalledExtension
     })
 }
 
+/// The `name` in `root/file`, a `languages/<x>/config.toml`.
+fn read_language_name(root: &Path, file: &Path, extension: &str) -> Result<String, ExtensionError> {
+    let path = root.join(file);
+    let text = fs::read_to_string(&path).map_err(|e| ExtensionError::io(&path, e))?;
+    let config: LanguageConfig =
+        toml::from_str(&text).map_err(|e| unparsable(extension, file, e))?;
+    Ok(config.name)
+}
+
 /// The one field of `languages/<x>/config.toml` that `list` shows.
 #[derive(Deserialize)]
 struct LanguageConfig {
     name: String,
-}
-
-/// Copies the regular files and directories under `from` into `to`, following symlinks so the copy
-/// holds the content they name.
-fn copy_tree(from: &Path, to: &Path) -> Result<(), ExtensionError> {
-    let entries = fs::read_dir(from).map_err(|e| ExtensionError::io(from, e))?;
-    for entry in entries {
-        let entry = entry.map_err(|e| ExtensionError::io(from, e))?;
-        let source = entry.path();
-        let target = to.join(entry.file_name());
-        let kind = fs::metadata(&source).map_err(|e| ExtensionError::io(&source, e))?;
-        if kind.is_dir() {
-            fs::create_dir(&target).map_err(|e| ExtensionError::io(&target, e))?;
-            copy_tree(&source, &target)?;
-        } else if kind.is_file() {
-            fs::copy(&source, &target).map_err(|e| ExtensionError::io(&source, e))?;
-        } else {
-            return Err(ExtensionError::io(
-                &source,
-                io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "only regular files and directories are copied",
-                ),
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// `installed/.<id>.partial`: the tree being staged. It is removed on drop unless
-/// [`Staging::promote`] renamed it into place, so a refusal at any step leaves nothing behind.
-struct Staging {
-    path: PathBuf,
-    promoted: bool,
-}
-
-impl Staging {
-    /// Creates `installed/` as needed and an empty partial directory for `id`, clearing any partial
-    /// an interrupted install left.
-    fn begin(dir: &ExtensionsDir, id: &str) -> Result<Self, ExtensionError> {
-        let installed = dir.installed();
-        fs::create_dir_all(&installed).map_err(|e| ExtensionError::io(&installed, e))?;
-        let path = installed.join(format!(".{id}.partial"));
-        remove_tree(&path)?;
-        fs::create_dir(&path).map_err(|e| ExtensionError::io(&path, e))?;
-        Ok(Self {
-            path,
-            promoted: false,
-        })
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-
-    fn promote(mut self, target: &Path) -> Result<(), ExtensionError> {
-        fs::rename(&self.path, target).map_err(|e| ExtensionError::io(target, e))?;
-        self.promoted = true;
-        Ok(())
-    }
-}
-
-impl Drop for Staging {
-    fn drop(&mut self) {
-        if !self.promoted {
-            // Best effort: the refusal that caused this drop is the error the caller sees.
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
-}
-
-/// Removes `path` if it is there: a directory with its contents, or a single file or link.
-fn remove_tree(path: &Path) -> Result<(), ExtensionError> {
-    let removed = match fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => fs::remove_dir_all(path),
-        Ok(_) => fs::remove_file(path),
-        Err(e) => Err(e),
-    };
-    match removed {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(ExtensionError::io(path, e)),
-    }
 }
 
 fn now_secs(dir: &ExtensionsDir) -> Result<u64, ExtensionError> {
