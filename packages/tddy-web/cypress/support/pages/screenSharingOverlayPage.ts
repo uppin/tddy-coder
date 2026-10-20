@@ -60,6 +60,30 @@ export const desktopPage = {
   close: () => byTestId("screen-sharing-overlay-close"),
   /** The overlay's statement that this desktop is watchable but not touchable. */
   inputUnavailableNotice: () => byTestId("screen-sharing-overlay-input-unavailable"),
+  /** The control that takes the desktop full screen, and brings it back. */
+  fullscreenToggle: () => byTestId("screen-sharing-fullscreen"),
+  /** The overlay's statement that Escape will leave full screen rather than reach the desktop. */
+  escapeLeavesFullScreenHint: () => byTestId("screen-sharing-fullscreen-escape-hint"),
+
+  toggleFullScreen() {
+    desktopPage.fullscreenToggle().click();
+  },
+
+  /** Assert the toggle offers to go full screen — its name and its pressed state agree. */
+  expectOffersToEnterFullScreen() {
+    desktopPage
+      .fullscreenToggle()
+      .should("have.attr", "aria-label", "Enter full screen")
+      .and("have.attr", "aria-pressed", "false");
+  },
+
+  /** Assert the toggle offers the way back out of full screen. */
+  expectOffersToExitFullScreen() {
+    desktopPage
+      .fullscreenToggle()
+      .should("have.attr", "aria-label", "Exit full screen")
+      .and("have.attr", "aria-pressed", "true");
+  },
 
   /**
    * Render the picture at a stated size, and confirm it took.

@@ -123,6 +123,27 @@ outside the element gives a framebuffer coordinate off the end of the desktop.
 - **Nothing is forwarded from a zero-sized picture** — the scaling would be `NaN`, which a `uint32`
   field cannot carry. The guard is at the call site, not inside the pure function.
 
+## Full screen and keyboard lock
+
+`ScreenSharingOverlay` carries the full-screen control, on both scopes.
+
+| File | Holds |
+|---|---|
+| `src/lib/browserFullscreen.ts` | `requestElementFullscreen(el)` (any element; the terminal panes use it too), `exitDocumentFullscreen`, `isTargetInActiveFullscreen`, and `useElementFullscreen(ref)` |
+| `src/lib/keyboardLock.ts` | `isKeyboardLockSupported`, `lockKeyboard`, `unlockKeyboard` over `navigator.keyboard` |
+
+- `useElementFullscreen` follows `fullscreenchange`, so a leave the browser performed itself is
+  reported as well as one asked for.
+- The overlay locks the keyboard in an effect keyed on the full-screen state: `lock()` with **no key
+  list** (every key), unlock in the cleanup. Any route out of full screen therefore unlocks.
+- A lock that fails or is unsupported leaves `keyboardLocked` false, which shows the "Esc leaves full
+  screen" hint.
+- The unmount cleanup captures the overlay root at mount (React may have detached the ref by then)
+  and exits document full screen if that root is the fullscreen element, so closing never leaves an
+  empty page full screen.
+- Browser-reserved behaviour is not testable; the specs (`ScreenSharingFullscreenAcceptance.cy.tsx`,
+  with `cypress/support/fullscreenBrowser.ts`) pin what tddy asks the browser to do.
+
 ## Not forwarded
 
 Scroll wheel, audio, clipboard, file transfer, multi-monitor, touch and pen. Wheel is the closest to

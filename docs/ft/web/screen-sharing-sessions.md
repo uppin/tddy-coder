@@ -179,6 +179,14 @@ can still be watched. Note what that notice does *not* cover: a bridge that cann
 commands silently rather than refusing the stream, so a genuinely view-only server is ignored, not
 reported.
 
+**Full screen.** The overlay has a **Full screen** control (**Exit full screen** while it is full
+screen) that hands the viewer element — not the page — to the browser's Fullscreen API. Where the
+browser offers the Keyboard Lock API, entering full screen locks every key, so Esc, Alt+Tab and
+similar keys reach the desktop; leaving full screen by any route (the control, the browser's own
+Esc, closing the desktop) unlocks. Where it does not, the overlay says "Esc leaves full screen",
+because Escape then goes to the browser. `Ctrl+Alt+Esc` still closes the desktop and leaves full
+screen with it. Picture-in-picture and scaling modes are not offered.
+
 Not forwarded: scroll wheel, audio, clipboard and file transfer. See
 [`packages/tddy-web/docs/remote-desktop-input.md`](../../../packages/tddy-web/docs/remote-desktop-input.md)
 for how the client is built.
