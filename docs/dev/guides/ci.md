@@ -599,6 +599,13 @@ they appear in the PR's checks and in `scripts/ci-status.sh` like any other run.
 too — so a stack's milestone pushes keep getting CI once one `#forcebuild` is in. Delete the comment
 to go back to skipping. Commenting again re-dispatches a build of the current head.
 
+The gate asks the API whether the PR is a draft **when it runs**, not what the event payload said
+when the event was created. Events are not delivered in order, so the `synchronize` event of a push
+made while the PR was still a draft can arrive after the `ready_for_review` event that followed it;
+trusting its payload skipped the build, and — the two runs share a concurrency group — cancelled the
+run that was building the ready PR. A PR that is ready therefore builds on every commit, whatever
+order its events arrive in.
+
 What to know when reading a draft's checks:
 
 - **A gated draft's checks report *skipped*, and skipped is not green.** GitHub counts a skipped
