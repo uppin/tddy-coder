@@ -20,6 +20,14 @@ rooted at its own workspace and served its own tree. Without that bound the encl
 workspace manifest would win, and every request from the worktree would be answered, checked and
 applied against another branch's files.
 
+## `registry::workspace_root_within` and `RustSupport`
+
+The restructure engine finds a Rust file's root through `RustSupport::workspace_root`
+(`tddy-code-restructuring/src/backends/rust/support.rs`), the Cargo rule as a language support
+provides it. It calls `workspace_root_within(directory, root)`: the same walk, but **bounded by the
+run's root** as well as by `.git`, and a directory outside `root` is an error rather than a root
+picked for it. `workspace_root_for` is unchanged for its other callers.
+
 **An unreadable manifest on the walk is an error** (`LspError::Io`, naming the file), not a manifest
 skipped. `tddy-index-daemon` reports it as `FailedPrecondition`; `tddy-lsp-executor`, which resolves
 its roots with the same function, as its string error.

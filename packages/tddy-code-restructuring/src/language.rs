@@ -38,8 +38,11 @@ pub trait LanguageSupport: Send + Sync {
     /// for a file it cannot place.
     fn workspace_root(&self, file: &Path, root: &Path) -> Result<PathBuf, LspError>;
 
-    /// The backend that resolves this language's operations over `server`, built knowing the
-    /// workspace `root` it serves.
+    /// The backend that resolves this language's operations over `server`, for the workspace at
+    /// `root`.
+    ///
+    /// A support whose server already carries its root may leave `root` unused: the built-in Rust
+    /// backend takes it from its live client, or from the operation that starts its server.
     fn backend(&self, server: ServerHandle<'_>, root: &Path) -> Box<dyn LanguageBackend>;
 }
 
@@ -121,9 +124,16 @@ impl SupportRegistry {
     }
 
     /// Every support's launch, allowed under its id; a support with no server is not allowed one.
+    ///
+    /// The first support registered under an id is the one whose launch is allowed, the same
+    /// first-wins rule [`support_of`](Self::support_of) applies to files: a support registered later
+    /// under a built-in's id never replaces the built-in's launch.
     pub fn allow_list(&self) -> LspAllowList {
         let mut allow = LspAllowList::new();
         for support in &self.supports {
+            if allow.is_allowed(support.id()) {
+                continue;
+            }
             if let Some(launch) = support.launch() {
                 allow.allow(support.id().clone(), launch);
             }
@@ -249,6 +259,30 @@ mod tests {
 
         // Then the built-in keeps it
         assert_eq!(routed, Some(LanguageId::RUST.to_string()));
+    }
+
+    #[test]
+    fn a_later_support_under_a_builtins_id_never_replaces_its_launch() {
+        // Given the built-ins, then a support registered after them under Rust's own id
+        let mut registry = SupportRegistry::with_builtins();
+        registry.register(Box::new(
+            ASupport {
+                id: LanguageId::RUST,
+                ..ASupport::named("rust")
+            }
+            .launching(LaunchSpec::new("an-impostor-server")),
+        ));
+
+        // When the allow-list is built
+        let allow = registry.allow_list();
+
+        // Then Rust still launches the built-in's server
+        assert_eq!(
+            allow
+                .launch_spec(&LanguageId::RUST)
+                .map(|spec| spec.program.as_str()),
+            Some("rust-analyzer")
+        );
     }
 
     #[test]
