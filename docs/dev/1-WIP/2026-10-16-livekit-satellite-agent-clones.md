@@ -55,6 +55,21 @@ paths whose fields change type in green. The ratchet strike waits on #623's `Wor
 attach flow (`AgentRoster` → `RoomAdmission`) that green introduces together with the field change;
 it is not written yet.
 
+**Green pass (2026-10-20):** the ports are real; `tddy-session-agents` names no LiveKit crate.
+Deviations from the contract above, each forced by a call site:
+- `RoomBroadcast::publish` is synchronous, so the plugin queues each snapshot on one ordered task
+  (`SessionRoomRegistry::agents_outbox`); a task per publish would let snapshots overtake each other.
+- `RoomDirectory::participants` answers `NotFound` for a room the server does not list (the roster's
+  old behaviour), not an empty list.
+- The first admission token is minted in the core through `RoomTokenMinter` and
+  `ADMISSION_TOKEN_TTL` (moved to `tddy-daemon-extensions`), after `RoomAdmission::admit`; the room
+  server URL comes from the `livekit:` block (`room_access::room_server_url`).
+  `tddy_daemon_livekit::first_admission_token` has no caller left.
+- `WorktreeSnapshot` (kernel `worktree_snapshot`) and `OpenedSessionRoom` (`tddy-daemon-extensions`)
+  moved out of the plugin because `AgentHostCallbacks` names them; the plugin re-exports both.
+- `AgentRoster` carries `room_directory`, `room_broadcast`, `room_tokens` and `room_connector`; the
+  session host builds them from its registries (`handler_state::agent_roster`).
+
 ## Draft PR contract
 
 ```rust
@@ -103,11 +118,11 @@ The session-agent roster and its clones talk to "a room" through ports.
 
 ## Scope
 
-- [ ] `RoomBroadcast`, `RoomAdmission`, `RoomDirectory` + null objects
-- [ ] Plugin implementations over `BroadcastPublisher`, `SessionAdmissionRegistry`, `RoomRoster`
-- [ ] Clone on `RoomConnector` + `RoomTokenMinter`
-- [ ] `session_room_name` → kernel (plugin re-exports)
-- [ ] Ratchet: strike `tddy-session-agents`
+- [x] `RoomBroadcast`, `RoomAdmission`, `RoomDirectory` + null objects
+- [x] Plugin implementations over `BroadcastPublisher`, `SessionAdmissionRegistry`, `RoomRoster`
+- [x] Clone on `RoomConnector` + `RoomTokenMinter`
+- [x] `session_room_name` → kernel (plugin re-exports)
+- [x] Ratchet: strike `tddy-session-agents`
 
 ## Technical Changes
 
@@ -132,10 +147,10 @@ As listed in Scope. The `AgentRoster` fields change from concrete plugin types t
 objects.
 
 ## Implementation Milestones
-- [ ] M1 Ports + plugin implementations
-- [ ] M2 Roster and admission on ports (in-memory tests green)
-- [ ] M3 Clone on `RoomConnector` (testkit suites green)
-- [ ] M4 Manifest; ratchet green
+- [x] M1 Ports + plugin implementations
+- [x] M2 Roster and admission on ports (in-memory tests green)
+- [x] M3 Clone on `RoomConnector` (testkit suites green)
+- [x] M4 Manifest; ratchet green
 
 ## Testing Plan
 
@@ -185,7 +200,7 @@ Unit: null objects in `tddy-daemon-extensions` (`with_nothing_wired_*`).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
