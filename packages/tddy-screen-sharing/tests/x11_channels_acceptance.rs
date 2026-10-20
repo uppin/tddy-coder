@@ -22,7 +22,17 @@ use tddy_rpc::Code;
 const DISPLAY_ONE: u32 = 1;
 
 /// Short, so a test about an x11vnc that never accepts costs a moment rather than the default wait.
-const A_SHORT_ACCEPT_WAIT: Duration = Duration::from_millis(500);
+///
+/// Not shorter: the window must outlast the stand-in's own start (fork, exec of `/bin/sh`, its first
+/// `echo` to the launch log), or the daemon kills a stand-in that never logged its launch and the
+/// test waits on a launch that cannot appear. The stand-in is warmed before the clock starts
+/// (`common::StandInX11vnc`), but on a heavily loaded machine 500 ms still lost that race.
+const A_SHORT_ACCEPT_WAIT: Duration = Duration::from_secs(3);
+
+/// How long the reopened channel's x11vnc is watched once the old bridge has exited: the daemon
+/// reaps an exited bridge within milliseconds, so a stop that reaping would cause has arrived by
+/// then.
+const AN_OLD_BRIDGE_HAS_BEEN_REAPED_WITHIN: Duration = Duration::from_secs(1);
 
 fn a_bridge_that_comes_up() -> TheBridge {
     TheBridge::ready_at(1280, 800)
@@ -115,6 +125,33 @@ async fn reopening_an_x11_channel_leaves_one_x11vnc_running() {
         tddy_testing_commons::process_is_alive(second.pid),
         "the reopened channel's x11vnc must still be serving it"
     );
+}
+
+#[tokio::test]
+async fn reopening_an_x11_channel_whose_old_bridge_exits_with_its_x11vnc_keeps_the_new_x11vnc() {
+    // Given
+    let daemon =
+        a_daemon_whose_bridge(TheBridge::ready_at_until_its_x11vnc_stops(1280, 800)).start();
+    let target_id = daemon.attach_an_x11_display_to(A_HOST, DISPLAY_ONE).await;
+    daemon
+        .open_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect("an X11 channel whose x11vnc accepts opens");
+    let first_bridge = daemon.bridge.pid().await;
+
+    // When
+    daemon
+        .open_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect("reopening the same X11 channel");
+
+    // Then
+    daemon.bridge.has_exited_as(first_bridge).await;
+    let second = daemon.x11vnc.launch(1).await;
+    daemon
+        .x11vnc
+        .keeps_running(&second, AN_OLD_BRIDGE_HAS_BEEN_REAPED_WITHIN)
+        .await;
 }
 
 #[tokio::test]

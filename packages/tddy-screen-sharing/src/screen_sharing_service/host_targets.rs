@@ -131,6 +131,11 @@ impl ScreenSharingServiceImpl {
         // An X11 display has no VNC server until one is started for it, and it is started before the
         // bridge so the bridge has something to connect to.
         if let Some(display) = target.display {
+            // A reopen stops the old bridge *before* its x11vnc. Stopping the x11vnc first makes the
+            // old bridge lose its VNC server and exit on its own while its key still names it, and
+            // its reaper then stops whatever x11vnc the key has by then — the one being started
+            // here. Forgotten first, the old bridge's exit no longer reaches the new x11vnc.
+            self.terminate_bridge(&bridge_key).await;
             let x11vnc = self
                 .x11vnc
                 .start(

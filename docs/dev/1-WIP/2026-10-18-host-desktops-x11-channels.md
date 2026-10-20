@@ -25,6 +25,7 @@
 - `ScreenSharingConfig.x11vnc_binary_path`, `.x11_socket_dir`, `resolve_x11vnc_binary_path`.
 - Host targets for X11 displays (`HostDesktopTarget.display: Option<u32>`), and the x11vnc lifecycle: spawn `x11vnc -display :N -localhost -rfbport <free> -nopw -forever` before the bridge, wait until it accepts, point the bridge at it; stop it on `StopHostStream`, on bridge exit, and before a reopen.
 - Web: `HostRowRemoteDesktop` lists every channel with its own Connect; `HostDesktopOverlay` opens the channel it is given (no `PROBED_HOST`/fixed-port matching).
+  - ⚠️ Delivered for X11 channels (matched by `(protocol, x11Display)`) and for the port (always the reading's). **Endpoint** channels still match and add their target on `127.0.0.1`, which is where the endpoint probe found them: kept on purpose, recorded as `docs/dev/todo/2026-10-20-endpoint-channel-targets-matched-by-loopback-port.md`.
 
 ## Boundaries
 
@@ -38,7 +39,7 @@
 |---|---|---|---|
 | n1 `service-split` | host-target RPC module, bridge-lifecycle module | adds the x11vnc step to the host start/stop there | move modules |
 | n4 `hosts-mount` | tooling cell on the Hosts screen; probe cache | channels render through it; the cache caches the channel list | change the cache |
-| n6 `bridge-ready` | `spawn_bridge` → `BridgeStarted`; failure mapping | an x11vnc that never accepts is reported through the same mapping | change readiness |
+| n6 `bridge-ready` | `spawn_bridge` → `BridgeStarted`; failure mapping | the bridge of an X11 channel is started and judged by `spawn_bridge` unchanged. x11vnc's own failures are mapped in `x11vnc.rs`, **not** by n6's `await_bridge_readiness`, to the same status codes n6 uses for the matching bridge failures: never accepts within the window → `DeadlineExceeded`, exits before accepting → `Unavailable`, cannot be spawned → `Internal`. No `Unauthenticated` path: x11vnc is `-nopw` | change readiness |
 
 **Sequencing fact:** wave 2 — needs node 1 green (module layout).
 
@@ -83,7 +84,7 @@ A host with several X displays offers each as a desktop.
 
 ## Scope
 
-- [~] Testing — failing tests written (contract stage)
+- [x] Testing — acceptance and unit tests green (scoped; see Validation Results)
 
 - [x] Proto channel identity; regenerated TS
 - [x] Display enumeration + config
@@ -144,7 +145,8 @@ they drive `ScreenSharingServiceImpl` through the `ScreenSharingService` trait, 
 | [x] | `the_bridge_of_an_x11_channel_connects_to_its_x11vnc` (added) | same | bridge config `host 127.0.0.1`, `port` = x11vnc `-rfbport` |
 | [x] | `closing_an_x11_channel_stops_its_x11vnc` | same | stop |
 | [x] | `reopening_an_x11_channel_leaves_one_x11vnc_running` | same | no orphan |
-| [x] | `an_x11vnc_that_never_accepts_fails_the_start_and_starts_no_bridge` | same | failure path (`DeadlineExceeded`, node 6's mapping) |
+| [x] | `reopening_an_x11_channel_whose_old_bridge_exits_with_its_x11vnc_keeps_the_new_x11vnc` (added, /validate-changes) | same | the old bridge's exit does not stop the reopened channel's x11vnc |
+| [x] | `an_x11vnc_that_never_accepts_fails_the_start_and_starts_no_bridge` | same | failure path (`DeadlineExceeded`, mapped in `x11vnc.rs` to the code n6 uses for a silent bridge) |
 | [x] | `an_x11vnc_that_never_accepts_is_stopped` (added) | same | no orphan on failure |
 | [x] | `an_x11_channel_whose_bridge_exits_stops_its_x11vnc` (added) | same | stop on bridge exit |
 | [x] | `offers one connect per connectable channel` | `packages/tddy-web/cypress/component/HostsScreenDesktopChannelsAcceptance.cy.tsx` (new) | many Connects |
@@ -155,12 +157,12 @@ they drive `ScreenSharingServiceImpl` through the `ScreenSharingService` trait, 
 listening half is done by a watcher thread in the test that binds `127.0.0.1:<-rfbport>` for each
 launch (so the suite needs no `nc`/`perl`). Node 6's stand-in bridge now records its stdin config.
 
-**Contract surface published (bodies `todo!()` / `throw`):**
+**Contract surface (published at the contract stage; every body implemented in green):**
 - `tddy_host_service::x11_displays::{X11Display, list_x11_displays, DEFAULT_X11_SOCKET_DIR}`; `with_x11_channels` (crate-private)
 - `remote_desktop_probe::DesktopChannel { Endpoint, X11Display(u32) }`, `DesktopReachability.channel`
-- `SubprocessHostToolingProbe::listing_x11_displays_for(&DaemonConfig)` (real setter; `for_config` not yet wired — TODO)
+- `SubprocessHostToolingProbe::listing_x11_displays_for(&DaemonConfig)` (real setter; `for_config` calls it, so the daemon's probe lists X11 channels)
 - `HostDesktopTarget.display: Option<u32>` (serde default, skipped when `None`); `add_host_target` stores `req.x11_display`
-- `ScreenSharingConfig.{x11vnc_binary_path, x11_socket_dir}`; `resolve_x11vnc_binary_path(&ScreenSharingConfig) -> PathBuf` (`todo!()` — no current-exe sibling step, so not identical to the two bridge resolvers)
+- `ScreenSharingConfig.{x11vnc_binary_path, x11_socket_dir}`; `resolve_x11vnc_binary_path(&ScreenSharingConfig) -> PathBuf` (no current-exe sibling step, so not identical to the two bridge resolvers)
 - `tddy_screen_sharing::x11vnc::{X11vncServers, X11vncStarted, x11vnc_arguments, DEFAULT_X11VNC_ACCEPT_TIMEOUT}`; `ScreenSharingServiceImpl::with_x11vnc_accept_timeout`
 - Web: `connectableChannels(readings)`, `ConnectableDesktop.{channelId, x11Display}`, `HostDesktopOverlay` prop `x11Display`; page object `hostDesktopChannelsPage` (Connect carries `data-channel-id`, channel reading `hosts-row-<id>-channel-<channelId>`)
 
@@ -189,6 +191,59 @@ into it (a pass-through), session-scope literals set `None`. Green matches an ex
 
 ## Validation Results
 ### /validate-changes
+
+**Run 2026-10-20 ([W] stage).** Risk summary: Critical 0 · Warning 3 · Info 3.
+
+**Stack gate.** Stack branch (planned; base `feature/host-desktops/bridge-ready`, PR #658 open).
+`/pr-stack-rebase` first verified the branch current on `578693a14`. n6 then pushed `31af5b866`
+(bridge readiness moved to `tddy_daemon_extensions::bridge_readiness`), so the branch was rebased
+`--onto origin/feature/host-desktops/bridge-ready 578693a14` (backup branch kept). The one conflict,
+in `tests/common/mod.rs` imports, was resolved by keeping n6's `tddy_daemon_extensions` import and
+dropping the old `tddy_screenshare::readiness` line, and adding this PR's `DEFAULT_X11VNC_ACCEPT_TIMEOUT`.
+Leak check: `origin/<base>..HEAD` is this PR's four commits only. No deletions, no Cargo changes.
+
+**Stack boundary.** Responsibility delivered except the endpoint-channel half of the overlay item
+(⚠️, deliberate: see Responsibility and the TODO). Dependencies: nothing of n1/n4/n6 implemented
+here; `spawn_bridge` and `await_bridge_readiness` unchanged. Boundaries respected (no X protocol, no
+sign-in change, one open desktop). Diff contains only this PR's files.
+
+**Build / tests (scoped, after the rebase).** `./test -p tddy-screen-sharing`: 62 passed, 0 failed.
+`./test -p tddy-host-service`: 198 passed, 0 failed. `cargo test -p tddy-daemon-kernel --test
+x11vnc_binary_resolution`: 2 passed. `cargo clippy -p <pkg> --all-targets -- -D warnings` clean for
+tddy-screen-sharing, tddy-host-service and tddy-daemon-kernel. Cypress, 6 specs
+(`HostsScreenDesktopChannelsAcceptance`, `HostDesktopConnectAcceptance`,
+`HostDesktopStartFailureAcceptance`, `HostsScreenRemoteDesktopAcceptance`,
+`HostsScreenToolingMountAcceptance`, `ScreenSharingInputScopesAcceptance`): 29 passed, 0 failed.
+
+**Findings.**
+- [WARNING, fixed] `an_x11vnc_that_never_accepts_is_stopped` was load-sensitive. Cause: the
+  stand-in x11vnc's first exec under load outlasted the 500 ms accept window, so the daemon killed
+  it before it logged its launch and `launch(0)` waited on a launch that could never appear. Fix:
+  the stand-in is warmed once before any test clock starts (n6's `StandInBridge::warm_up` pattern),
+  and a further failure (1 in 7 runs at load ~85, the warmed `/bin/sh` still missing 500 ms) set
+  `A_SHORT_ACCEPT_WAIT` to 3 s, with the reason recorded beside it. Afterwards: 3 of 3 suite runs green.
+- [WARNING, sent to /green] Reopen race: `start_host_stream` started the new x11vnc (stopping the
+  old one) before `spawn_bridge` terminated the old bridge. A real bridge exits when its VNC
+  server goes, and its reaper, still finding its pid under the key, stopped the **new** x11vnc.
+  **Fixed via /green (tdd-implementer):** `start_host_stream` terminates the old bridge before
+  starting the x11vnc. New test `reopening_an_x11_channel_whose_old_bridge_exits_with_its_x11vnc_keeps_the_new_x11vnc`
+  (stand-in bridge `TheBridge::ready_at_until_its_x11vnc_stops`) failed 4/4 before the fix (`Unavailable:
+  x11vnc for display :1 exited before accepting: signal: 15`), passes 3/3 after; `./test -p
+  tddy-screen-sharing` 63 passed, 0 failed; clippy clean.
+- [WARNING, deferred] An unreadable X11 socket directory (anything but `NotFound`) is logged and
+  lists no X11 channels, so the host shows no displays rather than a failed reading. No test or AC
+  pins that path; the honest fix needs a channel identity `host.proto` does not have:
+  `docs/dev/todo/2026-10-20-x11-socket-dir-read-failure-lists-no-channels.md`.
+- [INFO] Endpoint channels keep `(127.0.0.1, port, protocol)` target matching:
+  `docs/dev/todo/2026-10-20-endpoint-channel-targets-matched-by-loopback-port.md`.
+- [INFO] The Dependencies row said x11vnc failures go "through the same mapping" as n6's. They do
+  not: `x11vnc.rs` maps them itself to the same codes. Row corrected.
+- [INFO] `X11vncServers::stop` sends SIGTERM and does not wait; the reaper task collects the exit.
+  Same shape as `terminate_bridge`.
+
+**Changeset sync.** Testing `[~]` → `[x]`; contract-stage wording ("`todo!()`", "`for_config` not
+yet wired") corrected to what green delivered; Responsibility web item annotated ⚠️ (endpoint
+channels); Dependencies n6 row corrected.
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
