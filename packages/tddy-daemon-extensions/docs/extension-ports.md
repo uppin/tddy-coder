@@ -8,7 +8,11 @@ ports. Only the crates that build a binary (`tddy-daemon`, and the embedders) br
 A daemon with nothing wired gets each port's **null object**, which records the decision "no
 integration" instead of a `None` that could equally mean "wiring forgotten".
 
-The crate depends on `tddy-rpc` and `async-trait` and on nothing that reaches an integration.
+The crate depends on `tddy-rpc`, `async-trait`, `serde` and `serde_json` and on nothing that reaches
+an integration.
+
+It also holds one protocol that is not a port: `bridge_readiness`, the start report a screen-sharing
+bridge writes and the daemon reads. See [Bridge start report](bridge-readiness.md).
 
 ## The session-reach port (`session_reach`)
 

@@ -530,12 +530,13 @@ mod tests {
                 stdin_file: dir.join("bridge-stdin.json"),
             };
             let (argv, stdin) = (bridge.argv_file.display(), bridge.stdin_file.display());
-            let ready =
-                serde_json::to_string(&tddy_screenshare::readiness::BridgeReadiness::Ready {
+            let ready = serde_json::to_string(
+                &tddy_daemon_extensions::bridge_readiness::BridgeReadiness::Ready {
                     width: 1920,
                     height: 1080,
-                })
-                .expect("a readiness line");
+                },
+            )
+            .expect("a readiness line");
             // Each record is written to a temp file and `mv -f`'d over the target, the way
             // `stub_scripts` does it: a reader must see a whole record or none, never a
             // half-written one that would read as the daemon having built the wrong invocation.

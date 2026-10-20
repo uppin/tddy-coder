@@ -1,6 +1,6 @@
 //! Waiting for a spawned bridge to say whether its desktop came up.
 //!
-//! A bridge writes one readiness line to its stdout (`tddy_screenshare::readiness`) once it has
+//! A bridge writes one readiness line to its stdout (`tddy_daemon_extensions::bridge_readiness`) once it has
 //! signed in and knows the desktop's size, or once it knows it never will. Until that line
 //! arrives, a start has nothing true to tell the browser: not whether the password was right, and
 //! not how large the picture it is about to mount is.
@@ -10,8 +10,8 @@
 
 use std::time::Duration;
 
+use tddy_daemon_extensions::bridge_readiness::{read_readiness, BridgeReadiness, FailureKind};
 use tddy_rpc::Status;
-use tddy_screenshare::readiness::{read_readiness, BridgeReadiness, FailureKind};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 
 /// How long a start waits for a bridge's readiness line when nothing else is configured.

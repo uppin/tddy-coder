@@ -24,8 +24,10 @@ use tddy_service::proto::screen_sharing_input::{
 };
 
 use crate::client::{Credentials, ScreenSharingClient};
-use crate::readiness::{write_readiness, AuthenticationRefused, BridgeReadiness, FailureKind};
 use crate::streamer::ScreenSharingStreamer;
+use tddy_daemon_extensions::bridge_readiness::{
+    write_readiness, AuthenticationRefused, BridgeReadiness, FailureKind,
+};
 
 /// Configuration passed to a bridge binary via stdin as JSON.
 #[derive(Debug, Serialize, Deserialize)]

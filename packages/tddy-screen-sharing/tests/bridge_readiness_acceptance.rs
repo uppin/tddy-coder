@@ -2,7 +2,7 @@
 //!
 //! Feature doc: `docs/ft/web/screen-sharing-sessions.md` § The bridge's start report (`#host-desktops` 6/8).
 //!
-//! A bridge writes one readiness line to its stdout (`tddy_screenshare::readiness`). The daemon
+//! A bridge writes one readiness line to its stdout (`tddy_daemon_extensions::bridge_readiness`). The daemon
 //! reads it with a bounded wait: a refused sign-in fails the start as `Unauthenticated` with the
 //! desktop's reason, a bridge that exits or stays silent fails it too, every failed bridge is
 //! stopped, and a started desktop reports the size its bridge saw instead of 1920×1080.

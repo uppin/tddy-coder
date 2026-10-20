@@ -29,11 +29,9 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # password to, and the prompt channel that password is asked for on. Reused rather than
 # reimplemented — one key per host, and one decryption path for everything the browser encrypts.
 tddy-host-service = { path = "../tddy-host-service" }
-# `RoomTokenMinter`: a bridge's room token is minted through the daemon's one minter.
+# `RoomTokenMinter`: a bridge's room token is minted through the daemon's one minter, and
+# `bridge_readiness`: a start waits for the line its bridge reports on stdout.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
-# The bridge readiness protocol (`tddy_screenshare::readiness`): a start waits for the line its bridge
-# reports on stdout, and `read_readiness` parses it. A workspace path crate, nothing external.
-tddy-screenshare = { path = "../tddy-screenshare" }
 
 [target.'cfg(unix)'.dependencies]
 # `SIGTERM` to a bridge process — the daemon's own stop path.

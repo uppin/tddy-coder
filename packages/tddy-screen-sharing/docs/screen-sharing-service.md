@@ -22,7 +22,8 @@ Product behaviour: [screen-sharing-sessions.md](../../../docs/ft/web/screen-shar
 
 `spawn_bridge` pipes the bridge's stdin and stdout, writes the `BridgeSpawnConfig` JSON to stdin and
 closes it, records the pid, then waits for the bridge's start report
-(`tddy_screenshare::readiness`) through `await_bridge_readiness`:
+([`tddy_daemon_extensions::bridge_readiness`](../../tddy-daemon-extensions/docs/bridge-readiness.md))
+through `await_bridge_readiness`:
 
 | Report | Start returns |
 |---|---|

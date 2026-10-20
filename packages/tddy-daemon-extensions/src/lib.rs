@@ -9,9 +9,12 @@
 //! - [`session_reach`] — a session was reached on this host; an integration may extend that reach
 //!   beyond it.
 //! - [`peer_forwarder`] — carry an RPC to a peer daemon; the kernel's `CommonRoom` keeps the policy.
+//! - [`bridge_readiness`] — the one line a screen-sharing bridge reports its start on, read by the
+//!   daemon and written by the bridge, so neither side depends on the other to agree on it.
 //! - [`integration_status`] — the one place an integration's live state is recorded, so "is it
 //!   configured, is it up" is answered once instead of re-derived per caller.
 
+pub mod bridge_readiness;
 pub mod integration_status;
 pub mod peer_forwarder;
 pub mod room_admission;

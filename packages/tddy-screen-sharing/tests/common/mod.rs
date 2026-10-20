@@ -15,6 +15,7 @@ use std::time::Duration;
 use tddy_core::session_metadata::{
     write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
 };
+use tddy_daemon_extensions::bridge_readiness::{BridgeReadiness, FailureKind};
 use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig, ScreenSharingConfig};
 use tddy_host_service::host_desktop_targets::FileHostDesktopTargetStore;
 use tddy_host_service::host_keypair::{FileHostKeypair, HostKeypair, PublishedKey};
@@ -27,7 +28,6 @@ use tddy_screen_sharing::screen_sharing_records::{
     account_for, record_for, target_from, ScreenSharingTargetStore, TargetError,
 };
 use tddy_screen_sharing::{ScreenSharingServiceImpl, DEFAULT_BRIDGE_READY_TIMEOUT};
-use tddy_screenshare::readiness::{BridgeReadiness, FailureKind};
 use tddy_service::proto::screen_sharing::{
     AddHostTargetRequest, AddTargetRequest, Protocol, ScreenSharingService,
     ScreenSharingTarget as ProtoScreenSharingTarget, StartHostStreamRequest, StartStreamRequest,
