@@ -18,6 +18,7 @@ use tokio::sync::Mutex;
 use crate::bridge_config::browser_livekit_url;
 use crate::bridge_config::screenshare_track_name;
 use crate::bridge_config::session_bridge_key;
+use crate::host_desktop_sign_in::RememberedDesktopCredentials;
 use crate::screen_sharing_records::{ScreenSharingTargetStore, TargetError};
 use crate::session_vault_target_store::SessionVaultTargetStore;
 use tddy_credentials::SessionVaults;
@@ -116,6 +117,17 @@ pub struct ScreenSharingServiceImpl {
     bridge_ready_timeout: std::time::Duration,
     /// The x11vnc serving each open X11 channel.
     x11vnc: Arc<crate::x11vnc::X11vncServers>,
+    /// The host-desktop credentials operators asked to be remembered, in the same vaults the
+    /// session targets live in. Absent when no vaults are wired: nothing is then remembered, and
+    /// an answer asking to remember is refused rather than quietly forgotten.
+    remembered: Option<RememberedDesktopCredentials>,
+}
+
+impl HostScope {
+    /// The store a host's desktops live in.
+    pub(crate) fn targets(&self) -> &dyn HostDesktopTargetStore {
+        self.targets.as_ref()
+    }
 }
 
 impl ScreenSharingServiceImpl {
@@ -130,6 +142,7 @@ impl ScreenSharingServiceImpl {
             target_store: None,
             bridge_ready_timeout: crate::bridge_readiness::DEFAULT_BRIDGE_READY_TIMEOUT,
             x11vnc: Arc::new(crate::x11vnc::X11vncServers::default()),
+            remembered: None,
         }
     }
 
@@ -160,7 +173,17 @@ impl ScreenSharingServiceImpl {
     pub fn with_credential_vaults(self, vaults: Option<Arc<SessionVaults>>) -> Self {
         let Some(vaults) = vaults else { return self };
         let resolver = Arc::clone(&self.user_resolver);
-        self.with_target_store(Arc::new(SessionVaultTargetStore::new(vaults, resolver)))
+        let mut service = self.with_target_store(Arc::new(SessionVaultTargetStore::new(
+            Arc::clone(&vaults),
+            resolver,
+        )));
+        service.remembered = Some(RememberedDesktopCredentials::new(vaults));
+        service
+    }
+
+    /// The host-desktop credentials operators remembered, when vaults are wired.
+    pub(crate) fn remembered_desktop_credentials(&self) -> Option<&RememberedDesktopCredentials> {
+        self.remembered.as_ref()
     }
 
     /// Mint bridges' room tokens through `minter` (builder) — the daemon's one minter, built from
@@ -201,18 +224,18 @@ impl ScreenSharingServiceImpl {
     }
 
     /// The OS user a session token belongs to.
-    fn require_user(&self, session_token: &str) -> Result<String, Status> {
+    pub(crate) fn require_user(&self, session_token: &str) -> Result<String, Status> {
         (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid session token"))
     }
 
-    fn require_host_scope(&self) -> Result<&HostScope, Status> {
+    pub(crate) fn require_host_scope(&self) -> Result<&HostScope, Status> {
         self.host_scope.as_ref().ok_or_else(|| {
             Status::failed_precondition("this daemon serves no host-scoped desktop targets")
         })
     }
 
-    fn require_config(&self) -> Result<&DaemonConfig, Status> {
+    pub(crate) fn require_config(&self) -> Result<&DaemonConfig, Status> {
         self.config.as_deref().ok_or_else(|| {
             Status::failed_precondition("this daemon has no configuration to reach LiveKit with")
         })
@@ -238,7 +261,7 @@ mod host_targets;
 /// `ListTargets` never passes [`TargetError::Locked`] here: for it, locked is a *state* carried in
 /// `vault_locked`, and turning it into a `Status` would collapse the distinction this node exists
 /// to keep. Every other call has no such field, so for them a locked store is a refusal.
-fn target_error_to_status(error: TargetError) -> Status {
+pub(crate) fn target_error_to_status(error: TargetError) -> Status {
     match error {
         TargetError::NoSuchSession => Status::unauthenticated("invalid session token"),
         TargetError::Locked => Status::failed_precondition(
@@ -733,9 +756,17 @@ mod tests {
         }
     }
 
-    /// A password as the browser sends it: RSA-OAEP(SHA-256) under this host's published key.
+    /// A VNC-authentication sign-in with `password` as the browser sends it: a protobuf-encoded
+    /// `DesktopCredentialAnswer`, RSA-OAEP(SHA-256) under this host's published key.
     fn encrypted_under(keypair: &FileHostKeypair, password: &str) -> Vec<u8> {
+        use prost::Message as _;
         use rsa::pkcs8::DecodePublicKey;
+
+        let answer = tddy_service::proto::screen_sharing::DesktopCredentialAnswer {
+            method: tddy_service::proto::screen_sharing::DesktopAuthMethod::VncPassword as i32,
+            password: password.to_string(),
+            ..Default::default()
+        };
 
         let PublishedKey { spki_der, .. } = keypair.published().expect("this host's published key");
         rsa::RsaPublicKey::from_public_key_der(&spki_der)
@@ -743,7 +774,7 @@ mod tests {
             .encrypt(
                 &mut rand::thread_rng(),
                 rsa::Oaep::new::<sha2::Sha256>(),
-                password.as_bytes(),
+                &answer.encode_to_vec(),
             )
             .expect("a password fits comfortably in an OAEP payload")
     }
@@ -1320,8 +1351,8 @@ mod tests {
         );
         assert_eq!(
             asked[0].kind,
-            PromptKind::DesktopPassword,
-            "a desktop password is its own kind of question; node 6's key passphrase is not it"
+            PromptKind::DesktopCredentials,
+            "a desktop's credentials are their own kind of question; node 6's key passphrase is not it"
         );
 
         // …stamped for the operator who raised it, which is what makes it reachable at all:

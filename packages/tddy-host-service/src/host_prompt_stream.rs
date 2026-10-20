@@ -143,8 +143,8 @@ fn forward(
         host_public_key: published.spki_der,
         host_public_key_fingerprint: published.fingerprint,
         expires_at_unix_ms: prompt.expires_at_unix_ms,
-        // TODO(sign-in-form): carry the methods the desktop advertises on a DESKTOP_CREDENTIALS
-        // prompt — `PendingPrompt` holds none yet.
+        // Left empty: the methods a desktop advertises are read on demand by `InspectHostDesktop`,
+        // which the viewer calls before it opens a desktop, so no prompt carries them.
         offered_auth_methods: Vec::new(),
     }))
     .is_ok()

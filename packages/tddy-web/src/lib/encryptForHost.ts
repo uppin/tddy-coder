@@ -21,14 +21,14 @@ import { requireSubtleCrypto } from "./subtleCrypto";
 const ALGORITHM = { name: "RSA-OAEP", hash: "SHA-256" } as const;
 
 /**
- * Encrypt `plaintext` under `spkiDer` (the host's SPKI DER public key).
+ * Encrypt `plaintext` (text, or already-encoded bytes such as a protobuf message) under `spkiDer` (the host's SPKI DER public key).
  *
  * @returns the ciphertext bytes to place in `AnswerHostPromptRequest.encryptedAnswer`.
  * @throws Error where the origin exposes no `crypto.subtle`, naming the origin as the cause.
  */
 export async function encryptForHost(
   spkiDer: Uint8Array,
-  plaintext: string,
+  plaintext: string | Uint8Array,
 ): Promise<Uint8Array> {
   // Imported per call rather than cached: a `CryptoKey` outlives the prompt it belongs to, and the
   // import is cheap next to the guarantee that we always encrypt under the key just published.
@@ -39,7 +39,7 @@ export async function encryptForHost(
   const ciphertext = await subtle.encrypt(
     { name: ALGORITHM.name },
     publicKey,
-    new TextEncoder().encode(plaintext),
+    typeof plaintext === "string" ? new TextEncoder().encode(plaintext) : (plaintext as BufferSource),
   );
   return new Uint8Array(ciphertext);
 }

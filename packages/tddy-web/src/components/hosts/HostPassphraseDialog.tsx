@@ -25,6 +25,7 @@
 import React, { useState } from "react";
 import { encryptForHost } from "../../lib/encryptForHost";
 import type { KeyPinVerdict } from "../../lib/hostKeyPinning";
+import { HostKeyContinuityNotices, keyContinuityBlocks } from "./HostKeyContinuityNotices";
 
 /**
  * The words one question is asked in.
@@ -122,24 +123,15 @@ export function HostPassphraseDialog({
     explanation: `${hostId} is waiting to unlock ${subject} and load it into its ssh-agent.`,
     placeholder: "Passphrase",
   };
-  const keyChanged = keyContinuity.kind === "changed";
-  const keyUnverified = keyContinuity.kind === "unverified";
-  const keyMismatched = keyContinuity.kind === "mismatched";
-  const keyUnderivable = keyContinuity.kind === "underivable";
-  // The key arrived and its digest is not back. Nothing is said about it and nothing may be sent to
-  // it: a fingerprint shown now would be the *previous* key's, which is the one substitution the pin
-  // exists to catch, and it would be wearing that key's approval.
-  const keyUnchecked = keyContinuity.kind === "unchecked";
   const [passphrase, setPassphrase] = useState("");
   const [encrypting, setEncrypting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [changeVerified, setChangeVerified] = useState(false);
 
   // Empty is refused because an empty answer only wastes the host's single-use prompt — unless the
   // caller said that nothing IS a real answer here, which is true of a desktop with no password.
   // `encrypting` is refused because one prompt accepts exactly one answer. Each blocking key state
   // is refused for a reason of its own, spelled out beside its notice below.
-  const keyBlocks = keyChanged || keyMismatched || keyUnderivable || keyUnchecked;
+  const keyBlocks = keyContinuityBlocks(keyContinuity);
   const answerMissing = !allowEmpty && passphrase.length === 0;
   const blocked = keyBlocks || encrypting || answerMissing;
 
@@ -178,84 +170,12 @@ export function HostPassphraseDialog({
       >
         <p className="text-sm font-medium">{words.title}</p>
         <p className="text-xs text-muted-foreground">{words.explanation}</p>
-        {fingerprint !== null && !keyMismatched && (
-          <p className="text-xs text-muted-foreground break-all">
-            Answer encrypted for host key <span className="font-mono">{fingerprint}</span>
-          </p>
-        )}
-        {keyChanged && (
-          <>
-            <p
-              data-testid="host-key-changed-warning"
-              className="text-xs text-destructive border border-destructive rounded px-2 py-1"
-            >
-              This host&apos;s key has changed since you last answered a prompt from it. Verify the
-              fingerprint above with the host before sending anything.
-            </p>
-            <div className="flex flex-col gap-1 border border-border rounded px-2 py-1">
-              <label className="text-xs flex items-start gap-2">
-                <input
-                  data-testid="host-key-accept-confirm"
-                  type="checkbox"
-                  checked={changeVerified}
-                  onChange={(e) => setChangeVerified(e.target.checked)}
-                />
-                <span>
-                  I checked the fingerprint above with {hostId} itself, and its key changed because
-                  the host changed it.
-                </span>
-              </label>
-              <button
-                type="button"
-                data-testid="host-key-accept-submit"
-                disabled={!changeVerified}
-                onClick={onAcceptChangedKey}
-                className="self-end px-3 py-1 text-xs border border-destructive rounded hover:bg-muted disabled:opacity-50"
-              >
-                Accept this key for {hostId}
-              </button>
-            </div>
-          </>
-        )}
-        {keyMismatched && (
-          <p
-            data-testid="host-key-mismatch-warning"
-            className="text-xs text-destructive border border-destructive rounded px-2 py-1"
-          >
-            This prompt contradicts itself: it advertises host key{" "}
-            <span className="font-mono break-all">{keyContinuity.advertisedFingerprint}</span>, but
-            the key it carries is{" "}
-            <span className="font-mono break-all">{keyContinuity.derivedFingerprint}</span>. A host
-            describing its own key gets it right, so something rewrote this in flight. Nothing can be
-            sent to it.
-          </p>
-        )}
-        {keyUnderivable && (
-          <p
-            data-testid="host-key-underivable-notice"
-            className="text-xs text-destructive border border-destructive rounded px-2 py-1"
-          >
-            This host&apos;s key cannot be checked or encrypted to from this page:{" "}
-            {keyContinuity.reason}. Nothing has been sent.
-          </p>
-        )}
-        {keyUnchecked && (
-          <p
-            data-testid="host-key-unchecked-notice"
-            className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
-          >
-            Checking the key this host is presenting. Nothing can be sent until it is checked.
-          </p>
-        )}
-        {keyUnverified && (
-          <p
-            data-testid="host-key-unverified-notice"
-            className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
-          >
-            Could not check whether this host&apos;s key has changed since last time. Verify the
-            fingerprint above with the host before sending anything.
-          </p>
-        )}
+        <HostKeyContinuityNotices
+          hostId={hostId}
+          fingerprint={fingerprint}
+          keyContinuity={keyContinuity}
+          onAcceptChangedKey={onAcceptChangedKey}
+        />
         {failure !== null && (
           <p data-testid="host-passphrase-failure" className="text-xs text-destructive">
             Nothing was sent: {failure}

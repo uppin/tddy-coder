@@ -80,16 +80,14 @@ pub fn write_inspect_report(
     out: &mut impl std::io::Write,
     report: &InspectReport,
 ) -> std::io::Result<()> {
-    // TODO(sign-in-form): implement
-    let _ = (out, report);
-    todo!()
+    serde_json::to_writer(&mut *out, report)?;
+    out.write_all(b"\n")?;
+    out.flush()
 }
 
 /// Parse one line a bridge wrote with [`write_inspect_report`].
 pub fn read_inspect_report(line: &str) -> Result<InspectReport, serde_json::Error> {
-    // TODO(sign-in-form): implement
-    let _ = line;
-    todo!()
+    serde_json::from_str(line)
 }
 
 /// Inspect mode's whole run: ask `C` what the desktop at `target` advertises, and write the
@@ -98,9 +96,10 @@ pub fn read_inspect_report(line: &str) -> Result<InspectReport, serde_json::Erro
 /// An inspection that fails — the desktop is unreachable, or broke the protocol — is returned as an
 /// error, so the bridge exits non-zero with the reason on stderr and writes no report.
 pub async fn run_inspect<C: ScreenSharingClient>(target: InspectTarget) -> anyhow::Result<()> {
-    // TODO(sign-in-form): implement
-    let _ = target;
-    todo!()
+    let methods = C::inspect(&target.host, target.port).await?;
+    let mut stdout = std::io::stdout().lock();
+    write_inspect_report(&mut stdout, &InspectReport { methods })?;
+    Ok(())
 }
 
 #[cfg(test)]

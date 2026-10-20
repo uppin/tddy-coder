@@ -20,7 +20,9 @@ use ironrdp_pdu::{
         fast_path::{FastPathInputEvent, KeyboardFlags},
         mouse::{MousePdu, PointerFlags},
     },
+    nego,
     rdp::capability_sets::{BitmapCodecs, MajorPlatformType},
+    x224::X224,
 };
 use ironrdp_session::{image::DecodedImage, ActiveStage, ActiveStageOutput};
 use ironrdp_tokio::{
@@ -45,6 +47,54 @@ impl ironrdp_tokio::NetworkClient for NoKdcNetworkClient {
     }
 }
 
+/// How long an inspection waits for the desktop's Connection Confirm.
+const INSPECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The sign-in a Connection Confirm says the desktop requires.
+///
+/// The request offers TLS and CredSSP, so a selected protocol is one of those, and a failure code
+/// names the one the desktop insisted on. Anything else is a desktop tddy cannot sign in to.
+fn advertised_by(
+    confirm: nego::ConnectionConfirm,
+) -> Result<Vec<tddy_screenshare::AdvertisedMethod>> {
+    use tddy_screenshare::AdvertisedMethod;
+
+    match confirm {
+        nego::ConnectionConfirm::Response { protocol, .. }
+            if protocol
+                .intersects(nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX) =>
+        {
+            Ok(vec![AdvertisedMethod::RdpNla])
+        }
+        nego::ConnectionConfirm::Response { protocol, .. }
+            if protocol.contains(nego::SecurityProtocol::SSL) =>
+        {
+            Ok(vec![AdvertisedMethod::RdpTls])
+        }
+        nego::ConnectionConfirm::Response { protocol, .. } => {
+            anyhow::bail!(
+                "the desktop selected a security protocol tddy does not support: {protocol}"
+            )
+        }
+        nego::ConnectionConfirm::Failure { code }
+            if code == nego::FailureCode::HYBRID_REQUIRED_BY_SERVER =>
+        {
+            Ok(vec![AdvertisedMethod::RdpNla])
+        }
+        nego::ConnectionConfirm::Failure { code }
+            if code == nego::FailureCode::SSL_REQUIRED_BY_SERVER =>
+        {
+            Ok(vec![AdvertisedMethod::RdpTls])
+        }
+        nego::ConnectionConfirm::Failure { code } => {
+            anyhow::bail!(
+                "the desktop refused the X.224 negotiation with failure code {}",
+                u32::from(code)
+            )
+        }
+    }
+}
+
 /// Active RDP session.
 pub struct RdpClient {
     image: DecodedImage,
@@ -57,9 +107,37 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
     /// Sends an X.224 Connection Request offering TLS and CredSSP, and reads the protocol the
     /// Connection Confirm selects (or the failure code it answers with); then disconnects.
     async fn inspect(host: &str, port: u16) -> Result<Vec<tddy_screenshare::AdvertisedMethod>> {
-        // TODO(sign-in-form): implement
-        let _ = (host, port);
-        todo!()
+        let stream = TcpStream::connect(format!("{host}:{port}"))
+            .await
+            .context("TCP connect")?;
+        let mut framed = TokioFramed::new(stream);
+
+        tokio::time::timeout(INSPECT_TIMEOUT, async {
+            let request = X224(nego::ConnectionRequest {
+                nego_data: None,
+                flags: nego::RequestFlags::empty(),
+                protocol: nego::SecurityProtocol::SSL
+                    | nego::SecurityProtocol::HYBRID
+                    | nego::SecurityProtocol::HYBRID_EX,
+            });
+            let request =
+                ironrdp_pdu::encode_vec(&request).context("encode X.224 Connection Request")?;
+            framed
+                .write_all(&request)
+                .await
+                .context("send X.224 Connection Request")?;
+
+            let (_, confirm) = framed
+                .read_pdu()
+                .await
+                .context("read X.224 Connection Confirm")?;
+            let confirm = ironrdp_pdu::decode::<X224<nego::ConnectionConfirm>>(&confirm)
+                .context("decode X.224 Connection Confirm")?
+                .0;
+            advertised_by(confirm)
+        })
+        .await
+        .context("the desktop did not answer the X.224 Connection Request in time")?
     }
 
     async fn connect(

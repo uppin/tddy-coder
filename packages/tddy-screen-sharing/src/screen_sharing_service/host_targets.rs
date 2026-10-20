@@ -12,7 +12,7 @@ use crate::x11vnc::X11VNC_HOST;
 use crate::BridgeStarted;
 use tddy_daemon_kernel::config::{resolve_x11vnc_binary_path, DaemonConfig, ScreenSharingConfig};
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
-use tddy_rpc::{Request, Response, Status};
+use tddy_rpc::{Code, Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
     AddHostTargetRequest, AddHostTargetResponse, ListHostTargetsRequest, ListHostTargetsResponse,
     StartHostStreamRequest, StartStreamResponse, StopHostStreamRequest, StopHostStreamResponse,
@@ -110,7 +110,8 @@ impl ScreenSharingServiceImpl {
         let prepared = prepare_bridge(
             config,
             &host_target_as_bridge_target(&target),
-            target.username.clone(),
+            // The account is the operator's answer, which is not known until they have been asked.
+            String::new(),
             &bridge_identity,
             &track_name,
             &livekit_room,
@@ -118,26 +119,38 @@ impl ScreenSharingServiceImpl {
         )
         .map_err(Status::failed_precondition)?;
 
-        // Asked for, not looked up: nothing on this host stores a desktop password, and the browser
-        // could not have sent one — `HostPromptEvent` is the only place this host's public key is
-        // published, so a caller has nothing to encrypt under until it has been asked. Read once,
-        // handed to the bridge over its stdin, and dropped when this call returns.
-        let password = self
-            .prompt_for_desktop_password(scope, &operator, &target)
+        // Remembered, or asked for: the operator's own vault is the only place on this host a
+        // desktop's credential is ever kept, and only when they said so. Otherwise it is read once
+        // from the answer, handed to the bridge over its stdin, and dropped when this call returns.
+        let sign_in = self
+            .desktop_credential_for(scope, &operator, &req.daemon_instance_id, &target)
             .await?;
+        let remembered = sign_in.remembered;
 
         // Reported: these coordinates tell a browser to mount an overlay on a room, and a bridge that
         // never joined it leaves the operator watching nothing having already typed a secret. The
         // size is the one the bridge measured, so input lands where the operator aimed.
         let bridge_key = host_bridge_key(&req.daemon_instance_id, &req.target_id);
-        let mut prepared = prepared.for_password(password);
+        let mut prepared = prepared.for_credentials(sign_in.answer);
         // An X11 display has no VNC server until one is started for it, and it is started before the
         // bridge so the bridge has something to connect to.
         if let Some(display) = target.display {
             self.serve_x11_display_to_the_bridge(&mut prepared, &bridge_key, display, config)
                 .await?;
         }
-        let started = self.spawn_host_bridge(prepared, bridge_key).await?;
+        let started = match self.spawn_host_bridge(prepared, bridge_key).await {
+            Ok(started) => started,
+            Err(status) => {
+                if remembered && status.code == Code::Unauthenticated {
+                    self.mark_remembered_desktop_refused(
+                        &operator,
+                        &req.daemon_instance_id,
+                        &req.target_id,
+                    );
+                }
+                return Err(status);
+            }
+        };
 
         Ok(Response::new(StartStreamResponse {
             livekit_room,
@@ -188,6 +201,28 @@ impl ScreenSharingServiceImpl {
                 self.x11vnc.stop(&bridge_key).await;
                 Err(status)
             }
+        }
+    }
+
+    /// The desktop refused a credential held in the operator's vault: keep it, but never use it
+    /// again until the operator replaces it.
+    ///
+    /// Failing to record that must not replace the refusal the operator is about to be shown, so it
+    /// is logged: the next open would use the refused credential once more and be refused again.
+    fn mark_remembered_desktop_refused(
+        &self,
+        operator: &str,
+        daemon_instance_id: &str,
+        target_id: &str,
+    ) {
+        let Some(remembered) = self.remembered_desktop_credentials() else {
+            return;
+        };
+        if let Err(error) = remembered.mark_refused(operator, daemon_instance_id, target_id) {
+            log::error!(
+                target: "tddy_screen_sharing",
+                "could not mark the refused credential for {daemon_instance_id}:{target_id} as refused: {error:?}"
+            );
         }
     }
 

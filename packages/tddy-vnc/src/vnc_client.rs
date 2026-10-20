@@ -324,9 +324,12 @@ impl tddy_screenshare::ScreenSharingClient for VncClientState {
         host: &str,
         port: u16,
     ) -> anyhow::Result<Vec<tddy_screenshare::AdvertisedMethod>> {
-        // TODO(sign-in-form): implement
-        let _ = (host, port);
-        todo!()
+        let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}"))
+            .await
+            .with_context(|| format!("failed to connect to VNC at {host}:{port}"))?;
+        security::inspect(tcp)
+            .await
+            .context("VNC inspection failed")
     }
 
     fn framebuffer_dimensions(&self) -> (u32, u32) {

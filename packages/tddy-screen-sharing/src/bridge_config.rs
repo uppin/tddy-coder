@@ -3,10 +3,9 @@ use crate::screen_sharing_service::DEFAULT_STREAM_FPS;
 use std::time::Duration;
 use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
-use tddy_host_service::host_keypair::HostKeypair;
 use tddy_rpc::Status;
 use tddy_service::proto::screen_sharing::{
-    Protocol, ScreenSharingTarget as ProtoScreenSharingTarget,
+    DesktopCredentialAnswer, Protocol, ScreenSharingTarget as ProtoScreenSharingTarget,
 };
 
 /// A bridge spawn that is ready except for the password nobody has typed yet.
@@ -23,6 +22,15 @@ pub(crate) struct PreparedBridge {
 impl PreparedBridge {
     pub(crate) fn for_password(mut self, password: String) -> Self {
         self.spawn_config.password = password;
+        self
+    }
+
+    /// Sign the bridge in as `answer` says: its account, the account's Windows domain and its
+    /// password. Nothing else of the answer reaches the bridge.
+    pub(crate) fn for_credentials(mut self, answer: DesktopCredentialAnswer) -> Self {
+        self.spawn_config.username = answer.username;
+        self.spawn_config.domain = answer.domain;
+        self.spawn_config.password = answer.password;
         self
     }
 }
@@ -108,6 +116,7 @@ pub(crate) fn build_bridge_spawn_config(
         host: target.host.clone(),
         port: target.port,
         username,
+        domain: String::new(),
         password: String::new(),
         livekit_url: livekit_url_internal,
         livekit_token: token,
@@ -201,25 +210,6 @@ pub(crate) fn desktop_prompt_subject(target: &HostDesktopTarget) -> String {
     format!("{} ({}:{})", target.label, target.host, target.port)
 }
 
-/// A desktop password for immediate use, from the ciphertext the operator's browser encrypted under
-/// this host's published key.
-///
-/// The plaintext is owned by the caller and dies with the call that asked for it: `#hosts-screen
-/// 6/8`'s prompt-decrypt-drop posture, deliberately not the session vault's storing one, so the
-/// Hosts screen has a single secret-handling model. Nothing here writes it anywhere, and nothing
-/// logs it — not even the reason a decrypt failed, which is the keypair's own words about a
-/// ciphertext.
-pub(crate) fn decrypt_desktop_password(
-    keypair: &dyn HostKeypair,
-    encrypted_password: &[u8],
-) -> Result<String, Status> {
-    let plaintext = keypair
-        .decrypt(encrypted_password)
-        .map_err(Status::permission_denied)?;
-    String::from_utf8(plaintext)
-        .map_err(|_| Status::invalid_argument("that desktop password is not valid UTF-8"))
-}
-
 /// A host-scoped target as the shared bridge spawn path's input.
 ///
 /// Converted rather than given a spawn path of its own: a second implementation would be free to
@@ -253,6 +243,8 @@ pub(crate) struct BridgeSpawnConfig {
     pub(crate) host: String,
     pub(crate) port: u16,
     pub(crate) username: String,
+    /// The Windows domain of an RDP account; empty for a local account and for VNC.
+    pub(crate) domain: String,
     pub(crate) password: String,
     pub(crate) livekit_url: String,
     pub(crate) livekit_token: String,

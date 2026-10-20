@@ -16,7 +16,7 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { HostRemoteDesktopSchema, ProbeOutcome } from "../../src/gen/host_pb";
-import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
+import { DesktopAuthMethod, Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { mountWithRecordingLiveKitRpc, type RecordedRpcCall } from "../support/rpc/recordingLiveKitRpc";
@@ -54,6 +54,11 @@ function aHostWhoseDesktopOpens() {
   return anInMemoryRpcBackend().implement(ScreenSharingService, {
     listHostTargets: async () => ({ targets: [] }),
     addHostTarget: async () => ({ targetId: A_HOST_TARGET }),
+    inspectHostDesktop: async () => ({
+      offered: [DesktopAuthMethod.NONE],
+      unsupportedVncTypes: [],
+      remembered: false,
+    }),
     startHostStream: async () => ({
       livekitRoom: `host-desktop-${HOST}`,
       livekitUrl: "wss://livekit.example.test",

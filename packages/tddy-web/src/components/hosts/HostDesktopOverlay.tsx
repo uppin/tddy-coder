@@ -20,8 +20,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Client } from "@connectrpc/connect";
+import { create, toBinary } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { HostPromptKind, HostService } from "../../gen/host_pb";
 import {
+  DesktopAuthMethod,
+  DesktopCredentialAnswerSchema,
   Protocol,
   ScreenSharingService,
   type ScreenSharingTarget,
@@ -29,13 +33,13 @@ import {
 } from "../../gen/screen_sharing_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useCommonRoom } from "../../hooks/useCommonRoom";
-import { checkHostKey, type KeyPinVerdict } from "../../lib/hostKeyPinning";
+import { encryptForHost } from "../../lib/encryptForHost";
 import { presenceIdentityForUser } from "../../lib/presenceIdentity";
 import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
 import { useHostClient } from "../../rpc/connections/registry";
 import { useHostPrompts, type HostPromptEventLike } from "../../rpc/useHostPrompts";
 import { ScreenSharingOverlay } from "../sessions/ScreenSharingOverlay";
-import { HostPassphraseDialog } from "./HostPassphraseDialog";
+import { HostDesktopSignInDialog } from "./HostDesktopSignInDialog";
 
 export interface HostDesktopOverlayProps {
   /** The daemon instance whose desktop this is — host scope's whole addressing change. */
@@ -80,6 +84,13 @@ function isTargetOfChannel(
     target.port === port &&
     target.protocol === protocol
   );
+}
+
+/** What the overlay says when the desktop advertises nothing tddy can sign in with. */
+function noSupportedSignInText(unsupportedVncTypes: number[]): string {
+  return unsupportedVncTypes.length === 0
+    ? "This desktop offers no sign-in tddy supports."
+    : `This desktop offers no sign-in tddy supports: it advertises VNC security types ${unsupportedVncTypes.join(", ")}.`;
 }
 
 /**
@@ -134,6 +145,17 @@ export function HostDesktopOverlay({
   const { user, sessionToken } = useAuthContext();
   const [stream, setStream] = useState<StartStreamResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The sign-in methods the desktop advertised and tddy supports, once inspected.
+  const [offered, setOffered] = useState<DesktopAuthMethod[] | null>(null);
+  // The desktop's reason for refusing the last sign-in, shown when the host asks again.
+  const [signInError, setSignInError] = useState<string | undefined>(undefined);
+  // The question already answered: one prompt takes one answer, and the feed holds it until the
+  // next one replaces it.
+  const answeredPromptId = useRef<string | null>(null);
+  // How many answers this overlay has sent, so a start can tell whether it was refused one.
+  const answersSent = useRef(0);
+  // The question being answered; latched — see the effect that sets it.
+  const [question, setQuestion] = useState<HostPromptEventLike | null>(null);
 
   // The session every host-scoped call is gated on, read at call time rather than closed over.
   // Putting it in the effect's dependencies instead would tear the bridge down and start a second
@@ -162,15 +184,57 @@ export function HostDesktopOverlay({
         );
         if (cancelled) return;
         startedTargetId = targetId;
-        // This call blocks while the host asks for the desktop's password — the question arrives
-        // below, on the prompt feed, and the answer released the start that is awaited here.
-        const started = await client.startHostStream({
+        // Ask what the desktop advertises before starting anything: the form is shaped by it, and a
+        // desktop with nothing tddy supports must not start a bridge that can only fail.
+        const inspection = await client.inspectHostDesktop({
           sessionToken: sessionTokenRef.current ?? "",
           daemonInstanceId: hostId,
           targetId,
         });
         if (cancelled) return;
-        setStream(started);
+        const methods = inspection.offered.filter(
+          (method) => method !== DesktopAuthMethod.UNSPECIFIED,
+        );
+        if (methods.length === 0) {
+          setError(noSupportedSignInText(inspection.unsupportedVncTypes));
+          return;
+        }
+        setOffered(methods);
+        const needsNoSignIn = methods.includes(DesktopAuthMethod.NONE);
+
+        // Each start blocks while the host asks for the desktop's credentials — the question arrives
+        // below, on the prompt feed, and the answer releases the start awaited here. A desktop that
+        // refuses the credentials fails the start with its reason, and the host is started again so it
+        // asks again; a desktop that needed none has nothing to ask again about.
+        for (;;) {
+          const answersBefore = answersSent.current;
+          try {
+            const started = await client.startHostStream({
+              sessionToken: sessionTokenRef.current ?? "",
+              daemonInstanceId: hostId,
+              targetId,
+            });
+            if (cancelled) return;
+            setStream(started);
+            return;
+          } catch (e) {
+            if (cancelled) return;
+            // Asked again only when this start was refused a sign-in the operator just gave: a
+            // refusal that no answer preceded (a remembered credential the desktop turned down) has
+            // nothing to ask about yet, and starting again at once would only spin on it.
+            const refusedAnAnswer = answersSent.current > answersBefore;
+            if (
+              needsNoSignIn ||
+              !refusedAnAnswer ||
+              !(e instanceof ConnectError) ||
+              e.code !== Code.Unauthenticated
+            ) {
+              throw e;
+            }
+            setSignInError(screenSharingStartFailureText(e));
+            setQuestion(null);
+          }
+        }
       } catch (e) {
         if (cancelled) return;
         // The start failed, and the overlay says why in place of "Connecting…": a refused sign-in
@@ -223,8 +287,6 @@ export function HostDesktopOverlay({
   // Only this overlay's own kind is ever latched. The same feed carries the key passphrase
   // `HostAddKeyAction` raises, and answering that one with a desktop password would send a secret
   // to a question nobody here asked.
-  const [question, setQuestion] = useState<HostPromptEventLike | null>(null);
-
   useEffect(() => {
     if (!awaitingStart) {
       // The start settled — opened or failed — so whatever it was blocked on is no longer being
@@ -232,41 +294,59 @@ export function HostDesktopOverlay({
       setQuestion(null);
       return;
     }
-    if (raised === null || raised.kind !== HostPromptKind.DESKTOP_PASSWORD) return;
+    if (raised === null || raised.kind !== HostPromptKind.DESKTOP_CREDENTIALS) return;
+    // Answered already: the feed still holds it until the host's next question replaces it.
+    if (raised.promptId === answeredPromptId.current) return;
     // First one wins: the question the operator is answering is not replaced under them.
     setQuestion((held) => held ?? raised);
   }, [awaitingStart, raised]);
 
-  const [continuity, setContinuity] = useState<KeyPinVerdict | null>(null);
-
-  // Checked once per question, after the commit rather than during render: the check *records* the
-  // pin, and a render React discards would otherwise spend this host's one first-use trust slot on
-  // a dialog nobody was ever shown.
-  useEffect(() => {
-    setContinuity(
-      question === null ? null : checkHostKey(hostId, question.hostPublicKeyFingerprint),
-    );
-  }, [hostId, question]);
-
-  /** Send the ciphertext the dialog produced. The password itself never reaches this component. */
-  const answerWithPassword = async (encryptedAnswer: Uint8Array) => {
-    if (question === null || !hostService) return;
+  /** Send the ciphertext of the answer. The credential itself never reaches this component. */
+  const answerWithCredentials = async (asked: HostPromptEventLike, encryptedAnswer: Uint8Array) => {
+    if (!hostService) return;
+    answeredPromptId.current = asked.promptId;
+    answersSent.current += 1;
     try {
       const reply = await hostService.answerHostPrompt({
         sessionToken: sessionToken ?? "",
         daemonInstanceId: hostId,
-        promptId: question.promptId,
+        promptId: asked.promptId,
         encryptedAnswer,
       });
       // A refused answer leaves the host waiting on a question it will never get another answer to,
       // so say so now rather than leaving the operator in front of a dialog until the prompt expires.
       if (!reply.accepted) {
-        setError(`That password was not accepted: ${reply.rejectionReason}`);
+        setError(`That sign-in was not accepted: ${reply.rejectionReason}`);
       }
     } catch (e) {
-      setError(`The password could not be sent: ${messageOf(e)}`);
+      setError(`The sign-in could not be sent: ${messageOf(e)}`);
     }
   };
+
+  // A desktop that needs no sign-in is still asked its question on every start, because the host
+  // cannot know in advance which desktops want one. There is nothing for an operator to type, so the
+  // overlay answers it itself — with the "no authentication" answer, which carries no secret and so
+  // needs no key-continuity check.
+  const needsNoSignIn = offered?.includes(DesktopAuthMethod.NONE) ?? false;
+  useEffect(() => {
+    if (question === null || !needsNoSignIn || answeredPromptId.current === question.promptId) {
+      return;
+    }
+    answeredPromptId.current = question.promptId;
+    void (async () => {
+      try {
+        const none = toBinary(
+          DesktopCredentialAnswerSchema,
+          create(DesktopCredentialAnswerSchema, { method: DesktopAuthMethod.NONE }),
+        );
+        await answerWithCredentials(question, await encryptForHost(question.hostPublicKey, none));
+      } catch (e) {
+        setError(`The sign-in could not be sent: ${messageOf(e)}`);
+      }
+    })();
+    // `answerWithCredentials` is re-created every render; the answered-prompt guard is what makes
+    // this run once per question.
+  }, [question, needsNoSignIn]);
 
   // Portalled to `document.body`, not rendered where it was mounted from. The row section this
   // overlay is opened from is a `<span>` (`HostRowTooling`), and a `<div>` is not permitted inside
@@ -276,24 +356,12 @@ export function HostDesktopOverlay({
   // was ever in flow — so the body is where they already behave as though they are.
   return createPortal(
     <div data-testid={`host-desktop-overlay-${hostId}`}>
-      {question !== null && continuity !== null && (
-        <HostPassphraseDialog
-          hostId={hostId}
-          subject={question.subject}
-          fingerprint={question.hostPublicKeyFingerprint}
-          spkiDer={question.hostPublicKey}
-          keyContinuity={continuity}
-          wording={{
-            title: `Password for ${question.subject}`,
-            explanation: `${hostId} is waiting for this desktop's password to open it. It is used once and kept nowhere. Leave it blank if this desktop has no password.`,
-            placeholder: "Desktop password",
-          }}
-          // A desktop password is one question an empty answer can be the true answer to: the host
-          // asks on every start because it cannot know in advance whether this desktop wants one,
-          // and plenty do not. Refusing empty here would ask the operator to invent a password the
-          // desktop never had, and leave them with no way in at all.
-          allowEmpty
-          onSubmit={(encryptedAnswer) => void answerWithPassword(encryptedAnswer)}
+      {question !== null && offered !== null && !needsNoSignIn && (
+        <HostDesktopSignInDialog
+          question={question}
+          offered={offered}
+          error={signInError}
+          onSubmit={(encryptedAnswer) => void answerWithCredentials(question, encryptedAnswer)}
           // Declining the question is declining the desktop: the start has nothing to proceed with,
           // and closing releases it rather than leaving an overlay in front of a call that can only
           // time out.

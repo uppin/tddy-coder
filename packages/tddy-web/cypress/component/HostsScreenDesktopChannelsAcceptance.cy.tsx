@@ -17,7 +17,7 @@ import {
   HostService,
   ProbeOutcome,
 } from "../../src/gen/host_pb";
-import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
+import { DesktopAuthMethod, Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -67,6 +67,11 @@ function aHostAwaitingADesktopPassword(): InMemoryRpcBackend {
     .implement(ScreenSharingService, {
       listHostTargets: async () => ({ targets: [] }),
       addHostTarget: async () => ({ targetId: THE_X11_TARGET }),
+      inspectHostDesktop: async () => ({
+        offered: [DesktopAuthMethod.VNC_PASSWORD],
+        unsupportedVncTypes: [],
+        remembered: false,
+      }),
       startHostStream: () => new Promise(() => undefined),
       stopHostStream: async () => ({ ok: true }),
     });

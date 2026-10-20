@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tddy_credentials::{SessionVault, SessionVaults, VaultError, VaultState};
 use tddy_service::proto::screen_sharing::ScreenSharingTarget;
 
+use crate::host_desktop_sign_in::is_remembered_desktop_account;
 use crate::screen_sharing_records::{
     account_for, record_for, screen_sharing_provider, target_from, ScreenSharingTargetStore,
     TargetError,
@@ -42,25 +43,34 @@ impl SessionVaultTargetStore {
     /// passphrase would show.
     fn vault_for(&self, session_token: &str) -> Result<(String, Arc<SessionVault>), TargetError> {
         let subject = (self.subject_of)(session_token).ok_or(TargetError::NoSuchSession)?;
-        if let Some(refusal) = refusal_for_closed(self.vaults.state(&subject)) {
-            return Err(refusal);
-        }
-        match self.vaults.use_open(&subject) {
-            Some(vault) => Ok((subject, vault)),
-            // Closed between the two look-ups: whatever it is now is the answer.
-            None => Err(
-                refusal_for_closed(self.vaults.state(&subject)).unwrap_or_else(|| {
-                    TargetError::Unavailable(
-                    "the credential vault closed and reopened while it was being read; try again"
-                        .to_string(),
-                )
-                }),
-            ),
-        }
+        let vault = open_vault(&self.vaults, &subject)?;
+        Ok((subject, vault))
     }
 }
 
-fn refusal_for_closed(state: VaultState) -> Option<TargetError> {
+/// `subject`'s open vault, or the refusal that says why it is not open.
+pub(crate) fn open_vault(
+    vaults: &SessionVaults,
+    subject: &str,
+) -> Result<Arc<SessionVault>, TargetError> {
+    if let Some(refusal) = refusal_for_closed(vaults.state(subject)) {
+        return Err(refusal);
+    }
+    match vaults.use_open(subject) {
+        Some(vault) => Ok(vault),
+        // Closed between the two look-ups: whatever it is now is the answer.
+        None => Err(
+            refusal_for_closed(vaults.state(subject)).unwrap_or_else(|| {
+                TargetError::Unavailable(
+                    "the credential vault closed and reopened while it was being read; try again"
+                        .to_string(),
+                )
+            }),
+        ),
+    }
+}
+
+pub(crate) fn refusal_for_closed(state: VaultState) -> Option<TargetError> {
     match state {
         VaultState::Open => None,
         VaultState::Locked => Some(TargetError::Locked),
@@ -73,7 +83,7 @@ fn refusal_for_closed(state: VaultState) -> Option<TargetError> {
 /// `Locked` keeps its meaning. `Io` names server-side detail, so the client gets
 /// [`STORE_UNREADABLE`] and the log gets the full error; every other variant's text is a fixed
 /// sentence written for the person.
-fn refusal_of(subject: &str, error: VaultError) -> TargetError {
+pub(crate) fn refusal_of(subject: &str, error: VaultError) -> TargetError {
     match error {
         VaultError::Locked => TargetError::Locked,
         VaultError::Io(_) => {
@@ -87,7 +97,7 @@ fn refusal_of(subject: &str, error: VaultError) -> TargetError {
     }
 }
 
-fn now_unix_seconds() -> Result<u64, TargetError> {
+pub(crate) fn now_unix_seconds() -> Result<u64, TargetError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
@@ -101,6 +111,7 @@ impl ScreenSharingTargetStore for SessionVaultTargetStore {
             .list(Some(&screen_sharing_provider()))
             .map_err(|error| refusal_of(&subject, error))?
             .iter()
+            .filter(|record| !is_remembered_desktop_account(&record.account))
             .map(target_from)
             .collect()
     }
