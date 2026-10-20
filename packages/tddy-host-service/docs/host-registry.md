@@ -60,7 +60,7 @@ directory holding everything scoped to it.
 | | |
 |---|---|
 | File | `host-desktop-targets.json` — `{ hosts: { <daemon_instance_id>: [HostDesktopTarget] } }` |
-| A target | `target_id`, `label`, `host`, `port`, `protocol`, `username` |
+| A target | `target_id`, `label`, `host`, `port`, `protocol`, `username`, and an optional `display`: the X11 display (`:N`) a daemon-started x11vnc serves in place of `host:port`. It is skipped when absent, so files written before it load unchanged |
 | Publication | `tddy_core::atomic_file`, under a mutex held across each read-modify-write |
 
 The map is a `BTreeMap` so the file an operator opens is ordered the same way between writes rather

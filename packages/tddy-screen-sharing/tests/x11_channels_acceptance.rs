@@ -1,6 +1,6 @@
 //! Acceptance tests: opening an X11 desktop channel runs x11vnc for that display around the bridge.
 //!
-//! PRD: `docs/ft/web/1-WIP/PRD-2026-10-18-host-desktops-x11-channels.md` (`#host-desktops` 7/8).
+//! Feature: `docs/ft/web/screen-sharing-sessions.md` (AC-SS-18, `#host-desktops` 7/8).
 //!
 //! A host target may name an X11 display instead of a listening desktop. Starting one starts
 //! `x11vnc -display :N -localhost -rfbport <free> -nopw -forever`, waits until it accepts, and points

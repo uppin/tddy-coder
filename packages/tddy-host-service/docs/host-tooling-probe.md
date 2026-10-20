@@ -414,8 +414,11 @@ bridge whether or not a desktop is up. Collapsing them into one "available" flag
 operator to the wrong fix: "install the bridge" and "start a VNC server" are unrelated problems with
 nothing in common but the row they would share.
 
-`DesktopReachability` is `{ outcome, protocol, can_bridge, desktop_reachable, port }`, and
-`PROBED_PROTOCOLS` is both of them — `Vnc` on **5900**, `Rdp` on **3389**. Both are reported for
+`DesktopReachability` is `{ outcome, channel, protocol, can_bridge, desktop_reachable, port }`.
+`channel` is a `DesktopChannel`: `Endpoint` for a server already listening on `port` of this host's
+loopback, or `X11Display(N)` for a display the daemon serves on demand (see
+[X11 display channels](#x11-display-channels)). The endpoint readings come from
+`PROBED_PROTOCOLS`, which is both protocols — `Vnc` on **5900**, `Rdp` on **3389**. Both are reported for
 every host, including the ones nothing answered for, because "no desktop on :5900" is a finding and a
 block listing only the protocols that answered could not be told apart from one where nobody looked.
 
@@ -521,9 +524,9 @@ claim.
 
 ### On the wire
 
-`HostRemoteDesktop` (`connection.proto`) carries `{ outcome, protocol, can_bridge,
-desktop_reachable, port, failure_reason }`, and `GetHostToolingResponse.remote_desktop` is
-`repeated` — one entry per probed protocol, beside the git, `gh` and ssh-agent blocks rather than on
+`HostRemoteDesktop` (`host.proto`) carries `{ outcome, protocol, can_bridge,
+desktop_reachable, port, failure_reason, channel_id, kind, display, label }`, and
+`GetHostToolingResponse.remote_desktop` is `repeated`, one entry per desktop channel, beside the git, `gh` and ssh-agent blocks rather than on
 an RPC of its own.
 
 `protocol` is an `int32` holding **`screen_sharing.proto`'s `Protocol` values** (`1` = VNC, `2` =
@@ -533,6 +536,38 @@ actually spawns the bridges.
 
 `host_remote_desktop_message` is the one conversion, and it keeps `can_bridge` and
 `desktop_reachable` as two fields for the reason they are two facts.
+
+### X11 display channels
+
+`x11_displays.rs` adds one reading per X11 display the daemon's own OS user can open. It is wired by
+`SubprocessHostToolingProbe::listing_x11_displays_for(&config)`, which `for_config` calls. A probe
+built with `probing_desktops_with` alone lists endpoints only, so the endpoint tests need no socket
+directory.
+
+- **Enumeration** (`list_x11_displays(dir)`): every entry of `screen_sharing.x11_socket_dir`
+  (`DEFAULT_X11_SOCKET_DIR`, `/tmp/.X11-unix`, when empty) named `X` followed by digits, whose
+  Unix socket accepts a `connect` from this process. A connect and close, and no X protocol, the
+  same rule as the TCP probe. A dead server's leftover socket is refused, and another user's
+  server denies the connect, so neither is listed. Results are ordered by display number. A missing
+  directory is a host with no X server and lists nothing. Off Unix nothing is listed.
+- **No desktop twice** (`with_x11_channels`): a display whose VNC port (`5900 + N`) already
+  answers, asked through the same injected `RemoteDesktopProbe`, is left out.
+- **The reading**: `channel: X11Display(N)`, `protocol: Vnc`, `outcome: Ok`,
+  `desktop_reachable: true` (its socket answered), `port: 0` (x11vnc is given a free port only when
+  the channel is opened), and `can_bridge` only when **both** the VNC bridge and `x11vnc`
+  (`resolve_x11vnc_binary_path`, through the same `binary_is_present`) are present. Without
+  `x11vnc` the display is still listed, so the operator learns what to install.
+
+On the wire each `HostRemoteDesktop` carries its channel identity: `kind` (`ENDPOINT` /
+`X11_DISPLAY`), `display`, `channel_id` (`vnc:5900`, `rdp:3389`, `x11:1`), and `label`
+("Display :1"; empty for an endpoint). `channel_id` is how the web tells two channels apart.
+
+**Known limits.**
+- A socket directory that exists but cannot be read is logged (`could not list X11 displays …`)
+  and contributes no channels. It is not a `Failed` reading, because the wire has no channel
+  identity for "the socket directory".
+- A display `:N` (N ≥ 1) already served on `5900 + N` is dropped here, and the endpoint probes
+  read `:5900` only, so no reading offers it.
 
 ### What this block does not do
 
@@ -614,6 +649,9 @@ a Unix host can never honestly give for them.
 | Unit | `ssh_agent.rs` `#[cfg(test)]` | the protocol exchange, the four outcomes, fingerprint derivation |
 | Unit | `remote_desktop_probe.rs` `#[cfg(test)]` | a real socket's behaviour: reachable, refused, no bytes written, and the bridge check against a configured path |
 | Integration | `host_tooling.rs` `#[cfg(test)]` | the desktop block arriving **beside** the other three rather than instead of them, and the two facts staying apart |
+| Unit | `x11_displays.rs` `#[cfg(all(test, unix))]` | enumeration against a temp socket directory (`test_util::AnX11SocketDir`, listeners bound by the test): ordered by number, dead sockets and non-`X<N>` names skipped, a missing directory empty |
+| Integration | `host_tooling.rs` `#[cfg(test)]` | X11 channels beside the endpoints: a display served on its VNC port not listed twice, and `can_bridge = false` without `x11vnc` |
+| Unit | `host_messages.rs` `#[cfg(test)]` | the wire channel identity: `x11:1` / "Display :1" / `X11_DISPLAY`, and `vnc:5900` / `ENDPOINT` |
 | Integration | `host_tooling_handler_unit_tests.rs` | auth rejection, the OS user the probe is handed, peer routing, the agent block reaching the wire whole, and the cache wiring: two calls within the TTL run one probe, a different `github_hostname` is probed separately |
 | Unit | `host_tooling_cache.rs` `#[cfg(test)]` | dedup of concurrent callers, hit within the TTL, expiry, isolation by host, OS user and `github_hostname`, a dropped caller storing nothing, failed answers held, eviction of expired unheld slots |
 | Component | `packages/tddy-web/cypress/component/HostsScreenToolingMountAcceptance.cy.tsx`, `HostsScreenToolingAcceptance.cy.tsx`, `HostsScreenSshAgentAcceptance.cy.tsx`, `HostsScreenRemoteDesktopAcceptance.cy.tsx` | the states rendering distinguishably |

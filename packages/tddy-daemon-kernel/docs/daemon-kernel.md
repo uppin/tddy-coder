@@ -265,6 +265,17 @@ clear. It is one of two independent checks a peer must pass before it receives a
 is `#keyring` 1/9's Ed25519 signature — and this crate carries only the configuration value; the
 checks themselves live in `tddy-credential-sync`, which this crate does not depend on.
 
+## `screen_sharing` — where the bridges and x11vnc are found
+
+`ScreenSharingConfig` holds `vnc_binary_path`, `rdp_binary_path`, `x11vnc_binary_path` and
+`x11_socket_dir`, every one an empty string by default. `resolve_vnc_binary_path` and
+`resolve_rdp_binary_path` try the explicit path, then a sibling of `current_exe()`, then the bare
+name on `PATH`. `resolve_x11vnc_binary_path(&ScreenSharingConfig)` has no sibling step: x11vnc is a
+system package and never shipped beside tddy, so an unset path is `x11vnc` on `PATH`. An empty
+`x11_socket_dir` means `/tmp/.X11-unix`, which `tddy-host-service`'s `x11_displays` applies. None of
+these resolvers checks that the file exists; the tooling probe does that
+(`binary_is_present`). `tests/x11vnc_binary_resolution.rs` holds the x11vnc resolver.
+
 ## `agent_list_mapping` and `daemon_hook_urls` — two daemon-wide helpers with no session state
 
 `agent_list_mapping` is the daemon-facing adapter over `tddy_discovery::agent_list_mapping`: it maps the

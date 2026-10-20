@@ -259,6 +259,19 @@ prompt channel, uses it once and keeps it nowhere — not on disk, not in daemon
 and never in a process argument. An empty answer is a valid one and opens a password-less desktop.
 A question nobody answers before it expires fails the start and spawns no bridge.
 
+### AC-SS-17: One connect per desktop channel
+
+A host row offers one connect action per connectable channel: its endpoint desktops (VNC `:5900`,
+RDP `:3389`) and each X11 display its daemon can open. Each opens its own channel.
+
+### AC-SS-18: An X11 display is served through x11vnc
+
+Opening an X11 channel ("Display :N") starts `x11vnc` for display `:N` as the daemon's user, on
+loopback only, password-less, on a free port. The bridge is started only once that `x11vnc` accepts
+a connection, and is pointed at it. Closing the desktop, the bridge exiting, and a reopen each stop
+that `x11vnc`. A reopen leaves exactly one running, and an `x11vnc` that never accepts fails the
+start with `DeadlineExceeded`, is stopped, and no bridge is started.
+
 ### AC-SS-16: The two scopes are separate stores
 
 A host-scoped target is not visible to the session-scoped store and a session-scoped target is not
@@ -326,6 +339,20 @@ for. Each bridge is identified by the host and the target together, because ever
 lands in that same room. A daemon with no LiveKit configuration to reach refuses the start rather
 than returning coordinates nothing can join.
 
+**An X11 display is a channel of its own.** Its host target names the display (`x11_display`)
+instead of a listening host and port, and the overlay finds an existing one by `(protocol,
+display)`, so opening it again reuses the target. An endpoint channel's target is the loopback
+address and port the probe found it on. Starting an X11 target runs
+`x11vnc -display :N -localhost -rfbport <free> -nopw -forever` before the bridge and waits, by
+default up to 10 seconds, for that port to accept. The bridge then connects to `127.0.0.1:<port>`
+and signs in with no password, because nothing but the daemon's own bridge can reach a
+loopback-only server. If `x11vnc` exits before accepting, the start fails with `Unavailable`. If it
+never accepts, the start fails with `DeadlineExceeded`. If it cannot be spawned, `Internal`. These
+are the codes the bridge's own report maps to for the matching failures. `x11vnc` is a system
+package, never shipped with tddy, and is resolved from `screen_sharing.x11vnc_binary_path` or else
+from `PATH`. The displays are listed from `screen_sharing.x11_socket_dir` (default
+`/tmp/.X11-unix`).
+
 Every host-scoped call carries the operator's own session token, and the daemon rejects one that
 does not — so a host's desktops are reachable only by an authenticated operator, on every wire.
 
@@ -357,8 +384,8 @@ prompt channel is the only place a host publishes the key an answer could be enc
 
 ### What the Hosts screen reports, and what it does
 
-Whether a host has a desktop to reach at all is answered per host and per protocol, on the default
-ports, as two distinct facts: whether that host's daemon can spawn a bridge, and whether anything is
+Whether a host has a desktop to reach at all is answered per host and per channel (the default
+ports, plus each X11 display), as two distinct facts: whether that host's daemon can spawn a bridge, and whether anything is
 serving a desktop there. That **reporting** starts no stream, spawns no bridge and touches no
 session target or credential — it is a bare TCP connect plus a check that a binary exists. **Connecting**
 is the separate action described above, offered on the same row where those facts are reported, and
@@ -393,8 +420,13 @@ own logs go to stderr. The configuration still travels to the bridge as JSON on 
 - **A session desktop with nothing to start still answers.** A daemon with no bridge configuration,
   or a target that is not in the session's store, returns the stream's coordinates with a `0×0` size
   and spawns no bridge, so its viewer waits on a track that never arrives.
-- Only the default ports are probed, so a host serving on another display is not offered a connect
-  action even though a target pointed at that port would work.
+- Only the default ports are probed for an already-running server, so a VNC server on another port
+  is not offered a connect action. A display `:N` (N ≥ 1) already served on `5900 + N` is dropped
+  as an X11 channel and is not an endpoint reading either, so nothing offers it.
+- An X11 socket directory the daemon cannot read (for any reason but its absence) lists no X11
+  channels and is logged, rather than reported as a failed reading.
+- X11 displays are found only for the daemon's own OS user, only on Unix, and only through their
+  socket directory: no Wayland, no other users' displays, and no X server is ever started.
 
 ## Out of scope (MVP)
 

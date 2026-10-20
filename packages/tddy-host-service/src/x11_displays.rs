@@ -124,7 +124,11 @@ fn socket_dir_of(screen_sharing: &ScreenSharingConfig) -> &str {
 }
 
 /// The X11 channel reading for `display`, or `None` when the display is already served on its VNC
-/// port (`5900 + N`) and so is offered as that endpoint instead.
+/// port (`5900 + N`).
+///
+/// Only display `:0` is then offered as an endpoint instead, since the endpoint probes read `:5900`
+/// alone. A display `:N` (N ≥ 1) served on `5900 + N` is listed by neither:
+/// `docs/dev/todo/2026-10-20-x11-display-served-on-its-vnc-port-is-not-offered.md`.
 fn x11_channel_reading(
     display: &X11Display,
     probe: &Arc<dyn RemoteDesktopProbe>,

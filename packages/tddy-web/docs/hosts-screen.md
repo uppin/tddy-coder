@@ -85,9 +85,12 @@ finding that this host's config names no destinations — and each alias renders
 failed read never borrows the empty shape, because empty is the LocalShell choice in later flows and
 must not be stated when the config was not read.
 
-**`HostRowRemoteDesktop`** is the fourth section, taking `{instanceId, readings}` — one reading per
-probed protocol, and an absent block renders as an empty list rather than a fabricated one. Each
-reading becomes one `hosts-row-<id>-<vnc|rdp>` span holding **two facts side by side**: the bridge
+**`HostRowRemoteDesktop`** is the fourth section, taking `{instanceId, readings}`, one reading per
+desktop channel. An absent block renders as an empty list rather than a fabricated one. Each reading
+is a `ChannelReading`. An endpoint channel is one `hosts-row-<id>-<vnc|rdp>` span, and an X11
+channel (`kind === X11_DISPLAY`) is `hosts-row-<id>-channel-<channelId>`, labelled with the
+reading's `label` ("Display :1") and with a desktop half of "Display available" or "Could not check
+the display", since it has no port until it is opened. Each span holds **two facts side by side**: the bridge
 half (`Bridge ready` / `No bridge`) and the desktop half (`Desktop on :5900` / `No desktop on :5900`
 / `Could not check :5900`). They are never merged, because a host can serve a desktop tddy has no
 bridge for and a host with the bridge installed can be serving nothing — and the two "no"s ask for
@@ -110,12 +113,12 @@ row of facts, would be worse than omitting it.
 The port is part of every desktop string rather than a separate cell. Only default ports are probed,
 so "No desktop" on its own would read as authoritative about a host that simply serves elsewhere.
 
-Where a reading is **connectable**, the section also renders a `hosts-row-<id>-connect-desktop`
-button. `connectableDesktop(readings)` decides that, and all three of its conditions come from the
-probe: `ProbeOutcome.OK` (a reading that could not be made is not a finding), `desktopReachable` (a
+Where a reading is **connectable**, the section renders a `hosts-row-<id>-connect-desktop` button
+beside **that** reading, carrying `data-channel-id`. A host with several connectable channels has
+several. `connectableChannels(readings)` lists them in the probe's order, and `connectableDesktop`
+is its first. All three conditions come from the probe: `ProbeOutcome.OK` (a reading that could not be made is not a finding), `desktopReachable` (a
 desktop nothing is serving has nothing to stream), and `canBridge` (a reachable desktop on a daemon
-with no bridge binary is a spawn failure the operator would meet *after* asking). The first reading
-satisfying all three wins, in the probe's own order rather than a preference this row invents.
+with no bridge binary is a spawn failure the operator would meet *after* asking).
 
 A fourth fact gates the button and the row cannot read it from a probe: whether this host is reached
 over a connection that **carries media**. `useHostConnection(instanceId)` plus
@@ -137,11 +140,13 @@ VNC/RDP protocol client is added here, ever: the picture is always a daemon-prod
   is not permitted inside one — a parser hoists it out on any hydration path, and client-side a
   block element in the row's inline flex flow shifts the row for as long as the overlay is open.
   Both the overlay and its connecting state are `fixed inset-0 z-50`, so nothing was ever in flow.
-- **It resolves a target from the probed endpoint.** A row has a port and a protocol;
-  `StartHostStream` takes a target id, so `targetForProbedEndpoint` matches an existing host target
-  on `(host, port, protocol)` and adds one only when none matches — which is what stops one target
-  accumulating per connect. The address is the daemon's own loopback, because that is where the
-  probe made its reading.
+- **It resolves a target from the channel it was given.** `StartHostStream` takes a target id, so
+  `targetForChannel` reuses an existing host target and adds one only when none matches, which
+  stops one target accumulating per connect. `isTargetOfChannel` decides the match. An X11 channel
+  (`x11Display` prop) matches on `(protocol, x11Display)` and is added with `x11Display` set, so
+  the daemon starts x11vnc for it. An endpoint channel matches a target with no display on
+  `(127.0.0.1, port, protocol)`, the daemon's own loopback, because that is where the probe made
+  its reading.
 - **A failed start says why, in place of "Connecting…".** `screenSharingStartFailureText`
   (`lib/screenSharingStartFailure.ts`) turns an `Unauthenticated` reply into "The desktop refused
   the sign-in: <reason>" and any other `ConnectError` into its raw message. The session tab's target
@@ -438,6 +443,13 @@ overrides, so each test states only the field it is about.
 
 `hostRemoteDesktopPage` on the page object exposes `section(id)` and `protocol(id, "vnc" | "rdp")`,
 so a test names a protocol rather than a test id.
+
+`cypress/component/HostsScreenDesktopChannelsAcceptance.cy.tsx` mounts `HostRowRemoteDesktop` with
+an endpoint and an X11 reading. It covers one Connect per connectable channel, pressing an X11
+Connect adding a target with that `x11Display` and starting the stream on it, the "Display :1"
+label, and an X11 channel without `x11vnc` still listed with no Connect.
+`hostDesktopChannelsPage` exposes `connects(id)`, `connectTo(id, channelId)` and
+`channel(id, channelId)`.
 
 `cypress/component/HostDesktopConnectAcceptance.cy.tsx` covers the connect action and the overlay:
 the action offered over a media-carrying connection, withdrawn over one without media, withdrawn

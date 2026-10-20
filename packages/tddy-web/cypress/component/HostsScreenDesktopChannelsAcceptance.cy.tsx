@@ -6,7 +6,7 @@
  * channel — for an X11 display, by asking the host for a target naming the display, which is what
  * makes its daemon start x11vnc for it.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-18-host-desktops-x11-channels.md
+ * Feature: docs/ft/web/hosts-screen-tooling.md, docs/ft/web/screen-sharing-sessions.md (AC-SS-17)
  */
 
 import { create } from "@bufbuild/protobuf";
