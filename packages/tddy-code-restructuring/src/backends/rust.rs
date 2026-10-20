@@ -493,6 +493,9 @@ pub struct RustBackend {
     staged_projection: Vec<(String, String)>,
     /// The workspace root a self-spawned server was started in. A bridged client carries its own.
     root: Option<PathBuf>,
+    /// The LSP `languageId` each document is opened as: the launch spec's, set by the support that
+    /// built this backend.
+    document_language: String,
     /// Where the language server this backend starts itself is recorded, when a run asks for it.
     spawns: SpawnRecorder,
     /// How often a wait that lasts says what it is waiting for. Not a budget: nothing ends at it.
@@ -553,6 +556,7 @@ impl RustBackend {
             projection: projection::PlanProjection::default(),
             staged_projection: Vec::new(),
             root: None,
+            document_language: RUST_LANGUAGE.as_str().to_string(),
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
             silence_bounds: SilenceBounds::default(),
@@ -593,6 +597,12 @@ impl RustBackend {
     /// Install a diagnostic trace. Silent by default, and never on stdout by this library's choice.
     pub fn with_trace(mut self, sink: fn(&str)) -> Self {
         self.trace = sink;
+        self
+    }
+
+    /// Open documents as `language_id`, the LSP `languageId` the building support launches with.
+    pub(crate) fn with_document_language(mut self, language_id: impl Into<String>) -> Self {
+        self.document_language = language_id.into();
         self
     }
 
@@ -658,6 +668,7 @@ impl RustBackend {
             projection: projection::PlanProjection::default(),
             staged_projection: Vec::new(),
             root: None,
+            document_language: RUST_LANGUAGE.as_str().to_string(),
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
             silence_bounds: SilenceBounds::default(),

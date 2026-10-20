@@ -5,6 +5,7 @@
 **Type**: Enhancement (open language interface) + behaviour-preserving restructure (Rust moves behind it)
 **Stack**: `#reshape` 11/24, branch `feature/reshape/language-support`, base `feature/reshape/move-item-paths`, green wave 1.
 **PR**: [#675](https://github.com/uppin/tddy-coder/pull/675) (draft)
+**Complexity**: 4/5 — three crates (tddy-lsp, tddy-code-restructuring, tddy-index-daemon) plus test-only edits in three more; a trait signature change (`backend` takes the root) and an open `workspace_root` Result question.
 
 ## Initial Discovery
 
@@ -154,12 +155,12 @@ Real dependency edges (open nodes): `11→20`, `11→21`, `12→21`, `13→21`, 
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
-- [ ] USER REVIEW of the acceptance tests (ticked at `/green` start)
+- [x] USER REVIEW of the acceptance tests (ticked at `/green` start, 2026-10-20) ✅
 - [x] Draft PR contract: surface + failing tests (wave 2) ✅
 - [x] `LanguageId` + enum removal (tddy-lsp, all callers) ✅
-- [~] `LaunchSpec::language_id` and the document-sync path (field + default done; the two literals remain)
-- [~] `LanguageSupport`, `SupportRegistry`, `RustSupport` (surface; bodies `todo!()`)
-- [ ] Allow-list and registry builders switched; duplicates deleted
+- [x] `LaunchSpec::language_id` and the document-sync path (the two literals now come from the spec) ✅
+- [x] `LanguageSupport`, `SupportRegistry`, `RustSupport` (bodies filled, green 2026-10-20) ✅
+- [x] Allow-list and registry builders switched; duplicates deleted ✅
 - [ ] Docs: `## Languages` in rust-code-restructuring.md; workspace-root.md names `RustSupport`
 - [ ] Code Quality (`/analyze-clean-code` B or better)
 
@@ -206,3 +207,28 @@ Wave 2 contract (scoped: tddy-lsp, tddy-code-restructuring, tddy-index-daemon, t
 `language_support_acceptance` tests fail on `todo!` in this node's own surface; every other `tddy-code-restructuring`
 lib test (1093), all of `tddy-lsp`, `tddy-lsp-executor --lib`, `tddy-index-daemon --lib --bins` and the five fake-server
 restructuring suites pass.
+
+### Green (2026-10-20)
+
+Decided at green, in this node's own symbols:
+
+- `LanguageSupport::workspace_root` returns `Result<PathBuf, LspError>`. A file outside `root`, or with no directory to
+  search from, is an error; no support picks a root for it. `RustSupport::workspace_root` searches no further out than
+  `root`, through a new `tddy_lsp::registry::workspace_root_within` (the existing `workspace_root_for` is unchanged, with
+  its other callers).
+- `srcs_to_document_sources` takes the `language_id` it opens documents as (it had no callers in the packages).
+- **Deviation for the developer to accept or redirect:** `LanguageSupport::backend(server, root)` takes `root` but
+  `RustSupport::backend` does not store it (`_root`). The live tier's root is the bridged client's own; storing `root` on
+  the static tier would make `workspace_root()` answer, and `outline_of` (`backends/rust/item_path.rs`) would then call
+  `start(&root)` and could reach a spawn. Recorded as a known gap against "every backend is built knowing its root".
+
+Validation (scoped to `tddy-lsp`, `tddy-code-restructuring`, `tddy-index-daemon`):
+
+- `cargo clippy --all-targets -- -D warnings` clean; `cargo fmt --check` clean.
+- The 3 `language::tests` and the 4 `language_support_acceptance` tests pass (run directly).
+- `./test -p tddy-lsp`: 69 passed (including the 2 new `workspace_root_within` tests).
+- `./test -p tddy-index-daemon`: 173 passed, 12 `#[ignore]`d production tests not run.
+- `./test -p tddy-code-restructuring`: 1702 passed, 2 failed, 1 ignored on the first run. Both failures are live
+  rust-analyzer tests that pass when re-run alone. The machine ran at a load of 50–85 from other sessions, and the set of
+  failing live tests changes between runs (two `…within_the_ready_bound` tests are 60 s wall-clock assertions). Not
+  proven against the base commit; CI runs the live suites on a clean machine.

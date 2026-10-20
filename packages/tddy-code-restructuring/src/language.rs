@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_lsp::client::LspClient;
-use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspError};
 use tokio_util::sync::CancellationToken;
 
 use crate::backends::rust::{ProgressSink, RustSupport};
@@ -32,8 +32,11 @@ pub trait LanguageSupport: Send + Sync {
     fn launch(&self) -> Option<LaunchSpec>;
 
     /// The root the language's server is started at for `file`, searched no further out than
-    /// `root`.
-    fn workspace_root(&self, file: &Path, root: &Path) -> PathBuf;
+    /// `root`. A relative `file` is read against `root`.
+    ///
+    /// A file outside `root`, or one no root can be found for, is an error: no support picks a root
+    /// for a file it cannot place.
+    fn workspace_root(&self, file: &Path, root: &Path) -> Result<PathBuf, LspError>;
 
     /// The backend that resolves this language's operations over `server`, built knowing the
     /// workspace `root` it serves.
@@ -111,30 +114,36 @@ impl SupportRegistry {
 
     /// The first registered support that claims `path`.
     pub fn support_of(&self, path: &Path) -> Option<&dyn LanguageSupport> {
-        let _ = path;
-        // TODO(reshape-language-support): implement
-        todo!("SupportRegistry::support_of")
+        self.supports
+            .iter()
+            .find(|support| support.claims(path))
+            .map(|support| support.as_ref())
     }
 
     /// Every support's launch, allowed under its id; a support with no server is not allowed one.
     pub fn allow_list(&self) -> LspAllowList {
-        // TODO(reshape-language-support): implement
-        todo!("SupportRegistry::allow_list")
+        let mut allow = LspAllowList::new();
+        for support in &self.supports {
+            if let Some(launch) = support.launch() {
+                allow.allow(support.id().clone(), launch);
+            }
+        }
+        allow
     }
 
     /// Each support's backend over `server` for the workspace at `root`, in registration order.
     pub fn backends(&self, server: ServerHandle<'_>, root: &Path) -> BackendRegistry {
-        let _ = (server, root);
-        // TODO(reshape-language-support): implement
-        todo!("SupportRegistry::backends")
+        let mut registry = BackendRegistry::new();
+        for support in &self.supports {
+            registry.register(support.backend(server, root));
+        }
+        registry
     }
 
     /// Each support's backend with no server for the workspace at `root`, for checks that read
     /// text alone.
     pub fn backends_static(&self, root: &Path) -> BackendRegistry {
-        let _ = root;
-        // TODO(reshape-language-support): implement
-        todo!("SupportRegistry::backends_static")
+        self.backends(ServerHandle::none(), root)
     }
 }
 
@@ -183,8 +192,8 @@ mod tests {
             self.launch.clone()
         }
 
-        fn workspace_root(&self, _file: &Path, root: &Path) -> PathBuf {
-            root.to_path_buf()
+        fn workspace_root(&self, _file: &Path, root: &Path) -> Result<PathBuf, LspError> {
+            Ok(root.to_path_buf())
         }
 
         fn backend(&self, _server: ServerHandle<'_>, _root: &Path) -> Box<dyn LanguageBackend> {

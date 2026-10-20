@@ -121,6 +121,7 @@ fn apply_held_plan(
     // The gates run on a copy of the plan, outside the store's lock: the baseline compile check
     // takes minutes.
     let mut registry = runner::registry_for_waiting(
+        root,
         client,
         cancel.clone(),
         progress,

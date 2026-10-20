@@ -92,8 +92,14 @@ async fn anchor_covering(
             Some(std::sync::Arc::clone(&client)),
             cancel.clone(),
         )?;
-        let mut registry =
-            runner::registry_for_waiting(client, cancel, progress, logged_trace, options_heartbeat);
+        let mut registry = runner::registry_for_waiting(
+            &root,
+            client,
+            cancel,
+            progress,
+            logged_trace,
+            options_heartbeat,
+        );
         let range = item_anchor::span_of(&anchor, &root, &mut registry)?;
         Ok((anchor, range))
     })

@@ -5,7 +5,7 @@
 //! the `runner` module doc states why none of this prints.
 
 use crate::backends::rust::{ProgressSink, WAIT_HEARTBEAT};
-use crate::backends::RustBackend;
+use crate::language::{LiveServer, ServerHandle, SupportRegistry};
 use crate::plan::RefactorKind;
 use crate::plan_store::{FlushPolicy, PlanStore};
 use crate::registry::BackendRegistry;
@@ -89,18 +89,13 @@ pub use store_run::{
     PlanRun,
 };
 
-/// Build a registry for static checks only (no LSP connection).
-fn registry_for_static() -> BackendRegistry {
-    let mut registry = BackendRegistry::new();
-    registry.register(Box::new(RustBackend::new(
-        "/usr/bin/rust-analyzer",
-        "/tmp",
-        "/tmp",
-    )));
-    registry
+/// Build a registry for static checks only (no LSP connection), for the workspace at `root`.
+fn registry_for_static(root: &Path) -> BackendRegistry {
+    SupportRegistry::with_builtins().backends_static(root)
 }
 
-/// Build a registry backed by rust-analyzer through the shared LSP client.
+/// Build a registry backed by rust-analyzer through the shared LSP client, for the workspace at
+/// `root` that client serves.
 ///
 /// The token is what ends a wait for an index that is still loading: this library states no budget
 /// of its own, so the only bound on such a wait is the caller it belongs to.
@@ -109,12 +104,13 @@ fn registry_for_static() -> BackendRegistry {
 /// `trace` takes the diagnostic account of a seam — but only when `RESTRUCTURE_TRACE` asks for one,
 /// which is read here so that a run gets a trace without every caller having to look.
 pub fn registry_for(
+    root: &Path,
     client: Arc<LspClient>,
     cancel: CancellationToken,
     progress: ProgressSink,
     trace: fn(&str),
 ) -> BackendRegistry {
-    registry_for_waiting(client, cancel, progress, trace, WAIT_HEARTBEAT)
+    registry_for_waiting(root, client, cancel, progress, trace, WAIT_HEARTBEAT)
 }
 
 /// [`registry_for`] for a caller that owns the cadence at which a wait says what it is waiting for.
@@ -123,20 +119,21 @@ pub fn registry_for(
 /// is ready or `cancel` fires. A host passes the one it was configured with and a test passes a
 /// short one, so neither waits [`WAIT_HEARTBEAT`] to see a beat.
 pub fn registry_for_waiting(
+    root: &Path,
     client: Arc<LspClient>,
     cancel: CancellationToken,
     progress: ProgressSink,
     trace: fn(&str),
     wait_heartbeat: Duration,
 ) -> BackendRegistry {
-    let mut registry = BackendRegistry::new();
-    let mut rust = RustBackend::from_lsp_client(client, Some(cancel), progress)
-        .with_wait_heartbeat(wait_heartbeat);
-    if wants_trace(std::env::var_os(TRACE_VARIABLE).as_deref()) {
-        rust = rust.with_trace(trace);
-    }
-    registry.register(Box::new(rust));
-    registry
+    let server = LiveServer {
+        client: &client,
+        cancel: &cancel,
+        progress: &progress,
+        trace: wants_trace(std::env::var_os(TRACE_VARIABLE).as_deref()).then_some(trace),
+        wait_heartbeat,
+    };
+    SupportRegistry::with_builtins().backends(ServerHandle::live(server), root)
 }
 
 /// Execute a plan against the working tree under `root`.
@@ -286,7 +283,7 @@ mod tests {
     #[test]
     fn offers_the_reference_engine_a_cross_crate_move_survey_needs() {
         // Given the registry a check builds
-        let mut registry = registry_for_static();
+        let mut registry = registry_for_static(Path::new("."));
 
         // When the backend for a Rust module is asked for its reference engine
         let backend = registry

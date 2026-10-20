@@ -26,9 +26,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use tddy_code_restructuring::backends::rust::RustSupport;
 use tddy_code_restructuring::spawn_record::JsonlSpawnRecord;
+use tddy_code_restructuring::SupportRegistry;
 use tddy_index_daemon::{CodeIndexPorts, CodeIndexServiceImpl};
-use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry, SpawnObserver};
+use tddy_lsp::{LspRegistry, SpawnObserver};
 use tddy_task::TaskRegistry;
 
 use crate::cli::{IndexDaemonArgs, Lifetime};
@@ -153,13 +155,17 @@ async fn main() -> ExitCode {
 /// One instance, whichever of the two lifetimes this is. Behind an `Arc` even for a single-shot
 /// run, because the serving path needs the same handle in more than one place and a second
 /// construction shape would be a second thing to keep in step.
+///
+/// The allow-list is the one the built-in Rust support launches, with the configured program. This
+/// process cannot share `tddy-daemon`'s registry: the handshake is fixed at spawn, and the handshake
+/// is what this process's server needs to answer code actions and count columns the way it does.
 fn wired(
     rust_analyzer: &str,
     spawn_observer: Option<Arc<dyn SpawnObserver>>,
 ) -> (TaskRegistry, LspRegistry, Arc<CodeIndexServiceImpl>) {
     let tasks = TaskRegistry::new();
     let registry = LspRegistry::new(
-        rust_analyzer_as_this_crate_needs_it(rust_analyzer),
+        SupportRegistry::with_builtin_rust(RustSupport::launching(rust_analyzer)).allow_list(),
         tasks.clone(),
         A_SERVER_MAY_SIT_UNUSED_FOR,
     );
@@ -198,21 +204,4 @@ fn send_stderr_to(path: &std::path::Path) -> anyhow::Result<()> {
          unix operation",
         path.display()
     )
-}
-
-/// rust-analyzer, launched with the handshake the restructure backend needs.
-///
-/// `LspAllowList::rust_only` advertises nothing, and a server told nothing answers accordingly: no
-/// code actions at all — which reads as a range that supports no refactoring — and positions
-/// counted in utf-16 code units while this client counts bytes. Both are settled by the handshake,
-/// which is why this process cannot share `tddy-daemon`'s registry: the handshake is fixed at spawn.
-fn rust_analyzer_as_this_crate_needs_it(program: &str) -> LspAllowList {
-    let mut allow = LspAllowList::new();
-    allow.allow(
-        LanguageId::RUST,
-        LaunchSpec::new(program)
-            .with_capabilities(tddy_code_restructuring::client_capabilities())
-            .with_initialization_options(tddy_code_restructuring::server_settings()),
-    );
-    allow
 }

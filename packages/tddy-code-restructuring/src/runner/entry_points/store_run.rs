@@ -264,6 +264,7 @@ fn apply_held_plan(
         .plan
         .clone();
     let mut registry = registry_for(
+        root,
         client,
         cancel.clone(),
         Arc::clone(&options.progress),

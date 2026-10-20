@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tddy_lsp::registry::workspace_root_for;
+use tddy_lsp::registry::{workspace_root_for, workspace_root_within};
 
 const A_WORKSPACE_MANIFEST: &str = "[workspace]\nresolver = \"2\"\nmembers = [\"packages/*\"]\n";
 const A_PACKAGE_MANIFEST: &str = "[package]\nname = \"member\"\nversion = \"0.1.0\"\n";
@@ -147,4 +147,30 @@ fn roots_a_directory_holding_no_manifest_at_itself() {
 
     // Then the directory named is the root: there is no workspace to lift it to
     assert_eq!(root, tree.path("src"));
+}
+
+#[test]
+fn a_search_bounded_by_a_root_does_not_lift_past_it() {
+    // Given a member crate inside a workspace, and a bound at the member itself
+    let tree = a_main_checkout_workspace().with_dir("packages/member/src");
+    let bound = tree.path("packages/member");
+
+    // When a file in the member is resolved, searching no further out than the member
+    let root = workspace_root_within(&tree.path("packages/member/src"), &bound)
+        .expect("the member's manifest is readable");
+
+    // Then the member is its own root, since the workspace above it lies outside the bound
+    assert_eq!(root, bound);
+}
+
+#[test]
+fn a_target_outside_the_bound_is_refused_rather_than_searched_for() {
+    // Given a workspace, and a bound beside the member rather than around it
+    let tree = a_main_checkout_workspace();
+
+    // When the member is resolved against that bound
+    let refused = workspace_root_within(&tree.path("packages/member"), &tree.path("elsewhere"));
+
+    // Then the search is refused, rather than answered with a root above the bound
+    assert!(refused.is_err(), "expected a refusal, got {refused:?}");
 }
