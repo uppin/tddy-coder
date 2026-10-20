@@ -1,7 +1,7 @@
 /**
  * Acceptance tests: the remote desktop viewer takes the whole screen, and keys reach the desktop.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-18-host-desktops-viewer-fullscreen.md.
+ * Spec: docs/ft/web/screen-sharing-sessions.md (AC-SS-6); packages/tddy-web/docs/remote-desktop-input.md.
  *
  * The Fullscreen and Keyboard Lock APIs are faked on the AUT window (`support/fullscreenBrowser`):
  * a real `requestFullscreen` needs a user activation the runner cannot give, and what the browser

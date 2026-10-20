@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import { isKeyboardLockSupported, lockKeyboard } from "./keyboardLock";
+import { isKeyboardLockSupported, lockKeyboard, unlockKeyboard } from "./keyboardLock";
 
 /** A browser `navigator.keyboard` whose `lock` records what it was asked to lock. */
 function aKeyboardRecordingLocks() {
@@ -50,5 +50,28 @@ describe("keyboardLock", () => {
     // Then the lock was asked for once, with no key list — which is how "every key" is spelled
     expect(keyboard.lock).toHaveBeenCalledTimes(1);
     expect(keyboard.lock.mock.calls[0]).toEqual([]);
+  });
+
+  it("releases the lock", () => {
+    // Given a browser with the Keyboard Lock API
+    const keyboard = aKeyboardRecordingLocks();
+    givenTheBrowserHasKeyboard(keyboard);
+
+    // When the keyboard is unlocked
+    unlockKeyboard();
+
+    // Then the browser was asked to unlock once
+    expect(keyboard.unlock).toHaveBeenCalledTimes(1);
+  });
+
+  it("unlocks nothing, without complaint, where the browser has no keyboard lock", () => {
+    // Given a browser without the Keyboard Lock API
+    givenTheBrowserHasNoKeyboardLock();
+
+    // When the keyboard is unlocked
+    const unlock = () => unlockKeyboard();
+
+    // Then nothing is thrown
+    expect(unlock).not.toThrow();
   });
 });

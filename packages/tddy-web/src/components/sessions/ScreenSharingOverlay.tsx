@@ -26,21 +26,9 @@ export interface ScreenSharingOverlayProps {
   onClose: () => void;
 }
 
-export function ScreenSharingOverlay({
-  room,
-  bridgeIdentity,
-  trackName,
-  width,
-  height,
-  onClose,
-}: ScreenSharingOverlayProps): React.ReactElement {
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [videoTrack, setVideoTrack] = useState<VideoTrack | null>(null);
-  const { isFullscreen, enter, exit } = useElementFullscreen(overlayRef);
+/** Lock every key while full screen, and release it on leaving full screen by any route. */
+function useKeyboardLockWhileFullscreen(isFullscreen: boolean): boolean {
   const [keyboardLocked, setKeyboardLocked] = useState(false);
-
-  // Lock every key while full screen, and release it on leaving full screen by any route.
   useEffect(() => {
     if (!isFullscreen || !isKeyboardLockSupported()) return;
     let active = true;
@@ -58,18 +46,41 @@ export function ScreenSharingOverlay({
       unlockKeyboard();
     };
   }, [isFullscreen]);
+  return keyboardLocked;
+}
 
-  // Closing the desktop must not leave the document full screen on an empty page. The root is
-  // captured at mount: by the time this cleanup runs, React may already have detached the ref.
+/**
+ * Closing the desktop must not leave the document full screen on an empty page. The root is
+ * captured at mount: by the time this cleanup runs, React may already have detached the ref.
+ */
+function useLeaveFullscreenOnUnmount(ref: React.RefObject<HTMLElement | null>): void {
   useEffect(() => {
-    const root = overlayRef.current;
+    const root = ref.current;
     return () => {
       if (!isTargetInActiveFullscreen(root)) return;
       exitDocumentFullscreen().catch((e: unknown) => {
         console.warn("[tddy][ScreenSharingOverlay] leaving full screen failed", e);
       });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref object is stable; the root is read once at mount
   }, []);
+}
+
+export function ScreenSharingOverlay({
+  room,
+  bridgeIdentity,
+  trackName,
+  width,
+  height,
+  onClose,
+}: ScreenSharingOverlayProps): React.ReactElement {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoTrack, setVideoTrack] = useState<VideoTrack | null>(null);
+  const { isFullscreen, enter, exit } = useElementFullscreen(overlayRef);
+
+  const keyboardLocked = useKeyboardLockWhileFullscreen(isFullscreen);
+  useLeaveFullscreenOnUnmount(overlayRef);
 
   const toggleFullScreen = () => {
     const change = isFullscreen ? exit() : enter();
