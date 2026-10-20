@@ -178,7 +178,7 @@ None in `#reshape`: no node consumes this behaviour. The second stack (crate spl
 ## Implementation milestones
 
 - [x] **M1** `test_declarations` + unit tests 19–20
-- [ ] **M2** `repointed_header_in`, `Gate::Test`, `test_gated`; tests 7, 8
+- [x] **M2** `repointed_header_in`, `Gate::Test`, `test_gated`; tests 7, 8
 - [ ] **M3** `reach` on `defined_at` and tree root; tests 5, 16
 - [ ] **M4** `sorted`, `kept_by_outside_references`; tests 9–13
 - [ ] **M5** `follow_changes`, `travelling`; tests 1–4, 6, 14

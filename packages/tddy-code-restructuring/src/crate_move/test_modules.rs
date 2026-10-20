@@ -18,7 +18,7 @@ use crate::plan::RefactorOp;
 use crate::registry::Workspace;
 
 use super::module_files::MovedFile;
-use super::source_scan::TestDeclaration;
+use super::source_scan::{test_declarations, TestDeclaration};
 use super::{ModuleReferences, Move, Result};
 
 /// A test module that follows the move.
@@ -142,17 +142,46 @@ pub(crate) fn follow_changes(
 /// # Errors
 ///
 /// Refuses when a declaring file cannot be read.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-tests-follow): implement — `cluster_edits` picks each carried file's gate"
-)]
 pub(crate) fn test_gated(
     workspace: &Workspace<'_>,
     carried: &[MovedFile],
 ) -> Result<BTreeSet<String>> {
-    // TODO(reshape-tests-follow): implement
-    let _ = (workspace, carried);
-    todo!("test_modules::test_gated")
+    let mut gated = BTreeSet::new();
+    // A member's files begin with its own, which has no `below`, so each run of files that starts
+    // at one is one member's tree, and a declaring file is looked up within the run.
+    for tree in carried.chunk_by(|_, next| !next.below.is_empty()) {
+        for file in tree.iter().filter(|file| !file.below.is_empty()) {
+            if declared_under_test(workspace, tree, &file.below)? {
+                gated.insert(file.from.clone());
+            }
+        }
+    }
+    Ok(gated)
+}
+
+/// Whether one of the modules `below` leads through is declared `#[cfg(test)]` in the file that
+/// declares it, among the files of its member's `tree`.
+///
+/// TODO(reshape-tests-follow): only a declaration at the top level of its declaring file is read;
+/// a test declaration inside an inline module on the way down is not.
+fn declared_under_test(
+    workspace: &Workspace<'_>,
+    tree: &[MovedFile],
+    below: &[String],
+) -> Result<bool> {
+    for (depth, name) in below.iter().enumerate() {
+        let Some(declaring) = tree.iter().find(|file| file.below == below[..depth]) else {
+            continue;
+        };
+        let text = workspace.read(&declaring.from)?;
+        if test_declarations(&text)
+            .iter()
+            .any(|declaration| &declaration.name == name)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Every reason operation `index` of `ops` (`op`) cannot take a following test module along, read

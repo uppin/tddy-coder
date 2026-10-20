@@ -18,7 +18,7 @@ use super::module_home;
 use super::new_crate::{self, NewCrate};
 
 use super::malformed;
-use crate::crate_move::{carried, moving};
+use crate::crate_move::{carried, moving, test_modules};
 use crate::edit::{FileEdit, TextEdit};
 
 /// A set of modules that move to one destination **as a single unit**.
@@ -176,6 +176,7 @@ fn cluster_edits(
         the_set: &the_set,
         merged: MergedChanges::default(),
         totals: carried::SetTotals::default(),
+        gated: test_modules::test_gated(workspace, &the_set.carried.concat())?,
     };
     for (member, files) in members.iter().zip(&the_set.carried) {
         gathering.member_changes(engine, workspace, member, files)?;

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use super::super::Result;
 use super::MergedChanges;
 use super::ModuleReferences;
@@ -11,6 +13,8 @@ pub(super) struct Gathering<'a> {
     pub(super) the_set: &'a carried::TheSet,
     pub(super) merged: MergedChanges,
     pub(super) totals: carried::SetTotals,
+    /// The carried files reached through a `#[cfg(test)]` declaration, read as test code throughout.
+    pub(super) gated: BTreeSet<String>,
 }
 
 impl Gathering<'_> {
@@ -31,6 +35,7 @@ impl Gathering<'_> {
             the_set,
             merged,
             totals,
+            gated,
         } = self;
         let mut rewrites = Vec::new();
         let mut origin_paths = Vec::new();
@@ -43,11 +48,16 @@ impl Gathering<'_> {
                 &the_set.travelling,
             )?;
             let text = workspace.read(&file.from)?;
-            let header = header::repointed_header_at(
+            let gate = if gated.contains(&file.from) {
+                header::Gate::Test
+            } else {
+                header::Gate::AsWritten
+            };
+            let header = header::repointed_header_in(
                 workspace,
                 &text,
                 member,
-                &file.below,
+                &header::FileInTree::carried(member, &file.below, gate),
                 &the_set.co_moving,
             )?;
 
