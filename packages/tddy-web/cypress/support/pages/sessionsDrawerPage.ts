@@ -25,6 +25,7 @@ import {
   sessionsVncRemoveBtn,
   sessionsScreenSharingTargetRow,
   sessionsScreenSharingStartBtn,
+  sessionsScreenSharingStartError,
   sessionsScreenSharingStopBtn,
   sessionsScreenSharingRemoveBtn,
   sessionsRuntimeTerminal,
@@ -474,6 +475,10 @@ export const sessionsDrawerPage = {
   /** The Start button for a given screen-sharing target. */
   screenSharingStartBtn: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsScreenSharingStartBtn(targetId), { timeout: 5000, ...options }),
+
+  /** Why the last start of a given screen-sharing target failed, shown beside its row. */
+  screenSharingStartError: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsScreenSharingStartError(targetId), { timeout: 5000, ...options }),
 
   /** The Stop button for a given screen-sharing target. */
   screenSharingStopBtn: (targetId: string, options?: Parameters<typeof cy.get>[1]) =>

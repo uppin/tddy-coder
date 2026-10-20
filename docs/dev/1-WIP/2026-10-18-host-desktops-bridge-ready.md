@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **PR**: [#658](https://github.com/uppin/tddy-coder/pull/658)
 **Type**: Feature + Bug fix
-**Stack**: `#host-desktops` 6/8. Base: `feature/host-desktops/viewer-fullscreen`.
+**Stack**: `#host-desktops` 6/8. Base: `master` (repointed after #657 merged 2026-10-20; rebased `--onto origin/master` from the old base tip `3a2fab9fb`).
 
 ## Initial Discovery
 
@@ -103,10 +103,10 @@ A wrong password says so; clicks land right on any desktop size.
 
 ## Scope
 
-- [~] Testing — acceptance and unit tests written and failing (draft PR contract)
+- [x] Testing — acceptance, unit and integration tests pass (scoped run, see Validation Results)
 
 - [x] Readiness protocol + `run_bridge` emission
-- [ ] Authentication tagging in both bridges (VNC password path open: see the FIXME in `packages/tddy-vnc/src/vnc_client.rs`)
+- [x] Authentication tagging in both bridges (VNC: `security::negotiate` owns the VNC Authentication SecurityResult read, `SecurityError::Refused` → `AuthenticationRefused`; RDP: a CredSSP connector error → `AuthenticationRefused`)
 - [x] Daemon waits, maps, reaps; real size in replies
 - [x] Web shows start errors; resize TODO filed
 
@@ -178,6 +178,43 @@ Unit (`tddy-screenshare/src/readiness.rs`): `a_ready_line_round_trips`, `a_failu
 
 ## Validation Results
 ### /validate-changes
+**2026-10-20 — pass 1.** Risk: Critical 0, Warning 1, Info 3.
+
+Stack gate: base #657 squash-merged into master and #658 repointed to `master`; rebased
+`--onto origin/master 3a2fab9fb` (backup branch kept), range-diff identical, pushed with a lease
+(`841b1edd3` → `97ea1d1c5`). Leak check clean: `origin/master..HEAD` is this PR's four commits, 26
+files, all claimed by this changeset. Successor #659 (`x11-channels`) is now stale on its base.
+
+Stack boundary: Responsibility delivered (no stubs in the touched `src/`); Dependencies not
+re-implemented; the widened Boundary (VNC Authentication SecurityResult read, developer decision
+2026-10-20) is recorded above and is the only negotiation change; no dependent's behaviour; no
+parent-owned file deleted.
+
+Build: `./dev cargo clippy -p tddy-vnc -p tddy-screenshare -p tddy-screen-sharing -p tddy-rdp --all-targets -- -D warnings` clean.
+Tests: `./test -p tddy-screenshare -p tddy-vnc -p tddy-rdp -p tddy-screen-sharing`, 117 passed, 0 failed;
+Cypress `HostDesktopStartFailureAcceptance.cy.tsx`, 3/3 passing.
+
+| Item | Old | Actual | Now |
+|---|---|---|---|
+| Authentication tagging in both bridges | 🔲 | VNC via `security::negotiate` + `tag_refused_sign_in`; RDP CredSSP → `AuthenticationRefused` | ✅ |
+| Testing | ⚠️ red | all pass | ✅ |
+| — | — | RDP tagging test `a_wrong_password_on_an_nla_server_is_tagged_as_a_refused_sign_in` (verified failing with the tag removed) | 🆕 |
+| — | — | Session-row start error Cypress test `says on the session's target row that the desktop refused the sign in` (verified failing with the row error hidden) | 🆕 |
+| — | — | Session-scope `try_spawn_bridge`: a `prepare_bridge` failure is now `FailedPrecondition` instead of a silent `info!` skip | 🆕 |
+
+Findings:
+- **[WARNING]** `screen_sharing_service.rs` `start_stream`: no daemon config, an unknown target or an
+  unconvertible target still answers `Ok` with `0×0` and no bridge. Pre-existing. AC-SS-9's
+  `opening_a_desktop_returns_the_coordinates_a_viewer_needs` pins success without config, so this is
+  out of scope here: filed as [2026-10-20-session-start-without-a-bridge-succeeds.md](../todo/2026-10-20-session-start-without-a-bridge-succeeds.md).
+- **[INFO]** `BridgeSpawnConfig.width/height` are sent as `0`; nothing reads `BridgeConfig.width/height`
+  (the bridges take the size from the server: `wait_for_dimensions`, RDP `desktop_size`).
+- **[INFO]** The first stdout line of a bridge must be the readiness line: anything else a bridge
+  printed first fails the start as "unreadable". Bridges log to stderr only, so this holds today.
+- **[INFO]** Two stand-in bridges: the inline `FakeBridge` (`src/screen_sharing_service.rs` `mod tests`)
+  and `tests/common/mod.rs` `StandInBridge`. An integration test crate cannot share a `#[cfg(test)]`
+  module of the library, so merging them needs a shared testing module or feature: left to
+  /validate-tests.
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code

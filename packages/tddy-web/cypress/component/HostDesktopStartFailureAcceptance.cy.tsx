@@ -14,14 +14,17 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { HostRemoteDesktopSchema, ProbeOutcome } from "../../src/gen/host_pb";
-import { ScreenSharingService } from "../../src/gen/screen_sharing_pb";
+import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
+import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aBridgeRecordingInput, BUTTON } from "../support/rpc/screenSharingInputBridge";
 import { desktopPage } from "../support/pages/screenSharingOverlayPage";
 import { hostDesktopPage } from "../support/pages/hostsScreenPage";
+import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { aSessionsDrawerBackend } from "../support/rpc/screenSharingBackend";
 
 const HOST = "workstation-1";
 /** The directory lists the host its row is about — a row exists only for a listed host. */
@@ -80,6 +83,39 @@ function aHostWhoseDesktopOpensAt(size: { width: number; height: number }) {
   });
 }
 
+/** A session with a desktop saved on it — the session inspector's own way into a desktop. */
+const A_SESSION = {
+  sessionId: "ss-start-failure-0000-0000-0000-000000000001",
+  createdAt: "2026-10-18T09:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/start-failure-project",
+  pid: 33333,
+  isActive: false,
+  projectId: "proj-ss-start-failure",
+  daemonInstanceId: "",
+  workflowGoal: "Start failure session",
+  pendingElicitation: false,
+};
+const A_SESSION_TARGET = {
+  id: "t-start-failure-001",
+  label: "Build Box",
+  host: "192.168.10.9",
+  port: 5900,
+  protocol: Protocol.VNC,
+  username: "",
+};
+/** The session list is open by default only on a desktop-width window. */
+const A_DESKTOP_WINDOW = { width: 1280, height: 800 };
+
+/** A session whose saved desktop turns the sign-in down, failing the start as the daemon does. */
+function aSessionWhoseDesktopRefusesTheSignIn() {
+  return aSessionsDrawerBackend([A_SESSION])
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [A_SESSION_TARGET] }))
+    .onUnary(ScreenSharingService.method.startStream, () => {
+      throw new ConnectError(THE_DESKTOPS_REASON, Code.Unauthenticated);
+    });
+}
+
 function theHostRow() {
   return withSelectedDaemon(
     <HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />,
@@ -125,5 +161,23 @@ describe("Host desktop start failure", () => {
 
     // Then the click lands in the middle of the desktop, in the desktop's own pixels
     bridge.expectPointerLandings({ ...THE_MIDDLE_OF_THE_REPORTED_DESKTOP, buttonMask: BUTTON.left });
+  });
+
+  it("says on the session's target row that the desktop refused the sign in", () => {
+    // Given a session whose saved desktop turns the password down, open on its Screen Sharing tab
+    cy.viewport(A_DESKTOP_WINDOW.width, A_DESKTOP_WINDOW.height);
+    window.localStorage.setItem("tddy_session_token", "fake-token");
+    mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), aSessionWhoseDesktopRefusesTheSignIn());
+    sessionsDrawerPage.drawerItem(A_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorScreenSharingTab().click();
+
+    // When the operator starts that desktop
+    sessionsDrawerPage.screenSharingStartBtn(A_SESSION_TARGET.id).click();
+
+    // Then that target's row says the desktop refused the sign-in, in the desktop's own words
+    sessionsDrawerPage
+      .screenSharingStartError(A_SESSION_TARGET.id)
+      .should("have.attr", "role", "alert")
+      .and("have.text", `The desktop refused the sign-in: ${THE_DESKTOPS_REASON}`);
   });
 });

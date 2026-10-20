@@ -1212,6 +1212,10 @@ export const sessionsScreenSharingTargetRow = (targetId: string) =>
 export const sessionsScreenSharingStartBtn = (targetId: string) =>
   `sessions-screen-sharing-start-${targetId}`;
 
+/** `[data-testid="sessions-screen-sharing-start-error-<targetId>"]` — why that target's start failed */
+export const sessionsScreenSharingStartError = (targetId: string) =>
+  `sessions-screen-sharing-start-error-${targetId}`;
+
 /** `[data-testid="sessions-screen-sharing-stop-<targetId>"]` — Stop stream button */
 export const sessionsScreenSharingStopBtn = (targetId: string) =>
   `sessions-screen-sharing-stop-${targetId}`;
