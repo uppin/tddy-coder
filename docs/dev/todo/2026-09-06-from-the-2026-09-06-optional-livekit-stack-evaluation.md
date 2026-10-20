@@ -35,6 +35,13 @@ these are the design costs it *exposed*, not defects it introduced.
   sharing and `tddy-daemon-auth` no longer re-read `api_key` / `api_secret` to mint: the daemon builds
   one `RoomTokenMinter` from the `livekit:` block and they ask it. Screen sharing still reads the LiveKit
   *URL*, and `mint_live_kit_token` still checks that the credentials are present before minting.
+  **Touched, not closed, by `#satellite` 13/13 ([#635](https://github.com/uppin/tddy-coder/pull/635)).**
+  The ratchet closed: no daemon library crate names LiveKit, and every room capability reaches the
+  session host through a port the runtime wires once. But "configured?" is still re-derived from the
+  `livekit:` block in the core: `tddy-agent-launch` calls `spawner::livekit_creds_from_config` in
+  `svc_start_session_core.rs`, `svc_resume_session.rs` and `claude_cli_spawn_steps.rs`, and the
+  session host's `terminal_bridge_impl.rs` does too, beside the plugin's own credentials check and
+  the web readers (#631).
 - **`packages/tddy-web/src/components/GhosttyTerminalSession.tsx` lands at 960 lines.** The terminal
   convergence removed a duplicate path (`GhosttyTerminalLiveKit` 736 + `GhosttyTerminalGrpc` 631) but
   produced one file above any comfortable review size. The cheapest extraction is the history/offset

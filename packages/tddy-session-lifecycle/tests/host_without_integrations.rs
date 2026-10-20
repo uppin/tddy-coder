@@ -1,6 +1,5 @@
 //! A session host built with nothing wired — every extension port at its null object — still
-//! serves a local session end to end. PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-lifecycle-launch.md` § Success Criteria:
+//! serves a local session end to end (`docs/ft/daemon/session-room.md` § Configuration):
 //! the daemon's wiring may leave the LiveKit plugin out, and what is left is a working daemon.
 
 use std::path::{Path, PathBuf};

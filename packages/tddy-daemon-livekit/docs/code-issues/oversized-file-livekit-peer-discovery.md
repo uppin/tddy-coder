@@ -6,7 +6,7 @@
 **Metrics:** **1,407 production lines** (2026-10-20; 1,565 at detection) · budget 500 · **2.8× over**
 **Thresholds breached:** length 1407 > 500
 **Restructure:** seam A closed by #632 (the typed helpers moved to `tddy_daemon_kernel::peer_calls`); seams B and C designed, not applied
-**Status:** Open — partly fixed 2026-10-20 (−293, #632, `#satellite` 10/13); regressed 2026-10-17 (+3 from #624, `#satellite` 2/13; deferred with the developer's consent); — regressed 2026-10-17 (+39 from #623, `#satellite` 1/13; deferred with the developer's consent); **unclaimed** — regressed 2026-10-04 (+22, #512)
+**Status:** Open — narrowed 2026-10-21 (−17, #635); partly fixed 2026-10-20 (−293, #632, `#satellite` 10/13); regressed 2026-10-17 (+3 from #624, `#satellite` 2/13; deferred with the developer's consent); — regressed 2026-10-17 (+39 from #623, `#satellite` 1/13; deferred with the developer's consent); **unclaimed** — regressed 2026-10-04 (+22, #512)
 
 ## Measurement history
 
@@ -19,6 +19,7 @@
 | 2026-10-17 | 1,658 → 1,697 (+39) | `#satellite` 1/13 (#623): the discovery loop reports `Connecting` / `Connected` / `Unreachable` on the integration status board (`common_room_failure_state`, `common_room_lost_state`, a trailing `IntegrationReporter`). Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` — and because #624 (`#satellite` 2/13) also edits this file |
 | 2026-10-17 | 1,697 → 1,700 (+3) | `#satellite` 2/13 (#624): the two forwarding call sites build `CommonRoom::new(LiveKitPeerForwarder::new(slot), &config)` instead of `CommonRoom::from_config(slot, &config)`. Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` — and because later `#satellite` nodes also edit this file |
 | 2026-10-20 | 1,700 → 1,407 (−293) | `#satellite` 10/13 (#632): the thirteen `forward_*_via_livekit` helpers moved to `tddy_daemon_kernel::peer_calls` (seam A, by hand-written move rather than `extract_module`); the file keeps a `pub use` of each under its old name until node 11 moves the last callers. Narrowed, not closed |
+| 2026-10-21 | 1,407 → 1,390 (−17) | `#satellite` 13/13 (#635): the `StartSessionPeerRoute` alias and `classify_start_session_peer_route` wrapper are deleted; callers use the kernel's `classify_peer_route` / `PeerRoute`. Smaller, still over |
 
 ## What would close it — designed seams
 

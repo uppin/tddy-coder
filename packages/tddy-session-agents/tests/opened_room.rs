@@ -1,5 +1,5 @@
-//! Attaching an agent from another daemon needs the session's room — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-lifecycle-launch.md`.
+//! Attaching an agent from another daemon needs the session's room — `docs/ft/daemon/session-room.md`
+//! § When the room is created (`AttachSessionAgent`).
 
 use pretty_assertions::assert_eq;
 use tddy_daemon_extensions::OpenedRoom;

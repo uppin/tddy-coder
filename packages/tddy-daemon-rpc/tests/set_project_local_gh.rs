@@ -144,10 +144,13 @@ fn a_daemon(os_user: &str, tddy_data_dir: PathBuf) -> TestDaemon {
         tddy_data_dir,
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string())),
         None,
-        tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(LiveKitDiscoveryHandles {
-            eligible_daemon_source: eligible,
-            common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-        })),
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+            }),
+        ),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     ))
