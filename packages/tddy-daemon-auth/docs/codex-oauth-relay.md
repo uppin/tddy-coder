@@ -30,7 +30,7 @@ cargo test -p tddy-integration-tests --test codex_oauth_web_relay_acceptance -- 
 
 ## Related package docs
 
-- **[oauth-loopback-tunnel.md](./oauth-loopback-tunnel.md)** — operator TCP + **`StreamBytes`** bridge, in this crate
+- **[oauth-loopback-tunnel.md](../../tddy-daemon-livekit/docs/oauth-loopback-tunnel.md)** — operator TCP + **`StreamBytes`** bridge, in the LiveKit plugin
 
 ## Feature documentation
 

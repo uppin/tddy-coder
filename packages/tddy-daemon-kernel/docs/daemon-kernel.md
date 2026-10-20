@@ -232,6 +232,23 @@ every forward is a `FailedPrecondition` naming the call and the peer.
   `spawn_worker_request_timeout + peer_forward_timeout` (`split_forward_deadline`, 330 s by default) so a
   peer that clones first, and may stop to ask for a passphrase, is waited for; a longer setting lengthens it too.
 
+## `peer_calls` — typed RPCs forwarded to a peer
+
+`peer_calls` holds the thirteen typed forwards over `CommonRoom`: each encodes its request, forwards it
+to the peer's service and method, and decodes the answer. The unary ones go through one private
+`forward_unary`; a body that does not decode is `Internal`, `"decode <ResponseType>: …"`.
+
+| Family | Functions | Service |
+|---|---|---|
+| session | `forward_start_session`, `forward_start_session_within` (explicit deadline), `forward_stream_start_session`, `forward_delete_session` | `session.SessionService` |
+| exec tool | `forward_stream_execute_tool` | `exec_tools.ExecToolService` |
+| project | `forward_add_project_to_host`, `forward_set_project_default_branch`, `forward_set_project_accounts` | `project.ProjectService` |
+| session files | `forward_upload_staged_attachment_chunk`, `forward_list_staged_attachments`, `forward_delete_staged_attachment`, `forward_read_host_document`, `forward_stream_read_host_document` | `tddy_service::SESSION_FILES_SERVICE` |
+
+They are tested over a scripted `PeerForwarder` (`tests/peer_calls.rs`): the service, method and
+encoded body carried, a garbage answer as `Internal`, and a stream relayed frame by frame. The LiveKit
+plugin re-exports each under its old `*_via_livekit` name for the callers that have not moved.
+
 ## `keyring.group_secret` — which peers may hold this daemon's credentials
 
 `DaemonConfig.keyring: Option<KeyringConfig>` is `#keyring` 6/9's one setting:

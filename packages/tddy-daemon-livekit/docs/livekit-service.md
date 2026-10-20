@@ -9,20 +9,25 @@ stream.
 | Module | What is in it |
 |---|---|
 | `session_room` | the per-session room — naming, the poll loop, the WIP ref and the delta ring, and the four trait ports. Detail: [session-room.md](./session-room.md) |
-| `livekit_peer_discovery` | the metadata advertisement (with `AdvertisedSigningKey`), `CommonRoomPeerRegistry`, `peer_signing_public_keys`, `daemon_rpc_identity`, and the forwarding helpers |
+| `livekit_peer_discovery` | the metadata advertisement (with `AdvertisedSigningKey`), `CommonRoomPeerRegistry`, `peer_signing_public_keys`, `daemon_rpc_identity`, and `pub use` re-exports of the kernel's typed forwarding helpers under their old `forward_*_via_livekit` names, for the session crates that still call them |
 | `livekit_peer_forwarder` | `LiveKitPeerForwarder`: the kernel's `PeerForwarder` port over the common room — see below |
 | `common_room_supervisor` | the `CommonRoomSupervisor` trait and `SupervisedCommonRoom` — joining the common room and keeping it joined |
 | `livekit_rooms_stream` | `RoomRoster`, `RosterError`, and `pump_rooms`, the 3 s poller behind the rooms stream |
 | `livekit_service` | `LiveKitServiceImpl` and `build_livekit_entry` — **authored here**, because family T needs a service to be served by once it leaves `ConnectionServiceImpl` |
 | `session_reach` | LiveKit's implementation of the core's `SessionReach` port: `LiveKitSessionReach`, its `session_room.SessionRoomService` entry (`OpenSessionRoom`), `livekit_integration_state` and `LIVEKIT_INTEGRATION_ID`. Detail: [below](#livekitsessionreach--opening-the-room-for-a-reached-session) |
-| `peer_routing` | `PeerRouting`: this daemon's routing identity, the eligible peers (`set_eligible_daemon_source`, `eligible_instance_ids`), the route an addressed request takes (`classify_daemon_route`, `classify_addressed_daemon_route`, `stream_served_by_peer`) and the `CommonRoom` handle (room slot plus the peer-forward deadline) a forward travels through; `PeerRouting::new` builds it from its `DaemonConfig`. Shared, not copied, by the session host and the RPC families above it, so a session RPC and an exec-tool RPC addressed at one daemon agree on who owns the call |
+| `peer_routing` | a re-export of [`tddy_host_service::peer_routing`](../../tddy-host-service/docs/host-service.md#peerrouting--which-daemon-serves-an-addressed-request), kept for the session crates that still name this path |
+| `oauth_loopback_tunnel` | the operator-side Codex OAuth callback over the common room — [oauth-loopback-tunnel.md](./oauth-loopback-tunnel.md) |
 | `session_admission_service` | the room-admission handshake: `SessionAdmissionRegistry`, the short-TTL admission token (`ADMISSION_TOKEN_TTL`, `ADMISSION_RENEW_MARGIN`) and `SessionAdmissionServiceImpl`, whose `AdmitOwningDaemon` re-mints a token only for a daemon the registry still holds, so a revoked daemon stays out of the room |
 | `livekit_peer_transport` | `LiveKitPeerTransport`: `tddy-credential-sync`'s `PeerTransport` over the common room, for `#keyring` 6/9's credential propagation — see below |
 
-`peer_routing` and `session_admission_service` hold no session-host state. `tddy-session-lifecycle`
-re-exports both by name (`pub use tddy_daemon_livekit::{peer_routing, session_admission_service};`),
-and its host keeps one-line delegations to `PeerRouting` for the methods it serves itself, which is
-why those `PeerRouting` methods are `pub`.
+`session_admission_service` holds no session-host state. `tddy-session-lifecycle` re-exports it by
+name, and re-exports `peer_routing` from `tddy-host-service` and `oauth_loopback_tunnel` from here.
+
+The typed forwarding helpers and `PeerRouting` are transport-neutral, so they live outside this crate:
+[`tddy_daemon_kernel::peer_calls`](../../tddy-daemon-kernel/docs/daemon-kernel.md#peer_calls--typed-rpcs-forwarded-to-a-peer)
+and `tddy_host_service::peer_routing`. This crate's old paths are plain `pub use` re-exports (not
+`#[deprecated]`, which the workspace `clippy -D warnings` gate would turn into errors in the crates
+still calling them).
 
 ## `LiveKitPeerForwarder` — carrying a forward to a peer daemon
 
@@ -43,8 +48,8 @@ idle rule and the errors a caller sees; this carries the call and nothing else.
   room's shared response loop blocks for every call in flight. The kernel's relay drains into an
   unbounded buffer and never stalls; a second consumer must do the same.
 
-`PeerRouting` and the common-room discovery loop build their `CommonRoom` through it, over the slot they
-already hold.
+The daemon's runtime builds the `CommonRoom` it hands `PeerRouting` through it, and the common-room
+discovery loop builds its own the same way, over the slot they already hold.
 
 ## `livekit.LiveKitService`
 
@@ -245,7 +250,7 @@ chosen rather than defaulted.
 | `livekit_peer_discovery` → `split_session::SPLIT_AGENT_IDENTITY_PREFIX` | the constant lives in `tddy_service::participant_identity`, beside the rule that refuses it, and `tddy_daemon_kernel::daemon_identity` re-exports it for the crates that mint agents' identities; `split_session` re-exports that. Defining it here instead would make the **producer** of the identity depend on the crate that *refuses* it, and would break again when `split_session` moves to a third crate |
 | `common_room_supervisor` → `daemon_config_service` → `livekit_peer_discovery` | the `CommonRoomSupervisor` **trait** moves to `common_room_supervisor`, beside its one implementation, and `daemon_config_service` re-exports it. Re-pointing the return leg alone does not do it: the trait import is a `livekit → daemon` edge whether or not it closes a loop. The return leg was re-pointed too, from a re-export in a departing module to its real home, `tddy_daemon_kernel::daemon_identity::local_instance_id_for_config` |
 | `session_room` → `session_attachments::list_session_attachments` | the listing is lifted to `tddy_workflow::artifact_paths`, beside the `session_attachments_root` that names the very directory it reads, and the daemon re-exports it. Not the kernel: this is a filesystem convention `tddy-workflow` already owns, not a daemon identity |
-| `livekit_peer_discovery` → `oauth_loopback_tunnel` | not a cycle, but a forbidden direction — the LiveKit crate must not reach the identity boundary. `spawn_oauth_loopback_tunnel` moves to `tddy_daemon_auth::oauth_loopback_tunnel`, the module whose supervisor it starts. `spawn_common_room_discovery_task`, which composes that supervisor with the discovery loop, moves to `tddy-daemon`'s `runtime.rs` — after the split that is the only crate holding both halves |
+| `livekit_peer_discovery` → `oauth_loopback_tunnel` | at the split the tunnel went to `tddy-daemon-auth`, so the LiveKit crate would not reach the identity boundary. The tunnel has since moved back here as `oauth_loopback_tunnel`, with its metadata parser, because it is LiveKit work and the auth crate names no LiveKit crate; `spawn_common_room_discovery_task`, which composes it with the discovery loop, stays in `tddy-daemon`'s `runtime.rs` |
 
 A fifth, `livekit_peer_discovery ⇄ multi_host`, needed nothing. `multi_host` went to
 `tddy-host-service` in node 1, and nothing in that crate names a LiveKit module, so the edge runs

@@ -25,5 +25,5 @@ Logging uses **`log::`** with target **`tddy_daemon::codex_oauth`**; full query 
 
 - **[The identity boundary and the LiveKit service](auth-livekit-services.md)** — the crate these modules live in
 - **[`codex-oauth-relay.md`](../../../packages/tddy-daemon-auth/docs/codex-oauth-relay.md)** — API, tests, and commands
-- **[`oauth-loopback-tunnel.md`](../../../packages/tddy-daemon-auth/docs/oauth-loopback-tunnel.md)** — operator TCP + LiveKit tunnel supervisor
+- **[`oauth-loopback-tunnel.md`](../../../packages/tddy-daemon-livekit/docs/oauth-loopback-tunnel.md)** — operator TCP + LiveKit tunnel supervisor
 - **[Codex OAuth web relay (product)](../web/codex-oauth-web-relay.md)** — dashboard UX and scope

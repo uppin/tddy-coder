@@ -19,9 +19,12 @@ boundary in fact and not only in name.
 | `account_linking_provider` | `github_account_linking_provider` — the device-flow-only `GitHubOAuthProvider` an account link runs on, built from the login `client_id` (a public-client provider; the secret is never sent), or `None` for a stub or a `github:` block that serves no sign-in. It has no notion of a session, so nothing built on it can mint one. Used by `tddy-daemon`'s `account_linking` — [account-linking.md](../../tddy-accounts/docs/account-linking.md) |
 | `github_pr_credentials` | `PrLookup` / `pr_lookup_for_caller`, the three outcomes a PR list reads by, and `retained_github_token`, the caller's GitHub token read from their open credential vault |
 | `codex_oauth_relay` | authorize-URL validation and callback parsing — [codex-oauth-relay.md](./codex-oauth-relay.md) |
-| `oauth_loopback_tunnel` | the operator-side TCP listener and its LiveKit bridge — [oauth-loopback-tunnel.md](./oauth-loopback-tunnel.md) |
-| `codex_oauth_participant_metadata` | the `codex_oauth` participant-metadata shape both halves read |
-| `token_provider` | the token-source seam a caller injects |
+| `token_provider` | `MinterTokenProvider`, the token service's `TokenProvider` over the injected `RoomTokenMinter`, and `ROOM_TOKEN_TTL` — six hours, the same default `tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS` names, spelled here because this crate names no LiveKit crate (as `tddy-session-sync` does) |
+
+The operator-side OAuth loopback tunnel and the `codex_oauth` participant-metadata parser it reads
+live in the LiveKit plugin — [oauth-loopback-tunnel.md](../../tddy-daemon-livekit/docs/oauth-loopback-tunnel.md).
+`tddy-daemon-auth` names no LiveKit crate in its `[dependencies]`; its mint suites keep
+`tddy-daemon-livekit` and `tddy-livekit` as dev-dependencies.
 
 ## Services
 
@@ -357,7 +360,7 @@ cargo test -p tddy-daemon-auth
 ## Related
 
 - [codex-oauth-relay.md](./codex-oauth-relay.md) — authorize-URL validation and callback parsing
-- [oauth-loopback-tunnel.md](./oauth-loopback-tunnel.md) — the operator TCP + `StreamBytes` bridge
+- [oauth-loopback-tunnel.md](../../tddy-daemon-livekit/docs/oauth-loopback-tunnel.md) — the operator TCP + `StreamBytes` bridge, in the LiveKit plugin
 - [`tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md) — mints room JWTs through a port, and carries each daemon's advertised key as opaque strings
 - [`tddy-github` session tokens](../../tddy-github/docs/session-token.md) — the `v2` format these keys sign
 - [`tddy-github` device flow](../../tddy-github/docs/device-flow.md) — the provider seam, both sign-in flows and `LoginAdmission`

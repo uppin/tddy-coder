@@ -1,6 +1,6 @@
 //! Typed RPCs forwarded to a peer daemon: the request is encoded, carried to that peer's service and
 //! method, and the answer decoded — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-forwarding-consumers.md`. In memory: the
+//! `packages/tddy-daemon-kernel/docs/daemon-kernel.md` § `peer_calls`. In memory: the
 //! common room forwards through a scripted `PeerForwarder`.
 
 use std::sync::{Arc, Mutex};
@@ -20,10 +20,16 @@ use tokio::sync::mpsc;
 
 const PEER: &str = "peer-daemon-1";
 
+/// The scripted answer: one unary body (`Ok`) or the frames of a stream (`Err`).
+type ScriptedAnswer = Result<Vec<u8>, Vec<Vec<u8>>>;
+
+/// One forwarded call as carried: peer, service, method, encoded body.
+type CarriedCall = (String, String, String, Vec<u8>);
+
 /// Answers the one call it is scripted for and records what it carried.
 struct OnePeerCall {
-    answer: Mutex<Option<Result<Vec<u8>, Vec<Vec<u8>>>>>,
-    carried: Mutex<Vec<(String, String, String, Vec<u8>)>>,
+    answer: Mutex<Option<ScriptedAnswer>>,
+    carried: Mutex<Vec<CarriedCall>>,
 }
 
 impl OnePeerCall {
@@ -41,7 +47,7 @@ impl OnePeerCall {
         }
     }
 
-    fn carried(&self) -> Vec<(String, String, String, Vec<u8>)> {
+    fn carried(&self) -> Vec<CarriedCall> {
         self.carried.lock().unwrap().clone()
     }
 }

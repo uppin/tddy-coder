@@ -143,8 +143,9 @@ The lists, in the test file:
   allowance to the binary's wiring. These libraries join rooms through
   [`tddy-room-client`](../../tddy-room-client/docs/room-client.md).
 - `KNOWN_OFFENDERS` (library crates that still name a LiveKit crate): `tddy-agent-launch`,
-  `tddy-daemon-auth`, `tddy-daemon-rpc`, `tddy-session-agents`,
-  `tddy-session-files`, `tddy-session-lifecycle`, `tddy-session-split`.
+  `tddy-session-agents`, `tddy-session-lifecycle`, `tddy-session-split`. `tddy-daemon-auth`,
+  `tddy-daemon-rpc` and `tddy-session-files` left it once their peer forwards went through
+  `tddy_daemon_kernel::peer_calls` and the OAuth tunnel moved into the plugin.
 
 "Names" is a `[dependencies]` or `[build-dependencies]` entry, optional ones included;
 `[dev-dependencies]` are not counted, because a test may stand up a real LiveKit server. The

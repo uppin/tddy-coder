@@ -12,6 +12,7 @@ The crate is the host subsystem plus the host-key path, and nothing else.
 | `service.rs` | 1 | `HostServiceImpl` — the nine handlers, the state they read, and the `with_*` builders that inject each OS seam |
 | `stream.rs` | 1 | `MpscHostPromptStream`, `MpscHostStatsStream` — the two server-streaming adapters |
 | the registry | `host_registry`, `multi_host`, `host_session_service` | which machines exist, and which project lives on which |
+| routing | `peer_routing` | `PeerRouting` — which daemon serves an addressed request ([below](#peerrouting--which-daemon-serves-an-addressed-request)) |
 | the probes | `host_tooling`, `host_stats`, `remote_desktop_probe`, `host_desktop_targets` | what a host has, how busy it is, and whether a desktop on it can be reached |
 | the prompt channel | `host_prompts`, `host_prompt_stream`, `host_messages` | the daemon-asks-the-operator mechanism and its wire mapping |
 | the key path | `host_keypair`, `host_private_key`, `ssh_agent`, `ssh_agent_add` | the host RSA keypair, per-user private-key reading, and the agent protocol |
@@ -224,6 +225,27 @@ Injected for tests via `HostServiceImpl::with_host_prompts`, `with_host_keypair`
 `with_ssh_agent_key_adder` and `with_host_user_files` — the OS seams only. The prompt, the
 encryption, the decrypt and the key unlock run for real.
 
+## `PeerRouting` — which daemon serves an addressed request
+
+`PeerRouting::new(config, eligible, Option<CommonRoom>)` holds this daemon's routing identity, the
+peers it may route to (an `EligibleDaemonSource`, replaceable with `set_eligible_daemon_source`) and
+the kernel `CommonRoom` a forward travels through. It lives here, beside `EligibleDaemonSource`, not
+in the kernel, because this crate already depends on the kernel. It names no LiveKit crate: the
+daemon's runtime builds the `CommonRoom` over the LiveKit forwarder and hands it in.
+
+- `classify_daemon_route` / `classify_addressed_daemon_route` — `PeerRoute::Local` for an empty id or
+  this daemon's, `Forward { peer_instance_id }` for an eligible peer, `FailedPrecondition` otherwise.
+- `common_room_slot(rpc_name)` — the room, or `FailedPrecondition` `"cannot forward <rpc>: …"` when none
+  is configured.
+- `rpc_served_by_peer` and `stream_served_by_peer` — serve a unary or server-streaming RPC on the
+  peer its `daemon_instance_id` names (`Ok(None)` means it is this daemon's own), at the service
+  coordinate the caller passes.
+
+Shared, not copied: `Clone` hands out the same roster and room, so the session host and the RPC
+families above it agree on who owns a call. `tests/peer_routing.rs` covers local-versus-forward and
+the no-room refusal. The LiveKit plugin re-exports this module at its old
+`tddy_daemon_livekit::peer_routing` path for the session crates that still name it.
+
 ## Testing
 
 The suites travelled with the code they exercise:
@@ -232,7 +254,7 @@ The suites travelled with the code they exercise:
 |---|---|
 | Unit | each module's own `#[cfg(test)]` — the probe classifications, the agent protocol, the registry's write policy |
 | Handler | `src/host_add_key_handler_tests.rs`, `host_stats_handler_unit_tests.rs`, `host_tooling_handler_unit_tests.rs`, `known_hosts_handler_unit_tests.rs`, `ssh_agent_block_handler_tests.rs` — driven through the `host.HostService` trait, which is what the service now answers on |
-| Integration | `tests/stream_host_prompts_rpc.rs` |
+| Integration | `tests/stream_host_prompts_rpc.rs`, `tests/peer_routing.rs` |
 | Component | `packages/tddy-web/cypress/component/HostsScreen*.cy.tsx` |
 
 ## See also

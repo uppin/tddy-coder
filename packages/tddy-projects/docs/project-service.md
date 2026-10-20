@@ -40,8 +40,8 @@ status code and storage enforces it as the invariant. An unknown `project_id` is
 
 The scope is the logical project, exactly as for `SetProjectDefaultBranch`: when
 `daemon_instance_id` addresses a peer, or other hosts own the same `project_id`, the call is
-forwarded to them (`forward_set_project_accounts_via_livekit` in
-[`tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md)). An assignment forwarded
+forwarded to them (`forward_set_project_accounts` in
+[`tddy_daemon_kernel::peer_calls`](../../tddy-daemon-kernel/docs/daemon-kernel.md#peer_calls--typed-rpcs-forwarded-to-a-peer)). An assignment forwarded
 to a peer names an account that peer's vault may not hold; the resolver reports that state as
 `UnknownOnThisHost`, not as unassigned.
 

@@ -22,7 +22,10 @@ When **`livekit.enabled`** is `true` and **`livekit.common_room`** is set togeth
 **Forwarding transport.** A forward to a peer is carried by the LiveKit integration behind a
 `PeerForwarder` port, and the daemon's core keeps the deadline and the errors. A daemon with no
 transport wired reports no peer connected and refuses a forward as `FAILED_PRECONDITION`, the same
-answer a daemon whose common room is down gives.
+answer a daemon whose common room is down gives. The typed forwards (session start and delete,
+execute-tool, project mutations, staged attachments, host-document reads) and the routing of an
+addressed request to its owning daemon are part of that core too, so the RPC services that forward
+name no LiveKit crate.
 
 Spawned sessions continue to use **`livekit.common_room`** for collaboration when configured; per-session LiveKit identities follow existing **`livekit_server_identity_for_session`** rules.
 

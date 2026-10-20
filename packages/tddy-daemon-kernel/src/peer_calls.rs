@@ -26,6 +26,28 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::peer_forwarding::CommonRoom;
 
+/// Encode `request`, forward it to `service`/`method` on the peer, and decode the answer as `Resp`;
+/// an undecodable answer is `Internal`, naming the response type.
+async fn forward_unary<Req: Message, Resp: Message + Default>(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    service: &str,
+    method: &str,
+    request: &Req,
+) -> Result<Resp, Status> {
+    let out = room
+        .forward_to_peer(peer_instance_id, service, method, request.encode_to_vec())
+        .await?;
+    Resp::decode(out.as_slice())
+        .map_err(|e| Status::internal(format!("decode {}: {e}", short_type_name::<Resp>())))
+}
+
+/// `AddProjectToHostResponse` for `tddy_service::proto::project::AddProjectToHostResponse`.
+fn short_type_name<T>() -> &'static str {
+    let full = std::any::type_name::<T>();
+    full.rsplit("::").next().unwrap_or(full)
+}
+
 /// Forward **StartSession** to another daemon in the common room, under the room's forward deadline.
 ///
 /// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer_within`].
@@ -94,16 +116,14 @@ pub async fn forward_delete_session(
     peer_instance_id: &str,
     request: &DeleteSessionRequest,
 ) -> Result<DeleteSessionResponse, Status> {
-    let out = room
-        .forward_to_peer(
-            peer_instance_id,
-            "session.SessionService",
-            "DeleteSession",
-            request.encode_to_vec(),
-        )
-        .await?;
-    DeleteSessionResponse::decode(out.as_slice())
-        .map_err(|e| Status::internal(format!("decode DeleteSessionResponse: {e}")))
+    forward_unary(
+        room,
+        peer_instance_id,
+        "session.SessionService",
+        "DeleteSession",
+        request,
+    )
+    .await
 }
 
 /// Forward **StreamExecuteTool** to another daemon in the common room, yielding the peer's result
@@ -138,16 +158,14 @@ pub async fn forward_add_project_to_host(
     peer_instance_id: &str,
     request: &AddProjectToHostRequest,
 ) -> Result<AddProjectToHostResponse, Status> {
-    let out = room
-        .forward_to_peer(
-            peer_instance_id,
-            "project.ProjectService",
-            "AddProjectToHost",
-            request.encode_to_vec(),
-        )
-        .await?;
-    AddProjectToHostResponse::decode(out.as_slice())
-        .map_err(|e| Status::internal(format!("decode AddProjectToHostResponse: {e}")))
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "AddProjectToHost",
+        request,
+    )
+    .await
 }
 
 /// Forward **SetProjectDefaultBranch** to another daemon in the common room.
@@ -158,16 +176,14 @@ pub async fn forward_set_project_default_branch(
     peer_instance_id: &str,
     request: &SetProjectDefaultBranchRequest,
 ) -> Result<SetProjectDefaultBranchResponse, Status> {
-    let out = room
-        .forward_to_peer(
-            peer_instance_id,
-            "project.ProjectService",
-            "SetProjectDefaultBranch",
-            request.encode_to_vec(),
-        )
-        .await?;
-    SetProjectDefaultBranchResponse::decode(out.as_slice())
-        .map_err(|e| Status::internal(format!("decode SetProjectDefaultBranchResponse: {e}")))
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "SetProjectDefaultBranch",
+        request,
+    )
+    .await
 }
 
 /// Forward **SetProjectAccounts** to another daemon in the common room.
@@ -178,16 +194,14 @@ pub async fn forward_set_project_accounts(
     peer_instance_id: &str,
     request: &SetProjectAccountsRequest,
 ) -> Result<SetProjectAccountsResponse, Status> {
-    let out = room
-        .forward_to_peer(
-            peer_instance_id,
-            "project.ProjectService",
-            "SetProjectAccounts",
-            request.encode_to_vec(),
-        )
-        .await?;
-    SetProjectAccountsResponse::decode(out.as_slice())
-        .map_err(|e| Status::internal(format!("decode SetProjectAccountsResponse: {e}")))
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "SetProjectAccounts",
+        request,
+    )
+    .await
 }
 
 /// Forward **UploadStagedAttachmentChunk** to another daemon in the common room.
@@ -201,16 +215,14 @@ pub async fn forward_upload_staged_attachment_chunk(
     peer_instance_id: &str,
     request: &UploadStagedAttachmentChunkRequest,
 ) -> Result<UploadStagedAttachmentChunkResponse, Status> {
-    let out = room
-        .forward_to_peer(
-            peer_instance_id,
-            tddy_service::SESSION_FILES_SERVICE,
-            "UploadStagedAttachmentChunk",
-            request.encode_to_vec(),
-        )
-        .await?;
-    UploadStagedAttachmentChunkResponse::decode(out.as_slice())
-        .map_err(|e| Status::internal(format!("decode UploadStagedAttachmentChunkResponse: {e}")))
+    forward_unary(
+        room,
+        peer_instance_id,
+        tddy_service::SESSION_FILES_SERVICE,
+        "UploadStagedAttachmentChunk",
+        request,
+    )
+    .await
 }
 
 /// Forward **ListStagedAttachments** to another daemon in the common room.
@@ -219,16 +231,14 @@ pub async fn forward_list_staged_attachments(
     peer_instance_id: &str,
     request: &ListStagedAttachmentsRequest,
 ) -> Result<ListStagedAttachmentsResponse, Status> {
-    let out = room
-        .forward_to_peer(
-            peer_instance_id,
-            tddy_service::SESSION_FILES_SERVICE,
-            "ListStagedAttachments",
-            request.encode_to_vec(),
-        )
-        .await?;
-    ListStagedAttachmentsResponse::decode(out.as_slice())
-        .map_err(|e| Status::internal(format!("decode ListStagedAttachmentsResponse: {e}")))
+    forward_unary(
+        room,
+        peer_instance_id,
+        tddy_service::SESSION_FILES_SERVICE,
+        "ListStagedAttachments",
+        request,
+    )
+    .await
 }
 
 /// Forward **DeleteStagedAttachment** to another daemon in the common room.
@@ -237,16 +247,14 @@ pub async fn forward_delete_staged_attachment(
     peer_instance_id: &str,
     request: &DeleteStagedAttachmentRequest,
 ) -> Result<DeleteStagedAttachmentResponse, Status> {
-    let out = room
-        .forward_to_peer(
-            peer_instance_id,
-            tddy_service::SESSION_FILES_SERVICE,
-            "DeleteStagedAttachment",
-            request.encode_to_vec(),
-        )
-        .await?;
-    DeleteStagedAttachmentResponse::decode(out.as_slice())
-        .map_err(|e| Status::internal(format!("decode DeleteStagedAttachmentResponse: {e}")))
+    forward_unary(
+        room,
+        peer_instance_id,
+        tddy_service::SESSION_FILES_SERVICE,
+        "DeleteStagedAttachment",
+        request,
+    )
+    .await
 }
 
 /// Forward **ReadHostDocument** to another daemon in the common room.
@@ -255,16 +263,14 @@ pub async fn forward_read_host_document(
     peer_instance_id: &str,
     request: &ReadHostDocumentRequest,
 ) -> Result<ReadHostDocumentResponse, Status> {
-    let out = room
-        .forward_to_peer(
-            peer_instance_id,
-            tddy_service::SESSION_FILES_SERVICE,
-            "ReadHostDocument",
-            request.encode_to_vec(),
-        )
-        .await?;
-    ReadHostDocumentResponse::decode(out.as_slice())
-        .map_err(|e| Status::internal(format!("decode ReadHostDocumentResponse: {e}")))
+    forward_unary(
+        room,
+        peer_instance_id,
+        tddy_service::SESSION_FILES_SERVICE,
+        "ReadHostDocument",
+        request,
+    )
+    .await
 }
 
 /// Forward **StreamReadHostDocument** to another daemon in the common room, yielding the peer's

@@ -1,5 +1,5 @@
 //! Requests are routed to the daemon they address — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-forwarding-consumers.md`.
+//! `packages/tddy-host-service/docs/host-service.md` § `PeerRouting`.
 
 use std::sync::Arc;
 
