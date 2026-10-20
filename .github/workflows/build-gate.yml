@@ -9,6 +9,9 @@ name: Build gate
 #                                           `#forcebuild` comment from someone
 #                                           with write access
 #
+# "Draft" is read from the API when the gate runs, not from the event payload — see the note at the
+# lookup below.
+#
 # The `#forcebuild` comment is sticky: once it is on the PR, every later push to
 # the draft builds too. Delete the comment to go back to skipping. The comment
 # itself starts a build of the current head through forcebuild.yml — a comment
@@ -35,14 +38,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
-          DRAFT: ${{ github.event.pull_request.draft }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
 
-          if [ "$EVENT" != pull_request ] || [ "$DRAFT" != true ]; then
+          if [ "$EVENT" != pull_request ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "Not a draft PR ($EVENT) — building."
+            echo "Not a pull_request run ($EVENT) — building."
+            exit 0
+          fi
+
+          # The PR's draft state *now*, not the event payload's. A payload is a snapshot taken when
+          # the event was created, and events are not delivered in order: the `synchronize` event of
+          # a push made while the PR was still a draft can arrive after the `ready_for_review` event
+          # that followed it. That stale run then reads `draft: true`, skips every job, and — sharing
+          # the concurrency group — cancels the run that was building the ready PR, leaving a ready
+          # PR whose checks are all skipped.
+          draft=$(gh api "repos/$REPO/pulls/$PR" --jq .draft)
+          if [ "$draft" != true ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "PR #$PR is ready for review — building."
             exit 0
           fi
 
