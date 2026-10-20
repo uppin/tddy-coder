@@ -50,7 +50,8 @@ enum Server {
         /// The LSP `languageId` a document is opened as — the launch's.
         language_id: String,
     },
-    /// The server needs a command nobody configured: every server operation is refused with this.
+    /// The server cannot be started — it needs a command nobody configured, or its extension
+    /// refused it: every server operation is refused with exactly this.
     NoCommand { reason: String },
 }
 
@@ -67,9 +68,10 @@ impl ServerBackend {
         todo!("ServerBackend::over")
     }
 
-    /// The backend of a language whose server has no configured command: item anchors still
-    /// answer, and every server operation is [`crate::RestructureError::ServerNotConfigured`]
-    /// carrying `reason` (R3).
+    /// The backend of a language whose server cannot be started — no configured command (R3), or
+    /// a code extension's refusal (K24, developer decision 2026-10-20): item anchors still answer,
+    /// and every server operation is [`crate::RestructureError::ServerNotConfigured`] carrying
+    /// exactly `reason`, whatever it says.
     pub fn without_command(outline: Box<dyn LanguageBackend>, reason: impl Into<String>) -> Self {
         let _ = (outline, reason.into());
         // TODO(reshape-extension-language-server): implement
@@ -165,6 +167,39 @@ mod tests {
             r#"{"op":"rename_symbol","anchor":{"kind":"range","file":"config/app.toml","start":{"line":3,"col":1},"end":{"line":3,"col":5}},"name":"listen_port"}"#,
         )
         .expect("a rename parses")
+    }
+
+    /// A code extension's refusal (K24), not R3's missing command.
+    const EXTENSION_REFUSED: &str = "extension demo-toml: language server fake-ls asked to \
+                                     download https://example.com/fake-ls.tar.gz; downloads \
+                                     are not allowed";
+
+    #[test]
+    fn a_rename_is_refused_with_exactly_an_extensions_refusal() {
+        // Given a backend whose server a code extension refused to start
+        let mut backend =
+            ServerBackend::without_command(an_outline_backend_for("demo-toml"), EXTENSION_REFUSED);
+        let overlay = Overlay::new();
+
+        // When a rename is resolved
+        let refused = backend.resolve(
+            &a_rename_of_port(),
+            &Workspace {
+                root: Path::new("/workspace"),
+                overlay: &overlay,
+            },
+        );
+
+        // Then it is refused with the extension's words, unchanged, naming the language
+        match refused {
+            Err(RestructureError::ServerNotConfigured { language, reason }) => {
+                assert_eq!(
+                    (language.as_str(), reason.as_str()),
+                    ("demo-toml", EXTENSION_REFUSED)
+                )
+            }
+            other => panic!("expected ServerNotConfigured, got {other:?}"),
+        }
     }
 
     #[test]

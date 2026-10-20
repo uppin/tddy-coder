@@ -42,19 +42,30 @@ language has `rename_symbol` and references, on the CLI and through the index da
 | Symbol | Where |
 |---|---|
 | `ExtensionSettings { lsp, languages }` (`file`, `parse`, `load`, `server`, `names_server`), `LanguageSettings { language_servers }`, `ServerSettings { binary, initialization_options, settings }`, `BinarySettings { path, arguments, env }`, `SETTINGS_FILE` | `tddy-zed-extensions/src/settings.rs` |
-| `ServerChoice { Undeclared, Unconfigured(NoServerCommand), Configured { server, launch } }` (`for_language` = R1–R4, `launch`), `NoServerCommand` (R3 wording), `client_capabilities()` | `tddy-zed-extensions/src/server.rs` |
+| `ServerChoice { Undeclared, Unconfigured(NoServerCommand), Refused(ServerRefusal), Configured { server, launch } }` (`for_language` = R1–R4, `launch`, `refusal`), `NoServerCommand` (R3 wording), `ServerRefusal { server, reason }` (shown as `reason` alone), `client_capabilities()` | `tddy-zed-extensions/src/server.rs` |
 | private field `ExtensionSupport::server: ServerChoice` + `with_server`, `server()`; the green-time behaviour of K20's `launch()`, `backend()` and `load_installed` (see the `impl ExtensionSupport` doc there) | `tddy-zed-extensions/src/support.rs` |
 | `LaunchSpec::workspace_configuration: Value` + `with_workspace_configuration` (real) | `tddy-lsp/src/allowlist.rs` |
 | `configuration_answer(settings, params)` — the `workspace/configuration` reply from the spec's settings | `tddy-lsp/src/client/dispatch.rs` |
 | `fake_lsp` modes `--requests-configuration <section>` (+ `tddy/configurationAnswers`) and `--answers-rename` | `tddy-lsp/tests/bin/fake_lsp.rs` |
-| `ServerBackend` (`over(outline, live, language_id)`, `without_command(outline, reason)`; `rename_symbol` via `textDocument/rename`) | `tddy-code-restructuring/src/backends/server.rs` |
-| `RestructureError::ServerNotConfigured { language, reason }` (mapped `failed_precondition` in the daemon) | `tddy-code-restructuring/src/lib.rs`, `tddy-index-daemon/src/status.rs` |
+| `ServerBackend` (`over(outline, live, language_id)`, `without_command(outline, reason)` — for a missing command *and* a code extension's refusal; `rename_symbol` via `textDocument/rename`) | `tddy-code-restructuring/src/backends/server.rs` |
+| `RestructureError::ServerNotConfigured { language, reason }` — a server that cannot be started, `reason` shown unchanged (mapped `failed_precondition` in the daemon) | `tddy-code-restructuring/src/lib.rs`, `tddy-index-daemon/src/status.rs` |
 | `WorkspaceIndex::client_for_file` (routing) | `tddy-index-daemon/src/index.rs` |
 | `serves_workspace(root, supports: Option<&SupportRegistry>)` — the predicate callers ask instead of `is_rust_workspace`; `pub use SupportRegistry` | `tddy-index-daemon/src/lib.rs` |
 | `Readiness { ServerStatus, AfterInitialize }` (`of_launch`), `index_state_of(client, readiness)` — moved from `navigation.rs` and made public | `tddy-index-daemon/src/readiness.rs` |
 | `has_an_index`, `CodeNavigationServiceImpl::with_supports`, `code_session::start(.., supports, ..)` | `tddy-daemon-rpc/src/code_navigation.rs`, `code_session.rs` |
 | `warm_for_session_with_supports`, `IndexWarmupObserver::with_supports` (`warm_for_session` keeps its signature, over an empty registry) | `tddy-daemon-rpc/src/code_index_warmup.rs` |
 | `IndexLspExecutor::with_supports`; `is_available` asks `serves_workspace` | `tddy-lsp-executor/src/index_backed.rs` |
+
+**2026-10-20: `ServerChoice::Refused` carries a refusal from a code extension (K24) to the run (developer
+decision).** When a server cannot be started for a reason other than "no command configured" — K24's opted-in WASM
+asked for a download, or exceeded its deadline — the run refuses with that message. K24 builds
+`ServerChoice::Refused(ServerRefusal { server, reason })`; `ServerChoice::refusal()` gives the support the text to
+build `ServerBackend::without_command(outline, reason)` with, and every server operation is refused with
+`RestructureError::ServerNotConfigured { language, reason }` carrying exactly `reason`. Chosen: a `ServerRefusal`
+newtype rather than a bare `String`, so the refused server is named as `NoServerCommand` names it; and
+`ServerNotConfigured` reused rather than a sibling variant — `without_command` already takes any reason, and the
+daemon's `failed_precondition` mapping is the right answer for both (the variant name reads slightly narrow for a
+deadline; renaming it is left to the developer).
 
 **Not this node's (2026-10-20):** `WorkspaceIndex::with_supports` and `build_code_index_entry_with_supports` are
 **`extension-outline` (K20)'s** — the daemon seam moved down by developer decision; this node's tests use K20's.
@@ -132,6 +143,8 @@ body of this node, and the daemon test K11's `allow_list` too; the unit tests re
   `tddy-daemon-rpc` `code_index_warmup::tests::{an_extension_only_worktree_whose_language_has_a_server_is_warmed,
   an_extension_only_worktree_whose_language_has_a_server_is_not_reported_none}`;
   `tddy-lsp-executor` `index_backed::tests::the_tools_are_available_on_an_extension_only_worktree_the_host_serves`.
+  5th commit (2026-10-20, developer decision on K24's question): `server::tests::a_refused_server_is_refused_with_exactly_its_reason`
+  (`ServerChoice::refusal` is `todo!()`); `backends::server::tests::a_rename_is_refused_with_exactly_an_extensions_refusal`.
 - `serves_workspace(root, supports: Option<&SupportRegistry>)` keeps today's answer before its `todo!()`: a Rust
   workspace is served, and with `supports = None` (no extension language registered — the default of every
   `with_supports` holder, and `warm_for_session`) a non-Rust tree is not. Only a registry handed over reaches the
@@ -140,7 +153,7 @@ body of this node, and the daemon test K11's `allow_list` too; the unit tests re
   `tests::a_tree_with_no_cargo_manifest_is_not_served_while_no_extension_language_is_registered`.
 - Unit tests: `tddy-zed-extensions` `settings::tests` (4), `server::tests` (5; `the_refusal_reads_as_the_prd_words_it`
   green on purpose — it pins R3's wording, which is data); `tddy-lsp` `client::dispatch::tests` (4 new);
-  `tddy-code-restructuring` `backends::server::tests` (3); `tddy-index-daemon` lib `tests` (3, `serves_workspace`
+  `tddy-code-restructuring` `backends::server::tests` (4); `tddy-index-daemon` lib `tests` (3, `serves_workspace`
   against stand-in supports).
 
 ## Green wave

@@ -296,10 +296,11 @@ impl LanguageSupport for ExtensionSupport {
 /// ([`ServerChoice::launch`]); [`LanguageSupport::backend`] over a live server is a
 /// [`tddy_code_restructuring::backends::ServerBackend`] composed with
 /// [`ExtensionSupport::outline_backend`], and with no server for an
-/// [`ServerChoice::Unconfigured`] language one built `without_command`, carrying the
-/// [`crate::server::NoServerCommand`] text (R3); and [`load_installed`] reads
-/// [`crate::settings::ExtensionSettings::load`] once and gives every support its
-/// [`ServerChoice::for_language`].
+/// [`ServerChoice::Unconfigured`] or [`ServerChoice::Refused`] language one built
+/// `without_command`, carrying [`ServerChoice::refusal`] — the [`crate::server::NoServerCommand`]
+/// text (R3), or a code extension's refusal unchanged (K24, developer decision 2026-10-20); and
+/// [`load_installed`] reads [`crate::settings::ExtensionSettings::load`] once and gives every
+/// support its [`ServerChoice::for_language`].
 impl ExtensionSupport {
     /// This support, served as `server` says.
     pub fn with_server(self, server: ServerChoice) -> Self {

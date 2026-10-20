@@ -30,6 +30,18 @@ pub struct NoServerCommand {
     pub settings_file: PathBuf,
 }
 
+/// A declared server that cannot be started for a reason other than a missing command — a code
+/// extension (`extension-wasm-command`, K24) refused it: its WASM asked for a download, or exceeded
+/// its deadline. Shown as `reason` alone, the extension's own words (developer decision 2026-10-20).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{reason}")]
+pub struct ServerRefusal {
+    /// The `[language_servers.<id>]` id.
+    pub server: String,
+    /// Why it cannot be started, as the run reports it.
+    pub reason: String,
+}
+
 /// What serves one extension language.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ServerChoice {
@@ -40,6 +52,10 @@ pub enum ServerChoice {
     /// A server is declared and has no `lsp.<id>.binary.path`: every server operation is refused
     /// with this, before any process starts (R3).
     Unconfigured(NoServerCommand),
+    /// A server is declared and cannot be started for another reason — a code extension (K24)
+    /// refused it: every server operation is refused with exactly [`ServerRefusal::reason`],
+    /// before any process starts.
+    Refused(ServerRefusal),
     /// A server is declared and configured.
     Configured {
         /// The `[language_servers.<id>]` id.
@@ -81,8 +97,20 @@ impl ServerChoice {
     pub fn launch(&self) -> Option<&LaunchSpec> {
         match self {
             ServerChoice::Configured { launch, .. } => Some(launch),
-            ServerChoice::Undeclared | ServerChoice::Unconfigured(_) => None,
+            ServerChoice::Undeclared | ServerChoice::Unconfigured(_) | ServerChoice::Refused(_) => {
+                None
+            }
         }
+    }
+
+    /// The words every server operation of the language is refused with — the reason its support
+    /// builds a [`tddy_code_restructuring::backends::ServerBackend::without_command`] with:
+    /// [`NoServerCommand`]'s text for [`ServerChoice::Unconfigured`], exactly
+    /// [`ServerRefusal::reason`] for [`ServerChoice::Refused`]; `None` when there is nothing to
+    /// refuse ([`ServerChoice::Undeclared`], [`ServerChoice::Configured`]).
+    pub fn refusal(&self) -> Option<String> {
+        // TODO(reshape-extension-language-server): implement
+        todo!("ServerChoice::refusal")
     }
 }
 
@@ -331,6 +359,23 @@ mod tests {
                 Some("/opt/fake-ls")
             )
         );
+    }
+
+    #[test]
+    fn a_refused_server_is_refused_with_exactly_its_reason() {
+        // Given a server a code extension refused to start — its WASM asked for a download
+        let reason = "extension demo-toml: language server fake-ls asked to download \
+                      https://example.com/fake-ls.tar.gz; downloads are not allowed";
+        let choice = ServerChoice::Refused(ServerRefusal {
+            server: "fake-ls".into(),
+            reason: reason.into(),
+        });
+
+        // When what its operations are refused with is asked
+        let refused = (choice.launch(), choice.refusal());
+
+        // Then it has no launch, and the refusal is the extension's words, unchanged
+        assert_eq!(refused, (None, Some(reason.to_string())));
     }
 
     #[test]

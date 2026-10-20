@@ -39,7 +39,7 @@ pub use language::{ExtensionLanguage, LanguageConfig};
 pub use manifest::{ExtensionManifest, GrammarEntry, LanguageServerEntry, LibEntry, LibKind};
 pub use outline::{Outline, OutlineEntry};
 pub use registry::Registry;
-pub use server::{client_capabilities, NoServerCommand, ServerChoice};
+pub use server::{client_capabilities, NoServerCommand, ServerChoice, ServerRefusal};
 pub use settings::{BinarySettings, ExtensionSettings, ServerSettings};
 pub use support::{
     load_installed, ExtensionSupport, InstalledExtensions, InstalledLanguages, OutlineBackend,
