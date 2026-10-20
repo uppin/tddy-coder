@@ -2,9 +2,11 @@ use super::DaemonSessionHost;
 
 use std::time::Duration;
 
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 use tddy_daemon_livekit::{
     livekit_peer_discovery::LiveKitDiscoveryHandles,
     livekit_rooms_stream::{room_roster_from_config, RoomRoster},
+    LiveKitPeerForwarder,
 };
 
 use tddy_host_service::multi_host::LocalOnlyEligibleDaemonSource;
@@ -58,10 +60,14 @@ impl DaemonSessionHost {
         // report READY for a clone nobody built.
         let session_agent_clones =
             Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
+        // The LiveKit forwarder is built here, where both the plugin and the routing are in scope:
+        // the routing takes the built room and names no transport itself.
+        let common_room = common_room_livekit_room
+            .map(|slot| CommonRoom::new(LiveKitPeerForwarder::new(slot), &config));
         let peer_routing = crate::peer_routing::PeerRouting::new(
             config.clone(),
             eligible_daemon_source,
-            common_room_livekit_room,
+            common_room,
         );
         Self {
             config,

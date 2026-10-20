@@ -264,7 +264,7 @@ struct CredentialSyncPublishWatch {
 }
 
 /// The OAuth loopback TCP proxy, which follows the common room across a reconnect rather than
-/// belonging to any one connection — see [`tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel`].
+/// belonging to any one connection — see [`tddy_daemon_livekit::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel`].
 struct OauthLoopbackTunnel {
     config: Arc<DaemonConfig>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
@@ -290,7 +290,7 @@ pub fn spawn_common_room_discovery_task(
     // An embedder keeps no status board, so the loop reports on one nobody reads.
     let status = tddy_daemon_extensions::IntegrationStatusBoard::new()
         .reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit");
-    tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
+    tddy_daemon_livekit::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
         &config,
         room_slot.clone(),
     );
@@ -367,7 +367,7 @@ impl RuntimeTasks {
 
         if let Some(tunnel) = self.oauth_loopback_tunnel {
             if let Some(handle) =
-                tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
+                tddy_daemon_livekit::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
                     &tunnel.config,
                     tunnel.room_slot,
                 )

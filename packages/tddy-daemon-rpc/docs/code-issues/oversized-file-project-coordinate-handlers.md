@@ -43,3 +43,7 @@ Deferred in `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring
 ## Measurement update 2026-10-18 — `#satellite` 5/13
 
 **Touched, unchanged:** 660 → 660 production lines. #627 repoints one `local_instance_id_for_config` import at `tddy_daemon_kernel::daemon_identity`; no line count moves. Split not attempted (move-only node). Not claimed by any PR.
+
+## Measurement update 2026-10-20 — `#satellite` 10/13 (#632)
+
+660 → 652 production lines (same `awk` count on base and HEAD): the three forwards name `tddy_daemon_kernel::peer_forwarding` / `peer_calls` instead of the LiveKit plugin, and the shorter paths rustfmt onto fewer lines. Import rewrites only; still over budget, split still not designed.

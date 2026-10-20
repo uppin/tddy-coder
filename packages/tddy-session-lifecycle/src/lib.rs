@@ -20,15 +20,14 @@ pub enum SessionError {
     StartFailed { reason: String },
 }
 
-/// The three modules of `tddy-daemon-auth` this crate still names, out of the seven that moved
-/// there.
+/// The two modules of `tddy-daemon-auth` this crate still names, out of the seven that moved there.
 ///
 /// Named one by one rather than globbed, for the same reason the worktree and host lines below
-/// give — and the four that are absent are the point: `github_token_store`, `token_provider` and
-/// `codex_oauth_participant_metadata` had exactly one caller each and it moved with them, while
-/// `codex_oauth_relay`'s only caller was `tddy-integration-tests`, which now depends on the auth
-/// crate directly. A re-export kept for nobody is an edge that reads as real.
-pub use tddy_daemon_auth::{auth, github_pr_credentials, oauth_loopback_tunnel};
+/// give — and the absent ones are the point: `github_token_store` and `token_provider` had exactly
+/// one caller each and it moved with them, while `codex_oauth_relay`'s only caller was
+/// `tddy-integration-tests`, which now depends on the auth crate directly. A re-export kept for
+/// nobody is an edge that reads as real.
+pub use tddy_daemon_auth::{auth, github_pr_credentials};
 pub use tddy_daemon_sandbox::*;
 /// The eight git/worktree modules, which now live in `tddy-worktree-service`.
 ///
@@ -87,9 +86,11 @@ pub use tddy_daemon_livekit::{
     common_room_supervisor, livekit_peer_discovery, livekit_rooms_stream, livekit_service,
     session_room,
 };
-/// Which daemon serves an addressed request, shared with the families served above this crate, and
-/// room admission. Both now live in `tddy-daemon-livekit`.
-pub use tddy_daemon_livekit::{peer_routing, session_admission_service};
+/// Which daemon serves an addressed request, shared with the families served above this crate. The
+/// routing lives in `tddy-host-service`. The OAuth loopback tunnel and room admission are LiveKit
+/// features, so they live in `tddy-daemon-livekit`.
+pub use tddy_daemon_livekit::{oauth_loopback_tunnel, session_admission_service};
+pub use tddy_host_service::peer_routing;
 /// The nine host modules and the four host-key ones, which now live in `tddy-host-service`.
 ///
 /// Named one by one for the reason above; see `tddy_worktree_service`'s facade.

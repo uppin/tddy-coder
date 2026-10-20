@@ -12,6 +12,8 @@ path = "src/lib.rs"
 anyhow = "1"
 async-trait = "0.1"
 log = "0.4"
+# The peer-call helpers encode the requests they forward and decode the answers.
+prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

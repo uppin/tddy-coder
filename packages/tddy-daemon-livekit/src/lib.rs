@@ -15,7 +15,7 @@
 //! | `livekit_peer_discovery` → `split_session::SPLIT_AGENT_IDENTITY_PREFIX` | the constant lifted to [`tddy_daemon_kernel::daemon_identity`]; `split_session` re-exports it |
 //! | `common_room_supervisor` → `daemon_config_service` → `livekit_peer_discovery` | the `CommonRoomSupervisor` trait moved to [`common_room_supervisor`], beside its one implementation |
 //! | `session_room` → `session_attachments::list_session_attachments` | the listing lifted to `tddy_workflow::artifact_paths`, beside the `session_attachments_root` it reads |
-//! | `livekit_peer_discovery` → `oauth_loopback_tunnel` | the spawn moved to `tddy-daemon-auth`, whose module it starts; the composition that used both moved to the daemon's `runtime` |
+//! | `livekit_peer_discovery` → `oauth_loopback_tunnel` | node 1 moved the tunnel to `tddy-daemon-auth`; the satellite stack brings it back here, where it is a LiveKit feature (it follows room participants) and where its own metadata parser now lives |
 //!
 //! A fifth, `livekit_peer_discovery ⇄ multi_host`, needed nothing: node 1 took `multi_host` to
 //! `tddy-host-service`, and nothing in that crate names a LiveKit module, so the edge runs one way.
@@ -35,6 +35,7 @@
 //! [`AdvertisedSigningKey`]: the crate publishes them and reads peers' back
 //! ([`peer_signing_public_keys`]), and parses none of them.
 
+mod codex_oauth_participant_metadata;
 pub mod common_room_supervisor;
 pub mod first_admission_token;
 pub mod livekit_peer_discovery;
@@ -42,6 +43,7 @@ pub mod livekit_peer_forwarder;
 pub mod livekit_peer_transport;
 pub mod livekit_rooms_stream;
 pub mod livekit_service;
+pub mod oauth_loopback_tunnel;
 pub mod peer_routing;
 pub mod room_tokens;
 pub mod session_admission_service;

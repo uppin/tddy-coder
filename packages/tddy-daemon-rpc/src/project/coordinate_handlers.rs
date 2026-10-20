@@ -223,7 +223,7 @@ impl ProjectRpcHandler {
             .iter()
             .map(|e| e.instance_id.0.clone())
             .collect();
-        let route = tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
+        let route = tddy_daemon_kernel::peer_forwarding::classify_peer_route(
             &local_id,
             requested_daemon,
             &eligible_ids,
@@ -233,9 +233,7 @@ impl ProjectRpcHandler {
             Status::failed_precondition(msg)
         })?;
 
-        if let tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
-            peer_instance_id,
-        } = route
+        if let tddy_daemon_kernel::peer_forwarding::PeerRoute::Forward { peer_instance_id } = route
         {
             log::info!(
                 "AddProjectToHost: forwarding RPC to remote daemon_instance_id={}",
@@ -247,7 +245,7 @@ impl ProjectRpcHandler {
                 )
             })?;
             let conn_req: tddy_service::proto::project::AddProjectToHostRequest = wire_same(&req)?;
-            let inner = tddy_daemon_livekit::livekit_peer_discovery::forward_add_project_to_host_via_livekit(
+            let inner = tddy_daemon_kernel::peer_calls::forward_add_project_to_host(
                 slot,
                 &peer_instance_id,
                 &conn_req,
@@ -390,7 +388,7 @@ impl ProjectRpcHandler {
             .iter()
             .map(|e| e.instance_id.0.clone())
             .collect();
-        let route = tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
+        let route = tddy_daemon_kernel::peer_forwarding::classify_peer_route(
             &local_id,
             requested_daemon,
             &eligible_ids,
@@ -400,9 +398,7 @@ impl ProjectRpcHandler {
             Status::failed_precondition(msg)
         })?;
 
-        if let tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
-            peer_instance_id,
-        } = route
+        if let tddy_daemon_kernel::peer_forwarding::PeerRoute::Forward { peer_instance_id } = route
         {
             log::info!(
                 "SetProjectDefaultBranch: forwarding RPC to remote daemon_instance_id={}",
@@ -415,13 +411,12 @@ impl ProjectRpcHandler {
             })?;
             let conn_req: tddy_service::proto::project::SetProjectDefaultBranchRequest =
                 wire_same(&req)?;
-            let inner =
-                tddy_daemon_livekit::livekit_peer_discovery::forward_set_project_default_branch_via_livekit(
-                    slot,
-                    &peer_instance_id,
-                    &conn_req,
-                )
-                .await?;
+            let inner = tddy_daemon_kernel::peer_calls::forward_set_project_default_branch(
+                slot,
+                &peer_instance_id,
+                &conn_req,
+            )
+            .await?;
             return Ok(Response::new(wire_same(&inner)?));
         }
 
@@ -496,7 +491,7 @@ impl ProjectRpcHandler {
             .iter()
             .map(|e| e.instance_id.0.clone())
             .collect();
-        let route = tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
+        let route = tddy_daemon_kernel::peer_forwarding::classify_peer_route(
             &local_id,
             requested_daemon,
             &eligible_ids,
@@ -506,9 +501,7 @@ impl ProjectRpcHandler {
             Status::failed_precondition(msg)
         })?;
 
-        if let tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
-            peer_instance_id,
-        } = route
+        if let tddy_daemon_kernel::peer_forwarding::PeerRoute::Forward { peer_instance_id } = route
         {
             log::info!(
                 "SetProjectAccounts: forwarding RPC to remote daemon_instance_id={}",
@@ -521,13 +514,12 @@ impl ProjectRpcHandler {
             })?;
             let conn_req: tddy_service::proto::project::SetProjectAccountsRequest =
                 wire_same(&req)?;
-            let inner =
-                tddy_daemon_livekit::livekit_peer_discovery::forward_set_project_accounts_via_livekit(
-                    slot,
-                    &peer_instance_id,
-                    &conn_req,
-                )
-                .await?;
+            let inner = tddy_daemon_kernel::peer_calls::forward_set_project_accounts(
+                slot,
+                &peer_instance_id,
+                &conn_req,
+            )
+            .await?;
             return Ok(Response::new(wire_same(&inner)?));
         }
 

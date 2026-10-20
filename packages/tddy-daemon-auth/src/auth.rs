@@ -333,7 +333,7 @@ pub fn build_token_service_entry(
     let service = tddy_service::TokenServiceImpl::authenticated(
         crate::token_provider::MinterTokenProvider::new(
             minter,
-            Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
+            crate::token_provider::ROOM_TOKEN_TTL,
         ),
         authenticate,
     );

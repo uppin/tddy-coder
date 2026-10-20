@@ -14,7 +14,6 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 anyhow = "1"
 async-trait = "0.1"
 log = "0.4"
-livekit = "0.7"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -30,7 +29,6 @@ tddy-credentials = { path = "../tddy-credentials" }
 # the whole of what node 1 published so the auth subsystem could leave without depending on it.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-github = { path = "../tddy-github" }
-tddy-livekit = { path = "../tddy-livekit" }
 # `RoomTokenMinter`: the minter the token service answers through.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-rpc = { path = "../tddy-rpc" }
@@ -43,6 +41,8 @@ uuid = { version = "1", features = ["v4", "v7"] }
 # The minter the daemon wires from its `livekit:` block, so the mint suites run the production
 # adapter rather than a stand-in. A dev-dependency only: this crate reaches LiveKit through the port.
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+# The acceptance suites mint and verify real LiveKit tokens.
+tddy-livekit = { path = "../tddy-livekit" }
 pretty_assertions = { workspace = true }
 # `test-util` pauses tokio's clock, so the pending-login sweep's ticks are driven by hand.
 tokio = { version = "1", features = ["test-util"] }

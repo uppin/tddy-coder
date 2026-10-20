@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 use tddy_daemon_kernel::SessionUserResolver;
-use tddy_daemon_livekit::livekit_peer_discovery::CommonRoom;
 use tddy_host_service::multi_host::EligibleDaemonSource;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_spawn::spawn_worker::SpawnClient;

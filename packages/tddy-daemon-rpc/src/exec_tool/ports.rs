@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use prost::Message as _;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
-use tddy_daemon_livekit::livekit_peer_discovery::PeerRoute;
+use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::{
     ConversationWorktreeRequest, ConversationWorktreeResponse, ExecuteToolChunk,
@@ -116,13 +116,12 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
             let slot = self.peer_routing.common_room_slot("StreamExecuteTool")?;
             // A forwarded stream that stalls terminates as an *error*, so a truncated tool result
             // can never reach the caller looking complete.
-            let mut conn_rx =
-                tddy_daemon_livekit::livekit_peer_discovery::forward_stream_execute_tool_via_livekit(
-                    slot,
-                    &peer_instance_id,
-                    &req_conn,
-                )
-                .await?;
+            let mut conn_rx = tddy_daemon_kernel::peer_calls::forward_stream_execute_tool(
+                slot,
+                &peer_instance_id,
+                &req_conn,
+            )
+            .await?;
             let (tx, rx) =
                 tokio::sync::mpsc::unbounded_channel::<Result<ExecuteToolChunk, Status>>();
             tokio::spawn(async move {
@@ -199,7 +198,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                 .iter()
                 .map(|e| e.instance_id.0.clone())
                 .collect();
-            match tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
+            match tddy_daemon_kernel::peer_forwarding::classify_peer_route(
                 &local_id,
                 requested_daemon,
                 &eligible_ids,
@@ -208,7 +207,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                     log::info!("ListExecTools: rejected daemon routing: {}", msg);
                     return Err(Status::invalid_argument(msg));
                 }
-                Ok(tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
+                Ok(tddy_daemon_kernel::peer_forwarding::PeerRoute::Forward {
                     peer_instance_id,
                 }) => {
                     log::info!(
@@ -234,7 +233,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                     })?;
                     return Ok(Response::new(wire_same(&inner)?));
                 }
-                Ok(tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Local) => {
+                Ok(tddy_daemon_kernel::peer_forwarding::PeerRoute::Local) => {
                     // Fall through to local execution below.
                 }
             }
@@ -279,7 +278,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                 .iter()
                 .map(|e| e.instance_id.0.clone())
                 .collect();
-            match tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
+            match tddy_daemon_kernel::peer_forwarding::classify_peer_route(
                 &local_id,
                 requested_daemon,
                 &eligible_ids,
@@ -288,7 +287,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                     log::info!("ListSessionToolCalls: rejected daemon routing: {}", msg);
                     return Err(Status::invalid_argument(msg));
                 }
-                Ok(tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
+                Ok(tddy_daemon_kernel::peer_forwarding::PeerRoute::Forward {
                     peer_instance_id,
                 }) => {
                     log::info!(
@@ -315,7 +314,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                         })?;
                     return Ok(Response::new(wire_same(&inner)?));
                 }
-                Ok(tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Local) => {
+                Ok(tddy_daemon_kernel::peer_forwarding::PeerRoute::Local) => {
                     // Fall through to local execution below.
                 }
             }

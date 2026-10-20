@@ -10,7 +10,7 @@
 //!
 //! `daemon_instance_id` routing is **not** implemented in this crate. Forwarding a call to the peer
 //! that holds the bytes needs the common room slot, the peer registry and the per-method
-//! `forward_*_via_livekit` clients, all of which are the daemon's transport layer — a session-file
+//! `tddy_daemon_kernel::peer_calls::forward_*` clients, all of which are the daemon's transport layer — a session-file
 //! reader that reached for them would be back inside the module this crate was extracted from.
 //! The daemon wraps this entry in its own routing layer
 //! (`tddy-daemon`'s `PeerRoutedSessionFiles`), which is where forwarding lives.

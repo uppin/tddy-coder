@@ -1,4 +1,4 @@
-# OAuth loopback tunnel (tddy-daemon-auth)
+# OAuth loopback tunnel (tddy-daemon-livekit)
 
 ## Overview
 
@@ -7,15 +7,15 @@ When **`livekit.common_room`** is configured, the daemon runs **`oauth_loopback_
 ## Wiring
 
 - **`run_oauth_tunnel_supervisor_follow_room_slot`** follows the same **`Arc<Room>`** slot as **`tddy_daemon_livekit::livekit_peer_discovery`** so the supervisor (re)starts after common-room connect and reconnect.
-- **`spawn_oauth_loopback_tunnel`** — which starts that supervisor on the shared slot — lives **here**, beside the module it starts and the eligibility gate this page describes. It is the identity boundary's own task, and the LiveKit crate must not reach into the identity boundary to start it. The composition of it with the discovery loop, `spawn_common_room_discovery_task`, sits in `tddy-daemon`'s `runtime.rs`, which is the one place holding both halves.
+- **`spawn_oauth_loopback_tunnel`** starts that supervisor on the shared slot. The module lives in the LiveKit plugin because it *is* LiveKit work — it follows room participants and pipes bytes to one over a room RPC — so `tddy-daemon-auth` names no LiveKit crate. The **`codex_oauth_participant_metadata`** parser it reads (`parse_codex_oauth_metadata`, `resolved_codex_oauth_callback_port`, default port 1455) is a private module beside it; nothing else uses it. The daemon's `runtime.rs` starts the tunnel (through `tddy-session-lifecycle`'s re-export) and composes it with the discovery loop, `spawn_common_room_discovery_task`.
 - **Target selection:** **`pick_daemon_oauth_target`** scans remote participants whose identity starts with **`daemon-`** and picks the first with pending **`codex_oauth`** metadata (mirrors desktop **`codex-oauth-metadata`** semantics). **`RpcClient::new_shared`** targets that participant identity for **`loopback_tunnel.LoopbackTunnelService` / `StreamBytes`**.
 
 ## Tests
 
-Module tests live in **`oauth_loopback_tunnel.rs`** (metadata pick helpers). Full LiveKit coverage remains in **`tddy-livekit`** **`rpc_scenarios`** when a testkit is available.
+Module tests live in **`oauth_loopback_tunnel.rs`** (metadata pick helpers) and **`codex_oauth_participant_metadata.rs`** (the metadata shape). Full LiveKit coverage remains in **`tddy-livekit`** **`rpc_scenarios`** when a testkit is available.
 
 ```bash
-cargo test -p tddy-daemon-auth oauth_loopback_tunnel
+cargo test -p tddy-daemon-livekit oauth
 ```
 
 ## Logging
@@ -30,7 +30,7 @@ The module logs under target **`tddy_daemon::oauth_tunnel`**, which names the cr
 
 ## Related
 
-- **[auth-service.md](./auth-service.md)** — the crate this module belongs to
-- **[codex-oauth-relay.md](./codex-oauth-relay.md)** — the validation and capture half
-- **[`session-room.md`](../../tddy-daemon-livekit/docs/session-room.md)** — the LiveKit crate on the other side of the `Room` slot
+- **[livekit-service.md](./livekit-service.md)** — the crate this module belongs to
+- **[codex-oauth-relay.md](../../tddy-daemon-auth/docs/codex-oauth-relay.md)** — the validation and capture half, in `tddy-daemon-auth`
+- **[`session-room.md`](./session-room.md)** — the per-session room in the same crate
 - **[changesets/](./changesets/)**
