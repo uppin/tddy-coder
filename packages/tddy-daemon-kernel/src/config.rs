@@ -679,9 +679,11 @@ pub fn resolve_rdp_binary_path(config: &DaemonConfig) -> String {
 /// Resolve the path to `x11vnc`: the explicit `x11vnc_binary_path`, else the bare name for a PATH
 /// lookup. No current-exe sibling step — x11vnc is a system package, never shipped beside tddy.
 pub fn resolve_x11vnc_binary_path(config: &ScreenSharingConfig) -> std::path::PathBuf {
-    // TODO(x11-channels): implement
-    let _ = config;
-    todo!()
+    if config.x11vnc_binary_path.is_empty() {
+        std::path::PathBuf::from("x11vnc")
+    } else {
+        std::path::PathBuf::from(&config.x11vnc_binary_path)
+    }
 }
 
 fn default_claude_cli_binary_path() -> String {

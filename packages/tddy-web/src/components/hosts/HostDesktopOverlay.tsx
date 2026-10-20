@@ -47,7 +47,6 @@ export interface HostDesktopOverlayProps {
    * The X11 display to open, for an X11-display channel: sent as `AddHostTarget.x11Display` so the
    * daemon starts x11vnc for it. Absent for a desktop already listening on `port`.
    */
-  // TODO(x11-channels): open the channel given here rather than matching on (host, port, protocol).
   x11Display?: number;
   onClose: () => void;
 }
@@ -65,43 +64,57 @@ const PROBED_HOST = "127.0.0.1";
 const PROBED_TARGET_LABEL = "Desktop";
 
 /**
- * The host-scoped target for the probed endpoint, creating one the first time.
+ * The host-scoped target for the channel being opened, creating one the first time.
  *
- * A row has a port and a protocol; `StartHostStream` takes a target id. Matching on the endpoint
- * rather than adding unconditionally is what stops one target accumulating per connect.
+ * A row has a channel; `StartHostStream` takes a target id. Matching on the channel rather than
+ * adding unconditionally is what stops one target accumulating per connect. An X11 display is the
+ * channel `(protocol, x11Display)` names; any other channel is the listening endpoint
+ * `(host, port, protocol)`, and never a display's target.
  *
  * `sessionToken` is threaded in rather than left to the transport. The daemon gates every
  * host-scoped call on it, and the auth gate every LiveKit-reached host is wrapped in
  * (`rpc/authGatedTransport.ts`) rewrites the field **only where the request already carries one** —
  * so a request that omits it is not quietly repaired on the way out, it is rejected on arrival.
  */
-async function targetForProbedEndpoint(
+async function targetForChannel(
   client: Client<typeof ScreenSharingService>,
   sessionToken: string,
   hostId: string,
   port: number,
   protocol: Protocol,
+  x11Display: number | undefined,
 ): Promise<string> {
   const existing = await client.listHostTargets({ sessionToken, daemonInstanceId: hostId });
-  const match = existing.targets.find(
-    (target) =>
-      target.host === PROBED_HOST && target.port === port && target.protocol === protocol,
+  const match = existing.targets.find((target) =>
+    x11Display === undefined
+      ? target.x11Display === undefined &&
+        target.host === PROBED_HOST &&
+        target.port === port &&
+        target.protocol === protocol
+      : target.x11Display === x11Display && target.protocol === protocol,
   );
   if (match) return match.id;
 
   const added = await client.addHostTarget({
     sessionToken,
     daemonInstanceId: hostId,
-    label: PROBED_TARGET_LABEL,
+    label: x11Display === undefined ? PROBED_TARGET_LABEL : `Display :${x11Display}`,
     host: PROBED_HOST,
     port,
     protocol,
     username: "",
+    x11Display,
   });
   return added.targetId;
 }
 
-export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesktopOverlayProps) {
+export function HostDesktopOverlay({
+  hostId,
+  port,
+  protocol,
+  x11Display,
+  onClose,
+}: HostDesktopOverlayProps) {
   const client = useHostClient(ScreenSharingService, hostId);
   const hostService = useHostClient(HostService, hostId);
   const { user, sessionToken } = useAuthContext();
@@ -125,12 +138,13 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
 
     void (async () => {
       try {
-        const targetId = await targetForProbedEndpoint(
+        const targetId = await targetForChannel(
           client,
           sessionTokenRef.current ?? "",
           hostId,
           port,
           protocol,
+          x11Display,
         );
         if (cancelled) return;
         startedTargetId = targetId;
@@ -166,7 +180,7 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
           });
       }
     };
-  }, [client, hostId, port, protocol]);
+  }, [client, hostId, port, protocol, x11Display]);
 
   // The bridge publishes into the room the start reply names, which is not this page's common room:
   // joining it is the same mint-and-connect `useCommonRoom` already performs, with no coordinates

@@ -18,8 +18,8 @@
  * control that provably cannot work is worse than no control.
  */
 
-import { useState } from "react";
-import { ProbeOutcome, type HostRemoteDesktop } from "../../gen/host_pb";
+import { Fragment, useState } from "react";
+import { DesktopChannelKind, ProbeOutcome, type HostRemoteDesktop } from "../../gen/host_pb";
 import { Protocol } from "../../gen/screen_sharing_pb";
 import { useHostConnection } from "../../rpc/connections/registry";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
@@ -40,8 +40,18 @@ const PROTOCOL_NAMES: Record<number, { slug: "vnc" | "rdp"; label: string; proto
   [Protocol.RDP]: { slug: "rdp", label: "RDP", protocol: Protocol.RDP },
 };
 
+function isX11Display(reading: HostRemoteDesktop): boolean {
+  return reading.kind === DesktopChannelKind.X11_DISPLAY;
+}
+
 /** What the desktop half of a reading says. Kept separate from the bridge half on purpose. */
 function desktopFact(reading: HostRemoteDesktop): string {
+  // An X11 display has no port until it is opened: the reading is about the display's socket.
+  if (isX11Display(reading)) {
+    return reading.outcome !== ProbeOutcome.OK
+      ? "Could not check the display"
+      : "Display available";
+  }
   // A probe that could not run is not a negative finding. "No desktop" here would report a host we
   // never reached as one with nothing serving.
   if (reading.outcome !== ProbeOutcome.OK) {
@@ -63,38 +73,45 @@ export interface ConnectableDesktop {
 }
 
 /**
- * Every channel a connect could act on, in the probe's order — one Connect each.
- *
- * The same three conditions as {@link connectableDesktop}, applied per channel rather than stopping
- * at the first: a host with several X displays offers each one.
- */
-export function connectableChannels(
-  readings: readonly HostRemoteDesktop[],
-): ConnectableDesktop[] {
-  void readings;
-  throw new Error("TODO(x11-channels): implement");
-}
-
-/**
- * The desktop a connect would act on, or `null` when none of the readings is connectable.
+ * The channel a reading would open, or `null` when a connect on it could not work.
  *
  * All three conditions are node 7's, and none of them is redundant. A probe that could not run made
  * no finding at all; a desktop nothing is serving has nothing to stream; and a reachable desktop on
  * a daemon with no bridge binary is a stream that would fail at spawn, after the operator asked for
- * it. The first reading that satisfies all three wins, which is the probe's own order (VNC, then
- * RDP) rather than a preference this row invents.
+ * it.
+ */
+function connectableChannel(reading: HostRemoteDesktop): ConnectableDesktop | null {
+  const known = PROTOCOL_NAMES[reading.protocol];
+  if (!known) return null;
+  if (reading.outcome !== ProbeOutcome.OK) return null;
+  if (!reading.desktopReachable || !reading.canBridge) return null;
+  return {
+    protocol: known.protocol,
+    port: reading.port,
+    channelId: reading.channelId,
+    x11Display: isX11Display(reading) ? reading.display : undefined,
+  };
+}
+
+/**
+ * Every channel a connect could act on, in the probe's order — one Connect each.
+ *
+ * A host with several X displays offers each one.
+ */
+export function connectableChannels(
+  readings: readonly HostRemoteDesktop[],
+): ConnectableDesktop[] {
+  return readings.flatMap((reading) => connectableChannel(reading) ?? []);
+}
+
+/**
+ * The first desktop a connect would act on, or `null` when none of the readings is connectable —
+ * the probe's own order (VNC, then RDP) rather than a preference this row invents.
  */
 export function connectableDesktop(
   readings: readonly HostRemoteDesktop[],
 ): ConnectableDesktop | null {
-  for (const reading of readings) {
-    const known = PROTOCOL_NAMES[reading.protocol];
-    if (!known) continue;
-    if (reading.outcome !== ProbeOutcome.OK) continue;
-    if (!reading.desktopReachable || !reading.canBridge) continue;
-    return { protocol: known.protocol, port: reading.port };
-  }
-  return null;
+  return connectableChannels(readings)[0] ?? null;
 }
 
 export function HostRowRemoteDesktop({ instanceId, readings }: HostRowRemoteDesktopProps) {
@@ -102,7 +119,6 @@ export function HostRowRemoteDesktop({ instanceId, readings }: HostRowRemoteDesk
   // or a status string. See `rpc/connections/useHasCapability`.
   const connection = useHostConnection(instanceId);
   const carriesMedia = useHasCapability(connection, "media");
-  const connectable = connectableDesktop(readings);
   const [openDesktop, setOpenDesktop] = useState<ConnectableDesktop | null>(null);
 
   return (
@@ -114,36 +130,45 @@ export function HostRowRemoteDesktop({ instanceId, readings }: HostRowRemoteDesk
         {readings.map((reading) => {
           const protocol = PROTOCOL_NAMES[reading.protocol];
           if (!protocol) return null;
+          const x11 = isX11Display(reading);
+          const connectable = connectableChannel(reading);
           return (
-            <span
-              key={protocol.slug}
-              data-testid={`hosts-row-${instanceId}-${protocol.slug}`}
-              className="flex gap-1"
-              title={reading.failureReason || undefined}
-            >
-              <span className="font-medium">{protocol.label}</span>
-              <span>{reading.canBridge ? "Bridge ready" : "No bridge"}</span>
-              <span>·</span>
-              <span>{desktopFact(reading)}</span>
-            </span>
+            <Fragment key={reading.channelId || protocol.slug}>
+              <span
+                data-testid={
+                  x11
+                    ? `hosts-row-${instanceId}-channel-${reading.channelId}`
+                    : `hosts-row-${instanceId}-${protocol.slug}`
+                }
+                className="flex gap-1"
+                title={reading.failureReason || undefined}
+              >
+                <span className="font-medium">{x11 ? reading.label : protocol.label}</span>
+                <span>{reading.canBridge ? "Bridge ready" : "No bridge"}</span>
+                <span>·</span>
+                <span>{desktopFact(reading)}</span>
+              </span>
+              {carriesMedia && connectable && (
+                <button
+                  data-testid={`hosts-row-${instanceId}-connect-desktop`}
+                  data-channel-id={connectable.channelId}
+                  type="button"
+                  className="px-2 py-0.5 text-xs border border-border rounded hover:bg-accent"
+                  onClick={() => setOpenDesktop(connectable)}
+                >
+                  Connect
+                </button>
+              )}
+            </Fragment>
           );
         })}
-        {carriesMedia && connectable && (
-          <button
-            data-testid={`hosts-row-${instanceId}-connect-desktop`}
-            type="button"
-            className="px-2 py-0.5 text-xs border border-border rounded hover:bg-accent"
-            onClick={() => setOpenDesktop(connectable)}
-          >
-            Connect
-          </button>
-        )}
       </span>
       {openDesktop && (
         <HostDesktopOverlay
           hostId={instanceId}
           port={openDesktop.port}
           protocol={openDesktop.protocol}
+          x11Display={openDesktop.x11Display}
           onClose={() => setOpenDesktop(null)}
         />
       )}

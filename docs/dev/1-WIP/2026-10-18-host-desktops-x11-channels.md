@@ -86,9 +86,9 @@ A host with several X displays offers each as a desktop.
 - [~] Testing — failing tests written (contract stage)
 
 - [x] Proto channel identity; regenerated TS
-- [ ] Display enumeration + config
-- [ ] x11vnc lifecycle around the bridge
-- [ ] Row lists channels; overlay opens a given channel
+- [x] Display enumeration + config
+- [x] x11vnc lifecycle around the bridge
+- [x] Row lists channels; overlay opens a given channel
 
 ## Technical Changes
 
@@ -112,9 +112,9 @@ starting one runs x11vnc then the bridge.
 | `tddy-web` | `HostRowRemoteDesktop.tsx`, `HostDesktopOverlay.tsx`, page objects |
 
 ## Implementation Milestones
-- [ ] M1 Proto + enumeration + tooling
-- [ ] M2 x11vnc lifecycle with stand-in binary
-- [ ] M3 Web channels
+- [x] M1 Proto + enumeration + tooling
+- [x] M2 x11vnc lifecycle with stand-in binary
+- [x] M3 Web channels
 
 ## Testing Plan
 

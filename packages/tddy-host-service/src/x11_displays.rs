@@ -13,7 +13,11 @@ use std::sync::Arc;
 
 use tddy_daemon_kernel::config::ScreenSharingConfig;
 
-use crate::remote_desktop_probe::{DesktopReachability, RemoteDesktopProbe};
+use crate::host_tooling::ProbeOutcome;
+use crate::remote_desktop_probe::{
+    binary_is_present, DesktopChannel, DesktopProtocol, DesktopReachability, RemoteDesktopProbe,
+    DEFAULT_VNC_PORT,
+};
 
 /// The socket directory used when `screen_sharing.x11_socket_dir` is not configured.
 pub const DEFAULT_X11_SOCKET_DIR: &str = "/tmp/.X11-unix";
@@ -32,9 +36,50 @@ pub struct X11Display {
 /// A directory that does not exist is a host with no X server, and lists nothing. Entries whose
 /// name is not `X` followed by a number, and sockets nothing answers on, are skipped.
 pub fn list_x11_displays(socket_dir: &Path) -> std::io::Result<Vec<X11Display>> {
-    // TODO(x11-channels): implement
-    let _ = socket_dir;
-    todo!()
+    let entries = match std::fs::read_dir(socket_dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+
+    let mut displays = Vec::new();
+    for entry in entries {
+        let socket = entry?.path();
+        let Some(number) = socket
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(display_number_of)
+        else {
+            continue;
+        };
+        if accepts_connections(&socket) {
+            displays.push(X11Display { number, socket });
+        }
+    }
+    displays.sort_by_key(|display| display.number);
+    Ok(displays)
+}
+
+/// `1` out of `X1`; nothing for any other name.
+fn display_number_of(file_name: &str) -> Option<u32> {
+    let digits = file_name.strip_prefix('X')?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// Whether a connect to `socket` succeeds as this process's user — refused for a dead server,
+/// denied for another user's.
+#[cfg(unix)]
+fn accepts_connections(socket: &Path) -> bool {
+    std::os::unix::net::UnixStream::connect(socket).is_ok()
+}
+
+/// There are no X server sockets to connect to off Unix.
+#[cfg(not(unix))]
+fn accepts_connections(_socket: &Path) -> bool {
+    false
 }
 
 /// The desktop block's readings with one X11 channel appended per display listed in
@@ -48,10 +93,53 @@ pub(crate) fn with_x11_channels(
     screen_sharing: &ScreenSharingConfig,
     probe: &Arc<dyn RemoteDesktopProbe>,
 ) -> Vec<DesktopReachability> {
-    // TODO(x11-channels): implement
-    let _ = (screen_sharing, probe);
-    let _ = endpoints;
-    todo!()
+    let socket_dir = if screen_sharing.x11_socket_dir.is_empty() {
+        DEFAULT_X11_SOCKET_DIR
+    } else {
+        screen_sharing.x11_socket_dir.as_str()
+    };
+    let displays = match list_x11_displays(Path::new(socket_dir)) {
+        Ok(displays) => displays,
+        Err(e) => {
+            log::warn!("could not list X11 displays in {socket_dir}: {e}");
+            return endpoints;
+        }
+    };
+
+    let x11vnc_present = binary_is_present(
+        &tddy_daemon_kernel::config::resolve_x11vnc_binary_path(screen_sharing),
+    );
+    let mut readings = endpoints;
+    for display in displays {
+        let served_on_vnc_port = u16::try_from(u32::from(DEFAULT_VNC_PORT) + display.number)
+            .ok()
+            .map(|port| probe.probe(DesktopProtocol::Vnc, port));
+        if served_on_vnc_port
+            .as_ref()
+            .is_some_and(|reading| reading.desktop_reachable)
+        {
+            continue;
+        }
+        // The bridge half of `can_bridge` is the VNC bridge's, which any endpoint reading of the
+        // same probe carries; asking the probe about the display's own port yields it as well.
+        let vnc_bridge_present = served_on_vnc_port
+            .map(|reading| reading.can_bridge)
+            .unwrap_or_else(|| {
+                probe
+                    .probe(DesktopProtocol::Vnc, DEFAULT_VNC_PORT)
+                    .can_bridge
+            });
+        readings.push(DesktopReachability {
+            outcome: ProbeOutcome::Ok,
+            channel: DesktopChannel::X11Display(display.number),
+            protocol: DesktopProtocol::Vnc,
+            can_bridge: x11vnc_present && vnc_bridge_present,
+            desktop_reachable: true,
+            // No port until x11vnc is started for the display.
+            port: 0,
+        });
+    }
+    readings
 }
 
 #[cfg(all(test, unix))]

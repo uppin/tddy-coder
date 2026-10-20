@@ -114,9 +114,7 @@ pub struct ScreenSharingServiceImpl {
     /// How long a start waits for its bridge to report the desktop ready.
     bridge_ready_timeout: std::time::Duration,
     /// The x11vnc serving each open X11 channel.
-    // TODO(x11-channels): started before the bridge and stopped with it on the host path.
-    #[allow(dead_code)]
-    x11vnc: crate::x11vnc::X11vncServers,
+    x11vnc: Arc<crate::x11vnc::X11vncServers>,
 }
 
 impl ScreenSharingServiceImpl {
@@ -130,7 +128,7 @@ impl ScreenSharingServiceImpl {
             host_scope: None,
             target_store: None,
             bridge_ready_timeout: crate::bridge_readiness::DEFAULT_BRIDGE_READY_TIMEOUT,
-            x11vnc: crate::x11vnc::X11vncServers::default(),
+            x11vnc: Arc::new(crate::x11vnc::X11vncServers::default()),
         }
     }
 
@@ -145,7 +143,7 @@ impl ScreenSharingServiceImpl {
     /// How long opening an X11 channel waits for its x11vnc to accept before failing the open.
     #[must_use]
     pub fn with_x11vnc_accept_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.x11vnc = crate::x11vnc::X11vncServers::new(timeout);
+        self.x11vnc = Arc::new(crate::x11vnc::X11vncServers::new(timeout));
         self
     }
 

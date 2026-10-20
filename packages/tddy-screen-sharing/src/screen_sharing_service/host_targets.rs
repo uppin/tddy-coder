@@ -7,6 +7,7 @@ use crate::bridge_config::{
     browser_livekit_url, host_bridge_identity, host_bridge_key, host_livekit_room,
     host_target_as_bridge_target, host_target_to_proto, prepare_bridge, screenshare_track_name,
 };
+use tddy_daemon_kernel::config::{resolve_x11vnc_binary_path, ScreenSharingConfig};
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
@@ -125,12 +126,30 @@ impl ScreenSharingServiceImpl {
         // Reported: these coordinates tell a browser to mount an overlay on a room, and a bridge that
         // never joined it leaves the operator watching nothing having already typed a secret. The
         // size is the one the bridge measured, so input lands where the operator aimed.
-        let started = self
-            .spawn_bridge(
-                prepared.for_password(password),
-                host_bridge_key(&req.daemon_instance_id, &req.target_id),
-            )
-            .await?;
+        let bridge_key = host_bridge_key(&req.daemon_instance_id, &req.target_id);
+        let mut prepared = prepared.for_password(password);
+        // An X11 display has no VNC server until one is started for it, and it is started before the
+        // bridge so the bridge has something to connect to.
+        if let Some(display) = target.display {
+            let x11vnc = self
+                .x11vnc
+                .start(
+                    &bridge_key,
+                    &resolve_x11vnc_binary_path(&screen_sharing_of(config)),
+                    display,
+                )
+                .await?;
+            prepared.spawn_config.host = "127.0.0.1".to_string();
+            prepared.spawn_config.port = x11vnc.port;
+        }
+        let started = match self.spawn_bridge(prepared, bridge_key.clone()).await {
+            Ok(started) => started,
+            Err(status) => {
+                // A start that failed leaves no x11vnc behind; stopping a key with none is a no-op.
+                self.x11vnc.stop(&bridge_key).await;
+                return Err(status);
+            }
+        };
 
         Ok(Response::new(StartStreamResponse {
             livekit_room,
@@ -153,9 +172,15 @@ impl ScreenSharingServiceImpl {
         // performed tells the browser to tear down an overlay over a bridge still running.
         self.require_host_scope()?;
 
-        self.terminate_bridge(&host_bridge_key(&req.daemon_instance_id, &req.target_id))
-            .await;
+        let bridge_key = host_bridge_key(&req.daemon_instance_id, &req.target_id);
+        self.terminate_bridge(&bridge_key).await;
+        self.x11vnc.stop(&bridge_key).await;
 
         Ok(Response::new(StopHostStreamResponse { ok: true }))
     }
+}
+
+/// The daemon's `screen_sharing:` block, or the defaults of one when it has none.
+fn screen_sharing_of(config: &tddy_daemon_kernel::config::DaemonConfig) -> ScreenSharingConfig {
+    config.screen_sharing.clone().unwrap_or_default()
 }

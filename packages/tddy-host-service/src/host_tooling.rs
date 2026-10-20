@@ -225,13 +225,13 @@ impl SubprocessHostToolingProbe {
     /// operator's explicit `screen_sharing` paths are the ones checked for existence.
     #[must_use]
     pub fn for_config(config: &tddy_daemon_kernel::config::DaemonConfig) -> Self {
-        // TODO(x11-channels): also list X11 displays — `.listing_x11_displays_for(config)`.
         Self {
             remote_desktop: Arc::new(
                 crate::remote_desktop_probe::TcpRemoteDesktopProbe::for_config(config),
             ),
             x11_channels: None,
         }
+        .listing_x11_displays_for(config)
     }
 
     /// Fill the desktop block from `remote_desktop` instead of connecting for real.

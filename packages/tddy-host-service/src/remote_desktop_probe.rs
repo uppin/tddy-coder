@@ -181,7 +181,7 @@ impl RemoteDesktopProbe for TcpRemoteDesktopProbe {
 /// resort, which they hand to the OS to look up on `PATH` — is searched on `PATH` too: testing it
 /// with `exists()` would answer about the daemon's working directory, which is not where the OS
 /// would find it.
-fn binary_is_present(resolved: &Path) -> bool {
+pub(crate) fn binary_is_present(resolved: &Path) -> bool {
     let has_directory = resolved
         .parent()
         .is_some_and(|parent| !parent.as_os_str().is_empty());

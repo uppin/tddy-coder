@@ -5,7 +5,10 @@
 //! different things to the operator reading them, and collapsing the pair is how a probe failure
 //! comes to read as a finding.
 
+use tddy_service::proto::host::DesktopChannelKind;
 use tddy_service::proto::host::HostRemoteDesktop;
+
+use crate::remote_desktop_probe::{DesktopChannel, DesktopProtocol, DesktopReachability};
 use tddy_service::proto::host::ProbeOutcome as ProtoProbeOutcome;
 
 use tddy_service::proto::host::HostGithubCli;
@@ -227,9 +230,7 @@ pub(crate) fn github_cli_message(gh: &crate::host_tooling::GithubCliStatus) -> H
 /// daemon has no bridge binary" and "nothing is serving a desktop here" have unrelated fixes, and a
 /// single flag could not send an operator to the right one. `port` travels with them so an
 /// unreachable reading is not read as authoritative for a host serving somewhere non-default.
-pub(crate) fn host_remote_desktop_message(
-    reading: &crate::remote_desktop_probe::DesktopReachability,
-) -> HostRemoteDesktop {
+pub(crate) fn host_remote_desktop_message(reading: &DesktopReachability) -> HostRemoteDesktop {
     HostRemoteDesktop {
         outcome: proto_probe_outcome(&reading.outcome) as i32,
         // `screen_sharing.proto`'s `Protocol` values, which `DesktopProtocol`'s discriminants
@@ -239,8 +240,38 @@ pub(crate) fn host_remote_desktop_message(
         desktop_reachable: reading.desktop_reachable,
         port: u32::from(reading.port),
         failure_reason: probe_failure_reason(&reading.outcome),
-        // TODO(x11-channels): channel_id, kind, display and label from `reading.channel`.
-        ..HostRemoteDesktop::default()
+        channel_id: channel_id_of(reading),
+        kind: channel_kind_of(reading.channel) as i32,
+        display: match reading.channel {
+            DesktopChannel::X11Display(display) => display,
+            DesktopChannel::Endpoint => 0,
+        },
+        label: match reading.channel {
+            DesktopChannel::X11Display(display) => format!("Display :{display}"),
+            DesktopChannel::Endpoint => String::new(),
+        },
+    }
+}
+
+/// The stable identity of a channel on its host: `x11:<display>` for a display, otherwise
+/// `<protocol>:<port>` for the endpoint.
+fn channel_id_of(reading: &DesktopReachability) -> String {
+    match reading.channel {
+        DesktopChannel::X11Display(display) => format!("x11:{display}"),
+        DesktopChannel::Endpoint => {
+            let protocol = match reading.protocol {
+                DesktopProtocol::Vnc => "vnc",
+                DesktopProtocol::Rdp => "rdp",
+            };
+            format!("{protocol}:{}", reading.port)
+        }
+    }
+}
+
+fn channel_kind_of(channel: DesktopChannel) -> DesktopChannelKind {
+    match channel {
+        DesktopChannel::Endpoint => DesktopChannelKind::Endpoint,
+        DesktopChannel::X11Display(_) => DesktopChannelKind::X11Display,
     }
 }
 
