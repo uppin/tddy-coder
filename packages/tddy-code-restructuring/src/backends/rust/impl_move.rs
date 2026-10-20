@@ -6,8 +6,7 @@
 //! `move_item`, this operation is authored here and informed by the server: where the members are
 //! comes from the outline, who calls them from `textDocument/references`, and everything else is a
 //! function of the files' text, in [`assemble`]. No caller is edited — a method resolves through its
-//! type wherever its block is written. See `docs/dev/1-WIP/2026-10-09-reshape-move-impl-members.md`
-//! for the rules (R1–R7) and the refusals (P1–P9, S1–S6).
+//! type wherever its block is written. See `packages/tddy-code-restructuring/docs/impl-move.md`.
 
 pub(super) mod assemble;
 mod cut;

@@ -530,3 +530,121 @@ async fn the_inline_tests_still_call_a_moved_associated_function_through_the_typ
     );
     assert_compiles_with_its_tests(&workspace);
 }
+
+/// `Host` defined in `host`, with a private `bump` its child `host::inner` reaches through the
+/// privacy rule that lets a child see its parent's private items.
+const A_HOST_WITH_A_PRIVATE_BUMP_AND_A_CHILD: &str = concat!(
+    "mod inner;\n",
+    "\n",
+    "pub struct Host {\n",
+    "    n: u32,\n",
+    "}\n",
+    "\n",
+    "impl Host {\n",
+    "    fn bump(&mut self) {\n",
+    "        self.n += 1;\n",
+    "    }\n",
+    "}\n",
+);
+const A_CHILD_BLOCK_OF_HOST_THAT_BUMPS: &str =
+    "use super::Host;\n\nimpl Host {\n    pub fn twice(&mut self) {\n        self.bump();\n        self.bump();\n    }\n}\n";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn widens_a_stayed_method_of_an_ancestor_module_for_the_destination() {
+    // Given `twice` in `host::inner`, which calls `bump`, a private method `host` (its parent) holds
+    let workspace = an_app_whose_host_reads(
+        A_HOST_WITH_A_PRIVATE_BUMP_AND_A_CHILD,
+        &[
+            ("src/roster.rs", AN_EMPTY_ROSTER),
+            ("src/host/inner.rs", A_CHILD_BLOCK_OF_HOST_THAT_BUMPS),
+        ],
+    );
+    let anchor = the_anchor_over(
+        &workspace,
+        "src/host/inner.rs",
+        &["app::host::inner::Host::twice"],
+    )
+    .await;
+
+    // When `twice` moves to `roster`, outside `host`
+    let widenings =
+        the_widenings_of_applying(&workspace, a_member_move_op(&anchor, "app::roster")).await;
+
+    // Then `bump` is widened in the ancestor's file, and the widening is reported
+    assert!(
+        widenings.iter().any(|line| line.contains("`Host::bump`")),
+        "the widening of `bump` was not reported: {widenings:?}"
+    );
+    assert!(
+        workspace.read("src/host.rs").contains("pub(crate) fn bump"),
+        "`bump` is not widened in `host`:\n{}",
+        workspace.read("src/host.rs")
+    );
+    assert_eq!(
+        the_impl_blocks_of(&workspace.read("src/roster.rs")),
+        blocks(&[("Host", "twice")])
+    );
+    assert_compiles(&workspace);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn carries_a_self_type_the_origin_imports_into_the_destination() {
+    // Given a `Host` defined in `types`, and a `host` that imports it and holds an `impl Host`
+    let workspace = an_app_holding(&[
+        ("src/lib.rs", "pub mod host;\npub mod roster;\npub mod types;\n"),
+        (
+            "src/types.rs",
+            "pub struct Host {\n    pub n: u32,\n}\n",
+        ),
+        (
+            "src/host.rs",
+            "use crate::types::Host;\n\nimpl Host {\n    pub fn twice(&mut self) {\n        self.n += 2;\n    }\n}\n",
+        ),
+        ("src/roster.rs", AN_EMPTY_ROSTER),
+    ]);
+    let anchor = the_anchor_over(&workspace, "src/host.rs", &["app::host::Host::twice"]).await;
+
+    // When `twice` moves to `roster`, which does not import `Host`
+    applying_a_plan_of(&workspace, &[a_member_move_op(&anchor, "app::roster")])
+        .await
+        .expect("the member move applies");
+
+    // Then `roster` imports the type the new block names, and the crate compiles
+    assert_eq!(
+        the_impl_blocks_of(&workspace.read("src/roster.rs")),
+        blocks(&[("Host", "twice")])
+    );
+    assert_compiles(&workspace);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_helper_the_destination_imports_from_another_module() {
+    // Given `twice`, which calls `host`'s `step`, and a `roster` that imports a different `step`
+    let workspace = an_app_holding(&[
+        (
+            "src/lib.rs",
+            "pub mod host;\npub mod other;\npub mod roster;\n",
+        ),
+        ("src/host.rs", A_HOST_WHOSE_TWICE_READS_PRIVATE_THINGS),
+        ("src/host/inner.rs", AN_INNER_MODULE),
+        ("src/other.rs", "pub fn step() -> u32 {\n    3\n}\n"),
+        (
+            "src/roster.rs",
+            "use crate::other::step;\n\npub fn roster() -> u32 {\n    step()\n}\n",
+        ),
+    ]);
+    let before = workspace.read("src/host.rs");
+    let anchor = the_anchor_over_members_of_host(&workspace, &["Host::twice"]).await;
+
+    // When `twice` moves into `roster`
+    let refusal = applying_a_plan_of(&workspace, &[a_member_move_op(&anchor, "app::roster")])
+        .await
+        .expect_err("the member move refuses");
+
+    // Then the refusal names the helper, and nothing was written
+    assert!(
+        refusal.contains("this seam cannot be cut here:") && refusal.contains("`step`"),
+        "unexpected refusal: {refusal}"
+    );
+    assert_eq!(workspace.read("src/host.rs"), before);
+}

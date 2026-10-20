@@ -11,6 +11,7 @@ use std::ops::Range;
 use super::super::early_return::masked_to_code;
 use super::super::item_move::placement;
 use super::super::item_move::text::{depth_at, Edit};
+use crate::crate_move::readable_spans;
 use crate::Result;
 
 /// Where the members go in the destination's text.
@@ -105,20 +106,45 @@ fn opened(origin: &Origin<'_>, members: &str) -> String {
 }
 
 /// `text` with its indentation `from` replaced by `to` on every line that carries it. A line that
-/// does not carry `from` is left as it is.
-///
-/// FIXME(reshape-move-impl-members): a line of a multi-line string literal that starts with `from`
-/// is re-indented too, which changes the literal. Refuse such a run once a fixture needs it.
+/// does not carry `from` is left as it is, and so is a line that begins inside a multi-line string
+/// literal, whose bytes are data.
 fn reindent(text: &str, from: &str, to: &str) -> String {
     if from == to {
         return text.to_string();
     }
+    let literals = literal_gaps(text);
+    let mut at = 0usize;
     text.split_inclusive('\n')
-        .map(|line| match line.strip_prefix(from) {
-            Some(rest) if !line.trim().is_empty() => format!("{to}{rest}"),
-            _ => line.to_string(),
+        .map(|line| {
+            let start = at;
+            at += line.len();
+            let inside_a_literal = literals
+                .iter()
+                .any(|gap| gap.start < start && start < gap.end);
+            match line.strip_prefix(from) {
+                Some(rest) if !inside_a_literal && !line.trim().is_empty() => {
+                    format!("{to}{rest}")
+                }
+                _ => line.to_string(),
+            }
         })
         .collect()
+}
+
+/// The stretches of `text` that are neither code nor a comment: its string literals.
+fn literal_gaps(text: &str) -> Vec<Range<usize>> {
+    let mut gaps = Vec::new();
+    let mut from = 0usize;
+    for (span, _) in readable_spans(text) {
+        if span.start > from {
+            gaps.push(from..span.start);
+        }
+        from = from.max(span.end);
+    }
+    if from < text.len() {
+        gaps.push(from..text.len());
+    }
+    gaps
 }
 
 fn with_newline(text: &str) -> String {
@@ -284,4 +310,35 @@ fn tokens_of(text: &str) -> Vec<String> {
         tokens.push(word);
     }
     tokens
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reindent;
+
+    #[test]
+    fn reindent_leaves_a_line_of_a_multi_line_string_literal_alone() {
+        // Given members one level deep, one of which holds a literal whose second line starts with
+        // the same indentation
+        let members = concat!(
+            "    fn banner() -> &'static str {\n",
+            "        \"first\n",
+            "    second\"\n",
+            "    }\n",
+        );
+
+        // When the level is taken off
+        let reindented = reindent(members, "    ", "");
+
+        // Then every line of code moves out a level and the literal's bytes are unchanged
+        assert_eq!(
+            reindented,
+            concat!(
+                "fn banner() -> &'static str {\n",
+                "    \"first\n",
+                "    second\"\n",
+                "}\n",
+            )
+        );
+    }
 }

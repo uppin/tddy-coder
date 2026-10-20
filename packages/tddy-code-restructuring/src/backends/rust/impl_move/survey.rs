@@ -83,9 +83,8 @@ impl RustBackend {
     /// The root items the moved lines name (R4), confirmed by the server, and the origin's own self
     /// type, which the block's header names in the destination.
     ///
-    /// FIXME(reshape-move-impl-members): a self type the origin imports rather than defines is not
-    /// carried into the destination, so a destination without that `use` fails the compile gate. The
-    /// origin's `use` of the type needs the header's names as well as the moved code's.
+    /// A self type the origin imports rather than defines is not in this list: it reaches the
+    /// destination through the origin's `use` header, which `imports::needed` copies whole.
     fn reached_items(
         &mut self,
         survey: &Survey<'_>,

@@ -6,12 +6,14 @@ real run found a defect that was fixed on the spot. These are what was *not* don
 **Source:** `#live-plan` 7/15, [#539](https://github.com/uppin/tddy-coder/pull/539). The fixes made on the
 way (T1–T24) are in that PR's change history; this lists only what remains.
 
-## 1. `backends/rust.rs` — the impl-member seams (still ~2.6k production lines)
+## 1. `backends/rust.rs` — the `impl RustBackend` runs are not yet moved (still ~3k production lines)
 
 The free-item runs are done (nine modules: `line_diff`, `placeholder_checks`, `lsp_edits`,
 `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`; `rust.rs` went
 from 4,475 to 2,666 production lines). What remains is the methods of the three `impl RustBackend`
-blocks and the trait impls, which only the impl-member seam of `extract_module` can move:
+blocks and the trait impls. `move_impl_members` moves a run of them into an `impl` of the same type in another
+module (it needs no assist rename and does not widen every private member to `pub(crate)`), so the operation is
+there; the runs are not yet moved:
 
 | Run | Members | Lines |
 |---|---|---:|
@@ -21,10 +23,11 @@ blocks and the trait impls, which only the impl-member seam of `extract_module` 
 | `assist_ops` | `prune_assist_imports` … `rename_placeholder` | ~332 |
 | `backend_impl` | the three whole trait impls (`Drop`, `LanguageBackend`, `ModuleReferences`) | ~132 |
 
-Not done because each needs a probe first (`assist_ops`: `check --deep` and `apply --dry-run`), because a
-moved private method comes out `pub(crate)` and **stays** so (about 25 methods, plus the fields of 13
-structs), and because the empty-`impl` shell case is unverified. Close it with the carve's usual plan
-sequence, then delete `packages/tddy-code-restructuring/docs/code-issues/oversized-file-backends-rust.md`
+What is left is the plan itself: one `move_impl_members` line per run, into child modules of `backends::rust`
+created with `name`, each run probed first with `check --deep` and `apply --dry-run` (`assist_ops` in
+particular). A moved private method is widened only as far as its users need, not left `pub(crate)`, and the
+run that empties a block removes it, so the two blockers this entry once named are answered. Close it with that
+plan sequence, then delete `packages/tddy-code-restructuring/docs/code-issues/oversized-file-backends-rust.md`
 recording the final number.
 
 ## 3. `crate_move/test_binary.rs` (966 lines, pre-existing)

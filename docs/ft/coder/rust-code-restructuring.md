@@ -324,6 +324,7 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `move_item` | Move a contiguous run of module-level items into **another module of the same crate**, in any file. See [Same-crate moves](#same-crate-moves) |
 | `reparent_module` | Move a module's file, and the directory of its children, under **another parent of the same crate**. See [Same-crate moves](#same-crate-moves) |
 | `retarget_impl` | Rewrite an inherent `impl`'s self type to **another type of the same crate** — the whole block, or the run of members its anchor names. See [`retarget_impl`](#retarget_impl). With `variant: "leave_delegator"` and `expr`, each moved method leaves a forwarding method on the old type |
+| `move_impl_members` | Move a contiguous run of members of one inherent `impl` into an `impl` of the same type in **another module of the same crate**. See [`move_impl_members`](#move_impl_members) |
 | `read_fields_through` | Rebind the `self` a **range** of a method reads to a local inserted before it: `let <name> = <expr>;`, then `<name>.<field>` for every field read (field mode) or `<name>` for every `self` (self mode), so a following `extract_method` writes a free function. See [`read_fields_through`](#read_fields_through) |
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
@@ -424,7 +425,7 @@ parent declares, a destination inside the module being moved, a module declared 
 `#[path]` on the declaration or any `mod` of the moved tree, an inline new parent, a declaration sharing
 its line with other code, and a target file that already exists. On both, `also` and `to_file` are
 refused. Once the server has answered, `move_item` also refuses a range inside an `impl` (a member
-cannot move alone; move the `impl` block), an anchor that cuts an item in half, a module among the items
+moves with `move_impl_members`; the whole `impl` block moves with `move_item`), an anchor that cuts an item in half, a module among the items
 (that is `reparent_module`), and a moved name inside a nested `use` group.
 
 **Visibility.** Widening is not a refusal: a private item the moved code reaches is widened where it
@@ -547,6 +548,48 @@ signature and outer attributes (not its doc comment, which stays on the moved me
 `const fn` cannot be forwarded and are refused, all listed, before anything is written. A delegator
 nothing in the workspace calls is still written, and the run notes it, because a `pub` method may have
 callers outside the workspace. Behaviour and limits: [`docs/retarget-impl.md`](../../../packages/tddy-code-restructuring/docs/retarget-impl.md).
+
+### `move_impl_members`
+
+A run of members of one inherent `impl T` — methods, associated functions and associated constants — moves
+into an `impl T` block of **another module of the same crate**. rust-analyzer has no assist that does this,
+and `extract_module` can only lift members into a new child module of the same file. The anchor is one
+`items` anchor on members `c::m::Type::member` of one inherent `impl`, contiguous (only blank lines and
+comments between them), or one `item` anchor on a single member; `restructure anchors <file> --items
+'Type::a,Type::b'` emits it. `to` is the destination module, rooted at the package name; with `name`, it is
+the **parent** of the module the line creates, as for `move_item`. `range` and `symbol` anchors, an `item`
+anchor on `<Type>` (a whole block moves with `move_item`), a member written `<T as Trait>::m`, a missing
+`to`, a `to` in another crate (an inherent `impl` outside the type's crate is `E0116`), a destination that
+does not exist, that is the origin module, or whose created name is taken, and every field the operation
+cannot honour (`reexport`, `canonical_paths`, `to_type`, `to_file`, `also`, `callee`, …) are refused before a
+server starts.
+
+The members travel byte for byte, with their doc comments, attributes and the comments between them; only a
+visibility or a relative spelling (`super::`, `pub(super)`) inside them is edited. The block they leave
+loses the run and one adjoining blank line, and is removed with its attributes when the run was all of it.
+They land in the destination's **one** inherent `impl` whose attributes and header are token-equal to the
+origin's, after a blank line; with none, or with two or more, they open a new block written like the
+origin's header, above a trailing `#[cfg(test)]` module. The destination gains the origin module's `use`
+header and one `use` per root item of the origin the moved lines name, leaving out what it already binds.
+Callers are not edited: `self.m()`, `Self::m`, `T::m` and an alias's `A::m` resolve through the type wherever
+the block is written.
+
+**Widening** is as little as the split needs, and each change is reported (`` `Host::bump` private ->
+pub(super) ``):
+
+- a **moved** private member is widened where it lands, to cover every module that names it from outside the
+  run, `cfg(test)` modules and other files included;
+- a private member or field of the type that **stays**, in the origin or in an ancestor module of it below the
+  common ancestor of origin and destination, is widened where it is written when the moved lines name it;
+- a private root item of the origin the moved lines name is widened for the destination.
+
+A destination inside the origin's subtree needs none of the last two and sends no request for them.
+
+`check --deep` and `apply` refuse, before anything is written: members in two blocks, a member cut in half,
+a member of a trait `impl` (a trait `impl` moves whole with `move_item`), an item in the run that is not a
+member (a macro invocation), an inline destination written on one line, and a name the moved lines reach in
+the origin that the destination binds to something else — one it declares, or one it imports by a path
+other than the origin's. Behaviour and limits: [`docs/impl-move.md`](../../../packages/tddy-code-restructuring/docs/impl-move.md).
 
 ### `read_fields_through`
 
@@ -1156,6 +1199,11 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
 
 ## Known limitations
 
+- **`move_impl_members` leaves a stayed member in an inline module of an ancestor un-widened.** The members
+  of an ancestor module are read from its file's top-level outline, so a block of the type written inside
+  an inline `mod` there is not surveyed; a private member in it that the moved lines name stays private and the
+  compile gate refuses the run. A member run from a *generic* block that opens a new block repeats the
+  header, which `verify` reads as added statements.
 - **`remove_unused_param` reports every refusal from the server as a used parameter.** The refusal
   names the parameter and says it is used, with the server's own reason in parentheses; a parameter
   rust-analyzer declines to remove for another reason (a trait method whose impls would diverge, for

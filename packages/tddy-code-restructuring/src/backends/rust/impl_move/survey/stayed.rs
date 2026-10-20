@@ -57,10 +57,9 @@ impl RustBackend {
             .zip(&survey.destination.path)
             .take_while(|(one, other)| one == other)
             .count();
-        // FIXME(reshape-move-impl-members): an ancestor's members are the ones its file declares at
-        // the top level, as `members_of` reads them. A type's impl inside an inline `mod` of an
-        // ancestor's file is not surveyed, so a private member there that the moved lines name is
-        // not widened.
+        // TODO(reshape-move-impl-members): an ancestor's members are the ones its file declares at the
+        // top level, as `members_of` reads them; a block inside an inline `mod` of an ancestor's file is
+        // not surveyed. See `docs/dev/todo/2026-10-20-restructure-move-impl-members-skips-impls-in-an-ancestors-inline-module.md`.
         for depth in common + 1..survey.source.len() {
             let module = &survey.source[..depth];
             self.ancestor_stayed(workspace, survey, module, (region, mentioned), reach)?;
