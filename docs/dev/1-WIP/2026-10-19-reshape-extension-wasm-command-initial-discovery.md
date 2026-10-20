@@ -81,3 +81,21 @@ every node has its companion (ask the developer first). Not a changeset companio
 ## Exploration 2 — node notes
 
 Node-specific exploration is carried by the PRD's Background and the whole-work Exploration 1 above; the contract commit adds what its tests need.
+
+
+## Exploration 3 — contract (2026-10-20)
+
+- **WIT**: zed `main` at `c4a82ab1ab958aa43b0c0b15c0bad4fb77a7ca7f`, `crates/extension_api/wit/since_v0.6.0` — eleven
+  `.wit` files (and a `settings.rs`, not vendored). Identical to the WIT inside `zed_extension_api` 0.6.0 except one
+  doc comment in `dap.wit`.
+- **wasmtime**: tree-sitter 0.26.13 → `wasmtime-c-api-impl` 36.0.19 → `wasmtime` 36.0.19 with `runtime`, `gc`,
+  `std`, `cranelift`, `gc-drc` — no `component-model`. A direct `wasmtime = "36.0.19"` with `component-model`
+  unifies to the same crate. wasmtime 36's `bindgen!` spells trappable imports `imports: { default: trappable }`.
+- **One Engine is not possible in practice**: epoch interruption is an engine setting, and tree-sitter's `WasmStore`
+  never sets an epoch deadline, so its store would trap at once on a shared engine.
+- **Toolchain**: neither the dev shell's rustc 1.94.1 nor `~/.rustup` has `wasm32-wasip2`. The flake's pinned
+  `rust-overlay` gives `rust-bin.stable."1.94.1".default.override { targets = ["wasm32-wasip2"]; }` (a Nix build,
+  no repo change). Two clean builds produced the same bytes.
+- **The component's imports** (from its name section): `wasi:cli/*`, `wasi:clocks/wall-clock`,
+  `wasi:filesystem/*`, `wasi:io/*` at 0.2.0 and 0.2.6, plus `zed:extension/*`. `register_extension!`'s
+  `init-extension` reads `PWD` and calls `set_current_dir`, so WASI is reached before any export.

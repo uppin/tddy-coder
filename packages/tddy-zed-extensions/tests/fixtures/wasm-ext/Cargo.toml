@@ -1,0 +1,24 @@
+[package]
+name = "tddy-fixture-wasm-ext"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Test fixture: a tiny Zed code extension tddy-zed-extensions' WASM host runs"
+
+# Its own workspace root: built once, by hand, for wasm32-wasip2 (see README.md) — never a member of
+# the tddy workspace, so `cargo build` at the repo root never builds or reads it.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+# WIT `since_v0.6.0` — the only API version tddy's host supports (PRD F1 a).
+zed_extension_api = "=0.6.0"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1

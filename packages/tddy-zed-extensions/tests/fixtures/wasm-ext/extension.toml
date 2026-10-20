@@ -1,0 +1,20 @@
+id = "wasm-fixture"
+name = "WASM Fixture"
+version = "0.1.0"
+schema_version = 1
+authors = ["tddy <dev@tddy.invalid>"]
+description = "A tiny Zed code extension: its WASM names the command of three fixture language servers."
+repository = "https://example.invalid/wasm-fixture"
+
+[lib]
+kind = "Rust"
+version = "0.6.0"
+
+[language_servers.fake-ls]
+languages = ["Demo TOML"]
+
+[language_servers.downloading-ls]
+languages = ["Demo TOML"]
+
+[language_servers.looping-ls]
+languages = ["Demo TOML"]
