@@ -14,8 +14,7 @@
 
 - `packages/tddy-zed-extensions`: `language.rs`, `grammar.rs`, `outline.rs`, `support.rs` (new modules); depends on
   `tddy-code-restructuring` and `tddy-lsp`.
-- `packages/tddy-code-restructuring`: the seams an extension language needs — `LanguageBackend::bind_workspace`,
-  `BackendRegistry::bind_workspace`, `ItemResolver::module_of`, `runner::Options::installed`,
+- `packages/tddy-code-restructuring`: the seams an extension language needs — `ItemResolver::module_of`, `runner::Options::installed`,
   `restructure_cli::run_with_installed` — and, at green, routing `anchors` / static `check` / `items_anchor` through
   them. It **cannot** call `with_installed_extensions` itself: `tddy-zed-extensions` implements its `LanguageSupport`,
   so the dependency runs the other way (plan correction, see below).
@@ -43,8 +42,7 @@ anchors from tree-sitter + `outline.scm`, through the same item-anchor traits Ru
 | `ExtensionLanguage { extension, extension_dir, name, grammar, path_suffixes, outline_query }`, `load_all(dir, manifest)`, `support_id()` (R1), `grammar_wasm()`; `LanguageConfig` | `tddy-zed-extensions/src/language.rs` |
 | `GrammarStore` (one engine + `WasmStore` per process, inside its `Parser`; `new`, `load(extension, dir, grammar)`, `parse`), `GrammarLoadError { extension, grammar, reason }` (R8 wording) | `tddy-zed-extensions/src/grammar.rs` |
 | `Outline { entries }` (`of`, `entries_at`, `innermost_enclosing`) / `OutlineEntry { path, name, span, name_at }` (`segments`) | `tddy-zed-extensions/src/outline.rs` |
-| `ExtensionSupport: LanguageSupport` (`new`, `language`, `outline_of`, `outline_backend`), `OutlineBackend: LanguageBackend + ItemResolver + ItemAtResolver`, `InstalledLanguages`, `load_installed(dir)`, trait `InstalledExtensions` with `SupportRegistry::with_installed_extensions(dir) -> Result<Vec<GrammarLoadError>, ExtensionError>` | `tddy-zed-extensions/src/support.rs` |
-| `LanguageBackend::bind_workspace(root)` (provided, no-op for a backend over a server) and `BackendRegistry::bind_workspace(root)` | `tddy-code-restructuring/src/registry.rs` |
+| `ExtensionSupport: LanguageSupport` (`new`, `language`, `outline_of`, `outline_backend(root)`; `backend(server, root)` builds the `OutlineBackend` over `root`), `OutlineBackend: LanguageBackend + ItemResolver + ItemAtResolver`, `InstalledLanguages`, `load_installed(dir)`, trait `InstalledExtensions` with `SupportRegistry::with_installed_extensions(dir) -> Result<Vec<GrammarLoadError>, ExtensionError>` | `tddy-zed-extensions/src/support.rs` |
 | `ItemResolver::module_of(root, file)` (provided: Cargo's `module_path_of`) and its `BackendRegistry` routing | `tddy-code-restructuring/src/item_anchor.rs`, `registry.rs` |
 | `runner::Options::installed: Arc<SupportRegistry>` (empty by default) | `tddy-code-restructuring/src/runner/options.rs` |
 | `restructure_cli::run_with_installed(args, installed)` | `tddy-code-restructuring/src/restructure_cli.rs` |
@@ -70,9 +68,9 @@ anchors from tree-sitter + `outline.scm`, through the same item-anchor traits Ru
   `resolve_item_anchors` / `span_of`. All three route by the `BackendRegistry` to the `OutlineBackend`. The fingerprint
   is `Fingerprint::of` the entry's whole lines (Rust's); non-adjacent entries are refused by the shared
   `covering_run`, so in Rust's words. Green makes `items_anchor` read the prefix through `ItemResolver::module_of`
-  instead of `module_path_of`, and every entry point bind its registry (`bind_workspace`) before resolving: an
-  `ItemResolver` gets the file relative to the root and not the root, and an extension backend has no server to learn
-  it from.
+  instead of `module_path_of`. An `ItemResolver` gets the file relative to the root and not the root, and an
+  extension backend has no server to learn it from, so the `OutlineBackend` holds the root it was built over by
+  K11's `LanguageSupport::backend(server, root)`.
 - **R6 — static check.** A stale fingerprint is refused as for Rust: `RestructureError::ItemChanged { item, file }`.
   A static `check` resolves the item anchors of files a server-less support claims through `Options::installed`'s
   backends (cheap — no server) instead of giving them `anchors-outline`'s "only a deep check can resolve" finding or
@@ -109,16 +107,15 @@ anchors from tree-sitter + `outline.scm`, through the same item-anchor traits Ru
 
 ### Seams this node adds to `tddy-code-restructuring`, and why
 
-- **`bind_workspace`** — `LanguageSupport::backend(ServerHandle)` gives a backend no root, and `ItemResolver` takes
-  files relative to one; Rust learns it from rust-analyzer. A provided no-op on `LanguageBackend` plus
-  `BackendRegistry::bind_workspace` keeps K11's surface untouched. An unbound `OutlineBackend` refuses, never reads
-  against the process directory. *Alternative for the developer:* give `LanguageSupport::backend` (K11) the root, or
-  make `ItemResolver` take it — both wider changes to another node's or shared surface.
+- ~~**`bind_workspace`**~~ — removed, see the note below: the root now reaches a backend through K11.
 - **`ItemResolver::module_of`** — `items_anchor` prefixes bare names with `module_path_of` (Cargo). Provided method,
   default = that, so Rust is unchanged.
 - **`Options::installed` / `run_with_installed`** — the plan put the registration call in `restructure_cli.rs` /
   `runner/entry_points.rs`, which is a dependency cycle (`tddy-zed-extensions` → `tddy-code-restructuring`). The front
   ends (`tddy-tools`, `tddy-index-daemon`) build the registry and hand it in.
+
+2026-10-20: the workspace root reaches a backend through K11's `LanguageSupport::backend(server, root)`;
+`bind_workspace` removed.
 
 ## Draft PR contract
 
@@ -144,8 +141,8 @@ anchors from tree-sitter + `outline.scm`, through the same item-anchor traits Ru
   `packages/tddy-index-daemon/tests/extension_anchors.rs`: `the_daemon_answers_the_same_anchors_as_the_cli`.
 - Unit tests: `tddy-zed-extensions` `language::tests` (4: R1 id, languages dir scan, manifest-listed languages,
   missing config), `grammar::tests` (3: vendored grammar loads and parses, loaded once per store, missing file names
-  extension and grammar); `tddy-code-restructuring` `registry::tests` (2: `bind_workspace` reaches the backend and
-  `module_of` routes to it; `module_of` through a backend without a resolver is refused by name).
+  extension and grammar); `tddy-code-restructuring` `registry::tests` (2: `module_of` routes to the claiming backend,
+  which answers from the root it was built over; `module_of` through a backend without a resolver is refused by name).
 
 ## Green wave
 

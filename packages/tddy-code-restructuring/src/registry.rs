@@ -85,17 +85,6 @@ pub trait LanguageBackend {
     fn item_locator(&mut self) -> Option<&mut dyn ItemAtResolver> {
         None
     }
-
-    /// Tell this backend which tree its item anchors' files are relative to.
-    ///
-    /// A backend over a running server already knows — the server was started at the root — so the
-    /// default does nothing. A backend that reads files itself with no server, an installed
-    /// extension's outline backend, has no other way to learn it: [`ItemResolver::resolve_item`]
-    /// takes the file relative to the root and not the root. Every entry point that resolves item
-    /// anchors binds the registry it built, through [`BackendRegistry::bind_workspace`].
-    fn bind_workspace(&mut self, root: &Path) {
-        let _ = root;
-    }
 }
 
 #[derive(Default)]
@@ -129,14 +118,6 @@ impl BackendRegistry {
             });
         }
         Ok(backend)
-    }
-
-    /// Bind every registered backend to the tree under `root`
-    /// ([`LanguageBackend::bind_workspace`]), before any item anchor is resolved through it.
-    pub fn bind_workspace(&mut self, root: &Path) -> &mut Self {
-        let _ = root;
-        // TODO(reshape-extension-outline): implement
-        todo!("BackendRegistry::bind_workspace")
     }
 
     /// Find the backend for a file, whatever operation it is wanted for.
@@ -393,18 +374,19 @@ mod tests {
         }
     }
 
-    /// A backend for `.cfg` that reads its files itself: it records the root it is bound to, and
-    /// answers a file's module as `<bound root>:<file>`, so a test sees both.
+    /// A backend for `.cfg` that reads its files itself, built knowing its workspace root (as
+    /// `LanguageSupport::backend(server, root)` builds one): it answers a file's module as
+    /// `<its root>:<file>`, so a test sees both that the call reached it and which root it holds.
     struct AFileRootedBackend {
         language: LanguageId,
-        bound_to: Option<PathBuf>,
+        root: PathBuf,
     }
 
     impl AFileRootedBackend {
-        fn new() -> Self {
+        fn over(root: &Path) -> Self {
             Self {
                 language: LanguageId::new("cfg"),
-                bound_to: None,
+                root: root.to_path_buf(),
             }
         }
     }
@@ -433,10 +415,6 @@ mod tests {
         fn item_resolver(&mut self) -> Option<&mut dyn ItemResolver> {
             Some(self)
         }
-
-        fn bind_workspace(&mut self, root: &Path) {
-            self.bound_to = Some(root.to_path_buf());
-        }
     }
 
     impl ItemResolver for AFileRootedBackend {
@@ -449,25 +427,20 @@ mod tests {
         }
 
         fn module_of(&mut self, _root: &Path, file: &str) -> crate::Result<Vec<String>> {
-            let bound = self
-                .bound_to
-                .as_ref()
-                .map_or_else(|| "unbound".to_string(), |root| root.display().to_string());
-            Ok(vec![format!("{bound}:{file}")])
+            Ok(vec![format!("{}:{file}", self.root.display())])
         }
     }
 
     #[test]
-    fn binding_the_registry_reaches_a_backend_that_reads_its_own_files() {
-        // Given a registry holding a backend that reads files itself
+    fn a_files_module_is_answered_by_the_backend_that_reads_its_own_files() {
+        // Given a registry holding a backend that reads files itself, built over a workspace root
         let mut registry = BackendRegistry::new();
-        registry.register(Box::new(AFileRootedBackend::new()));
+        registry.register(Box::new(AFileRootedBackend::over(Path::new("/work/tree"))));
 
-        // When the registry is bound to a workspace and an item is routed to that backend
-        registry.bind_workspace(Path::new("/work/tree"));
+        // When the module of a file that backend claims is asked for
         let module = registry.module_of(Path::new("/work/tree"), "conf/app.cfg");
 
-        // Then the backend was told the root, and answers the file's module itself
+        // Then the registry routed it to that backend, which answers it from the root it holds
         assert_eq!(
             module.expect("the backend answers"),
             vec!["/work/tree:conf/app.cfg".to_string()]

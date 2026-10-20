@@ -127,7 +127,7 @@ fn the_outline_lists_each_item_with_its_context() {
 
 #[test]
 fn anchors_print_an_item_path_and_fingerprint_per_entry() {
-    // Given a workspace with the app config, and the demo-toml language bound to it
+    // Given a workspace with the app config, and the demo-toml language built over it
     let installed = an_extensions_dir_with(&[AFixtureExtension::DemoToml]);
     let workspace = a_workspace_holding_the_app_config();
     let languages = load_installed(&installed.extensions).expect("the extensions load");
@@ -151,7 +151,7 @@ fn anchors_print_an_item_path_and_fingerprint_per_entry() {
 
 #[test]
 fn an_at_anchor_names_the_innermost_entry_with_its_context() {
-    // Given a workspace with the app config, and the demo-toml language bound to it
+    // Given a workspace with the app config, and the demo-toml language built over it
     let installed = an_extensions_dir_with(&[AFixtureExtension::DemoToml]);
     let workspace = a_workspace_holding_the_app_config();
     let languages = load_installed(&installed.extensions).expect("the extensions load");
@@ -205,7 +205,7 @@ fn an_items_anchor_over_adjacent_entries_resolves() {
 
 #[test]
 fn non_adjacent_entries_are_refused() {
-    // Given the demo-toml language bound to a workspace with the app config
+    // Given the demo-toml language built over a workspace with the app config
     let installed = an_extensions_dir_with(&[AFixtureExtension::DemoToml]);
     let workspace = a_workspace_holding_the_app_config();
     let languages = load_installed(&installed.extensions).expect("the extensions load");

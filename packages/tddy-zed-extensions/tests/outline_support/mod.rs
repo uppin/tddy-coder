@@ -130,17 +130,19 @@ impl AWorkspace {
     }
 }
 
-/// The backends of `languages`' supports, with no server, bound to `workspace` — what an entry
-/// point resolves an extension language's item anchors through.
+/// The backends of `languages`' supports, with no server, built over `workspace`'s root — what an
+/// entry point resolves an extension language's item anchors through.
 pub fn a_backend_registry_of(
     languages: &InstalledLanguages,
     workspace: &AWorkspace,
 ) -> BackendRegistry {
     let mut registry = BackendRegistry::new();
     for support in &languages.supports {
-        registry.register(support.backend(tddy_code_restructuring::ServerHandle::none()));
+        registry.register(support.backend(
+            tddy_code_restructuring::ServerHandle::none(),
+            workspace.root(),
+        ));
     }
-    registry.bind_workspace(workspace.root());
     registry
 }
 

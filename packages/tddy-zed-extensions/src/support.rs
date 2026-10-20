@@ -109,8 +109,10 @@ impl ExtensionSupport {
         todo!("ExtensionSupport::outline_of")
     }
 
-    /// The outline backend over this language, bound to no workspace yet.
-    pub fn outline_backend(&self) -> OutlineBackend {
+    /// The outline backend over this language, reading its files under `root` — the tree item
+    /// anchors' files are relative to.
+    pub fn outline_backend(&self, root: &Path) -> OutlineBackend {
+        let _ = root;
         // TODO(reshape-extension-outline): implement
         todo!("ExtensionSupport::outline_backend")
     }
@@ -142,9 +144,10 @@ impl LanguageSupport for ExtensionSupport {
         todo!("ExtensionSupport::workspace_root")
     }
 
-    /// [`ExtensionSupport::outline_backend`], whatever `server` is: this tier never has one.
-    fn backend(&self, server: ServerHandle<'_>) -> Box<dyn LanguageBackend> {
-        let _ = server;
+    /// [`ExtensionSupport::outline_backend`] over `root`, whatever `server` is: this tier never
+    /// has one.
+    fn backend(&self, server: ServerHandle<'_>, root: &Path) -> Box<dyn LanguageBackend> {
+        let _ = (server, root);
         // TODO(reshape-extension-outline): implement
         todo!("ExtensionSupport::backend")
     }
@@ -178,14 +181,13 @@ pub struct OutlineBackend {
         reason = "TODO(reshape-extension-outline): read by the resolvers once implemented"
     )]
     store: Arc<Mutex<GrammarStore>>,
-    /// The tree item anchors' files are relative to, once
-    /// [`LanguageBackend::bind_workspace`] is called; an item anchor resolved before that is
-    /// refused, never read against the process directory.
+    /// The tree item anchors' files are relative to, given by
+    /// [`LanguageSupport::backend`] — never the process directory.
     #[allow(
         dead_code,
         reason = "TODO(reshape-extension-outline): read by the resolvers once implemented"
     )]
-    root: Option<PathBuf>,
+    root: PathBuf,
 }
 
 impl LanguageBackend for OutlineBackend {
@@ -226,12 +228,6 @@ impl LanguageBackend for OutlineBackend {
     fn item_locator(&mut self) -> Option<&mut dyn ItemAtResolver> {
         // TODO(reshape-extension-outline): implement
         todo!("OutlineBackend::item_locator")
-    }
-
-    fn bind_workspace(&mut self, root: &Path) {
-        let _ = root;
-        // TODO(reshape-extension-outline): implement
-        todo!("OutlineBackend::bind_workspace")
     }
 }
 
