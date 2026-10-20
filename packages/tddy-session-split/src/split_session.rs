@@ -14,7 +14,7 @@ use tddy_core::backend::RemoteToolEnv;
 use tddy_daemon_auth::SessionTokens;
 use tddy_rpc::Status;
 
-/// Lifetime of the agent's scoped LiveKit join token.
+/// Lifetime of the agent's scoped room join token, as the split-room port is asked to issue it.
 ///
 /// Matches the per-session PTY bridge's token (`LiveKitTerminalExposure`): long
 /// enough that a working day of tool calls never re-authenticates, short enough that a leaked token
@@ -153,72 +153,60 @@ pub use agent_credentials::*;
 /// The split agent's tool environment from the room join the split-room port issued: it reaches the
 /// codebase daemon's session through that room, as `host_identity`'s peer, carrying
 /// `agent_session_token`.
+///
+/// `codebase_session_id` is the **workspace session on the codebase daemon**, not this session:
+/// that daemon resolves the worktree from its own sessions base keyed by the id it is given, so the
+/// agent's own id would find nothing there.
+///
+/// The join's token grants room-join under one pinned identity for one room, and it is all of the
+/// room's credentials the agent is given: whatever minted it — and could mint a token for any room
+/// as any identity — stays with the port, out of reach of an agent running model-authored code.
+///
+/// The RPC server the agent addresses is `host_identity`, the room's host: only the daemon that
+/// hosts a room is in it, so the identity and the room have to travel together.
+/// `codebase_instance_id` is not that identity — it hosts no room and joins none — it is the
+/// forwarding hint the room's host routes on to reach the checkout.
 pub fn split_remote_tool_env_from_join(
     join: &tddy_daemon_extensions::SplitAgentJoin,
     host_identity: &str,
     agent_session_token: String,
     target: &SplitSpawnTarget<'_>,
 ) -> RemoteToolEnv {
-    let _ = (join, host_identity, agent_session_token, target);
-    todo!("split_remote_tool_env_from_join")
+    RemoteToolEnv {
+        // A split session has no HTTP route to its worktree: this daemon's own URL would answer,
+        // but from the wrong host's filesystem. Left empty so the room transport is the only one
+        // configured rather than a wrong one waiting behind it.
+        daemon_url: String::new(),
+        daemon_socket: None,
+        session_id: target.codebase_session_id.to_string(),
+        session_token: agent_session_token,
+        daemon_instance_id: Some(target.codebase_instance_id.to_string()),
+        livekit_url: Some(join.url.clone()),
+        livekit_room: Some(join.room.clone()),
+        server_identity: Some(host_identity.to_string()),
+        livekit_token: Some(join.token.clone()),
+    }
 }
 
-/// Mint the agent's scoped LiveKit join token and build the `TDDY_REMOTE_*` environment around it.
-///
-/// `codebase_session_id` is the **workspace session on the codebase daemon**, not this session:
-/// that daemon resolves the worktree from its own sessions base keyed by the id it is given, so the
-/// agent's own id would find nothing there.
-///
-/// The token grants room-join under one pinned identity for one room. The daemon's
-/// `livekit.api_secret` is deliberately not exported — it would let an agent running model-authored
-/// code mint a token for any room as any identity (contrast `spawner.rs`, which passes it on the
-/// command line to `tddy-coder`, where `/proc/<pid>/cmdline` exposes it).
-///
-/// The RPC server the agent addresses is the room's host, taken from the same `livekit` value that
-/// names the room: only the daemon that hosts a room is in it, so the identity and the room have to
-/// travel together. `codebase_instance_id` is not that identity — it hosts no room and joins none —
-/// it is the forwarding hint the room's host routes on to reach the checkout.
+/// Mint the agent's own session token and build the `TDDY_REMOTE_*` environment around the room
+/// join `room` carries (see [`split_remote_tool_env_from_join`]).
 ///
 /// `target.session_token` is the *caller's* credential and is never forwarded: it is proof of who
 /// asked, and the agent gets one of its own minted from it with `tokens` (see
 /// [`mint_agent_session_token`]).
 pub fn split_remote_tool_env(
-    livekit: &SplitLiveKitRoom,
+    room: &SplitAgentRoom,
     tokens: &SessionTokens,
     target: &SplitSpawnTarget<'_>,
 ) -> Result<RemoteToolEnv, Status> {
-    let SplitSpawnTarget {
-        session_id,
-        codebase_instance_id,
-        codebase_session_id,
-        session_token,
-    } = *target;
-    let agent_session_token = agent_credentials::mint_agent_session_token(tokens, session_token)?;
-    let identity = split_agent_participant_identity(session_id);
-    let token = tddy_livekit::TokenGenerator::new(
-        livekit.api_key.clone(),
-        livekit.api_secret.clone(),
-        livekit.room.clone(),
-        identity,
-        SPLIT_AGENT_TOKEN_TTL,
-    )
-    .generate()
-    .map_err(|e| Status::internal(format!("mint LiveKit join token for split session: {e}")))?;
-
-    Ok(RemoteToolEnv {
-        // A split session has no HTTP route to its worktree: this daemon's own URL would answer,
-        // but from the wrong host's filesystem. Left empty so the LiveKit transport is the only one
-        // configured rather than a wrong one waiting behind it.
-        daemon_url: String::new(),
-        daemon_socket: None,
-        session_id: codebase_session_id.to_string(),
-        session_token: agent_session_token,
-        daemon_instance_id: Some(codebase_instance_id.to_string()),
-        livekit_url: Some(livekit.url.clone()),
-        livekit_room: Some(livekit.room.clone()),
-        server_identity: Some(livekit.host_identity.clone()),
-        livekit_token: Some(token),
-    })
+    let agent_session_token =
+        agent_credentials::mint_agent_session_token(tokens, target.session_token)?;
+    Ok(split_remote_tool_env_from_join(
+        &room.join,
+        &room.host_identity,
+        agent_session_token,
+        target,
+    ))
 }
 
 /// Build the `TDDY_REMOTE_*` environment for a **sandboxed codebase** agent — the placement whose
@@ -263,48 +251,42 @@ pub fn colocated_jail_tool_env(
     }
 }
 
-/// The room a split session's agent joins, and the LiveKit credentials to mint its join token.
-pub struct SplitLiveKitRoom {
-    pub room: String,
-    pub url: String,
-    pub api_key: String,
-    pub api_secret: String,
-    /// The participant identity serving RPC in `room` — the facilitating daemon's, since that is
-    /// the daemon that opens the room and the only one that joins it. Carried beside the room name
-    /// so an agent can never be pointed at a participant that is not in the room it was given.
+/// The room a split session's agent joins, as the split-room port issued it.
+pub struct SplitAgentRoom {
+    /// The room, its URL, and the agent's join token for it.
+    pub join: tddy_daemon_extensions::SplitAgentJoin,
+    /// The participant identity serving RPC in the join's room — the facilitating daemon's, since
+    /// that is the daemon that opens the room and the only one that joins it. Carried beside the
+    /// join so an agent can never be pointed at a participant that is not in the room it was given.
     pub host_identity: String,
 }
 
-impl SplitLiveKitRoom {
-    /// Resolve from daemon config for a named room, refusing a split placement the agent could not
-    /// be wired for.
+impl SplitAgentRoom {
+    /// Ask `split_rooms` for the join of `session_id`'s own room, refusing a split placement the
+    /// agent could not be wired for — a daemon with no room integration refuses it here.
     ///
-    /// The room is a parameter because it is no longer the lobby: the agent belongs in the room of
-    /// the worktree it was given, so its token admits it there and nowhere else — not to the room
-    /// every daemon and browser in the project shares. The credentials still come from the common
-    /// room's resolution, since a daemon with no common room cannot forward `StartSession` to a
-    /// peer in the first place, so a split placement is impossible before this is reached.
+    /// The room is this session's, hosted by this daemon — the one running the agent, and therefore
+    /// the session's facilitating daemon. Named from `session_id`, never from the codebase daemon's
+    /// session: that daemon hosts no room, so a room named after its session would be one nobody is
+    /// in. The agent belongs in the room of the worktree it was given, so its join admits it there
+    /// and nowhere else — not to the lobby every daemon and browser in the project shares. Start
+    /// and resume derive it the same way, so a resumed agent rejoins the room it left.
     ///
-    /// Called before the codebase daemon is asked to create anything: a wiring failure discovered
-    /// afterwards would strand a worktree on a host the operator may never look at.
-    pub fn from_config(
+    /// Called by a split start before the codebase daemon is asked to create anything: a wiring
+    /// failure discovered afterwards would strand a worktree on a host the operator may never look
+    /// at.
+    pub fn issued_by(
+        split_rooms: &dyn tddy_daemon_extensions::SplitRoomHosting,
         config: &tddy_daemon_kernel::config::DaemonConfig,
-        room: impl Into<String>,
+        session_id: &str,
     ) -> Result<Self, Status> {
-        let (_common_room, url, api_key, api_secret) =
-            tddy_daemon_livekit::livekit_peer_discovery::livekit_common_room_connect_strings(
-                config,
-            )
-            .map_err(|e| {
-                Status::failed_precondition(format!(
-                    "cannot place a session's codebase on another daemon: {e}"
-                ))
-            })?;
+        let join = split_rooms.agent_join(
+            &tddy_daemon_kernel::peer_forwarding::session_room_name(session_id),
+            &split_agent_participant_identity(session_id),
+            SPLIT_AGENT_TOKEN_TTL,
+        )?;
         Ok(Self {
-            room: room.into(),
-            url,
-            api_key,
-            api_secret,
+            join,
             host_identity: tddy_daemon_kernel::peer_forwarding::daemon_rpc_identity(
                 &tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(config),
             ),
@@ -330,7 +312,7 @@ pub struct SplitSpawnTarget<'a> {
     pub session_token: &'a str,
 }
 
-/// Assemble everything the agent spawn needs, minting a fresh join token.
+/// Assemble everything the agent spawn needs, with a fresh join from `split_rooms`.
 ///
 /// `withdrawals` is the session's roster as [`wire_roster_withdrawals`] renders it — read from the
 /// codebase daemon, since that is the host that holds it. It reaches both halves of the spawn: the
@@ -341,6 +323,7 @@ pub struct SplitSpawnTarget<'a> {
 /// that failed has already failed this call, for the reason [`build_split_context_dir`] gives.
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_split_agent_wiring(
+    split_rooms: &dyn tddy_daemon_extensions::SplitRoomHosting,
     config: &tddy_daemon_kernel::config::DaemonConfig,
     tokens: &SessionTokens,
     session_dir: &Path,
@@ -350,15 +333,8 @@ pub fn prepare_split_agent_wiring(
     globs: &[&str],
     source: &dyn tddy_session_files::context_sync::ContextSource,
 ) -> Result<SplitAgentWiring, Status> {
-    // This session's own room, hosted by this daemon — the one running the agent, and therefore the
-    // session's facilitating daemon. Named from `session_id`, never from `codebase_session_id`: the
-    // codebase daemon hosts no room, so a room named after its session would be one nobody is in.
-    // Start and resume derive it the same way, so a resumed agent rejoins the room it left.
-    let livekit = SplitLiveKitRoom::from_config(
-        config,
-        tddy_daemon_livekit::session_room::session_room_name(target.session_id),
-    )?;
-    let remote = split_remote_tool_env(&livekit, tokens, target)?;
+    let room = SplitAgentRoom::issued_by(split_rooms, config, target.session_id)?;
+    let remote = split_remote_tool_env(&room, tokens, target)?;
     Ok(SplitAgentWiring {
         context_dir: build_split_context_dir(session_dir, withdrawals, globs, source)?,
         extra_args: agent_argv::split_claude_extra_args(session_dir, tddy_tools_path, withdrawals)?,
@@ -427,20 +403,21 @@ mod tests {
     use tddy_daemon_auth::{DaemonSigningKey, StandaloneKeyDirectory, SIGNING_KEY_FILE};
     use tddy_github::{GitHubUser, SessionClaims, SessionTokenVerifier, SESSION_TOKEN_TTL};
 
-    /// The session room as the facilitating daemon resolved it: its name, and the identity that
-    /// daemon serves RPC on inside it. The two travel together because only the daemon that hosts a
-    /// room can say who is in it.
-    fn a_room_hosted_by(host_instance_id: &str) -> SplitLiveKitRoom {
-        SplitLiveKitRoom {
-            room: "session-agent-side-session".to_string(),
-            url: "ws://livekit.invalid:7880".to_string(),
-            api_key: "devkey".to_string(),
-            api_secret: "secret".to_string(),
+    /// The session room as the facilitating daemon's split-room port issued it: the agent's join,
+    /// and the identity that daemon serves RPC on inside the room. The two travel together because
+    /// only the daemon that hosts a room can say who is in it.
+    fn a_room_hosted_by(host_instance_id: &str) -> SplitAgentRoom {
+        SplitAgentRoom {
+            join: tddy_daemon_extensions::SplitAgentJoin {
+                room: "session-agent-side-session".to_string(),
+                url: "ws://livekit.invalid:7880".to_string(),
+                token: "a-join-scoped-to-the-session-room".to_string(),
+            },
             host_identity: format!("daemon-{host_instance_id}"),
         }
     }
 
-    fn a_room() -> SplitLiveKitRoom {
+    fn a_room() -> SplitAgentRoom {
         a_room_hosted_by("workstation-a")
     }
 
@@ -723,34 +700,6 @@ mod tests {
         assert_eq!(
             env_value(&env, "TDDY_REMOTE_DAEMON_INSTANCE_ID").as_deref(),
             Some("workstation-b")
-        );
-    }
-
-    #[test]
-    fn the_agent_receives_a_scoped_join_token_and_never_the_api_secret() {
-        let host = an_agent_host();
-        // When
-        let env = split_remote_tool_env(
-            &a_room(),
-            &host.tokens,
-            &SplitSpawnTarget {
-                session_id: "sid",
-                codebase_instance_id: "workstation-b",
-                codebase_session_id: "codebase-sid",
-                session_token: &host.a_caller_token(),
-            },
-        )
-        .expect("mint split env");
-
-        // Then — a JWT, not the secret that mints JWTs for any room and identity
-        let token = env_value(&env, "TDDY_REMOTE_LIVEKIT_TOKEN").expect("join token");
-        assert!(
-            token.starts_with("eyJ"),
-            "expected a signed JWT; got {token:?}"
-        );
-        assert!(
-            !env.env_pairs().iter().any(|(_, v)| v == "secret"),
-            "the daemon's api_secret must never reach the agent's environment"
         );
     }
 

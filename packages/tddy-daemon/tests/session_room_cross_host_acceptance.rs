@@ -24,11 +24,12 @@ use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::common_room_key_directory::{advertised_signing_key, CommonRoomKeyDirectory};
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
+use tddy_daemon::runtime::{spawn_common_room_discovery_task, split_room_hosting};
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens};
 use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
+use tddy_daemon_livekit::room_tokens::room_token_minter;
 use tddy_daemon_livekit::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
 use tddy_github::{GitHubUser, TokenKind};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
@@ -315,6 +316,13 @@ async fn a_daemon(
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_session_tokens(tokens);
+    // The split-room port the daemon installs, over this host's own room registry.
+    let split_rooms = split_room_hosting(
+        service.config(),
+        service.session_rooms(),
+        room_token_minter(service.config().livekit.as_ref()),
+    );
+    let service = service.with_split_rooms(split_rooms);
 
     Daemon {
         service: Arc::new(tddy_daemon_rpc::RpcHandlers::install(service).0),

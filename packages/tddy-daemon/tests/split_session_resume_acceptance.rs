@@ -35,11 +35,12 @@ use tddy_core::session_agent::SessionAgentRecord;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon::common_room_key_directory::{advertised_signing_key, CommonRoomKeyDirectory};
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::runtime::spawn_common_room_discovery_task;
+use tddy_daemon::runtime::{spawn_common_room_discovery_task, split_room_hosting};
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory};
 use tddy_daemon_livekit::livekit_peer_discovery::{
     CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
+use tddy_daemon_livekit::room_tokens::room_token_minter;
 use tddy_github::GitHubUser;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
@@ -230,23 +231,27 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
         LiveKitEligibleDaemonSource::new(config_arc, registry, room_slot.clone()),
     );
 
-    tddy_daemon_rpc::RpcHandlers::install(
-        DaemonSessionHost::new(
-            config,
-            resolver,
-            tddy_data_dir,
-            user_resolver,
-            None,
-            Some(LiveKitDiscoveryHandles {
-                eligible_daemon_source: eligible,
-                common_room_livekit_room: room_slot,
-            }),
-            None,
-            Arc::new(ClaudeCliSessionManager::new()),
-        )
-        .with_session_tokens(tokens),
+    let service = DaemonSessionHost::new(
+        config,
+        resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        Some(LiveKitDiscoveryHandles {
+            eligible_daemon_source: eligible,
+            common_room_livekit_room: room_slot,
+        }),
+        None,
+        Arc::new(ClaudeCliSessionManager::new()),
     )
-    .0
+    .with_session_tokens(tokens);
+    // The split-room port the daemon installs, over this host's own room registry.
+    let split_rooms = split_room_hosting(
+        service.config(),
+        service.session_rooms(),
+        room_token_minter(service.config().livekit.as_ref()),
+    );
+    tddy_daemon_rpc::RpcHandlers::install(service.with_split_rooms(split_rooms)).0
 }
 
 /// Serve a daemon on the common room under its production identity — the one `forward_to_peer`

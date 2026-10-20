@@ -46,14 +46,14 @@ and session-split's switch. Strikes `tddy-session-split`.
 moved with its type and became `pub`, since an inherent method cannot stay behind in the plugin) and
 re-exported from `tddy_daemon_livekit::session_room`, so every caller compiles unchanged — the plugin's
 whole suite (lib and integration, with the LiveKit testkit) is 208 passing and 0 failing as of milestone 1 (2026-10-20; the wave-2 count of 77 passing and 6 red is superseded). New: `SplitRoomHosting`,
-`SplitAgentJoin`, `NoSplitRooms` (`todo!()`) with a failing unit test. **Not yet published:** the plugin's
-`SplitRoomHosting` impl and session-split's acceptance tests (`split_room_hosting_port.rs`) — they drive
-`SplitSessions` paths that switch in green. The ratchet strike waits on #623's `WorkspaceGraph`.
+`SplitAgentJoin`, `NoSplitRooms` (`todo!()`) with a failing unit test. **Published in green (2026-10-20):** the plugin's
+`SplitRoomHosting` impl (`LiveKitSplitRooms`) and session-split's switch onto the port, which drives
+`SplitSessions` paths. The ratchet strike is done (`livekit_is_a_satellite`, 6 of 6 green); it no longer waits on #623's `WorkspaceGraph`.
 
 **Red pass (2026-10-17):** added `split_session::split_remote_tool_env_from_join` and
 `tests/split_room_hosting_port.rs` (`a_split_agent_is_spawned_with_the_join_the_port_issued`); the
-refusal row is the `NoSplitRooms` unit test. ⚠ **Open:** `a_split_start_hosts_the_room_over_the_remote_checkout`
-needs a seam into `spawn_split_agent` that green introduces with the `SplitSessions` field change.
+refusal row is the `NoSplitRooms` unit test. **Green (2026-10-20):** `a_split_start_hosts_the_room_over_the_remote_checkout`, which the red pass had missed,
+is now in `split_room_hosting_port.rs`. It is the seam the `SplitSessions` field change introduced: it did not compile before that change, and it fails on the `host_remote_worktree` arguments if the codebase session and instance ids are swapped.
 
 ## Draft PR contract
 
@@ -108,8 +108,8 @@ depends on LiveKit.
 - [x] Move `WorktreeSnapshot`, `SessionTokenMinter`, `RemoteSnapshotSource` → extensions (plugin re-exports)
 - [x] `SplitRoomHosting` + `SplitAgentJoin` + `NoSplitRooms`
 - [x] Plugin `SplitRoomHosting` over registry + `RemoteCheckout` + `RoomTokenMinter`
-- [ ] session-split on the port and kernel forwards
-- [ ] Ratchet: strike `tddy-session-split`
+- [x] session-split on the port and kernel forwards
+- [x] Ratchet: strike `tddy-session-split`
 
 ## Technical Changes
 
@@ -137,7 +137,7 @@ As listed in Scope.
 ## Implementation Milestones
 - [x] M1 Trait and type moves (re-exports keep everything compiling)
 - [x] M2 Port + plugin implementation (`NoSplitRooms` refusal; `LiveKitSplitRooms` in `tddy-daemon-livekit`)
-- [ ] M3 Split switched; suites green; ratchet green
+- [x] M3 Split switched; suites green; ratchet green (the six `split_session_resume_acceptance` reds are environmental, named under Acceptance Tests)
 
 ## Testing Plan
 
@@ -149,12 +149,25 @@ lifecycle's split tests) remain the testkit-backed integration proof.
 
 | Test | File | Validates |
 |---|---|---|
-| `a_split_start_hosts_the_room_over_the_remote_checkout` | `packages/tddy-session-split/tests/split_room_hosting_port.rs` (new) | `host_remote_worktree(session, dir, codebase session, codebase instance, ..)` with the verified-caller minter |
+| `a_split_start_hosts_the_room_over_the_remote_checkout` | `packages/tddy-session-split/tests/split_room_hosting_port.rs` (added in green) | `host_remote_worktree(session, dir, codebase session, codebase instance, ..)` with the verified-caller minter |
 | `a_split_agent_is_spawned_with_the_join_the_port_issued` | same | `agent_join(room, split identity, SPLIT_AGENT_TOKEN_TTL)` flows into the agent's env |
 | `with_nothing_wired_split_placement_is_refused_as_before` | `packages/tddy-daemon-extensions/src/split_rooms.rs` (unit) | `NoSplitRooms` produces `FailedPrecondition` "cannot place a session's codebase on another daemon: …" |
 | `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
+| `the_agent_receives_a_scoped_join_token_and_never_the_api_secret` (removed from `split_session.rs`; developer accepted, 2026-10-20) | `packages/tddy-daemon-livekit/tests/split_rooms.rs` | The join's room and identity verify with LiveKit's own verifier; no field carries the API secret |
+
+**Local results (2026-10-20; scoped; LiveKit testkit; machine load about 190).** `tddy-session-split`: 36 unit and 2 integration passed. `tddy-daemon-extensions`: 18 unit and 6 ratchet passed. `tddy-daemon-livekit`: 208 passed (milestone 1). `split_session_resume_acceptance` (tddy-daemon): 2 passed, and 6 **environmental** failures. Each was re-run once in isolation, and each dies in the harness join at `packages/tddy-session-lifecycle/src/test_util.rs:364` (`daemon joins the room as its RPC participant: Engine(Connection("wait_pc_connection timed out"))`), before any split or resume code runs:
+- `a_resumed_split_agent_is_pointed_at_the_codebase_hosts_session_not_its_own`
+- `a_resumed_split_agent_keeps_every_tool_when_the_roster_is_empty`
+- `a_resumed_split_agent_loses_the_tools_the_codebase_hosts_roster_withdrew`
+- `a_resumed_split_agent_receives_a_join_token_minted_at_the_resume`
+- `a_resumed_split_agents_tool_transport_is_rebuilt_from_the_persisted_pairing`
+- `a_split_sessions_agent_half_resumes_through_the_split_path_not_the_sandboxed_runner_path`
+
+The two that pass in isolation are `a_split_session_whose_codebase_host_does_not_answer_is_refused_rather_than_resumed` and `a_split_session_whose_codebase_host_is_not_routable_is_refused_rather_than_resumed`. Not run locally and left to CI: `remote_managed_worktree_cross_host_acceptance`, `session_room_cross_host_acceptance`, and the rest of `session_room_acceptance` (its `a_split_agent` tests passed, 2 of 2).
 
 ## Technical Debt & Production Readiness
+
+Stale doc lines for the [W] wrap stage to update (`packages/*/docs/` is not edited on this branch): `packages/tddy-session-split/docs/module-layout.md:18` (`join_split_livekit_room`, now `host_split_room`); `packages/tddy-session-split/docs/code-issues/complexity-svc-spawn-split-agent-spawn-split-agent.md:27`; `packages/tddy-agent-launch/docs/code-issues/complexity-svc-resume-claude-cli-session-resume-claude-cli-session.md:28`.
 
 ## Decisions & Trade-offs
 - **Move the LiveKit-free traits instead of wrapping them.** `SessionTokenMinter` and
@@ -168,6 +181,13 @@ lifecycle's split tests) remain the testkit-backed integration proof.
   Developer decision (2026-10-20, option A): the struct and its `tracked_diff_differs` move to
   extensions verbatim, and the kernel module becomes a `pub use` re-export, so the kernel's path
   and the plugin's `session_room` re-export are unchanged.
+
+- **The removed unit test `the_agent_receives_a_scoped_join_token_and_never_the_api_secret` moved to the plugin.** It sat in `split_session.rs` and checked a join token that session-split minted. Session-split can no longer name LiveKit, so it cannot mint one; minting now happens in the plugin. Its claim lives in `packages/tddy-daemon-livekit/tests/split_rooms.rs`, which verifies the join's room and identity with LiveKit's own verifier and checks that no field carries the API secret. Accepted by the developer, 2026-10-20.
+- **`prost = "0.13"` is a dev-dependency of `tddy-session-split`.** `tests/split_room_hosting_port.rs` decodes the forwarded `StartSession` in its wire format. It is dev-only and already in `Cargo.lock`. Allowed by the developer, 2026-10-20. `tddy-room-client` is also a dev-dependency there, for `NoRoomTransport`.
+- **`SplitLiveKitRoom` is now `SplitAgentRoom { join: SplitAgentJoin, host_identity }`.** `SplitAgentRoom::issued_by(split_rooms, config, session_id)` asks the port for the join. The join is minted before the StartSession forward, so the port's precondition and the mint are the same step, and a failed mint leaves nothing on the peer.
+- **`SplitSessions` changed.** It gained `split_rooms: Arc<dyn SplitRoomHosting>` and `reachable_sessions: Arc<dyn ReachableSessions>` (the second because `host_remote_worktree` takes one), and it lost `session_rooms`. `SplitHost::session_room_roster` is removed, since nothing else called it. `prepare_split_agent_wiring` takes the port as its first argument.
+- **Fixture changes, not in the original testing plan.** The port is installed in three `tddy-daemon` fixtures (`split_session_resume_acceptance`, `remote_managed_worktree_cross_host_acceptance`, `session_room_cross_host_acceptance`) and in the lifecycle `session_room_acceptance` fixture, through `tddy_daemon::runtime::split_room_hosting`. That returns the plugin's `LiveKitSplitRooms` when the config has a `livekit:` block and `NoSplitRooms` otherwise. The host's default is `NoSplitRooms`, so a hand-built host that does a real split start must install the port.
+- **Refusal wording on a daemon without LiveKit.** `common_room_slot` still refuses first, as before. With a `livekit:` block, the plugin's refusal is today's exact message.
 
 ## Refactoring Needed
 ### From /validate-changes
@@ -192,8 +212,8 @@ lifecycle's split tests) remain the testkit-backed integration proof.
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
+- [x] Update documentation with progress
+- [x] Run scoped tests for touched packages; full-workspace result from CI (scoped results under Acceptance Tests; full result from CI)
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)

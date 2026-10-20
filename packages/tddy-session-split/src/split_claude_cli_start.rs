@@ -76,13 +76,14 @@ impl SplitSessions {
         // a teardown. This is what makes the failure atomic rather than merely usually atomic.
         let codebase_session_id = Uuid::now_v7().to_string();
 
-        // Resolved before the peer is contacted: a room this daemon cannot mint a token for means
-        // the agent could never reach its checkout, so nothing should be created for it. The room is
-        // *this* session's and is hosted here — this daemon runs the agent, so it is the session's
-        // facilitating daemon whether or not the repo turns out to live somewhere else.
-        let livekit = crate::split_session::SplitLiveKitRoom::from_config(
+        // Resolved before the peer is contacted: a room the split-room port cannot issue a join for
+        // means the agent could never reach its checkout, so nothing should be created for it. The
+        // room is *this* session's and is hosted here — this daemon runs the agent, so it is the
+        // session's facilitating daemon whether or not the repo turns out to live somewhere else.
+        let room = crate::split_session::SplitAgentRoom::issued_by(
+            self.split_rooms.as_ref(),
             &self.config,
-            tddy_daemon_livekit::session_room::session_room_name(&session_id),
+            &session_id,
         )?;
 
         let workspace_req = agent_roster::workspace_start_request(
@@ -91,14 +92,13 @@ impl SplitSessions {
             &session_id,
             &codebase_session_id,
         )?;
-        let forwarded =
-            tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit_within(
-                &slot,
-                codebase_instance_id,
-                &workspace_req,
-                agent_roster::split_forward_deadline(&self.config),
-            )
-            .await;
+        let forwarded = tddy_daemon_kernel::peer_calls::forward_start_session_within(
+            &slot,
+            codebase_instance_id,
+            &workspace_req,
+            agent_roster::split_forward_deadline(&self.config),
+        )
+        .await;
         let workspace = match forwarded {
             Ok(workspace) => workspace,
             Err(status) => {
@@ -153,7 +153,7 @@ impl SplitSessions {
                 &sessions_base,
                 codebase_instance_id,
                 &codebase_session_id,
-                Some(&livekit),
+                Some(&room),
                 req,
                 progress,
             )

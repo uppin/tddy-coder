@@ -1,7 +1,5 @@
 use uuid::Uuid;
 
-use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
-
 use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
@@ -45,10 +43,10 @@ impl SplitSessions {
     /// exactly one thing — how the agent reaches the checkout:
     ///
     /// - `Some(room)` is a **split** session. The checkout is on `codebase_instance_id`, reached
-    ///   over the LiveKit room this daemon hosts and measures the remote worktree through.
+    ///   over the session room this daemon hosts and measures the remote worktree through.
     /// - `None` is a **sandboxed codebase** session. The checkout is a jailed `workspace` session
     ///   on *this* daemon, reached over this daemon's own HTTP URL — so there is no room to open,
-    ///   nothing remote to measure, and no join token to mint.
+    ///   nothing remote to measure, and no join to issue.
     ///
     /// The argv is deliberately identical either way: both agents run outside the checkout with
     /// every native filesystem and shell tool withdrawn, and the jailed-codebase placement's whole
@@ -61,7 +59,7 @@ impl SplitSessions {
         sessions_base: &Path,
         codebase_instance_id: &str,
         codebase_session_id: &str,
-        livekit: Option<&crate::split_session::SplitLiveKitRoom>,
+        room: Option<&crate::split_session::SplitAgentRoom>,
         req: &StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
@@ -85,18 +83,21 @@ impl SplitSessions {
             session_id,
             codebase_instance_id,
             codebase_session_id,
-            livekit,
+            room,
             req,
         )?;
-        self.join_split_livekit_room(
-            session_id,
-            codebase_instance_id,
-            codebase_session_id,
-            livekit,
-            req,
-            &session_dir,
-        )
-        .await?;
+        // A jailed-codebase session opens no room: the worktree it would measure is on this
+        // filesystem, held by a `workspace` session that reports on itself.
+        if room.is_some() {
+            self.host_split_room(
+                session_id,
+                codebase_instance_id,
+                codebase_session_id,
+                req,
+                &session_dir,
+            )
+            .await?;
+        }
 
         // A split session's roster lives on the codebase daemon, in the workspace session the
         // forward created moments ago — which is where this start's seed was recorded, before that
@@ -154,7 +155,7 @@ impl SplitSessions {
             &handle,
         )?;
 
-        let placement = match livekit {
+        let placement = match room {
             Some(_) => "split",
             None => "jailed-codebase",
         };
@@ -178,13 +179,13 @@ impl SplitSessions {
         session_id: &str,
         codebase_instance_id: &str,
         codebase_session_id: &str,
-        livekit: Option<&crate::split_session::SplitLiveKitRoom>,
+        room: Option<&crate::split_session::SplitAgentRoom>,
         req: &StartSessionRequest,
     ) -> Result<(std::path::PathBuf, tddy_core::RemoteToolEnv), Status> {
         let tddy_tools_path = self.resolve_tddy_tools_path()?;
-        let remote = match livekit {
-            Some(livekit) => crate::split_session::split_remote_tool_env(
-                livekit,
+        let remote = match room {
+            Some(room) => crate::split_session::split_remote_tool_env(
+                room,
                 self.session_tokens()?,
                 &crate::split_session::SplitSpawnTarget {
                     session_id,
@@ -279,64 +280,39 @@ impl SplitSessions {
         Ok((hook_token, handle))
     }
 
-    async fn join_split_livekit_room(
+    /// Host this split session's room over its checkout on `codebase_instance_id`.
+    ///
+    /// This daemon runs the agent, so it is this session's facilitating daemon and hosts its room —
+    /// even though the checkout is elsewhere. Opened before the agent is spawned (PRD FR2), and
+    /// measured by asking the codebase daemon rather than by reading a filesystem this host does not
+    /// have (FR5). The agent's join was issued for exactly this room.
+    ///
+    /// The poller signs its own credential per poll under the verified caller's identity rather
+    /// than re-presenting `req.session_token`, which the codebase daemon stops accepting five
+    /// minutes in — see `RoomPollTokenMinter`.
+    async fn host_split_room(
         &self,
         session_id: &str,
         codebase_instance_id: &str,
         codebase_session_id: &str,
-        livekit: Option<&crate::split_session::SplitLiveKitRoom>,
         req: &StartSessionRequest,
         session_dir: &std::path::Path,
     ) -> Result<(), Status> {
-        if livekit.is_some() {
-            // This daemon runs the agent, so it is this session's facilitating daemon and hosts its room —
-            // even though the checkout is on `codebase_instance_id`. Opened before the agent is spawned
-            // (PRD FR2), and measured by asking the codebase daemon rather than by reading a filesystem
-            // this host does not have (FR5). The agent's token was minted for exactly this room.
-            //
-            // A jailed-codebase session opens none: the worktree it would measure is on this
-            // filesystem, held by a `workspace` session that reports on itself.
-            //
-            // The poller signs its own credential per poll under the verified caller's identity rather
-            // than re-presenting `req.session_token`, which the codebase daemon stops accepting five
-            // minutes in — see `RoomPollTokenMinter`.
-            let token_minter = Arc::new(crate::split_session::RoomPollTokenMinter::new(
-                self.session_tokens()?,
-                &req.session_token,
-            )?);
-            let remote_source = Arc::new(tddy_daemon_livekit::session_room::RemoteCheckout::new(
+        let token_minter = Arc::new(crate::split_session::RoomPollTokenMinter::new(
+            self.session_tokens()?,
+            &req.session_token,
+        )?);
+        self.split_rooms
+            .host_remote_worktree(
+                session_id,
+                session_dir,
+                codebase_session_id,
+                codebase_instance_id,
                 self.remote_worktree_snapshots(),
-                codebase_session_id.to_string(),
-                codebase_instance_id.to_string(),
                 token_minter,
-                session_dir.to_path_buf(),
-            ));
-            let local_instance_id = local_instance_id_for_config(&self.config);
-            match self
-                .session_rooms
-                .open_measured_by(
-                    &tddy_daemon_livekit::session_room::DaemonRoomHosting {
-                        config: &self.config,
-                        instance_id: &local_instance_id,
-                        rooms: &self.session_rooms,
-                    }
-                    .for_remote_worktree(session_id, session_dir),
-                    || self.host.session_room_roster(),
-                    remote_source,
-                )
-                .await?
-            {
-                Some(room) => log::info!(
-                    "split session {session_id} facilitated in {} as {}, measuring session {codebase_session_id} on daemon {codebase_instance_id}",
-                    room.room,
-                    room.server_identity
-                ),
-                None => log::debug!(
-                    "split session {session_id} runs without a session room (LiveKit not configured)"
-                ),
-            }
-        }
-        Ok(())
+                Arc::clone(&self.reachable_sessions),
+            )
+            .await
     }
 
     async fn split_agent_roster(

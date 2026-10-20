@@ -36,7 +36,7 @@ impl SplitSessions {
             session_token: session_token.to_string(),
             session_id: codebase_session_id.to_string(),
         };
-        match tddy_daemon_livekit::livekit_peer_discovery::forward_delete_session_via_livekit(
+        match tddy_daemon_kernel::peer_calls::forward_delete_session(
                 slot,
                 codebase_instance_id,
                 &request,
@@ -141,7 +141,7 @@ impl SplitSessions {
                  delete that session on {codebase_daemon} directly and retry"
                 )));
         }
-        match tddy_daemon_livekit::livekit_peer_discovery::forward_delete_session_via_livekit(
+        match tddy_daemon_kernel::peer_calls::forward_delete_session(
                 slot,
                 codebase_daemon,
                 &DeleteSessionRequest {

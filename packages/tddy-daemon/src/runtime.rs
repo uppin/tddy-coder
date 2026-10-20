@@ -808,6 +808,12 @@ pub async fn build(
             None => Arc::new(tddy_daemon_extensions::NoTerminalExposure),
         };
 
+    let split_rooms = split_room_hosting(
+        &config,
+        Arc::clone(&shared_session_rooms),
+        Arc::clone(&room_tokens),
+    );
+
     let telegram = build_telegram(
         &config,
         &tddy_data_dir,
@@ -1178,6 +1184,7 @@ pub async fn build(
                 Arc::clone(&livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
             )
             .with_terminal_exposure(Arc::clone(&terminal_exposure))
+            .with_split_rooms(split_rooms)
             .with_model_registry(Arc::clone(&model_registry))
             .with_session_notification_bus(session_notification_bus)
             .with_session_tokens(session_tokens.clone())
@@ -1716,6 +1723,25 @@ pub async fn build(
 struct TelegramWiring {
     hooks: Option<Arc<tddy_telegram_control::telegram_session_subscriber::TelegramDaemonHooks>>,
     inbound: Option<TelegramInbound>,
+}
+
+/// The port a split session's room is hosted and its agent joined through: the LiveKit plugin's,
+/// over `rooms` — the host's one registry, so deletion closes the room a split start opens — and
+/// `room_tokens`, the one minter. A daemon with no `livekit:` block has no room integration, and
+/// split placement is refused.
+pub fn split_room_hosting(
+    config: &DaemonConfig,
+    rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
+    room_tokens: Arc<dyn tddy_daemon_extensions::RoomTokenMinter>,
+) -> Arc<dyn tddy_daemon_extensions::SplitRoomHosting> {
+    match config.livekit {
+        Some(_) => Arc::new(tddy_daemon_livekit::LiveKitSplitRooms::new(
+            config.clone(),
+            rooms,
+            room_tokens,
+        )),
+        None => Arc::new(tddy_daemon_extensions::NoSplitRooms),
+    }
 }
 
 fn build_telegram(

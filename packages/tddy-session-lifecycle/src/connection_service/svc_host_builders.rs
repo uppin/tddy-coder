@@ -126,6 +126,7 @@ impl DaemonSessionHost {
             worktree_observer: None,
             session_reach: Arc::new(tddy_daemon_extensions::NoSessionReach),
             terminal_exposure: Arc::new(tddy_daemon_extensions::NoTerminalExposure),
+            split_rooms: Arc::new(tddy_daemon_extensions::NoSplitRooms),
             askpass: None,
         }
     }
@@ -204,6 +205,19 @@ impl DaemonSessionHost {
         rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
     ) -> Self {
         self.session_rooms = rooms;
+        self
+    }
+
+    /// Install what hosts a split session's room over a checkout on another daemon and issues its
+    /// agent's join (builder). Without it split placement is refused, as on a daemon with no room
+    /// integration.
+    #[must_use]
+    pub fn with_split_rooms(
+        mut self,
+        split_rooms: Arc<dyn tddy_daemon_extensions::SplitRoomHosting>,
+    ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_split_rooms");
+        self.split_rooms = split_rooms;
         self
     }
 

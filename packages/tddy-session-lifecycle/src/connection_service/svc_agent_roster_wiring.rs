@@ -9,13 +9,13 @@ use tddy_service::proto::session::GetWorktreeSnapshotRequest;
 /// measurement takes exactly the path a caller's would — including the peer routing and the
 /// blocking-pool budget.
 #[async_trait::async_trait]
-impl tddy_daemon_livekit::session_room::RemoteSnapshotSource for DaemonSessionHost {
+impl tddy_daemon_extensions::RemoteSnapshotSource for DaemonSessionHost {
     async fn snapshot(
         &self,
         session_token: &str,
         codebase_session_id: &str,
         codebase_instance_id: &str,
-    ) -> Result<tddy_daemon_livekit::session_room::WorktreeSnapshot, Status> {
+    ) -> Result<tddy_daemon_extensions::WorktreeSnapshot, Status> {
         let answered = self
             .launch_sessions()
             .get_worktree_snapshot_at_session_coordinate(Request::direct(
@@ -27,7 +27,7 @@ impl tddy_daemon_livekit::session_room::RemoteSnapshotSource for DaemonSessionHo
             ))
             .await?
             .into_inner();
-        Ok(tddy_daemon_livekit::session_room::WorktreeSnapshot {
+        Ok(tddy_daemon_extensions::WorktreeSnapshot {
             head_commit: answered.head_commit,
             branch: answered.branch,
             changed_paths: answered.changed_paths,

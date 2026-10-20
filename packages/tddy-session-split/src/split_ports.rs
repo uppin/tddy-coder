@@ -1,9 +1,9 @@
 //! What the split topic needs from the session host that is not one of its fields, and the owned
 //! handle that carries both.
 //!
-//! A split session is an agent paired with a codebase on a sandboxed checkout: its LiveKit room,
+//! A split session is an agent paired with a codebase on a sandboxed checkout: its session room,
 //! its context read from the codebase host, its teardown. Those read a fixed set of host fields
-//! (held by [`SplitSessions`]) and reach five capabilities that are not fields and live in wiring
+//! (held by [`SplitSessions`]) and reach four capabilities that are not fields and live in wiring
 //! above this topic: [`SplitHost`] is how the topic reaches them without naming the host. It
 //! extends [`AgentHostCallbacks`], so the agent topic's callbacks (`worktree_snapshot` among them)
 //! come through the same handle.
@@ -14,11 +14,11 @@
 
 use std::sync::Arc;
 
-use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_daemon_livekit::peer_routing::PeerRouting;
-use tddy_daemon_livekit::session_room::{
-    RemoteSnapshotSource, SessionRoomRegistry, WorktreeSnapshot,
+use tddy_daemon_extensions::{
+    ReachableSessions, RemoteSnapshotSource, SplitRoomHosting, WorktreeSnapshot,
 };
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_host_service::peer_routing::PeerRouting;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
     DeleteSessionRequest, DeleteSessionResponse, StartSessionRequest, StartSessionResponse,
@@ -79,9 +79,6 @@ pub trait SplitHost: AgentHostCallbacks {
 
     /// This daemon's roster surface, which a split agent's withdrawals are read back through.
     fn session_agents(&self) -> Arc<SplitSessionAgents>;
-
-    /// Every coordinate a session room serves (the host's `session_room_roster`).
-    fn session_room_roster(&self) -> Result<tddy_rpc::MultiRpcService, Status>;
 }
 
 /// The session host's split fields, owned, plus its callbacks.
@@ -94,7 +91,11 @@ pub struct SplitSessions {
     pub tddy_data_dir: std::path::PathBuf,
     pub staging_base_dir: std::path::PathBuf,
     pub peer_routing: PeerRouting,
-    pub session_rooms: Arc<SessionRoomRegistry>,
+    /// How a split session's room is hosted over a checkout on another daemon, and the join its
+    /// agent is spawned with. A host with no room integration refuses split placement here.
+    pub split_rooms: Arc<dyn SplitRoomHosting>,
+    /// The host as a split session's room reaches it: the services that room serves.
+    pub reachable_sessions: Arc<dyn ReachableSessions>,
     pub workspace_sandboxes:
         Arc<tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry>,
     pub workspace_sandbox_provisioner:
