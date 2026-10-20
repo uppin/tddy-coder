@@ -62,19 +62,15 @@ impl AgentRoster {
             self.room_tokens.as_ref(),
             session_id,
             daemon_instance_id,
-        );
-        let (first_admission_token, first_admission_url, first_admission_room, _ttl) =
-            match first_admission {
-                Some((token, url, room, ttl)) => (token, url, room, ttl),
-                None => {
-                    log::warn!(
-                        "session {session_id}: facilitating daemon could not mint an admission \
-                         token for owning daemon {daemon_instance_id}; the owning daemon will fall \
-                         back to self-minting a room token (PRD § Deviations — no handshake)"
-                    );
-                    (String::new(), String::new(), String::new(), 0u64)
-                }
-            };
+        )
+        .unwrap_or_else(|| {
+            log::warn!(
+                "session {session_id}: facilitating daemon could not mint an admission token for \
+                 owning daemon {daemon_instance_id}; the owning daemon will fall back to \
+                 self-minting a room token (PRD § Deviations — no handshake)"
+            );
+            room_access::FirstAdmission::default()
+        });
         let request = StartSessionRequest {
             session_token: session_token.to_string(),
             session_type: "workspace".to_string(),
@@ -87,9 +83,9 @@ impl AgentRoster {
                 session_id: session_id.to_string(),
                 facilitating_daemon_instance_id: local_instance_id_for_config(&self.config),
                 facilitating_daemon_url: daemon_hook_urls::advertise_daemon_url(&self.config),
-                first_admission_token,
-                first_admission_url,
-                first_admission_room,
+                first_admission_token: first_admission.token,
+                first_admission_url: first_admission.url,
+                first_admission_room: first_admission.room,
             }),
             ..StartSessionRequest::default()
         };

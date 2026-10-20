@@ -6,7 +6,7 @@
 **Metrics:** **1,158 production lines** (counted to the first `#[cfg(test)]`; 1,257 total) · budget 500 · **2.3× over**
 **Thresholds breached:** length 1,158 > 500
 **Restructure:** not designed
-**Status:** Open — **unclaimed**
+**Status:** Open — **unclaimed** · unchanged by #633 (1,157 → 1,156)
 
 ## Measurement history
 
@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-10-01 | 1,158 | first record. Recorded because PR #560's boundaries ("no peer-clone changes") put this file next to the change, so a later node that does touch it should know the size it starts from |
 | 2026-10-04 | 1,157 | 1,158 → 1,157 after `#e2e-leg` 2/5 (#579): `SessionAgentCloneSpec.common_room_slot` becomes `common_room` and holds a `CommonRoom`. Not grown; unchanged class |
+| 2026-10-20 | 1,156 | 1,157 → 1,156 after `#satellite` 11/13 (#633): the clone joins through `RoomConnector` and self-mints through `RoomTokenMinter`, and the join builder `clone_room_join` lives in `room_access.rs`. Not grown. The module names no LiveKit crate; the two-sides split is still open, and #633's Boundaries forbid it |
 
 ## What the tool found
 

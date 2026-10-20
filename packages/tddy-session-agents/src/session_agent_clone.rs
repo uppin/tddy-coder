@@ -26,7 +26,9 @@ use std::time::Duration;
 use prost::Message as _;
 use tddy_daemon_extensions::RoomTokenMinter;
 use tddy_daemon_kernel::peer_forwarding::{daemon_rpc_identity, session_room_name, CommonRoom};
-use tddy_room_client::{RoomAuth, RoomConnector, RoomJoin, RoomSession};
+use tddy_room_client::{RoomConnector, RoomSession};
+
+use crate::room_access::clone_room_join;
 use tddy_rpc::{RpcClientTransport, Status};
 use tddy_service::proto::activity::{AgentActivityDeltaChunk, AgentActivityRecord};
 use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
@@ -478,26 +480,6 @@ pub struct CloneMirrorSpec {
     /// daemon has no LiveKit discovery (a test fixture), in which case the re-admit loop is skipped
     /// and the first admission token is used as a one-shot join.
     pub common_room: Option<CommonRoom>,
-}
-
-/// The join a hosted clone makes into `session_id`'s room, and the participant it waits for: the
-/// room `session-{session_id}`, as `daemon-{owning}`, with `token`, waiting for `daemon-{facilitating}`.
-pub fn clone_room_join(
-    url: &str,
-    session_id: &str,
-    owning_instance_id: &str,
-    facilitating_instance_id: &str,
-    token: &str,
-) -> (tddy_room_client::RoomJoin, String) {
-    (
-        RoomJoin {
-            url: url.to_string(),
-            room: session_room_name(session_id),
-            identity: daemon_rpc_identity(owning_instance_id),
-            auth: RoomAuth::Token(token.to_string()),
-        },
-        daemon_rpc_identity(facilitating_instance_id),
-    )
 }
 
 /// Join the session's room, restore the checkout from its WIP ref, and keep it equal until the room

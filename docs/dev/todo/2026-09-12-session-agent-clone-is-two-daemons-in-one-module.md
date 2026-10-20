@@ -39,3 +39,14 @@ Deferred rather than done at wrap because it is a real restructure with a behavi
 re-admit loop, the revocation signal, the mirror's local-changes gate), not a file move — and node 7
 is a move-only node whose test coverage for that surface is `session_agent_remote_acceptance.rs`,
 which needs two real daemons and Docker.
+
+## Narrowed 2026-10-20 — the LiveKit half is closed
+
+`#satellite` 11/13 ([#633](https://github.com/uppin/tddy-coder/pull/633)) put the owning half's room
+behind ports. The hosted clone joins through `tddy_room_client::RoomConnector`, self-mints through
+`RoomTokenMinter`, and holds an `Arc<dyn RoomSession>`. `tddy-session-agents` names neither
+`tddy-daemon-livekit` nor `livekit`, and the satellite ratchet no longer lists it. **What remains is
+the split itself:** the two sides still share the module, and the file is still over budget (see
+`packages/tddy-session-agents/docs/code-issues/oversized-file-session-agent-clone.md`). The
+`CloneTransport` port proposed above is now unnecessary, because the room ports already do that job.
+Splitting the facilitating bookkeeping from the owning participant is the remaining work.

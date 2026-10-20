@@ -266,6 +266,7 @@ fn peer_forward_deadline_status(
 #[cfg(test)]
 mod common_room_tests {
     use super::*;
+    use crate::config::DaemonConfig;
 
     #[test]
     fn a_sessions_room_is_named_after_the_session() {
@@ -274,7 +275,6 @@ mod common_room_tests {
             "session-1780828020298-abc"
         );
     }
-    use crate::config::DaemonConfig;
 
     #[test]
     fn a_common_room_carries_the_deadline_the_config_names() {

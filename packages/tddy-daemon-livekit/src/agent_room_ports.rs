@@ -33,27 +33,33 @@ impl RoomBroadcast for SessionRoomRegistry {
                         "cannot publish to session {session_id}'s room outside a runtime: {e}"
                     ))
                 })?;
-                self.agents_outbox.get_or_init(|| {
-                    let (outbox, mut queued) =
-                        tokio::sync::mpsc::unbounded_channel::<QueuedBroadcast>();
-                    runtime.spawn(async move {
-                        while let Some((publisher, session_id, payload)) = queued.recv().await {
-                            if let Err(e) = publisher.publish(&payload).await {
-                                log::warn!(
-                                    "could not broadcast session {session_id}'s roster on {}: {e}",
-                                    tddy_service::session_agents::SESSION_AGENTS_TOPIC
-                                );
-                            }
-                        }
-                    });
-                    outbox
-                })
+                self.agents_outbox
+                    .get_or_init(|| start_broadcast_outbox(&runtime))
             }
         };
         outbox
             .send((publisher, session_id.to_string(), payload))
             .map_err(|_| Status::internal("the session-room broadcast queue has stopped"))
     }
+}
+
+/// The one task that publishes queued roster snapshots, in the order they were queued, and the
+/// sender that queues them.
+fn start_broadcast_outbox(
+    runtime: &tokio::runtime::Handle,
+) -> tokio::sync::mpsc::UnboundedSender<QueuedBroadcast> {
+    let (outbox, mut queued) = tokio::sync::mpsc::unbounded_channel::<QueuedBroadcast>();
+    runtime.spawn(async move {
+        while let Some((publisher, session_id, payload)) = queued.recv().await {
+            if let Err(e) = publisher.publish(&payload).await {
+                log::warn!(
+                    "could not broadcast session {session_id}'s roster on {}: {e}",
+                    tddy_service::session_agents::SESSION_AGENTS_TOPIC
+                );
+            }
+        }
+    });
+    outbox
 }
 
 impl RoomAdmission for SessionAdmissionRegistry {

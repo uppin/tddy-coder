@@ -20,6 +20,8 @@
 | 2026-10-08 | 513 | `#carve` 20/21 (#535): **+3** over 510 (`origin/master` after `#keyring` 9/9) — three `mod` lines (`svc_ensure_project_available_for_start`, `svc_index_workspace_worktree`, `daemon_hook_urls`). Still over 500; growth deferred again, unchanged reason |
 | 2026-10-09 | 525 | `#carve` 21/21 (#536): **582 on `origin/master` (`468b368f9`) → 525**, by the changeset's counter (any line outside an inline `#[cfg(test)] mod … { }` block; the rows above used a counter that reads lower, so they are not comparable with these two). **−57**: the `mod` / `pub use` lines of every topic that moved out are gone, replaced by the facades (`pub use tddy_*::{…}`, 37 named modules nothing else names, and four `#[cfg(test)]` glob re-exports). **Still over 500, by 25**; the file now holds `DaemonSessionHost`, the receivers' facades and the wiring declarations. Remaining split: group the facade blocks by receiver into one declaration file each (`extract_module`), no node in flight edits this file |
 
+| 2026-10-20 | −1 | `#satellite` 11/13 (#633): the `pub use tddy_daemon_livekit::first_admission_token;` re-export is gone with the module (`git diff --numstat`: 0 added, 1 removed; `loc.py` not re-run). Still over 500 |
+
 ## What grew it
 
 The file holds the `DaemonSessionHost` struct, its `mod` and `pub use` lines, and what little else a host
