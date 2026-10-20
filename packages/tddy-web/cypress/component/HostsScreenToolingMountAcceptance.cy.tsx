@@ -12,7 +12,7 @@
  * `SelectedDaemonProvider` is given no room so that registry is the only answer. A host absent from
  * the registry has no wire at all.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-18-host-desktops-hosts-mount.md
+ * Feature: docs/ft/web/hosts-screen-tooling.md
  */
 
 import { create } from "@bufbuild/protobuf";

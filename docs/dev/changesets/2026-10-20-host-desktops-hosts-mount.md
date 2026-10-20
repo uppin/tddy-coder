@@ -10,7 +10,7 @@ Packages: `tddy-web`, `tddy-host-service`. The Hosts screen mounts the tooling s
 
 | Record | Before → after (production lines) | Outcome |
 |---|---|---|
-| `oversized-file-service.md` (`tddy-host-service/src/service.rs`) | 936 → 961 | regressed by 25 (the cache wiring); split deferred with developer consent 2026-10-20, see `docs/dev/todo/2026-10-20-hosts-mount-service-rs-grew-while-over-budget.md`; record kept |
+| `oversized-file-service.md` (`tddy-host-service/src/service.rs`) | 936 → 961 | regressed by 25 (the cache wiring); split deferred with developer consent 2026-10-20; record kept |
 | `oversized-file-host-tooling.md` (`host_tooling.rs`) | 775 → 775 | unchanged — the cache lives in a new module; record kept |
 
 New module `host_tooling_cache.rs` is 115+ production lines; `HostRowToolingCell.tsx` and `useHostTooling.ts` are 66 and 48 lines.
