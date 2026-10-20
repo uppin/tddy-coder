@@ -70,7 +70,7 @@ type Events = mpsc::Sender<Result<CodeSessionEvent, Status>>;
 pub(crate) fn start(
     worktrees: Arc<WorktreeServiceImpl>,
     index_daemon: Option<Arc<dyn IndexChannelSource>>,
-    supports: Arc<SupportRegistry>,
+    supports: Option<Arc<SupportRegistry>>,
     frames: tddy_rpc::Streaming<CodeSessionRequest>,
 ) -> ReceiverStream<Result<CodeSessionEvent, Status>> {
     let (events, rx) = mpsc::channel(EVENT_BUFFER);
@@ -78,7 +78,7 @@ pub(crate) fn start(
         if let Err(status) = run(
             &worktrees,
             index_daemon.as_ref(),
-            &supports,
+            supports.as_deref(),
             frames,
             &events,
         )
@@ -95,7 +95,7 @@ pub(crate) fn start(
 async fn run(
     worktrees: &WorktreeServiceImpl,
     index_daemon: Option<&Arc<dyn IndexChannelSource>>,
-    supports: &SupportRegistry,
+    supports: Option<&SupportRegistry>,
     mut frames: tddy_rpc::Streaming<CodeSessionRequest>,
     events: &Events,
 ) -> Result<(), Status> {

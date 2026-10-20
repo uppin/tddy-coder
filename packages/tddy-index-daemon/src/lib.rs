@@ -81,17 +81,26 @@ pub fn is_rust_workspace(root: &std::path::Path) -> bool {
 /// predicate a caller asks in place of [`is_rust_workspace`] before warming a root or reporting it
 /// has no index.
 ///
+/// `supports` is the host's registry of extension languages, `None` when it registered none —
+/// then only a Rust workspace is served, exactly as before extensions existed, and no tree is
+/// walked. (`SupportRegistry` exposes no way to ask whether it holds any support beyond Rust, so
+/// "none registered" is the absence of a registry.)
+///
 /// Walks the tree for a claimed file, skipping `.git` and `target`; a support with no server
 /// (outline only) never makes a root servable.
 #[must_use]
 pub fn serves_workspace(
     root: &std::path::Path,
-    supports: &tddy_code_restructuring::SupportRegistry,
+    supports: Option<&tddy_code_restructuring::SupportRegistry>,
 ) -> bool {
-    // Kept reachable while the walk is a contract: a Rust worktree is served exactly as before.
+    // Today's answer stays reachable while the walk is a contract: a Rust worktree is served, and
+    // with no extension language registered nothing else is.
     if is_rust_workspace(root) {
         return true;
     }
+    let Some(supports) = supports else {
+        return false;
+    };
     let _ = supports;
     // TODO(reshape-extension-language-server): implement
     todo!("serves_workspace")
@@ -174,7 +183,7 @@ mod tests {
         // When the index is asked whether it serves the tree
         let served = (
             is_rust_workspace(tree.path()),
-            serves_workspace(tree.path(), &supports),
+            serves_workspace(tree.path(), Some(&supports)),
         );
 
         // Then it is no Rust workspace, and served all the same
@@ -188,7 +197,7 @@ mod tests {
         let supports = supports_of(a_toml_support_launching(None));
 
         // When the index is asked whether it serves the tree
-        let served = serves_workspace(tree.path(), &supports);
+        let served = serves_workspace(tree.path(), Some(&supports));
 
         // Then it is not: there is no server to hold it
         assert!(!served, "an outline-only language made the tree servable");
@@ -202,9 +211,24 @@ mod tests {
             .expect("a manifest");
 
         // When the index is asked whether it serves the tree
-        let served = serves_workspace(tree.path(), &SupportRegistry::new());
+        let served = serves_workspace(tree.path(), None);
 
         // Then it is, as it always was
         assert!(served, "a Rust workspace stopped being served");
+    }
+
+    #[test]
+    fn a_tree_with_no_cargo_manifest_is_not_served_while_no_extension_language_is_registered() {
+        // Given an extension-only tree, and a host that registered no extension language
+        let tree = an_extension_only_tree();
+
+        // When the index is asked whether it serves the tree
+        let served = serves_workspace(tree.path(), None);
+
+        // Then it is not, as before extensions existed
+        assert!(
+            !served,
+            "a non-Rust tree was served with no extension language registered"
+        );
     }
 }

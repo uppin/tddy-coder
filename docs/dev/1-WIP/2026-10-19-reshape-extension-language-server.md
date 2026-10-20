@@ -50,7 +50,7 @@ language has `rename_symbol` and references, on the CLI and through the index da
 | `ServerBackend` (`over(outline, live, language_id)`, `without_command(outline, reason)`; `rename_symbol` via `textDocument/rename`) | `tddy-code-restructuring/src/backends/server.rs` |
 | `RestructureError::ServerNotConfigured { language, reason }` (mapped `failed_precondition` in the daemon) | `tddy-code-restructuring/src/lib.rs`, `tddy-index-daemon/src/status.rs` |
 | `WorkspaceIndex::client_for_file` (routing) | `tddy-index-daemon/src/index.rs` |
-| `serves_workspace(root, supports)` — the predicate callers ask instead of `is_rust_workspace`; `pub use SupportRegistry` | `tddy-index-daemon/src/lib.rs` |
+| `serves_workspace(root, supports: Option<&SupportRegistry>)` — the predicate callers ask instead of `is_rust_workspace`; `pub use SupportRegistry` | `tddy-index-daemon/src/lib.rs` |
 | `Readiness { ServerStatus, AfterInitialize }` (`of_launch`), `index_state_of(client, readiness)` — moved from `navigation.rs` and made public | `tddy-index-daemon/src/readiness.rs` |
 | `has_an_index`, `CodeNavigationServiceImpl::with_supports`, `code_session::start(.., supports, ..)` | `tddy-daemon-rpc/src/code_navigation.rs`, `code_session.rs` |
 | `warm_for_session_with_supports`, `IndexWarmupObserver::with_supports` (`warm_for_session` keeps its signature, over an empty registry) | `tddy-daemon-rpc/src/code_index_warmup.rs` |
@@ -132,9 +132,12 @@ body of this node, and the daemon test K11's `allow_list` too; the unit tests re
   `tddy-daemon-rpc` `code_index_warmup::tests::{an_extension_only_worktree_whose_language_has_a_server_is_warmed,
   an_extension_only_worktree_whose_language_has_a_server_is_not_reported_none}`;
   `tddy-lsp-executor` `index_backed::tests::the_tools_are_available_on_an_extension_only_worktree_the_host_serves`.
-- `serves_workspace` answers a Rust workspace `true` before its `todo!()`, so every Rust caller switched to it keeps
-  today's behaviour; a non-Rust worktree reaches the `todo!()` (including existing `NONE` tests in `tddy-daemon`
-  until green).
+- `serves_workspace(root, supports: Option<&SupportRegistry>)` keeps today's answer before its `todo!()`: a Rust
+  workspace is served, and with `supports = None` (no extension language registered — the default of every
+  `with_supports` holder, and `warm_for_session`) a non-Rust tree is not. Only a registry handed over reaches the
+  walk's `todo!()`, i.e. only the new tests. `None` rather than an empty registry because K11's `SupportRegistry`
+  exposes no way to ask whether it holds any support beyond Rust. Pinned green on purpose by
+  `tests::a_tree_with_no_cargo_manifest_is_not_served_while_no_extension_language_is_registered`.
 - Unit tests: `tddy-zed-extensions` `settings::tests` (4), `server::tests` (5; `the_refusal_reads_as_the_prd_words_it`
   green on purpose — it pins R3's wording, which is data); `tddy-lsp` `client::dispatch::tests` (4 new);
   `tddy-code-restructuring` `backends::server::tests` (3); `tddy-index-daemon` lib `tests` (3, `serves_workspace`

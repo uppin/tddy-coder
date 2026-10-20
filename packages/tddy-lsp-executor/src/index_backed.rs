@@ -48,9 +48,9 @@ pub trait IndexChannel: Send + Sync {
 /// Answers the `Lsp*` tools from the warm index reached through an [`IndexChannel`].
 pub struct IndexLspExecutor {
     index: Arc<dyn IndexChannel>,
-    /// The languages beyond Rust the index serves — the registry the host built it over. Empty
-    /// unless [`IndexLspExecutor::with_supports`] says otherwise.
-    supports: Arc<SupportRegistry>,
+    /// The languages beyond Rust the index serves — the registry the host built it over. `None`
+    /// unless [`IndexLspExecutor::with_supports`] says otherwise: Rust only.
+    supports: Option<Arc<SupportRegistry>>,
 }
 
 impl IndexLspExecutor {
@@ -59,7 +59,7 @@ impl IndexLspExecutor {
     pub fn new(index: Arc<dyn IndexChannel>) -> Self {
         Self {
             index,
-            supports: Arc::new(SupportRegistry::new()),
+            supports: None,
         }
     }
 
@@ -67,7 +67,7 @@ impl IndexLspExecutor {
     /// the index over — serves it (`#reshape` extension-language-server, R7).
     #[must_use]
     pub fn with_supports(mut self, supports: Arc<SupportRegistry>) -> Self {
-        self.supports = supports;
+        self.supports = Some(supports);
         self
     }
 
@@ -91,7 +91,7 @@ impl LspExecutor for IndexLspExecutor {
     /// Whether the index serves the worktree: a Rust workspace, or a tree holding a file one of the
     /// host's supports claims and serves ([`tddy_index_daemon::serves_workspace`]).
     fn is_available(&self, repo_dir: &Path) -> bool {
-        tddy_index_daemon::serves_workspace(repo_dir, &self.supports)
+        tddy_index_daemon::serves_workspace(repo_dir, self.supports.as_deref())
     }
 
     fn diagnostics(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {

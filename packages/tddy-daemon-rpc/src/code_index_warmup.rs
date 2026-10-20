@@ -24,14 +24,14 @@ use tddy_code_restructuring::SupportRegistry;
 use crate::code_navigation::{has_an_index, index_daemon_error, IndexChannelSource};
 
 /// Starts warming `worktree`'s code index for `session_id` in the background, for a host with no
-/// languages beyond Rust: [`warm_for_session_with_supports`] over an empty registry.
+/// languages beyond Rust: only a Rust workspace is warmed, as before extensions existed.
 #[must_use = "dropping the handle detaches the warm, it does not cancel it"]
 pub fn warm_for_session(
     index_daemon: Option<&Arc<dyn IndexChannelSource>>,
     session_id: &str,
     worktree: &Path,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    warm_for_session_with_supports(index_daemon, &SupportRegistry::new(), session_id, worktree)
+    start_warm(index_daemon, None, session_id, worktree)
 }
 
 /// Starts warming `worktree`'s code index for `session_id` in the background.
@@ -45,6 +45,17 @@ pub fn warm_for_session(
 pub fn warm_for_session_with_supports(
     index_daemon: Option<&Arc<dyn IndexChannelSource>>,
     supports: &SupportRegistry,
+    session_id: &str,
+    worktree: &Path,
+) -> Option<tokio::task::JoinHandle<()>> {
+    start_warm(index_daemon, Some(supports), session_id, worktree)
+}
+
+/// The warm both entry points start, `supports` being `None` for a host with no extension
+/// language.
+fn start_warm(
+    index_daemon: Option<&Arc<dyn IndexChannelSource>>,
+    supports: Option<&SupportRegistry>,
     session_id: &str,
     worktree: &Path,
 ) -> Option<tokio::task::JoinHandle<()>> {
@@ -102,9 +113,9 @@ fn warm_failed(status: tonic::Status) -> String {
 /// [`SessionWorktreeObserver`] port.
 pub struct IndexWarmupObserver {
     index_daemon: Arc<dyn IndexChannelSource>,
-    /// The languages beyond Rust the index daemon serves. Empty unless
+    /// The languages beyond Rust the index daemon serves. `None` — Rust only — unless
     /// [`IndexWarmupObserver::with_supports`] says otherwise.
-    supports: Arc<SupportRegistry>,
+    supports: Option<Arc<SupportRegistry>>,
 }
 
 impl IndexWarmupObserver {
@@ -113,7 +124,7 @@ impl IndexWarmupObserver {
     pub fn new(index_daemon: Arc<dyn IndexChannelSource>) -> Self {
         Self {
             index_daemon,
-            supports: Arc::new(SupportRegistry::new()),
+            supports: None,
         }
     }
 
@@ -121,7 +132,7 @@ impl IndexWarmupObserver {
     /// daemon over — serves it (`#reshape` extension-language-server, R7).
     #[must_use]
     pub fn with_supports(mut self, supports: Arc<SupportRegistry>) -> Self {
-        self.supports = supports;
+        self.supports = Some(supports);
         self
     }
 }
@@ -129,9 +140,9 @@ impl IndexWarmupObserver {
 impl SessionWorktreeObserver for IndexWarmupObserver {
     fn worktree_ready(&self, session_id: &str, worktree: &Path) {
         // Detached on purpose: a session's start never waits on its index.
-        drop(warm_for_session_with_supports(
+        drop(start_warm(
             Some(&self.index_daemon),
-            &self.supports,
+            self.supports.as_deref(),
             session_id,
             worktree,
         ));
@@ -243,7 +254,7 @@ mod tests {
         let worktree = an_extension_only_worktree();
 
         // When a code session or `WatchCodeIndex` asks whether it has an index
-        let indexed = has_an_index(worktree.path(), &supports_serving_toml());
+        let indexed = has_an_index(worktree.path(), Some(&supports_serving_toml()));
 
         // Then it has one: the session follows it rather than reporting `NONE`
         assert!(

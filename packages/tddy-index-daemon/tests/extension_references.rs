@@ -192,7 +192,7 @@ fn an_extension_only_worktree_has_an_index_state() {
     // When the index is asked whether it serves the worktree
     let served = (
         is_rust_workspace(workspace.path()),
-        serves_workspace(workspace.path(), &supports),
+        serves_workspace(workspace.path(), Some(&supports)),
     );
 
     // Then it is no Rust workspace, and served all the same — it gets an index, not `NONE`

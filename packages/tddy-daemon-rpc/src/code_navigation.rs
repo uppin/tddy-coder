@@ -86,8 +86,9 @@ pub struct CodeNavigationServiceImpl {
     /// The index daemon this runtime manages; `None` when no `index_daemon:` section asked for one.
     index_daemon: Option<Arc<dyn IndexChannelSource>>,
     /// The languages beyond Rust the index daemon serves — the same registry the host built it
-    /// over. Empty unless [`CodeNavigationServiceImpl::with_supports`] says otherwise.
-    supports: Arc<SupportRegistry>,
+    /// over. `None` — Rust only — unless [`CodeNavigationServiceImpl::with_supports`] says
+    /// otherwise.
+    supports: Option<Arc<SupportRegistry>>,
 }
 
 /// An authorised request, ready to be asked of the index: a client on the index daemon's channel
@@ -109,7 +110,7 @@ impl CodeNavigationServiceImpl {
         Self {
             worktrees,
             index_daemon,
-            supports: Arc::new(SupportRegistry::new()),
+            supports: None,
         }
     }
 
@@ -118,7 +119,7 @@ impl CodeNavigationServiceImpl {
     /// than reported `NONE` (`#reshape` extension-language-server, R7).
     #[must_use]
     pub fn with_supports(mut self, supports: Arc<SupportRegistry>) -> Self {
-        self.supports = supports;
+        self.supports = Some(supports);
         self
     }
 
@@ -169,9 +170,9 @@ pub(crate) fn index_daemon_error(err: &IndexChannelError) -> String {
 }
 
 /// Whether `root` has a code index: what [`tddy_index_daemon::serves_workspace`] answers for the
-/// host's `supports`. The one question every caller here asks before warming a worktree, following
-/// it, or reporting it `NONE`.
-pub(crate) fn has_an_index(root: &Path, supports: &SupportRegistry) -> bool {
+/// host's `supports` (`None`: no extension language registered, so a Rust workspace only). The one
+/// question every caller here asks before warming a worktree, following it, or reporting it `NONE`.
+pub(crate) fn has_an_index(root: &Path, supports: Option<&SupportRegistry>) -> bool {
     tddy_index_daemon::serves_workspace(root, supports)
 }
 
@@ -293,7 +294,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         let worktree = session_worktree(&session_dir)?;
         let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
         let (Some(worktree), Some(source)) = (
-            worktree.filter(|root| has_an_index(root, &self.supports)),
+            worktree.filter(|root| has_an_index(root, self.supports.as_deref())),
             self.index_daemon.as_ref(),
         ) else {
             // Nothing to follow: an empty stream, so no indicator shows.
@@ -327,7 +328,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         Ok(Response::new(crate::code_session::start(
             Arc::clone(&self.worktrees),
             self.index_daemon.clone(),
-            Arc::clone(&self.supports),
+            self.supports.clone(),
             request.into_inner(),
         )))
     }
