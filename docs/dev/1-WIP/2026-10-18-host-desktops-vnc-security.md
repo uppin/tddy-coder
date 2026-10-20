@@ -78,10 +78,10 @@ macOS Screen Sharing and VeNCrypt-only servers (TigerVNC's default) can be opene
 
 ## Scope
 
-- [ ] Version + security negotiation in `tddy-vnc`
-- [ ] VncAuth, VeNCrypt Plain/TLSPlain, ARD exchanges
-- [ ] Hand-off to vnc-rs from ServerInit (or pinned patch)
-- [ ] Fake RFB server in tests advertising configurable security lists
+- [x] Version + security negotiation in `tddy-vnc`
+- [x] VncAuth, VeNCrypt Plain/TLSPlain, ARD exchanges
+- [x] Hand-off to vnc-rs from ServerInit (or pinned patch)
+- [x] Fake RFB server in tests advertising configurable security lists
 
 ## Technical Changes
 
@@ -100,9 +100,9 @@ from ServerInit → existing frame/input path.
 | `tddy-vnc` | `src/security.rs` (new), `src/vnc_client.rs`, `tests/vnc_security_integration.rs` (new), `Cargo.toml` (crates — ask first) |
 
 ## Implementation Milestones
-- [ ] M1 Parser + chooser (pure, unit-tested)
-- [ ] M2 VncAuth and VeNCrypt Plain against the fake server; hand-off decided
-- [ ] M3 TLSPlain and ARD
+- [x] M1 Parser + chooser (pure, unit-tested)
+- [x] M2 VncAuth and VeNCrypt Plain against the fake server; hand-off decided
+- [x] M3 TLSPlain and ARD
 
 ## Testing Plan
 
@@ -139,8 +139,11 @@ all written, failing on `todo!()`. `parse_security_types` takes the whole securi
 ## Decisions & Trade-offs
 - **TLSPlain accepts an unverified server certificate** (developer, 2026-10-18). rustls has no anonymous-DH suites, so TLSPlain works with servers that present a certificate (verified or not) and not with anonymous-only ones (e.g. GnuTLS anon). Same posture as tddy-rdp's TLS; documented as a limit at wrap.
 - **Crates approved** (developer, 2026-10-18), at the versions already in Cargo.lock (no version moves): normal deps `rustls` 0.23 and `tokio-rustls` 0.26 (both `default-features = false`, `ring` + `tls12` + `logging`, matching tddy-livekit's ring choice), `num-bigint` 0.4, `aes` 0.8, `md-5` 0.10, `thiserror` 2; dev-dep `rcgen` 0.13.
-- **Open for green — TLSPlain trust model:** real VeNCrypt TLSPlain (259) servers (TigerVNC/GnuTLS) use *anonymous* Diffie-Hellman cipher suites, which rustls does not implement. The fake server presents a self-signed certificate, so the client must accept an unverified certificate for TLSPlain; that interoperates with certificate-presenting servers but not with anon-DH-only ones. X509Plain (262) would be the verified variant. Decide in green.
+- **TLSPlain trust model — decided in green:** the client accepts an unverified server certificate for TLSPlain (it still checks the TLS handshake signature against the presented certificate's key). That interoperates with certificate-presenting servers but not with servers offering anonymous-DH suites only (TigerVNC/GnuTLS default), which rustls does not implement. X509Plain (262) would be the verified variant. Documented in the `security.rs` module docs.
 - **Own security layer rather than a vnc-rs fork** (developer, 2026-10-18). Fallback to a pinned patch only if vnc-rs cannot be entered after SecurityResult — recorded here when decided.
+- **Hand-off to vnc-rs — decided in green: no patch needed.** vnc-rs `ab684d0` has no entry point after SecurityResult (its connector always runs the version and security handshake). `security::negotiate` returns a `SecuredStream` that replays the handshake bytes vnc-rs expects to read and swallows the 12-byte version echo it writes. VeNCrypt and ARD are run in this layer, then the stream replays RFB 3.3 + security type None, so vnc-rs reads nothing before ClientInit. VNC Authentication and None are left to vnc-rs over the same stream (replayed version + the single chosen type), because no DES crate is a dependency. Consequence: a refused VNC Authentication reaches the caller as vnc-rs's error carrying the server's reason, not as `SecurityError::Refused`; VeNCrypt/ARD refusals are `SecurityError::Refused`. Swapping this for in-layer DES needs a `des` crate (ask first).
+- **VeNCrypt ack byte:** the fake server sends an accept byte after the subtype choice only for TLSPlain, not Plain; the client matches that. TODO: confirm against a real TigerVNC server whether Plain also sends one.
+- **Inherent `VncClientState::connect(host, port, password)` kept** (the existing integration tests call it); `connect_with_credentials` carries the full `Credentials` and is what the `ScreenSharingClient` trait impl uses.
 
 ## Technical Debt & Production Readiness
 
@@ -169,7 +172,7 @@ all written, failing on `todo!()`. `parse_security_types` takes the whole securi
 - [x] Run acceptance tests (verify they fail) — 6 fail, 2 pass today as regression guards
 - [x] USER REVIEW — acceptance tests (approved with the wave-1 batch, 2026-10-18)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
