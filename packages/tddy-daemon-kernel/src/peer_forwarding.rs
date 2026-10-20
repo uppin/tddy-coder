@@ -83,6 +83,15 @@ pub fn daemon_rpc_identity(instance_id: &str) -> String {
     )
 }
 
+/// The name of the room that belongs to the checkout owned by `session_id`: `session-{session_id}`.
+///
+/// Both the daemon holding the worktree and the daemon running the agent derive this from an id they
+/// already exchange, so the room name never has to travel as a field of its own — and the two can
+/// never disagree about it.
+pub fn session_room_name(session_id: &str) -> String {
+    format!("session-{session_id}")
+}
+
 /// Default deadline for one forwarded unary RPC, and for opening a forwarded server stream; the
 /// value `DaemonConfig::peer_forward_timeout_secs` takes when the operator sets nothing. Forwarders
 /// read the configured deadline from their [`CommonRoom`], never this constant.
@@ -92,12 +101,6 @@ pub fn daemon_rpc_identity(instance_id: &str) -> String {
 /// forever — the operator sees an action that neither completes nor fails. Generous enough for a
 /// forward carrying a whole attachment's bytes over chunked data frames, short enough that a dead
 /// peer surfaces as an error rather than a hang.
-/// The room a session is reached in: `session-{session_id}`.
-pub fn session_room_name(session_id: &str) -> String {
-    let _ = session_id;
-    todo!("session_room_name")
-}
-
 pub const PEER_FORWARD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a forwarded server stream may go without a frame before it is terminated as an error.
@@ -266,7 +269,10 @@ mod common_room_tests {
 
     #[test]
     fn a_sessions_room_is_named_after_the_session() {
-        assert_eq!(session_room_name("1780828020298-abc"), "session-1780828020298-abc");
+        assert_eq!(
+            session_room_name("1780828020298-abc"),
+            "session-1780828020298-abc"
+        );
     }
     use crate::config::DaemonConfig;
 

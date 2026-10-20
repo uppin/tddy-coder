@@ -38,6 +38,7 @@ pub mod hosted_clone_start;
 pub mod opened_session_room;
 pub mod peer_session_answer;
 pub mod ports;
+pub mod room_access;
 pub mod roster_broadcast;
 pub mod roster_replacement;
 pub mod seed_codebase;

@@ -15,7 +15,7 @@ pub struct NoRoomBroadcast;
 
 impl RoomBroadcast for NoRoomBroadcast {
     fn publish(&self, _session_id: &str, _topic: &str, _payload: Vec<u8>) -> Result<(), Status> {
-        todo!("NoRoomBroadcast::publish")
+        Ok(())
     }
 }
 

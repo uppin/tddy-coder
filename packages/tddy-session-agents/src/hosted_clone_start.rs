@@ -16,8 +16,6 @@ pub fn start_hosted_agent_clone(
     session_id: &str,
     facilitating: &str,
     url: String,
-    api_key: String,
-    api_secret: String,
     worktree_path: PathBuf,
     projects_dir: PathBuf,
     state: crate::AgentRosterState<'_>,
@@ -49,9 +47,9 @@ pub fn start_hosted_agent_clone(
         project_repo_path: PathBuf::from(&project.main_repo_path),
         project_id: project_id.to_string(),
         session_token: session_token.to_string(),
-        livekit_url: url,
-        livekit_api_key: api_key,
-        livekit_api_secret: api_secret,
+        room_url: url,
+        room_tokens: Arc::clone(state.room_tokens),
+        connector: Arc::clone(state.room_connector),
         facilitating_daemon_url: if is_facilitator_clone {
             let u = placement.facilitating_daemon_url.trim();
             if u.is_empty() {

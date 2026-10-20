@@ -6,7 +6,7 @@ use tddy_service::proto::session_agents_svc::OpenAgentConversationResponse;
 
 use tddy_rpc::Status;
 
-use tddy_daemon_livekit::livekit_peer_discovery::CommonRoom;
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 
 use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 

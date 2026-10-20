@@ -60,13 +60,12 @@ impl AgentRoster {
                  half a placement names a room to join with nobody in it to address",
             ));
         }
-        let (_common_room, url, api_key, api_secret) =
-            tddy_daemon_livekit::livekit_peer_discovery::livekit_common_room_connect_strings(
-                &self.config,
-            )
-            .map_err(|e| {
-                Status::failed_precondition(format!("this daemon cannot hold an agent clone: {e}"))
-            })?;
+        let url = crate::room_access::room_server_url(&self.config).map_err(|e| {
+            Status::failed_precondition(format!(
+                "this daemon cannot hold an agent clone: {}",
+                e.message
+            ))
+        })?;
         let worktree_path = crate::peer_session_answer::resolve_worktree_root_for_session(
             sessions_base,
             codebase_session_id,
@@ -92,8 +91,6 @@ impl AgentRoster {
             session_id,
             facilitating,
             url,
-            api_key,
-            api_secret,
             worktree_path,
             projects_dir,
             state,

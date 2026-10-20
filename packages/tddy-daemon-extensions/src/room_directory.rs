@@ -5,7 +5,8 @@ use tddy_rpc::Status;
 /// The room server's view of who is where.
 #[async_trait::async_trait]
 pub trait RoomDirectory: Send + Sync {
-    /// The identities in `room`, in the server's order; empty when the server knows no such room.
+    /// The identities in `room`, in the server's order. `NotFound` when the server has no such room:
+    /// a room nobody has opened is not the same fact as a room nobody is in.
     async fn participants(&self, room: &str) -> Result<Vec<String>, Status>;
 }
 
@@ -16,7 +17,9 @@ pub struct NoRoomDirectory;
 #[async_trait::async_trait]
 impl RoomDirectory for NoRoomDirectory {
     async fn participants(&self, _room: &str) -> Result<Vec<String>, Status> {
-        todo!("NoRoomDirectory::participants")
+        Err(Status::failed_precondition(
+            "this daemon has no room server configured, so there is no room listing to read",
+        ))
     }
 }
 

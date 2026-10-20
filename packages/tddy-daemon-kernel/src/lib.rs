@@ -80,6 +80,7 @@ pub mod local_token_tonic_adapter;
 pub mod relay_idle;
 pub mod toolchain;
 pub mod user_paths;
+pub mod worktree_snapshot;
 
 /// Resolve a session token to the OS user that owns it.
 ///

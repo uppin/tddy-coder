@@ -2,7 +2,7 @@ use tddy_rpc::Status;
 
 pub fn require_opened_session_room(
     session_id: &str,
-    opened: Option<tddy_daemon_livekit::session_room::OpenedSessionRoom>,
+    opened: Option<tddy_daemon_extensions::OpenedSessionRoom>,
 ) -> Result<(), Status> {
     match opened {
         Some(room) => {

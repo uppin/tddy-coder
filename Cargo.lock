@@ -13428,7 +13428,6 @@ name = "tddy-session-agents"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "livekit",
  "log",
  "pretty_assertions",
  "prost 0.13.5",
@@ -13437,9 +13436,8 @@ dependencies = [
  "tddy-core",
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",
- "tddy-daemon-livekit",
  "tddy-discovery",
- "tddy-livekit",
+ "tddy-host-service",
  "tddy-model-registry",
  "tddy-projects",
  "tddy-room-client",

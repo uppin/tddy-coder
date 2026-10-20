@@ -2,31 +2,22 @@
 // only its methods are used.
 use prost::Message as _;
 
-use std::sync::Arc;
-
 use tddy_service::proto::session_agents_svc::SessionAgentRoster;
-
-pub async fn broadcast_roster(
-    session_id: &str,
-    roster: &SessionAgentRoster,
-    publisher: Arc<tddy_livekit::BroadcastPublisher>,
-) {
-    if let Err(e) = publisher.publish(&roster.encode_to_vec()).await {
-        log::warn!(
-            "could not broadcast session {session_id}'s roster on \
-                 {}: {e}",
-            tddy_daemon_livekit::session_room::SESSION_AGENTS_TOPIC
-        );
-    }
-}
+use tddy_service::session_agents::SESSION_AGENTS_TOPIC;
 
 /// Broadcast `roster` to everyone in `session_id`'s room through the room port: encoded, on the
 /// session-agents topic.
+///
+/// Best-effort, as it always was: a roster that could not reach the room is a stale browser tab, and
+/// the caller has already persisted and streamed the roster it is announcing.
 pub fn broadcast_roster_through(
     rooms: &dyn tddy_daemon_extensions::RoomBroadcast,
     session_id: &str,
     roster: &SessionAgentRoster,
 ) {
-    let _ = (rooms, session_id, roster);
-    todo!("broadcast_roster_through")
+    if let Err(e) = rooms.publish(session_id, SESSION_AGENTS_TOPIC, roster.encode_to_vec()) {
+        log::warn!(
+            "could not broadcast session {session_id}'s roster on {SESSION_AGENTS_TOPIC}: {e}"
+        );
+    }
 }

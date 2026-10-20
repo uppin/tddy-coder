@@ -10,13 +10,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tddy_daemon_extensions::{
+    RoomAdmission, RoomBroadcast, RoomDirectory, RoomTokenMinter, SessionRooms,
+};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
-use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
-use tddy_daemon_livekit::peer_routing::PeerRouting;
-use tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry;
-use tddy_daemon_livekit::session_room::SessionRoomRegistry;
+use tddy_host_service::peer_routing::PeerRouting;
 use tddy_model_registry::ModelRegistryStore;
+use tddy_room_client::RoomConnector;
 
 use crate::session_agent_clone::{HostedAgentClones, SessionAgentCloneStore};
 use crate::session_agent_roster::SessionAgentRosterStore;
@@ -32,10 +33,17 @@ pub struct AgentRosterState<'a> {
     pub user_resolver: &'a SessionUserResolver,
     /// How the host routes an addressed request to a peer daemon.
     pub peer_routing: &'a PeerRouting,
-    /// Who the LiveKit server reports in each room.
-    pub room_roster: &'a Arc<dyn RoomRoster>,
+    /// Who the room server reports in each room.
+    pub room_directory: &'a Arc<dyn RoomDirectory>,
     /// The session rooms this daemon hosts.
-    pub session_rooms: &'a Arc<SessionRoomRegistry>,
+    pub session_rooms: &'a Arc<dyn SessionRooms>,
+    /// Broadcasts in those rooms.
+    pub room_broadcast: &'a Arc<dyn RoomBroadcast>,
+    /// Mints the token a clone self-joins its session room with, and the one an owning daemon is
+    /// admitted with.
+    pub room_tokens: &'a Arc<dyn RoomTokenMinter>,
+    /// How a hosted clone joins the facilitating daemon's session room.
+    pub room_connector: &'a Arc<dyn RoomConnector>,
     /// Every session's agent roster.
     pub session_agent_rosters: &'a Arc<SessionAgentRosterStore>,
     /// The clones peers hold for this daemon's sessions.
@@ -45,7 +53,7 @@ pub struct AgentRosterState<'a> {
     /// How often a `StreamSessionAgents` subscription re-sends an unchanged roster.
     pub roster_keepalive_interval: Duration,
     /// The owning daemons this daemon, as the facilitating one, has admitted to its session rooms.
-    pub session_admissions: &'a Arc<SessionAdmissionRegistry>,
+    pub session_admissions: &'a Arc<dyn RoomAdmission>,
     /// This daemon's model registry — the assistants an agent id may resolve to — when one is wired.
     pub model_registry: &'a Option<Arc<ModelRegistryStore>>,
 }

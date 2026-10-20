@@ -22,13 +22,15 @@ use crate::seeded_clone_guard;
 use crate::session_agent_clone::{HostedAgentClones, HostedClone, SessionAgentCloneStore};
 use crate::session_agent_roster::SessionAgentRosterStore;
 use crate::AgentRosterState;
+use tddy_daemon_extensions::{
+    OpenedSessionRoom, RoomAdmission, RoomBroadcast, RoomDirectory, RoomTokenMinter, SessionRooms,
+};
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_kernel::worktree_snapshot::WorktreeSnapshot;
 use tddy_daemon_kernel::SessionUserResolver;
-use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
-use tddy_daemon_livekit::peer_routing::PeerRouting;
-use tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry;
-use tddy_daemon_livekit::session_room::{OpenedSessionRoom, SessionRoomRegistry, WorktreeSnapshot};
+use tddy_host_service::peer_routing::PeerRouting;
 use tddy_model_registry::ModelRegistryStore;
+use tddy_room_client::RoomConnector;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_service::proto::exec_tools::ExecuteToolResponse;
@@ -70,7 +72,7 @@ pub trait AgentHostCallbacks: Send + Sync {
 
     /// Open the session's room over a checkout this daemon holds, unless it is open already (the
     /// host's `ensure_session_room`: the room's roster and its terminal bridge are the host's to
-    /// supply). `Ok(None)` means this daemon has no LiveKit credentials and hosts no rooms.
+    /// supply). `Ok(None)` means this daemon has no room integration configured and hosts no rooms.
     async fn ensure_session_room(
         &self,
         session_id: &str,
@@ -89,13 +91,16 @@ pub struct AgentRoster {
     pub tddy_data_dir: std::path::PathBuf,
     pub user_resolver: SessionUserResolver,
     pub peer_routing: PeerRouting,
-    pub room_roster: Arc<dyn RoomRoster>,
-    pub session_rooms: Arc<SessionRoomRegistry>,
+    pub room_directory: Arc<dyn RoomDirectory>,
+    pub session_rooms: Arc<dyn SessionRooms>,
+    pub room_broadcast: Arc<dyn RoomBroadcast>,
+    pub room_tokens: Arc<dyn RoomTokenMinter>,
+    pub room_connector: Arc<dyn RoomConnector>,
     pub session_agent_rosters: Arc<SessionAgentRosterStore>,
     pub session_agent_clones: Arc<SessionAgentCloneStore>,
     pub hosted_agent_clones: Arc<HostedAgentClones>,
     pub roster_keepalive_interval: Duration,
-    pub session_admissions: Arc<SessionAdmissionRegistry>,
+    pub session_admissions: Arc<dyn RoomAdmission>,
     pub model_registry: Option<Arc<ModelRegistryStore>>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn AgentHostCallbacks>,
@@ -109,8 +114,11 @@ impl AgentRoster {
             tddy_data_dir: &self.tddy_data_dir,
             user_resolver: &self.user_resolver,
             peer_routing: &self.peer_routing,
-            room_roster: &self.room_roster,
+            room_directory: &self.room_directory,
             session_rooms: &self.session_rooms,
+            room_broadcast: &self.room_broadcast,
+            room_tokens: &self.room_tokens,
+            room_connector: &self.room_connector,
             session_agent_rosters: &self.session_agent_rosters,
             session_agent_clones: &self.session_agent_clones,
             hosted_agent_clones: &self.hosted_agent_clones,

@@ -146,13 +146,20 @@ impl DaemonSessionHost {
             tddy_data_dir: self.tddy_data_dir.clone(),
             user_resolver: self.user_resolver.clone(),
             peer_routing: self.peer_routing.clone(),
-            room_roster: Arc::clone(&self.room_roster),
-            session_rooms: Arc::clone(&self.session_rooms),
+            room_directory: Arc::new(tddy_daemon_livekit::agent_room_ports::RosterDirectory(
+                Arc::clone(&self.room_roster),
+            )),
+            session_rooms: Arc::clone(&self.session_rooms) as _,
+            room_broadcast: Arc::clone(&self.session_rooms) as _,
+            room_tokens: tddy_daemon_livekit::room_tokens::room_token_minter(
+                self.config.livekit.as_ref(),
+            ),
+            room_connector: Arc::new(tddy_livekit::room_connector::LiveKitRoomConnector),
             session_agent_rosters: Arc::clone(&self.session_agent_rosters),
             session_agent_clones: Arc::clone(&self.session_agent_clones),
             hosted_agent_clones: Arc::clone(&self.hosted_agent_clones),
             roster_keepalive_interval: self.roster_keepalive_interval,
-            session_admissions: Arc::clone(&self.session_admissions),
+            session_admissions: Arc::clone(&self.session_admissions) as _,
             model_registry: self.model_registry.clone(),
             host: Arc::new(self.clone()),
         }

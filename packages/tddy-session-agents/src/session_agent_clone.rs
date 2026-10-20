@@ -24,9 +24,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use prost::Message as _;
-use tddy_livekit::client_connect::{connect_client, ConnectedClient};
-use tddy_livekit::{BroadcastChannel, RpcClient, TokenGenerator};
-use tddy_rpc::Status;
+use tddy_daemon_extensions::RoomTokenMinter;
+use tddy_daemon_kernel::peer_forwarding::{daemon_rpc_identity, session_room_name, CommonRoom};
+use tddy_room_client::{RoomAuth, RoomConnector, RoomJoin, RoomSession};
+use tddy_rpc::{RpcClientTransport, Status};
 use tddy_service::proto::activity::{AgentActivityDeltaChunk, AgentActivityRecord};
 use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
 use tddy_service::proto::session_agents_svc::{AgentCloneState, ReportAgentCloneStateRequest};
@@ -262,7 +263,7 @@ pub struct HostedClone {
     pub worktree_path: PathBuf,
     /// Addressed at `daemon-{facilitating}` inside the session room. Every mutating tool call a
     /// roster agent on this host makes goes through it, and so does every clone-state report.
-    client: RpcClient,
+    client: Arc<dyn RpcClientTransport>,
     /// The credential presented to the facilitating daemon.
     ///
     /// TODO(session-agent-roster): this is the caller's own token, carried from the attach that
@@ -272,7 +273,7 @@ pub struct HostedClone {
     session_token: String,
     /// Held for the clone's life: dropping it leaves the session room, and a clone outside the room
     /// hears nothing further while failing at nothing.
-    _room: Arc<livekit::Room>,
+    _room: Arc<dyn RoomSession>,
 }
 
 impl HostedClone {
@@ -448,9 +449,13 @@ pub struct CloneMirrorSpec {
     pub project_repo_path: PathBuf,
     pub project_id: String,
     pub session_token: String,
-    pub livekit_url: String,
-    pub livekit_api_key: String,
-    pub livekit_api_secret: String,
+    /// The room server the session room is on, for a join that was not handed a URL by the
+    /// facilitating daemon.
+    pub room_url: String,
+    /// Mints the self-join token when the facilitating daemon sent none.
+    pub room_tokens: Arc<dyn RoomTokenMinter>,
+    /// How the clone joins the session room.
+    pub connector: Arc<dyn RoomConnector>,
     /// The facilitating daemon's HTTP URL, when this clone was provisioned from it via
     /// `tddy-remote-git-repo` (PRD AC37). When set, the checkout's `origin` remote points at the
     /// facilitating daemon's `remote_git.RemoteGitService`, so the WIP-ref fetch in [`CloneMirror`]
@@ -472,15 +477,9 @@ pub struct CloneMirrorSpec {
     /// `AdmitOwningDaemon` over the common room every daemon already joined. `None` when this
     /// daemon has no LiveKit discovery (a test fixture), in which case the re-admit loop is skipped
     /// and the first admission token is used as a one-shot join.
-    pub common_room: Option<tddy_daemon_livekit::livekit_peer_discovery::CommonRoom>,
+    pub common_room: Option<CommonRoom>,
 }
 
-/// Join the session's room, restore the checkout from its WIP ref, and keep it equal until the room
-/// closes.
-///
-/// Registers the clone and reports `READY` only once the **first restore has completed**: readiness
-/// is a claim that a prompt can be served, and a checkout that has joined a room but not yet caught
-/// up would answer a search from the state the worktree was cut in.
 /// The join a hosted clone makes into `session_id`'s room, and the participant it waits for: the
 /// room `session-{session_id}`, as `daemon-{owning}`, with `token`, waiting for `daemon-{facilitating}`.
 pub fn clone_room_join(
@@ -490,21 +489,29 @@ pub fn clone_room_join(
     facilitating_instance_id: &str,
     token: &str,
 ) -> (tddy_room_client::RoomJoin, String) {
-    let _ = (url, session_id, owning_instance_id, facilitating_instance_id, token);
-    todo!("clone_room_join")
+    (
+        RoomJoin {
+            url: url.to_string(),
+            room: session_room_name(session_id),
+            identity: daemon_rpc_identity(owning_instance_id),
+            auth: RoomAuth::Token(token.to_string()),
+        },
+        daemon_rpc_identity(facilitating_instance_id),
+    )
 }
 
+/// Join the session's room, restore the checkout from its WIP ref, and keep it equal until the room
+/// closes.
+///
+/// Registers the clone and reports `READY` only once the **first restore has completed**: readiness
+/// is a claim that a prompt can be served, and a checkout that has joined a room but not yet caught
+/// up would answer a search from the state the worktree was cut in.
 pub async fn run_clone_mirror(
     spec: CloneMirrorSpec,
     hosted: Arc<HostedAgentClones>,
 ) -> Result<(), Status> {
-    let room_name = tddy_daemon_livekit::session_room::session_room_name(&spec.session_id);
-    let identity = tddy_daemon_livekit::livekit_peer_discovery::daemon_rpc_identity(
-        &spec.owning_daemon_instance_id,
-    );
-    let facilitator_identity = tddy_daemon_livekit::livekit_peer_discovery::daemon_rpc_identity(
-        &spec.facilitating_daemon_instance_id,
-    );
+    let room_name = session_room_name(&spec.session_id);
+    let identity = daemon_rpc_identity(&spec.owning_daemon_instance_id);
 
     // The room-admission handshake (PRD § "What attach does" step 3). When the facilitating daemon
     // minted a scoped, short-TTL admission token and forwarded it, the owning daemon joins with
@@ -539,15 +546,11 @@ pub async fn run_clone_mirror(
     // The first token: the facilitating daemon's admission token when the handshake is in play,
     // otherwise a self-minted 24 h room token (the fallback).
     let self_minted_token = || -> Result<String, Status> {
-        TokenGenerator::new(
-            spec.livekit_api_key.clone(),
-            spec.livekit_api_secret.clone(),
-            room_name.clone(),
-            identity.clone(),
-            CLONE_ROOM_TOKEN_TTL,
-        )
-        .generate()
-        .map_err(|e| Status::internal(format!("mint a join token for {room_name}: {e}")))
+        spec.room_tokens
+            .mint(&room_name, &identity, CLONE_ROOM_TOKEN_TTL)
+            .map_err(|e| {
+                Status::internal(format!("mint a join token for {room_name}: {}", e.message))
+            })
     };
 
     let mut current_token = if !spec.first_admission_token.is_empty() {
@@ -558,7 +561,7 @@ pub async fn run_clone_mirror(
     let mut current_url = if !spec.first_admission_url.is_empty() {
         spec.first_admission_url.clone()
     } else {
-        spec.livekit_url.clone()
+        spec.room_url.clone()
     };
 
     // The mirror survives every reconnect: it holds the checkout and the applied-sequence cursor,
@@ -569,15 +572,19 @@ pub async fn run_clone_mirror(
     let mut first_iteration = true;
 
     loop {
-        let ConnectedClient { room, client } = match connect_client(
+        let (join, facilitator_identity) = clone_room_join(
             &current_url,
+            &spec.session_id,
+            &spec.owning_daemon_instance_id,
+            &spec.facilitating_daemon_instance_id,
             &current_token,
-            &facilitator_identity,
-            FACILITATING_DAEMON_WAIT,
-        )
-        .await
+        );
+        let room = match spec
+            .connector
+            .connect(&join, &facilitator_identity, FACILITATING_DAEMON_WAIT)
+            .await
         {
-            Ok(c) => c,
+            Ok(room) => room,
             Err(e) => {
                 return Err(Status::unavailable(format!(
                     "the clone for session {} could not join {room_name} as {identity}: {e}",
@@ -587,20 +594,17 @@ pub async fn run_clone_mirror(
         };
 
         // Both subscriptions are taken before the restore, so nothing published while the mirror
-        // is catching up is lost: `BroadcastChannel::subscribe` takes its own room event handle,
-        // and a record that arrives during the restore is decided against the marker the restore
-        // wrote.
-        let mut session_activity =
-            BroadcastChannel::new(Arc::clone(&room), SESSION_ACTIVITY_TOPIC).subscribe();
-        let mut worktree_activity =
-            BroadcastChannel::new(Arc::clone(&room), WORKTREE_ACTIVITY_TOPIC).subscribe();
+        // is catching up is lost: each subscription takes its own room event handle, and a record
+        // that arrives during the restore is decided against the marker the restore wrote.
+        let mut session_activity = room.subscribe(SESSION_ACTIVITY_TOPIC);
+        let mut worktree_activity = room.subscribe(WORKTREE_ACTIVITY_TOPIC);
 
         let hosted_clone = Arc::new(HostedClone {
             session_id: spec.session_id.clone(),
             facilitating_daemon_instance_id: spec.facilitating_daemon_instance_id.clone(),
             codebase_session_id: spec.codebase_session_id.clone(),
             worktree_path: spec.worktree_path.clone(),
-            client,
+            client: room.rpc(),
             session_token: spec.session_token.clone(),
             _room: room,
         });
@@ -672,11 +676,11 @@ pub async fn run_clone_mirror(
         loop {
             let outcome = tokio::select! {
                 message = session_activity.recv() => match message {
-                    Some(message) => mirror.on_activity(&message.payload, &hosted_clone).await,
+                    Some(payload) => mirror.on_activity(&payload, &hosted_clone).await,
                     None => { room_closed = true; Ok(()) },
                 },
                 message = worktree_activity.recv() => match message {
-                    Some(message) => mirror.on_worktree(&message.payload).await,
+                    Some(payload) => mirror.on_worktree(&payload).await,
                     None => { room_closed = true; Ok(()) },
                 },
             };

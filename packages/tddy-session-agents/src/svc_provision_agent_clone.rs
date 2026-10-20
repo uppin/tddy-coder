@@ -15,7 +15,6 @@ use tddy_service::proto::session::DeleteSessionRequest;
 use crate::seed_codebase;
 use crate::session_dir_lookup;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
-use tddy_daemon_livekit::first_admission_token;
 
 use tddy_service::proto::session::StartSessionRequest;
 
@@ -57,9 +56,10 @@ impl AgentRoster {
         // against `session_admission.SessionAdmissionService/AdmitOwningDaemon` before it expires.
         // `None` (LiveKit not configured) falls back to the owning daemon self-minting — a recorded
         // deviation, never a silent one.
-        let first_admission = first_admission_token::mint_first_admission_token(
+        let first_admission = room_access::mint_first_admission(
             &self.config,
-            &self.session_admissions,
+            self.session_admissions.as_ref(),
+            self.room_tokens.as_ref(),
             session_id,
             daemon_instance_id,
         );
@@ -96,14 +96,13 @@ impl AgentRoster {
         // The split forward's deadline, for the split forward's reason: giving up after the ordinary
         // forward deadline would mean erroring while the peer is still cloning, and a peer that carried on would
         // leave a checkout on a host nobody is watching.
-        let answered =
-            tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit_within(
-                &slot,
-                daemon_instance_id,
-                &request,
-                crate::agent_roster::split_forward_deadline(&self.config),
-            )
-            .await?;
+        let answered = peer_calls::forward_start_session_within(
+            &slot,
+            daemon_instance_id,
+            &request,
+            crate::agent_roster::split_forward_deadline(&self.config),
+        )
+        .await?;
         let created = answered.session_id.trim();
         if created != codebase_session_id {
             // A peer that ignored `requested_session_id` cannot give the guarantee above, so what it
@@ -144,7 +143,7 @@ impl AgentRoster {
             );
             return;
         };
-        match tddy_daemon_livekit::livekit_peer_discovery::forward_delete_session_via_livekit(
+        match peer_calls::forward_delete_session(
             slot,
             daemon_instance_id,
             &DeleteSessionRequest {
@@ -200,7 +199,7 @@ impl AgentRoster {
                  the daemons can see each other"
             )));
         }
-        match tddy_daemon_livekit::livekit_peer_discovery::forward_delete_session_via_livekit(
+        match peer_calls::forward_delete_session(
             slot,
             daemon_instance_id,
             &DeleteSessionRequest {
@@ -299,13 +298,14 @@ impl AgentRoster {
     /// deciding who is interested, which it cannot know: a browser tab or a newly admitted owning
     /// daemon joins at any time.
     pub async fn broadcast_roster(&self, session_id: &str, roster: &SessionAgentRoster) {
-        let Some(publisher) = self.session_rooms.agents_publisher(session_id) else {
-            return;
-        };
-        roster_broadcast::broadcast_roster(session_id, roster, publisher).await;
+        roster_broadcast::broadcast_roster_through(
+            self.room_broadcast.as_ref(),
+            session_id,
+            roster,
+        );
     }
 
-    /// The identities currently joined to a session's room, as the LiveKit server reports them.
+    /// The identities currently joined to a session's room, as the room server reports them.
     ///
     /// Read from the server API rather than from this daemon's own connection: the question is who
     /// is in the room, and only the server can answer it for participants this daemon did not admit.
@@ -313,12 +313,11 @@ impl AgentRoster {
         &self,
         session_id: &str,
     ) -> Result<Vec<String>, Status> {
-        let room_name = tddy_daemon_livekit::session_room::session_room_name(session_id);
-        let room_roster = &self.room_roster;
+        let room_name = session_room_name(session_id);
         session_room_participants::session_room_participant_identities(
             session_id,
             room_name,
-            room_roster,
+            self.room_directory.as_ref(),
         )
         .await
     }
@@ -379,7 +378,10 @@ impl AgentRoster {
     }
 }
 
+use crate::room_access;
 use crate::roster_broadcast;
+use tddy_daemon_kernel::peer_calls;
+use tddy_daemon_kernel::peer_forwarding::session_room_name;
 
 use crate::session_room_participants;
 
