@@ -145,11 +145,13 @@ The desktop asks for what it needs, and only once if the operator says so.
 
 ## Scope
 
-- [~] Testing — failing acceptance and unit tests written (red phase, 2026-10-18)
+- [x] Testing — acceptance and unit tests written (red 2026-10-18) and green
 - [x] Protos + generated TS
-- [ ] Inspect mode in both bridges
-- [ ] Daemon inspect, remembered credential, prompt with method, remember write, refused marking
-- [ ] Sign-in dialog; overlay inspect → form → start → re-ask
+- [x] Inspect mode in both bridges (`tddy-vnc` `security::inspect`, `tddy-rdp` `RdpClient::inspect`)
+- [x] Daemon inspect, remembered credential, prompt with method, remember write, refused marking
+- [x] Sign-in dialog; overlay inspect → form → start → re-ask
+- [x] 🆕 Inspect line types moved to `tddy_daemon_extensions::desktop_inspect` after the rebase onto node 6's move of the readiness protocol (`tddy-screen-sharing` no longer depends on `tddy-screenshare`, `livekit_is_a_satellite`); `tddy-screenshare::inspect` keeps `BridgeMode` and `run_inspect` and re-exports the rest
+- [x] 🆕 `HostKeyContinuityNotices.tsx` extracted from `HostPassphraseDialog` so both dialogs render one key-continuity notice set
 
 ## Technical Changes
 
@@ -174,9 +176,9 @@ Open → `InspectHostDesktop` → (remembered? start) : (form by method → encr
 | `tddy-web` | `HostDesktopSignInDialog.tsx` (new), `HostDesktopOverlay.tsx`, page objects, `hostPromptFeed` kind |
 
 ## Implementation Milestones
-- [ ] M1 Protos + inspect mode (bridges)
-- [ ] M2 Daemon inspect + remembered path
-- [ ] M3 Dialog + overlay flow
+- [x] M1 Protos + inspect mode (bridges)
+- [x] M2 Daemon inspect + remembered path
+- [x] M3 Dialog + overlay flow
 
 ## Testing Plan
 
@@ -257,12 +259,30 @@ inspects first and answers `DESKTOP_CREDENTIALS` instead of `DESKTOP_PASSWORD`: 
 - `prost = "0.13"` added as a **dev**-dependency of `tddy-screen-sharing` (already in the lockfile
   via `tddy-service`); the green decode of the answer will need it as a normal dependency.
 ### From /validate-changes
+- ✅ Fixed (back to /green once): a credential typed with Remember was sealed in the vault *before* the bridge started, so a wrong password was stored and then marked refused. Now written only after a successful start; an already-remembered credential the desktop refuses is still marked refused.
+- ✅ Fixed (back to /green once): a **locked** operator vault failed every host-desktop open (`usable` mapped `Locked` to an error). A locked vault now means nothing usable is remembered: the operator is asked.
+- ✅ Fixed (back to /green once): VNC inspect dropped every type a server advertised after VeNCrypt (`break` after committing to type 19). VeNCrypt's subtypes are now appended after the other types.
+- Minor, for /pr-wrap: `HostPassphraseDialog.allowEmpty` has no caller left; `PromptKind::DesktopPassword` is raised by nothing (the proto value stays for wire compatibility); `HostKeyContinuityNotices` fragment is over-indented.
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
 
 ## Validation Results
 ### /validate-changes
+**2026-10-20 ([W] stage).** Stack gate: base `feature/host-desktops/x11-channels` (PR #659, resolved from the PR's `baseRefName`); rebased `--onto origin/feature/host-desktops/x11-channels 382db6473` (n7's old tip); leak check `origin/<base>..HEAD` = this PR's own commits only; no paths deleted against the base. Conflicts: `tests/common/mod.rs` (imports: union, readiness from `tddy_daemon_extensions::bridge_readiness`), `tddy-screenshare/src/lib.rs` (union), `screen_sharing_service/host_targets.rs` (n7's `serve_x11_display_to_the_bridge` / `spawn_host_bridge` kept, the refused-marking wrapped around `spawn_host_bridge`), `HostDesktopOverlay.tsx` (union of `isTargetOfChannel` and `noSupportedSignInText`). `grep -rn tddy_screenshare::readiness` is empty. `Cargo.lock` gains only the `prost 0.13.5` edge of `tddy-screen-sharing` — no new crate version.
+
+| Check | Result |
+|---|---|
+| Changeset items implemented or deferred | ✅ all |
+| `## Responsibility` delivered | ✅ no `todo!()` / `TODO(sign-in-form)` left in the touched crates |
+| `## Dependencies` not implemented here | ✅ |
+| `## Boundaries` respected | ✅ probe unchanged, session targets keep their form |
+| Diff only this PR's files | ✅ |
+| Parent-owned files intact | ✅ |
+
+Builds: `cargo check --all-targets` for `tddy-daemon-extensions`, `tddy-screenshare`, `tddy-screen-sharing`, `tddy-vnc`, `tddy-rdp` ✅. Pre-fix `./test -p tddy-screen-sharing`: 73 passed, 0 failed.
+
+Findings: 3 warnings fixed through /green (above, *From /validate-changes*); 3 minor cleanups for /pr-wrap. Decisions recorded: the **"Open for green"** choice is the overlay answering itself — the daemon still raises `DESKTOP_CREDENTIALS` on every start (an X11 channel and a `NONE` desktop included; `InspectHostDesktop` answers `NONE` for an X11 display without running a bridge), and the overlay answers a `NONE` desktop's question with an encrypted `{method: NONE}` and no form. Node 7's x11vnc step stays in the host-target start path, between the credential and the bridge spawn. `HostPromptEvent.offered_auth_methods` is sent empty: the methods come from `InspectHostDesktop`, not the prompt.
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
@@ -275,9 +295,9 @@ inspects first and answers `DESKTOP_CREDENTIALS` instead of `DESKTOP_PASSWORD`: 
 - [x] Create changeset (this document)
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
+- [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
