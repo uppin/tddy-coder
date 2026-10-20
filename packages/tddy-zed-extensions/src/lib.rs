@@ -13,6 +13,8 @@ pub mod install;
 pub mod manifest;
 pub mod registry;
 
+mod archive;
+
 pub use dir::ExtensionsDir;
 pub use error::ExtensionError;
 pub use index::{ExtensionSource, Index, IndexEntry};

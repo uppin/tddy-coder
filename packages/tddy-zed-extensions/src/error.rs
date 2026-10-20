@@ -2,7 +2,7 @@
 //! paths are relative to the extension's root — the layout a reader recognises, not the partial
 //! directory the install happened to unpack into.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ExtensionError {
@@ -71,4 +71,17 @@ pub enum ExtensionError {
 
     #[error("{}: {message}", path.display())]
     Io { path: PathBuf, message: String },
+
+    #[error("{id:?} is not a valid extension id: it must be one name, such as demo-lang")]
+    InvalidExtensionId { id: String },
+}
+
+impl ExtensionError {
+    /// An I/O failure at `path`.
+    pub(crate) fn io(path: &Path, error: std::io::Error) -> Self {
+        Self::Io {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        }
+    }
 }

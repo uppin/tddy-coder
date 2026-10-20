@@ -3,6 +3,7 @@
 **Date**: 2026-10-19
 **Status**: 🚧 In Progress
 **Type**: New feature (extension installation)
+**Complexity**: 4/5 — new crate + tddy-tools, HTTP/archive I/O seam
 **Stack**: `#reshape` 19/24, branch `feature/reshape/extension-install`, base `feature/reshape/fn-sizes-rest`, green wave 1.
 **PR**: [#678](https://github.com/uppin/tddy-coder/pull/678) (draft)
 
@@ -112,10 +113,10 @@ fixture registry; no parent surface is reached (the contract's tests found no ne
 - [x] Create failing acceptance tests (contract commit)
 - [x] Run acceptance tests (verify they fail) — 13 acceptance + 1 unit fail on this node's `todo!()`
 - [x] TDD Red — write failing unit/integration tests
-- [ ] USER REVIEW of the acceptance tests (ticked at `/green` start)
-- [ ] Crate, manifest, dir, index
-- [ ] Registry and path install (R2–R5), list, remove
-- [ ] `tddy-tools extensions`
+- [x] USER REVIEW of the acceptance tests (ticked at `/green` start)
+- [x] Crate, manifest, dir, index
+- [x] Registry and path install (R2–R5), list, remove
+- [x] `tddy-tools extensions`
 - [ ] Docs: `docs/ft/coder/zed-extensions.md` (install section)
 - [ ] Code Quality
 
@@ -125,7 +126,11 @@ Library-level acceptance against a local HTTP server and temp `TDDY_DATA_DIR`; n
 
 ## Refactoring Needed
 
-_None yet._
+- `src/install.rs` is 470 lines, past the ~400-line guideline and under the 500 `pr-wrap` line. Staging,
+  `copy_tree` and `remove_tree` are the seams for a private module if `pr-wrap` wants it below 400.
+- Open at green: `list` fails for every extension when one installed `config.toml` does not parse, because
+  validation only checks that the file exists. A chain of in-tree symlinks that resolves outside is caught only
+  lexically. Both are for review, not this green.
 
 ## Validation Results
 
@@ -137,6 +142,14 @@ Contract commit (2026-10-20), scoped to the touched packages:
 - `cargo test -p tddy-zed-extensions --no-fail-fast` — 1 passed (`manifest_parses_zeds_fields`), 14 failed, every one a
   `todo!()` panic in this crate (`install.rs`, `dir.rs`, `manifest.rs`).
 - `cargo test -p tddy-tools --no-fail-fast` — all pass.
+
+Green (2026-10-20), scoped to the touched packages, through the nix dev shell (`./dev cargo …`):
+
+- `cargo test -p tddy-zed-extensions --no-fail-fast` — 16 passed (13 acceptance, 3 unit), 0 failed.
+- `cargo clippy -p tddy-zed-extensions --all-targets -- -D warnings` — clean.
+- `cargo clippy -p tddy-tools --all-targets -- -D warnings` — clean.
+- `cargo test -p tddy-tools --no-fail-fast` — all pass.
+- `cargo fmt -p tddy-zed-extensions -p tddy-tools -- --check` — clean.
 
 ## 2026-10-20: `LanguageServerEntry` reads Zed's opt-in and action-kind fields
 

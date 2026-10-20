@@ -14272,6 +14272,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+ "tddy-session-store",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

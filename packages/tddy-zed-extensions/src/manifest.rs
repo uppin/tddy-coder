@@ -92,9 +92,15 @@ impl ExtensionManifest {
     /// Refuses a `schema_version` outside [`SUPPORTED_SCHEMA_VERSIONS`], naming this extension and
     /// `file` (relative to the extension root).
     pub fn check_schema_version(&self, file: &Path) -> Result<(), ExtensionError> {
-        let _ = file;
-        // TODO(reshape-extension-install): implement
-        todo!("ExtensionManifest::check_schema_version")
+        if SUPPORTED_SCHEMA_VERSIONS.contains(&self.schema_version) {
+            Ok(())
+        } else {
+            Err(ExtensionError::SchemaVersionOutOfRange {
+                extension: self.id.clone(),
+                file: file.to_path_buf(),
+                schema_version: self.schema_version,
+            })
+        }
     }
 }
 

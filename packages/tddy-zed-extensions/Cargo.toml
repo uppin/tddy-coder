@@ -10,6 +10,8 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1"
+# `default_tddy_data_dir`: the debug-build default the daemon resolves the tddy data dir from.
+tddy-session-store = { path = "../tddy-session-store" }
 clap = { version = "4", features = ["derive"] }
 # The registry body is a `.tar.gz`: `flate2` (already in Cargo.lock) inflates it, `tar` (consented
 # 2026-10-19) walks its entries so each one can be checked before it is written.
