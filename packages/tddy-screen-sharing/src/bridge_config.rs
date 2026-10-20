@@ -242,6 +242,7 @@ pub(crate) fn host_target_to_proto(t: &HostDesktopTarget) -> ProtoScreenSharingT
         port: t.port as u32,
         protocol: t.protocol,
         username: t.username.clone(),
+        x11_display: t.display,
     }
 }
 
