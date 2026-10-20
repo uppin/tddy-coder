@@ -159,6 +159,24 @@ all written, failing on `todo!()`. `parse_security_types` takes the whole securi
 ### From /analyze-clean-code
 - [x] Items above; moving the fake server to `tests/support` is deferred
 
+## Restructuring
+
+`packages/tddy-vnc/src/security.rs` (889 production lines, budget 500) was decomposed with `tddy-tools restructure` (four `move_item` operations with `name` and `reexport: named`; `check --deep --budget 500` reported no findings; applied in one run). No moved code was hand-written; no tests were edited.
+
+| File | Production lines before | after | Holds |
+|------|------:|------:|-------|
+| `security.rs` | 889 | 398 | module docs, constants, `negotiate*` orchestration, RFB version, sign-in dispatch, `pub use` re-exports, the unit tests (unchanged) |
+| `security/types.rs` | - | 174 | `VncSecurityType`, `VncSignIn`, `SecurityError`, `parse_security_types`, `choose_sign_in` |
+| `security/stream.rs` | - | 84 | `Transport`, `SecuredStream` and its `AsyncRead`/`AsyncWrite` impls |
+| `security/vencrypt.rs` | - | 150 | VeNCrypt subtype exchange, Plain credentials, `start_tls`, the unverified-certificate verifier |
+| `security/ard.rs` | - | 139 | Apple Remote Desktop exchange, AES/MD5 key derivation |
+
+- Every public path is unchanged: `tddy_vnc::security::{VncSecurityType, VncSignIn, SecurityError, parse_security_types, choose_sign_in, negotiate, SecuredStream, Transport}` via `pub use` in `security.rs`.
+- The parent stays `security.rs` beside a `security/` directory rather than `security/mod.rs`: the engine does not rename files and `git mv` is not allowed. Equivalent for the compiler.
+- The unit tests stay in `security.rs`: they exercise items from all four children and the engine does not split a `mod tests`. They do not count toward the production budget.
+- Hand fixes after the apply (lint only): removed three unused `use md5::Digest;` lines the engine's import tidy left in `security.rs`, `security/stream.rs` and `security/vencrypt.rs`.
+- Verification, scoped to `tddy-vnc`: `./test -p tddy-vnc` 23 unit + 5 `vnc_client_integration` + 16 `vnc_security_integration`, all green (as at baseline); `cargo clippy -p tddy-vnc --all-targets -- -D warnings` and `cargo fmt -p tddy-vnc` clean.
+
 ## Validation Results
 ### /validate-changes
 2026-10-20, after `/pr-stack-rebase` onto `rdp-nla` `3330f1205` (leak check clean: 4 own commits).

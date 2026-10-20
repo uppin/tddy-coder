@@ -31,21 +31,21 @@
 //! Plain (subtype 256) carries the username and password with no encryption. It is run when it
 //! is the only supported subtype the server offers, and a `log::warn!` says so each time.
 
-use std::io;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
+mod ard;
+mod stream;
+mod types;
+mod vencrypt;
+
 use std::time::Duration;
 
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
-use md5::{Digest, Md5};
+#[cfg(test)]
+use aes::cipher::generic_array::GenericArray;
+#[cfg(test)]
+use aes::cipher::KeyInit;
+#[cfg(test)]
 use num_bigint::BigUint;
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::crypto::{ring, CryptoProvider};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, SignatureScheme};
 use tddy_screenshare::Credentials;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const VENCRYPT_PLAIN: u32 = 256;
 const VENCRYPT_TLS_PLAIN: u32 = 259;
@@ -78,249 +78,14 @@ const DH_MIN_ELEMENT: u8 = 2;
 const RFB_MINOR_37: u32 = 7;
 const RFB_MINOR_38: u32 = 8;
 
-/// One entry of the server's security-types list (RFB 3.8 §7.1.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VncSecurityType {
-    /// Type 1 — no authentication.
-    None,
-    /// Type 2 — VNC Authentication (DES challenge with a password).
-    VncAuth,
-    /// Type 19 — VeNCrypt, which carries its own subtype list.
-    VeNCrypt,
-    /// Type 30 — Apple Remote Desktop (Diffie-Hellman, then username and password).
-    AppleRemoteDesktop,
-    /// Any other type number, kept so an error can name it.
-    Unknown(u8),
-}
-
-impl VncSecurityType {
-    fn from_number(number: u8) -> Self {
-        match number {
-            TYPE_NONE => Self::None,
-            TYPE_VNC_AUTH => Self::VncAuth,
-            TYPE_VENCRYPT => Self::VeNCrypt,
-            TYPE_APPLE_REMOTE_DESKTOP => Self::AppleRemoteDesktop,
-            other => Self::Unknown(other),
-        }
-    }
-
-    /// The type number as it appears on the wire.
-    pub fn number(self) -> u8 {
-        match self {
-            Self::None => TYPE_NONE,
-            Self::VncAuth => TYPE_VNC_AUTH,
-            Self::VeNCrypt => TYPE_VENCRYPT,
-            Self::AppleRemoteDesktop => TYPE_APPLE_REMOTE_DESKTOP,
-            Self::Unknown(number) => number,
-        }
-    }
-}
-
-/// Parse the server's security-types message: a count byte followed by that many type numbers.
-///
-/// Unknown type numbers are kept as [`VncSecurityType::Unknown`] rather than failing the list.
-pub fn parse_security_types(bytes: &[u8]) -> Result<Vec<VncSecurityType>, SecurityError> {
-    let (&count, types) = bytes
-        .split_first()
-        .ok_or_else(|| SecurityError::Protocol("the security-types message is empty".to_owned()))?;
-    if count == 0 {
-        return Err(SecurityError::Protocol(
-            "the server offered no security types".to_owned(),
-        ));
-    }
-    if types.len() != count as usize {
-        return Err(SecurityError::Protocol(format!(
-            "the security-types message announces {count} types but carries {}",
-            types.len()
-        )));
-    }
-    Ok(types
-        .iter()
-        .map(|&number| VncSecurityType::from_number(number))
-        .collect())
-}
-
-/// The sign-in method the client runs against the server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VncSignIn {
-    /// No authentication.
-    None,
-    /// VNC Authentication with the password.
-    VncAuth,
-    /// VeNCrypt subtype Plain (256): username and password in the clear.
-    VeNCryptPlain,
-    /// VeNCrypt subtype TLSPlain (259): username and password inside a TLS session.
-    VeNCryptTlsPlain,
-    /// Apple Remote Desktop (type 30).
-    AppleRemoteDesktop,
-}
-
-impl VncSignIn {
-    fn is_vencrypt(self) -> bool {
-        matches!(self, Self::VeNCryptPlain | Self::VeNCryptTlsPlain)
-    }
-}
-
-/// Choose the sign-in method to run, given what the server offers and what the caller supplied.
-///
-/// `vencrypt_subtypes` is the VeNCrypt subtype list (empty when VeNCrypt is not offered or its
-/// subtypes are not known yet). A method needing a credential the caller did not supply is never
-/// chosen. Preference: VeNCrypt (TLSPlain over Plain), Apple Remote Desktop, VNC Authentication,
-/// then None.
-pub fn choose_sign_in(
-    offered: &[VncSecurityType],
-    vencrypt_subtypes: &[u32],
-    credentials: &Credentials,
-) -> Result<VncSignIn, SecurityError> {
-    let missing_account_credential = first_missing_for_account(credentials);
-
-    if offered.contains(&VncSecurityType::VeNCrypt) && missing_account_credential.is_none() {
-        if vencrypt_subtypes.contains(&VENCRYPT_TLS_PLAIN) {
-            return Ok(VncSignIn::VeNCryptTlsPlain);
-        }
-        if vencrypt_subtypes.contains(&VENCRYPT_PLAIN) {
-            return Ok(VncSignIn::VeNCryptPlain);
-        }
-    }
-    if offered.contains(&VncSecurityType::AppleRemoteDesktop)
-        && missing_account_credential.is_none()
-    {
-        return Ok(VncSignIn::AppleRemoteDesktop);
-    }
-    if offered.contains(&VncSecurityType::VncAuth) && credentials.password.is_some() {
-        return Ok(VncSignIn::VncAuth);
-    }
-    if offered.contains(&VncSecurityType::None) {
-        return Ok(VncSignIn::None);
-    }
-
-    // Nothing was chosen: name the first credential a method the server offers was missing.
-    let needs_account = offered.contains(&VncSecurityType::VeNCrypt)
-        || offered.contains(&VncSecurityType::AppleRemoteDesktop);
-    let missing = missing_account_credential
-        .filter(|_| needs_account)
-        .or_else(|| (offered.contains(&VncSecurityType::VncAuth)).then_some("password"));
-    match missing {
-        Some(credential) => Err(SecurityError::MissingCredential(credential)),
-        None => Err(SecurityError::NothingSupported {
-            offered: offered.iter().map(|t| t.number()).collect(),
-        }),
-    }
-}
-
-/// The first credential the username-and-password methods need that `credentials` lacks.
-fn first_missing_for_account(credentials: &Credentials) -> Option<&'static str> {
-    if credentials.username.is_none() {
-        Some("username")
-    } else if credentials.password.is_none() {
-        Some("password")
-    } else {
-        None
-    }
-}
-
-/// Why a VNC sign-in could not be completed.
-#[derive(Debug, thiserror::Error)]
-pub enum SecurityError {
-    /// The server refused the sign-in (SecurityResult failed), with its reason.
-    #[error("the VNC server refused the sign-in: {reason}")]
-    Refused { reason: String },
-    /// The server offered no method this client can run; the offered type numbers are kept.
-    #[error(
-        "the VNC server offers no supported sign-in method (offered security types: {offered:?})"
-    )]
-    NothingSupported { offered: Vec<u8> },
-    /// Every method the server offers needs a credential that was not supplied.
-    #[error("the VNC server's sign-in methods need a {0}")]
-    MissingCredential(&'static str),
-    /// The connection failed mid-exchange.
-    #[error("VNC sign-in connection failed: {0}")]
-    Io(#[from] std::io::Error),
-    /// The server broke the protocol.
-    #[error("VNC sign-in protocol error: {0}")]
-    Protocol(String),
-    /// The sign-in did not finish in time (a server that stops answering).
-    #[error("VNC sign-in did not finish within {0:?}")]
-    TimedOut(Duration),
-}
+use crate::security::types::first_missing_for_account;
+pub use crate::security::types::{
+    choose_sign_in, parse_security_types, SecurityError, VncSecurityType, VncSignIn,
+};
 
 // ── Transport ─────────────────────────────────────────────────────────────────
 
-/// A byte stream the sign-in layer can run over.
-pub trait Transport: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
-impl<T: AsyncRead + AsyncWrite + Unpin + Send + Sync> Transport for T {}
-
-/// A stream positioned so that vnc-rs, running its own handshake over it, ends up at ClientInit.
-///
-/// Reads first return the `replay` bytes, then the underlying stream; the first `swallow` bytes
-/// written are dropped instead of reaching the server. See the module docs.
-pub struct SecuredStream {
-    inner: Box<dyn Transport>,
-    replay: Vec<u8>,
-    replayed: usize,
-    swallow: usize,
-}
-
-impl SecuredStream {
-    fn new(inner: Box<dyn Transport>, replay: Vec<u8>, swallow: usize) -> Self {
-        Self {
-            inner,
-            replay,
-            replayed: 0,
-            swallow,
-        }
-    }
-
-    /// A stream whose sign-in is complete: vnc-rs is told RFB 3.3 with security type None, which
-    /// it handles without reading or writing anything but the version it echoes.
-    fn authenticated(inner: Box<dyn Transport>) -> Self {
-        let mut replay = RfbVersion::V33.bytes().to_vec();
-        replay.extend_from_slice(&u32::from(TYPE_NONE).to_be_bytes());
-        Self::new(inner, replay, RFB_VERSION_LEN)
-    }
-}
-
-impl AsyncRead for SecuredStream {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        let this = self.get_mut();
-        if this.replayed < this.replay.len() {
-            let pending = &this.replay[this.replayed..];
-            let n = pending.len().min(buf.remaining());
-            buf.put_slice(&pending[..n]);
-            this.replayed += n;
-            return Poll::Ready(Ok(()));
-        }
-        Pin::new(&mut this.inner).poll_read(cx, buf)
-    }
-}
-
-impl AsyncWrite for SecuredStream {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        let this = self.get_mut();
-        if this.swallow > 0 {
-            let n = this.swallow.min(buf.len());
-            this.swallow -= n;
-            return Poll::Ready(Ok(n));
-        }
-        Pin::new(&mut this.inner).poll_write(cx, buf)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
-    }
-}
+pub use crate::security::stream::{SecuredStream, Transport};
 
 // ── Negotiation ───────────────────────────────────────────────────────────────
 
@@ -622,270 +387,19 @@ where
 
 // ── VeNCrypt ──────────────────────────────────────────────────────────────────
 
-/// VeNCrypt 0.2 version exchange, then the server's subtype list.
-async fn read_vencrypt_subtypes<S>(stream: &mut S) -> Result<Vec<u32>, SecurityError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let mut server_version = [0u8; 2];
-    stream.read_exact(&mut server_version).await?;
-    if server_version < VENCRYPT_VERSION {
-        return Err(SecurityError::Protocol(format!(
-            "the server speaks VeNCrypt {}.{}, this client needs {}.{}",
-            server_version[0], server_version[1], VENCRYPT_VERSION[0], VENCRYPT_VERSION[1]
-        )));
-    }
-    stream.write_all(&VENCRYPT_VERSION).await?;
-    if stream.read_u8().await? != 0 {
-        return Err(SecurityError::Protocol(format!(
-            "the server did not accept VeNCrypt {}.{}",
-            VENCRYPT_VERSION[0], VENCRYPT_VERSION[1]
-        )));
-    }
-    let count = stream.read_u8().await?;
-    let mut subtypes = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        subtypes.push(stream.read_u32().await?);
-    }
-    Ok(subtypes)
-}
-
-/// VeNCrypt Plain: username length, password length, username, password.
-async fn send_vencrypt_plain_credentials<S>(
-    stream: &mut S,
-    credentials: &Credentials,
-) -> Result<(), SecurityError>
-where
-    S: AsyncWrite + Unpin,
-{
-    let (username, password) = username_and_password(credentials)?;
-    let mut message =
-        Vec::with_capacity(VENCRYPT_PLAIN_HEADER_LEN + username.len() + password.len());
-    message.extend_from_slice(&(username.len() as u32).to_be_bytes());
-    message.extend_from_slice(&(password.len() as u32).to_be_bytes());
-    message.extend_from_slice(username);
-    message.extend_from_slice(password);
-    stream.write_all(&message).await?;
-    stream.flush().await?;
-    Ok(())
-}
-
-/// The username and password as bytes, or the credential that is missing.
-fn username_and_password(credentials: &Credentials) -> Result<(&[u8], &[u8]), SecurityError> {
-    match (&credentials.username, &credentials.password) {
-        (Some(username), Some(password)) => Ok((username.as_bytes(), password.as_bytes())),
-        _ => Err(SecurityError::MissingCredential(
-            first_missing_for_account(credentials).unwrap_or("username"),
-        )),
-    }
-}
-
-async fn start_tls<S>(
-    stream: S,
-    server_name: &str,
-) -> Result<tokio_rustls::client::TlsStream<S>, SecurityError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let provider = Arc::new(ring::default_provider());
-    let config = rustls::ClientConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()
-        .map_err(|e| SecurityError::Protocol(format!("TLS is unavailable: {e}")))?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(UnverifiedServerCertificate { provider }))
-        .with_no_client_auth();
-    let name = ServerName::try_from(server_name.to_owned()).map_err(|e| {
-        SecurityError::Protocol(format!(
-            "{server_name:?} is not a valid TLS server name: {e}"
-        ))
-    })?;
-    Ok(tokio_rustls::TlsConnector::from(Arc::new(config))
-        .connect(name, stream)
-        .await?)
-}
-
-/// Accepts any server certificate (see the module docs on TLSPlain trust) while still checking
-/// that the TLS handshake is signed by the key of the certificate the server presented.
-#[derive(Debug)]
-struct UnverifiedServerCertificate {
-    provider: Arc<CryptoProvider>,
-}
-
-impl ServerCertVerifier for UnverifiedServerCertificate {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
+use crate::security::vencrypt::{
+    read_vencrypt_subtypes, send_vencrypt_plain_credentials, start_tls,
+};
 
 // ── Apple Remote Desktop ──────────────────────────────────────────────────────
 
-/// What an Apple Remote Desktop server sends before the client answers.
-#[derive(Debug)]
-struct ArdParameters {
-    generator: u16,
-    key_len: usize,
-    prime: BigUint,
-    server_public: BigUint,
-}
-
-/// Apple Remote Desktop (type 30): read the Diffie-Hellman parameters and the server's public
-/// key, answer with the username and password (two 64-byte null-terminated fields) encrypted
-/// with AES-128-ECB under the MD5 of the shared secret, followed by the client's public key.
-async fn apple_remote_desktop<S>(
-    stream: &mut S,
-    credentials: &Credentials,
-) -> Result<(), SecurityError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let (username, password) = username_and_password(credentials)?;
-    if username.len() >= ARD_FIELD_LEN || password.len() >= ARD_FIELD_LEN {
-        return Err(SecurityError::Protocol(format!(
-            "Apple Remote Desktop accepts a username and password of at most {} bytes",
-            ARD_FIELD_LEN - 1
-        )));
-    }
-    let parameters = read_ard_parameters(stream).await?;
-
-    let mut private_key = vec![0u8; parameters.key_len];
-    fill_random(&mut private_key)?;
-    let private_key = BigUint::from_bytes_be(&private_key);
-    let client_public = BigUint::from(parameters.generator).modpow(&private_key, &parameters.prime);
-    let shared_secret = parameters
-        .server_public
-        .modpow(&private_key, &parameters.prime);
-    let aes_key = derive_aes_key(&shared_secret, parameters.key_len);
-
-    let mut message = encrypt_credentials_block(&aes_key, username, password)?.to_vec();
-    message.extend_from_slice(&be_padded(&client_public, parameters.key_len));
-    stream.write_all(&message).await?;
-    stream.flush().await?;
-    Ok(())
-}
-
-/// Read generator, key length, prime and the server's public key, refusing values that would
-/// make the shared secret predictable: a generator or public value below 2, or a public value
-/// of `prime - 1` (whose powers are only ever +1 or -1).
-async fn read_ard_parameters<S>(stream: &mut S) -> Result<ArdParameters, SecurityError>
-where
-    S: AsyncRead + Unpin,
-{
-    let generator = stream.read_u16().await?;
-    let key_len = stream.read_u16().await? as usize;
-    if key_len == 0 || key_len > MAX_ARD_KEY_LEN {
-        return Err(SecurityError::Protocol(format!(
-            "unusable Apple Remote Desktop key length {key_len}"
-        )));
-    }
-    let mut prime = vec![0u8; key_len];
-    stream.read_exact(&mut prime).await?;
-    let mut server_public = vec![0u8; key_len];
-    stream.read_exact(&mut server_public).await?;
-    let prime = BigUint::from_bytes_be(&prime);
-    let server_public = BigUint::from_bytes_be(&server_public);
-
-    let min_element = BigUint::from(DH_MIN_ELEMENT);
-    let usable = generator >= u16::from(DH_MIN_ELEMENT)
-        && server_public >= min_element
-        && &server_public + 1u8 < prime;
-    if !usable {
-        return Err(SecurityError::Protocol(
-            "the Apple Remote Desktop key parameters are not usable".to_owned(),
-        ));
-    }
-    Ok(ArdParameters {
-        generator,
-        key_len,
-        prime,
-        server_public,
-    })
-}
-
-/// The AES-128 key: the MD5 of the shared secret written big-endian in `key_len` bytes.
-fn derive_aes_key(shared_secret: &BigUint, key_len: usize) -> [u8; AES_BLOCK_LEN] {
-    Md5::digest(be_padded(shared_secret, key_len)).into()
-}
-
-/// The credentials block — username field, then password field, each [`ARD_FIELD_LEN`] bytes —
-/// encrypted with AES-128-ECB. Each field is its text, a NUL terminator and then random bytes,
-/// as macOS clients send it, so equal credentials do not encrypt to equal blocks. Both must be
-/// shorter than [`ARD_FIELD_LEN`] (the caller checks).
-fn encrypt_credentials_block(
-    aes_key: &[u8; AES_BLOCK_LEN],
-    username: &[u8],
-    password: &[u8],
-) -> Result<[u8; 2 * ARD_FIELD_LEN], SecurityError> {
-    let mut block = [0u8; 2 * ARD_FIELD_LEN];
-    fill_random(&mut block)?;
-    block[..username.len()].copy_from_slice(username);
-    block[username.len()] = 0;
-    block[ARD_FIELD_LEN..ARD_FIELD_LEN + password.len()].copy_from_slice(password);
-    block[ARD_FIELD_LEN + password.len()] = 0;
-
-    let cipher = aes::Aes128::new(GenericArray::from_slice(aes_key));
-    for chunk in block.chunks_exact_mut(AES_BLOCK_LEN) {
-        cipher.encrypt_block(GenericArray::from_mut_slice(chunk));
-    }
-    Ok(block)
-}
-
-fn fill_random(buf: &mut [u8]) -> Result<(), SecurityError> {
-    ring::default_provider()
-        .secure_random
-        .fill(buf)
-        .map_err(|_| {
-            SecurityError::Protocol("the system random number generator failed".to_owned())
-        })
-}
-
-/// `value` as big-endian bytes, left-padded with zeros to `len`.
-fn be_padded(value: &BigUint, len: usize) -> Vec<u8> {
-    let bytes = value.to_bytes_be();
-    let mut padded = vec![0u8; len.saturating_sub(bytes.len())];
-    padded.extend_from_slice(&bytes);
-    padded
-}
+use crate::security::ard::apple_remote_desktop;
+#[cfg(test)]
+use crate::security::ard::encrypt_credentials_block;
+#[cfg(test)]
+use crate::security::ard::read_ard_parameters;
+#[cfg(test)]
+use crate::security::ard::ArdParameters;
 
 #[cfg(test)]
 mod tests {
