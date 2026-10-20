@@ -2,7 +2,7 @@
 //! asked to be remembered (`#host-desktops` 8/8).
 //!
 //! - **Inspect.** `InspectHostDesktop` runs the target's bridge binary with `--inspect`
-//!   (`tddy_screenshare::inspect`), writes `{host, port}` to its stdin and reads the one report line
+//!   (`tddy_daemon_extensions::desktop_inspect`), writes `{host, port}` to its stdin and reads the one report line
 //!   it prints: the sign-in methods the desktop advertises, read without signing in.
 //! - **The answer.** A `DESKTOP_CREDENTIALS` prompt is answered with a protobuf-encoded
 //!   `DesktopCredentialAnswer`, RSA-OAEP-encrypted under the host's published key exactly as a
@@ -24,12 +24,12 @@ use prost::Message as _;
 use tddy_credentials::{
     AccountId, CredentialRecord, SecretString, SessionVaults, VaultState, FIRST_VERSION,
 };
+use tddy_daemon_extensions::desktop_inspect::{
+    read_inspect_report, AdvertisedMethod, InspectTarget, INSPECT_FLAG,
+};
 use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path};
 use tddy_host_service::host_keypair::HostKeypair;
 use tddy_rpc::{Request, Response, Status};
-use tddy_screenshare::inspect::{
-    read_inspect_report, AdvertisedMethod, InspectTarget, INSPECT_FLAG,
-};
 use tddy_service::proto::screen_sharing::{
     DesktopAuthMethod, DesktopCredentialAnswer, InspectHostDesktopRequest,
     InspectHostDesktopResponse, Protocol,

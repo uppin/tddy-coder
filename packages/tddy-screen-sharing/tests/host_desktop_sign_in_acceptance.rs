@@ -23,9 +23,9 @@ use pretty_assertions::assert_eq;
 use common::{
     a_credential, a_daemon_whose_bridge, CredentialBuilder, TheBridge, A_HOST, A_VNC_PORT,
 };
+use tddy_daemon_extensions::desktop_inspect::AdvertisedMethod;
 use tddy_host_service::host_prompts::PromptKind;
 use tddy_rpc::Code;
-use tddy_screenshare::inspect::AdvertisedMethod;
 use tddy_service::proto::screen_sharing::{DesktopAuthMethod, InspectHostDesktopResponse};
 
 const THE_DESKTOP_PASSWORD: &str = "correct horse battery staple";

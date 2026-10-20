@@ -23,6 +23,7 @@ use tddy_core::session_metadata::{
 };
 use tddy_credentials::{AccountId, CredentialRecord, CredentialStore, SecretString, SessionVaults};
 use tddy_daemon_extensions::bridge_readiness::{BridgeReadiness, FailureKind};
+use tddy_daemon_extensions::desktop_inspect::{AdvertisedMethod, InspectReport};
 use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig, ScreenSharingConfig};
 use tddy_host_service::host_desktop_targets::FileHostDesktopTargetStore;
 use tddy_host_service::host_keypair::{FileHostKeypair, HostKeypair, PublishedKey};
@@ -38,7 +39,6 @@ use tddy_screen_sharing::screen_sharing_records::{
 use tddy_screen_sharing::{
     ScreenSharingServiceImpl, DEFAULT_BRIDGE_READY_TIMEOUT, DEFAULT_X11VNC_ACCEPT_TIMEOUT,
 };
-use tddy_screenshare::inspect::{AdvertisedMethod, InspectReport};
 use tddy_service::proto::screen_sharing::{
     AddHostTargetRequest, AddTargetRequest, DesktopAuthMethod, DesktopCredentialAnswer,
     InspectHostDesktopRequest, InspectHostDesktopResponse, Protocol, ScreenSharingService,
@@ -196,7 +196,12 @@ impl StandInBridge {
             // so the trailing space keeps one port from matching another that it prefixes.
             TheBridge::ExitsWithItsX11vnc(readiness) => {
                 let line = serde_json::to_string(readiness).expect("a readiness line");
-                let launches = dir.join(X11VNC_LAUNCH_LOG);
+                // The stand-in x11vnc logs its launches into the directory the bridge is installed in.
+                let launches = self
+                    .binary
+                    .parent()
+                    .expect("the stand-in bridge is installed in a directory")
+                    .join(X11VNC_LAUNCH_LOG);
                 let launches = launches.display();
                 format!(
                     "port=$(sed -n 's/.*\"port\":\\([0-9]*\\).*/\\1/p' \"{config}\")\n\
