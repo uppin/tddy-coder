@@ -35,8 +35,9 @@ pub trait LanguageSupport: Send + Sync {
     /// `root`.
     fn workspace_root(&self, file: &Path, root: &Path) -> PathBuf;
 
-    /// The backend that resolves this language's operations over `server`.
-    fn backend(&self, server: ServerHandle<'_>) -> Box<dyn LanguageBackend>;
+    /// The backend that resolves this language's operations over `server`, built knowing the
+    /// workspace `root` it serves.
+    fn backend(&self, server: ServerHandle<'_>, root: &Path) -> Box<dyn LanguageBackend>;
 }
 
 /// The running server a backend is built over, or none for the static tier.
@@ -121,15 +122,17 @@ impl SupportRegistry {
         todo!("SupportRegistry::allow_list")
     }
 
-    /// Each support's backend over `server`, in registration order.
-    pub fn backends(&self, server: ServerHandle<'_>) -> BackendRegistry {
-        let _ = server;
+    /// Each support's backend over `server` for the workspace at `root`, in registration order.
+    pub fn backends(&self, server: ServerHandle<'_>, root: &Path) -> BackendRegistry {
+        let _ = (server, root);
         // TODO(reshape-language-support): implement
         todo!("SupportRegistry::backends")
     }
 
-    /// Each support's backend with no server, for checks that read text alone.
-    pub fn backends_static(&self) -> BackendRegistry {
+    /// Each support's backend with no server for the workspace at `root`, for checks that read
+    /// text alone.
+    pub fn backends_static(&self, root: &Path) -> BackendRegistry {
+        let _ = root;
         // TODO(reshape-language-support): implement
         todo!("SupportRegistry::backends_static")
     }
@@ -184,7 +187,7 @@ mod tests {
             root.to_path_buf()
         }
 
-        fn backend(&self, _server: ServerHandle<'_>) -> Box<dyn LanguageBackend> {
+        fn backend(&self, _server: ServerHandle<'_>, _root: &Path) -> Box<dyn LanguageBackend> {
             unreachable!("no registry test builds a backend")
         }
     }

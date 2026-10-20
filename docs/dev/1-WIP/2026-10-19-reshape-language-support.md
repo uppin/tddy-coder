@@ -52,8 +52,8 @@ This PR owns:
 |---|---|---|
 | `LanguageId` (`new`, `RUST`, `as_str`, `Display`) | `tddy-lsp/src/allowlist.rs` | replaces `tddy_lsp::Language` |
 | `LaunchSpec::language_id` + builder `with_language_id` | `tddy-lsp/src/allowlist.rs` | default = the id's string |
-| `LanguageSupport` trait, `ServerHandle` | `tddy-code-restructuring/src/language.rs` | F1 (a) |
-| `SupportRegistry` (`with_builtins`, `register`, `support_of`, `allow_list`, `backends`, `backends_static`) | `language.rs` | first claim wins; built-ins first (F2 a) |
+| `LanguageSupport` trait (`id`, `claims`, `launch`, `workspace_root`, `backend(&self, server: ServerHandle<'_>, root: &Path) -> Box<dyn LanguageBackend>`), `ServerHandle` | `tddy-code-restructuring/src/language.rs` | F1 (a); `backend` takes the workspace root (2026-10-20) |
+| `SupportRegistry` (`with_builtins`, `register`, `support_of`, `allow_list`, `backends(server, root)`, `backends_static(root)`) | `language.rs` | first claim wins; built-ins first (F2 a) |
 | `RustSupport` | `tddy-code-restructuring/src/backends/rust/support.rs` | wraps today's construction |
 | `LanguageBackend::language() -> &LanguageId` | `registry.rs` | `registry::Language` removed |
 
@@ -125,6 +125,16 @@ Real in this commit (mechanical, every later node compiles against it):
 and deleting them is green's (R2, R3, R5).
 
 `with_builtin_rust(RustSupport::launching(program))` is the daemon's constructor: its rust-analyzer path is configured.
+
+### 2026-10-20: `backend` takes the workspace root
+
+2026-10-20: `backend` takes the workspace root (developer decision on K20's question); K20 drops `bind_workspace`.
+`LanguageSupport::backend(&self, server: ServerHandle<'_>, root: &Path) -> Box<dyn LanguageBackend>` — every backend is
+built knowing its root, so no separate binding hook exists. `SupportRegistry::backends(server, root)` and
+`backends_static(root)` pass it through. Signature change only (third commit); the reds are the same `todo!()`s.
+
+**Open for green:** `workspace_root` may need to return `Result<PathBuf>` (a file outside any workspace, or a root
+search that fails) rather than `PathBuf`; decide when implementing it.
 
 ## Green wave
 

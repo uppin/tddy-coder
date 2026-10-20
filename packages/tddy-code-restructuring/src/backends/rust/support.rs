@@ -64,8 +64,8 @@ impl LanguageSupport for RustSupport {
         todo!("RustSupport::workspace_root")
     }
 
-    fn backend(&self, server: ServerHandle<'_>) -> Box<dyn LanguageBackend> {
-        let _ = server;
+    fn backend(&self, server: ServerHandle<'_>, root: &Path) -> Box<dyn LanguageBackend> {
+        let _ = (server, root);
         // TODO(reshape-language-support): implement
         todo!("RustSupport::backend")
     }

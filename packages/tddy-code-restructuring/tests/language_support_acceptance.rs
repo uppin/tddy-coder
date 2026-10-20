@@ -119,13 +119,16 @@ async fn a_document_opens_with_its_supports_language_id() {
         let cancel = CancellationToken::new();
         let progress = discard();
         let supports = SupportRegistry::with_builtins();
-        let mut backends = supports.backends(ServerHandle::live(LiveServer {
-            client: &for_the_backend,
-            cancel: &cancel,
-            progress: &progress,
-            trace: None,
-            wait_heartbeat: Duration::from_secs(60),
-        }));
+        let mut backends = supports.backends(
+            ServerHandle::live(LiveServer {
+                client: &for_the_backend,
+                cancel: &cancel,
+                progress: &progress,
+                trace: None,
+                wait_heartbeat: Duration::from_secs(60),
+            }),
+            &root,
+        );
         let overlay = Overlay::new();
         let _ = backends
             .backend_of(Path::new("src/lib.rs"))
@@ -159,8 +162,9 @@ async fn a_document_opens_with_its_supports_language_id() {
 
 #[test]
 fn an_unsupported_operation_names_the_language_by_its_id() {
-    // Given the built-in backends with no server
-    let mut backends = SupportRegistry::with_builtins().backends_static();
+    // Given the built-in backends with no server, for a workspace
+    let workspace = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    let mut backends = SupportRegistry::with_builtins().backends_static(workspace.path());
 
     // When a Rust file is asked for an operation Rust does not perform
     let refused = backends
