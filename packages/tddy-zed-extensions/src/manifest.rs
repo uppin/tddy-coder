@@ -2,7 +2,7 @@
 //! that tddy reads. Unknown fields (themes, capabilities, snippets, …) are accepted and ignored, as
 //! Zed itself does, so any published extension parses.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -74,6 +74,13 @@ pub struct LanguageServerEntry {
     pub languages: Vec<String>,
     #[serde(default)]
     pub language_ids: BTreeMap<String, String>,
+    /// Languages (from `languages`) the server does not start for unless a setting names it — Zed's
+    /// `opt_in_languages`.
+    #[serde(default)]
+    pub opt_in_languages: BTreeSet<String>,
+    /// The code-action kinds the server is asked for — Zed's `code_action_kinds`.
+    #[serde(default)]
+    pub code_action_kinds: Option<Vec<String>>,
 }
 
 impl ExtensionManifest {
@@ -158,6 +165,38 @@ mod tests {
                         ..LanguageServerEntry::default()
                     },
                 )]),
+            }
+        );
+    }
+
+    #[test]
+    fn a_language_server_entry_reads_its_opt_in_languages_ids_and_action_kinds() {
+        // Given a server serving two languages, one only when a setting names it
+        let manifest = ExtensionManifest::parse(
+            r#"
+                id = "demo-lang"
+                name = "Demo"
+                version = "0.1.0"
+                schema_version = 1
+
+                [language_servers.demo-ls]
+                languages = ["Demo", "Demo Script"]
+                opt_in_languages = ["Demo Script"]
+                language_ids = { "Demo Script" = "demo-script" }
+                code_action_kinds = ["refactor.extract"]
+            "#,
+        )
+        .expect("parses");
+
+        // Then the entry carries all three, as Zed's manifest does
+        assert_eq!(
+            manifest.language_servers["demo-ls"],
+            LanguageServerEntry {
+                languages: vec!["Demo".into(), "Demo Script".into()],
+                language_ids: BTreeMap::from([("Demo Script".into(), "demo-script".into())]),
+                opt_in_languages: BTreeSet::from(["Demo Script".into()]),
+                code_action_kinds: Some(vec!["refactor.extract".into()]),
+                ..LanguageServerEntry::default()
             }
         );
     }

@@ -137,3 +137,11 @@ Contract commit (2026-10-20), scoped to the touched packages:
 - `cargo test -p tddy-zed-extensions --no-fail-fast` — 1 passed (`manifest_parses_zeds_fields`), 14 failed, every one a
   `todo!()` panic in this crate (`install.rs`, `dir.rs`, `manifest.rs`).
 - `cargo test -p tddy-tools --no-fail-fast` — all pass.
+
+## 2026-10-20: `LanguageServerEntry` reads Zed's opt-in and action-kind fields
+
+Developer decision on K22's question: `LanguageServerEntry` also parses Zed's `opt_in_languages`
+(`BTreeSet<String>`) and `code_action_kinds` (`Option<Vec<String>>`), beside the `language_ids` it already
+read — the three fields of Zed's `LanguageServerManifestEntry` that K22 (server choice, `languageId`) and
+K23 (code actions) need. Plain serde fields; pinned green by
+`manifest::tests::a_language_server_entry_reads_its_opt_in_languages_ids_and_action_kinds`.
