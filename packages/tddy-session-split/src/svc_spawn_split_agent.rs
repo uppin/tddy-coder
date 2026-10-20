@@ -86,18 +86,15 @@ impl SplitSessions {
             room,
             req,
         )?;
-        // A jailed-codebase session opens no room: the worktree it would measure is on this
-        // filesystem, held by a `workspace` session that reports on itself.
-        if room.is_some() {
-            self.host_split_room(
-                session_id,
-                codebase_instance_id,
-                codebase_session_id,
-                req,
-                &session_dir,
-            )
-            .await?;
-        }
+        self.host_split_room(
+            session_id,
+            codebase_instance_id,
+            codebase_session_id,
+            room,
+            req,
+            &session_dir,
+        )
+        .await?;
 
         // A split session's roster lives on the codebase daemon, in the workspace session the
         // forward created moments ago — which is where this start's seed was recorded, before that
@@ -290,14 +287,21 @@ impl SplitSessions {
     /// The poller signs its own credential per poll under the verified caller's identity rather
     /// than re-presenting `req.session_token`, which the codebase daemon stops accepting five
     /// minutes in — see `RoomPollTokenMinter`.
+    ///
+    /// A jailed-codebase session (`room` is `None`) opens no room: the worktree it would measure is
+    /// on this filesystem, held by a `workspace` session that reports on itself.
     async fn host_split_room(
         &self,
         session_id: &str,
         codebase_instance_id: &str,
         codebase_session_id: &str,
+        room: Option<&crate::split_session::SplitAgentRoom>,
         req: &StartSessionRequest,
         session_dir: &std::path::Path,
     ) -> Result<(), Status> {
+        if room.is_none() {
+            return Ok(());
+        }
         let token_minter = Arc::new(crate::split_session::RoomPollTokenMinter::new(
             self.session_tokens()?,
             &req.session_token,
