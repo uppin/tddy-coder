@@ -9,23 +9,22 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
-use log::{error, info};
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
+use log::error;
 use tokio::sync::Mutex;
 
+use crate::bridge_config::browser_livekit_url;
+use crate::bridge_config::screenshare_track_name;
+use crate::bridge_config::session_bridge_key;
 use crate::screen_sharing_records::{ScreenSharingTargetStore, TargetError};
 use crate::session_vault_target_store::SessionVaultTargetStore;
 use tddy_credentials::SessionVaults;
-use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
-use tddy_host_service::host_desktop_targets::{HostDesktopTarget, HostDesktopTargetStore};
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_host_service::host_desktop_targets::HostDesktopTargetStore;
 use tddy_host_service::host_keypair::HostKeypair;
-use tddy_host_service::host_prompts::{answer_before_expiry, HostPromptRegistry, PromptKind};
+use tddy_host_service::host_prompts::HostPromptRegistry;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
     AddHostTargetRequest, AddHostTargetResponse, AddTargetRequest, AddTargetResponse,
@@ -36,9 +35,9 @@ use tddy_service::proto::screen_sharing::{
     StopStreamResponse,
 };
 
-const DEFAULT_STREAM_WIDTH: u32 = 1920;
-const DEFAULT_STREAM_HEIGHT: u32 = 1080;
-const DEFAULT_STREAM_FPS: u32 = 30;
+pub(crate) const DEFAULT_STREAM_WIDTH: u32 = 1920;
+pub(crate) const DEFAULT_STREAM_HEIGHT: u32 = 1080;
+pub(crate) const DEFAULT_STREAM_FPS: u32 = 30;
 
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Per-OS-user sessions base resolver: `Arc<dyn Fn(&str) -> Option<PathBuf>>`.
@@ -47,33 +46,15 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// session's metadata is read from the same data root as the session trees.
 pub type SessionsBase = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
-/// Bridge config serialized to the bridge binary's stdin (field names match `tddy_screenshare::BridgeConfig`).
-#[derive(serde::Serialize)]
-struct BridgeSpawnConfig {
-    host: String,
-    port: u16,
-    username: String,
-    password: String,
-    livekit_url: String,
-    livekit_token: String,
-    livekit_room: String,
-    livekit_identity: String,
-    track_name: String,
-    width: u32,
-    height: u32,
-    target_id: String,
-    fps: u32,
-}
-
 /// A desktop a bridge can be spawned for, from either scope.
 ///
 /// What the spawn path reads and nothing more: the label and username a scope stores travel
 /// separately, so the two scopes meet at the fields a bridge is addressed and configured by.
-struct BridgeTarget {
-    id: String,
-    host: String,
-    port: u16,
-    protocol: Protocol,
+pub(crate) struct BridgeTarget {
+    pub(crate) id: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
+    pub(crate) protocol: Protocol,
 }
 
 impl BridgeTarget {
@@ -95,7 +76,10 @@ impl BridgeTarget {
 /// One value rather than two independent options: a daemon that can store a host's desktop but
 /// cannot read the password prompted for it can start nothing, so "host scope is wired" is a
 /// single fact.
-struct HostScope {
+// TODO(restructure): hand-widened to pub(crate) -- `prompt_for_desktop_password`, now in
+// `bridge_lifecycle` at pub(crate), names this type (E private_interfaces); the engine widens moved
+// items only, and this one did not move.
+pub(crate) struct HostScope {
     targets: Arc<dyn HostDesktopTargetStore>,
     /// `#hosts-screen 6/8`'s keypair, reused rather than reimplemented — one key per host, and one
     /// decryption path for everything the browser encrypts to it.
@@ -224,445 +208,10 @@ impl ScreenSharingServiceImpl {
             .ok_or_else(|| Status::internal("sessions base not found for user"))?;
         Ok(base.join("sessions").join(session_id))
     }
-
-    /// Signal a running bridge to stop and forget its PID.
-    ///
-    /// Shared by both scopes: the process, the signal and the PID map are the same, and only the
-    /// key that addresses it differs.
-    async fn terminate_bridge(&self, bridge_key: &str) {
-        let pid_opt = self.active_bridges.lock().await.remove(bridge_key);
-
-        if let Some(pid) = pid_opt {
-            info!(
-                "stop stream: sending SIGTERM to bridge pid={} key={}",
-                pid, bridge_key
-            );
-            #[cfg(unix)]
-            // SAFETY: pid > 0 is enforced by the `if pid > 0` guard in `try_spawn_bridge`
-            // that filters out the zero sentinel before inserting into `active_bridges`.
-            // Sending SIGTERM to a pid is safe — the signal is delivered to the process
-            // group and the call does not affect memory safety.
-            unsafe {
-                libc::kill(pid as libc::pid_t, libc::SIGTERM);
-            }
-        } else {
-            info!(
-                "stop stream: no active bridge for key={} (already stopped?)",
-                bridge_key
-            );
-        }
-    }
-
-    /// The wired credential store, or a refusal naming the fact that none is wired.
-    ///
-    /// `failed_precondition` rather than an empty listing: a daemon assembled without a store is a
-    /// deployment mistake, and answering "no targets" would hide it behind a plausible screen.
-    fn require_target_store(&self) -> Result<&Arc<dyn ScreenSharingTargetStore>, Status> {
-        self.target_store
-            .as_ref()
-            .ok_or_else(|| Status::failed_precondition("no credential store is wired"))
-    }
-
-    /// Ask this host's operator for `target`'s password, and return what they typed.
-    ///
-    /// The question is raised **here**, by the daemon, rather than answered by the caller. It has to
-    /// be: `HostPromptEvent` is the only place a host publishes the public key an answer travels
-    /// under, so a browser that has not been asked anything has nothing to encrypt with — and a
-    /// desktop password is stored nowhere on this host, which is the whole point of prompting for
-    /// it.
-    ///
-    /// Every start asks. Nothing records whether a desktop wants a password, and a daemon that
-    /// guessed would either skip the question for a desktop that needs one or refuse a desktop that
-    /// does not; an operator answering with nothing is how a password-less desktop is opened.
-    ///
-    /// The wait is bounded by the prompt's own expiry, so an operator who walks away releases the
-    /// call at the moment the question stops being answerable — never later, and never never.
-    async fn prompt_for_desktop_password(
-        &self,
-        scope: &HostScope,
-        operator: &str,
-        target: &HostDesktopTarget,
-    ) -> Result<String, Status> {
-        // Stamped with the GitHub user that raised it, which is what makes it *this* operator's
-        // question: `StreamHostPrompts` shows a prompt to nobody else, and nobody else can spend
-        // its one answer. Anything else here and the question reaches no browser at all.
-        let prompt = scope.prompts.issue(
-            operator,
-            PromptKind::DesktopPassword,
-            &desktop_prompt_subject(target),
-            tddy_host_service::host_registry::now_unix_ms(),
-        );
-        // Claimed immediately after issuing, because issuing is what puts the prompt on the feed: an
-        // operator whose browser answers at once must find a handoff already waiting for them.
-        let answer = match scope.prompts.awaited_answer(&prompt.prompt_id) {
-            Some(handoff) => answer_before_expiry(handoff, &prompt).await,
-            // The registry forgot the prompt between issuing it and being asked for its handoff,
-            // which for the operator is indistinguishable from one that ran out of time.
-            None => None,
-        };
-        let Some(encrypted_password) = answer else {
-            // Refused rather than started without one: a bridge spawned against a desktop whose
-            // password nobody supplied authenticates to nothing, and would leave a process running
-            // for a stream that can never carry a frame.
-            return Err(Status::deadline_exceeded(format!(
-                "nobody answered the password prompt for {} before it expired",
-                prompt.subject
-            )));
-        };
-        decrypt_desktop_password(scope.keypair.as_ref(), &encrypted_password)
-    }
-
-    /// Spawn a bridge for the given target, logging every failure and reporting none.
-    ///
-    /// The **session-scoped** spawn, and deliberately silent: `start_stream` hands back its
-    /// pre-computed LiveKit coordinates whether or not a bridge came up, which is the behaviour
-    /// AC-9 pins and its callers depend on. The host path does not reuse this — it reports —
-    /// see [`Self::spawn_bridge`] and `start_host_stream`.
-    #[allow(clippy::too_many_arguments)]
-    async fn try_spawn_bridge(
-        &self,
-        config: &DaemonConfig,
-        target: &BridgeTarget,
-        username: String,
-        password: String,
-        bridge_identity: &str,
-        track_name: &str,
-        livekit_room: &str,
-        // Built by `session_bridge_key` or `host_bridge_key`: the scope decides how a running
-        // bridge is addressed, the spawn itself does not care which.
-        bridge_key: String,
-    ) {
-        let prepared = match prepare_bridge(
-            config,
-            target,
-            username,
-            bridge_identity,
-            track_name,
-            livekit_room,
-            &*self.room_tokens,
-        ) {
-            Ok(prepared) => prepared.for_password(password),
-            Err(e) => {
-                info!("bridge spawn skipped: {e}");
-                return;
-            }
-        };
-
-        if let Err(e) = self.spawn_bridge(prepared, bridge_key).await {
-            error!("bridge spawn failed: {e}");
-        }
-    }
-
-    /// Start a bridge process, and say so when it does not start.
-    ///
-    /// Takes a [`PreparedBridge`], so everything knowable without the desktop's password has
-    /// already been settled: what is left here is the spawn itself, and the only failures it can
-    /// report are real ones.
-    async fn spawn_bridge(
-        &self,
-        prepared: PreparedBridge,
-        // Built by `session_bridge_key` or `host_bridge_key`: the scope decides how a running
-        // bridge is addressed, the spawn itself does not care which.
-        bridge_key: String,
-    ) -> Result<(), String> {
-        let PreparedBridge {
-            binary,
-            spawn_config,
-        } = prepared;
-
-        let config_json = serde_json::to_vec(&spawn_config)
-            .map_err(|e| format!("encoding the bridge's config: {e}"))?;
-
-        // A second start for the same desktop must not strand the first process. `active_bridges`
-        // holds one pid per key, so a spawn that overwrote one would leave a bridge nothing can
-        // ever signal — running against a desktop nobody is watching.
-        self.terminate_bridge(&bridge_key).await;
-
-        let mut child = Command::new(&binary)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| format!("spawning the bridge binary '{binary}': {e}"))?;
-
-        // Write the JSON config to the bridge's stdin, then close it.
-        if let Some(mut stdin) = child.stdin.take() {
-            if let Err(e) = stdin.write_all(&config_json).await {
-                let _ = child.kill().await;
-                return Err(format!("writing the bridge's config to its stdin: {e}"));
-            }
-            // stdin dropped here → pipe closed → bridge reads EOF and proceeds
-        }
-
-        // Store the PID so the matching stop call can send SIGTERM.
-        let pid = child.id().unwrap_or(0);
-        if pid > 0 {
-            self.active_bridges
-                .lock()
-                .await
-                .insert(bridge_key.clone(), pid);
-        }
-
-        info!(
-            "bridge spawned: binary={} pid={} key={}",
-            binary, pid, bridge_key
-        );
-
-        // Background task: wait for the process to exit (prevents zombie processes) and
-        // forget the PID when it does.
-        let active_bridges = Arc::clone(&self.active_bridges);
-        tokio::spawn(async move {
-            match child.wait().await {
-                Ok(status) => {
-                    info!("bridge exited: key={} status={}", bridge_key, status)
-                }
-                Err(e) => error!("bridge wait error: key={} err={}", bridge_key, e),
-            }
-            // Only while the key still names *this* bridge. A restart records a newer pid under
-            // the same key, and forgetting that one would leave the running process unstoppable.
-            let mut bridges = active_bridges.lock().await;
-            if bridges.get(&bridge_key) == Some(&pid) {
-                bridges.remove(&bridge_key);
-            }
-        });
-
-        Ok(())
-    }
 }
 
-/// A bridge spawn that is ready except for the password nobody has typed yet.
-///
-/// Separated from the spawn so that everything knowable *without* a secret — the LiveKit
-/// coordinates, the minted token, which binary speaks this desktop's protocol — is settled before
-/// an operator is asked for one. A desktop this host could never bridge is then refused without
-/// anybody typing a password for a stream that was never going to start.
-struct PreparedBridge {
-    binary: String,
-    spawn_config: BridgeSpawnConfig,
-}
-
-impl PreparedBridge {
-    fn for_password(mut self, password: String) -> Self {
-        self.spawn_config.password = password;
-        self
-    }
-}
-
-/// Everything a bridge spawn needs except the desktop's password.
-fn prepare_bridge(
-    config: &DaemonConfig,
-    target: &BridgeTarget,
-    username: String,
-    bridge_identity: &str,
-    track_name: &str,
-    livekit_room: &str,
-    room_tokens: &dyn tddy_daemon_extensions::RoomTokenMinter,
-) -> Result<PreparedBridge, String> {
-    let binary = match target.protocol {
-        Protocol::Vnc => resolve_vnc_binary_path(config),
-        Protocol::Rdp => resolve_rdp_binary_path(config),
-        Protocol::Unspecified => {
-            return Err(format!(
-                "target {} names no protocol to bridge it with",
-                target.id
-            ))
-        }
-    };
-
-    Ok(PreparedBridge {
-        binary,
-        spawn_config: build_bridge_spawn_config(
-            config,
-            target,
-            username,
-            bridge_identity,
-            track_name,
-            livekit_room,
-            room_tokens,
-        )?,
-    })
-}
-
-/// How long a bridge's room token is valid: six hours, the length of a LiveKit access token's own
-/// default, so a published desktop is not cut off by token expiry under normal use (the bridge has
-/// no reconnect loop that fetches another).
-const BRIDGE_TOKEN_TTL: Duration = Duration::from_secs(6 * 3600);
-
-/// Extract the LiveKit URL, mint a token, and assemble a `BridgeSpawnConfig`.
-///
-/// Says what is missing rather than logging it: a host desktop that cannot be published anywhere
-/// has to be refused, and the caller is the only place that knows whether that refusal reaches an
-/// operator or only the log.
-///
-/// The password is left empty here and filled in by [`PreparedBridge::for_password`] — nothing in
-/// this function needs one, which is exactly why it can run before anybody is asked.
-fn build_bridge_spawn_config(
-    config: &DaemonConfig,
-    target: &BridgeTarget,
-    username: String,
-    bridge_identity: &str,
-    track_name: &str,
-    livekit_room: &str,
-    room_tokens: &dyn tddy_daemon_extensions::RoomTokenMinter,
-) -> Result<BridgeSpawnConfig, String> {
-    let lk = config
-        .livekit
-        .as_ref()
-        .ok_or("this daemon has no LiveKit configuration to publish a desktop through")?;
-
-    macro_rules! require_field {
-        ($opt:expr, $msg:literal) => {
-            match $opt.as_deref().filter(|s| !s.is_empty()) {
-                Some(v) => v.to_string(),
-                None => return Err($msg.to_string()),
-            }
-        };
-    }
-
-    let livekit_url_internal = require_field!(lk.url, "no LiveKit URL is configured");
-
-    let token = room_tokens
-        .mint(livekit_room, bridge_identity, BRIDGE_TOKEN_TTL)
-        .map_err(|refused| refused.message)?;
-
-    Ok(BridgeSpawnConfig {
-        host: target.host.clone(),
-        port: target.port,
-        username,
-        password: String::new(),
-        livekit_url: livekit_url_internal,
-        livekit_token: token,
-        livekit_room: livekit_room.to_string(),
-        livekit_identity: bridge_identity.to_string(),
-        track_name: track_name.to_string(),
-        width: DEFAULT_STREAM_WIDTH,
-        height: DEFAULT_STREAM_HEIGHT,
-        target_id: target.id.clone(),
-        fps: DEFAULT_STREAM_FPS,
-    })
-}
-
-/// How a session's running bridge is addressed in `active_bridges`.
-fn session_bridge_key(session_id: &str, target_id: &str) -> String {
-    format!("{}:{}", session_id, target_id)
-}
-
-/// How a host's running bridge is addressed in `active_bridges`.
-///
-/// Prefixed, so a daemon instance id can never collide with a session id and stop the wrong
-/// bridge — the two id spaces are unrelated and neither is reserved against the other.
-fn host_bridge_key(daemon_instance_id: &str, target_id: &str) -> String {
-    format!("host:{}:{}", daemon_instance_id, target_id)
-}
-
-/// The identity the host's bridge joins LiveKit under, and the one the overlay subscribes to.
-///
-/// Carries the host id because every host's bridge publishes into the *same* common room; without
-/// it, two hosts streaming at once would collide on one identity.
-fn host_bridge_identity(daemon_instance_id: &str, target_id: &str) -> String {
-    format!(
-        "{}{}-{}",
-        tddy_service::SCREEN_SHARE_HOST_IDENTITY_PREFIX,
-        daemon_instance_id,
-        target_id
-    )
-}
-
-fn screenshare_track_name(target_id: &str) -> String {
-    format!("screenshare:{}", target_id)
-}
-
-/// The LiveKit URL to hand the **browser** — `public_url` when the operator set one, since the
-/// internal URL may not resolve outside the daemon's network.
-fn browser_livekit_url(config: &DaemonConfig) -> String {
-    config
-        .livekit
-        .as_ref()
-        .map(|lk| {
-            lk.public_url
-                .as_deref()
-                .or(lk.url.as_deref())
-                .unwrap_or("")
-                .to_string()
-        })
-        .unwrap_or_default()
-}
-
-/// The room a **host** desktop is published into: this daemon's common room.
-///
-/// A session desktop has a room of its own, named in the session's metadata. A host has none — and
-/// the viewer opening it from the Hosts screen is already in the common room, which is the one
-/// room a browser holds a token for without opening a session.
-///
-/// Deliberately not gated on `livekit.enabled`: that switch governs whether *this daemon* joins the
-/// common room, and a bridge joins as a participant of its own. What it cannot do without is a room
-/// name, and a daemon without one says so rather than starting a bridge nobody could watch.
-fn host_livekit_room(config: &DaemonConfig) -> Result<String, Status> {
-    config
-        .livekit
-        .as_ref()
-        .and_then(|lk| lk.common_room.as_deref())
-        .filter(|room| !room.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| {
-            Status::failed_precondition(
-                "no LiveKit common room is configured; a host desktop has no room to publish into",
-            )
-        })
-}
-
-/// How the question this host raises names the desktop it is about.
-///
-/// The label the operator gave it, and the endpoint it points at: a host may have several desktops,
-/// and a dialog naming none of them asks somebody to type a secret into an unaddressed box. Neither
-/// half is a secret — both are already in `ListHostTargets`.
-fn desktop_prompt_subject(target: &HostDesktopTarget) -> String {
-    format!("{} ({}:{})", target.label, target.host, target.port)
-}
-
-/// A desktop password for immediate use, from the ciphertext the operator's browser encrypted under
-/// this host's published key.
-///
-/// The plaintext is owned by the caller and dies with the call that asked for it: `#hosts-screen
-/// 6/8`'s prompt-decrypt-drop posture, deliberately not the session vault's storing one, so the
-/// Hosts screen has a single secret-handling model. Nothing here writes it anywhere, and nothing
-/// logs it — not even the reason a decrypt failed, which is the keypair's own words about a
-/// ciphertext.
-fn decrypt_desktop_password(
-    keypair: &dyn HostKeypair,
-    encrypted_password: &[u8],
-) -> Result<String, Status> {
-    let plaintext = keypair
-        .decrypt(encrypted_password)
-        .map_err(Status::permission_denied)?;
-    String::from_utf8(plaintext)
-        .map_err(|_| Status::invalid_argument("that desktop password is not valid UTF-8"))
-}
-
-/// A host-scoped target as the shared bridge spawn path's input.
-///
-/// Converted rather than given a spawn path of its own: a second implementation would be free to
-/// drift from the one the session scope is proven against, and host scope is an addressing change,
-/// not a second way to start a bridge.
-fn host_target_as_bridge_target(target: &HostDesktopTarget) -> BridgeTarget {
-    BridgeTarget {
-        id: target.target_id.clone(),
-        host: target.host.clone(),
-        port: target.port,
-        protocol: Protocol::try_from(target.protocol).unwrap_or(Protocol::Unspecified),
-    }
-}
-
-fn host_target_to_proto(t: &HostDesktopTarget) -> ProtoScreenSharingTarget {
-    ProtoScreenSharingTarget {
-        id: t.target_id.clone(),
-        label: t.label.clone(),
-        host: t.host.clone(),
-        port: t.port as u32,
-        protocol: t.protocol,
-        username: t.username.clone(),
-    }
-}
+mod bridge_lifecycle;
+mod host_targets;
 
 /// How a store refusal reaches the caller.
 ///
@@ -692,147 +241,36 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
     // calls above, addressed by `daemon_instance_id`, and reuse the same bridge spawn path — host
     // scope is an addressing and storage change, not a second implementation.
 
+    // TODO(restructure): hand-moved — extract_method refused under #[async_trait]; see docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md
     async fn list_host_targets(
         &self,
         request: Request<ListHostTargetsRequest>,
     ) -> Result<Response<ListHostTargetsResponse>, Status> {
-        let req = request.into_inner();
-        self.require_user(&req.session_token)?;
-        let scope = self.require_host_scope()?;
-
-        let targets = scope
-            .targets
-            .list(&req.daemon_instance_id)
-            .map_err(Status::internal)?;
-
-        Ok(Response::new(ListHostTargetsResponse {
-            targets: targets.iter().map(host_target_to_proto).collect(),
-        }))
+        self.list_host_targets_impl(request).await
     }
 
+    // TODO(restructure): hand-moved — extract_method refused under #[async_trait]; see docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md
     async fn add_host_target(
         &self,
         request: Request<AddHostTargetRequest>,
     ) -> Result<Response<AddHostTargetResponse>, Status> {
-        let req = request.into_inner();
-        self.require_user(&req.session_token)?;
-        let scope = self.require_host_scope()?;
-
-        // Refused rather than wrapped: proto has no 16-bit integer, so a port past 65535 arrives
-        // here intact and a cast would quietly attach a desktop to some other port entirely.
-        let port = u16::try_from(req.port).map_err(|_| {
-            Status::invalid_argument(format!(
-                "{} is not a port a desktop can listen on",
-                req.port
-            ))
-        })?;
-
-        // No password field, and none accepted: a host desktop's password is prompted when it is
-        // opened, never stored beside the address of the machine it opens.
-        let target_id = scope
-            .targets
-            .add(
-                &req.daemon_instance_id,
-                HostDesktopTarget {
-                    // Assigned by the store; whatever is sent here would be overwritten.
-                    target_id: String::new(),
-                    label: req.label,
-                    host: req.host,
-                    port,
-                    protocol: req.protocol,
-                    username: req.username,
-                },
-            )
-            .map_err(Status::internal)?;
-
-        Ok(Response::new(AddHostTargetResponse { target_id }))
+        self.add_host_target_impl(request).await
     }
 
-    /// Starts a bridge for a host-scoped target, returning the same coordinates the session-scoped
-    /// call does — the browser overlay already consumes exactly those fields.
+    // TODO(restructure): hand-moved — extract_method refused under #[async_trait]; see docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md
     async fn start_host_stream(
         &self,
         request: Request<StartHostStreamRequest>,
     ) -> Result<Response<StartStreamResponse>, Status> {
-        let req = request.into_inner();
-        let operator = self.require_user(&req.session_token)?;
-        let scope = self.require_host_scope()?;
-        let config = self.require_config()?;
-
-        let target = scope
-            .targets
-            .list(&req.daemon_instance_id)
-            .map_err(Status::internal)?
-            .into_iter()
-            .find(|t| t.target_id == req.target_id)
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "host {} has no desktop target {}",
-                    req.daemon_instance_id, req.target_id
-                ))
-            })?;
-
-        let livekit_room = host_livekit_room(config)?;
-        let bridge_identity = host_bridge_identity(&req.daemon_instance_id, &req.target_id);
-        let track_name = screenshare_track_name(&req.target_id);
-
-        // Settled before anybody is asked for a secret. A desktop this host cannot bridge — no
-        // LiveKit to publish through, no protocol to speak — is refused here, so an operator is
-        // never made to type a password into a dialog for a stream that could not have started.
-        let prepared = prepare_bridge(
-            config,
-            &host_target_as_bridge_target(&target),
-            target.username.clone(),
-            &bridge_identity,
-            &track_name,
-            &livekit_room,
-            &*self.room_tokens,
-        )
-        .map_err(Status::failed_precondition)?;
-
-        // Asked for, not looked up: nothing on this host stores a desktop password, and the browser
-        // could not have sent one — `HostPromptEvent` is the only place this host's public key is
-        // published, so a caller has nothing to encrypt under until it has been asked. Read once,
-        // handed to the bridge over its stdin, and dropped when this call returns.
-        let password = self
-            .prompt_for_desktop_password(scope, &operator, &target)
-            .await?;
-
-        // Reported, unlike the session path's deliberately silent spawn: these coordinates tell a
-        // browser to mount an overlay on a room, and a bridge that never joined it leaves the
-        // operator watching nothing having already typed a secret.
-        self.spawn_bridge(
-            prepared.for_password(password),
-            host_bridge_key(&req.daemon_instance_id, &req.target_id),
-        )
-        .await
-        .map_err(Status::internal)?;
-
-        Ok(Response::new(StartStreamResponse {
-            livekit_room,
-            livekit_url: browser_livekit_url(config),
-            bridge_identity,
-            track_name,
-            width: DEFAULT_STREAM_WIDTH,
-            height: DEFAULT_STREAM_HEIGHT,
-        }))
+        self.start_host_stream_impl(request).await
     }
 
+    // TODO(restructure): hand-moved — extract_method refused under #[async_trait]; see docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md
     async fn stop_host_stream(
         &self,
         request: Request<StopHostStreamRequest>,
     ) -> Result<Response<StopHostStreamResponse>, Status> {
-        let req = request.into_inner();
-        self.require_user(&req.session_token)?;
-        // Checked here as it is on every other host-scoped call: a daemon that serves no host
-        // desktops cannot have been holding one open, and `ok: true` for a stop it could not have
-        // performed tells the browser to tear down an overlay over a bridge still running.
-        self.require_host_scope()?;
-
-        self.terminate_bridge(&host_bridge_key(&req.daemon_instance_id, &req.target_id))
-            .await;
-
-        Ok(Response::new(StopHostStreamResponse { ok: true }))
+        self.stop_host_stream_impl(request).await
     }
 
     async fn list_targets(
@@ -996,6 +434,7 @@ mod tests {
     use tddy_testing_commons::stub_scripts::{make_executable, read_recorded_argv};
     use tddy_testing_commons::wait::eventually;
 
+    use crate::bridge_config::build_bridge_spawn_config;
     use tddy_daemon_kernel::config::{LiveKitConfig, ScreenSharingConfig};
     use tddy_host_service::host_desktop_targets::FileHostDesktopTargetStore;
     use tddy_host_service::host_keypair::{FileHostKeypair, PublishedKey};

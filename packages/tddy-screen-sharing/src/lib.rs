@@ -20,6 +20,7 @@
 //! their tests. The deletion rides with this node rather than getting its own because this is the
 //! only node whose reviewer is already reading the live screen-sharing service beside it.
 
+mod bridge_config;
 pub mod screen_sharing_records;
 pub mod screen_sharing_service;
 pub mod session_vault_target_store;
