@@ -1,7 +1,7 @@
 # 2026-10-21 — The desktop sign-in dialog pins the fingerprint the prompt advertises
 
 **Category:** Deferred from `#host-desktops` 8/8 (#660)
-**Source:** `docs/dev/1-WIP/2026-10-18-host-desktops-sign-in-form.md`, `/validate-prod-ready`
+**Source:** `#host-desktops` 8/8 ([#660](https://github.com/uppin/tddy-coder/pull/660)), `/validate-prod-ready`
 
 - `packages/tddy-web/src/components/hosts/HostDesktopSignInDialog.tsx` checks key continuity with
   `checkHostKey(hostId, question.hostPublicKeyFingerprint)`: it pins and shows the fingerprint

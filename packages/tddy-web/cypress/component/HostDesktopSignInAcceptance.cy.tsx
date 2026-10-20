@@ -11,7 +11,7 @@
  * question published (`anRsaOaepKeypair`) and decoding the `DesktopCredentialAnswer` inside: every
  * RSA-2048 ciphertext is 256 bytes whatever it carries, so only the plaintext says what was sent.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-18-host-desktops-sign-in-form.md
+ * Feature: docs/ft/web/screen-sharing-sessions.md (AC-SS-15, AC-SS-19)
  */
 
 import { create, fromBinary } from "@bufbuild/protobuf";

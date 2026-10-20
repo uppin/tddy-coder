@@ -1,7 +1,7 @@
 //! Acceptance tests: a host desktop's sign-in is shaped by what the desktop advertises, and a
 //! credential is kept only when the operator ticks Remember.
 //!
-//! PRD: `docs/ft/web/1-WIP/PRD-2026-10-18-host-desktops-sign-in-form.md` (`#host-desktops` 8/8).
+//! Feature: `docs/ft/web/screen-sharing-sessions.md` (AC-SS-15, AC-SS-19; `#host-desktops` 8/8).
 //!
 //! `InspectHostDesktop` runs the target's bridge in inspect mode and reports what it read. Opening
 //! a desktop asks a `DESKTOP_CREDENTIALS` question unless the operator has a remembered credential

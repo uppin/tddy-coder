@@ -1,7 +1,7 @@
 # 2026-10-21 — `HostPromptEvent.offered_auth_methods` is never populated
 
 **Category:** Deferred from `#host-desktops` 8/8 (#660)
-**Source:** `docs/dev/1-WIP/2026-10-18-host-desktops-sign-in-form.md`, `/validate-prod-ready`
+**Source:** `#host-desktops` 8/8 ([#660](https://github.com/uppin/tddy-coder/pull/660)), `/validate-prod-ready`
 
 - `host.proto` `HostPromptEvent.offered_auth_methods = 8` was added by the #660 contract, so that a
   `DESKTOP_CREDENTIALS` prompt could say which methods the form should offer. Green took the methods
