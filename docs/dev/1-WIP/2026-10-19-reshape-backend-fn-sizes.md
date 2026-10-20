@@ -3,7 +3,7 @@
 **Date**: 2026-10-19
 **Status**: 🚧 In Progress
 **Type**: Behaviour-preserving restructure (function length)
-**Stack**: `#reshape` 21/24, branch `feature/reshape/backend-fn-sizes`, base `feature/reshape/extension-outline`, green wave 2.
+**Stack**: `#reshape` 21/24, PR [#680](https://github.com/uppin/tddy-coder/pull/680), branch `feature/reshape/backend-fn-sizes`, base `feature/reshape/extension-outline`, green wave 2.
 
 ## Initial Discovery
 
@@ -54,6 +54,48 @@ operations. Replaces the closed #616.
 - The gate extended (it fails today, listing the functions), the list of functions over 60 lines **re-measured at this
   commit** with their counts (#616 counted 17 at its base).
 
+### Published (commit 2)
+
+The gate is extended **beside** K18's, not by editing it: K18 (`fn-sizes-rest`, #613) owns
+`LEFT_TO_THE_BACKEND_NODE`, `functions_past_the_cap_under` and `the_backend_is_left_to_its_own_node`, and is itself
+contract-stage. This node adds its own items to `packages/tddy-code-restructuring/tests/function_length_budget.rs`,
+reusing K18's measurement (`production_files_under`, `functions_of`, `CAP` — `fn` line to closing brace, test code
+skipped):
+
+- `backend_functions_past_the_cap_under(src)` — the functions past the cap under `src/backends/`, named relative to
+  `src`.
+- `no_production_function_in_the_backend_runs_past_sixty_lines` — **red**, listing the 14 functions below.
+- `a_long_function_under_the_backend_is_reported_with_its_file_line_and_length`,
+  `a_backend_function_of_exactly_sixty_lines_is_within_the_cap` — green on purpose: they pin the helper.
+
+When both K18 and this node are green, the two gates may be folded into one by removing K18's exclusion and its pin
+(K18's own `TODO(reshape-19)` names this node by its old number) — whichever node lands second does it.
+
+### Functions past 60 lines in `src/backends/`, re-measured at this commit
+
+Base: `feature/reshape/extension-outline` @ `5f97ed93e4d3`. K11–K15 are contract-stage, so this measures the backend
+**before** their moves; `/green` re-measures after rebasing onto them and the gate's output is authoritative.
+14 functions (#616 counted 17 at its base):
+
+| # | Function | File:line | Lines |
+|---|---|---|---|
+| 1 | `choose_import` | `src/backends/rust/import_text.rs:18` | 65 |
+| 2 | `next_import` | `src/backends/rust/imports.rs:103` | 62 |
+| 3 | `assemble` | `src/backends/rust/item_move/assemble.rs:72` | 82 |
+| 4 | `visibilities` | `src/backends/rust/item_move/assemble.rs:207` | 73 |
+| 5 | `into_destination` | `src/backends/rust/item_move/assemble.rs:451` | 61 |
+| 6 | `edits_for_file` | `src/backends/rust/item_move/sites.rs:95` | 91 |
+| 7 | `move_items` | `src/backends/rust/item_move.rs:59` | 73 |
+| 8 | `retarget_impl` | `src/backends/rust/retarget_impl.rs:58` | 65 |
+| 9 | `assist_for` | `src/backends/rust.rs:299` | 93 |
+| 10 | `start` | `src/backends/rust.rs:772` | 87 |
+| 11 | `request` | `src/backends/rust.rs:860` | 64 |
+| 12 | `offered_assist` | `src/backends/rust.rs:1059` | 71 |
+| 13 | `resolve_opening` | `src/backends/rust.rs:1267` | 161 |
+| 14 | `assisted_edit` | `src/backends/rust.rs:1498` | 123 |
+
+K18's own gate is also red at this base (9 functions outside `backends/`) — K18's red, not this node's.
+
 ## Green wave
 
 **Wave:** 2 of 4.
@@ -68,7 +110,7 @@ operations. Replaces the closed #616.
 ## Scope
 
 - [ ] USER REVIEW (ticked at `/green` start)
-- [ ] Gate extended
+- [x] Gate extended (contract commit)
 - [ ] Each function cut (list at the contract commit)
 - [ ] Code-issue records updated with the final measurement
 - [ ] Code Quality

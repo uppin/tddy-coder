@@ -328,3 +328,86 @@ fn the_backend_is_left_to_its_own_node() {
     // Then none is
     assert_eq!(past, Vec::<Measured>::new());
 }
+
+// ---------------------------------------------------------------------------------------------
+// `src/backends/` — `#reshape` 21/24 (`backend-fn-sizes`, which replaces the closed #616) holds the
+// backend to the same cap. These items are that node's; the exclusion above and its pin stay K18's
+// (`fn-sizes-rest`, #613) and are folded into one gate once both nodes are green.
+// ---------------------------------------------------------------------------------------------
+
+/// Every production function under `src`'s `backends/` directory past the cap, in path and line
+/// order, named relative to `src` — the same measurement as `functions_past_the_cap_under`.
+fn backend_functions_past_the_cap_under(src: &Path) -> Vec<Measured> {
+    let mut files = Vec::new();
+    production_files_under(&src.join(LEFT_TO_THE_BACKEND_NODE), &mut files);
+    files.sort();
+    files
+        .iter()
+        .flat_map(|path| {
+            let relative = path
+                .strip_prefix(src)
+                .expect("under the source directory")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let text = std::fs::read_to_string(path).expect("a readable source file");
+            functions_of(&relative, &text)
+        })
+        .filter(|function| function.lines > CAP)
+        .collect()
+}
+
+/// A function of exactly `lines` lines, from its `fn` line to its closing brace.
+fn a_function_of(name: &str, lines: usize) -> String {
+    a_function_with(name, lines - 2)
+}
+
+#[test]
+fn no_production_function_in_the_backend_runs_past_sixty_lines() {
+    // Given the engine's own sources
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+
+    // When the backend's functions past the cap are listed
+    let past: Vec<String> = backend_functions_past_the_cap_under(&src)
+        .iter()
+        .map(Measured::to_string)
+        .collect();
+
+    // Then there are none
+    assert!(
+        past.is_empty(),
+        "production functions past {CAP} lines in src/{LEFT_TO_THE_BACKEND_NODE}/ ({}):\n  src/{}",
+        past.len(),
+        past.join("\n  src/")
+    );
+}
+
+#[test]
+fn a_long_function_under_the_backend_is_reported_with_its_file_line_and_length() {
+    // Given a tree with one function past the cap under `backends/` and one outside it
+    let long = a_function_of("sample", CAP + 1);
+    let outside = a_function_of("outside_the_backend", CAP + 1);
+    let tree = a_source_tree_of(&[("backends/rust/sample.rs", &long), ("plan.rs", &outside)]);
+
+    // When the backend's functions past the cap are listed
+    let past: Vec<String> = backend_functions_past_the_cap_under(tree.path())
+        .iter()
+        .map(Measured::to_string)
+        .collect();
+
+    // Then only the backend's is, named relative to the source directory
+    assert_eq!(past, vec!["backends/rust/sample.rs:1 sample (61 lines)"]);
+}
+
+#[test]
+fn a_backend_function_of_exactly_sixty_lines_is_within_the_cap() {
+    // Given a backend function at the cap and one a line past it
+    let at_the_cap = a_function_of("at_the_cap", CAP);
+    let past_the_cap = a_function_of("past_the_cap", CAP + 1);
+    let tree = a_source_tree_of(&[("backends/rust.rs", &format!("{at_the_cap}{past_the_cap}"))]);
+
+    // When the backend's functions past the cap are listed
+    let past = backend_functions_past_the_cap_under(tree.path());
+
+    // Then only the one past it is
+    assert_eq!(names_of(&past), vec!["past_the_cap"]);
+}
