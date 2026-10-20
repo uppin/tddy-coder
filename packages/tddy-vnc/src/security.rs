@@ -25,6 +25,11 @@
 //! this works with servers presenting a certificate (verified or not) and not with servers that
 //! offer anonymous-DH only. The TLS session still verifies that the handshake is signed by the
 //! presented certificate's key.
+//!
+//! # VeNCrypt Plain
+//!
+//! Plain (subtype 256) carries the username and password with no encryption. It is run when it
+//! is the only supported subtype the server offers, and a `log::warn!` says so each time.
 
 use std::io;
 use std::pin::Pin;
@@ -132,6 +137,12 @@ pub enum VncSignIn {
     VeNCryptTlsPlain,
     /// Apple Remote Desktop (type 30).
     AppleRemoteDesktop,
+}
+
+impl VncSignIn {
+    fn is_vencrypt(self) -> bool {
+        matches!(self, Self::VeNCryptPlain | Self::VeNCryptTlsPlain)
+    }
 }
 
 /// Choose the sign-in method to run, given what the server offers and what the caller supplied.
@@ -354,11 +365,11 @@ where
     let offered = read_security_types(&mut stream, version).await?;
     log::debug!("VNC server offers security types {offered:?}");
 
-    let vencrypt_subtypes = if version != RfbVersion::V33
+    let committed_to_vencrypt = version != RfbVersion::V33
         && offered.contains(&VncSecurityType::VeNCrypt)
         && credentials.username.is_some()
-        && credentials.password.is_some()
-    {
+        && credentials.password.is_some();
+    let vencrypt_subtypes = if committed_to_vencrypt {
         stream.write_all(&[TYPE_VENCRYPT]).await?;
         read_vencrypt_subtypes(&mut stream).await?
     } else {
@@ -366,6 +377,13 @@ where
     };
 
     let sign_in = choose_sign_in(&offered, &vencrypt_subtypes, credentials)?;
+    // Type 19 is already on the wire, so the server is in the VeNCrypt phase: any other
+    // method would write a second security-type byte into it.
+    if committed_to_vencrypt && !sign_in.is_vencrypt() {
+        return Err(SecurityError::NothingSupported {
+            offered: vec![TYPE_VENCRYPT],
+        });
+    }
     log::debug!("VNC sign-in method: {sign_in:?}");
     match sign_in {
         VncSignIn::None => Ok(delegate_to_vnc_rs(stream, version, TYPE_NONE)),
@@ -377,6 +395,9 @@ where
             finish(stream, version).await
         }
         VncSignIn::VeNCryptPlain => {
+            log::warn!(
+                "VNC server offers VeNCrypt Plain without TLS: the password is sent unencrypted"
+            );
             stream.write_all(&VENCRYPT_PLAIN.to_be_bytes()).await?;
             plain(&mut stream, credentials).await?;
             finish(stream, version).await

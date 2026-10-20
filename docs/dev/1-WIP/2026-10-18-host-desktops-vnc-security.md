@@ -158,6 +158,22 @@ all written, failing on `todo!()`. `parse_security_types` takes the whole securi
 
 ## Validation Results
 ### /validate-changes
+2026-10-20, after `/pr-stack-rebase` onto `rdp-nla` `3330f1205` (leak check clean: 4 own commits).
+Scoped build/test/clippy/fmt for `tddy-vnc`: 16/16 tests pass, clippy and fmt clean.
+Boundaries held: `Credentials` and the trait signature untouched, no tddy-rdp edit, no daemon
+outcome reporting, no inspect mode, only the approved crates added. No `todo!()` left in
+`security.rs`. Changeset items: all three milestones ✅ implemented.
+
+- ✅ (fixed 2026-10-20, regression test `a_vencrypt_server_with_no_supported_subtype_is_refused_without_a_second_type_byte`) **VeNCrypt commitment can fall through to another method.** `negotiate` writes type 19
+  *before* `choose_sign_in`; if the server's VeNCrypt subtypes hold neither Plain nor TLSPlain and
+  it also offers ARD / VNC Authentication / None, `choose_sign_in` returns that method and the
+  client writes a second type byte into the VeNCrypt phase (`security.rs` `negotiate`). It must
+  fail with `NothingSupported` naming `[19]` once VeNCrypt is chosen.
+- ✅ (fixed 2026-10-20: `log::warn!` + module docs, behaviour unchanged) **VeNCrypt Plain sends the password in the clear** when it is the only subtype offered, with
+  no log line. Not a fallback to add silently; at least `log::warn!` and name it in the docs.
+- ⚠️ `security.rs` is 697 production lines (budget 500) — step 3.5 of `/pr-wrap`.
+- ℹ️ `negotiate` has no timeout around its reads; a silent server stalls `connect`.
+- ℹ️ ARD accepts a zero `generator`; harmless but unvalidated.
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code

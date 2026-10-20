@@ -29,6 +29,7 @@ const VENCRYPT: u8 = 19;
 const APPLE_REMOTE_DESKTOP: u8 = 30;
 const VENCRYPT_PLAIN: u32 = 256;
 const VENCRYPT_TLS_PLAIN: u32 = 259;
+const X509_PLAIN: u32 = 262;
 
 // ── The fake server's account ─────────────────────────────────────────────────
 
@@ -595,6 +596,30 @@ async fn a_server_offering_only_unknown_types_is_refused_naming_them() {
         message.contains("99"),
         "error does not name type 99: {message}"
     );
+}
+
+#[tokio::test]
+async fn a_vencrypt_server_with_no_supported_subtype_is_refused_without_a_second_type_byte() {
+    // Given: VeNCrypt is chosen first, and ARD is offered as a tempting alternative
+    let server = a_vnc_server()
+        .offering(&[VENCRYPT, APPLE_REMOTE_DESKTOP])
+        .with_vencrypt_subtypes(&[X509_PLAIN])
+        .start()
+        .await;
+
+    // When
+    let err = sign_in(&server, &a_username_and_password())
+        .await
+        .err()
+        .expect("sign-in fails when no VeNCrypt subtype is supported");
+
+    // Then
+    let message = error_text(&err);
+    assert!(
+        message.contains("[19]"),
+        "error does not name VeNCrypt (type 19): {message}"
+    );
+    assert_eq!(server.selected_vencrypt_subtype(), None);
 }
 
 #[tokio::test]
