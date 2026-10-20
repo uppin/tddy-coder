@@ -1128,19 +1128,24 @@ mod tests {
         let tooling = probe.probe(&the_current_os_user(), None);
 
         // Then
-        let display_one = the_x11_channels_in(&tooling);
-        assert_eq!(display_one.len(), 1, "one X11 channel: {display_one:?}");
+        let channels: Vec<_> = the_x11_channels_in(&tooling)
+            .into_iter()
+            .map(|reading| {
+                (
+                    reading.channel,
+                    reading.desktop_reachable,
+                    reading.can_bridge,
+                )
+            })
+            .collect();
         assert_eq!(
-            display_one[0].channel,
-            crate::remote_desktop_probe::DesktopChannel::X11Display(1)
-        );
-        assert!(
-            display_one[0].desktop_reachable,
-            "the display's socket answered"
-        );
-        assert!(
-            !display_one[0].can_bridge,
-            "without x11vnc the display cannot be bridged"
+            channels,
+            vec![(
+                crate::remote_desktop_probe::DesktopChannel::X11Display(1),
+                true,
+                false
+            )],
+            "(channel, desktop_reachable, can_bridge): the display answered but has no x11vnc"
         );
     }
 

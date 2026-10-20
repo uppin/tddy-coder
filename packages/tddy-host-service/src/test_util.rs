@@ -112,6 +112,15 @@ impl AnX11SocketDir {
         self
     }
 
+    /// A socket that answers connects but whose `name` may not be a display's: what the name filter
+    /// alone has to keep out.
+    pub fn with_a_listening_socket_named(mut self, name: &str) -> Self {
+        let listener = std::os::unix::net::UnixListener::bind(self.dir.path().join(name))
+            .expect("binding a socket in the X11 socket directory");
+        self.listeners.push(listener);
+        self
+    }
+
     /// Where display `number`'s socket is.
     pub fn socket_of(&self, number: u32) -> PathBuf {
         self.dir.path().join(format!("X{number}"))

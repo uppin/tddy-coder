@@ -183,6 +183,22 @@ mod tests {
     }
 
     #[test]
+    fn ignores_entries_that_are_not_display_sockets() {
+        // Given
+        let sockets = an_x11_socket_dir()
+            .with_a_running_display(0)
+            .with_a_listening_socket_named("X1-lock")
+            .with_a_listening_socket_named("X")
+            .with_a_listening_socket_named("Xabc");
+
+        // When
+        let displays = list_x11_displays(sockets.path()).expect("a readable socket directory");
+
+        // Then
+        assert_eq!(displays, vec![display(0, &sockets)]);
+    }
+
+    #[test]
     fn a_host_with_no_x11_socket_directory_lists_no_displays() {
         // Given
         let sockets = an_x11_socket_dir();

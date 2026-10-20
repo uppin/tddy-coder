@@ -198,15 +198,36 @@ async fn an_x11vnc_that_never_accepts_is_stopped() {
 }
 
 #[tokio::test]
-async fn an_x11_channel_whose_bridge_exits_stops_its_x11vnc() {
+async fn an_x11_channel_whose_bridge_fails_to_start_stops_its_x11vnc() {
     // Given
     let daemon = a_daemon_whose_bridge(TheBridge::ExitsBeforeReporting).start();
     let target_id = daemon.attach_an_x11_display_to(A_HOST, DISPLAY_ONE).await;
 
     // When
-    let _failed = daemon.open_the_desktop_of(A_HOST, &target_id).await;
+    daemon
+        .open_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect_err("an X11 channel whose bridge exited before reporting must not start");
 
     // Then
     let x11vnc = daemon.x11vnc.launch(0).await;
+    daemon.x11vnc.has_exited(&x11vnc).await;
+}
+
+#[tokio::test]
+async fn an_x11_channel_whose_running_bridge_exits_stops_its_x11vnc() {
+    // Given
+    let daemon = a_daemon_whose_bridge(TheBridge::ready_at_then_exits(1280, 800)).start();
+    let target_id = daemon.attach_an_x11_display_to(A_HOST, DISPLAY_ONE).await;
+    daemon
+        .open_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect("an X11 channel whose bridge came up opens");
+    let x11vnc = daemon.x11vnc.launch(0).await;
+
+    // When — the bridge exits on its own after reporting ready
+    daemon.bridge.has_exited().await;
+
+    // Then
     daemon.x11vnc.has_exited(&x11vnc).await;
 }

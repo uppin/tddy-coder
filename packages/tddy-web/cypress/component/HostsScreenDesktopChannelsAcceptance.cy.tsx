@@ -39,16 +39,18 @@ function aVncServerOnItsDefaultPort() {
     port: 5900,
     channelId: "vnc:5900",
     kind: DesktopChannelKind.ENDPOINT,
-    label: "VNC :5900",
   });
 }
 
-/** X display :1, which the host's daemon would serve through x11vnc. */
-function x11DisplayOne() {
+/**
+ * X display :1, which the host's daemon would serve through x11vnc — or, with `canBridge: false`,
+ * one it cannot (no x11vnc on the host).
+ */
+function x11DisplayOne({ canBridge = true }: { canBridge?: boolean } = {}) {
   return create(HostRemoteDesktopSchema, {
     outcome: ProbeOutcome.OK,
     protocol: Protocol.VNC,
-    canBridge: true,
+    canBridge,
     desktopReachable: true,
     port: 0,
     channelId: "x11:1",
@@ -80,6 +82,16 @@ function mountAHostWithTwoChannels(backend: InMemoryRpcBackend = anInMemoryRpcBa
       HOST_LISTED,
     ),
     backend,
+  );
+}
+
+function mountAHostWithOnlyAnUnbridgeableX11Display() {
+  mountWithRpc(
+    withSelectedDaemon(
+      <HostRowRemoteDesktop instanceId={HOST} readings={[x11DisplayOne({ canBridge: false })]} />,
+      HOST_LISTED,
+    ),
+    anInMemoryRpcBackend(),
   );
 }
 
@@ -115,6 +127,22 @@ describe("Hosts screen desktop channels", () => {
   it("names each x11 channel by its display", () => {
     // Given / When
     mountAHostWithTwoChannels();
+
+    // Then
+    hostDesktopChannelsPage.channel(HOST, "x11:1").should("contain.text", "Display :1");
+  });
+
+  it("offers no connect for an x11 channel that cannot be bridged", () => {
+    // Given / When
+    mountAHostWithOnlyAnUnbridgeableX11Display();
+
+    // Then
+    hostDesktopChannelsPage.connects(HOST).should("not.exist");
+  });
+
+  it("still lists an x11 channel that cannot be bridged", () => {
+    // Given / When
+    mountAHostWithOnlyAnUnbridgeableX11Display();
 
     // Then
     hostDesktopChannelsPage.channel(HOST, "x11:1").should("contain.text", "Display :1");

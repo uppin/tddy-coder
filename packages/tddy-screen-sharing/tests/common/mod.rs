@@ -85,11 +85,24 @@ pub enum TheBridge {
     /// Writes this readiness line, then exits as soon as the x11vnc serving the port it was pointed
     /// at is gone — as a real `tddy-vnc` does when its VNC server goes away under it.
     ExitsWithItsX11vnc(BridgeReadiness),
+    /// Writes this readiness line, stays up for [`A_REPORTED_BRIDGE_EXITS_AFTER_SECS`], then exits
+    /// on its own: a bridge that came up and later crashed.
+    ReportsThenExits(BridgeReadiness),
 }
+
+/// How long a bridge that [`TheBridge::ReportsThenExits`] stays up after its readiness line: long
+/// enough that the daemon has read that line and the start has returned, so the exit is a running
+/// bridge's rather than a failed start's.
+const A_REPORTED_BRIDGE_EXITS_AFTER_SECS: &str = "0.5";
 
 impl TheBridge {
     pub fn ready_at(width: u32, height: u32) -> Self {
         Self::Reports(BridgeReadiness::Ready { width, height })
+    }
+
+    /// Ready at this size, then gone on its own shortly after.
+    pub fn ready_at_then_exits(width: u32, height: u32) -> Self {
+        Self::ReportsThenExits(BridgeReadiness::Ready { width, height })
     }
 
     /// Ready at this size, and gone as soon as its x11vnc is.
@@ -134,6 +147,12 @@ impl StandInBridge {
             }
             TheBridge::NeverReports => format!("exec sleep {A_BRIDGE_STAYS_UP_FOR_SECS}\n"),
             TheBridge::ExitsBeforeReporting => "exit 1\n".to_string(),
+            TheBridge::ReportsThenExits(readiness) => {
+                let line = serde_json::to_string(readiness).expect("a readiness line");
+                format!(
+                    "printf '%s\\n' '{line}'\nsleep {A_REPORTED_BRIDGE_EXITS_AFTER_SECS}\nexit 1\n"
+                )
+            }
             // The x11vnc is found by the port in the bridge's config: the launch log line naming
             // `-rfbport <that port>` carries its pid. `-rfbport` is never x11vnc's last argument,
             // so the trailing space keeps one port from matching another that it prefixes.

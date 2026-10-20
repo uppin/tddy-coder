@@ -186,8 +186,16 @@ into it (a pass-through), session-scope literals set `None`. Green matches an ex
 - `host_tooling.rs` grew by ~150 lines (mostly tests); record the delta against `oversized-file-host-tooling.md`.
 ### From /validate-changes
 ### From /validate-tests
+- Split `an_x11_channel_whose_bridge_exits_stops_its_x11vnc` into the failed-start case (renamed) and
+  a bridge that reports ready then exits on its own.
+- One equality assertion in `reports_x11_channels_as_unbridgeable_without_x11vnc`.
+- Add the non-display-entry test to `x11_displays.rs` and the unbridgeable-X11 Cypress case; drop the
+  endpoint fixture's invented label.
 ### From /validate-prod-ready
+- None beyond the deferred socket-directory error (TODO above).
 ### From /analyze-clean-code
+- Extract the X11 block of `start_host_stream_impl`; split `with_x11_channels`; `ChannelReading`
+  sub-component; name the loopback host; name the overlay's target predicate.
 
 ## Validation Results
 ### /validate-changes
@@ -241,12 +249,91 @@ tddy-screen-sharing, tddy-host-service and tddy-daemon-kernel. Cypress, 6 specs
 - [INFO] `X11vncServers::stop` sends SIGTERM and does not wait; the reaper task collects the exit.
   Same shape as `terminate_bridge`.
 
+**Re-run (`/pr-wrap` step 1, head `4e5092572`).** Stack gate: current on `31af5b866`, leak-free (five
+own commits). The gap fix and its fixture (`TheBridge::ExitsWithItsX11vnc`, `keeps_running`,
+`has_exited_as`) reviewed: no new findings; nothing for `refactor`. One note: the stand-in bridge
+reads `port` out of its config with `sed`, which relies on serde_json's compact output.
+
 **Changeset sync.** Testing `[~]` → `[x]`; contract-stage wording ("`todo!()`", "`for_config` not
 yet wired") corrected to what green delivered; Responsibility web item annotated ⚠️ (endpoint
 channels); Dependencies n6 row corrected.
 ### /validate-tests
+
+**Run 2026-10-20.** 26 tests analyzed (Rust: `x11_displays` 3, `host_tooling` 2, `host_messages` 2,
+`x11vnc_binary_resolution` 2, `x11_channels_acceptance` 8; Cypress `HostsScreenDesktopChannelsAcceptance` 3;
+plus the fixture changes in `tests/common/mod.rs` and `test_util.rs`). Critical 0 · Warning 4 · Info 2.
+All follow Given/When/Then, names read as behaviour, page objects used in the Cypress spec, no `.only`,
+`.skip` or `#[ignore]`.
+
+- [WARNING, description-body misalignment] `x11_channels_acceptance.rs::an_x11_channel_whose_bridge_exits_stops_its_x11vnc`
+  uses `TheBridge::ExitsBeforeReporting`, so the *start* fails and the x11vnc is stopped by the
+  failed-start path in `start_host_stream`. The path its name describes, a bridge that came up and
+  then exits (`reap_bridge` → `x11vnc.stop`), is untested. It also discards the start's result.
+- [WARNING, assertion roulette] `host_tooling.rs::reports_x11_channels_as_unbridgeable_without_x11vnc`:
+  four separate asserts (count, channel, reachable, can_bridge) for one reading.
+- [WARNING, missing edge case] `x11_displays.rs`: no test that entries not named `X<digits>`
+  (`X1-lock`, `X`, `.X1-lock`) are skipped, though `display_number_of` exists for exactly that.
+- [WARNING, missing edge case] Cypress: PRD success criterion "Without `x11vnc` the channels are
+  listed but offer no Connect" has no web test for an X11 reading with `canBridge: false`.
+- [INFO, test data] `aVncServerOnItsDefaultPort()` sets `label: "VNC :5900"`, which the daemon never
+  sends for an endpoint channel (`host_remote_desktop_message` leaves it empty).
+- [INFO, timing] `StandInX11vnc::keeps_running` is a fixed-window negative check (1 s); justified in
+  its doc comment, since a stop that is not coming cannot be awaited.
 ### /validate-prod-ready
+
+**Run 2026-10-20: ✅ Ready.** 14 production files checked (tests, Cypress and `src/gen` excluded).
+Blockers 0 · Warnings 1 (already deferred). Mock code 0, TODO/FIXME/HACK 0, debug output 0
+(`println!`/`eprintln!`/`dbg!`/`console.*` none; x11vnc's stderr is inherited by the daemon exactly as
+the bridge's is in `start_bridge_process`).
+
+- [WARNING, deferred] `x11_displays.rs::with_x11_channels` turns a non-`NotFound` socket-directory
+  error into a `log::warn!` and no X11 channels: recorded as
+  `docs/dev/todo/2026-10-20-x11-socket-dir-read-failure-lists-no-channels.md`.
+- Acceptable: `config.screen_sharing.clone().unwrap_or_default()` (`host_tooling.rs`,
+  `host_targets.rs`) is the documented meaning of an absent `screen_sharing:` block, the same as the
+  bridge resolvers'; `child.id().unwrap_or(0)` in `x11vnc.rs` is the zero sentinel `start` never
+  records, as `record_bridge_pid` does; the `5900` probe in `with_x11_channels`'s `unwrap_or_else`
+  is only for a display number past `u16` and asks for the bridge half only.
+- Unused code: none. `x11vnc_arguments`, `X11vncStarted`, `DEFAULT_X11_SOCKET_DIR` are used in-crate
+  and part of the published contract surface.
 ### /analyze-clean-code
+
+**Run 2026-10-20: score C before cleanup** (1 must-refactor, 3 needs-attention, 4 minor).
+
+| Metric | Excellent | Acceptable | Needs attention | Must refactor |
+|---|---|---|---|---|
+| File length (≤500 / >500) | — | 15 | 2 (`config.rs` 1,575, `host_tooling.rs` 806; both pre-existing, grown here; see 3.5 below) | — |
+| Function length (functions this PR wrote or grew) | 17 | 6 | 2 | 1 |
+| Nesting depth | all ≤ 3 | — | — | — |
+| Parameter count | all ≤ 3 | — | — | — |
+
+- [MUST REFACTOR] `screen_sharing_service/host_targets.rs::start_host_stream_impl`: 67 → 90 lines.
+  The X11 block (start x11vnc, repoint the bridge, stop x11vnc on a failed spawn) is one helper.
+  The file is not touched by #660, so extracting a method here conflicts with nobody.
+- [NEEDS ATTENTION] `x11_displays.rs::with_x11_channels`: 52 lines. The socket-dir default and the
+  per-display reading are two helpers.
+- [NEEDS ATTENTION] `HostRowRemoteDesktop.tsx` component: 60 lines (≈50 before), the per-reading JSX
+  is a `ChannelReading` sub-component.
+- [NEEDS ATTENTION, pre-existing] `HostDesktopOverlay.tsx` component: ~200 lines, n4's; this PR
+  added one prop and one dependency. Not changed here.
+- [MINOR, magic value] `"127.0.0.1"` three times in `x11vnc.rs` and once in `host_targets.rs`.
+  Name it once, in `x11vnc.rs` (`X11VNC_HOST`), and use it for the bridge's host too.
+- [MINOR, readability] `HostDesktopOverlay.tsx::targetForChannel`: the nested-ternary `find`
+  predicate becomes a named `isTargetOfChannel`.
+- [MINOR, duplication] `"Display :N"` is built in `host_messages.rs` (label) and again in
+  `HostDesktopOverlay.tsx` (target label). The web could reuse the reading's `label`, but the
+  overlay is given a display, not a reading. Kept: two layers, one format string each.
+- [MINOR, duplication] `x11vnc.rs::{reap, forget}` mirror `bridge_lifecycle.rs::{reap_bridge,
+  forget_bridge_pid}`. A shared process table would change n1's bridge-lifecycle module. Kept,
+  noted for the post-stack restructure.
+
+**File length gate (3.5).** `config.rs` 1,557 → 1,575 and `host_tooling.rs` 775 → 806, both
+already over budget and grown here; neither touched by #660 or any lower node. Not decomposed:
+this changeset's `## Prerequisites` verdicts (⚠ DURING, "record the delta", "keep the resolver
+beside the existing two"), approved with the plan, and `oversized-file-config.md`'s own
+"do not absorb this into a feature node". Growth recorded in both code-issue records'
+measurement history. Every other non-test file is under 500 (`x11_displays.rs` 144 and
+`x11vnc.rs` 198 are new).
 
 ## TODO
 
