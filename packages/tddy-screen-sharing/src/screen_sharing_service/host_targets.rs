@@ -2,7 +2,7 @@
 //
 // The bodies of the four host-target RPCs, moved out of the `#[async_trait]` impl byte for byte; the
 // trait methods in `screen_sharing_service.rs` delegate here.
-use super::bridge_lifecycle::Remembering;
+use super::bridge_lifecycle::{Remembering, SignIn};
 use super::ScreenSharingServiceImpl;
 use crate::bridge_config::{
     browser_livekit_url, host_bridge_identity, host_bridge_key, host_livekit_room,
@@ -19,6 +19,13 @@ use tddy_service::proto::screen_sharing::{
     ListHostTargetsResponse, StartHostStreamRequest, StartStreamResponse, StopHostStreamRequest,
     StopHostStreamResponse,
 };
+
+/// Whose sign-in to which host desktop a bridge start is settling in the vault.
+struct SignedInDesktop<'a> {
+    operator: &'a str,
+    daemon_instance_id: &'a str,
+    target_id: &'a str,
+}
 
 impl ScreenSharingServiceImpl {
     pub(crate) async fn list_host_targets_impl(
@@ -109,7 +116,7 @@ impl ScreenSharingServiceImpl {
         // Settled before anybody is asked for a secret. A desktop this host cannot bridge — no
         // LiveKit to publish through, no protocol to speak — is refused here, so an operator is
         // never made to type a password into a dialog for a stream that could not have started.
-        let prepared = prepare_bridge(
+        let mut prepared = prepare_bridge(
             config,
             &host_target_as_bridge_target(&target),
             // The account is the operator's answer, which is not known until they have been asked.
@@ -127,44 +134,25 @@ impl ScreenSharingServiceImpl {
         let sign_in = self
             .desktop_credential_for(scope, &operator, &req.daemon_instance_id, &target)
             .await?;
-        let remembering = sign_in.remembering;
-        // Held only until the desktop has answered: written to the vault if it accepts the sign-in.
-        let to_remember = (remembering == Remembering::AfterStart).then(|| sign_in.answer.clone());
 
         // Reported: these coordinates tell a browser to mount an overlay on a room, and a bridge that
         // never joined it leaves the operator watching nothing having already typed a secret. The
         // size is the one the bridge measured, so input lands where the operator aimed.
         let bridge_key = host_bridge_key(&req.daemon_instance_id, &req.target_id);
-        let mut prepared = prepared.for_credentials(sign_in.answer);
         // An X11 display has no VNC server until one is started for it, and it is started before the
         // bridge so the bridge has something to connect to.
         if let Some(display) = target.display {
             self.serve_x11_display_to_the_bridge(&mut prepared, &bridge_key, display, config)
                 .await?;
         }
-        let started = match self.spawn_host_bridge(prepared, bridge_key).await {
-            Ok(started) => started,
-            Err(status) => {
-                if remembering == Remembering::AlreadyRemembered
-                    && status.code == Code::Unauthenticated
-                {
-                    self.mark_remembered_desktop_refused(
-                        &operator,
-                        &req.daemon_instance_id,
-                        &req.target_id,
-                    );
-                }
-                return Err(status);
-            }
+        let desktop = SignedInDesktop {
+            operator: &operator,
+            daemon_instance_id: &req.daemon_instance_id,
+            target_id: &req.target_id,
         };
-        if let Some(answer) = to_remember {
-            self.remember_accepted_desktop_credential(
-                &operator,
-                &req.daemon_instance_id,
-                &req.target_id,
-                &answer,
-            );
-        }
+        let started = self
+            .start_signed_in_bridge(prepared, bridge_key, sign_in, &desktop)
+            .await?;
 
         Ok(Response::new(StartStreamResponse {
             livekit_room,
@@ -174,6 +162,48 @@ impl ScreenSharingServiceImpl {
             width: started.width,
             height: started.height,
         }))
+    }
+
+    /// Sign `prepared` in as `sign_in` says and spawn it under `bridge_key`, settling the vault
+    /// with what the desktop made of the credential.
+    ///
+    /// A remembered credential the desktop refuses is marked refused; an answer the operator asked
+    /// to remember is written only once the desktop has accepted it. Anything else is kept nowhere.
+    async fn start_signed_in_bridge(
+        &self,
+        prepared: PreparedBridge,
+        bridge_key: String,
+        sign_in: SignIn,
+        desktop: &SignedInDesktop<'_>,
+    ) -> Result<BridgeStarted, Status> {
+        let remembering = sign_in.remembering;
+        // Held only until the desktop has answered: written to the vault if it accepts the sign-in.
+        let to_remember = (remembering == Remembering::AfterStart).then(|| sign_in.answer.clone());
+        let prepared = prepared.for_credentials(sign_in.answer);
+        let started = match self.spawn_host_bridge(prepared, bridge_key).await {
+            Ok(started) => started,
+            Err(status) => {
+                if remembering == Remembering::AlreadyRemembered
+                    && status.code == Code::Unauthenticated
+                {
+                    self.mark_remembered_desktop_refused(
+                        desktop.operator,
+                        desktop.daemon_instance_id,
+                        desktop.target_id,
+                    );
+                }
+                return Err(status);
+            }
+        };
+        if let Some(answer) = to_remember {
+            self.remember_accepted_desktop_credential(
+                desktop.operator,
+                desktop.daemon_instance_id,
+                desktop.target_id,
+                &answer,
+            );
+        }
+        Ok(started)
     }
 
     /// Start an x11vnc for `display` under `bridge_key` and point `prepared` at it.

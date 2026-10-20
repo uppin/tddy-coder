@@ -133,6 +133,94 @@ async function targetForChannel(
   return added.targetId;
 }
 
+/** What `signInAndStart` needs from the overlay that is opening a desktop. */
+interface SignInAndStartInputs {
+  client: Client<typeof ScreenSharingService>;
+  hostId: string;
+  targetId: string;
+  /** The session the calls are gated on, read at call time — see `sessionTokenRef`. */
+  sessionToken: () => string;
+  /** Whether the overlay has closed since the start began, so nothing more is set on it. */
+  isCancelled: () => boolean;
+  /** How many answers the overlay has sent, so a start can tell whether it was refused one. */
+  answersSent: { readonly current: number };
+  setOffered: (methods: DesktopAuthMethod[]) => void;
+  setStream: (stream: StartStreamResponse) => void;
+  setError: (error: string) => void;
+  setSignInError: (error: string) => void;
+  setQuestion: (question: null) => void;
+}
+
+/**
+ * Inspect the desktop, then start its stream — asking again for as long as the desktop refuses a
+ * sign-in the operator has just given.
+ *
+ * Resolves once there is a stream, once the desktop is known to offer nothing tddy supports, or
+ * once the overlay has closed; rejects with the failure the overlay is to show.
+ */
+async function signInAndStart(inputs: SignInAndStartInputs): Promise<void> {
+  const { client, hostId, targetId, sessionToken, isCancelled, setOffered, setError } = inputs;
+  // Ask what the desktop advertises before starting anything: the form is shaped by it, and a
+  // desktop with nothing tddy supports must not start a bridge that can only fail.
+  const inspection = await client.inspectHostDesktop({
+    sessionToken: sessionToken(),
+    daemonInstanceId: hostId,
+    targetId,
+  });
+  if (isCancelled()) return;
+  const methods = inspection.offered.filter((method) => method !== DesktopAuthMethod.UNSPECIFIED);
+  if (methods.length === 0) {
+    setError(noSupportedSignInText(inspection.unsupportedVncTypes));
+    return;
+  }
+  setOffered(methods);
+  await startUntilSignedIn(inputs, methods.includes(DesktopAuthMethod.NONE));
+}
+
+/**
+ * Start the desktop's stream, starting it again each time the desktop refuses a sign-in the
+ * operator has just given — unless it needed no sign-in at all.
+ */
+async function startUntilSignedIn(
+  inputs: SignInAndStartInputs,
+  needsNoSignIn: boolean,
+): Promise<void> {
+  const { client, hostId, targetId, sessionToken, isCancelled, answersSent, ...set } = inputs;
+  // Each start blocks while the host asks for the desktop's credentials — the question arrives
+  // below, on the prompt feed, and the answer releases the start awaited here. A desktop that
+  // refuses the credentials fails the start with its reason, and the host is started again so it
+  // asks again; a desktop that needed none has nothing to ask again about.
+  for (;;) {
+    const answersBefore = answersSent.current;
+    try {
+      const started = await client.startHostStream({
+        sessionToken: sessionToken(),
+        daemonInstanceId: hostId,
+        targetId,
+      });
+      if (isCancelled()) return;
+      set.setStream(started);
+      return;
+    } catch (e) {
+      if (isCancelled()) return;
+      // Asked again only when this start was refused a sign-in the operator just gave: a
+      // refusal that no answer preceded (a remembered credential the desktop turned down) has
+      // nothing to ask about yet, and starting again at once would only spin on it.
+      const refusedAnAnswer = answersSent.current > answersBefore;
+      if (
+        needsNoSignIn ||
+        !refusedAnAnswer ||
+        !(e instanceof ConnectError) ||
+        e.code !== Code.Unauthenticated
+      ) {
+        throw e;
+      }
+      set.setSignInError(screenSharingStartFailureText(e));
+      set.setQuestion(null);
+    }
+  }
+}
+
 export function HostDesktopOverlay({
   hostId,
   port,
@@ -184,57 +272,19 @@ export function HostDesktopOverlay({
         );
         if (cancelled) return;
         startedTargetId = targetId;
-        // Ask what the desktop advertises before starting anything: the form is shaped by it, and a
-        // desktop with nothing tddy supports must not start a bridge that can only fail.
-        const inspection = await client.inspectHostDesktop({
-          sessionToken: sessionTokenRef.current ?? "",
-          daemonInstanceId: hostId,
+        await signInAndStart({
+          client,
+          hostId,
           targetId,
+          sessionToken: () => sessionTokenRef.current ?? "",
+          isCancelled: () => cancelled,
+          answersSent,
+          setOffered,
+          setStream,
+          setError,
+          setSignInError,
+          setQuestion,
         });
-        if (cancelled) return;
-        const methods = inspection.offered.filter(
-          (method) => method !== DesktopAuthMethod.UNSPECIFIED,
-        );
-        if (methods.length === 0) {
-          setError(noSupportedSignInText(inspection.unsupportedVncTypes));
-          return;
-        }
-        setOffered(methods);
-        const needsNoSignIn = methods.includes(DesktopAuthMethod.NONE);
-
-        // Each start blocks while the host asks for the desktop's credentials — the question arrives
-        // below, on the prompt feed, and the answer releases the start awaited here. A desktop that
-        // refuses the credentials fails the start with its reason, and the host is started again so it
-        // asks again; a desktop that needed none has nothing to ask again about.
-        for (;;) {
-          const answersBefore = answersSent.current;
-          try {
-            const started = await client.startHostStream({
-              sessionToken: sessionTokenRef.current ?? "",
-              daemonInstanceId: hostId,
-              targetId,
-            });
-            if (cancelled) return;
-            setStream(started);
-            return;
-          } catch (e) {
-            if (cancelled) return;
-            // Asked again only when this start was refused a sign-in the operator just gave: a
-            // refusal that no answer preceded (a remembered credential the desktop turned down) has
-            // nothing to ask about yet, and starting again at once would only spin on it.
-            const refusedAnAnswer = answersSent.current > answersBefore;
-            if (
-              needsNoSignIn ||
-              !refusedAnAnswer ||
-              !(e instanceof ConnectError) ||
-              e.code !== Code.Unauthenticated
-            ) {
-              throw e;
-            }
-            setSignInError(screenSharingStartFailureText(e));
-            setQuestion(null);
-          }
-        }
       } catch (e) {
         if (cancelled) return;
         // The start failed, and the overlay says why in place of "Connecting…": a refused sign-in

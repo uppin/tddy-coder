@@ -17,7 +17,7 @@
 //! (`#host-desktops` node 1); the service's trait methods delegate here.
 
 use std::collections::BTreeMap;
-use std::process::Stdio;
+use std::process::{Output, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,7 +28,8 @@ use tddy_credentials::{
 use tddy_daemon_extensions::desktop_inspect::{
     read_inspect_report, AdvertisedMethod, InspectTarget, INSPECT_FLAG,
 };
-use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path};
+use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
+use tddy_host_service::host_desktop_targets::HostDesktopTarget;
 use tddy_host_service::host_keypair::HostKeypair;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
@@ -36,10 +37,10 @@ use tddy_service::proto::screen_sharing::{
     InspectHostDesktopResponse, Protocol,
 };
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 
 use crate::screen_sharing_records::{screen_sharing_provider, TargetError, META_USERNAME};
-use crate::screen_sharing_service::ScreenSharingServiceImpl;
+use crate::screen_sharing_service::{HostScope, ScreenSharingServiceImpl};
 use crate::session_vault_target_store::{now_unix_seconds, open_vault, refusal_of};
 
 /// How long an inspection may take: a little past the bridge's own limit on the desktop's answer,
@@ -69,18 +70,7 @@ pub async fn inspect_host_desktop(
     let scope = service.require_host_scope()?;
     let config = service.require_config()?;
 
-    let target = scope
-        .targets()
-        .list(&req.daemon_instance_id)
-        .map_err(Status::internal)?
-        .into_iter()
-        .find(|t| t.target_id == req.target_id)
-        .ok_or_else(|| {
-            Status::not_found(format!(
-                "host {} has no desktop target {}",
-                req.daemon_instance_id, req.target_id
-            ))
-        })?;
+    let target = find_host_target(scope, &req)?;
 
     let remembered = service
         .remembered_desktop_credentials()
@@ -97,16 +87,7 @@ pub async fn inspect_host_desktop(
         )));
     }
 
-    let binary = match Protocol::try_from(target.protocol).unwrap_or(Protocol::Unspecified) {
-        Protocol::Vnc => resolve_vnc_binary_path(config),
-        Protocol::Rdp => resolve_rdp_binary_path(config),
-        Protocol::Unspecified => {
-            return Err(Status::failed_precondition(format!(
-                "target {} names no protocol to inspect it with",
-                target.target_id
-            )))
-        }
-    };
+    let binary = inspect_bridge_binary(config, &target)?;
     let methods = run_inspect_bridge(
         &binary,
         &InspectTarget {
@@ -119,6 +100,40 @@ pub async fn inspect_host_desktop(
     Ok(Response::new(response_for(&methods, remembered)))
 }
 
+/// The desktop target `req` names among the ones its host has.
+fn find_host_target(
+    scope: &HostScope,
+    req: &InspectHostDesktopRequest,
+) -> Result<HostDesktopTarget, Status> {
+    scope
+        .targets()
+        .list(&req.daemon_instance_id)
+        .map_err(Status::internal)?
+        .into_iter()
+        .find(|t| t.target_id == req.target_id)
+        .ok_or_else(|| {
+            Status::not_found(format!(
+                "host {} has no desktop target {}",
+                req.daemon_instance_id, req.target_id
+            ))
+        })
+}
+
+/// The bridge binary that speaks `target`'s protocol, which is the one that can inspect it.
+fn inspect_bridge_binary(
+    config: &DaemonConfig,
+    target: &HostDesktopTarget,
+) -> Result<String, Status> {
+    match Protocol::try_from(target.protocol).unwrap_or(Protocol::Unspecified) {
+        Protocol::Vnc => Ok(resolve_vnc_binary_path(config)),
+        Protocol::Rdp => Ok(resolve_rdp_binary_path(config)),
+        Protocol::Unspecified => Err(Status::failed_precondition(format!(
+            "target {} names no protocol to inspect it with",
+            target.target_id
+        ))),
+    }
+}
+
 /// Run `binary --inspect`, hand it where the desktop is, and read the one report line it prints.
 ///
 /// Only an address crosses to the bridge: inspect never signs in, so there is no credential to
@@ -127,6 +142,23 @@ async fn run_inspect_bridge(
     binary: &str,
     target: &InspectTarget,
 ) -> Result<Vec<AdvertisedMethod>, Status> {
+    let child = spawn_inspect_bridge(binary, target).await?;
+
+    let output = tokio::time::timeout(INSPECT_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| {
+            Status::deadline_exceeded(format!(
+                "the desktop at {}:{} did not report its sign-in methods within {INSPECT_TIMEOUT:?}",
+                target.host, target.port
+            ))
+        })?
+        .map_err(|e| Status::unavailable(format!("waiting for the bridge: {e}")))?;
+
+    read_inspect_output(&output, target)
+}
+
+/// Spawn `binary --inspect` and write `target` to its stdin, closing it so the bridge starts.
+async fn spawn_inspect_bridge(binary: &str, target: &InspectTarget) -> Result<Child, Status> {
     let request = serde_json::to_vec(target)
         .map_err(|e| Status::internal(format!("encoding the inspect request: {e}")))?;
 
@@ -148,17 +180,14 @@ async fn run_inspect_bridge(
         .await
         .map_err(|e| Status::internal(format!("writing the inspect request to the bridge: {e}")))?;
     drop(stdin);
+    Ok(child)
+}
 
-    let output = tokio::time::timeout(INSPECT_TIMEOUT, child.wait_with_output())
-        .await
-        .map_err(|_| {
-            Status::deadline_exceeded(format!(
-                "the desktop at {}:{} did not report its sign-in methods within {INSPECT_TIMEOUT:?}",
-                target.host, target.port
-            ))
-        })?
-        .map_err(|e| Status::unavailable(format!("waiting for the bridge: {e}")))?;
-
+/// The methods in the one report line an inspecting bridge that exited cleanly printed.
+fn read_inspect_output(
+    output: &Output,
+    target: &InspectTarget,
+) -> Result<Vec<AdvertisedMethod>, Status> {
     if !output.status.success() {
         return Err(Status::unavailable(format!(
             "inspecting the desktop at {}:{} failed: {}",
