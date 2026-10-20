@@ -21,11 +21,13 @@ use same_crate::{an_app_holding, blocks, the_anchor_over, the_impl_blocks_of};
 use tddy_code_restructuring::{Anchor, RefactorOp};
 
 /// `Host` with a private `bump` that `tick` (left behind) calls, and a sibling module that calls it
-/// too; `host::counting` exists and holds one free function.
+/// too; `host::counting` exists and holds one free function, which `tick` calls so that it is used
+/// before the move. `Host` derives `Default` so that its `new` is lint-clean before the move.
 const A_HOST_WHOSE_BUMP_IS_CALLED_FROM_HOST_AND_A_SIBLING: &str = concat!(
     "mod counting;\n",
     "mod sibling;\n",
     "\n",
+    "#[derive(Default)]\n",
     "pub struct Host {\n",
     "    n: u32,\n",
     "}\n",
@@ -41,6 +43,7 @@ const A_HOST_WHOSE_BUMP_IS_CALLED_FROM_HOST_AND_A_SIBLING: &str = concat!(
     "\n",
     "    pub fn tick(&mut self) {\n",
     "        self.bump();\n",
+    "        counting::noop();\n",
     "        sibling::poke(self);\n",
     "    }\n",
     "}\n",

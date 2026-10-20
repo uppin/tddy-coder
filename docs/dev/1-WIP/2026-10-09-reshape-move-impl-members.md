@@ -425,6 +425,12 @@ All seven were **decided 2026-10-09**: the developer approved every recommendati
 - **Known limits, marked FIXME in code.** (1) An ancestor file's members are the top-level ones `members_of` reads; a
   type's impl inside an inline `mod` of an ancestor is not surveyed. (2) A self type the origin imports, rather than
   defines, is not carried into the destination's `use` (the compile gate would catch it).
+- **F14. Test 16 fixture made lint-clean before the move (2026-10-20, developer decision).** Test 16
+  (`moves_private_methods_a_member_left_behind_calls_into_an_existing_module`) failed at `assert_lints_clean` on its
+  pre-move fixture, not on the move: `counting::noop` was never used (`function 'noop' is never used`), and `Host::new`
+  had no `Default` (`new_without_default`). The oracle (`assert_lints_clean`) is unchanged. The fixture changed in two
+  places only: `Host` derives `Default`, and `tick` (which stays behind) calls `counting::noop()`. Every assertion is
+  unchanged. Verified: `--test move_impl_members_acceptance -- --test-threads=1` is 10/10.
 
 ## Refactoring needed
 
@@ -434,6 +440,11 @@ All seven were **decided 2026-10-09**: the developer approved every recommendati
 private, takes `&Moving`, and `visibilities` now ends with `widen_reached_items(...)?; Ok(landing)`. The file grew from
 509 to 519 lines (the extraction adds a 12-line signature and tail), so the checklist's `below 507` is not met: it was
 already not met at the base (509). Shrinking it below 507 needs a further engine move or a developer decision.
+
+**Exception, decided by the developer (2026-10-20): `item_move/assemble.rs` at 519 lines, cap 507, accepted.** The
+measured count is 519 (509 at base). The cause is the engine extraction of `widen_reached_items` (above), which this
+node was asked to do. The owner of the shrink is **K17 `oversized-files`**, which already lists `item_move/assemble.rs`
+among its splits and clears it. This node does not split it further.
 
 ## Final Checklist
 
@@ -463,7 +474,9 @@ Edges that must **not** exist:
   `src/backends/rust/impl_move*`.
 - [ ] `plan` → `backends`. Checked by `grep -rn "backends" src/plan` returning nothing new.
 - [ ] `rust.rs` production lines not above the pre-PR count (the awk to the first inline `#[cfg(test)] mod`);
-  `item_move/assemble.rs` below 507; `check` ≤ 66 and `resolve_opening` ≤ 163 lines.
+  `check` ≤ 66 and `resolve_opening` ≤ 163 lines.
+- [x] `item_move/assemble.rs` below 507: **satisfied by exception**, 519 lines, owner K17 (`oversized-files`); see
+  § Refactoring needed.
 - [ ] The engine `extract_method` is the only move of existing code. Any post-move hand fix gets a todo entry.
 
 ## Validation results
