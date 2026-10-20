@@ -57,16 +57,16 @@ pub fn snapshot_worktree_within(worktree_root: &Path, budget: Duration) -> Workt
         // references, in a repository shared by every worktree, held for git's two-week prune
         // grace period.
         //
-        // So the tree is measured by whoever is about to *use* it, via [`write_wip_tree_within`],
-        // and published as a ref in the same breath ([`publish_wip_ref`]) so the objects it writes
-        // are reachable from the moment they exist.
+        // So the tree is measured by whoever is about to *use* it — the session room's
+        // `write_wip_tree_within` — and published as a ref in the same breath (`publish_wip_ref`)
+        // so the objects it writes are reachable from the moment they exist.
         wip_tree: String::new(),
     }
 }
 
-/// The working tree's diff against HEAD, run and parsed exactly as [`tddy_worktree_service::worktrees`] does it for
+/// The working tree's diff against HEAD, run and parsed exactly as [`crate::worktrees`] does it for
 /// the Worktrees screen — only under this module's deadline.
-pub fn numstat_within(worktree_root: &Path, deadline: Instant) -> WorktreeNumstat {
+fn numstat_within(worktree_root: &Path, deadline: Instant) -> WorktreeNumstat {
     parse_git_diff_numstat(&git_stdout(
         worktree_root,
         &["diff", "--numstat", "HEAD"],
@@ -77,7 +77,7 @@ pub fn numstat_within(worktree_root: &Path, deadline: Instant) -> WorktreeNumsta
 /// How many files in the checkout git has never been told about: the `??` entries of
 /// `git status --porcelain`, and only those. Every other status line describes a path the numstat
 /// diff has already accounted for.
-pub fn untracked_file_count(worktree_root: &Path, deadline: Instant) -> u32 {
+fn untracked_file_count(worktree_root: &Path, deadline: Instant) -> u32 {
     git_stdout(worktree_root, &["status", "--porcelain"], deadline)
         .lines()
         .filter(|line| line.starts_with("??"))
@@ -97,7 +97,7 @@ pub fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> Str
 }
 
 /// [`git_stdout`] with extra environment for the child — `GIT_INDEX_FILE` for the WIP tree, the
-/// identity [`publish_wip_ref`] signs with — and the same "empty string when git could not answer".
+/// identity the session room's `publish_wip_ref` signs with — and the same "empty string when git could not answer".
 pub fn git_stdout_with(
     worktree_root: &Path,
     args: &[&str],
@@ -204,5 +204,65 @@ pub fn git_output(
                 budget.as_millis()
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "t@t.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "t@t.com")
+            .output()
+            .expect("git must be on PATH");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed in {dir:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// A checkout with one committed file and one untracked file beside it.
+    fn a_checkout_with_an_untracked_file() -> tempfile::TempDir {
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.path().join("shipped.txt"), "shipped\n").unwrap();
+        git(repo.path(), &["add", "shipped.txt"]);
+        git(repo.path(), &["commit", "-qm", "seed"]);
+        std::fs::write(repo.path().join("scratch.txt"), "not added\n").unwrap();
+        repo
+    }
+
+    /// Take the index lock the way a developer's own `git add` does for the moment it runs.
+    fn while_another_git_holds_the_index_lock(repo: &Path) {
+        std::fs::write(repo.join(".git").join("index.lock"), b"").unwrap();
+    }
+
+    #[test]
+    fn a_checkout_is_measured_while_another_git_holds_the_index_lock() {
+        // Given a checkout whose index is locked, as it is for the moment any `git add`, `git
+        // commit` or rebase in it is running
+        let repo = a_checkout_with_an_untracked_file();
+        while_another_git_holds_the_index_lock(repo.path());
+
+        // When the room polls it
+        let snapshot = snapshot_worktree(repo.path());
+
+        // Then the poll still measured the checkout. This runs against a worktree a developer is
+        // working in, several times a second: a measurement that needs the index lock both loses
+        // the race — reporting `head_commit: ""`, which reads as a commit to the empty sha — and
+        // takes the lock often enough to fail the developer's own git.
+        assert_eq!(snapshot.branch, "main");
+        assert_eq!(snapshot.untracked_files, 1);
+        assert!(
+            !snapshot.head_commit.is_empty(),
+            "HEAD must still resolve while the index is locked"
+        );
     }
 }

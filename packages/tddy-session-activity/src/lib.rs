@@ -32,8 +32,8 @@ pub mod streams;
 pub mod user_sessions_path;
 
 pub use service::{
-    ActivityPorts, ActivityServiceImpl, DeltaLookup, DeltaScope, MeasuredDelta, OsUserResolver,
-    SessionDeltaStores, SessionLabels,
+    ActivityPorts, ActivityServiceImpl, DeltaLookup, DeltaScope, MeasuredDelta,
+    NoSessionDeltaStores, OsUserResolver, SessionDeltaStores, SessionLabels,
 };
 
 /// How a session's activity deltas are numbered: the wire's absent value, the first real tick, and

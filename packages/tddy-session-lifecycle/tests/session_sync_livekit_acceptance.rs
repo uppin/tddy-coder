@@ -63,8 +63,9 @@ use tddy_worktree_service::remote_git_service::{
 ///
 /// What `tddy-daemon` wires in production (`RoomsHostedByThisDaemon`); written out here because
 /// this crate's tests cannot depend on the daemon.
-// TODO: one adapter, in the plugin, once `tddy-daemon-livekit` may depend on
-// `tddy-session-activity`; this copy and the daemon's then go.
+// TODO(#satellite follow-up): one adapter, in the plugin, once `tddy-daemon-livekit` may depend on
+// `tddy-session-activity`; this copy and the daemon's then go
+// (`docs/dev/todo/2026-10-21-session-delta-stores-adapter-lives-in-the-daemon.md`).
 struct DeltaRingsOf(Arc<SessionRoomRegistry>);
 
 impl SessionDeltaStores for DeltaRingsOf {

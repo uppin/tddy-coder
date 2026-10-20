@@ -14,9 +14,9 @@ use prost::Message;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory, SIGNING_KEY_FILE};
 use tddy_daemon_extensions::{
-    NoRoomAdmission, NoRoomBroadcast, NoRoomDirectory, NoRoomTokens, NoSessionRooms,
-    OpenedSessionRoom, PeerForwarder, ReachableSessions, ReachedSession, RemoteSnapshotSource,
-    SessionTokenMinter, SplitAgentJoin, SplitRoomHosting,
+    NoRoomAdmission, NoRoomBroadcast, NoRoomDirectory, NoRoomTokens, NoSessionRooms, OpenedRoom,
+    PeerForwarder, ReachableSessions, ReachedSession, RemoteSnapshotSource, SessionTokenMinter,
+    SplitAgentJoin, SplitRoomHosting,
 };
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::peer_forwarding::CommonRoom;
@@ -514,7 +514,7 @@ impl AgentHostCallbacks for TheRestOfTheHost {
         _session_id: &str,
         _session_dir: &Path,
         _worktree_root: &Path,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
+    ) -> Result<Option<OpenedRoom>, Status> {
         not_reached_before_the_room("ensure_session_room")
     }
 }

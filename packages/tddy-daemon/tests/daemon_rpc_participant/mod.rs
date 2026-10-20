@@ -33,46 +33,34 @@ pub async fn serve_daemon_rpc_participant(
     tokio::spawn(async move { participant.run().await })
 }
 
-/// The room ports a daemon with LiveKit configured wires into its session host, over `rooms` and
-/// `admissions` — what `DaemonSessionHost::new` used to build for itself before LiveKit became a
-/// plugin. The caller keeps the two registries for whatever else is built over them (the split
-/// room port, the admission service).
+/// The LiveKit plugin wired into `host` as the daemon wires it: its room ports over `rooms` and
+/// `admissions` ([`tddy_daemon::livekit_host_ports::with_livekit_room_ports`]), plus the reach and
+/// terminal exposure the runtime builds beside them. The caller keeps the two registries for
+/// whatever else is built over them (the split room port, the admission service).
 pub fn with_the_livekit_room_ports(
     host: DaemonSessionHost,
     rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
     admissions: Arc<tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry>,
 ) -> DaemonSessionHost {
-    let livekit = host.config().livekit.clone();
+    let config = host.config().clone();
     let reach = tddy_daemon_livekit::LiveKitSessionReach::new(
-        host.config().clone(),
+        config.clone(),
         Arc::clone(&rooms),
         tddy_daemon_extensions::IntegrationStatusBoard::new()
             .reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit"),
     );
     let terminal_exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure> =
-        match tddy_daemon_livekit::terminal_exposure::LiveKitTerminalExposure::from_config(
-            host.config(),
-        ) {
+        match tddy_daemon_livekit::terminal_exposure::LiveKitTerminalExposure::from_config(&config)
+        {
             Some(exposure) => exposure,
             None => Arc::new(tddy_daemon_extensions::NoTerminalExposure),
         };
-    host.with_session_rooms(rooms.clone())
-        .with_session_reach(reach)
-        .with_terminal_exposure(terminal_exposure)
-        .with_session_delta_stores(Arc::new(
-            tddy_daemon::session_delta_stores::RoomsHostedByThisDaemon::new(Arc::clone(&rooms)),
-        ))
-        .with_room_broadcast(rooms)
-        .with_room_admission(admissions)
-        .with_room_directory(Arc::new(
-            tddy_daemon_livekit::agent_room_ports::RosterDirectory(
-                tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
-                    livekit.as_ref(),
-                ),
-            ),
-        ))
-        .with_room_tokens(tddy_daemon_livekit::room_tokens::room_token_minter(
-            livekit.as_ref(),
-        ))
-        .with_room_connector(Arc::new(tddy_daemon_livekit::LiveKitRoomConnector))
+    tddy_daemon::livekit_host_ports::with_livekit_room_ports(
+        host,
+        rooms,
+        admissions,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .with_session_reach(reach)
+    .with_terminal_exposure(terminal_exposure)
 }

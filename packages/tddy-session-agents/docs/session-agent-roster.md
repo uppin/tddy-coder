@@ -260,7 +260,7 @@ state. The parts that need no host capability live here as free functions, which
 | `departed_daemon` | `refuse_departed_daemon` | `refuse_departed_daemon`, over the eligible instance ids the host reads |
 | `session_room_participants` | `session_room_participant_identities` | `session_room_participant_identities`, over the room roster |
 | `roster_broadcast` | `broadcast_roster` | `broadcast_roster`: publishing a roster once the host has found the session's room |
-| `opened_session_room` | `require_opened_session_room` | `ensure_session_room_for_agents`, after the host has opened the room |
+| `opened_session_room` | `require_opened_room` | `ensure_session_room_for_agents`, after the host's `SessionReach::open_now` answered: `None` (no integration hosts rooms) refuses a remote agent with `FailedPrecondition` |
 | `spawn_agent_def` | `agent_def_for_spawn` | `agent_def_for_spawn`: the def an agent spawns with, the model registry's assistant winning over a YAML def |
 | `hosted_clone_start` | `start_hosted_agent_clone` | `start_hosted_agent_clone`, after its head (which resolves the workspace session) has run |
 | `agent_records` | `def_tool_names`, `roster_record`, `qualified_agent_id`, `started_agent_id` | already free functions, re-exported by lifecycle's `agent_roster` so `connection_service::{def_tool_names, qualified_agent_id}` resolve |

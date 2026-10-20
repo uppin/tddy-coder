@@ -1171,36 +1171,24 @@ pub async fn build(
             .map_err(|e| anyhow::anyhow!("bind the askpass endpoint on loopback: {e}"))?,
         );
 
-        let mut connection_impl =
-            tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
-                config.clone(),
-                sessions_base_resolver.clone(),
-                tddy_data_dir.clone(),
-                user_resolver,
-                options.spawn_client.clone(),
-                tddy_daemon_livekit::peer_routing::peer_routing_over(&config, livekit_discovery),
-                telegram_hooks.clone().map(|hooks| {
-                    hooks as tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink
-                }),
-                Arc::clone(&shared_claude_cli_manager),
-            )
-            .with_session_rooms(Arc::clone(&shared_session_rooms) as _)
-            .with_room_broadcast(Arc::clone(&shared_session_rooms) as _)
-            .with_room_admission(Arc::clone(&shared_session_admissions) as _)
-            .with_session_delta_stores(Arc::new(
-                crate::session_delta_stores::RoomsHostedByThisDaemon::new(Arc::clone(
-                    &shared_session_rooms,
-                )),
-            ))
-            .with_room_directory(Arc::new(
-                tddy_daemon_livekit::agent_room_ports::RosterDirectory(
-                    tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
-                        config.livekit.as_ref(),
-                    ),
-                ),
-            ))
-            .with_room_tokens(Arc::clone(&room_tokens))
-            .with_room_connector(Arc::new(tddy_daemon_livekit::LiveKitRoomConnector))
+        let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver.clone(),
+            tddy_data_dir.clone(),
+            user_resolver,
+            options.spawn_client.clone(),
+            tddy_daemon_livekit::peer_routing::peer_routing_over(&config, livekit_discovery),
+            telegram_hooks.clone().map(|hooks| {
+                hooks as tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink
+            }),
+            Arc::clone(&shared_claude_cli_manager),
+        );
+        let mut connection_impl = crate::livekit_host_ports::with_livekit_room_ports(
+            connection_impl,
+            Arc::clone(&shared_session_rooms),
+            Arc::clone(&shared_session_admissions),
+            Arc::clone(&room_tokens),
+        )
             .with_session_reach(
                 Arc::clone(&livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
             )

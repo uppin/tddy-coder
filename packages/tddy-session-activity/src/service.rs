@@ -137,6 +137,21 @@ pub trait SessionDeltaStores: Send + Sync {
     ) -> Result<DeltaLookup, Status>;
 }
 
+/// No session room is hosted here, so no session has a delta: every lookup is
+/// [`DeltaLookup::NoRoomHere`], the absence rather than a failure.
+pub struct NoSessionDeltaStores;
+
+impl SessionDeltaStores for NoSessionDeltaStores {
+    fn delta_for_call(
+        &self,
+        _session_id: &str,
+        _call_id: &str,
+        _scope: DeltaScope,
+    ) -> Result<DeltaLookup, Status> {
+        Ok(DeltaLookup::NoRoomHere)
+    }
+}
+
 /// Everything the eight handlers need from the host they run on.
 ///
 /// A struct rather than six positional parameters: they are all wiring, and the two `Arc<dyn _>`
@@ -815,5 +830,19 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
             first_seq: page.first_seq,
             at_oldest: page.at_oldest,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_no_room_hosted_here_every_session_has_no_delta_rather_than_a_failure() {
+        let looked_up = NoSessionDeltaStores
+            .delta_for_call("1780828020298-abc", "call-1", DeltaScope::Call)
+            .expect("no room is an answer, not a failure");
+
+        assert_eq!(looked_up, DeltaLookup::NoRoomHere);
     }
 }

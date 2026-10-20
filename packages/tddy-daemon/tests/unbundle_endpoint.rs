@@ -108,7 +108,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 23] = [
+    const ENDPOINT: [&str; 24] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -173,6 +173,10 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // names no LiveKit crate and the LiveKit crate names no activity service, so only the
         // crate that depends on both can join them.
         "session_delta_stores.rs",
+        // The LiveKit plugin installed behind the session host's room ports: called by
+        // `runtime.rs` and by the suites that stand a host up the way the daemon does, so the two
+        // cannot wire the plugin differently.
+        "livekit_host_ports.rs",
     ];
 
     let mut files = Vec::new();

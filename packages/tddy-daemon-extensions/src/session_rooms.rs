@@ -7,10 +7,6 @@
 
 use std::path::Path;
 
-/// Where a hosted room is, for the response that announces it: the same value the reach port's
-/// `open_now` answers, under the name this port always used.
-pub type OpenedSessionRoom = crate::session_reach::OpenedRoom;
-
 /// The rooms this daemon hosts, by session.
 pub trait SessionRooms: Send + Sync {
     /// Whether this daemon currently hosts `session_id`'s room.

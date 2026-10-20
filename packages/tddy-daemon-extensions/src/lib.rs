@@ -34,7 +34,7 @@ pub use room_tokens::{NoRoomTokens, RoomTokenMinter};
 pub use session_reach::{
     NoSessionReach, OpenedRoom, ReachableSessions, ReachedSession, SessionReach,
 };
-pub use session_rooms::{NoSessionRooms, OpenedSessionRoom, SessionRooms};
+pub use session_rooms::{NoSessionRooms, SessionRooms};
 pub use split_rooms::{
     NoSplitRooms, RemoteSnapshotSource, SessionTokenMinter, SplitAgentJoin, SplitRoomHosting,
     WorktreeSnapshot,

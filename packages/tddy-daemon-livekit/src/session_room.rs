@@ -51,22 +51,6 @@ pub use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, Worktree
 
 pub use tddy_daemon_kernel::peer_forwarding::session_room_name;
 
-/// Whether a session of this type is *facilitated* by the daemon it was started on — that is,
-/// whether it runs an agent here and therefore has a session room of its own.
-///
-/// The PRD's Roles table as a predicate (`docs/ft/daemon/session-room.md` § Roles): the room
-/// belongs to the daemon running the session's agent. `claude-cli` and `cursor-cli` run one here.
-/// A `workspace` session runs none — it is the codebase half of a split session or a standalone
-/// checkout, and whatever agent it has is on another daemon. A `tool` (tddy-coder) session's
-/// terminal is a room `tddy-coder` joins for itself, which this daemon neither creates nor serves.
-///
-/// Deliberately **not** a statement about whether a session type "uses LiveKit". A `claude-cli`
-/// session also bridges its PTY into the lobby, and `ConnectSession` answers about a *terminal*
-/// room none of these types has. Three different rooms; this names one of them.
-pub fn session_type_is_facilitated_here(session_type: &str) -> bool {
-    matches!(session_type.trim(), "claude-cli" | "cursor-cli")
-}
-
 pub use tddy_daemon_kernel::worktree_snapshot::WorktreeSnapshot;
 
 /// The tree object of `worktree_root`'s whole working tree, staged into a temporary index.
@@ -1063,7 +1047,7 @@ pub struct SessionRoomHosting<'a> {
     pub session_dir: &'a Path,
 }
 
-pub use tddy_daemon_extensions::OpenedSessionRoom;
+pub use tddy_daemon_extensions::OpenedRoom;
 
 /// What makes a session's terminal drivable over LiveKit, named here so [`SessionRoomRegistry`] can
 /// establish it in the same breath as the room without knowing what a PTY is.
@@ -1231,7 +1215,7 @@ impl SessionRoomRegistry {
         &self,
         hosting: &SessionRoomHosting<'_>,
         service: S,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
+    ) -> Result<Option<OpenedRoom>, Status> {
         self.open_measured_by(hosting, move || Ok(service), Self::local_checkout(hosting)?)
             .await
     }
@@ -1268,7 +1252,7 @@ impl SessionRoomRegistry {
         hosting: &SessionRoomHosting<'_>,
         service: impl FnOnce() -> Result<S, Status>,
         source: Arc<dyn WorktreeSource>,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
+    ) -> Result<Option<OpenedRoom>, Status> {
         self.open_staged(hosting, service, source)
             .await
             .map_err(RoomOpenFailure::into_status)
@@ -1280,7 +1264,7 @@ impl SessionRoomRegistry {
         hosting: &SessionRoomHosting<'_>,
         service: impl FnOnce() -> Result<S, Status>,
         source: Arc<dyn WorktreeSource>,
-    ) -> Result<Option<OpenedSessionRoom>, RoomOpenFailure> {
+    ) -> Result<Option<OpenedRoom>, RoomOpenFailure> {
         use RoomOpenFailure::{Elsewhere, Server};
         let Some(credentials) = LiveKitCredentials::from_config(hosting.config) else {
             log::debug!(
@@ -1325,7 +1309,7 @@ impl SessionRoomRegistry {
             "session_room: hosting {room_name} as {identity} for worktree {:?}",
             hosting.worktree_root
         );
-        Ok(Some(OpenedSessionRoom {
+        Ok(Some(OpenedRoom {
             room: room_name,
             url: credentials.url,
             server_identity: identity,
@@ -1355,7 +1339,7 @@ impl SessionRoomRegistry {
         hosting: &SessionRoomHosting<'_>,
         service: impl FnOnce() -> Result<S, Status>,
         terminal: &dyn SessionTerminalBridge,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
+    ) -> Result<Option<OpenedRoom>, Status> {
         self.ensure_open_staged(hosting, service, terminal)
             .await
             .map_err(RoomOpenFailure::into_status)
@@ -1368,7 +1352,7 @@ impl SessionRoomRegistry {
         hosting: &SessionRoomHosting<'_>,
         service: impl FnOnce() -> Result<S, Status>,
         terminal: &dyn SessionTerminalBridge,
-    ) -> Result<Option<OpenedSessionRoom>, RoomOpenFailure> {
+    ) -> Result<Option<OpenedRoom>, RoomOpenFailure> {
         let opening = self.opening_lock(hosting.codebase_session_id);
         let _opening_this_session = opening.lock().await;
         let room = match self.already_open(hosting) {
@@ -1425,12 +1409,12 @@ impl SessionRoomRegistry {
     /// daemon's instance id and the URL from its configuration, so a room reported here is
     /// described exactly as the call that opened it described it. Storing the answer would be a
     /// second copy of three values that cannot disagree.
-    fn already_open(&self, hosting: &SessionRoomHosting<'_>) -> Option<OpenedSessionRoom> {
+    fn already_open(&self, hosting: &SessionRoomHosting<'_>) -> Option<OpenedRoom> {
         if !self.hosts(hosting.codebase_session_id) {
             return None;
         }
         let credentials = LiveKitCredentials::from_config(hosting.config)?;
-        Some(OpenedSessionRoom {
+        Some(OpenedRoom {
             room: session_room_name(hosting.codebase_session_id),
             url: credentials.url,
             server_identity: daemon_rpc_identity(hosting.instance_id),
@@ -2664,68 +2648,6 @@ fn unix_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|since| since.as_millis() as u64)
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod snapshot_worktree_tests {
-    use std::process::Command;
-
-    use super::*;
-
-    fn git(dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "Test")
-            .env("GIT_AUTHOR_EMAIL", "t@t.com")
-            .env("GIT_COMMITTER_NAME", "Test")
-            .env("GIT_COMMITTER_EMAIL", "t@t.com")
-            .output()
-            .expect("git must be on PATH");
-        assert!(
-            output.status.success(),
-            "git {args:?} failed in {dir:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    /// A checkout with one committed file and one untracked file beside it.
-    fn a_checkout_with_an_untracked_file() -> tempfile::TempDir {
-        let repo = tempfile::tempdir().unwrap();
-        git(repo.path(), &["init", "-q", "-b", "main"]);
-        std::fs::write(repo.path().join("shipped.txt"), "shipped\n").unwrap();
-        git(repo.path(), &["add", "shipped.txt"]);
-        git(repo.path(), &["commit", "-qm", "seed"]);
-        std::fs::write(repo.path().join("scratch.txt"), "not added\n").unwrap();
-        repo
-    }
-
-    /// Take the index lock the way a developer's own `git add` does for the moment it runs.
-    fn while_another_git_holds_the_index_lock(repo: &Path) {
-        std::fs::write(repo.join(".git").join("index.lock"), b"").unwrap();
-    }
-
-    #[test]
-    fn a_checkout_is_measured_while_another_git_holds_the_index_lock() {
-        // Given a checkout whose index is locked, as it is for the moment any `git add`, `git
-        // commit` or rebase in it is running
-        let repo = a_checkout_with_an_untracked_file();
-        while_another_git_holds_the_index_lock(repo.path());
-
-        // When the room polls it
-        let snapshot = snapshot_worktree(repo.path());
-
-        // Then the poll still measured the checkout. This runs against a worktree a developer is
-        // working in, several times a second: a measurement that needs the index lock both loses
-        // the race — reporting `head_commit: ""`, which reads as a commit to the empty sha — and
-        // takes the lock often enough to fail the developer's own git.
-        assert_eq!(snapshot.branch, "main");
-        assert_eq!(snapshot.untracked_files, 1);
-        assert!(
-            !snapshot.head_commit.is_empty(),
-            "HEAD must still resolve while the index is locked"
-        );
-    }
 }
 
 #[cfg(test)]

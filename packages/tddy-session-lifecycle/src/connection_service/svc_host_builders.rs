@@ -24,21 +24,6 @@ use std::path::PathBuf;
 
 use crate::config::DaemonConfig;
 
-/// No session room is hosted here, so no session has a delta: the absence the activity service
-/// reports as `NoRoomHere`.
-struct NoSessionDeltaStores;
-
-impl tddy_session_activity::service::SessionDeltaStores for NoSessionDeltaStores {
-    fn delta_for_call(
-        &self,
-        _session_id: &str,
-        _call_id: &str,
-        _scope: tddy_session_activity::service::DeltaScope,
-    ) -> Result<tddy_session_activity::service::DeltaLookup, tddy_rpc::Status> {
-        Ok(tddy_session_activity::service::DeltaLookup::NoRoomHere)
-    }
-}
-
 impl DaemonSessionHost {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -85,7 +70,7 @@ impl DaemonSessionHost {
             room_directory: Arc::new(NoRoomDirectory),
             room_tokens: Arc::new(NoRoomTokens),
             room_connector: Arc::new(NoRoomTransport),
-            session_delta_stores: Arc::new(NoSessionDeltaStores),
+            session_delta_stores: Arc::new(tddy_session_activity::NoSessionDeltaStores),
             room_broadcast: Arc::new(NoRoomBroadcast),
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,

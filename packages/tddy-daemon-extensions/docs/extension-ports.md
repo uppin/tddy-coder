@@ -18,9 +18,10 @@ transport the request arrived on, and the integration decides what that costs th
 | Item | Role |
 |---|---|
 | `ReachedSession` | The session at the moment it was reached: `session_id`, `session_dir`, `worktree_root` (the checkout the session's agent works in, on this host) and `arrived_over` (`tddy_rpc::RequestTransport`, stamped by the receiving host; a caller cannot choose it). |
-| `SessionReach` | `session_reached(session, host)`. An `Err` fails the request that reached the session, so an implementation returns one only when that caller cannot be served without what failed. |
+| `SessionReach` | `session_reached(session, host)`. An `Err` fails the request that reached the session, so an implementation returns one only when that caller cannot be served without what failed. `open_now(session, host)` opens the session's room now, for a caller that cannot proceed without it, and fails loudly; `Ok(None)` means no integration hosts rooms on this daemon. The session host's `ensure_session_room` (the agent-roster paths) and the plugin's `OpenSessionRoom` both go through it. |
+| `OpenedRoom` | Where an opened room is: `room`, `url` and `server_identity` (the participant serving the session there). It replaced `session_rooms::OpenedSessionRoom`, the same three fields under the room port's name. |
 | `ReachableSessions` | The session host as an extension sees it, implemented once by the session host: `resolve(session_token, session_id)` authenticates and resolves a session for an extension's own RPC (the result's `arrived_over` is `Direct`, because the extension's RPC, not the core, received the request); `session_services()` is the RPC surface a participant outside this host reaches the session through; `expose_terminal(session_id)` makes the session's terminal drivable from outside this host (a session with no terminal is not a failure). |
-| `NoSessionReach` | No extension wired: a session is reachable on this host and nowhere else. `session_reached` returns `Ok` without consulting the host. |
+| `NoSessionReach` | No extension wired: a session is reachable on this host and nowhere else. `session_reached` returns `Ok` and `open_now` returns `Ok(None)`, neither consulting the host. |
 
 `ConnectSession` reports a reach only for a session whose type this daemon facilitates and which
 records a checkout; the rule lives in one function, `facilitated_checkout`, in
@@ -127,7 +128,6 @@ that a hosted agent clone joins through.
 | `ADMISSION_TOKEN_TTL` | 300 s: the TTL of an admission token, which is also the re-admit cadence and the revocation window. |
 | `RoomDirectory` | `participants(room)`: the identities in a room, from the room server's own listing. `NotFound` when the server has no such room, because a room nobody opened is not the same fact as a room nobody is in. |
 | `NoRoomDirectory` | No room server: every listing is a failed precondition. |
-| `OpenedSessionRoom` | `room`, `url`, `server_identity`: where a hosted room is, for the response that announces it (in `session_rooms`). |
 
 `tddy-daemon-livekit::agent_room_ports` implements them:
 - `SessionRoomRegistry` is the `RoomBroadcast`. It publishes the roster on `SESSION_AGENTS_TOPIC`
@@ -137,8 +137,8 @@ that a hosted agent clone joins through.
 - `SessionAdmissionRegistry` is the `RoomAdmission`.
 - `RosterDirectory(Arc<dyn RoomRoster>)` is the `RoomDirectory`. It answers with sorted identities.
 
-The session host builds the roster's port fields in `tddy-session-lifecycle`'s
-`handler_state::agent_roster`.
+The session host holds each port and hands the roster its own clones of them in
+`tddy-session-lifecycle`'s `handler_state::agent_roster`.
 
 ## The split-rooms port (`split_rooms`)
 
@@ -164,6 +164,38 @@ be resolved. `tddy_daemon::runtime::split_room_hosting` picks `LiveKitSplitRooms
 a `livekit:` block and `NoSplitRooms` otherwise; the session host takes it through
 `with_split_rooms` and defaults to `NoSplitRooms`.
 
+## Wiring the session host
+
+`DaemonSessionHost::new(config, sessions_base_for_user, tddy_data_dir, user_resolver, spawn_client,
+peer_routing, presenter_event_sink, claude_cli_manager)` names no integration: it takes a
+`tddy_host_service::peer_routing::PeerRouting` (`PeerRouting::local_only(&config)` for a machine
+with no peers) and installs every port's null object. A `with_*` builder replaces each:
+
+| Builder | Port | Null object |
+|---|---|---|
+| `with_session_reach` | `SessionReach` | `NoSessionReach` |
+| `with_terminal_exposure` | `TerminalExposure` | `NoTerminalExposure` |
+| `with_session_rooms` | `SessionRooms` | `NoSessionRooms` |
+| `with_room_broadcast` | `RoomBroadcast` | `NoRoomBroadcast` |
+| `with_room_admission` | `RoomAdmission` | `NoRoomAdmission` |
+| `with_room_directory` | `RoomDirectory` | `NoRoomDirectory` |
+| `with_room_tokens` | `RoomTokenMinter` | `NoRoomTokens` |
+| `with_room_connector` | `tddy_room_client::RoomConnector` | `NoRoomTransport` |
+| `with_split_rooms` | `SplitRoomHosting` | `NoSplitRooms` |
+| `with_session_delta_stores` | `tddy_session_activity::SessionDeltaStores` | answers `NoRoomHere` for every session |
+
+`tddy-session-lifecycle/tests/host_without_integrations.rs` holds that a host given none of them
+starts, connects to locally, resumes and deletes a session.
+
+The daemon wires the LiveKit plugin in `tddy_daemon::runtime::build`: one `SessionRoomRegistry` and
+one `SessionAdmissionRegistry` for the whole daemon, installed through
+`tddy_daemon::livekit_host_ports::with_livekit_room_ports` (rooms, broadcast, delta stores,
+admission, directory, tokens, connector), then the reach, terminal exposure and split rooms the
+runtime shares with other consumers. The suites in `tddy-daemon/tests` that stand a host up over a
+real room call the same function (`tests/daemon_rpc_participant/mod.rs`), so they cannot wire the
+plugin differently from the daemon. The delta adapter, `RoomsHostedByThisDaemon`, lives in
+`tddy-daemon` (`session_delta_stores.rs`) until the plugin may depend on `tddy-session-activity`.
+
 ## The satellite rule and its ratchet
 
 **Nothing in this crate may reach a LiveKit crate**, transitively, so a core crate that depends on
@@ -175,8 +207,7 @@ over the workspace graph read by
 |---|---|
 | `the_extension_ports_reach_the_crates_they_are_built_on` | The walk from this crate sees `tddy-rpc`, so the next test is not vacuous. |
 | `the_extension_ports_reach_no_livekit_crate` | `reaches("tddy-daemon-extensions")` shares nothing with `LIVEKIT_FAMILY`. |
-| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` | Every workspace crate that names a LiveKit crate directly is on `PLUGINS`, `WIRING`, `WIRING_WITH_A_LIBRARY` or `KNOWN_OFFENDERS`. |
-| `every_known_offender_still_names_a_livekit_crate` | A crate that stopped naming one must be struck from `KNOWN_OFFENDERS`, so the list says what the tree does. |
+| `only_plugins_and_wiring_name_a_livekit_crate` | Every workspace crate that names a LiveKit crate directly is on `PLUGINS`, `WIRING` or `WIRING_WITH_A_LIBRARY`. |
 | `a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary` | The sources of every `WIRING_WITH_A_LIBRARY` crate, apart from `src/main.rs`, contain no path into `livekit`, `livekit_api` or `livekit_protocol`. |
 
 The lists, in the test file:
@@ -194,18 +225,13 @@ The lists, in the test file:
   the edge appears on the crate; the shape test above holds the library sources clean, which keeps the
   allowance to the binary's wiring. These libraries join rooms through
   [`tddy-room-client`](../../tddy-room-client/docs/room-client.md).
-- `KNOWN_OFFENDERS` (library crates that still name a LiveKit crate): `tddy-agent-launch`,
-  `tddy-session-lifecycle`. `tddy-daemon-auth`, `tddy-daemon-rpc` and
-  `tddy-session-files` left it once their peer forwards went through
-  `tddy_daemon_kernel::peer_calls` and the OAuth tunnel moved into the plugin. `tddy-session-agents`
-  left it once the roster and its clones went through the agent-roster room ports, and
-  `tddy-session-split` once split placement went through the split-rooms port.
 
 "Names" is a `[dependencies]` or `[build-dependencies]` entry, optional ones included;
 `[dev-dependencies]` are not counted, because a test may stand up a real LiveKit server. The
 transitive walk is applied to this crate only; for every other crate the ratchet holds the direct
 edge, which is what each cluster that moves behind a port can remove.
 
-**The list only shrinks.** A crate that starts naming a LiveKit crate and is on no list fails the
-second test; an offender that stops fails the third until it is struck off. Adding a crate to
-`KNOWN_OFFENDERS` to make a build pass is the one edit the ratchet exists to make conspicuous.
+**No library crate names LiveKit.** The `#satellite` stack shrank a `KNOWN_OFFENDERS` list of library
+crates that still named a LiveKit crate, node by node, from eighteen to none, and its last node
+deleted the list. A crate that starts naming a LiveKit crate and is on none of the three lists fails
+the third test; the fix is a port, or the code moving into the plugin, never a new list entry.
