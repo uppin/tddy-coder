@@ -42,6 +42,10 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-task = { path = "../tddy-task" }
+# An installed Zed extension's languages, registered after the built-ins so `anchors` and a static
+# `check` answer their files as the cold CLI does (#reshape extension-outline). Brings wasmtime,
+# through tree-sitter's `wasm` feature.
+tddy-zed-extensions = { path = "../tddy-zed-extensions" }
 # `net` for the binary's own listeners: a TCP one for `--grpc` and an AF_UNIX one for
 # `--grpc-uds`. The service itself binds nothing.
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "signal", "process", "net"] }

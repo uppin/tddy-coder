@@ -37,6 +37,16 @@ pub trait ItemResolver {
     /// a segment is absent, or when a segment matches more than one outline node. Nothing searches a
     /// file other than `file`.
     fn resolve_item(&mut self, file: &str, item: &ItemPath) -> Result<ResolvedItem>;
+
+    /// The path every item path in `file` begins with, as `[root, module, …]` — what `anchors
+    /// --items` prefixes a bare name with.
+    ///
+    /// The default is Cargo's ([`module_path_of`]): the crate, then the modules. A language with no
+    /// module system names the file itself — an installed extension's outline backend answers
+    /// `[<file relative to the root>]` (`#reshape` extension-outline, R4).
+    fn module_of(&mut self, root: &Path, file: &str) -> Result<Vec<String>> {
+        module_path_of(root, file)
+    }
 }
 
 /// The module path of a source file inside its package, as `[crate, module, …]`.

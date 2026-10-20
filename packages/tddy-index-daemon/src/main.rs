@@ -205,3 +205,18 @@ fn send_stderr_to(path: &std::path::Path) -> anyhow::Result<()> {
         path.display()
     )
 }
+
+/// The languages this process routes after the built-ins: every installed Zed extension's under
+/// `<tddy data dir>/extensions` (`TDDY_DATA_DIR`, else `$HOME/.tddy`), each grammar that does not
+/// load logged once, by name, and leaving the other languages working (`#reshape`
+/// extension-outline, R8). The cold CLI registers the same through `tddy-tools`, which is what
+/// keeps the two answering the same anchors.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-extension-outline): wired into the service's ports once implemented"
+)]
+fn installed_languages() -> anyhow::Result<tddy_code_restructuring::SupportRegistry> {
+    // TODO(reshape-extension-outline): implement — `ExtensionsDir::resolve()`, then
+    // `SupportRegistry::new().with_installed_extensions(..)`, logging each `GrammarLoadError` once.
+    todo!("installed_languages")
+}

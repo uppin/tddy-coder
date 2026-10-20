@@ -1,0 +1,14 @@
+# A declarative extension around the vendored TOML grammar (`../grammars/tree-sitter-toml/`): one
+# language, no code. The suites install it by copying this directory and that grammar into
+# `installed/demo-toml/`, so the binary is committed once.
+id = "demo-toml"
+name = "Demo TOML"
+version = "0.1.0"
+schema_version = 1
+authors = ["tddy <dev@tddy.invalid>"]
+description = "TOML outlines for the extension-outline suites."
+repository = "https://example.invalid/demo-toml"
+
+[grammars.toml]
+repository = "https://github.com/tree-sitter/tree-sitter-toml"
+rev = "342d9be207c2dba869b9967124c679b5e6fd0ebe"

@@ -92,6 +92,20 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
     report(outcome, rehearsal)
 }
 
+/// [`run`], routing the files the built-ins do not claim to `installed` — the languages a front end
+/// registered after them. `tddy-tools` passes the installed Zed extensions'
+/// (`tddy_zed_extensions::InstalledExtensions`), which this crate cannot load itself without
+/// depending on the crate that implements its own interface.
+///
+/// An `anchors`, or a static `check`, whose files a support with no server claims starts no
+/// rust-analyzer (`#reshape` extension-outline, R5–R7).
+pub async fn run_with_installed(args: RestructureArgs, installed: SupportRegistry) -> Result<()> {
+    let _ = (args, installed);
+    // TODO(reshape-extension-outline): implement — `options.installed = Arc::new(installed)`, and
+    // `needs_lsp_client` false for an `anchors` whose file `installed` claims.
+    todo!("run_with_installed")
+}
+
 /// Write a run's result to the console this front end owns, and say whether the run succeeded.
 ///
 /// The wording is [`crate::console`]'s, which is what makes the same operation read the same

@@ -81,3 +81,30 @@ every node has its companion (ask the developer first). Not a changeset companio
 ## Exploration 2 — node notes
 
 Node-specific exploration is carried by the PRD's Background and the whole-work Exploration 1 above; the contract commit adds what its tests need.
+
+## Exploration 3 — contract stage (2026-10-20)
+
+- **`anchor_for` is gone.** `anchors-outline` (#609) deleted `LanguageBackend::anchor_for`; item anchors run
+  `items_anchor` / `item_anchor_at` / `resolve_item_anchors` / `span_of` (`item_anchor.rs`) over `ItemResolver` /
+  `ItemAtResolver`, routed by `BackendRegistry` (`registry.rs`). Adjacency is `item_anchor::covering_run`.
+- **No root reaches a server-less backend.** `ItemResolver::resolve_item(file, item)` takes the file relative to the
+  root; Rust's resolver gets the root from rust-analyzer (`item_path.rs` `outline_of` → `workspace_root()`).
+  `LanguageSupport::backend(ServerHandle)` (K11) carries none, and the index daemon serves several roots, so binding
+  at registration is wrong → `LanguageBackend::bind_workspace` + `BackendRegistry::bind_workspace`.
+- **The module prefix is Cargo's.** `items_anchor` calls `module_path_of(root, file)`, which refuses a file outside a
+  package's `src/` → `ItemResolver::module_of` (default `module_path_of`).
+- **Registration cannot live in `tddy-code-restructuring`.** `tddy-zed-extensions` must depend on it to implement
+  `LanguageSupport`; `restructure_cli::run` and `runner::dispatch` take no registry → `Options::installed`,
+  `run_with_installed`; `tddy-tools/src/index_client.rs:41,120` and the daemon build the registry.
+- **The runner is rust-analyzer-bound today:** `needs_lsp_client` is true for every `anchors`; `item_anchors` refuses
+  without a client; the daemon's `serve_anchors` (`queries.rs`) acquires a client before anything else. Green routes
+  around all three for a server-less support's file.
+- **Static check vs K16:** `check_plan` (`check_entry_points.rs:209`) gives item-anchored ops K16's findings
+  (`item_anchor_findings` → `refuse_a_foreign_prefix`, Cargo prefix) and then `registry_for_static()` (Rust only) →
+  `NoBackend` for `.toml`.
+- **tree-sitter:** 0.26.13 `wasm` pins `wasmtime-c-api` 36 and re-exports `tree_sitter::wasmtime`; a WASM `Language`
+  is usable only by the parser holding the `WasmStore` that loaded it. tree-sitter-toml's `table` node ends at the next
+  table's line, column 0 (probe: `[server]` 0:0–4:0), hence R3's trimmed span end. A text file as `.wasm` fails with
+  `Failed to parse Wasm: failed to parse dylink section of Wasm module`.
+- **Grammar candidates checked:** Zed's `ini` (grammar justinmk/tree-sitter-ini, not MIT-confirmed, 5.9 KB) and `toml`
+  (tree-sitter/tree-sitter-toml, MIT, 26.9 KB) — toml chosen.

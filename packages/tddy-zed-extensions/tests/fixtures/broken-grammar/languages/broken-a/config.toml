@@ -1,0 +1,3 @@
+name = "Broken A"
+grammar = "broken"
+path_suffixes = ["broken-a"]
