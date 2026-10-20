@@ -81,3 +81,17 @@ every node has its companion (ask the developer first). Not a changeset companio
 ## Exploration 2 — node notes
 
 Node-specific exploration is carried by the PRD's Background and the whole-work Exploration 1 above; the contract commit adds what its tests need.
+
+## Exploration 3 — contract commit (2026-10-20)
+
+- **Data dir rule.** `tddy-daemon`'s `tddy_data_dir_for` (`runtime.rs:583`) is `TDDY_DATA_DIR`, else the config's
+  `tddy_data_dir`, else `default_tddy_data_dir()` (`tmp/.tddy` in **debug** builds, `None` in release —
+  `tddy-session-store/src/output/writer.rs:105`), else `$HOME/.tddy`. This crate follows the changeset/PRD rule —
+  `TDDY_DATA_DIR`, else `$HOME/.tddy` — and does **not** take the debug `tmp/.tddy` step (that would need a
+  `tddy-session-store` dependency for one constant). Open for the developer: a debug `tddy-tools extensions` installs
+  into `~/.tddy/extensions`, while a debug daemon reads `tmp/.tddy`.
+- **Fixture registry.** `wiremock` 0.6 is already `tddy-tools`' dev-dependency (in `Cargo.lock`), and its
+  `query_param` matchers pin R4's four parameters, so a request missing one is a 404 the install must refuse. No new
+  crate.
+- **Hostile archive entries.** `tar::Builder::append_data` refuses `..` and absolute names, so the test support writes
+  the name into the GNU header bytes directly (`with_raw_entry`).

@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: New feature (extension installation)
 **Stack**: `#reshape` 19/24, branch `feature/reshape/extension-install`, base `feature/reshape/fn-sizes-rest`, green wave 1.
+**PR**: [#678](https://github.com/uppin/tddy-coder/pull/678) (draft)
 
 ## Initial Discovery
 
@@ -30,12 +31,18 @@ registry or a local directory. Nothing loads them yet.
 | Symbol | Where |
 |---|---|
 | crate `tddy-zed-extensions` | `packages/tddy-zed-extensions` |
-| `ExtensionsDir` (`resolve()`: `TDDY_DATA_DIR` else `$HOME/.tddy`, then `/extensions`; `installed()`, `index()`) | `src/dir.rs` |
-| `ExtensionManifest` (+ `GrammarEntry`, `LanguageServerEntry`, `LibEntry`) parsed from `extension.toml` | `src/manifest.rs` |
-| `install_from_registry(dir, id, version)`, `install_from_path(dir, path)`, `list(dir)`, `remove(dir, id)` | `src/install.rs` |
-| `Index` / `IndexEntry { id, version, source, installed_at }` (`index.json`) | `src/index.rs` |
-| `ExtensionsArgs` / `ExtensionsCommand { Install, List, Remove }` | `src/cli.rs` |
+| `ExtensionsDir` — `under_data_dir(data_dir)`, `resolve()` (env, CLI only), `resolve_from(tddy_data_dir, home)` (`TDDY_DATA_DIR` else `$HOME/.tddy`, then `/extensions`), `root()`, `installed()`, `extension(id)`, `index()` | `src/dir.rs` |
+| `ExtensionManifest` (+ `GrammarEntry`, `LanguageServerEntry`, `LibEntry`, `LibKind`), `parse`, `check_schema_version`, `SUPPORTED_SCHEMA_VERSIONS` | `src/manifest.rs` |
+| `ExtensionError` — one variant per R3/R4 refusal, `file`/`entry` relative to the extension root | `src/error.rs` |
+| `Registry` — `at(api)`, `from_env()` (`TDDY_ZED_EXTENSIONS_API` else `DEFAULT_API`, CLI only), `api()` | `src/registry.rs` |
+| `install_from_registry(dir, registry, id, version)` (async), `install_from_path(dir, path)`, `list(dir)`, `remove(dir, id)`, `InstallOutcome { Installed, Replaced, AlreadyInstalled }`, `InstalledExtension` + `line()` (R6) | `src/install.rs` |
+| `Index { extensions }` + `load`/`save`, `IndexEntry { id, version, source, installed_at }` (Unix seconds), `ExtensionSource { Registry, Path }` (`index.json`) | `src/index.rs` |
+| `ExtensionsArgs` / `ExtensionsCommand { Install, List, Remove }`, `InstallArgs`, `RemoveArgs`, `run(args)` | `src/cli.rs` |
 | `Subcommand::Extensions(ExtensionsArgs)` | `packages/tddy-tools/src/main.rs` |
+
+Library functions take the directory and the registry **explicitly**; only `cli::run` reads the environment
+(`TDDY_DATA_DIR`, `HOME`, `TDDY_ZED_EXTENSIONS_API`), so tests never race on process env. That is why
+`install_from_registry` takes a `Registry` the wave-1 table did not list.
 
 ### The rules (the contract)
 
@@ -62,22 +69,37 @@ registry or a local directory. Nothing loads them yet.
 
 ## Draft PR contract
 
-- Surface: the crate with every public function `todo!()` (`TODO(reshape-extension-install)`), the manifest types
-  real (they are plain serde structs), the clap args and the `tddy-tools` arm wired.
-- Failing tests (`packages/tddy-zed-extensions/tests/install_acceptance.rs`, a local HTTP fixture registry serving a
-  `.tar.gz` built by the test from `tests/fixtures/demo-lang/` — PRD F2 a):
+Published in commit 2 (the first push of this PR, not its deliverable):
+
+- **Surface**: the crate with every install/list/remove/index/dir-resolution body `todo!()`
+  (`TODO(reshape-extension-install)`); the manifest types, `ExtensionError`, `Registry`, the path accessors and the clap
+  args real; the `tddy-tools` arm wired. Dependencies: `tar` (new, consented), `flate2`, `toml` 0.9, `reqwest` 0.12
+  (`rustls-tls`, no default features — as `tddy-tools`), `thiserror` 2; dev: `wiremock` 0.6 (already `tddy-tools`'
+  fixture HTTP server — no new crate), `tokio`, `tempfile`, `pretty_assertions`.
+- **Fixture** `tests/fixtures/demo-lang/`: `extension.toml` (id `demo-lang`, 0.1.0, schema 1, grammar `demo`),
+  `languages/demo/config.toml` (`Demo`, `path_suffixes = ["demo"]`), and `grammars/demo.wasm` — a **placeholder**: the
+  8-byte empty WASM module header. This node only checks the file is present; `extension-outline` (K20) vendors a
+  real grammar.
+- **Test support** `tests/support/mod.rs`: `a_data_dir()` (temp data dir + `ExtensionsDir`), `the_demo_lang_archive()`
+  (builds the `.tar.gz` from the fixture — PRD F2 a — with `with_version`, `with_id`, `without`, and `with_raw_entry`,
+  which writes a `..` name into the tar header verbatim), `a_fixture_registry()` (wiremock answering only
+  `/extensions/<id>[/<version>]/download` with the four R4 query parameters).
+- **Failing tests** — `packages/tddy-zed-extensions/tests/install_acceptance.rs`:
   `installs_from_the_registry_into_the_installed_layout`, `records_the_install_in_the_index`,
   `lists_what_an_extension_provides`, `installs_a_dev_extension_from_a_path`, `refuses_an_archive_entry_that_climbs_out`,
   `refuses_a_grammar_the_archive_does_not_ship`, `refuses_a_manifest_whose_id_differs`,
   `a_refused_install_keeps_the_previous_version`, `reinstalling_the_same_version_changes_nothing`,
-  `removes_an_extension_and_its_index_entry`, `removing_an_unknown_id_names_it`,
-  `everything_happens_under_tddy_data_dir`.
-  - unit: `manifest_parses_zeds_fields`, `schema_version_outside_the_range_is_refused`.
+  `reinstalling_a_different_version_replaces_it` (added: PRD F3 a's other half),
+  `removes_an_extension_and_its_index_entry`, `removing_an_unknown_id_names_it`, `everything_happens_under_tddy_data_dir`.
+  - unit (`src/manifest.rs`): `schema_version_outside_the_range_is_refused` (red);
+    `manifest_parses_zeds_fields` is **green on purpose** — the manifest types are plain serde structs, real in the
+    contract.
 
 ## Green wave
 
 **Wave:** 1 of 4.
-**Greenable independently:** yes.
+**Greenable independently:** yes — every test drives only this crate, against a temp data dir and a local
+fixture registry; no parent surface is reached (the contract's tests found no new edge).
 **Concurrent with:** every other wave-1 node (K11–K18).
 **Blocks:** none (K20's fixtures write the installed layout directly).
 
@@ -87,6 +109,9 @@ registry or a local directory. Nothing loads them yet.
 
 ## Scope
 
+- [x] Create failing acceptance tests (contract commit)
+- [x] Run acceptance tests (verify they fail) — 13 acceptance + 1 unit fail on this node's `todo!()`
+- [x] TDD Red — write failing unit/integration tests
 - [ ] USER REVIEW of the acceptance tests (ticked at `/green` start)
 - [ ] Crate, manifest, dir, index
 - [ ] Registry and path install (R2–R5), list, remove
@@ -104,4 +129,11 @@ _None yet._
 
 ## Validation Results
 
-_Not run._
+Contract commit (2026-10-20), scoped to the touched packages:
+
+- `cargo clippy -p tddy-zed-extensions --all-targets -- -D warnings` — clean.
+- `cargo clippy -p tddy-tools --all-targets -- -D warnings` — clean.
+- `cargo fmt --all --check` — clean.
+- `cargo test -p tddy-zed-extensions --no-fail-fast` — 1 passed (`manifest_parses_zeds_fields`), 14 failed, every one a
+  `todo!()` panic in this crate (`install.rs`, `dir.rs`, `manifest.rs`).
+- `cargo test -p tddy-tools --no-fail-fast` — all pass.
