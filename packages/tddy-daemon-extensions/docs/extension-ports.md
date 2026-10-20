@@ -140,6 +140,30 @@ that a hosted agent clone joins through.
 The session host builds the roster's port fields in `tddy-session-lifecycle`'s
 `handler_state::agent_roster`.
 
+## The split-rooms port (`split_rooms`)
+
+Split placement — the agent on this daemon, its checkout on another — reaches its session room
+through this port. The facilitating daemon (the one running the agent) hosts the room over a
+checkout it does not hold and spawns the agent with a join the port issued. Split placement requires
+a room integration; there is no other placement to fall back to.
+
+| Item | Role |
+|---|---|
+| `WorktreeSnapshot` | Everything one poll of a checkout observed: `head_commit`, `branch`, `changed_paths`, `changed_files`, `lines_added`, `lines_removed`, `untracked_files`, `wip_tree`. `tracked_diff_differs` compares the tracked diff only (HEAD and `untracked_files` excluded). `tddy_daemon_kernel::worktree_snapshot` and `tddy_daemon_livekit::session_room` re-export it. |
+| `SessionTokenMinter` | `mint()`: the credential one poll authenticates with, signed per poll. Infallible. |
+| `RemoteSnapshotSource` | `snapshot(session_token, codebase_session_id, codebase_instance_id)`: one `GetWorktreeSnapshot` call to the codebase daemon. |
+| `SplitAgentJoin` | `url`, `room`, `token`: the room join a split agent is spawned with. It carries no signing credential. |
+| `SplitRoomHosting` | `host_remote_worktree(session_id, session_dir, codebase_session_id, codebase_instance_id, snapshots, minter, services)`: open the session's room measuring the remote checkout. `agent_join(room, identity, ttl)`: the agent's join. |
+| `NoSplitRooms` | No room integration: both methods return `FailedPrecondition` "cannot place a session's codebase on another daemon: this daemon has no room integration configured". |
+
+`tddy_daemon_livekit::LiveKitSplitRooms` implements the port over the daemon's one
+`SessionRoomRegistry` (so deletion closes the room a split start opens), `RemoteCheckout`, and the
+`RoomTokenMinter`. Its `agent_join` takes the URL from the common room's connect strings and refuses
+with `FailedPrecondition` "cannot place a session's codebase on another daemon: …" when they cannot
+be resolved. `tddy_daemon::runtime::split_room_hosting` picks `LiveKitSplitRooms` when the config has
+a `livekit:` block and `NoSplitRooms` otherwise; the session host takes it through
+`with_split_rooms` and defaults to `NoSplitRooms`.
+
 ## The satellite rule and its ratchet
 
 **Nothing in this crate may reach a LiveKit crate**, transitively, so a core crate that depends on
@@ -171,10 +195,11 @@ The lists, in the test file:
   allowance to the binary's wiring. These libraries join rooms through
   [`tddy-room-client`](../../tddy-room-client/docs/room-client.md).
 - `KNOWN_OFFENDERS` (library crates that still name a LiveKit crate): `tddy-agent-launch`,
-  `tddy-session-lifecycle`, `tddy-session-split`. `tddy-daemon-auth`, `tddy-daemon-rpc` and
+  `tddy-session-lifecycle`. `tddy-daemon-auth`, `tddy-daemon-rpc` and
   `tddy-session-files` left it once their peer forwards went through
   `tddy_daemon_kernel::peer_calls` and the OAuth tunnel moved into the plugin. `tddy-session-agents`
-  left it once the roster and its clones went through the agent-roster room ports.
+  left it once the roster and its clones went through the agent-roster room ports, and
+  `tddy-session-split` once split placement went through the split-rooms port.
 
 "Names" is a `[dependencies]` or `[build-dependencies]` entry, optional ones included;
 `[dev-dependencies]` are not counted, because a test may stand up a real LiveKit server. The

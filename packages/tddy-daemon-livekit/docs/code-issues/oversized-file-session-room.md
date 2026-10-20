@@ -6,7 +6,7 @@
 **Metrics:** **2,874 production lines** (3,029 total, first `#[cfg(test)]` at `:2875`) · budget 500 · **5.7× over**
 **Thresholds breached:** length 2874 > 500
 **Restructure:** required — `extract_module --to_file` seams, designed below, not applied
-**Status:** Open — regressed 2026-10-17 (+61 from #623, `#satellite` 1/13; deferred with the developer's consent), then narrowed 2026-10-20 by #633 (2,935 → 2,885, still over 500); **unclaimed** · pre-existing; #508 rewrote comments only (net 0 lines)
+**Status:** Open — regressed 2026-10-17 (+61 from #623, `#satellite` 1/13; deferred with the developer's consent), then narrowed 2026-10-20 by #633 (2,935 → 2,885) and #634 (2,885 → 2,857), still over 500; **unclaimed** · pre-existing; #508 rewrote comments only (net 0 lines)
 
 ## Measurement history
 
@@ -16,6 +16,7 @@
 | 2026-10-17 | 2,874 → 2,935 (+61) | `#satellite` 1/13 (#623): `RoomOpenFailure` and `open_staged` / `ensure_open_staged`, which tag a failed open with the stage that failed so only a server failure reports LiveKit unreachable. The new reach logic itself went in `session_reach.rs`, as planned. Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` |
 
 | 2026-10-20 | 2,935 → 2,885 (−50) | `#satellite` 11/13 (#633): `WorktreeSnapshot` moves to `tddy-daemon-kernel::worktree_snapshot` and `OpenedSessionRoom` to `tddy-daemon-extensions` (re-exported here); the registry gains the `agents_outbox` field. Smaller, still 5.8× over. Seam A starts at the measurement functions now that `WorktreeSnapshot` is gone |
+| 2026-10-20 | 2,885 → 2,857 (−28) | `#satellite` 12/13 (#634): `SessionTokenMinter` and `RemoteSnapshotSource` move to `tddy_daemon_extensions::split_rooms` (re-exported here), and `WorktreeSnapshot` is defined there too (the kernel re-exports it). Smaller, still 5.7× over. Not split here: #633 and #635 in the same stack touch this file |
 
 ## What the gate found
 

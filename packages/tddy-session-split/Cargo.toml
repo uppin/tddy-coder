@@ -5,6 +5,9 @@ edition = "2021"
 description = "Split and sandboxed-codebase sessions: the paired agent/codebase start, resume and teardown"
 
 [dependencies]
+# `SplitRoomHosting` / `SplitAgentJoin`: split placement reaches its room through these, and
+# `SessionTokenMinter` / `RemoteSnapshotSource` are what that room is measured with.
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 anyhow = "1"
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -15,11 +18,11 @@ tddy-cli-sessions = { path = "../tddy-cli-sessions" }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
-tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-github = { path = "../tddy-github" }
-tddy-livekit = { path = "../tddy-livekit" }
+# `PeerRouting` — which daemon serves an addressed request, and the common room a forward travels.
+tddy-host-service = { path = "../tddy-host-service" }
 tddy-projects = { path = "../tddy-projects" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }
@@ -37,3 +40,8 @@ uuid = { version = "1", features = ["v4", "v7"] }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = "3"
+# `split_room_hosting_port.rs` scripts the codebase host on the common room, so it reads and
+# answers the forwarded `StartSession` in its wire format.
+prost = "0.13"
+# `NoRoomTransport`: the agent topic a split start is built with, with no room transport wired.
+tddy-room-client = { path = "../tddy-room-client" }

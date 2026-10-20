@@ -210,6 +210,11 @@ pub struct DaemonSessionHost {
     /// [`tddy_daemon_extensions::TerminalExposure`]. [`tddy_daemon_extensions::NoTerminalExposure`]
     /// until the composition root installs an integration with [`Self::with_terminal_exposure`].
     terminal_exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure>,
+    /// How a split session's room is hosted over a checkout on another daemon, and the join its
+    /// agent is spawned with — see [`tddy_daemon_extensions::SplitRoomHosting`].
+    /// [`tddy_daemon_extensions::NoSplitRooms`], which refuses split placement, until the
+    /// composition root installs an integration with [`Self::with_split_rooms`].
+    split_rooms: Arc<dyn tddy_daemon_extensions::SplitRoomHosting>,
     /// Where a clone's `SSH_ASKPASS` helper asks for a key passphrase. `None` on a host the
     /// daemon runtime did not build.
     askpass: Option<Arc<tddy_host_service::askpass::AskpassEndpoint>>,

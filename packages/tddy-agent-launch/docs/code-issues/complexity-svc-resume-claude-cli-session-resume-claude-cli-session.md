@@ -25,7 +25,7 @@
 PR #518 threaded `sessions_base` through so a resumed sandboxed-codebase session could re-provision
 its jail, and added the co-located branch selecting `resume_colocated_jail_wiring` over
 `resume_split_wiring`. The co-located branch exists because `resume_split_wiring` reaches
-`SplitLiveKitRoom::from_config`, which refuses on a daemon with no LiveKit — exactly the daemon this
+`SplitAgentRoom::issued_by`, which refuses on a daemon with no room integration — exactly the daemon this
 placement is defined by.
 
 ## What would close it

@@ -8,7 +8,7 @@
 //! here instead — the same `workspace_start_request`, the same caller-chosen session id, the same
 //! pairing fields — so the jail, the tool routing, the resume and the teardown are consumed
 //! rather than rebuilt. Three things it does *not* have: a common room, a LiveKit forward, and a
-//! [`crate::split_session::SplitLiveKitRoom`]. A placement whose halves share a host must start on
+//! [`crate::split_session::SplitAgentRoom`]. A placement whose halves share a host must start on
 //! a daemon that has never joined a room.
 
 use tddy_rpc::{Response, Status};

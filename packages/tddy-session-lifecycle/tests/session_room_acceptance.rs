@@ -36,12 +36,15 @@ use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory, SIGNING_KEY_FILE};
-use tddy_daemon_extensions::{IntegrationState, IntegrationStatusBoard};
+use tddy_daemon_extensions::{
+    IntegrationState, IntegrationStatusBoard, NoSplitRooms, SplitRoomHosting,
+};
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_livekit::room_tokens::room_token_minter;
 use tddy_daemon_livekit::session_room::{
     session_room_name, SessionRoomRegistry, WORKTREE_ACTIVITY_TOPIC,
 };
-use tddy_daemon_livekit::{LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
+use tddy_daemon_livekit::{LiveKitSessionReach, LiveKitSplitRooms, LIVEKIT_INTEGRATION_ID};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Request, RequestMetadata, RequestTransport, RpcMessage, RpcResult};
@@ -333,6 +336,9 @@ struct FacilitatingDaemon {
     /// The daemon's signing identity — what the browser's token is signed with, and what it mints
     /// a split agent's own credential with.
     tokens: SessionTokens,
+    /// The split-room port the host was built with: the plugin's when it is wired, which issues a
+    /// split agent's join to its session room.
+    split_rooms: Arc<dyn SplitRoomHosting>,
     sessions_base: PathBuf,
     staging_base: PathBuf,
     ws_url: String,
@@ -426,6 +432,14 @@ impl FacilitatingDaemon {
             Arc::clone(&rooms),
             integrations.reporter(LIVEKIT_INTEGRATION_ID, "LiveKit"),
         );
+        let split_rooms: Arc<dyn SplitRoomHosting> = match plugin {
+            ThePlugin::Wired => Arc::new(LiveKitSplitRooms::new(
+                config.clone(),
+                Arc::clone(&rooms),
+                room_token_minter(config.livekit.as_ref()),
+            )),
+            ThePlugin::NotWired => Arc::new(NoSplitRooms),
+        };
         let host = DaemonSessionHost::new(
             config.clone(),
             resolver,
@@ -437,7 +451,8 @@ impl FacilitatingDaemon {
             Arc::clone(&agents),
         )
         .with_staging_base_dir(staging.path().to_path_buf())
-        .with_session_rooms(rooms);
+        .with_session_rooms(rooms)
+        .with_split_rooms(Arc::clone(&split_rooms));
         let host = match plugin {
             ThePlugin::Wired => host
                 .with_session_reach(reach.clone())
@@ -463,6 +478,7 @@ impl FacilitatingDaemon {
             config,
             common_room,
             tokens,
+            split_rooms,
             sessions_base: sessions.path().to_path_buf(),
             staging_base: staging.path().to_path_buf(),
             ws_url: ws_url.unwrap_or_default(),
@@ -806,6 +822,7 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
 
     // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
     let wiring = tddy_session_lifecycle::split_session::prepare_split_agent_wiring(
+        daemon.split_rooms.as_ref(),
         &daemon.config,
         &daemon.tokens,
         &session_dir,
@@ -860,6 +877,7 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
 
     // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
     let wiring = tddy_session_lifecycle::split_session::prepare_split_agent_wiring(
+        daemon.split_rooms.as_ref(),
         &daemon.config,
         &daemon.tokens,
         &session_dir,

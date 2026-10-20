@@ -2043,35 +2043,7 @@ pub struct RemoteCheckout {
     session_dir: PathBuf,
 }
 
-/// The credential one poll authenticates with.
-///
-/// A minter rather than a token, because a token is a thing that expires: a session token lives
-/// [`tddy_github::SESSION_TOKEN_TTL`] — five minutes — while a room outlives the agent it belongs
-/// to, so anything frozen at session start stops being accepted by the codebase daemon long before
-/// the room stops asking, and every poll after that reads as an unreachable peer. This daemon holds
-/// its own signing key, so it can issue one per poll and needs no long-lived bearer token in memory
-/// at all.
-///
-/// Infallible: a minter can only be built where a signing key and a verified identity are already
-/// proven to exist, so "nothing to sign with" is a precondition of constructing one and never a
-/// condition a poll has to handle.
-pub trait SessionTokenMinter: Send + Sync {
-    fn mint(&self) -> String;
-}
-
-/// One `GetWorktreeSnapshot` call, as the room's poll loop needs it.
-///
-/// A trait so the room does not depend on `DaemonSessionHost`: the daemon supplies the real
-/// implementation, and the dependency runs one way.
-#[async_trait::async_trait]
-pub trait RemoteSnapshotSource: Send + Sync {
-    async fn snapshot(
-        &self,
-        session_token: &str,
-        codebase_session_id: &str,
-        codebase_instance_id: &str,
-    ) -> Result<WorktreeSnapshot, Status>;
-}
+pub use tddy_daemon_extensions::split_rooms::{RemoteSnapshotSource, SessionTokenMinter};
 
 impl RemoteCheckout {
     pub fn new(

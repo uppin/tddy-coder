@@ -105,10 +105,6 @@ impl SplitHost for DaemonSessionHost {
     fn session_agents(&self) -> Arc<SplitSessionAgents> {
         Arc::new(self.session_agents_service())
     }
-
-    fn session_room_roster(&self) -> Result<tddy_rpc::MultiRpcService, Status> {
-        Arc::new(self.clone()).session_room_roster()
-    }
 }
 
 impl LaunchHost for DaemonSessionHost {

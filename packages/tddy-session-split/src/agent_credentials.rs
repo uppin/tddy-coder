@@ -104,7 +104,7 @@ impl RoomPollTokenMinter {
     }
 }
 
-impl tddy_daemon_livekit::session_room::SessionTokenMinter for RoomPollTokenMinter {
+impl tddy_daemon_extensions::SessionTokenMinter for RoomPollTokenMinter {
     /// [`tddy_github::SESSION_TOKEN_TTL`] and no longer: a poll that outlives its own credential is
     /// the bug this exists to remove, and the next poll mints another.
     fn mint(&self) -> String {

@@ -77,6 +77,7 @@ impl SplitSessions {
             .await?;
 
         let wiring = crate::split_session::prepare_split_agent_wiring(
+            self.split_rooms.as_ref(),
             &self.config,
             self.session_tokens()?,
             session_dir,
