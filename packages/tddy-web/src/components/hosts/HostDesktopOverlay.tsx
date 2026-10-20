@@ -24,6 +24,7 @@ import { HostPromptKind, HostService } from "../../gen/host_pb";
 import {
   Protocol,
   ScreenSharingService,
+  type ScreenSharingTarget,
   type StartStreamResponse,
 } from "../../gen/screen_sharing_pb";
 import { useAuthContext } from "../../hooks/authProvider";
@@ -63,6 +64,24 @@ const PROBED_HOST = "127.0.0.1";
 /** What a target created from a probe reading is called, so an operator can tell it apart later. */
 const PROBED_TARGET_LABEL = "Desktop";
 
+/** Whether `target` is the one a connect on this channel reuses: same display, or same endpoint. */
+function isTargetOfChannel(
+  target: ScreenSharingTarget,
+  port: number,
+  protocol: Protocol,
+  x11Display: number | undefined,
+): boolean {
+  if (x11Display !== undefined) {
+    return target.x11Display === x11Display && target.protocol === protocol;
+  }
+  return (
+    target.x11Display === undefined &&
+    target.host === PROBED_HOST &&
+    target.port === port &&
+    target.protocol === protocol
+  );
+}
+
 /**
  * The host-scoped target for the channel being opened, creating one the first time.
  *
@@ -86,12 +105,7 @@ async function targetForChannel(
 ): Promise<string> {
   const existing = await client.listHostTargets({ sessionToken, daemonInstanceId: hostId });
   const match = existing.targets.find((target) =>
-    x11Display === undefined
-      ? target.x11Display === undefined &&
-        target.host === PROBED_HOST &&
-        target.port === port &&
-        target.protocol === protocol
-      : target.x11Display === x11Display && target.protocol === protocol,
+    isTargetOfChannel(target, port, protocol, x11Display),
   );
   if (match) return match.id;
 

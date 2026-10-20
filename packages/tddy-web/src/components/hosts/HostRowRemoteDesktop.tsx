@@ -18,7 +18,7 @@
  * control that provably cannot work is worse than no control.
  */
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { DesktopChannelKind, ProbeOutcome, type HostRemoteDesktop } from "../../gen/host_pb";
 import { Protocol } from "../../gen/screen_sharing_pb";
 import { useHostConnection } from "../../rpc/connections/registry";
@@ -114,6 +114,51 @@ export function connectableDesktop(
   return connectableChannels(readings)[0] ?? null;
 }
 
+interface ChannelReadingProps {
+  instanceId: string;
+  reading: HostRemoteDesktop;
+  /** Whether this host's connection carries media; without it no Connect is rendered. */
+  carriesMedia: boolean;
+  onConnect: (desktop: ConnectableDesktop) => void;
+}
+
+/** One reading's two facts, plus its Connect when the channel is connectable over media. */
+function ChannelReading({ instanceId, reading, carriesMedia, onConnect }: ChannelReadingProps) {
+  const protocol = PROTOCOL_NAMES[reading.protocol];
+  if (!protocol) return null;
+  const x11 = isX11Display(reading);
+  const connectable = connectableChannel(reading);
+  return (
+    <>
+      <span
+        data-testid={
+          x11
+            ? `hosts-row-${instanceId}-channel-${reading.channelId}`
+            : `hosts-row-${instanceId}-${protocol.slug}`
+        }
+        className="flex gap-1"
+        title={reading.failureReason || undefined}
+      >
+        <span className="font-medium">{x11 ? reading.label : protocol.label}</span>
+        <span>{reading.canBridge ? "Bridge ready" : "No bridge"}</span>
+        <span>·</span>
+        <span>{desktopFact(reading)}</span>
+      </span>
+      {carriesMedia && connectable && (
+        <button
+          data-testid={`hosts-row-${instanceId}-connect-desktop`}
+          data-channel-id={connectable.channelId}
+          type="button"
+          className="px-2 py-0.5 text-xs border border-border rounded hover:bg-accent"
+          onClick={() => onConnect(connectable)}
+        >
+          Connect
+        </button>
+      )}
+    </>
+  );
+}
+
 export function HostRowRemoteDesktop({ instanceId, readings }: HostRowRemoteDesktopProps) {
   // The one predicate every media surface is gated on — never re-derived from a `Room`, a transport
   // or a status string. See `rpc/connections/useHasCapability`.
@@ -130,36 +175,14 @@ export function HostRowRemoteDesktop({ instanceId, readings }: HostRowRemoteDesk
         {readings.map((reading) => {
           const protocol = PROTOCOL_NAMES[reading.protocol];
           if (!protocol) return null;
-          const x11 = isX11Display(reading);
-          const connectable = connectableChannel(reading);
           return (
-            <Fragment key={reading.channelId || protocol.slug}>
-              <span
-                data-testid={
-                  x11
-                    ? `hosts-row-${instanceId}-channel-${reading.channelId}`
-                    : `hosts-row-${instanceId}-${protocol.slug}`
-                }
-                className="flex gap-1"
-                title={reading.failureReason || undefined}
-              >
-                <span className="font-medium">{x11 ? reading.label : protocol.label}</span>
-                <span>{reading.canBridge ? "Bridge ready" : "No bridge"}</span>
-                <span>·</span>
-                <span>{desktopFact(reading)}</span>
-              </span>
-              {carriesMedia && connectable && (
-                <button
-                  data-testid={`hosts-row-${instanceId}-connect-desktop`}
-                  data-channel-id={connectable.channelId}
-                  type="button"
-                  className="px-2 py-0.5 text-xs border border-border rounded hover:bg-accent"
-                  onClick={() => setOpenDesktop(connectable)}
-                >
-                  Connect
-                </button>
-              )}
-            </Fragment>
+            <ChannelReading
+              key={reading.channelId || protocol.slug}
+              instanceId={instanceId}
+              reading={reading}
+              carriesMedia={carriesMedia}
+              onConnect={setOpenDesktop}
+            />
           );
         })}
       </span>

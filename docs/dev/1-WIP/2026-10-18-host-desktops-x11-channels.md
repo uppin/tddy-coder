@@ -298,7 +298,7 @@ the bridge's is in `start_bridge_process`).
   and part of the published contract surface.
 ### /analyze-clean-code
 
-**Run 2026-10-20: score C before cleanup** (1 must-refactor, 3 needs-attention, 4 minor).
+**Run 2026-10-20: score C before cleanup, B after** (1 must-refactor, 3 needs-attention, 4 minor).
 
 | Metric | Excellent | Acceptable | Needs attention | Must refactor |
 |---|---|---|---|---|
@@ -326,6 +326,17 @@ the bridge's is in `start_bridge_process`).
 - [MINOR, duplication] `x11vnc.rs::{reap, forget}` mirror `bridge_lifecycle.rs::{reap_bridge,
   forget_bridge_pid}`. A shared process table would change n1's bridge-lifecycle module. Kept,
   noted for the post-stack restructure.
+
+**After `refactor` (score B).** `start_host_stream_impl` 90 → 70 (its X11 block is
+`serve_x11_display_to_the_bridge` and `spawn_host_bridge`). Not taken further: what is left is the
+pre-existing 67-line body, and n6 (#658, open below this PR) touches `host_targets.rs` and records
+that function in `docs/dev/todo/2026-10-20-screen-sharing-start-functions-over-length.md`, so the
+parent's target lookup was not extracted here. `with_x11_channels` 52 → 25 (`socket_dir_of`,
+`x11_channel_reading`); `HostRowRemoteDesktop` 60 → 39 (`ChannelReading`); `X11VNC_HOST` named
+once; `isTargetOfChannel` named. `./test -p tddy-screen-sharing` 64 passed, 0 failed;
+`./test -p tddy-host-service` 198 passed, 1 failed: `github_cli_environment::the_gh_asked_as_a_user_is_given_none_of_the_daemons_github_tokens`
+(`gh … did not answer within 5s`), a load timeout in a test this PR does not touch, which passed
+re-run alone (1 passed). Clippy clean on both; Cypress 4 specs 25 passed, 0 failed.
 
 **File length gate (3.5).** `config.rs` 1,557 → 1,575 and `host_tooling.rs` 775 → 806, both
 already over budget and grown here; neither touched by #660 or any lower node. Not decomposed:

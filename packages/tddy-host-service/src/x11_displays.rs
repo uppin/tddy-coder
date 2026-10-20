@@ -93,11 +93,7 @@ pub(crate) fn with_x11_channels(
     screen_sharing: &ScreenSharingConfig,
     probe: &Arc<dyn RemoteDesktopProbe>,
 ) -> Vec<DesktopReachability> {
-    let socket_dir = if screen_sharing.x11_socket_dir.is_empty() {
-        DEFAULT_X11_SOCKET_DIR
-    } else {
-        screen_sharing.x11_socket_dir.as_str()
-    };
+    let socket_dir = socket_dir_of(screen_sharing);
     let displays = match list_x11_displays(Path::new(socket_dir)) {
         Ok(displays) => displays,
         Err(e) => {
@@ -110,36 +106,57 @@ pub(crate) fn with_x11_channels(
         &tddy_daemon_kernel::config::resolve_x11vnc_binary_path(screen_sharing),
     );
     let mut readings = endpoints;
-    for display in displays {
-        let served_on_vnc_port = u16::try_from(u32::from(DEFAULT_VNC_PORT) + display.number)
-            .ok()
-            .map(|port| probe.probe(DesktopProtocol::Vnc, port));
-        if served_on_vnc_port
-            .as_ref()
-            .is_some_and(|reading| reading.desktop_reachable)
-        {
-            continue;
-        }
-        // The bridge half of `can_bridge` is the VNC bridge's, which any endpoint reading of the
-        // same probe carries; asking the probe about the display's own port yields it as well.
-        let vnc_bridge_present = served_on_vnc_port
-            .map(|reading| reading.can_bridge)
-            .unwrap_or_else(|| {
-                probe
-                    .probe(DesktopProtocol::Vnc, DEFAULT_VNC_PORT)
-                    .can_bridge
-            });
-        readings.push(DesktopReachability {
-            outcome: ProbeOutcome::Ok,
-            channel: DesktopChannel::X11Display(display.number),
-            protocol: DesktopProtocol::Vnc,
-            can_bridge: x11vnc_present && vnc_bridge_present,
-            desktop_reachable: true,
-            // No port until x11vnc is started for the display.
-            port: 0,
-        });
-    }
+    readings.extend(
+        displays
+            .iter()
+            .filter_map(|display| x11_channel_reading(display, probe, x11vnc_present)),
+    );
     readings
+}
+
+/// `screen_sharing.x11_socket_dir`, or [`DEFAULT_X11_SOCKET_DIR`] when it is not configured.
+fn socket_dir_of(screen_sharing: &ScreenSharingConfig) -> &str {
+    if screen_sharing.x11_socket_dir.is_empty() {
+        DEFAULT_X11_SOCKET_DIR
+    } else {
+        screen_sharing.x11_socket_dir.as_str()
+    }
+}
+
+/// The X11 channel reading for `display`, or `None` when the display is already served on its VNC
+/// port (`5900 + N`) and so is offered as that endpoint instead.
+fn x11_channel_reading(
+    display: &X11Display,
+    probe: &Arc<dyn RemoteDesktopProbe>,
+    x11vnc_present: bool,
+) -> Option<DesktopReachability> {
+    let served_on_vnc_port = u16::try_from(u32::from(DEFAULT_VNC_PORT) + display.number)
+        .ok()
+        .map(|port| probe.probe(DesktopProtocol::Vnc, port));
+    if served_on_vnc_port
+        .as_ref()
+        .is_some_and(|reading| reading.desktop_reachable)
+    {
+        return None;
+    }
+    // The bridge half of `can_bridge` is the VNC bridge's, which any endpoint reading of the
+    // same probe carries; asking the probe about the display's own port yields it as well.
+    let vnc_bridge_present = served_on_vnc_port
+        .map(|reading| reading.can_bridge)
+        .unwrap_or_else(|| {
+            probe
+                .probe(DesktopProtocol::Vnc, DEFAULT_VNC_PORT)
+                .can_bridge
+        });
+    Some(DesktopReachability {
+        outcome: ProbeOutcome::Ok,
+        channel: DesktopChannel::X11Display(display.number),
+        protocol: DesktopProtocol::Vnc,
+        can_bridge: x11vnc_present && vnc_bridge_present,
+        desktop_reachable: true,
+        // No port until x11vnc is started for the display.
+        port: 0,
+    })
 }
 
 #[cfg(all(test, unix))]

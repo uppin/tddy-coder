@@ -6,8 +6,11 @@ use super::ScreenSharingServiceImpl;
 use crate::bridge_config::{
     browser_livekit_url, host_bridge_identity, host_bridge_key, host_livekit_room,
     host_target_as_bridge_target, host_target_to_proto, prepare_bridge, screenshare_track_name,
+    PreparedBridge,
 };
-use tddy_daemon_kernel::config::{resolve_x11vnc_binary_path, ScreenSharingConfig};
+use crate::x11vnc::X11VNC_HOST;
+use crate::BridgeStarted;
+use tddy_daemon_kernel::config::{resolve_x11vnc_binary_path, DaemonConfig, ScreenSharingConfig};
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
@@ -131,30 +134,10 @@ impl ScreenSharingServiceImpl {
         // An X11 display has no VNC server until one is started for it, and it is started before the
         // bridge so the bridge has something to connect to.
         if let Some(display) = target.display {
-            // A reopen stops the old bridge *before* its x11vnc. Stopping the x11vnc first makes the
-            // old bridge lose its VNC server and exit on its own while its key still names it, and
-            // its reaper then stops whatever x11vnc the key has by then — the one being started
-            // here. Forgotten first, the old bridge's exit no longer reaches the new x11vnc.
-            self.terminate_bridge(&bridge_key).await;
-            let x11vnc = self
-                .x11vnc
-                .start(
-                    &bridge_key,
-                    &resolve_x11vnc_binary_path(&screen_sharing_of(config)),
-                    display,
-                )
+            self.serve_x11_display_to_the_bridge(&mut prepared, &bridge_key, display, config)
                 .await?;
-            prepared.spawn_config.host = "127.0.0.1".to_string();
-            prepared.spawn_config.port = x11vnc.port;
         }
-        let started = match self.spawn_bridge(prepared, bridge_key.clone()).await {
-            Ok(started) => started,
-            Err(status) => {
-                // A start that failed leaves no x11vnc behind; stopping a key with none is a no-op.
-                self.x11vnc.stop(&bridge_key).await;
-                return Err(status);
-            }
-        };
+        let started = self.spawn_host_bridge(prepared, bridge_key).await?;
 
         Ok(Response::new(StartStreamResponse {
             livekit_room,
@@ -164,6 +147,48 @@ impl ScreenSharingServiceImpl {
             width: started.width,
             height: started.height,
         }))
+    }
+
+    /// Start an x11vnc for `display` under `bridge_key` and point `prepared` at it.
+    async fn serve_x11_display_to_the_bridge(
+        &self,
+        prepared: &mut PreparedBridge,
+        bridge_key: &str,
+        display: u32,
+        config: &DaemonConfig,
+    ) -> Result<(), Status> {
+        // A reopen stops the old bridge *before* its x11vnc. Stopping the x11vnc first makes the
+        // old bridge lose its VNC server and exit on its own while its key still names it, and
+        // its reaper then stops whatever x11vnc the key has by then — the one being started
+        // here. Forgotten first, the old bridge's exit no longer reaches the new x11vnc.
+        self.terminate_bridge(bridge_key).await;
+        let x11vnc = self
+            .x11vnc
+            .start(
+                bridge_key,
+                &resolve_x11vnc_binary_path(&screen_sharing_of(config)),
+                display,
+            )
+            .await?;
+        prepared.spawn_config.host = X11VNC_HOST.to_string();
+        prepared.spawn_config.port = x11vnc.port;
+        Ok(())
+    }
+
+    /// Spawn a host-scoped bridge, stopping any x11vnc started for it when the spawn fails.
+    async fn spawn_host_bridge(
+        &self,
+        prepared: PreparedBridge,
+        bridge_key: String,
+    ) -> Result<BridgeStarted, Status> {
+        match self.spawn_bridge(prepared, bridge_key.clone()).await {
+            Ok(started) => Ok(started),
+            Err(status) => {
+                // A start that failed leaves no x11vnc behind; stopping a key with none is a no-op.
+                self.x11vnc.stop(&bridge_key).await;
+                Err(status)
+            }
+        }
     }
 
     pub(crate) async fn stop_host_stream_impl(
@@ -186,6 +211,6 @@ impl ScreenSharingServiceImpl {
 }
 
 /// The daemon's `screen_sharing:` block, or the defaults of one when it has none.
-fn screen_sharing_of(config: &tddy_daemon_kernel::config::DaemonConfig) -> ScreenSharingConfig {
+fn screen_sharing_of(config: &DaemonConfig) -> ScreenSharingConfig {
     config.screen_sharing.clone().unwrap_or_default()
 }

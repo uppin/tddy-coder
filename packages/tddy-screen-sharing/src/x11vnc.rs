@@ -29,6 +29,10 @@ use tokio::sync::Mutex;
 /// a display it cannot open makes it exit, and one that never accepts is reported, not waited on.
 pub const DEFAULT_X11VNC_ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The address x11vnc listens on: it is started `-localhost`, so loopback is the only place it
+/// accepts a connection.
+pub const X11VNC_HOST: &str = "127.0.0.1";
+
 /// How long to wait between connect attempts while x11vnc comes up.
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
@@ -144,7 +148,7 @@ impl X11vncServers {
     ) -> Result<(), Status> {
         let accepting = async {
             loop {
-                if tokio::net::TcpStream::connect(("127.0.0.1", port))
+                if tokio::net::TcpStream::connect((X11VNC_HOST, port))
                     .await
                     .is_ok()
                 {
@@ -172,7 +176,7 @@ impl X11vncServers {
 /// There is a window between releasing it and x11vnc binding it; x11vnc failing to bind makes it
 /// exit, which the start reports.
 fn a_free_loopback_port() -> Result<u16, Status> {
-    std::net::TcpListener::bind(("127.0.0.1", 0))
+    std::net::TcpListener::bind((X11VNC_HOST, 0))
         .and_then(|listener| listener.local_addr())
         .map(|address| address.port())
         .map_err(|e| Status::internal(format!("finding a free port for x11vnc: {e}")))
