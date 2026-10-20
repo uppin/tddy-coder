@@ -11,6 +11,14 @@
 //! Zed gets a server's command from the extension's WASM unless the user set
 //! `lsp.<id>.binary.path`; tddy runs no WASM here, so that setting is the only command there is
 //! (R2). Every key this tier does not read is accepted and ignored, as Zed accepts it.
+//!
+//! `languages.<Name>.language_servers` is read too, in the shape of Zed's per-language setting, for
+//! one purpose only: a server that lists a language in its manifest's `opt_in_languages` serves it
+//! only when that list names the server (R1, [`ExtensionSettings::names_server`]):
+//!
+//! ```json
+//! { "languages": { "Demo TOML": { "language_servers": ["fake-ls", "..."] } } }
+//! ```
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -24,12 +32,24 @@ use crate::error::ExtensionError;
 /// The settings file's name inside the extensions directory.
 pub const SETTINGS_FILE: &str = "settings.json";
 
-/// The whole settings file. Only `lsp` is read.
+/// The whole settings file. Only `lsp` and `languages.<Name>.language_servers` are read.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct ExtensionSettings {
     /// One entry per language server id — the id of a manifest's `[language_servers.<id>]`.
     #[serde(default)]
     pub lsp: BTreeMap<String, ServerSettings>,
+    /// One entry per language, keyed by the language's name as its `config.toml` spells it.
+    #[serde(default)]
+    pub languages: BTreeMap<String, LanguageSettings>,
+}
+
+/// `languages.<Name>`. Only `language_servers` is read.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct LanguageSettings {
+    /// Zed's per-language server list, verbatim: server ids, `!<id>` to disable one, and `...` for
+    /// "the rest of the language's servers".
+    #[serde(default)]
+    pub language_servers: Vec<String>,
 }
 
 /// `lsp.<id>`.
@@ -80,6 +100,18 @@ impl ExtensionSettings {
         let _ = dir;
         // TODO(reshape-extension-language-server): implement
         todo!("ExtensionSettings::load")
+    }
+
+    /// Whether `languages.<language>.language_servers` names `server` — the only way a server that
+    /// lists `language` in its manifest's `opt_in_languages` comes to serve it (R1).
+    ///
+    /// Named means listed as the bare id. `!<id>` disables it, and `...` does not name it: the rest
+    /// of a language's servers are its default ones, and an opt-in server is not among them — as in
+    /// Zed. No `languages.<language>` entry names nothing.
+    pub fn names_server(&self, language: &str, server: &str) -> bool {
+        let _ = (language, server);
+        // TODO(reshape-extension-language-server): implement
+        todo!("ExtensionSettings::names_server")
     }
 
     /// `lsp.<server>`, if the file has one.
@@ -141,6 +173,7 @@ mod tests {
                         settings: json!({ "elixirLS": { "fetchDeps": false } }),
                     },
                 )]),
+                languages: BTreeMap::new(),
             }
         );
     }
@@ -165,6 +198,54 @@ mod tests {
                 .and_then(|binary| binary.path),
             Some("/usr/bin/taplo".to_string())
         );
+    }
+
+    #[test]
+    fn a_zed_language_servers_list_parses_unchanged() {
+        // Given a per-language server list as Zed's own settings.json spells it
+        let text = json!({
+            "languages": { "Demo TOML": { "language_servers": ["fake-ls", "!taplo", "..."], "tab_size": 2 } }
+        })
+        .to_string();
+
+        // When it is parsed
+        let settings = ExtensionSettings::parse(&text).expect("the list parses");
+
+        // Then the list is read verbatim, and the language's other keys are not
+        assert_eq!(
+            settings.languages,
+            BTreeMap::from([(
+                "Demo TOML".to_string(),
+                LanguageSettings {
+                    language_servers: vec!["fake-ls".into(), "!taplo".into(), "...".into()],
+                },
+            )])
+        );
+    }
+
+    #[test]
+    fn only_a_bare_id_names_a_server_for_a_language() {
+        // Given Demo TOML's list naming fake-ls, disabling taplo and keeping the rest
+        let settings = ExtensionSettings {
+            languages: BTreeMap::from([(
+                "Demo TOML".to_string(),
+                LanguageSettings {
+                    language_servers: vec!["fake-ls".into(), "!taplo".into(), "...".into()],
+                },
+            )]),
+            ..ExtensionSettings::default()
+        };
+
+        // When each server is asked after, for Demo TOML and for a language with no list
+        let named = (
+            settings.names_server("Demo TOML", "fake-ls"),
+            settings.names_server("Demo TOML", "taplo"),
+            settings.names_server("Demo TOML", "other-ls"),
+            settings.names_server("Other", "fake-ls"),
+        );
+
+        // Then only the bare id is named: `!` disables, `...` names nobody, no list names nothing
+        assert_eq!(named, (true, false, false, false));
     }
 
     #[test]

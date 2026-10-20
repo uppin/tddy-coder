@@ -24,6 +24,7 @@ pub mod operations;
 mod plan_flush;
 mod plan_upkeep;
 pub mod queries;
+pub mod readiness;
 pub mod service;
 pub mod status;
 mod symbols;
@@ -35,6 +36,10 @@ pub use service::{
     build_code_index_entry, build_code_index_entry_with_supports, CodeIndexPorts,
     CodeIndexServiceImpl, EventStream,
 };
+/// The registry [`serves_workspace`] asks, re-exported so a caller that holds only this crate — the
+/// session tools' index-backed executor — can be handed the host's (`#reshape`
+/// extension-language-server, R7).
+pub use tddy_code_restructuring::SupportRegistry;
 
 pub mod proto {
     /// The canonical message types, the `tddy-rpc` service trait and server, and the tonic adapter
@@ -83,7 +88,11 @@ pub fn serves_workspace(
     root: &std::path::Path,
     supports: &tddy_code_restructuring::SupportRegistry,
 ) -> bool {
-    let _ = (root, supports);
+    // Kept reachable while the walk is a contract: a Rust worktree is served exactly as before.
+    if is_rust_workspace(root) {
+        return true;
+    }
+    let _ = supports;
     // TODO(reshape-extension-language-server): implement
     todo!("serves_workspace")
 }

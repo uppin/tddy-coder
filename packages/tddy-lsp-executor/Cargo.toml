@@ -37,6 +37,10 @@ tonic = "0.12"
 hyper-util = { version = "0.1", features = ["tokio"] }
 pretty_assertions = { workspace = true }
 tddy-rpc = { path = "../tddy-rpc" }
+# A language support standing in for an installed extension's implements `tddy-code-restructuring`'s
+# `LanguageSupport` (`#reshape` extension-language-server, R7). Already in this crate's tree through
+# `tddy-index-daemon`; test-only.
+tddy-code-restructuring = { path = "../tddy-code-restructuring" }
 tempfile = "3"
 tokio-stream = { version = "0.1", features = ["net"] }
 tower = "0.5"

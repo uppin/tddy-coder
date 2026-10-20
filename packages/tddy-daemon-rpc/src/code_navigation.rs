@@ -16,10 +16,17 @@
 //! `CodeSession` — the code pane's bidirectional stream — lives in [`crate::code_session`];
 //! `WatchCodeIndex` follows `code_index.WatchRoot` for the session's worktree and never warms it —
 //! it dials only an index daemon that is already running ([`IndexChannelSource::connect_if_running`]).
+//!
+//! Whether a worktree has an index at all is [`has_an_index`]: a Rust workspace, or a tree holding a
+//! file one of the host's language supports claims and serves — an extension-only worktree whose
+//! language has a configured server (`#reshape` extension-language-server, R7). The host hands its
+//! [`SupportRegistry`] over with [`CodeNavigationServiceImpl::with_supports`]; without one, only a
+//! Rust workspace has an index, as before extensions existed.
 
 use std::path::Path;
 use std::sync::Arc;
 
+use tddy_code_restructuring::SupportRegistry;
 use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_rpc::{Request, Response, Status};
@@ -78,6 +85,9 @@ pub struct CodeNavigationServiceImpl {
     worktrees: Arc<WorktreeServiceImpl>,
     /// The index daemon this runtime manages; `None` when no `index_daemon:` section asked for one.
     index_daemon: Option<Arc<dyn IndexChannelSource>>,
+    /// The languages beyond Rust the index daemon serves — the same registry the host built it
+    /// over. Empty unless [`CodeNavigationServiceImpl::with_supports`] says otherwise.
+    supports: Arc<SupportRegistry>,
 }
 
 /// An authorised request, ready to be asked of the index: a client on the index daemon's channel
@@ -99,7 +109,17 @@ impl CodeNavigationServiceImpl {
         Self {
             worktrees,
             index_daemon,
+            supports: Arc::new(SupportRegistry::new()),
         }
+    }
+
+    /// Asks `supports` — the registry the host built its index daemon over — whether a worktree
+    /// has an index ([`has_an_index`]), so an extension-only worktree is warmed and followed rather
+    /// than reported `NONE` (`#reshape` extension-language-server, R7).
+    #[must_use]
+    pub fn with_supports(mut self, supports: Arc<SupportRegistry>) -> Self {
+        self.supports = supports;
+        self
     }
 
     /// The one path every method takes: authorise the worktree as `WorktreeService` does, refuse a
@@ -146,6 +166,13 @@ pub(crate) fn index_daemon_unavailable(err: &IndexChannelError) -> Status {
 /// Why the index daemon's channel could not be had, as one line.
 pub(crate) fn index_daemon_error(err: &IndexChannelError) -> String {
     format!("index daemon: {err}")
+}
+
+/// Whether `root` has a code index: what [`tddy_index_daemon::serves_workspace`] answers for the
+/// host's `supports`. The one question every caller here asks before warming a worktree, following
+/// it, or reporting it `NONE`.
+pub(crate) fn has_an_index(root: &Path, supports: &SupportRegistry) -> bool {
+    tddy_index_daemon::serves_workspace(root, supports)
 }
 
 /// A client on the index daemon's channel — dialling it starts the index daemon on first use — or
@@ -266,7 +293,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         let worktree = session_worktree(&session_dir)?;
         let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
         let (Some(worktree), Some(source)) = (
-            worktree.filter(|root| tddy_index_daemon::is_rust_workspace(root)),
+            worktree.filter(|root| has_an_index(root, &self.supports)),
             self.index_daemon.as_ref(),
         ) else {
             // Nothing to follow: an empty stream, so no indicator shows.
@@ -300,6 +327,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         Ok(Response::new(crate::code_session::start(
             Arc::clone(&self.worktrees),
             self.index_daemon.clone(),
+            Arc::clone(&self.supports),
             request.into_inner(),
         )))
     }

@@ -56,9 +56,16 @@ impl ServerChoice {
     /// R1–R4 for `language`, an extension language `manifest` declares, from `settings` read at
     /// `settings_file`.
     ///
-    /// R1: a `[language_servers.<id>]` whose `language` or `languages` names `language.name`.
-    /// Which of several such servers serves it is an open question (the changeset's R1 names
-    /// `opt_in_languages`, which `LanguageServerEntry` does not carry).
+    /// R1: a `[language_servers.<id>]` whose `language` or `languages` names `language.name` —
+    /// unless the entry's `opt_in_languages` lists the language too, in which case it serves it
+    /// only when `settings` names it there ([`ExtensionSettings::names_server`]:
+    /// `languages.<Name>.language_servers` lists the bare id); an opt-in language no setting names
+    /// is [`ServerChoice::Undeclared`] for that server. Which of several qualifying servers serves
+    /// it is still open (see the changeset).
+    ///
+    /// The launch's `language_id` is the entry's `language_ids` value for `language.name` when it
+    /// has one; otherwise it is left empty, and the allow-list opens documents as the support's id
+    /// (`language-support`'s default).
     pub fn for_language(
         manifest: &ExtensionManifest,
         language: &ExtensionLanguage,
@@ -89,7 +96,7 @@ pub fn client_capabilities() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{BinarySettings, ServerSettings};
+    use crate::settings::{BinarySettings, LanguageSettings, ServerSettings};
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -119,7 +126,36 @@ mod tests {
     fn settings_for(server: &str, settings: ServerSettings) -> ExtensionSettings {
         ExtensionSettings {
             lsp: BTreeMap::from([(server.to_string(), settings)]),
+            ..ExtensionSettings::default()
         }
+    }
+
+    /// Settings running fake-ls from `/opt/fake-ls`, with nothing else.
+    fn fake_ls_configured() -> ExtensionSettings {
+        settings_for(
+            "fake-ls",
+            ServerSettings {
+                binary: Some(BinarySettings {
+                    path: Some("/opt/fake-ls".into()),
+                    ..BinarySettings::default()
+                }),
+                ..ServerSettings::default()
+            },
+        )
+    }
+
+    /// `settings` with `languages."Demo TOML".language_servers` set to `servers`.
+    fn naming_for_demo_toml(
+        mut settings: ExtensionSettings,
+        servers: &[&str],
+    ) -> ExtensionSettings {
+        settings.languages.insert(
+            "Demo TOML".into(),
+            LanguageSettings {
+                language_servers: servers.iter().map(|id| id.to_string()).collect(),
+            },
+        );
+        settings
     }
 
     fn the_choice(manifest: &ExtensionManifest, settings: &ExtensionSettings) -> ServerChoice {
@@ -242,6 +278,58 @@ mod tests {
         assert_eq!(
             choice.launch().map(|launch| launch.language_id.as_str()),
             Some("toml")
+        );
+    }
+
+    #[test]
+    fn without_language_ids_the_documents_language_id_is_left_to_the_support() {
+        // Given fake-ls declared for Demo TOML with no `language_ids`, and configured
+        let manifest =
+            a_manifest_declaring("[language_servers.fake-ls]\nlanguages = [\"Demo TOML\"]\n");
+
+        // When the language's server is chosen
+        let choice = the_choice(&manifest, &fake_ls_configured());
+
+        // Then its launch names no language id, so the allow-list's default — the support's id —
+        // opens its documents
+        assert_eq!(
+            choice.launch().map(|launch| launch.language_id.as_str()),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn an_opt_in_language_does_not_pick_the_server() {
+        // Given fake-ls declared for Demo TOML only as an opt-in language, and configured
+        let manifest = a_manifest_declaring(
+            "[language_servers.fake-ls]\nlanguages = [\"Demo TOML\"]\n\
+             opt_in_languages = [\"Demo TOML\"]\n",
+        );
+
+        // When the language's server is chosen with settings that do not name it for Demo TOML —
+        // `...` included — and with settings that do
+        let unnamed = the_choice(&manifest, &fake_ls_configured());
+        let rest_only = the_choice(
+            &manifest,
+            &naming_for_demo_toml(fake_ls_configured(), &["..."]),
+        );
+        let named = the_choice(
+            &manifest,
+            &naming_for_demo_toml(fake_ls_configured(), &["fake-ls", "..."]),
+        );
+
+        // Then it serves Demo TOML only where `languages."Demo TOML".language_servers` names it
+        assert_eq!(
+            (
+                unnamed,
+                rest_only,
+                named.launch().map(|launch| launch.program.as_str())
+            ),
+            (
+                ServerChoice::Undeclared,
+                ServerChoice::Undeclared,
+                Some("/opt/fake-ls")
+            )
         );
     }
 

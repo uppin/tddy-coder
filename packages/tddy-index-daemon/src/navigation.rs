@@ -9,17 +9,16 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use tddy_code_restructuring::backends::rust::ServerChatter;
 use tddy_lsp::{Location, LspClient, Position};
 use tddy_rpc::Status;
 
 use crate::activity::Activity;
-use crate::graph::state_of_quiescence;
 use crate::index::WorkspaceIndex;
 use crate::proto::code_index::{
     CodeLocation, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, IndexState,
     ReferencesRequest, ReferencesResponse, SourcePosition, SourceRange,
 };
+use crate::readiness::{index_state_of, Readiness};
 use crate::status::status_of_lsp;
 
 /// The language id a document of this host's one language server is announced under.
@@ -105,7 +104,12 @@ async fn locations_at(
         .iter()
         .map(|location| code_location(root, location))
         .collect::<Result<_, _>>()?;
-    Ok((locations, index_state_of(&asked.client)))
+    // Rust's rule: only `.rs` files are routed here today. TODO(reshape-extension-language-server):
+    // an extension file's answer is read by its support's launch (`Readiness::of_launch`).
+    Ok((
+        locations,
+        index_state_of(&asked.client, Readiness::ServerStatus),
+    ))
 }
 
 async fn hover_at(
@@ -122,24 +126,9 @@ async fn hover_at(
         .map_err(|failure| status_of_lsp(&failure))?;
     Ok(HoverResponse {
         markdown,
-        state: index_state_of(&asked.client) as i32,
+        // Rust's rule, as above. TODO(reshape-extension-language-server): the support's launch.
+        state: index_state_of(&asked.client, Readiness::ServerStatus) as i32,
     })
-}
-
-/// Where the root's index stood when `client` answered: `READY` when the server's latest
-/// `experimental/serverStatus` said it is quiescent, `LOADING` otherwise — including a server that
-/// has said nothing yet. Never `IDLE`: a server answered.
-///
-/// Read from the client's own record of the latest status rather than from the root's progress
-/// watcher: the reader records a status before it routes the response that follows it, so the
-/// state is the one the answer was given in — the watcher may not have folded it in yet. Read
-/// through [`ServerChatter`], the one reading of that notification.
-fn index_state_of(client: &LspClient) -> IndexState {
-    let mut chatter = ServerChatter::default();
-    if let Some(status) = client.server_status() {
-        chatter.absorb(&status);
-    }
-    state_of_quiescence(chatter.quiescent())
 }
 
 /// What a navigation query is put to: the root's warm server, which has been told the file's
