@@ -10,6 +10,7 @@
 - **Host connections (transport-neutral daemon RPC)**: [host-connections.md](host-connections.md)
 - **Host directory (which hosts exist, merged from sources)**: [host-directory.md](host-directory.md)
 - **Hosts screen (every host the daemon has a record of)**: [hosts-screen.md](hosts-screen.md)
+- **Daemon settings screen (LiveKit integration status line)**: [daemon-settings-screen.md](daemon-settings-screen.md)
 - **Inactive session activities (main-pane base view)**: [inactive-session-activities.md](inactive-session-activities.md)
 - **Agent conversation tabs (attach a roster agent, talk to it)**: [session-agent-conversation.md](session-agent-conversation.md)
 - **Insecure-origin constraints (plain-http LAN serving)**: [insecure-origin-constraints.md](insecure-origin-constraints.md)

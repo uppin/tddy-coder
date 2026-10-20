@@ -4,7 +4,7 @@
  */
 
 import React from "react";
-import { createClient, type Code } from "@connectrpc/connect";
+import { Code, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { DaemonSettingsScreen } from "../../../src/components/settings/DaemonSettingsScreen";
 import { DaemonConfigService } from "../../../src/gen/daemon_config_pb";
@@ -76,6 +76,52 @@ export function aDaemonRefusingUpdates(code: Code, message: string) {
   return aDaemonServing().failWith(DaemonConfigService.method.updateConfig, code, message);
 }
 
+/**
+ * What `GetIntegrationStatus` answers with: LiveKit in `state`, entered `secondsAgo` before the
+ * daemon answers. The timestamp is minted at answer time, so a slow mount cannot age the line.
+ */
+export function aLiveKitIntegration(fields: {
+  state: number;
+  secondsAgo: number;
+  error?: string;
+  missingFields?: string[];
+}) {
+  return {
+    id: "livekit",
+    label: "LiveKit",
+    state: fields.state,
+    error: fields.error ?? "",
+    missingFields: fields.missingFields ?? [],
+    secondsAgo: fields.secondsAgo,
+  };
+}
+
+/** A daemon that also reports its integrations, answering each status read with the next entry. */
+export function aDaemonReportingIntegrations(
+  ...answers: ReturnType<typeof aLiveKitIntegration>[]
+) {
+  let read = 0;
+  return aDaemonConfigBackend().onUnary(DaemonConfigService.method.getIntegrationStatus, () => {
+    const { secondsAgo, ...answer } = answers[Math.min(read, answers.length - 1)];
+    read += 1;
+    return { integrations: [{ ...answer, sinceUnixMs: BigInt(Date.now() - secondsAgo * 1000) }] };
+  });
+}
+
+/** A daemon too old to answer `GetIntegrationStatus`. */
+export function aDaemonWithoutIntegrationStatus() {
+  return aDaemonConfigBackend().failWith(
+    DaemonConfigService.method.getIntegrationStatus,
+    Code.Unimplemented,
+    "unknown method GetIntegrationStatus",
+  );
+}
+
+/** A daemon whose status call fails with something other than `Unimplemented`. */
+export function aDaemonFailingIntegrationStatus(code: Code, message: string) {
+  return aDaemonConfigBackend().failWith(DaemonConfigService.method.getIntegrationStatus, code, message);
+}
+
 type Backend = ReturnType<typeof aDaemonConfigBackend>;
 
 export function aDaemonSettingsScreen(backend: Backend) {
@@ -129,6 +175,18 @@ export function aDaemonSettingsScreen(backend: Backend) {
     },
     expectRestartRequired(field: string) {
       byTestId(TEST_IDS.daemonSettingsRestartRequired).should("contain.text", field);
+      return driver;
+    },
+    expectLiveKitStatus(text: string) {
+      byTestId(TEST_IDS.daemonSettingsLivekitStatus).should("have.text", text);
+      return driver;
+    },
+    expectNoLiveKitStatus() {
+      byTestId(TEST_IDS.daemonSettingsLivekitStatus).should("not.exist");
+      return driver;
+    },
+    expectNoError() {
+      byTestId(TEST_IDS.daemonSettingsError).should("not.exist");
       return driver;
     },
     expectError(fragment: string) {
