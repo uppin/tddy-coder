@@ -64,9 +64,9 @@ in_shell cargo build --release \
   -p tddy-sandbox-runner \
   -p tddy-daemon \
   -p tddy-supervisor \
-  -p tddy-remote-git-repo \
+  -p tddy-remote-git-repo-cli \
   -p tddy-askpass \
-  -p tddy-session-sync \
+  -p tddy-session-sync-cli \
   -p tddy-index-daemon
 
 if [[ "$want_installers" == true && "$want_desktop" != true ]]; then

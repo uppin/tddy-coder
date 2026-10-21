@@ -21,7 +21,7 @@ before the usage below works:
 | `./install --systemd --user` | `INSTALL_BIN_DIR`, default `~/.local/bin` |
 | the `tddy` `.deb` (`./publish.sh`) | `/usr/bin` |
 
-Built it yourself instead? `./release` (or `cargo build --release -p tddy-remote-git-repo`) leaves
+Built it yourself instead? `./release` (or `cargo build --release -p tddy-remote-git-repo-cli`) leaves
 it at `target/release/tddy-remote-git-repo`, which is not on anyone's `PATH` — point
 `GIT_SSH_COMMAND` at the absolute path, or copy it somewhere that is:
 
