@@ -303,9 +303,8 @@ that may never invoke it. Three things settle it the other way:
 - **The cost is one static binary.** It carries no config, writes nothing, opens no port, and reads
   nothing `install` renders — an unused copy on a server is inert.
 
-A separate client-only package (`tddy-client`, say) would be the tidier answer once there is a
-second client-side binary to put in it. Until then, one more file in an existing package beats a
-second package for a single executable.
+The binary is built by its own wiring package, `tddy-remote-git-repo-cli`, which binds LiveKit as the
+room transport; the `tddy-remote-git-repo` library names no LiveKit crate.
 
 ## Throughput
 
