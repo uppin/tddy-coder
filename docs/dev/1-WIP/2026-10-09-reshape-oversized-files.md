@@ -384,6 +384,11 @@ changes from this PR's diff.
 - **After the counter and `lines`** (scoped): `cargo test -p tddy-code-restructuring --lib`: 1139 passed, **1 failed**
   (`does_not_end_early_at_a_test_only_import_above_the_module`, asserts 4; acceptance 2 requires 2). Shape tests: budget
   red on the over-500 list below; edges 6 red. `tddy-tools` routing test `a_line_count_is_answered_in_process_whatever_the_environment_names`: ok.
+- **Full scoped gate on the rebased tree** (`./test -p tddy-code-restructuring -p tddy-tools`, 2026-10-21): 2100 passed,
+  21 failure lines = 17 names. Nine names failed with `StorageFull` or `cargo watcher failed` while the shared disk was
+  full (`inline_paths_acceptance` ×3, `move_fidelity_acceptance` ×6); each passes when run alone with headroom. Still red:
+  `runner::budget::…does_not_end_early_at_a_test_only_import_above_the_module` (the contract pin), and
+  `every_production_file_of_the_engine_is_within_500_lines` with the six `engine_module_edges_shape` tests (need plans A–D).
 - **Measurement at this base** (`production_lines_of_file`, the items rule): the only files over 500 in the gate are
   `crate_move/test_binary.rs` 967 · `crate_move/test_modules.rs` 664 (**not in State B; needs a plan**) ·
   `verify/retarget.rs` 631 · `runner/tidy.rs` 542 · `backends/rust/item_move/assemble.rs` 521. `backends/rust.rs` is exempt.
