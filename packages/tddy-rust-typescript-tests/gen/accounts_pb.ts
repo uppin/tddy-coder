@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file accounts.proto.
  */
 export const file_accounts: GenFile = /*@__PURE__*/
-  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMiqQEKDkFjY291bnRTdW1tYXJ5EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkSDQoFbGFiZWwYAyABKAkSDwoHc3ViamVjdBgEIAEoCRISCgp1cGRhdGVkX2F0GAUgASgDEhIKCmhhc19zZWNyZXQYBiABKAgSKQoLc3luY19zdGF0dXMYByABKA4yFC5hY2NvdW50cy5TeW5jU3RhdHVzIlAKEFByb3ZpZGVyQWNjb3VudHMSEAoIcHJvdmlkZXIYASABKAkSKgoIYWNjb3VudHMYAiADKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeSIsChNMaXN0QWNjb3VudHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkixAEKFExpc3RBY2NvdW50c1Jlc3BvbnNlEi0KCXByb3ZpZGVycxgBIAMoCzIaLmFjY291bnRzLlByb3ZpZGVyQWNjb3VudHMSFAoMdmF1bHRfbG9ja2VkGAIgASgIEhsKE3ZhdWx0X3VuaW5pdGlhbGl6ZWQYAyABKAgSNgoPc2Vzc2lvbl9hY2NvdW50GAQgASgLMhguYWNjb3VudHMuU2Vzc2lvbkFjY291bnRIAIgBAUISChBfc2Vzc2lvbl9hY2NvdW50ImQKFlNldEFjY291bnRMYWJlbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCRISCgphY2NvdW50X2lkGAMgASgJEg0KBWxhYmVsGAQgASgJIkQKF1NldEFjY291bnRMYWJlbFJlc3BvbnNlEikKB2FjY291bnQYASABKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeSJTChRSZW1vdmVBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJEhIKCmFjY291bnRfaWQYAyABKAkiRgoVUmVtb3ZlQWNjb3VudFJlc3BvbnNlEi0KCXByb3ZpZGVycxgBIAMoCzIaLmFjY291bnRzLlByb3ZpZGVyQWNjb3VudHMiNgoOU2Vzc2lvbkFjY291bnQSEAoIcHJvdmlkZXIYASABKAkSEgoKYWNjb3VudF9pZBgCIAEoCSJCChdCZWdpbkxpbmtBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJIo4BChhCZWdpbkxpbmtBY2NvdW50UmVzcG9uc2USDwoHbGlua19pZBgBIAEoCRIRCgl1c2VyX2NvZGUYAiABKAkSGAoQdmVyaWZpY2F0aW9uX3VyaRgDIAEoCRIaChJleHBpcmVzX2luX3NlY29uZHMYBCABKAMSGAoQaW50ZXJ2YWxfc2Vjb25kcxgFIAEoAyJAChZQb2xsTGlua0FjY291bnRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDwoHbGlua19pZBgCIAEoCSKCAQoXUG9sbExpbmtBY2NvdW50UmVzcG9uc2USIgoFc3RhdGUYASABKA4yEy5hY2NvdW50cy5MaW5rU3RhdGUSKQoHYWNjb3VudBgCIAEoCzIYLmFjY291bnRzLkFjY291bnRTdW1tYXJ5EhgKEGludGVydmFsX3NlY29uZHMYAyABKAMqrAEKClN5bmNTdGF0dXMSGwoXU1lOQ19TVEFUVVNfVU5TUEVDSUZJRUQQABIWChJTWU5DX1NUQVRVU19TWU5DRUQQARIXChNTWU5DX1NUQVRVU19QRU5ESU5HEAISHQoZU1lOQ19TVEFUVVNfVU5ERUxJVkVSQUJMRRADEhgKFFNZTkNfU1RBVFVTX0NPTkZMSUNUEAQSFwoTU1lOQ19TVEFUVVNfUkVGVVNFRBAFKoQBCglMaW5rU3RhdGUSGgoWTElOS19TVEFURV9VTlNQRUNJRklFRBAAEhAKDExJTktfUEVORElORxABEg8KC0xJTktfTElOS0VEEAISDwoLTElOS19ERU5JRUQQAxIQCgxMSU5LX0VYUElSRUQQBBIVChFMSU5LX1ZBVUxUX0xPQ0tFRBAFMr0DCg9BY2NvdW50c1NlcnZpY2USTQoMTGlzdEFjY291bnRzEh0uYWNjb3VudHMuTGlzdEFjY291bnRzUmVxdWVzdBoeLmFjY291bnRzLkxpc3RBY2NvdW50c1Jlc3BvbnNlElYKD1NldEFjY291bnRMYWJlbBIgLmFjY291bnRzLlNldEFjY291bnRMYWJlbFJlcXVlc3QaIS5hY2NvdW50cy5TZXRBY2NvdW50TGFiZWxSZXNwb25zZRJQCg1SZW1vdmVBY2NvdW50Eh4uYWNjb3VudHMuUmVtb3ZlQWNjb3VudFJlcXVlc3QaHy5hY2NvdW50cy5SZW1vdmVBY2NvdW50UmVzcG9uc2USWQoQQmVnaW5MaW5rQWNjb3VudBIhLmFjY291bnRzLkJlZ2luTGlua0FjY291bnRSZXF1ZXN0GiIuYWNjb3VudHMuQmVnaW5MaW5rQWNjb3VudFJlc3BvbnNlElYKD1BvbGxMaW5rQWNjb3VudBIgLmFjY291bnRzLlBvbGxMaW5rQWNjb3VudFJlcXVlc3QaIS5hY2NvdW50cy5Qb2xsTGlua0FjY291bnRSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMi0QEKDkFjY291bnRTdW1tYXJ5EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkSDQoFbGFiZWwYAyABKAkSDwoHc3ViamVjdBgEIAEoCRISCgp1cGRhdGVkX2F0GAUgASgDEhIKCmhhc19zZWNyZXQYBiABKAgSKQoLc3luY19zdGF0dXMYByABKA4yFC5hY2NvdW50cy5TeW5jU3RhdHVzEg4KBnByZXNldBgIIAEoCRIWCg53aXJlX3Byb3RvY29scxgJIAMoCSJQChBQcm92aWRlckFjY291bnRzEhAKCHByb3ZpZGVyGAEgASgJEioKCGFjY291bnRzGAIgAygLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiLAoTTGlzdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIsQBChRMaXN0QWNjb3VudHNSZXNwb25zZRItCglwcm92aWRlcnMYASADKAsyGi5hY2NvdW50cy5Qcm92aWRlckFjY291bnRzEhQKDHZhdWx0X2xvY2tlZBgCIAEoCBIbChN2YXVsdF91bmluaXRpYWxpemVkGAMgASgIEjYKD3Nlc3Npb25fYWNjb3VudBgEIAEoCzIYLmFjY291bnRzLlNlc3Npb25BY2NvdW50SACIAQFCEgoQX3Nlc3Npb25fYWNjb3VudCJkChZTZXRBY2NvdW50TGFiZWxSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEgoKYWNjb3VudF9pZBgDIAEoCRINCgVsYWJlbBgEIAEoCSJEChdTZXRBY2NvdW50TGFiZWxSZXNwb25zZRIpCgdhY2NvdW50GAEgASgLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiUwoUUmVtb3ZlQWNjb3VudFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCRISCgphY2NvdW50X2lkGAMgASgJIkYKFVJlbW92ZUFjY291bnRSZXNwb25zZRItCglwcm92aWRlcnMYASADKAsyGi5hY2NvdW50cy5Qcm92aWRlckFjY291bnRzIjYKDlNlc3Npb25BY2NvdW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkiQgoXQmVnaW5MaW5rQWNjb3VudFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCSKOAQoYQmVnaW5MaW5rQWNjb3VudFJlc3BvbnNlEg8KB2xpbmtfaWQYASABKAkSEQoJdXNlcl9jb2RlGAIgASgJEhgKEHZlcmlmaWNhdGlvbl91cmkYAyABKAkSGgoSZXhwaXJlc19pbl9zZWNvbmRzGAQgASgDEhgKEGludGVydmFsX3NlY29uZHMYBSABKAMiQAoWUG9sbExpbmtBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg8KB2xpbmtfaWQYAiABKAkiggEKF1BvbGxMaW5rQWNjb3VudFJlc3BvbnNlEiIKBXN0YXRlGAEgASgOMhMuYWNjb3VudHMuTGlua1N0YXRlEikKB2FjY291bnQYAiABKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeRIYChBpbnRlcnZhbF9zZWNvbmRzGAMgASgDIpsBCh1Db25uZWN0UHJvdmlkZXJBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg4KBnByZXNldBgCIAEoCRINCgVsYWJlbBgDIAEoCRIPCgdhcGlfa2V5GAQgASgJEhoKEmFudGhyb3BpY19iYXNlX3VybBgFIAEoCRIXCg9vcGVuYWlfYmFzZV91cmwYBiABKAkiSwoeQ29ubmVjdFByb3ZpZGVyQWNjb3VudFJlc3BvbnNlEikKB2FjY291bnQYASABKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeSJNCiBMaXN0UHJvdmlkZXJBY2NvdW50TW9kZWxzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkiNgohTGlzdFByb3ZpZGVyQWNjb3VudE1vZGVsc1Jlc3BvbnNlEhEKCW1vZGVsX2lkcxgBIAMoCSqsAQoKU3luY1N0YXR1cxIbChdTWU5DX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKElNZTkNfU1RBVFVTX1NZTkNFRBABEhcKE1NZTkNfU1RBVFVTX1BFTkRJTkcQAhIdChlTWU5DX1NUQVRVU19VTkRFTElWRVJBQkxFEAMSGAoUU1lOQ19TVEFUVVNfQ09ORkxJQ1QQBBIXChNTWU5DX1NUQVRVU19SRUZVU0VEEAUqhAEKCUxpbmtTdGF0ZRIaChZMSU5LX1NUQVRFX1VOU1BFQ0lGSUVEEAASEAoMTElOS19QRU5ESU5HEAESDwoLTElOS19MSU5LRUQQAhIPCgtMSU5LX0RFTklFRBADEhAKDExJTktfRVhQSVJFRBAEEhUKEUxJTktfVkFVTFRfTE9DS0VEEAUyoAUKD0FjY291bnRzU2VydmljZRJNCgxMaXN0QWNjb3VudHMSHS5hY2NvdW50cy5MaXN0QWNjb3VudHNSZXF1ZXN0Gh4uYWNjb3VudHMuTGlzdEFjY291bnRzUmVzcG9uc2USVgoPU2V0QWNjb3VudExhYmVsEiAuYWNjb3VudHMuU2V0QWNjb3VudExhYmVsUmVxdWVzdBohLmFjY291bnRzLlNldEFjY291bnRMYWJlbFJlc3BvbnNlElAKDVJlbW92ZUFjY291bnQSHi5hY2NvdW50cy5SZW1vdmVBY2NvdW50UmVxdWVzdBofLmFjY291bnRzLlJlbW92ZUFjY291bnRSZXNwb25zZRJZChBCZWdpbkxpbmtBY2NvdW50EiEuYWNjb3VudHMuQmVnaW5MaW5rQWNjb3VudFJlcXVlc3QaIi5hY2NvdW50cy5CZWdpbkxpbmtBY2NvdW50UmVzcG9uc2USVgoPUG9sbExpbmtBY2NvdW50EiAuYWNjb3VudHMuUG9sbExpbmtBY2NvdW50UmVxdWVzdBohLmFjY291bnRzLlBvbGxMaW5rQWNjb3VudFJlc3BvbnNlEmsKFkNvbm5lY3RQcm92aWRlckFjY291bnQSJy5hY2NvdW50cy5Db25uZWN0UHJvdmlkZXJBY2NvdW50UmVxdWVzdBooLmFjY291bnRzLkNvbm5lY3RQcm92aWRlckFjY291bnRSZXNwb25zZRJ0ChlMaXN0UHJvdmlkZXJBY2NvdW50TW9kZWxzEiouYWNjb3VudHMuTGlzdFByb3ZpZGVyQWNjb3VudE1vZGVsc1JlcXVlc3QaKy5hY2NvdW50cy5MaXN0UHJvdmlkZXJBY2NvdW50TW9kZWxzUmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * One linked account, as a person sees it.
@@ -79,6 +79,23 @@ export type AccountSummary = Message<"accounts.AccountSummary"> & {
    * @generated from field: accounts.SyncStatus sync_status = 7;
    */
   syncStatus: SyncStatus;
+
+  /**
+   * For a model-provider account: the preset it was connected with — "meta", "fireworks",
+   * "baseten", "modal", "openai-compatible", "anthropic-compatible". Empty for every other account.
+   *
+   * @generated from field: string preset = 8;
+   */
+  preset: string;
+
+  /**
+   * For a model-provider account: the wire protocols its endpoint serves —
+   * "anthropic-messages", "openai-responses", "openai-chat". Which harness can run on it follows
+   * from these. Empty for every other account.
+   *
+   * @generated from field: repeated string wire_protocols = 9;
+   */
+  wireProtocols: string[];
 };
 
 /**
@@ -451,6 +468,115 @@ export const PollLinkAccountResponseSchema: GenMessage<PollLinkAccountResponse> 
   messageDesc(file_accounts, 12);
 
 /**
+ * A model-provider account, connected by key.
+ *
+ * `api_key` is **inbound only**: no response carries it back, by the same message-shape rule as
+ * `AccountSummary`. The base URLs are set only for a preset whose endpoint the operator supplies
+ * (Modal, the two generic presets); a preset with fixed endpoints refuses them.
+ *
+ * @generated from message accounts.ConnectProviderAccountRequest
+ */
+export type ConnectProviderAccountRequest = Message<"accounts.ConnectProviderAccountRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string preset = 2;
+   */
+  preset: string;
+
+  /**
+   * @generated from field: string label = 3;
+   */
+  label: string;
+
+  /**
+   * @generated from field: string api_key = 4;
+   */
+  apiKey: string;
+
+  /**
+   * The Anthropic Messages root (the client appends `/v1/messages`), for "anthropic-compatible".
+   *
+   * @generated from field: string anthropic_base_url = 5;
+   */
+  anthropicBaseUrl: string;
+
+  /**
+   * The OpenAI root that serves `/models`, `/responses` and `/chat/completions` — usually ending in
+   * `/v1` — for "modal" and "openai-compatible".
+   *
+   * @generated from field: string openai_base_url = 6;
+   */
+  openaiBaseUrl: string;
+};
+
+/**
+ * Describes the message accounts.ConnectProviderAccountRequest.
+ * Use `create(ConnectProviderAccountRequestSchema)` to create a new message.
+ */
+export const ConnectProviderAccountRequestSchema: GenMessage<ConnectProviderAccountRequest> = /*@__PURE__*/
+  messageDesc(file_accounts, 13);
+
+/**
+ * @generated from message accounts.ConnectProviderAccountResponse
+ */
+export type ConnectProviderAccountResponse = Message<"accounts.ConnectProviderAccountResponse"> & {
+  /**
+   * @generated from field: accounts.AccountSummary account = 1;
+   */
+  account?: AccountSummary;
+};
+
+/**
+ * Describes the message accounts.ConnectProviderAccountResponse.
+ * Use `create(ConnectProviderAccountResponseSchema)` to create a new message.
+ */
+export const ConnectProviderAccountResponseSchema: GenMessage<ConnectProviderAccountResponse> = /*@__PURE__*/
+  messageDesc(file_accounts, 14);
+
+/**
+ * @generated from message accounts.ListProviderAccountModelsRequest
+ */
+export type ListProviderAccountModelsRequest = Message<"accounts.ListProviderAccountModelsRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string account_id = 2;
+   */
+  accountId: string;
+};
+
+/**
+ * Describes the message accounts.ListProviderAccountModelsRequest.
+ * Use `create(ListProviderAccountModelsRequestSchema)` to create a new message.
+ */
+export const ListProviderAccountModelsRequestSchema: GenMessage<ListProviderAccountModelsRequest> = /*@__PURE__*/
+  messageDesc(file_accounts, 15);
+
+/**
+ * @generated from message accounts.ListProviderAccountModelsResponse
+ */
+export type ListProviderAccountModelsResponse = Message<"accounts.ListProviderAccountModelsResponse"> & {
+  /**
+   * @generated from field: repeated string model_ids = 1;
+   */
+  modelIds: string[];
+};
+
+/**
+ * Describes the message accounts.ListProviderAccountModelsResponse.
+ * Use `create(ListProviderAccountModelsResponseSchema)` to create a new message.
+ */
+export const ListProviderAccountModelsResponseSchema: GenMessage<ListProviderAccountModelsResponse> = /*@__PURE__*/
+  messageDesc(file_accounts, 16);
+
+/**
  * One account's aggregate standing across every peer it has been offered to, worst first: a
  * refusal means this deployment is misconfigured and nobody will fix it without being told; a
  * conflict means two edits raced; undeliverable is the network, and often clears on its own;
@@ -609,6 +735,28 @@ export const AccountsService: GenService<{
     methodKind: "unary";
     input: typeof PollLinkAccountRequestSchema;
     output: typeof PollLinkAccountResponseSchema;
+  },
+  /**
+   * Add a model-provider account (Meta, Fireworks, …) from a pasted API key. The key is checked by
+   * listing the endpoint's models before anything is stored. Mints no session; the key goes in,
+   * never out.
+   *
+   * @generated from rpc accounts.AccountsService.ConnectProviderAccount
+   */
+  connectProviderAccount: {
+    methodKind: "unary";
+    input: typeof ConnectProviderAccountRequestSchema;
+    output: typeof ConnectProviderAccountResponseSchema;
+  },
+  /**
+   * The models one provider account's endpoint serves, asked of the endpoint with that account's key.
+   *
+   * @generated from rpc accounts.AccountsService.ListProviderAccountModels
+   */
+  listProviderAccountModels: {
+    methodKind: "unary";
+    input: typeof ListProviderAccountModelsRequestSchema;
+    output: typeof ListProviderAccountModelsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_accounts, 0);
