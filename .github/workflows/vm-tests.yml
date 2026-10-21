@@ -193,13 +193,16 @@ jobs:
           # The CI run of the same trigger. A `#forcebuild` dispatch shares its
           # head commit with the draft's gated `pull_request` run, whose
           # `Rust build` was skipped — `--limit 1` must not land on that one.
+          # A cancelled twin of the same trigger (a draft-gate race) never
+          # builds either, so cancelled runs are not candidates.
           EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 3600))
           while :; do
-            run_id=$(gh run list --commit "$HEAD_SHA" --workflow CI --event "$EVENT" --limit 1 \
-                       --json databaseId --jq '.[0].databaseId // empty')
+            run_id=$(gh run list --commit "$HEAD_SHA" --workflow CI --event "$EVENT" --limit 10 \
+                       --json databaseId,conclusion \
+                       --jq '[.[] | select(.conclusion != "cancelled")][0].databaseId // empty')
             if [ -n "$run_id" ]; then
               build=$(gh run view "$run_id" --json jobs \
                         --jq '.jobs[] | select(.name=="Rust build") | "\(.status)/\(.conclusion // "-")"')
