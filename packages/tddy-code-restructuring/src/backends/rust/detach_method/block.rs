@@ -61,7 +61,7 @@ pub(super) fn read(
     span: LineRange,
     anchored: Option<&[String]>,
 ) -> Result<Block> {
-    let run = outline::read(symbols, text, span)?;
+    let run = outline::read(symbols, text, span, outline::Operation::DetachMethod)?;
     if let Some(anchored) = anchored {
         refuse_a_mismatch(&run, anchored)?;
     }
