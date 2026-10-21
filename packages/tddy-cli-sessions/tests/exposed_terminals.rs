@@ -102,22 +102,86 @@ fn a_sleeping_agent(dir: &Path) -> String {
 
 /// A manager running one session whose terminal was recorded as exposable.
 async fn a_manager_with_a_recorded_terminal(dir: &Path) -> Arc<CliSessionManager> {
+    a_manager_with_recorded_terminals(dir, &[SESSION]).await
+}
+
+/// A manager running each of `sessions`, every one with its terminal recorded as exposable.
+async fn a_manager_with_recorded_terminals(
+    dir: &Path,
+    sessions: &[&str],
+) -> Arc<CliSessionManager> {
     let manager = Arc::new(CliSessionManager::new());
+    for session in sessions {
+        manager
+            .start(
+                session,
+                dir.to_path_buf(),
+                "claude-opus-4-8",
+                &a_sleeping_agent(dir),
+                None,
+                None,
+            )
+            .await
+            .expect("the stub agent starts under a PTY");
+        manager
+            .expose_terminal_to_livekit(
+                session,
+                SessionParticipantMetadata {
+                    session_id: session.to_string(),
+                    ..the_metadata_block()
+                },
+            )
+            .await;
+    }
     manager
-        .start(
-            SESSION,
-            dir.to_path_buf(),
-            "claude-opus-4-8",
-            &a_sleeping_agent(dir),
-            None,
-            None,
+}
+
+/// An exposure that completes only once `parties` exposures are running at the same moment — so
+/// it can never complete if the manager lets one exposure wait for another.
+struct MeetingExposure {
+    meeting: tokio::sync::Barrier,
+}
+
+#[async_trait::async_trait]
+impl TerminalExposure for MeetingExposure {
+    async fn expose(
+        &self,
+        _at: &TerminalAddress,
+        _terminal: Arc<dyn tddy_rpc::RpcService>,
+        _metadata_json: Option<String>,
+    ) -> Result<ExposedTerminal, Status> {
+        self.meeting.wait().await;
+        Ok(ExposedTerminal::new(tokio::spawn(
+            std::future::pending::<()>(),
+        )))
+    }
+}
+
+#[tokio::test]
+async fn two_sessions_are_exposed_at_the_same_time() {
+    // Given two sessions with recorded terminals, and an exposure that completes only once both
+    // of their exposures are running together
+    let dir = tempfile::tempdir().unwrap();
+    let manager = a_manager_with_recorded_terminals(dir.path(), &["session-a", "session-b"]).await;
+    let exposure = MeetingExposure {
+        meeting: tokio::sync::Barrier::new(2),
+    };
+    let at = the_address();
+
+    // When both are reached at the same moment
+    let both = async {
+        tokio::join!(
+            manager.ensure_exposed_terminal("session-a", &at, &exposure),
+            manager.ensure_exposed_terminal("session-b", &at, &exposure),
         )
+    };
+    let (a, b) = tokio::time::timeout(std::time::Duration::from_secs(10), both)
         .await
-        .expect("the stub agent starts under a PTY");
-    manager
-        .expose_terminal_to_livekit(SESSION, the_metadata_block())
-        .await;
-    manager
+        .expect("one session's join must not hold up another session's join");
+
+    // Then both are exposed
+    assert_eq!((a.unwrap(), b.unwrap()), (true, true));
+    manager.kill_all().await;
 }
 
 #[tokio::test]

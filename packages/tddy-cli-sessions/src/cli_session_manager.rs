@@ -76,6 +76,10 @@ struct ExposedTerminalRecord {
     /// The exposure, once a consumer has arrived. It ends when the room or the PTY does, so a
     /// finished one is an exposure that is no longer there.
     exposure: Option<tddy_daemon_extensions::ExposedTerminal>,
+    /// Held for the whole of one reach's exposure, so reaches to **this** session queue behind
+    /// each other and reaches to another session do not. The registry's own lock is held only to
+    /// read and to write the record, never across the join.
+    flight: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Manages PTY session tools via the shared [`TaskRegistry`] and per-session control leases.
