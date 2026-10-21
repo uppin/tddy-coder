@@ -22,7 +22,8 @@
 
 use std::path::Path;
 
-use crate::config::{DaemonConfig, UserMapping};
+use crate::config::access::UserMapping;
+use crate::config::DaemonConfig;
 
 /// Why a deployment cannot enrol a first login.
 #[derive(Debug, Clone, PartialEq, Eq)]

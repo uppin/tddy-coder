@@ -303,6 +303,7 @@ pub use crate::config::screen_sharing::{
     ScreenSharingConfig,
 };
 
+pub(crate) mod access;
 mod agent_cli;
 mod env_overrides;
 mod sandbox_paths;
@@ -321,6 +322,7 @@ pub use agent_cli::{
     CURSOR_HOME_ENV,
 };
 
+use crate::config::access::AllowedTool;
 use crate::config::env_overrides::merge_telegram_env;
 use crate::config::env_overrides::merge_timing_env;
 use crate::config::env_overrides::parse_env_bool;
@@ -427,47 +429,7 @@ impl LiveKitConfig {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct GitHubConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_secret: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub redirect_uri: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stub: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stub_codes: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")] // `pending_login_ttl.rs`
-    pub pending_login_ttl_seconds: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")] // `open_vault_idle_ttl.rs`
-    pub open_vault_idle_ttl_seconds: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct UserMapping {
-    pub github_user: String,
-    pub os_user: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AllowedTool {
-    pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AllowedAgent {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-}
+pub use crate::config::access::{AllowedAgent, GitHubConfig, UserMapping};
 
 impl DaemonConfig {
     /// Default subdirectory under home for cloned project repos when `repos_base_path` is unset.
@@ -702,6 +664,7 @@ impl DaemonConfig {
 #[cfg(test)]
 mod default_tool_path_tests {
     use super::*;
+    use crate::config::access::AllowedTool;
 
     #[test]
     fn default_tool_path_uses_the_first_configured_allowed_tool() {

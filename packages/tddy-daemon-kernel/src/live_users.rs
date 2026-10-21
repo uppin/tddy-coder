@@ -16,7 +16,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
 
-use crate::config::UserMapping;
+use crate::config::access::UserMapping;
 use crate::first_login_enrolment::{enrol_first_login, EnrolmentRefusal};
 
 /// A cheap-to-clone handle on the daemon's `users:` rows. Clones share the rows.
