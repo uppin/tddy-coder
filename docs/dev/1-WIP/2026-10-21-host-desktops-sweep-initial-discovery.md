@@ -1,4 +1,4 @@
-# Initial discovery: `#host-desktops` sweep (9/9)
+# Initial discovery: `#host-desktops` sweep, `config.rs` (9/10)
 
 **Date**: 2026-10-21
 **Tree measured**: `master` `fa9b42215` — the squash of #660. Its tree is byte-identical to the
@@ -13,8 +13,14 @@ both trees.
 1/8) and the merge base the orchestrator named, `569c65456` (after #657, before #658).
 
 This is the code-discovery record behind
-[2026-10-21-host-desktops-sweep.md](./2026-10-21-host-desktops-sweep.md). It holds the measurements
+[2026-10-21-host-desktops-sweep.md](./2026-10-21-host-desktops-sweep.md) (PR #692). It holds the measurements
 and the seam checks; the changeset holds the plan.
+
+> **Split on 2026-10-21 (developer decision 4).** Sections 1–4 are the whole sweep's measurements and are
+> shared with the sibling PR. This PR carries `config.rs` only; `host_tooling.rs`, `service.rs`, the start
+> functions and the stand-in bridges are in the sibling's discovery record
+> (`docs/dev/1-WIP/2026-10-21-host-desktops-sweep-host-service-initial-discovery.md`, branch
+> `feature/host-desktops/sweep-host-service`).
 
 ## 1. Where the stack stands
 
@@ -130,7 +136,7 @@ written by earlier nodes of this stack:
 | `2026-10-20-rdp-test-support-module.md` | #654 | test duplication — not an engine move |
 | `2026-10-20-rdp-empty-tls-public-key-fallback.md` | #654 | behaviour change (removing a fallback) |
 
-## 5. Seam reading per file
+## 5. Seam reading
 
 ### `tddy-daemon-kernel/src/config.rs` (1,575)
 
@@ -176,57 +182,6 @@ helpers directly (`choose_claude_binary`, `find_real_agent_in`, `merge_timing_en
 narrowest visibility that reaches them. The engine reports each widening; the changeset's
 `## Visibility` table is filled from the apply.
 
-### `tddy-host-service/src/host_tooling.rs` (806)
-
-| Lines | Contents | Seam |
-|---|---|---|
-| 1–381 | types, the probe trait, argv builders, parsers, `SubprocessHostToolingProbe`, its two `probe` impls (`unix` / `not(unix)`) | stays |
-| 382–482 | `start_desktop_probes`, `desktop_readings_of`, `desktop_probe_failed`, `warn_if_a_desktop_probe_failed` | `desktop_probes` |
-| 483–625 | `#[cfg(unix)]` readings: `start_agent_probe`, `agent_status_of`, `not_on_path`, `warn_if_failed`, `git_identity_of`, `git_config_value`, `github_cli_of` | `readings` |
-| 626–806 | `#[cfg(unix)]` subprocess plumbing: `ProbeOutput`, `Written`, `StartedProbe`, `RunningProbe`, `start_probe`, `start_running`, `read_both_pipes`, `read_to_end` and the two impls | `subprocess` |
-| 807–1274 | `mod tests` | stays |
-
-Crate-internal caller: `github_cli.rs:19` imports `start_probe`, `summarise`, `ProbeOutput`,
-`PROBE_TIMEOUT` from `crate::host_tooling` — re-pointed by `reexport: "outside"` (only `summarise`
-and `PROBE_TIMEOUT` stay where they are).
-
-### `tddy-host-service/src/service.rs` (972)
-
-| Lines | Contents |
-|---|---|
-| 1–106 | `use`s, consts, `struct HostServiceImpl` |
-| 107–288 | `impl HostServiceImpl`: `new`, the `with_*` builders, accessors, `cached_tooling`, `pending_prompt_pump_count` |
-| 289–410 | same `impl`: peer routing (`record_rpc_activity`, `eligible_instance_ids`, `classify_addressed_daemon_route`, `common_room_slot`, `rpc_served_by_peer`, `stream_served_by_peer`) — the record's seam A |
-| 412–972 | `#[async_trait] impl HostService for HostServiceImpl` — **561 lines**, nine RPCs; seams B, C, D of the record are bodies in here |
-
-The `#[async_trait]` impl is the whole difficulty: it is 561 lines on its own, larger than the budget,
-and a trait impl cannot be split across modules (`E0119`/`E0046`). The record's seams B–D need its
-method bodies moved out, which is `extract_method` inside an `#[async_trait]` impl — refused by the
-engine on 2026-10-19 (`docs/dev/todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md`).
-Re-probed below against today's engine.
-
-### Start functions
-
-- `start_host_stream_impl` (inherent `async fn` in `host_targets.rs`): two cuts — the target lookup
-  (`let target = scope.targets.list(..)…?;`, 12 lines) and the bridge start (`bridge_key` →
-  `start_signed_in_bridge(..).await?`, 15 lines). Inherent async methods extract (probe P2 of the
-  2026-10-19 entry).
-- `start_bridge` (free generic `async fn` in `bridge.rs`): the LiveKit join and track publish (the
-  input channel → `tokio::spawn(participant.run())`, 29 lines) names no `C`, so it extracts as a
-  non-generic helper.
-- `start_stream` and `RdpClient::connect` sit in `#[async_trait]` impls: same question as service.rs.
-
-### The two stand-in bridges
-
-`FakeBridge` lives in `#[cfg(all(test, unix))] mod tests` of `screen_sharing_service.rs` (1,378 test
-lines, `use super::*;`, reaching the service's private items); `StandInBridge` in
-`tests/common/mod.rs` (1,241 lines, shared by three integration binaries). An integration-test crate
-cannot see the library's `#[cfg(test)]` code, and none of the engine's operations moves an inline test
-module into `tests/` (`move_test_binary_to_crate` moves `tests/*.rs` binaries between crates and
-refuses `tests/common/mod.rs` as an anchor; `move_item` refuses a module; `reparent_module` refuses an
-inline one). Merging the two also means deleting one copy and giving the other the argv/stdin
-recording — an edit, not a move.
-
 ## 6. Engine results
 
 See the changeset's `## Restructuring` for the per-plan table; the commands and their output
@@ -241,7 +196,6 @@ with `TDDY_INDEX_SOCKET` set. The machine ran at a load average of 240–280 thr
 for the two range-anchored plans). Two anchor refusals, both worked around with a range anchor:
 
 - `--items …,is_executable_file,…` in `config.rs`: `plan is malformed: tddy_daemon_kernel::config::is_executable_file names 2 items … qualify it with the trait` — the two items are the `#[cfg(unix)]` and `#[cfg(not(unix))]` twins of one free function, not trait members. An engine gap (an `items` anchor cannot name a cfg twin pair); a candidate backlog entry for the wrap.
-- `--items HostServiceImpl::host_keypair,…` in `service.rs`: the same refusal, because `host_keypair` is both a field and a method of `HostServiceImpl`. Same gap, different cause.
 
 **`check --deep --budget 500`**, run twice: on `fa9b42215`, and again on `ea5ba6fb1` after the
 fast-forward (the index daemon told its server of 136 changed files first). Same answers both times:
@@ -252,23 +206,22 @@ fast-forward (the index daemon told its server of 136 changed files first). Same
 | `01-config-agent-cli` (as planned: `extract_module` over the range `689:1–1005:2`, `to_file`, `reexport: named`) | **no findings**; widens `is_wrapper_shim_dir`, `ClaudeBinaryChoice`, `choose_claude_binary`, `find_real_agent_in`, `CursorBinaryChoice`, `choose_cursor_binary` to `pub(crate)` |
 | `02-…` (a second `move_item` into `agent_cli`) | dropped: `check` refuses a `to` that does not exist yet, and the range seam made it unnecessary |
 | `03`–`09` config `move_item`s | **no findings** each; widenings `resolve_sandbox_config_path_with`, `parse_env_bool`, `merge_telegram_env`, `MIN_WORKTREE_ROOM_INTERVAL_MS`, `SessionRoomConfig::validate` → `pub(super)` |
-| `10`–`12` host_tooling `move_item`s | **no findings**; widenings `desktop_readings_of`, `warn_if_a_desktop_probe_failed`, `git_config_value`, `github_cli_of`, fields `StartedProbe::running`, `RunningProbe::child` → `pub(super)` |
-| `13-service-peer-forwards` (`extract_module`, items = six members) | **no findings**; `common_room_slot`, `rpc_served_by_peer`, `stream_served_by_peer` → `pub(crate)` |
-| `14-service-builders` (`extract_module`, range `108:5–287:6`) | **no findings**; `cached_tooling` → `pub(crate)` |
-| `16-host-targets-start-host-stream` (two `extract_method`s, bottom-up) | **no findings** |
-| `17-bridge-start-bridge` (`extract_method`) | **no findings** |
-| `probe-a-start-stream` (`extract_method` over `screen_sharing_service.rs:416–449`, `#[async_trait]`) | refused — `this seam cannot be cut here: rust-analyzer offers no "extract into function" assist for the given range (it offered: Extract into variable)` |
-| `probe-b-rdp-connector-config` (`extract_method` over the `Config { … }` literal, `rdp_client.rs:155–198`, `#[async_trait]`) | refused — same text |
-| `probe-c-service-add-host-key` (`extract_method` over two `let` statements, `service.rs:683–692`, `#[async_trait]`) | refused — same text |
 
-`--budget 500` only reports the file's current size (`config.rs is 1575 production lines, 1075 over`,
-`host_tooling.rs … 306 over`, `service.rs … 472 over`); it does not project the result.
+`--budget 500` only reports the file's current size (`config.rs is 1575 production lines, 1075 over`); it does not project the result.
 
 **Not run:** `restructure apply` (not even as a trial — the tree was never modified by the engine) and
 `restructure verify --against HEAD` (it accounts for an applied run's statements; there is none).
 `check --deep` is not a compile proof: the first apply's compile gate is.
 
 **Projected sizes** were computed by script from whole-item spans (leading doc comments and attributes
-included, closing brace found by brace matching): `config.rs` 1,175 lines out → ~400 + facades;
-`host_tooling.rs` 422 out → ~384 + facades; `service.rs` 301 out → ~673 (still over).
+included, closing brace found by brace matching): `config.rs` 1,175 lines out → ~400 + facades.
 
+
+## 7. Independence from the sibling PR (`feature/host-desktops/sweep-host-service`)
+
+The two PRs write disjoint files: this one only `tddy-daemon-kernel/src/config.rs` and new files under
+`src/config/`, plus its own documents. The sibling's moved code uses four `tddy_daemon_kernel::config::…`
+items (`DaemonConfig`, `LiveKitConfig`, which stay here, and `ScreenSharingConfig`,
+`resolve_x11vnc_binary_path`, which plan 03 moves with `reexport: "outside"`, the sibling's files being the
+outside callers that keep them in the named facade), so its paths resolve before and after this PR. The
+full proof is in the sibling's discovery record, § 7.

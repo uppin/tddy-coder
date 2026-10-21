@@ -38,14 +38,3 @@ Seams B, C and D sit inside a trait impl. Their bodies move to free functions an
 ## Measurement update 2026-10-20 — #656 (`#host-desktops` 4/8)
 
 **Regressed, split deferred with consent:** 936 → 961 production lines (+25). `get_host_tooling` goes through the new `ToolingCache` (`host_tooling_cache.rs`); the growth is the TTL constant, the `HostServiceImpl` field and the keyed call. Still unclaimed. See [2026-10-20-hosts-mount-service-rs-grew-while-over-budget.md](../../../../docs/dev/todo/2026-10-20-hosts-mount-service-rs-grew-while-over-budget.md).
-
-## Measurement correction 2026-10-21 — `#host-desktops` sweep planning (9/9)
-
-**The 961 above is wrong; the file is at 972 production lines** (972 total, still no `#[cfg(test)]`).
-Re-measured on `master` `fa9b42215` and on #656's squash commit `300c3da4c` (972), against its parent
-`300c3da4c^` (936): #656 grew the file by **+36**, not +25 (48 added, 12 removed). No later node of the
-stack touched the file. 1.94× over the 500-line budget. Still unclaimed.
-
-| Run | Production lines | Note |
-|---|---|---|
-| 2026-10-21 | 972 | correction of the 2026-10-20 row: 936 → 972 (+36) in #656, measured from the commits, production lines counted to the first `#[cfg(test)]` (there is none) |

@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{"packages/tddy-host-service/src/service.rs":"sha256:3a39074fca280095ab8207de76b146f31f956c356f3cf63f573d6caca0780342"}}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-host-service/src/service.rs","start":{"line":108,"col":5},"end":{"line":287,"col":6}},"name":"builders","to_file":true,"reexport":"none"}
