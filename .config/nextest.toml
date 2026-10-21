@@ -100,6 +100,7 @@ package(tddy-code-restructuring) and (
     binary(anchors_command_acceptance)
     or binary(anchors_package_relative_path)
     or binary(cluster_move_acceptance)
+    or binary(detach_method_acceptance)
     or binary(escaping_types_acceptance)
     or binary(extract_facade_acceptance)
     or binary(extract_method_clean_acceptance)

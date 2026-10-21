@@ -37,6 +37,9 @@ pub struct Declared {
     /// The `self` rebinds declared (`--rebind`, one per `read_fields_through`): rule R-rebind, in
     /// [`super::rebind`].
     pub rebinds: Vec<super::Rebind>,
+    /// The detaches declared (`--detach TYPE=NAME`, one per `detach_method` type): rule R-detach,
+    /// in [`super::detach`].
+    pub detaches: Vec<super::Detach>,
 }
 
 /// One declared retarget: the members of `impl from` became members of `impl to`. Bare type
@@ -96,6 +99,7 @@ impl Declared {
                 .collect::<Result<_, _>>()?,
             repoints: Vec::new(),
             rebinds: Vec::new(),
+            detaches: Vec::new(),
         })
     }
 
@@ -110,6 +114,32 @@ impl Declared {
                 .map(|text| text.parse())
                 .collect::<Result<_, _>>()?,
             ..self
+        })
+    }
+
+    /// This declaration with the detaches the texts name added, or the first that is not one.
+    pub fn with_detaches<'a>(
+        self,
+        detaches: impl IntoIterator<Item = &'a String>,
+    ) -> Result<Declared, String> {
+        let detaches: Vec<super::Detach> = detaches
+            .into_iter()
+            .map(|text| text.parse())
+            .collect::<Result<_, _>>()?;
+        // R7: a detach implies the rebind of the parameter its receiver became, once each.
+        let mut rebinds = self.rebinds;
+        for detach in &detaches {
+            if !rebinds.iter().any(|rebind| rebind.name == detach.name) {
+                rebinds.push(super::Rebind {
+                    name: detach.name.clone(),
+                });
+            }
+        }
+        Ok(Declared {
+            detaches,
+            rebinds,
+            retargets: self.retargets,
+            repoints: self.repoints,
         })
     }
 }

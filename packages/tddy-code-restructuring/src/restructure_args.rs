@@ -189,6 +189,11 @@ pub struct RestructureVerifyArgs {
     /// the differences it causes are accounted for rather than reported.
     #[arg(long = "rebind", value_name = "NAME")]
     pub rebind: Vec<String>,
+    /// Members of a type the author detached into functions over a parameter, `TYPE=NAME`
+    /// (repeatable, one per detached type): the differences it causes are accounted for rather than
+    /// reported. Implies `--rebind NAME`.
+    #[arg(long = "detach", value_name = "TYPE=NAME")]
+    pub detach: Vec<String>,
 }
 
 /// A struct of its own rather than a second use of [`RestructurePlanArgs`]: `--dry-run`,
@@ -253,6 +258,7 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             retargets: verify.retarget,
             repoints: verify.repoint,
             rebinds: verify.rebind,
+            detaches: verify.detach,
             ..Options::default()
         },
         RestructureCommand::Snapshot(snapshot) => Options {

@@ -452,6 +452,7 @@ async fn the_daemon_verifying(
             retargets: retargets.iter().map(|text| (*text).to_string()).collect(),
             repoints: Vec::new(),
             rebinds: Vec::new(),
+            detaches: Vec::new(),
         })
         .await
         .expect("the daemon answers")
@@ -517,6 +518,7 @@ async fn the_daemon_verifying_repoints(
             retargets: Vec::new(),
             repoints: repoints.iter().map(|text| (*text).to_string()).collect(),
             rebinds: Vec::new(),
+            detaches: Vec::new(),
         })
         .await
         .expect("the daemon answers")
@@ -583,6 +585,7 @@ async fn the_daemon_verifying_rebinds(
             retargets: Vec::new(),
             repoints: Vec::new(),
             rebinds: rebinds.iter().map(|text| (*text).to_string()).collect(),
+            detaches: Vec::new(),
         })
         .await
         .expect("the daemon answers")

@@ -58,6 +58,9 @@ impl Run {
 pub(in crate::backends::rust) enum Operation {
     RetargetImpl,
     MoveImplMembers,
+    /// `detach_method` refuses a trait impl's members itself, naming the member, so the read adds
+    /// no second refusal for them.
+    DetachMethod,
 }
 
 /// The `impl` block `range` lands in and the run of members it moves, or the refusal for why none
@@ -98,6 +101,9 @@ fn two_blocks_reason(operation: Operation, count: usize) -> String {
         }
         Operation::MoveImplMembers => {
             "a member move takes one run from one block, and one operation cannot take from"
+        }
+        Operation::DetachMethod => {
+            "a detach turns one block's members into functions, and one operation cannot detach from"
         }
     };
     format!("the members anchored sit in more than one `impl` block ({count} of them): {change} {count}")

@@ -173,6 +173,14 @@ pub enum RefactorKind {
     /// `move_item` creates one). No caller is edited — a method resolves through its type wherever
     /// its block is written — and what the split puts out of reach is widened, each change reported.
     MoveImplMembers,
+    /// Turns the members of one inherent `impl T` block into free functions over a named
+    /// parameter, in the same module and with the same visibility: `&mut self` becomes
+    /// `<name>: &mut T`, every `self` in the body becomes `<name>` and every `Self` becomes `T`.
+    /// Every caller the server reports is rewritten (`x.m(a)` → `m(x, a)`, or `M::m(x, a)` from
+    /// another module; `Self::m(a)` → `m(a)`), nothing is left on the type, and a block the run
+    /// empties is removed. Anchored by `items` (or a single `item`) on the members; `name` is the
+    /// parameter.
+    DetachMethod,
 }
 
 impl RefactorKind {

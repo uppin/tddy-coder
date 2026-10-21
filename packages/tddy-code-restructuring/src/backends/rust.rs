@@ -30,6 +30,7 @@ use tokio_util::sync::CancellationToken;
 
 mod chatter;
 mod declarations;
+pub mod detach_method;
 mod documents;
 mod early_return;
 mod escaping_types;
@@ -78,7 +79,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 27] = [
+const SUPPORTED: [RefactorKind; 28] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -106,6 +107,7 @@ const SUPPORTED: [RefactorKind; 27] = [
     RefactorKind::RepointFacadeImports,
     RefactorKind::ReadFieldsThrough,
     RefactorKind::MoveImplMembers,
+    RefactorKind::DetachMethod,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.

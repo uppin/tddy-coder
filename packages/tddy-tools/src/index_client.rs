@@ -377,6 +377,7 @@ async fn verify(
             retargets: args.retarget,
             repoints: args.repoint,
             rebinds: args.rebind,
+            detaches: args.detach,
         })
         .await
         .map_err(refused)?

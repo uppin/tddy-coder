@@ -272,8 +272,10 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         anchor.validate()?;
     }
 
-    // Before the generic field rules, so a member move names the operation in every refusal it makes.
+    // Before the generic field rules, so a member move or a detach names the operation in every
+    // refusal it makes.
     impl_move_fields::rules(&op)?;
+    detach_fields::rules(&op)?;
 
     // Silently ignoring the field would be worse than refusing it: the plan author asked for a
     // facade, would not get one, and would read the resulting stranded-reference refusal as the
@@ -457,6 +459,7 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 
 mod canonical_paths;
 mod crate_move_fields;
+mod detach_fields;
 mod facade_imports_fields;
 mod file_hint;
 mod groups;

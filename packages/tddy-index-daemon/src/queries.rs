@@ -295,6 +295,7 @@ async fn comparison_against(
         retargets: request.retargets,
         repoints: request.repoints,
         rebinds: request.rebinds,
+        detaches: request.detaches,
         ..Options::default()
     };
 
