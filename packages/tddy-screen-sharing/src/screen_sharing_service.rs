@@ -277,6 +277,32 @@ impl ScreenSharingServiceImpl {
         // Spawn the bridge process when daemon config is available. The start waits for that bridge
         // to report its desktop up, so a refused sign-in or a bridge that never came up fails this
         // call rather than handing back coordinates for a stream that will never carry a frame.
+        let started = self
+            .start_session_bridge(req, store, &livekit_room, &bridge_identity, &track_name)
+            .await?;
+
+        // With no bridge started there is no desktop to have measured, so the size is zero rather
+        // than a guess.
+        let (width, height) = started.map_or((0, 0), |bridge| (bridge.width, bridge.height));
+
+        Ok(Response::new(StartStreamResponse {
+            livekit_room,
+            livekit_url,
+            bridge_identity,
+            track_name,
+            width,
+            height,
+        }))
+    }
+
+    async fn start_session_bridge(
+        &self,
+        req: StartStreamRequest,
+        store: &Arc<dyn ScreenSharingTargetStore>,
+        livekit_room: &str,
+        bridge_identity: &str,
+        track_name: &str,
+    ) -> Result<Option<crate::BridgeStarted>, Status> {
         let mut started = None;
         if let Some(ref config) = self.config {
             let target = store
@@ -297,9 +323,9 @@ impl ScreenSharingServiceImpl {
                                     &bridge_target,
                                     target.username.clone(),
                                     password,
-                                    &bridge_identity,
-                                    &track_name,
-                                    &livekit_room,
+                                    bridge_identity,
+                                    track_name,
+                                    livekit_room,
                                     session_bridge_key(&req.session_id, &req.target_id),
                                 )
                                 .await?,
@@ -311,19 +337,7 @@ impl ScreenSharingServiceImpl {
                 None => error!("start_stream: target '{}' not found", req.target_id),
             }
         }
-
-        // With no bridge started there is no desktop to have measured, so the size is zero rather
-        // than a guess.
-        let (width, height) = started.map_or((0, 0), |bridge| (bridge.width, bridge.height));
-
-        Ok(Response::new(StartStreamResponse {
-            livekit_room,
-            livekit_url,
-            bridge_identity,
-            track_name,
-            width,
-            height,
-        }))
+        Ok(started)
     }
 }
 
