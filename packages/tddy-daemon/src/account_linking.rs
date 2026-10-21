@@ -16,6 +16,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
+use crate::provider_model_probe::HttpProviderModelProbe;
 use tddy_accounts::{
     deadline_after, forget_expired, AccountLinker, AccountsServiceImpl, LinkChallenge, LinkError,
     LinkProgress, LinkedAccountStore, LinkedIdentity, SessionSubjectResolver,
@@ -263,10 +264,14 @@ pub fn accounts_service_over(
     config: &DaemonConfig,
 ) -> AccountsServiceImpl<SessionVaultAccountStore> {
     let linking_provider = tddy_daemon_auth::github_account_linking_provider(config);
-    let service = AccountsServiceImpl::new(Arc::new(SessionVaultAccountStore::new(
+    let store = Arc::new(SessionVaultAccountStore::new(
         Arc::clone(vaults),
         subject_of.clone(),
-    )));
+    ));
+    let service = AccountsServiceImpl::new(Arc::clone(&store)).with_provider_accounts(
+        store,
+        Arc::new(HttpProviderModelProbe::new(reqwest::Client::new())),
+    );
     match linking_provider {
         Some(provider) => service.with_linking(
             Arc::new(GitHubAccountLinker::new(provider)),

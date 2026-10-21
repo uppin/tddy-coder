@@ -6,8 +6,9 @@ It is the surface the `/accounts` screen in `tddy-web` reads
 ([accounts screen](../../tddy-web/docs/accounts-screen.md)); the product view is
 [docs/ft/web/accounts-screen.md](../../../docs/ft/web/accounts-screen.md).
 
-Three methods that read and curate, plus two that link ([Linking](#linking)). Linking is the only way
-a credential enters the vault through this service, and it never produces a session.
+Three methods that read and curate, two that link ([Linking](#linking)) and two that connect a
+model-provider account by API key ([Provider accounts](#provider-accounts)). Linking and connecting
+are the only ways a credential enters the vault through this service, and neither produces a session.
 
 | RPC | Does |
 |---|---|
@@ -21,7 +22,8 @@ was opened on, and nothing addresses it over the daemon's local Unix socket.
 
 ## No secret on the wire
 
-`AccountSummary { provider, account_id, label, subject, updated_at, has_secret, sync_status }` has
+`AccountSummary { provider, account_id, label, subject, updated_at, has_secret, sync_status, preset,
+wire_protocols }` has
 **no secret field**, and no method returns a credential. The rule is enforced by message shape
 rather than by discipline: there is nothing to fill. `has_secret` is the one bit a screen needs to
 tell a linked account from a stale row. `subject` is the record's `metadata["subject"]` — the
@@ -139,6 +141,14 @@ account without replacing the session, and `ListAccountsResponse.session_account
 the session was established with (which `RemoveAccount` refuses to remove). They are served only when
 `AccountsServiceImpl::with_linking` was called; otherwise both answer `FAILED_PRECONDITION`. Detail:
 [account-linking.md](./account-linking.md).
+
+## Provider accounts
+
+`ConnectProviderAccount(session_token, preset, label, api_key, anthropic_base_url, openai_base_url)`
+stores a model-provider account after its endpoint lists models with the key, and
+`ListProviderAccountModels(session_token, account_id)` asks that endpoint again. `api_key` is
+inbound only. They are served only when `AccountsServiceImpl::with_provider_accounts` was called;
+otherwise both answer `FAILED_PRECONDITION`. Detail: [provider-accounts.md](./provider-accounts.md).
 
 ## Registration
 

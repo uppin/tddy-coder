@@ -65,6 +65,16 @@ Leaving the page stops the checking. While nobody has approved, the code stays o
 The control is shown for every provider group, including on a daemon that wired no linking (a stub
 GitHub provider); there the daemon refuses the request and the screen shows its reason.
 
+### Connect API key
+
+**Connect API key** adds a model-provider account — Meta, Fireworks, Baseten, Modal, or an
+OpenAI- or Anthropic-compatible endpoint — from a pasted key. The form asks for the provider, a
+label and the key, plus a base URL only for a provider whose endpoint is per deployment. The daemon
+checks the key by listing the endpoint's models before storing anything: a key it rejects is refused
+with the provider's reason and nothing is added; a working one joins its provider's group. The key
+is never shown again. A provider account's row shows its provider and the protocols it serves, and
+**Models** lists what its endpoint serves. See [Provider accounts](../daemon/provider-accounts.md).
+
 ## Scope and access
 
 - The list is the signed-in person's own vault on the **selected daemon**; it is refused, not shown
@@ -78,6 +88,7 @@ GitHub provider); there the daemon refuses the request and the screen shows its 
 ## Related
 
 - [App shell § Navigation menu](app-shell.md#navigation-menu)
+- [Provider accounts](../daemon/provider-accounts.md)
 - [Cross-daemon session authentication](../daemon/session-auth.md)
 - Implementation: [tddy-web accounts screen](../../../packages/tddy-web/docs/accounts-screen.md),
   [tddy-accounts service](../../../packages/tddy-accounts/docs/accounts-service.md)

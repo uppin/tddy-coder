@@ -13,6 +13,11 @@
 
 import { useState } from "react";
 import { Button } from "../ui/button";
+import {
+  ConnectProviderAccountForm,
+  PROVIDER_PRESET_OPTIONS,
+  type ConnectProviderAccountInput,
+} from "./ConnectProviderAccountForm";
 
 /**
  * `#keyring` 6/9's aggregate sync standing for one account, worst peer first. `null` means
@@ -34,6 +39,10 @@ export interface AccountRow {
   hasSecret: boolean;
   /** See [`AccountSyncStatus`]. */
   syncStatus: AccountSyncStatus | null;
+  /** For a model-provider account: the preset it was connected with. Empty for any other. */
+  preset: string;
+  /** For a model-provider account: the wire protocols its endpoint serves. */
+  wireProtocols: string[];
 }
 
 export interface ProviderGroup {
@@ -87,6 +96,15 @@ export interface AccountsScreenProps {
   onRemove: (provider: string, accountId: string) => void;
   /** Begin adding another account at this provider. Never signs anybody in. */
   onAddAccount: (provider: string) => void;
+  /**
+   * Connect a model-provider account from a pasted API key; resolves true once it was added. When
+   * absent the screen offers no such form.
+   */
+  onConnectProviderAccount?: (input: ConnectProviderAccountInput) => Promise<boolean>;
+  /** The daemon's reason the last connect was refused, verbatim. */
+  connectError?: string | null;
+  /** The models a provider account's endpoint serves, asked for when its row is expanded. */
+  onListModels?: (accountId: string) => Promise<string[]>;
 }
 
 export function AccountsScreen({
@@ -95,10 +113,16 @@ export function AccountsScreen({
   onRename,
   onRemove,
   onAddAccount,
+  onConnectProviderAccount,
+  connectError = null,
+  onListModels,
 }: AccountsScreenProps) {
   return (
     <div data-testid="accounts-screen">
-      {renderOutcome(outcome, onRename, onRemove, onAddAccount)}
+      {onConnectProviderAccount && outcome.kind === "listed" ? (
+        <ConnectApiKey onConnect={onConnectProviderAccount} error={connectError} />
+      ) : null}
+      {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels)}
       {linkAttempt ? <LinkAttemptView attempt={linkAttempt} /> : null}
     </div>
   );
@@ -159,6 +183,7 @@ function renderOutcome(
   onRename: AccountsScreenProps["onRename"],
   onRemove: AccountsScreenProps["onRemove"],
   onAddAccount: AccountsScreenProps["onAddAccount"],
+  onListModels: AccountsScreenProps["onListModels"],
 ) {
   switch (outcome.kind) {
     case "uninitialized":
@@ -215,6 +240,7 @@ function renderOutcome(
                     }
                     onRename={onRename}
                     onRemove={onRemove}
+                    onListModels={onListModels}
                   />
                 ))}
               </ul>
@@ -254,6 +280,7 @@ interface AccountRowViewProps {
   isSessionAccount: boolean;
   onRename: AccountsScreenProps["onRename"];
   onRemove: AccountsScreenProps["onRemove"];
+  onListModels: AccountsScreenProps["onListModels"];
 }
 
 function AccountRowView({
@@ -262,6 +289,7 @@ function AccountRowView({
   isSessionAccount,
   onRename,
   onRemove,
+  onListModels,
 }: AccountRowViewProps) {
   const rowId = `accounts-row-${provider}-${account.accountId}`;
   const [draftLabel, setDraftLabel] = useState(account.label);
@@ -284,6 +312,11 @@ function AccountRowView({
       {account.hasSecret ? null : (
         <span className="text-amber-700 text-xs">no credential stored</span>
       )}
+      {account.preset ? (
+        <span data-testid={`${rowId}-preset`} className="text-xs text-muted-foreground">
+          {account.preset} · {account.wireProtocols.join(", ")}
+        </span>
+      ) : null}
       <SyncStatusBadge rowId={rowId} status={account.syncStatus} />
       <form
         className="flex items-center gap-2"
@@ -303,6 +336,9 @@ function AccountRowView({
           Rename
         </Button>
       </form>
+      {account.preset && onListModels ? (
+        <ProviderModels rowId={rowId} accountId={account.accountId} onListModels={onListModels} />
+      ) : null}
       {isSessionAccount ? null : confirmingRemoval ? (
         <span className="flex items-center gap-2">
           <span>Remove this account's credential?</span>
@@ -332,6 +368,97 @@ function AccountRowView({
         </Button>
       )}
     </li>
+  );
+}
+
+/** "Connect API key" and, once pressed, its form; closes when the daemon added the account. */
+function ConnectApiKey({
+  onConnect,
+  error,
+}: {
+  onConnect: NonNullable<AccountsScreenProps["onConnectProviderAccount"]>;
+  error: string | null;
+}) {
+  const [connecting, setConnecting] = useState(false);
+  const [pending, setPending] = useState(false);
+  return (
+    <div className="mb-4">
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="accounts-connect-api-key"
+        onClick={() => setConnecting(true)}
+      >
+        Connect API key
+      </Button>
+      {connecting ? (
+        <ConnectProviderAccountForm
+          presets={PROVIDER_PRESET_OPTIONS}
+          pending={pending}
+          error={error}
+          onCancel={() => setConnecting(false)}
+          onSubmit={(input) => {
+            setPending(true);
+            onConnect(input)
+              .then((added) => {
+                if (added) setConnecting(false);
+              })
+              .finally(() => setPending(false));
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type ModelsState =
+  | { kind: "closed" }
+  | { kind: "loading" }
+  | { kind: "listed"; modelIds: string[] }
+  | { kind: "error"; reason: string };
+
+/** A provider account's models, asked of its endpoint only when a person expands the row. */
+function ProviderModels({
+  rowId,
+  accountId,
+  onListModels,
+}: {
+  rowId: string;
+  accountId: string;
+  onListModels: (accountId: string) => Promise<string[]>;
+}) {
+  const [state, setState] = useState<ModelsState>({ kind: "closed" });
+  const toggle = () => {
+    if (state.kind !== "closed") {
+      setState({ kind: "closed" });
+      return;
+    }
+    setState({ kind: "loading" });
+    onListModels(accountId)
+      .then((modelIds) => setState({ kind: "listed", modelIds }))
+      .catch((e: unknown) =>
+        setState({ kind: "error", reason: e instanceof Error ? e.message : String(e) }),
+      );
+  };
+  return (
+    <span className="flex flex-col gap-1">
+      <Button size="sm" variant="ghost" data-testid={`${rowId}-models-toggle`} onClick={toggle}>
+        {state.kind === "closed" ? "Models" : "Hide models"}
+      </Button>
+      {state.kind === "loading" ? <span className="text-xs">Asking the provider…</span> : null}
+      {state.kind === "error" ? (
+        <span data-testid={`${rowId}-models-error`} className="text-xs text-destructive">
+          {state.reason}
+        </span>
+      ) : null}
+      {state.kind === "listed" ? (
+        <ul data-testid={`${rowId}-models`} className="text-xs font-mono">
+          {state.modelIds.map((id) => (
+            <li key={id}>{id}</li>
+          ))}
+        </ul>
+      ) : null}
+    </span>
   );
 }
 

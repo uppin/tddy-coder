@@ -76,7 +76,10 @@ vault's subject)
 (`GitHubAccountLinker` and `VaultLinkedAccountStore`, over
 `tddy_daemon_auth::github_account_linking_provider`) — and wires none for a stub GitHub provider, so
 the two link RPCs answer `FAILED_PRECONDITION` there
-([account-linking.md](../../tddy-accounts/docs/account-linking.md#daemon-wiring-tddy-daemon)). The built `DaemonRuntime` keeps
+([account-linking.md](../../tddy-accounts/docs/account-linking.md#daemon-wiring-tddy-daemon)). It
+always wires provider accounts over the same store, with `provider_model_probe::HttpProviderModelProbe`
+(`reqwest`, 20 s per probe) as the `ProviderModelProbe`
+([provider-accounts.md](../../tddy-accounts/docs/provider-accounts.md)). The built `DaemonRuntime` keeps
 the one handle privately and exposes it read-only as `DaemonRuntime::credential_vaults()` — the very
 registry its services hold open, not a second instance over the same directory whose in-memory open
 state would be its own; `tests/accounts_stub_daemon_acceptance.rs` opens a stub user's vault through

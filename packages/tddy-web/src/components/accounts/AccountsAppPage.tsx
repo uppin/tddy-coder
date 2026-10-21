@@ -21,6 +21,7 @@ import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
 import { reasonOf } from "./rpcReason";
 import { useLinkFlow } from "./useLinkFlow";
+import { type ConnectProviderAccountInput } from "./ConnectProviderAccountForm";
 import { AppShell } from "../shell/AppShell";
 import {
   AccountsScreen,
@@ -57,6 +58,8 @@ function rowFromRpc(account: AccountSummary): AccountRow {
     updatedAtUnixSeconds: account.updatedAt,
     hasSecret: account.hasSecret,
     syncStatus: syncStatusFromRpc(account.syncStatus),
+    preset: account.preset,
+    wireProtocols: account.wireProtocols,
   };
 }
 
@@ -124,6 +127,8 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
     };
   }, [client, sessionToken]);
 
+  const [connectError, setConnectError] = useState<string | null>(null);
+
   const reread = () => {
     if (!client) return;
     client
@@ -138,6 +143,39 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
     onLinked: reread,
     onError: setActionError,
   });
+
+  const connectProviderAccount = async (input: ConnectProviderAccountInput) => {
+    if (!client) return false;
+    try {
+      await client.connectProviderAccount({
+        sessionToken: sessionToken ?? "",
+        preset: input.preset,
+        label: input.label,
+        apiKey: input.apiKey,
+        openaiBaseUrl: input.openAiBaseUrl,
+        anthropicBaseUrl: input.anthropicBaseUrl,
+      });
+    } catch (e: unknown) {
+      setConnectError(reasonOf(e));
+      return false;
+    }
+    setConnectError(null);
+    reread();
+    return true;
+  };
+
+  const listModels = async (accountId: string) => {
+    if (!client) return [];
+    try {
+      const res = await client.listProviderAccountModels({
+        sessionToken: sessionToken ?? "",
+        accountId,
+      });
+      return res.modelIds;
+    } catch (e: unknown) {
+      throw new Error(reasonOf(e));
+    }
+  };
 
   const rename = (provider: string, accountId: string, label: string) => {
     if (!client) return;
@@ -189,6 +227,9 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
           onRemove={remove}
           linkAttempt={linkAttempt}
           onAddAccount={addAccount}
+          onConnectProviderAccount={connectProviderAccount}
+          connectError={connectError}
+          onListModels={listModels}
         />
       ) : null}
     </AppShell>

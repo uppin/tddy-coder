@@ -5,19 +5,25 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use tddy_credential_sync::AccountSyncSummary;
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::accounts::{
-    AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse, LinkState,
-    ListAccountsRequest, ListAccountsResponse, PollLinkAccountRequest, PollLinkAccountResponse,
-    ProviderAccounts, RemoveAccountRequest, RemoveAccountResponse, SessionAccount,
-    SetAccountLabelRequest, SetAccountLabelResponse, SyncStatus,
+    AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse,
+    ConnectProviderAccountRequest, ConnectProviderAccountResponse, LinkState, ListAccountsRequest,
+    ListAccountsResponse, ListProviderAccountModelsRequest, ListProviderAccountModelsResponse,
+    PollLinkAccountRequest, PollLinkAccountResponse, ProviderAccounts, RemoveAccountRequest,
+    RemoveAccountResponse, SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse,
+    SyncStatus,
 };
 
 use crate::attempts::{Attempts, PollAdmission};
 use crate::linking::{
     record_for_link, removal_allowed, AccountLinker, LinkError, LinkProgress, LinkedAccountStore,
     LinkedIdentity, META_SUBJECT,
+};
+use crate::provider_account::{
+    account_id_for, endpoints_for, preset, ProviderAccount, ProviderAccountError,
+    ProviderAccountStore, ProviderModelProbe,
 };
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
@@ -37,6 +43,13 @@ struct Linking {
     attempts: Attempts,
 }
 
+/// The two ports connecting a model-provider account needs: somewhere to keep it, and a way to ask
+/// its endpoint whether the key works. Wired together for the reason [`Linking`] is.
+struct ProviderAccountPorts {
+    store: Arc<dyn ProviderAccountStore>,
+    probe: Arc<dyn ProviderModelProbe>,
+}
+
 /// Serves `accounts.AccountsService` by reading and curating one [`AccountStore`], and — when the
 /// linking half is wired — by adding accounts to it.
 pub struct AccountsServiceImpl<S> {
@@ -49,6 +62,7 @@ pub struct AccountsServiceImpl<S> {
     /// `SYNC_STATUS_UNSPECIFIED`, exactly as it did before this port existed.
     sync_status: Option<Arc<dyn SyncStatusSource>>,
     linking: Option<Linking>,
+    provider_accounts: Option<ProviderAccountPorts>,
 }
 
 impl<S> AccountsServiceImpl<S> {
@@ -59,6 +73,7 @@ impl<S> AccountsServiceImpl<S> {
             clock: Arc::new(Instant::now),
             sync_status: None,
             linking: None,
+            provider_accounts: None,
         }
     }
 
@@ -92,12 +107,35 @@ impl<S> AccountsServiceImpl<S> {
         self
     }
 
+    /// Wire the half that connects model-provider accounts by key.
+    ///
+    /// Additive, like [`with_linking`](Self::with_linking): a daemon that skips it answers the two
+    /// provider-account methods with `FAILED_PRECONDITION` and nothing else changes.
+    #[must_use]
+    pub fn with_provider_accounts(
+        mut self,
+        store: Arc<dyn ProviderAccountStore>,
+        probe: Arc<dyn ProviderModelProbe>,
+    ) -> Self {
+        self.provider_accounts = Some(ProviderAccountPorts { store, probe });
+        self
+    }
+
     /// Replace the clock attempt deadlines and poll pacing are read from. For tests, which would
     /// otherwise sleep to cross a window or an interval.
     #[must_use]
     pub fn with_clock(mut self, clock: Clock) -> Self {
         self.clock = clock;
         self
+    }
+
+    /// The provider-account half, or the refusal a daemon that never wired one owes the caller.
+    fn require_provider_accounts(&self) -> Result<&ProviderAccountPorts, Status> {
+        self.provider_accounts.as_ref().ok_or_else(|| {
+            Status::failed_precondition(
+                "this daemon cannot connect provider accounts: no store is wired",
+            )
+        })
     }
 
     /// The linking half, or the refusal a daemon that never wired one owes the caller.
@@ -114,6 +152,69 @@ impl<S> AccountsServiceImpl<S> {
 
 #[async_trait]
 impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
+    async fn connect_provider_account(
+        &self,
+        request: Request<ConnectProviderAccountRequest>,
+    ) -> Result<Response<ConnectProviderAccountResponse>, Status> {
+        let request = request.into_inner();
+        let ports = self.require_provider_accounts()?;
+        let session_token = request.session_token.clone();
+        let account = requested_account(request).map_err(refusal_of_provider_account)?;
+
+        // The vault is consulted before the network: a locked vault refuses without the key ever
+        // leaving this daemon.
+        self.store.list(&session_token).map_err(status_for)?;
+        ports
+            .probe
+            .list_models(&account.endpoints, &account.api_key)
+            .await
+            .map_err(|reason| {
+                Status::invalid_argument(format!(
+                    "the {} endpoint did not accept this key: {reason}",
+                    account.preset.label
+                ))
+            })?;
+
+        let record = ports
+            .store
+            .put_provider_account(&session_token, &account)
+            .map_err(status_for)?;
+        Ok(Response::new(ConnectProviderAccountResponse {
+            account: Some(summary_of(&record, self.sync_status.as_deref())),
+        }))
+    }
+
+    async fn list_provider_account_models(
+        &self,
+        request: Request<ListProviderAccountModelsRequest>,
+    ) -> Result<Response<ListProviderAccountModelsResponse>, Status> {
+        let request = request.into_inner();
+        let ports = self.require_provider_accounts()?;
+        let account = ports
+            .store
+            .provider_account(&request.session_token, &AccountId::new(&request.account_id))
+            .map_err(|refusal| match refusal {
+                AccountsError::NotFound { .. } => Status::not_found(format!(
+                    "no provider account {} is connected",
+                    request.account_id
+                )),
+                other => status_for(other),
+            })?;
+        let model_ids = ports
+            .probe
+            .list_models(&account.endpoints, &account.api_key)
+            .await
+            .map_err(|reason| {
+                Status::unavailable(format!(
+                    "the {} endpoint did not list its models: {reason}",
+                    account.preset.label
+                ))
+            })?;
+        Ok(Response::new(ListProviderAccountModelsResponse {
+            model_ids,
+        }))
+    }
+
     async fn list_accounts(
         &self,
         request: Request<ListAccountsRequest>,
@@ -408,6 +509,61 @@ fn grouped_by_provider(
     groups
 }
 
+/// The account a connect request describes, before anything is asked of the vault or the network.
+fn requested_account(
+    request: ConnectProviderAccountRequest,
+) -> Result<ProviderAccount, ProviderAccountError> {
+    let preset = preset(&request.preset)
+        .ok_or_else(|| ProviderAccountError::UnknownPreset(request.preset.clone()))?;
+    if request.api_key.is_empty() {
+        return Err(ProviderAccountError::MissingApiKey);
+    }
+    let endpoints = endpoints_for(
+        preset,
+        non_blank(&request.anthropic_base_url),
+        non_blank(&request.openai_base_url),
+    )?;
+    Ok(ProviderAccount {
+        account: account_id_for(preset, &request.label),
+        preset,
+        label: request.label,
+        endpoints,
+        api_key: SecretString::new(request.api_key),
+    })
+}
+
+/// A request string with nothing in it is a field the client left unset.
+fn non_blank(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+/// Every [`ProviderAccountError`] is a request the operator can correct.
+fn refusal_of_provider_account(error: ProviderAccountError) -> Status {
+    let reason = match error {
+        ProviderAccountError::UnknownPreset(preset) => {
+            format!("{preset:?} is not a known provider")
+        }
+        ProviderAccountError::MissingBaseUrl { preset, protocol } => format!(
+            "the {preset} provider needs a base URL for {}",
+            protocol.as_str()
+        ),
+        ProviderAccountError::FixedBaseUrl { preset, protocol } => format!(
+            "the {preset} provider's {} endpoint is fixed and cannot be replaced",
+            protocol.as_str()
+        ),
+        ProviderAccountError::UnservedBaseUrl { preset, protocol } => format!(
+            "the {preset} provider does not serve {}, so it takes no base URL for it",
+            protocol.as_str()
+        ),
+        ProviderAccountError::InvalidBaseUrl(url) => format!(
+            "{url:?} is not an http(s) URL with a host and without credentials, query or fragment"
+        ),
+        ProviderAccountError::MissingApiKey => "an API key is required".to_string(),
+    };
+    Status::invalid_argument(reason)
+}
+
 /// What a person may see of a record. The secret is reduced to whether one is present.
 fn summary_of(
     record: &CredentialRecord,
@@ -416,6 +572,7 @@ fn summary_of(
     let sync_status = sync_status
         .and_then(|source| source.status_for(&record.provider, &record.account))
         .map_or(SyncStatus::Unspecified, sync_status_proto_of);
+    let provider_account = ProviderAccount::from_record(record);
     AccountSummary {
         provider: record.provider.as_str().to_string(),
         account_id: record.account.as_str().to_string(),
@@ -428,6 +585,16 @@ fn summary_of(
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
         has_secret: !record.secret.expose().is_empty(),
         sync_status: sync_status as i32,
+        preset: provider_account
+            .as_ref()
+            .map_or_else(String::new, |account| account.preset.id.to_string()),
+        wire_protocols: provider_account.map_or_else(Vec::new, |account| {
+            account
+                .wire_protocols()
+                .into_iter()
+                .map(|protocol| protocol.as_str().to_string())
+                .collect()
+        }),
     }
 }
 

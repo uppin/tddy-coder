@@ -29,6 +29,12 @@ service AccountsService {
   rpc BeginLinkAccount(BeginLinkAccountRequest) returns (BeginLinkAccountResponse);
   // Ask where a link attempt stands. Mints no session and returns no token.
   rpc PollLinkAccount(PollLinkAccountRequest) returns (PollLinkAccountResponse);
+  // Add a model-provider account (Meta, Fireworks, …) from a pasted API key. The key is checked by
+  // listing the endpoint's models before anything is stored. Mints no session; the key goes in,
+  // never out.
+  rpc ConnectProviderAccount(ConnectProviderAccountRequest) returns (ConnectProviderAccountResponse);
+  // The models one provider account's endpoint serves, asked of the endpoint with that account's key.
+  rpc ListProviderAccountModels(ListProviderAccountModelsRequest) returns (ListProviderAccountModelsResponse);
 }
 
 // One linked account, as a person sees it.
@@ -60,6 +66,13 @@ message AccountSummary {
   // credentials, or none has been admitted. That is not the same as every peer having
   // acknowledged it, which is `SYNC_STATUS_SYNCED`.
   SyncStatus sync_status = 7;
+  // For a model-provider account: the preset it was connected with — "meta", "fireworks",
+  // "baseten", "modal", "openai-compatible", "anthropic-compatible". Empty for every other account.
+  string preset = 8;
+  // For a model-provider account: the wire protocols its endpoint serves —
+  // "anthropic-messages", "openai-responses", "openai-chat". Which harness can run on it follows
+  // from these. Empty for every other account.
+  repeated string wire_protocols = 9;
 }
 
 // One account's aggregate standing across every peer it has been offered to, worst first: a
@@ -213,4 +226,34 @@ message PollLinkAccountResponse {
   // The interval to wait before the next poll. Set on `LINK_PENDING`, and widened when the
   // provider said the last one was too soon.
   int64 interval_seconds = 3;
+}
+
+// A model-provider account, connected by key.
+//
+// `api_key` is **inbound only**: no response carries it back, by the same message-shape rule as
+// `AccountSummary`. The base URLs are set only for a preset whose endpoint the operator supplies
+// (Modal, the two generic presets); a preset with fixed endpoints refuses them.
+message ConnectProviderAccountRequest {
+  string session_token = 1;
+  string preset = 2;
+  string label = 3;
+  string api_key = 4;
+  // The Anthropic Messages root (the client appends `/v1/messages`), for "anthropic-compatible".
+  string anthropic_base_url = 5;
+  // The OpenAI root that serves `/models`, `/responses` and `/chat/completions` — usually ending in
+  // `/v1` — for "modal" and "openai-compatible".
+  string openai_base_url = 6;
+}
+
+message ConnectProviderAccountResponse {
+  AccountSummary account = 1;
+}
+
+message ListProviderAccountModelsRequest {
+  string session_token = 1;
+  string account_id = 2;
+}
+
+message ListProviderAccountModelsResponse {
+  repeated string model_ids = 1;
 }
