@@ -228,6 +228,12 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 // terminal is announced to a human in the reply below and never asked about again
                 // from here.
                 Ok(_serving) => (at.room, lk.url.clone(), at.identity),
+                // Nothing wired to expose through is the port's "not exposed", not a failure: a
+                // daemon without LiveKit credentials reaches here with its null object, and a
+                // warning on every start would cry wolf.
+                Err(refused) if exposure_is_unwired(&refused) => {
+                    (String::new(), String::new(), String::new())
+                }
                 Err(e) => {
                     log::warn!(
                         target: "tddy_daemon::telegram_session_control",
@@ -423,5 +429,31 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         self.sender.send_message(chat_id, &done).await?;
         self.notify_account_identity_unavailable(chat_id, session_id, &project)
             .await
+    }
+}
+
+/// Whether `refused` is the exposure port's answer for "nothing is wired" — `FailedPrecondition`,
+/// what [`tddy_daemon_extensions::NoTerminalExposure`] returns — as opposed to a real failure.
+fn exposure_is_unwired(refused: &tddy_rpc::Status) -> bool {
+    refused.code == tddy_rpc::Code::FailedPrecondition
+}
+
+#[cfg(test)]
+mod exposure_refusal_tests {
+    use super::exposure_is_unwired;
+    use tddy_rpc::Status;
+
+    #[test]
+    fn the_null_exposures_refusal_is_not_a_failure() {
+        let refused = Status::failed_precondition("no terminal exposure is wired");
+
+        assert!(exposure_is_unwired(&refused));
+    }
+
+    #[test]
+    fn a_failed_join_is_a_failure() {
+        let refused = Status::internal("could not join the room");
+
+        assert!(!exposure_is_unwired(&refused));
     }
 }
