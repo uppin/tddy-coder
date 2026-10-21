@@ -43,9 +43,9 @@ const THE_MODULE_B: &str =
 const THE_A_TESTS: &str = "use super::a::Thing;\nuse super::recipe;\n\n#[test]\nfn recipe_holds() {\n    \
                            assert!(recipe());\n    let _ = Thing;\n    crate::facade::defined::f();\n    \
                            let _ = tempfile::tempdir();\n}\n";
-/// `mixed_tests` names `a`, and the whole parent through `super::*`.
+/// `mixed_tests` names `a` as `super::a::Thing`, and the whole parent through `super::*`.
 const THE_MIXED_TESTS: &str =
-    "use super::*;\n\n#[test]\nfn both() {\n    let _ = (Thing, keeper::Keeper);\n}\n";
+    "use super::*;\n\n#[test]\nfn both() {\n    let _ = (super::a::Thing, keeper::Keeper);\n}\n";
 const THE_UNRELATED_TESTS: &str = "#[test]\nfn arithmetic() {\n    assert_eq!(2, 1 + 1);\n}\n";
 /// `ab_tests` names both `a` and `b`.
 const THE_AB_TESTS: &str =
@@ -376,18 +376,18 @@ fn the_crates_a_following_test_module_names_join_dev_dependencies() {
     // When the move is resolved
     let edit = resolving(&workspace, &mut nothing_reaches_anything(), &cluster);
 
-    // Then `tempfile` is a dev-dependency and not a dependency
+    // Then `tempfile` and `other` are dev-dependencies, and `tempfile` is not a dependency
     let manifest = after(&workspace, &edit, DESTINATION_MANIFEST);
-    let dependencies = manifest
-        .split("[dev-dependencies]")
-        .next()
-        .unwrap_or_default();
+    let (dependencies, dev_dependencies) = manifest
+        .split_once("[dev-dependencies]")
+        .unwrap_or((manifest.as_str(), ""));
     assert_eq!(
         (
-            manifest.contains("[dev-dependencies]\ntempfile = \"3\"\n"),
+            dev_dependencies.lines().any(|line| line == "tempfile = \"3\""),
+            dev_dependencies.lines().any(|line| line.starts_with("other ")),
             dependencies.contains("tempfile"),
         ),
-        (true, false),
+        (true, true, false),
         "{manifest}"
     );
 }

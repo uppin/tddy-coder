@@ -180,8 +180,8 @@ None in `#reshape`: no node consumes this behaviour. The second stack (crate spl
 - [x] **M1** `test_declarations` + unit tests 19–20
 - [x] **M2** `repointed_header_in`, `Gate::Test`, `test_gated`; tests 7, 8
 - [x] **M3** `reach` on `defined_at` and tree root; tests 5, 16
-- [ ] **M4** `sorted`, `kept_by_outside_references`; tests 9–13
-- [ ] **M5** `follow_changes`, `travelling`; tests 1–4, 6, 14
+- [x] **M4** `sorted`, `kept_by_outside_references`; tests 9–13
+- [x] **M5** `follow_changes`, `travelling`; tests 1–4, 6, 14
 - [x] **M6** `unfollowable`, notes; tests 15, 17, 18
 - [x] **M7** live case 22
 - [ ] **M8** docs at wrap
@@ -274,6 +274,11 @@ Taken by the developer (2026-10-09, PRD review), with all recommendations accept
 - **F3: no opt-out field.** **Decided (2026-10-09): none**: a follower by construction needs nothing that stays; add a field only when a plan needs one.
 - **F4: outside references keep a test module behind** (resolve-time, so plain `check` cannot see it). **Decided (2026-10-09): keep it** (rare, but moving a module whose helpers another test imports breaks that test); the parity gap is stated in the limitations.
 - **F5: test fixtures.** **Decided (2026-10-09): move node 5's fake reference set into `tests/harness/`** (a test-only move) if node 5 kept it local to `tests/crate_move_children.rs`, rather than a second copy.
+
+Taken by the developer (2026-10-21), on the `/green` stop for two red tests of this node:
+
+- **Test 7 (`the_crates_a_following_test_module_names_join_dev_dependencies`): check the line, not adjacency.** The assertion required `tempfile = "3"` to sit directly under `[dev-dependencies]`. The destination also correctly declares `other` (the origin facade `crate::facade::defined::f` resolves to `other::defined::f`), so the two lines are never adjacent. It now asserts that the dev table has both lines and that `tempfile` is not in `[dependencies]`. Reason: the assertion was over-specified; the rule it checks (dev-dependency, not dependency) is unchanged.
+- **Test 9 (`a_test_module_that_also_names_code_staying_behind_stays_and_the_resolution_notes_why`): fixture to the approved changeset.** `THE_MIXED_TESTS` used a bare `Thing`, which the lexical survey cannot see, so the test module was not reported. It now names `super::a::Thing`, as the Fixture paragraph above specifies. Reason: the fixture contradicted the approved plan; the assertion is unchanged.
 
 **OPEN:** none.
 
