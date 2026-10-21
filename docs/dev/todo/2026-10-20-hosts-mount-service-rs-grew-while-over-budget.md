@@ -15,3 +15,7 @@ The file needs the four-seam split recorded in the code issue (peer routing, hos
 host stats, prompts). That is a restructure pass of its own, not something a 25-line feature PR
 should carry. Do it as one pass after the `#host-desktops` stack lands, together with the other
 deferrals that name this file.
+
+**Correction (2026-10-21, `#host-desktops` sweep planning):** the file went 936 → **972** in #656 (+36:
+48 lines added, 12 removed, measured from `300c3da4c^` → `300c3da4c`), not 936 → 961. The record carries
+the corrected row. The sweep node (`#host-desktops` 9/9) plans the split; see its changeset.

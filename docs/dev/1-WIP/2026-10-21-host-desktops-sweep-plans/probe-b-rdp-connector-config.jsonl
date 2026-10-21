@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-rdp/src/rdp_client.rs":{"sha256":"sha256:07b738be8504dafb618f736eacacb010f96b92eaf17e0d3f0576cc2e7b961749","modified":"2026-10-21T03:38:01Z"}}}
+{"op": "extract_method", "anchor": {"kind": "item", "item": "tddy_rdp::rdp_client::<RdpClient as ScreenSharingClient>::connect", "file": "packages/tddy-rdp/src/rdp_client.rs", "start": {"line": 13, "col": 9}, "end": {"line": 56, "col": 11}, "fingerprint": "sha256:5c7bd4188b88fa46519c5cc2dbb83103850b9b647b58cf51d1b3bd5602172c6f", "hint": {"line": 155, "col": 9}}, "name": "connector_config"}

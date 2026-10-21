@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-screenshare/src/bridge.rs":{"sha256":"sha256:42614e864244d93ea07eaa1a9af4d2df4e66fb4d8156ed781d3de0045e2b60ad","modified":"2026-10-21T03:38:01Z"}}}
+{"op": "extract_method", "anchor": {"kind": "item", "item": "tddy_screenshare::bridge::start_bridge", "file": "packages/tddy-screenshare/src/bridge.rs", "start": {"line": 18, "col": 5}, "end": {"line": 45, "col": 58}, "fingerprint": "sha256:2f671593d4069c09220ff72c5592ccd60ce91d811b6fbe997ff42a76da19def4", "hint": {"line": 265, "col": 5}}, "name": "publish_to_livekit"}

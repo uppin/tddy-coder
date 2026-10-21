@@ -1,0 +1,2 @@
+{"v":1,"snapshot":{"packages/tddy-daemon-kernel/src/config.rs":"sha256:c299ceb65a698567001f83f47e1587a097b28092dcb46816f675f3b3be636779"}}
+{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon-kernel/src/config.rs","start":{"line":689,"col":1},"end":{"line":1005,"col":2}},"name":"agent_cli","to_file":true,"reexport":"named"}
