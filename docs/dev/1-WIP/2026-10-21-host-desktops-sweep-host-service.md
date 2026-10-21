@@ -340,8 +340,9 @@ statement plan 24 moved, whose arguments now read the helper's `&str` parameters
 
 | File / function | Before | After |
 |---|---|---|
-| `host_tooling.rs` | 806 | **396** |
-| `host_tooling/{desktop_probes, readings, subprocess}.rs` | — | 100, 164, 184 |
+| `host_tooling.rs` | 806 | **404** (396 before E5's eight `#[cfg(unix)]` lines) |
+| `host_tooling/{desktop_probes, readings, subprocess}.rs` | — | 100, 165, 184 |
+| `github_cli.rs` | 201 | 205 (re-pointed imports + E5) |
 | `service.rs` | 972 | **242** |
 | `service/{builders, host_keys, listings, peer_forwards, prompts, stats_stream}.rs` | — | 234, 251, 135, 137, 123, 123 |
 | `screen_sharing_service.rs` | 482 | 415 |
@@ -493,11 +494,73 @@ lines in `host_tooling.rs`'s `mod tests`.
 [G]'s run and accounted for its 2 lost / 67 gained by the scripts above.
 
 **Code issues:** no record under the four packages' `docs/code-issues/` carries `Claimed by:`.
-`oversized-file-host-tooling.md` (396) and `oversized-file-service.md` (242) close; `oversized-file-host-registry.md`
+`oversized-file-host-tooling.md` (404 after E5) and `oversized-file-service.md` (242) close; `oversized-file-host-registry.md`
 and `complexity-host-messages-unlock-and-add.md` name files this PR does not touch.
 
 **Risk summary:** Critical 0 · Warning 1 (the dropped `#[cfg(unix)]`, fixed as E5) · Info 2 (plan 26 reduced;
 `connect_impl` 72 and `stream_host_stats_impl` 96 stay over 60, recorded).
+
+### `/validate-tests` (2026-10-21, `/pr-wrap` step 2)
+
+- **Tests analyzed:** 0 changed test bodies. The only test-code change in `origin/master...HEAD` is six lines
+  at the top of `host_tooling.rs`'s `mod tests` (three re-pointed `use` lines and their `#[cfg(unix)]`, E5);
+  no file under any `tests/` changed; the test regions of `screen_sharing_service.rs` (from line 416) and
+  `bridge.rs` (from line 405) carry no hunk.
+- **Anti-patterns / fluent-tests violations / description-body mismatches:** none introduced (nothing to
+  introduce them in). No `#[ignore]`, `.skip`, `.only`, sleep or timeout added or removed.
+- **Coverage of the extracted helpers:** behaviour-preserving moves are covered by the unchanged suites that
+  covered the inlined code — `host_add_key_handler_tests` (add-key helpers), `bridge_readiness_acceptance`,
+  `host_desktop_sign_in_acceptance`, `x11_channels_acceptance`, `screen_sharing_service_acceptance`
+  (`start_stream_impl`/`start_session_bridge`, `start_host_stream_impl` helpers), `rdp_client_integration` /
+  `rdp_nla_integration` (`connector_config`); 298/0 equal to the baseline. No new tests are owed: a
+  restructure adds none (`code-restructuring` § Scope).
+- **Critical:** 0 · **Warning:** 0. Refactoring needed from this step: none.
+
+### `/validate-prod-ready` (2026-10-21, `/pr-wrap` step 3) — ✅ Ready
+
+Files checked: 20 production `.rs` files in the diff (test modules excluded). Scan of every added line for
+`TODO|FIXME|HACK|XXX|WORKAROUND|println!|eprintln!|dbg!|mock|fake|stub|unwrap()|expect(|unwrap_or_default`:
+
+| Category | Count | Status |
+|---|---|---|
+| Mock / fake / stub code | 0 | ✅ |
+| Dev fallbacks | 0 new — the four `unwrap_or_default` and the one `"0.0.0.0:0".parse().unwrap()` hits are moved lines present verbatim at `origin/master` (moved-line diff: none gained) | ✅ |
+| TODO/FIXME | 1 — `host_tooling/subprocess.rs` `TODO(host-desktops sweep)` above `pub(super) struct RunningProbe` (hand edit E1): acceptable, tracked by `docs/dev/todo/2026-10-21-restructure-widened-field-leaves-its-private-type.md`, removed when the engine widens reached types | ⚠️ tracked |
+| Unused code | 0 — `cargo clippy -p <four> --all-targets -- -D warnings` clean | ✅ |
+| Debug output | 0 | ✅ |
+
+Blockers: 0. Verified by the scoped test and clippy runs recorded under `## Baseline` (298/0). Refactoring
+needed from this step: none.
+
+### `/analyze-clean-code` (2026-10-21, `/pr-wrap` step 4) — score **C**, nothing worsened
+
+Scripted over the 17 non-test source files (function span signature-to-brace, parameter count including
+`self`, indentation depth). **File length:** every file ≤ 500 production lines; whole-file totals over 500 are
+the inline test modules of `host_tooling.rs` (879) and `screen_sharing_service.rs` (1,794) — pre-existing,
+`misplaced-tests` not decomposition (the latter is `2026-10-20-screen-sharing-two-stand-in-bridges`).
+
+| Function | Lines | Params | Verdict | Origin |
+|---|---|---|---|---|
+| `stream_host_stats_impl` | 96 | 2 | must refactor (length) | moved body H9, unchanged 96 — out of scope (`## Boundaries`) |
+| `connect_impl` | 72 | 3 | must refactor (length) | was 115; finalize step refused by the engine — rdp todo narrowed |
+| `start_bridge_for_desktop` | 26 | 7 | must refactor (params) | new helper, plan 16 — signature change not allowed in a move: todo |
+| `start_session_bridge` | 44 | 6 | needs attention (params), nesting 6 | new helper, plan 24, the ladder moved verbatim from `start_stream`: todo |
+| `start_host_stream_impl` 53, `answer_host_prompt_impl` 54, `list_ssh_config_hosts_impl` 54, `add_host_key_impl` 48, `list_host_key_candidates_impl` 48, `connector_config` 46, `stream_host_prompts_impl` 44, `get_host_tooling_impl` 44, `start_stream_impl` 41 | 41–54 | ≤ 3 | needs attention | moved bodies (or shortened by this PR) |
+| `probe` 77, `pump_loop` 74, `keysym_to_scancode` 89 | | | must refactor | pre-existing, not touched by this PR |
+
+Magic values / duplication / naming: none introduced (every literal is a moved line). **Cleanups applied**
+(through the `refactor` subagent): `bridge.rs` — the `// Channel: input RPC handler → pump loop` comment the
+extraction left above the `publish_to_livekit` call moved back above the channel it documents, and the three
+blank lines the extraction dropped restored (comment/whitespace only). **Recorded instead of applied** (would
+change a signature or a moved body): `docs/dev/todo/2026-10-21-desktop-start-helpers-parameter-count-and-nesting.md`.
+
+### File-length gate (`/pr-wrap` step 3.5)
+
+The gate's own script (production lines to the first `#[cfg(test)]`, merge-base `e0256b346`, `*/tests/*` and
+`src/gen` excluded) over the 17 non-test source files in the diff: **none at or over 500**. Largest: `rdp_client.rs`
+446 → 459, `screen_sharing_service.rs` 482 → 415, `host_tooling.rs` 806 → 404, `bridge.rs` 399 → 404. The
+`honest` measure (every `#[cfg(test)]` item excluded) gives the same numbers on every file. Nothing to
+decompose or defer.
 
 ## Plan
 
