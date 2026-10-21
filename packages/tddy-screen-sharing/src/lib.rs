@@ -25,6 +25,7 @@ pub mod bridge_readiness;
 pub mod screen_sharing_records;
 pub mod screen_sharing_service;
 pub mod session_vault_target_store;
+pub mod x11vnc;
 
 use std::sync::Arc;
 
@@ -35,6 +36,7 @@ pub use screen_sharing_records::{
 };
 pub use screen_sharing_service::{ScreenSharingServiceImpl, SessionsBase};
 pub use session_vault_target_store::{SessionSubjectResolver, SessionVaultTargetStore};
+pub use x11vnc::{X11vncServers, X11vncStarted, DEFAULT_X11VNC_ACCEPT_TIMEOUT};
 
 /// The `screen_sharing.ScreenSharingService` entry the daemon's wiring layer registers.
 ///

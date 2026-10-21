@@ -275,6 +275,26 @@ export const hostDesktopPage = {
 };
 
 /**
+ * One desktop channel per Connect — added by `#host-desktops 7/8`.
+ *
+ * A host may offer several desktops (its endpoint probes plus one per X11 display), so each Connect
+ * carries the channel it opens in `data-channel-id`, and each channel's reading is addressed by it.
+ */
+export const hostDesktopChannelsPage = {
+  /** Every Connect the row offers, one per connectable channel. */
+  connects: (instanceId: string) =>
+    cy.get(`[data-testid="${ROW_TEST_ID_PREFIX}${instanceId}-connect-desktop"]`),
+  /** The Connect for one channel. */
+  connectTo: (instanceId: string, channelId: string) =>
+    cy.get(
+      `[data-testid="${ROW_TEST_ID_PREFIX}${instanceId}-connect-desktop"][data-channel-id="${channelId}"]`,
+    ),
+  /** What the row says about one channel. */
+  channel: (instanceId: string, channelId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-channel-${channelId}`),
+};
+
+/**
  * The tooling cell each Hosts-screen row asks its host through — added by `#host-desktops 4/8`.
  *
  * `hostToolingPage` addresses the report once it is on screen; this addresses the cell's own states

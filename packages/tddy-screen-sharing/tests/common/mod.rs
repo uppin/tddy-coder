@@ -27,11 +27,13 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_screen_sharing::screen_sharing_records::{
     account_for, record_for, target_from, ScreenSharingTargetStore, TargetError,
 };
-use tddy_screen_sharing::{ScreenSharingServiceImpl, DEFAULT_BRIDGE_READY_TIMEOUT};
+use tddy_screen_sharing::{
+    ScreenSharingServiceImpl, DEFAULT_BRIDGE_READY_TIMEOUT, DEFAULT_X11VNC_ACCEPT_TIMEOUT,
+};
 use tddy_service::proto::screen_sharing::{
     AddHostTargetRequest, AddTargetRequest, Protocol, ScreenSharingService,
     ScreenSharingTarget as ProtoScreenSharingTarget, StartHostStreamRequest, StartStreamRequest,
-    StartStreamResponse,
+    StartStreamResponse, StopHostStreamRequest,
 };
 use tddy_testing_commons::process_is_alive;
 use tddy_testing_commons::stub_scripts::make_executable;
@@ -62,6 +64,13 @@ pub const A_START_FINISHES_WITHIN: Duration = Duration::from_secs(20);
 /// The argument that makes the stand-in exit at once, before it records anything.
 const WARM_UP_ARGUMENT: &str = "--warm-up";
 
+/// Where the stand-in x11vnc logs its launches, in the daemon's storage directory. A bridge that
+/// [`TheBridge::ExitsWithItsX11vnc`] reads it too, to find the x11vnc it was pointed at.
+const X11VNC_LAUNCH_LOG: &str = "x11vnc-launches";
+
+/// How often a bridge that [`TheBridge::ExitsWithItsX11vnc`] checks whether its x11vnc is still up.
+const A_BRIDGE_CHECKS_ITS_X11VNC_EVERY: &str = "0.02";
+
 /// What the stand-in bridge does once the daemon has written its config to it.
 #[derive(Debug, Clone)]
 pub enum TheBridge {
@@ -73,11 +82,32 @@ pub enum TheBridge {
     NeverReports,
     /// Exits without writing anything: a bridge that crashed before it knew anything.
     ExitsBeforeReporting,
+    /// Writes this readiness line, then exits as soon as the x11vnc serving the port it was pointed
+    /// at is gone — as a real `tddy-vnc` does when its VNC server goes away under it.
+    ExitsWithItsX11vnc(BridgeReadiness),
+    /// Writes this readiness line, stays up for [`A_REPORTED_BRIDGE_EXITS_AFTER_SECS`], then exits
+    /// on its own: a bridge that came up and later crashed.
+    ReportsThenExits(BridgeReadiness),
 }
+
+/// How long a bridge that [`TheBridge::ReportsThenExits`] stays up after its readiness line: long
+/// enough that the daemon has read that line and the start has returned, so the exit is a running
+/// bridge's rather than a failed start's.
+const A_REPORTED_BRIDGE_EXITS_AFTER_SECS: &str = "0.5";
 
 impl TheBridge {
     pub fn ready_at(width: u32, height: u32) -> Self {
         Self::Reports(BridgeReadiness::Ready { width, height })
+    }
+
+    /// Ready at this size, then gone on its own shortly after.
+    pub fn ready_at_then_exits(width: u32, height: u32) -> Self {
+        Self::ReportsThenExits(BridgeReadiness::Ready { width, height })
+    }
+
+    /// Ready at this size, and gone as soon as its x11vnc is.
+    pub fn ready_at_until_its_x11vnc_stops(width: u32, height: u32) -> Self {
+        Self::ExitsWithItsX11vnc(BridgeReadiness::Ready { width, height })
     }
 
     pub fn refusing_the_sign_in_with(reason: &str) -> Self {
@@ -97,6 +127,8 @@ impl TheBridge {
 pub struct StandInBridge {
     pub binary: PathBuf,
     pid_file: PathBuf,
+    /// What the daemon wrote to the bridge's stdin.
+    config_file: PathBuf,
 }
 
 impl StandInBridge {
@@ -104,8 +136,10 @@ impl StandInBridge {
         let bridge = Self {
             binary: dir.join("tddy-vnc-stand-in"),
             pid_file: dir.join("bridge-pid"),
+            config_file: dir.join("bridge-config.json"),
         };
         let pid = bridge.pid_file.display();
+        let config = bridge.config_file.display();
         let after_config = match behaviour {
             TheBridge::Reports(readiness) => {
                 let line = serde_json::to_string(readiness).expect("a readiness line");
@@ -113,6 +147,27 @@ impl StandInBridge {
             }
             TheBridge::NeverReports => format!("exec sleep {A_BRIDGE_STAYS_UP_FOR_SECS}\n"),
             TheBridge::ExitsBeforeReporting => "exit 1\n".to_string(),
+            TheBridge::ReportsThenExits(readiness) => {
+                let line = serde_json::to_string(readiness).expect("a readiness line");
+                format!(
+                    "printf '%s\\n' '{line}'\nsleep {A_REPORTED_BRIDGE_EXITS_AFTER_SECS}\nexit 1\n"
+                )
+            }
+            // The x11vnc is found by the port in the bridge's config: the launch log line naming
+            // `-rfbport <that port>` carries its pid. `-rfbport` is never x11vnc's last argument,
+            // so the trailing space keeps one port from matching another that it prefixes.
+            TheBridge::ExitsWithItsX11vnc(readiness) => {
+                let line = serde_json::to_string(readiness).expect("a readiness line");
+                let launches = dir.join(X11VNC_LAUNCH_LOG);
+                let launches = launches.display();
+                format!(
+                    "port=$(sed -n 's/.*\"port\":\\([0-9]*\\).*/\\1/p' \"{config}\")\n\
+                     x11vnc=$(grep -e \"-rfbport $port \" \"{launches}\" | sed 's/ .*//')\n\
+                     printf '%s\\n' '{line}'\n\
+                     while kill -0 \"$x11vnc\" 2>/dev/null; do sleep {A_BRIDGE_CHECKS_ITS_X11VNC_EVERY}; done\n\
+                     exit 1\n"
+                )
+            }
         };
         // The pid is written to a temp file and `mv -f`'d into place, so a reader sees a whole pid
         // or none.
@@ -123,7 +178,7 @@ impl StandInBridge {
                  [ \"$1\" = {WARM_UP_ARGUMENT} ] && exit 0\n\
                  echo $$ > \"{pid}.part\"\n\
                  mv -f \"{pid}.part\" \"{pid}\"\n\
-                 cat > /dev/null\n\
+                 cat > \"{config}\"\n\
                  {after_config}"
             ),
         )
@@ -162,9 +217,40 @@ impl StandInBridge {
         .await
     }
 
+    /// Whether the daemon has spawned this bridge at all. Read after a start has returned, by
+    /// which time any bridge it spawned has long since recorded its pid.
+    pub fn was_ever_started(&self) -> bool {
+        self.pid_file.exists()
+    }
+
+    /// The config the daemon wrote to the bridge's stdin, once the bridge has read all of it.
+    pub async fn config_read_from_its_stdin(&self) -> serde_json::Value {
+        // The pid is recorded before stdin is read, so a bridge with a pid has a config on its way.
+        self.pid().await;
+        eventually(
+            "the bridge has read its whole config",
+            A_BRIDGE_RECORDS_ITS_PID_WITHIN,
+            || {
+                let written = std::fs::read(&self.config_file).map_err(|e| {
+                    format!("{} is not readable yet: {e}", self.config_file.display())
+                })?;
+                serde_json::from_slice(&written).map_err(|e| {
+                    format!("{} is not whole JSON yet: {e}", self.config_file.display())
+                })
+            },
+        )
+        .await
+    }
+
     /// Wait until the bridge process is gone.
     pub async fn has_exited(&self) {
         let pid = self.pid().await;
+        self.has_exited_as(pid).await;
+    }
+
+    /// Wait until the bridge that ran as `pid` is gone — for a bridge since replaced, whose pid is
+    /// no longer the recorded one.
+    pub async fn has_exited_as(&self, pid: u32) {
         eventually(
             "the bridge process has exited",
             A_STOPPED_BRIDGE_EXITS_WITHIN,
@@ -188,6 +274,216 @@ impl StandInBridge {
         // SAFETY: signalling a pid affects no memory in this process.
         unsafe { libc::kill(pid, libc::SIGKILL) };
     }
+}
+
+/// What the stand-in `x11vnc` does once the daemon has started it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TheX11vnc {
+    /// Accepts connections on the `-rfbport` it was given, as a real x11vnc does once it has
+    /// attached to its display.
+    AcceptsConnections,
+    /// Stays up and never accepts: an x11vnc stuck attaching to its display.
+    NeverAccepts,
+}
+
+/// One start of the stand-in x11vnc: the pid it ran as and the arguments it was given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct X11vncLaunch {
+    pub pid: u32,
+    pub argv: Vec<String>,
+}
+
+impl X11vncLaunch {
+    fn parsed_from(line: &str) -> Option<Self> {
+        let mut words = line.split_whitespace();
+        let pid = words.next()?.parse().ok()?;
+        Some(Self {
+            pid,
+            argv: words.map(str::to_string).collect(),
+        })
+    }
+
+    /// The value following `flag`, if the launch was given that flag.
+    fn value_of(&self, flag: &str) -> Option<&str> {
+        self.argv
+            .iter()
+            .position(|arg| arg == flag)
+            .and_then(|at| self.argv.get(at + 1))
+            .map(String::as_str)
+    }
+
+    /// The port x11vnc was told to serve on.
+    pub fn rfb_port(&self) -> u16 {
+        self.value_of("-rfbport")
+            .and_then(|port| port.parse().ok())
+            .unwrap_or_else(|| panic!("x11vnc was given no -rfbport: {:?}", self.argv))
+    }
+
+    pub fn assert_serves_display(&self, display: u32) -> &Self {
+        assert_eq!(
+            self.value_of("-display"),
+            Some(format!(":{display}").as_str()),
+            "x11vnc was not pointed at display :{display}: {:?}",
+            self.argv
+        );
+        self
+    }
+
+    pub fn assert_listens_on_loopback_only(&self) -> &Self {
+        assert!(
+            self.argv.iter().any(|arg| arg == "-localhost"),
+            "x11vnc would listen beyond loopback: {:?}",
+            self.argv
+        );
+        self
+    }
+}
+
+/// A stand-in for `x11vnc` that appends `<pid> <argv…>` to a launch log on every start, then
+/// sleeps until it is stopped.
+///
+/// The listening half is done by the test rather than the script, so the stand-in needs no `nc` or
+/// `perl` on the machine running the suite: when it [`TheX11vnc::AcceptsConnections`], a watcher
+/// thread binds `127.0.0.1:<-rfbport>` for every launch it sees — a bound listener completes TCP
+/// handshakes from its backlog, which is all the daemon's readiness check asks of it.
+pub struct StandInX11vnc {
+    pub binary: PathBuf,
+    launch_log: PathBuf,
+    stop_watching: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// How long the watcher sleeps between reads of the launch log.
+const X11VNC_WATCH_INTERVAL: Duration = Duration::from_millis(20);
+/// Safety net for a launch that should happen: a stand-in that has logged nothing by now was never
+/// started.
+const AN_X11VNC_LOGS_ITS_LAUNCH_WITHIN: Duration = Duration::from_secs(10);
+
+impl StandInX11vnc {
+    fn installed_in(dir: &Path, behaviour: TheX11vnc) -> Self {
+        let x11vnc = Self {
+            binary: dir.join("x11vnc-stand-in"),
+            launch_log: dir.join(X11VNC_LAUNCH_LOG),
+            stop_watching: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        // One `echo` per launch, so a reader sees whole lines.
+        std::fs::write(
+            &x11vnc.binary,
+            format!(
+                "#!/bin/sh\n\
+                 [ \"$1\" = {WARM_UP_ARGUMENT} ] && exit 0\n\
+                 echo \"$$ $*\" >> \"{log}\"\n\
+                 exec sleep {A_BRIDGE_STAYS_UP_FOR_SECS}\n",
+                log = x11vnc.launch_log.display()
+            ),
+        )
+        .expect("writing the stand-in x11vnc");
+        make_executable(&x11vnc.binary);
+        x11vnc.warm_up();
+        if behaviour == TheX11vnc::AcceptsConnections {
+            x11vnc.listen_for_each_launch();
+        }
+        x11vnc
+    }
+
+    /// Run the freshly written script once, to completion, before any test clock starts — as
+    /// [`StandInBridge::warm_up`] does, and for the same reason.
+    ///
+    /// The first exec of a new executable can take seconds on a loaded macOS machine. A test about
+    /// an x11vnc that never accepts gives the start a short accept window, and without this the
+    /// daemon gave up on, and killed, a stand-in that had not yet logged its launch, so the test
+    /// saw no launch ever happen.
+    fn warm_up(&self) {
+        let status = std::process::Command::new(&self.binary)
+            .arg(WARM_UP_ARGUMENT)
+            .status()
+            .expect("warming up the stand-in x11vnc");
+        assert!(status.success(), "the stand-in x11vnc warm-up: {status}");
+    }
+
+    fn listen_for_each_launch(&self) {
+        let launch_log = self.launch_log.clone();
+        let stop = Arc::clone(&self.stop_watching);
+        std::thread::spawn(move || {
+            let mut listeners = Vec::new();
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                let launches = read_launches(&launch_log);
+                for launch in launches.iter().skip(listeners.len()) {
+                    listeners.push(
+                        std::net::TcpListener::bind(("127.0.0.1", launch.rfb_port()))
+                            .expect("listening where x11vnc was told to"),
+                    );
+                }
+                std::thread::sleep(X11VNC_WATCH_INTERVAL);
+            }
+        });
+    }
+
+    /// Every start so far, in order.
+    pub fn launches(&self) -> Vec<X11vncLaunch> {
+        read_launches(&self.launch_log)
+    }
+
+    /// The `nth` start (0-based), once it has happened.
+    pub async fn launch(&self, nth: usize) -> X11vncLaunch {
+        eventually(
+            "x11vnc is started",
+            AN_X11VNC_LOGS_ITS_LAUNCH_WITHIN,
+            || {
+                let launches = self.launches();
+                launches
+                    .get(nth)
+                    .cloned()
+                    .ok_or_else(|| format!("{} launches so far: {launches:?}", launches.len()))
+            },
+        )
+        .await
+    }
+
+    /// Wait until the process of `launch` is gone.
+    pub async fn has_exited(&self, launch: &X11vncLaunch) {
+        let pid = launch.pid;
+        eventually(
+            "the x11vnc process has exited",
+            A_STOPPED_BRIDGE_EXITS_WITHIN,
+            || {
+                (!process_is_alive(pid))
+                    .then_some(())
+                    .ok_or_else(|| format!("x11vnc pid {pid} is still alive"))
+            },
+        )
+        .await
+    }
+
+    /// Check, for `window`, that the process of `launch` stays up — a stop that is coming would
+    /// have arrived by then.
+    pub async fn keeps_running(&self, launch: &X11vncLaunch, window: Duration) {
+        let until = tokio::time::Instant::now() + window;
+        while tokio::time::Instant::now() < until {
+            assert!(
+                process_is_alive(launch.pid),
+                "x11vnc pid {} was stopped while its channel was still open",
+                launch.pid
+            );
+            tokio::time::sleep(X11VNC_WATCH_INTERVAL).await;
+        }
+    }
+
+    fn kill_every_launch(&self) {
+        self.stop_watching
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        for launch in self.launches() {
+            // SAFETY: signalling a pid affects no memory in this process.
+            unsafe { libc::kill(launch.pid as i32, libc::SIGKILL) };
+        }
+    }
+}
+
+fn read_launches(launch_log: &Path) -> Vec<X11vncLaunch> {
+    std::fs::read_to_string(launch_log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(X11vncLaunch::parsed_from)
+        .collect()
 }
 
 /// The operator at the browser: answers every desktop-password question with the empty password,
@@ -321,6 +617,7 @@ impl ScreenSharingTargetStore for TheSessionsCredentials {
 pub struct DaemonUnderTest {
     service: ScreenSharingServiceImpl,
     pub bridge: StandInBridge,
+    pub x11vnc: StandInX11vnc,
     storage: tempfile::TempDir,
 }
 
@@ -328,6 +625,8 @@ pub struct DaemonUnderTest {
 pub struct DaemonBuilder {
     bridge: TheBridge,
     ready_timeout: Duration,
+    x11vnc: TheX11vnc,
+    x11vnc_accept_timeout: Duration,
 }
 
 /// A daemon whose bridge does `bridge` once it is spawned.
@@ -335,6 +634,8 @@ pub fn a_daemon_whose_bridge(bridge: TheBridge) -> DaemonBuilder {
     DaemonBuilder {
         bridge,
         ready_timeout: DEFAULT_BRIDGE_READY_TIMEOUT,
+        x11vnc: TheX11vnc::AcceptsConnections,
+        x11vnc_accept_timeout: DEFAULT_X11VNC_ACCEPT_TIMEOUT,
     }
 }
 
@@ -346,9 +647,23 @@ impl DaemonBuilder {
         self
     }
 
+    /// The installed x11vnc does `x11vnc` once it is started.
+    pub fn with_an_x11vnc_that(mut self, x11vnc: TheX11vnc) -> Self {
+        self.x11vnc = x11vnc;
+        self
+    }
+
+    /// Wait at most `timeout` for x11vnc to accept — set short here so a test about one that never
+    /// does costs a moment rather than the default wait.
+    pub fn waiting_for_x11vnc_at_most(mut self, timeout: Duration) -> Self {
+        self.x11vnc_accept_timeout = timeout;
+        self
+    }
+
     pub fn start(self) -> DaemonUnderTest {
         let storage = tempfile::tempdir().expect("a storage directory");
         let bridge = StandInBridge::installed_in(storage.path(), &self.bridge);
+        let x11vnc = StandInX11vnc::installed_in(storage.path(), self.x11vnc);
 
         let config = Arc::new(DaemonConfig {
             livekit: Some(LiveKitConfig {
@@ -361,6 +676,7 @@ impl DaemonBuilder {
             }),
             screen_sharing: Some(ScreenSharingConfig {
                 vnc_binary_path: bridge.binary.display().to_string(),
+                x11vnc_binary_path: x11vnc.binary.display().to_string(),
                 ..Default::default()
             }),
             ..Default::default()
@@ -386,11 +702,13 @@ impl DaemonBuilder {
             operator as Arc<dyn HostPromptRegistry>,
         )
         .with_target_store(Arc::new(TheSessionsCredentials::default()))
-        .with_bridge_ready_timeout(self.ready_timeout);
+        .with_bridge_ready_timeout(self.ready_timeout)
+        .with_x11vnc_accept_timeout(self.x11vnc_accept_timeout);
 
         DaemonUnderTest {
             service,
             bridge,
+            x11vnc,
             storage,
         }
     }
@@ -408,11 +726,44 @@ impl DaemonUnderTest {
                 port: A_VNC_PORT,
                 protocol: Protocol::Vnc as i32,
                 username: THE_OS_USER.to_string(),
+                x11_display: None,
             }))
             .await
             .expect("attaching a desktop to a host")
             .into_inner()
             .target_id
+    }
+
+    /// Attach X11 display `:display` of `host` as a desktop, as the Hosts screen does when an
+    /// operator presses Connect on that display's channel.
+    pub async fn attach_an_x11_display_to(&self, host: &str, display: u32) -> String {
+        self.service
+            .add_host_target(Request::direct(AddHostTargetRequest {
+                session_token: A_SESSION_TOKEN.to_string(),
+                daemon_instance_id: host.to_string(),
+                label: format!("Display :{display}"),
+                host: "127.0.0.1".to_string(),
+                port: 0,
+                protocol: Protocol::Vnc as i32,
+                username: String::new(),
+                x11_display: Some(display),
+            }))
+            .await
+            .expect("attaching an X11 display to a host")
+            .into_inner()
+            .target_id
+    }
+
+    /// Close a host's open desktop, as the viewer does when the operator closes it.
+    pub async fn close_the_desktop_of(&self, host: &str, target_id: &str) {
+        self.service
+            .stop_host_stream(Request::direct(StopHostStreamRequest {
+                session_token: A_SESSION_TOKEN.to_string(),
+                daemon_instance_id: host.to_string(),
+                target_id: target_id.to_string(),
+            }))
+            .await
+            .expect("closing a host's desktop");
     }
 
     /// Open a host's desktop and hand back whatever the start came to, refusal included.
@@ -494,6 +845,7 @@ impl Drop for DaemonUnderTest {
     /// A stand-in left sleeping is a bad neighbour to every run after it.
     fn drop(&mut self) {
         self.bridge.kill_if_running();
+        self.x11vnc.kill_every_launch();
     }
 }
 

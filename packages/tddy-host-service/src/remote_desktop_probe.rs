@@ -56,10 +56,22 @@ impl DesktopProtocol {
     }
 }
 
-/// What the probe found for one protocol on one host.
+/// Which desktop on a host a reading is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DesktopChannel {
+    /// A server already listening on the reading's port of this host's loopback.
+    #[default]
+    Endpoint,
+    /// An X11 display (`:N`), served on demand by starting x11vnc for it
+    /// ([`crate::x11_displays`]).
+    X11Display(u32),
+}
+
+/// What the probe found for one desktop channel on one host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopReachability {
     pub outcome: ProbeOutcome,
+    pub channel: DesktopChannel,
     pub protocol: DesktopProtocol,
     /// The bridge binary for this protocol exists and could be spawned.
     pub can_bridge: bool,
@@ -143,6 +155,7 @@ impl RemoteDesktopProbe for TcpRemoteDesktopProbe {
         match is_accepting_connections(PROBE_HOST, port) {
             Ok(desktop_reachable) => DesktopReachability {
                 outcome: ProbeOutcome::Ok,
+                channel: DesktopChannel::Endpoint,
                 protocol,
                 can_bridge,
                 desktop_reachable,
@@ -150,6 +163,7 @@ impl RemoteDesktopProbe for TcpRemoteDesktopProbe {
             },
             Err(reason) => DesktopReachability {
                 outcome: ProbeOutcome::Failed(reason),
+                channel: DesktopChannel::Endpoint,
                 protocol,
                 can_bridge,
                 // Not a finding. `Failed` is what says so — a reader keying off this flag alone
@@ -167,7 +181,7 @@ impl RemoteDesktopProbe for TcpRemoteDesktopProbe {
 /// resort, which they hand to the OS to look up on `PATH` — is searched on `PATH` too: testing it
 /// with `exists()` would answer about the daemon's working directory, which is not where the OS
 /// would find it.
-fn binary_is_present(resolved: &Path) -> bool {
+pub(crate) fn binary_is_present(resolved: &Path) -> bool {
     let has_directory = resolved
         .parent()
         .is_some_and(|parent| !parent.as_os_str().is_empty());
@@ -221,7 +235,7 @@ mod tests {
         DaemonConfig {
             screen_sharing: Some(tddy_daemon_kernel::config::ScreenSharingConfig {
                 vnc_binary_path: binary.to_string_lossy().to_string(),
-                rdp_binary_path: String::new(),
+                ..Default::default()
             }),
             ..DaemonConfig::default()
         }

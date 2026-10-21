@@ -16,6 +16,7 @@ Product behaviour: [screen-sharing-sessions.md](../../../docs/ft/web/screen-shar
 | `screen_sharing_service::bridge_lifecycle` | bridge spawning, the wait for its start report, and termination; the desktop-password prompt and the target-store lookup, as `impl ScreenSharingServiceImpl` members |
 | `bridge_readiness` | `await_bridge_readiness`: reading a bridge's start report from its stdout within a bound, and mapping it to `BridgeStarted { width, height }` or a `Status`; `DEFAULT_BRIDGE_READY_TIMEOUT` (30 s) |
 | `screen_sharing_service::host_targets` | the bodies of the host-scoped RPCs (`list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream`) as `*_impl` members |
+| `x11vnc` | `X11vncServers`: one `x11vnc` per open X11 channel, keyed like its bridge; start (stopping the key's previous one first), wait until it accepts, stop; `x11vnc_arguments`, `X11VNC_HOST`, `DEFAULT_X11VNC_ACCEPT_TIMEOUT` (10 s) |
 | `bridge_config` | `BridgeSpawnConfig` and `PreparedBridge`, how a bridge's spawn configuration is built (`prepare_bridge`, `build_bridge_spawn_config`), and the bridge key, identity, track-name and LiveKit-room naming |
 
 ## A start waits for its bridge
@@ -43,6 +44,28 @@ the bridge's size or its failure, and a session target whose bridge cannot be pr
 (it names no protocol, the daemon has no LiveKit configuration, or no room token can be minted) fails `FAILED_PRECONDITION`. `BridgeSpawnConfig.width/height` are `0`: no
 size is hinted to a bridge, which takes it from the desktop. A session start with no daemon config,
 or for a target that is not in the store, spawns nothing and answers with a `0×0` size.
+
+## An X11 channel runs x11vnc around its bridge
+
+A host target may name an X11 display (`HostDesktopTarget.display`, from
+`AddHostTargetRequest.x11_display`, returned on `ScreenSharingTarget.x11_display`) instead of a
+listening `host:port`. `start_host_stream` for one does the following:
+
+1. Terminates any bridge still under the target's key, **before** touching x11vnc. A reopen that
+   stopped the old x11vnc first would make the old bridge exit while its key still named it, and
+   that bridge's reaper would then stop the x11vnc being started.
+2. `X11vncServers::start`: stops the key's previous x11vnc, spawns
+   `x11vnc -display :N -localhost -rfbport <free> -nopw -forever` (binary from
+   `resolve_x11vnc_binary_path`), and polls `127.0.0.1:<port>` until it accepts. If it exits
+   first, the start fails with `Unavailable`. Past `DEFAULT_X11VNC_ACCEPT_TIMEOUT` (or
+   `with_x11vnc_accept_timeout`) it fails with `DeadlineExceeded`, and a spawn error is `Internal`.
+   On any failure the x11vnc is killed before the call returns, and no bridge is started.
+3. Points the bridge's spawn config at `X11VNC_HOST:<port>` and spawns it (`spawn_bridge`,
+   unchanged). If the bridge fails, its x11vnc is stopped.
+
+The x11vnc is stopped by `StopHostStream`, and by `reap_bridge` when a bridge exits on its own while
+its key still names it. A bridge that was stopped or replaced leaves the x11vnc alone, because its
+stopper owns that. A background task reaps every x11vnc child.
 
 ## A target is a record
 
@@ -114,6 +137,7 @@ its stdin.
 | `tests/screen_sharing_records_unit.rs` | the record mapping, malformed records, the AEAD tamper |
 | `tests/screen_sharing_service_acceptance.rs` | the service, over an in-memory store that uses the real mapping |
 | `tests/bridge_readiness_acceptance.rs` | a start against a `/bin/sh` stand-in bridge scripted per test (`tests/common`): refused sign-in, reported size on both scopes, early exit, silence past the timeout, and that a failed bridge is stopped |
+| `tests/x11_channels_acceptance.rs` | an X11 target through the RPC against stand-in `x11vnc` and bridge scripts (`tests/common`): argv `-display :1 -localhost`, the bridge pointed at the x11vnc's port, stop on close, one x11vnc after a reopen (also when the old bridge exits with its x11vnc), never-accepts → `DeadlineExceeded` with no bridge and the x11vnc stopped, and stop when the bridge fails to start or exits after running. The stand-ins are run once with `--warm-up` before any test clock starts, because a new executable's first exec on a loaded macOS machine can outlast a short accept window |
 | `tests/session_vault_target_store_acceptance.rs` | the store, over a real sealed vault: cross-session listing, locked, cleartext leakage |
 | `tests/screen_sharing_record_propagation.rs` | reconciliation of a screen-sharing record through the sync engine |
 | `tddy-service/tests/screen_sharing_carries_no_passphrase.rs` | the schema declares no unlock RPC and no passphrase field |

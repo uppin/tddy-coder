@@ -39,6 +39,11 @@ pub struct HostDesktopTarget {
     /// Mirrors `screen_sharing.proto`'s `Protocol`. See [`DesktopProtocolId`].
     pub protocol: i32,
     pub username: String,
+    /// An X11 display (`:N`) served through a daemon-started x11vnc, in place of `host`:`port`.
+    /// Absent for a desktop that is already listening somewhere, and in every file written before
+    /// X11 channels existed — so those files still load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<u32>,
 }
 
 /// The `screen_sharing.proto` `Protocol` discriminants, named so a fixture reads as a protocol
@@ -181,6 +186,7 @@ mod tests {
                 port: 5900,
                 protocol: DesktopProtocolId::VNC,
                 username: "ada".to_string(),
+                display: None,
             },
         }
     }

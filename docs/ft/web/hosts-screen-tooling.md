@@ -47,10 +47,22 @@ Five sections, each labelled with the tool it speaks for.
 | remote desktop | desktop serving | "Desktop on :5900" — something accepted a connection on the port named |
 | remote desktop | nothing serving | "No desktop on :5900" — the probe reached the host and nothing was listening |
 | remote desktop | could not check | "Could not check :5900", with the reason on hover |
+| remote desktop (X11 display) | display available | "Display :1" with "Display available" — the daemon's user can connect to that display's X server socket |
+| remote desktop (X11 display) | no x11vnc | "Display :1" with "No bridge" — listed, with no Connect, until `x11vnc` is installed |
 
-The remote-desktop section lists **both protocols, always** — VNC on `:5900` and RDP on `:3389` —
-including the ones nothing answered for. "No desktop on :5900" is a finding, and a row that listed
-only the protocols that answered could not be told apart from one where nobody looked.
+The remote-desktop section lists the host's **desktop channels**. Two are always there: VNC on
+`:5900` and RDP on `:3389`, including the ones nothing answered for. "No desktop on :5900" is a
+finding, and a row that listed only the protocols that answered could not be told apart from one
+where nobody looked. Beside them, the section has **one channel per X11 display** the daemon's own OS
+user can open, named "Display :N". These are the `X<N>` sockets in the X11 socket directory
+(`/tmp/.X11-unix` unless configured) that accept a connection from that user. A stale socket left
+by a crashed server is not listed, and neither is another user's display. A display already served
+on its VNC port (`5900 + N`) is not listed a second time. Each connectable channel has its own
+Connect. Pressing Connect on an X11 channel has the daemon start `x11vnc` for that display, bound
+to loopback with no password, and the stream runs through it (see
+[screen-sharing-sessions.md](./screen-sharing-sessions.md) § Connecting from a host row). Without
+`x11vnc` on the host, its displays are still listed and report "No bridge", so the operator learns
+what to install.
 
 A host that has not answered yet renders a waiting marker, and a platform that cannot run the probes
 at all says so. Neither borrows the shape of a finding. The desktop section is the exception to the
@@ -127,9 +139,11 @@ They are independent — a host can serve a desktop that tddy has no bridge for,
 bridges installed can be serving nothing — so the row shows both, side by side, and never one
 merged verdict. Merged, "unavailable" sends an operator to the wrong machine's worth of work.
 
-**The port that was checked is always named.** Only the default ports are probed, and a host is free
-to serve on another display; "No desktop" without a port reads as authoritative about the host
-rather than about `:5900`. Discovering non-default ports is not part of this.
+**The port that was checked is always named.** The endpoint probes read only the default ports, and
+a host is free to serve elsewhere; "No desktop" without a port reads as authoritative about the host
+rather than about `:5900`. A host's X11 displays are found by their sockets, not by port, so a
+display with no VNC server of its own is still offered. Discovering other non-default ports is not
+part of this.
 
 **The probe is a bare TCP connect, closed immediately — never a protocol handshake.** The screen
 would otherwise be pointing half-open RFB handshakes at people's desktops on a timer, and the
@@ -212,6 +226,11 @@ than subscribed to, and only for hosts that are online.
 - [x] Wildcard-only `Host` patterns contribute no alias names.
 - [x] In the running app, a reachable desktop on an online host shows Connect on its Hosts row.
 - [x] An offline host makes no tooling call, even when a wire to it exists.
+- [x] A host with displays `:0` and `:1` lists two X11 channels plus the endpoint readings.
+- [x] A display socket nothing answers on, and an entry not named `X<N>`, is not listed.
+- [x] A display already served on its VNC port is not listed twice.
+- [x] Without `x11vnc` the X11 channels are listed but offer no Connect.
+- [x] A row with two connectable channels offers two Connect actions, each opening its own channel.
 - [x] A host that does not answer reads "Tooling could not be read", never a blank cell.
 - [x] Two concurrent requests for one host run one probe.
 - [x] A request within the TTL runs no probe, and one after it probes again.

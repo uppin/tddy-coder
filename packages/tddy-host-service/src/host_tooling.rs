@@ -208,6 +208,8 @@ const PROBED_PROTOCOLS: [DesktopProtocol; 2] = [DesktopProtocol::Vnc, DesktopPro
 /// listening on the machine running the suite, and a test may not depend on that.
 pub struct SubprocessHostToolingProbe {
     remote_desktop: Arc<dyn RemoteDesktopProbe>,
+    /// Where X11 displays are listed from and how x11vnc resolves; `None` lists no X11 channels.
+    x11_channels: Option<tddy_daemon_kernel::config::ScreenSharingConfig>,
 }
 
 impl Default for SubprocessHostToolingProbe {
@@ -227,13 +229,41 @@ impl SubprocessHostToolingProbe {
             remote_desktop: Arc::new(
                 crate::remote_desktop_probe::TcpRemoteDesktopProbe::for_config(config),
             ),
+            x11_channels: None,
         }
+        .listing_x11_displays_for(config)
     }
 
     /// Fill the desktop block from `remote_desktop` instead of connecting for real.
     #[must_use]
     pub fn probing_desktops_with(remote_desktop: Arc<dyn RemoteDesktopProbe>) -> Self {
-        Self { remote_desktop }
+        Self {
+            remote_desktop,
+            x11_channels: None,
+        }
+    }
+
+    /// Also report one channel per X11 display in `config`'s `screen_sharing.x11_socket_dir`
+    /// ([`crate::x11_displays`]).
+    #[must_use]
+    pub fn listing_x11_displays_for(
+        mut self,
+        config: &tddy_daemon_kernel::config::DaemonConfig,
+    ) -> Self {
+        self.x11_channels = Some(config.screen_sharing.clone().unwrap_or_default());
+        self
+    }
+
+    /// The endpoint readings, with the X11 channels appended when this probe lists them.
+    fn with_x11_channels(&self, endpoints: Vec<DesktopReachability>) -> Vec<DesktopReachability> {
+        match &self.x11_channels {
+            None => endpoints,
+            Some(screen_sharing) => crate::x11_displays::with_x11_channels(
+                endpoints,
+                screen_sharing,
+                &self.remote_desktop,
+            ),
+        }
     }
 }
 
@@ -282,7 +312,7 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
         // Collected here for the same reason, and not as the last field of the literal: two bounded
         // TCP connects judged on whatever `git` and `gh` left of the deadline would report a host as
         // unprobeable for time they spent, which is the one thing this block must never claim.
-        let remote_desktop = desktop_readings_of(remote_desktop, deadline);
+        let remote_desktop = self.with_x11_channels(desktop_readings_of(remote_desktop, deadline));
 
         let tooling = HostTooling {
             git: match (name, email) {
@@ -341,7 +371,7 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
                 login: None,
             },
             ssh_agent: crate::ssh_agent::AgentStatus::unsupported(),
-            remote_desktop: desktop_readings_of(remote_desktop, deadline),
+            remote_desktop: self.with_x11_channels(desktop_readings_of(remote_desktop, deadline)),
         };
 
         warn_if_a_desktop_probe_failed(&tooling.remote_desktop);
@@ -417,6 +447,7 @@ fn desktop_readings_of(
 fn desktop_probe_failed(protocol: DesktopProtocol, reason: String) -> DesktopReachability {
     DesktopReachability {
         outcome: ProbeOutcome::Failed(reason),
+        channel: crate::remote_desktop_probe::DesktopChannel::Endpoint,
         protocol,
         can_bridge: false,
         desktop_reachable: false,
@@ -865,6 +896,7 @@ mod tests {
     fn serving_with_no_bridge(protocol: DesktopProtocol) -> DesktopReachability {
         DesktopReachability {
             outcome: ProbeOutcome::Ok,
+            channel: crate::remote_desktop_probe::DesktopChannel::Endpoint,
             protocol,
             can_bridge: false,
             desktop_reachable: true,
@@ -877,6 +909,7 @@ mod tests {
     fn bridgeable_with_no_desktop(protocol: DesktopProtocol) -> DesktopReachability {
         DesktopReachability {
             outcome: ProbeOutcome::Ok,
+            channel: crate::remote_desktop_probe::DesktopChannel::Endpoint,
             protocol,
             can_bridge: true,
             desktop_reachable: false,
@@ -983,6 +1016,137 @@ mod tests {
         assert_was_probed_on_this_host("git identity", &tooling.git.outcome);
         assert_was_probed_on_this_host("gh", &tooling.github_cli.outcome);
         assert_was_probed_on_this_host("ssh-agent", &tooling.ssh_agent.outcome);
+    }
+
+    /// An endpoint probe that answers by port: a VNC server is listening on exactly `serving`, and
+    /// on nothing else. The bridge is always there, so only reachability varies.
+    #[cfg(unix)]
+    struct VncServedOnPorts {
+        serving: Vec<u16>,
+    }
+
+    #[cfg(unix)]
+    impl RemoteDesktopProbe for VncServedOnPorts {
+        fn probe(&self, protocol: DesktopProtocol, port: u16) -> DesktopReachability {
+            DesktopReachability {
+                outcome: ProbeOutcome::Ok,
+                channel: crate::remote_desktop_probe::DesktopChannel::Endpoint,
+                protocol,
+                can_bridge: true,
+                desktop_reachable: protocol == DesktopProtocol::Vnc && self.serving.contains(&port),
+                port,
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn a_vnc_server_listening_on(ports: &[u16]) -> Arc<dyn RemoteDesktopProbe> {
+        Arc::new(VncServedOnPorts {
+            serving: ports.to_vec(),
+        })
+    }
+
+    /// A daemon whose `screen_sharing:` block lists displays from `socket_dir` and resolves
+    /// x11vnc to `x11vnc` — a path that may or may not exist, as the test arranges.
+    #[cfg(unix)]
+    fn a_config_listing_x11_displays_in(
+        socket_dir: &std::path::Path,
+        x11vnc: &std::path::Path,
+    ) -> tddy_daemon_kernel::config::DaemonConfig {
+        tddy_daemon_kernel::config::DaemonConfig {
+            screen_sharing: Some(tddy_daemon_kernel::config::ScreenSharingConfig {
+                x11_socket_dir: socket_dir.display().to_string(),
+                x11vnc_binary_path: x11vnc.display().to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// The X11 channel readings in a block, in order.
+    #[cfg(unix)]
+    fn the_x11_channels_in(tooling: &HostTooling) -> Vec<DesktopReachability> {
+        tooling
+            .remote_desktop
+            .iter()
+            .filter(|reading| {
+                matches!(
+                    reading.channel,
+                    crate::remote_desktop_probe::DesktopChannel::X11Display(_)
+                )
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Display `:0` is already served by the VNC server on 5900, which the endpoint reading
+    /// reports. Listing it again as an X11 channel would offer the operator one desktop twice.
+    #[cfg(unix)]
+    #[test]
+    fn does_not_list_a_display_already_served_on_its_vnc_port_twice() {
+        // Given
+        let sockets = crate::test_util::an_x11_socket_dir()
+            .with_a_running_display(0)
+            .with_a_running_display(1);
+        let probe =
+            SubprocessHostToolingProbe::probing_desktops_with(a_vnc_server_listening_on(&[5900]))
+                .listing_x11_displays_for(&a_config_listing_x11_displays_in(
+                    sockets.path(),
+                    std::path::Path::new("/nonexistent/x11vnc"),
+                ));
+
+        // When
+        let tooling = probe.probe(&the_current_os_user(), None);
+
+        // Then
+        assert_eq!(
+            the_x11_channels_in(&tooling)
+                .iter()
+                .map(|reading| reading.channel)
+                .collect::<Vec<_>>(),
+            vec![crate::remote_desktop_probe::DesktopChannel::X11Display(1)],
+        );
+    }
+
+    /// A display is there and the VNC bridge is there, but nothing can serve the display to the
+    /// bridge without x11vnc. The channel is still listed — the operator learns what to install —
+    /// and reports that it cannot be bridged.
+    #[cfg(unix)]
+    #[test]
+    fn reports_x11_channels_as_unbridgeable_without_x11vnc() {
+        // Given
+        let sockets = crate::test_util::an_x11_socket_dir().with_a_running_display(1);
+        let missing_x11vnc = sockets.path().join("x11vnc-is-not-installed");
+        let probe =
+            SubprocessHostToolingProbe::probing_desktops_with(a_vnc_server_listening_on(&[]))
+                .listing_x11_displays_for(&a_config_listing_x11_displays_in(
+                    sockets.path(),
+                    &missing_x11vnc,
+                ));
+
+        // When
+        let tooling = probe.probe(&the_current_os_user(), None);
+
+        // Then
+        let channels: Vec<_> = the_x11_channels_in(&tooling)
+            .into_iter()
+            .map(|reading| {
+                (
+                    reading.channel,
+                    reading.desktop_reachable,
+                    reading.can_bridge,
+                )
+            })
+            .collect();
+        assert_eq!(
+            channels,
+            vec![(
+                crate::remote_desktop_probe::DesktopChannel::X11Display(1),
+                true,
+                false
+            )],
+            "(channel, desktop_reachable, can_bridge): the display answered but has no x11vnc"
+        );
     }
 
     /// A configured host reports both halves of the identity its commits would carry.

@@ -25,6 +25,7 @@ pub mod remote_desktop_probe;
 pub mod ssh_agent;
 pub mod ssh_agent_add;
 pub mod ssh_config;
+pub mod x11_displays;
 
 pub mod service;
 pub mod stream;

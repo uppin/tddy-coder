@@ -25,6 +25,7 @@ fn a_vnc_target() -> ScreenSharingTarget {
         port: 5900,
         protocol: Protocol::Vnc as i32,
         username: "ada".to_string(),
+        x11_display: None,
     }
 }
 
@@ -36,6 +37,7 @@ fn an_rdp_target() -> ScreenSharingTarget {
         port: 3389,
         protocol: Protocol::Rdp as i32,
         username: "tester".to_string(),
+        x11_display: None,
     }
 }
 

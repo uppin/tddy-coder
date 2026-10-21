@@ -73,3 +73,60 @@ pub fn encrypt_for_host(spki_der: &[u8], plaintext: &[u8]) -> Vec<u8> {
         )
         .expect("a passphrase fits comfortably in an OAEP payload")
 }
+
+/// A throwaway X11 socket directory whose `X<N>` sockets are bound by the test, never by an X
+/// server — so what is listed depends on nothing the machine running the suite has.
+#[cfg(unix)]
+pub struct AnX11SocketDir {
+    dir: tempfile::TempDir,
+    /// Held so the running displays keep answering for the length of the test.
+    listeners: Vec<std::os::unix::net::UnixListener>,
+}
+
+/// An X11 socket directory with no displays in it yet.
+#[cfg(unix)]
+pub fn an_x11_socket_dir() -> AnX11SocketDir {
+    AnX11SocketDir {
+        dir: tempfile::tempdir().expect("a temporary X11 socket directory"),
+        listeners: Vec::new(),
+    }
+}
+
+#[cfg(unix)]
+impl AnX11SocketDir {
+    /// A display whose server is up: its socket accepts connections.
+    pub fn with_a_running_display(mut self, number: u32) -> Self {
+        let listener = std::os::unix::net::UnixListener::bind(self.socket_of(number))
+            .expect("binding an X11 socket");
+        self.listeners.push(listener);
+        self
+    }
+
+    /// A display whose server is gone but left its socket file behind: the file is there, and a
+    /// connect to it is refused.
+    pub fn with_a_dead_display(self, number: u32) -> Self {
+        drop(
+            std::os::unix::net::UnixListener::bind(self.socket_of(number))
+                .expect("binding an X11 socket"),
+        );
+        self
+    }
+
+    /// A socket that answers connects but whose `name` may not be a display's: what the name filter
+    /// alone has to keep out.
+    pub fn with_a_listening_socket_named(mut self, name: &str) -> Self {
+        let listener = std::os::unix::net::UnixListener::bind(self.dir.path().join(name))
+            .expect("binding a socket in the X11 socket directory");
+        self.listeners.push(listener);
+        self
+    }
+
+    /// Where display `number`'s socket is.
+    pub fn socket_of(&self, number: u32) -> PathBuf {
+        self.dir.path().join(format!("X{number}"))
+    }
+
+    pub fn path(&self) -> &Path {
+        self.dir.path()
+    }
+}

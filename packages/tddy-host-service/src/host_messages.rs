@@ -5,7 +5,10 @@
 //! different things to the operator reading them, and collapsing the pair is how a probe failure
 //! comes to read as a finding.
 
+use tddy_service::proto::host::DesktopChannelKind;
 use tddy_service::proto::host::HostRemoteDesktop;
+
+use crate::remote_desktop_probe::{DesktopChannel, DesktopProtocol, DesktopReachability};
 use tddy_service::proto::host::ProbeOutcome as ProtoProbeOutcome;
 
 use tddy_service::proto::host::HostGithubCli;
@@ -227,9 +230,7 @@ pub(crate) fn github_cli_message(gh: &crate::host_tooling::GithubCliStatus) -> H
 /// daemon has no bridge binary" and "nothing is serving a desktop here" have unrelated fixes, and a
 /// single flag could not send an operator to the right one. `port` travels with them so an
 /// unreachable reading is not read as authoritative for a host serving somewhere non-default.
-pub(crate) fn host_remote_desktop_message(
-    reading: &crate::remote_desktop_probe::DesktopReachability,
-) -> HostRemoteDesktop {
+pub(crate) fn host_remote_desktop_message(reading: &DesktopReachability) -> HostRemoteDesktop {
     HostRemoteDesktop {
         outcome: proto_probe_outcome(&reading.outcome) as i32,
         // `screen_sharing.proto`'s `Protocol` values, which `DesktopProtocol`'s discriminants
@@ -239,5 +240,96 @@ pub(crate) fn host_remote_desktop_message(
         desktop_reachable: reading.desktop_reachable,
         port: u32::from(reading.port),
         failure_reason: probe_failure_reason(&reading.outcome),
+        channel_id: channel_id_of(reading),
+        kind: channel_kind_of(reading.channel) as i32,
+        display: match reading.channel {
+            DesktopChannel::X11Display(display) => display,
+            DesktopChannel::Endpoint => 0,
+        },
+        label: match reading.channel {
+            DesktopChannel::X11Display(display) => format!("Display :{display}"),
+            DesktopChannel::Endpoint => String::new(),
+        },
+    }
+}
+
+/// The stable identity of a channel on its host: `x11:<display>` for a display, otherwise
+/// `<protocol>:<port>` for the endpoint.
+fn channel_id_of(reading: &DesktopReachability) -> String {
+    match reading.channel {
+        DesktopChannel::X11Display(display) => format!("x11:{display}"),
+        DesktopChannel::Endpoint => {
+            let protocol = match reading.protocol {
+                DesktopProtocol::Vnc => "vnc",
+                DesktopProtocol::Rdp => "rdp",
+            };
+            format!("{protocol}:{}", reading.port)
+        }
+    }
+}
+
+fn channel_kind_of(channel: DesktopChannel) -> DesktopChannelKind {
+    match channel {
+        DesktopChannel::Endpoint => DesktopChannelKind::Endpoint,
+        DesktopChannel::X11Display(_) => DesktopChannelKind::X11Display,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host_tooling::ProbeOutcome;
+    use crate::remote_desktop_probe::{DesktopChannel, DesktopProtocol, DesktopReachability};
+    use tddy_service::proto::host::DesktopChannelKind;
+
+    fn a_reading_for(channel: DesktopChannel, port: u16) -> DesktopReachability {
+        DesktopReachability {
+            outcome: ProbeOutcome::Ok,
+            channel,
+            protocol: DesktopProtocol::Vnc,
+            can_bridge: true,
+            desktop_reachable: true,
+            port,
+        }
+    }
+
+    #[test]
+    fn names_an_x11_channel_by_its_display() {
+        // Given
+        let reading = a_reading_for(DesktopChannel::X11Display(1), 0);
+
+        // When
+        let message = host_remote_desktop_message(&reading);
+
+        // Then
+        assert_eq!(
+            (
+                message.kind,
+                message.display,
+                message.channel_id.as_str(),
+                message.label.as_str()
+            ),
+            (
+                DesktopChannelKind::X11Display as i32,
+                1,
+                "x11:1",
+                "Display :1"
+            )
+        );
+    }
+
+    #[test]
+    fn identifies_an_endpoint_channel_by_its_protocol_and_port() {
+        // Given
+        let reading = a_reading_for(DesktopChannel::Endpoint, 5900);
+
+        // When
+        let message = host_remote_desktop_message(&reading);
+
+        // Then
+        assert_eq!(
+            (message.kind, message.channel_id.as_str()),
+            (DesktopChannelKind::Endpoint as i32, "vnc:5900")
+        );
     }
 }

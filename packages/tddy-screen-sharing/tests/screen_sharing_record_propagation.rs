@@ -25,6 +25,7 @@ fn a_desktop() -> ScreenSharingTarget {
         port: 5900,
         protocol: Protocol::Vnc as i32,
         username: "ada".to_string(),
+        x11_display: None,
     }
 }
 

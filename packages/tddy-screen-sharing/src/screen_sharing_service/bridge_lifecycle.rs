@@ -201,7 +201,13 @@ impl ScreenSharingServiceImpl {
         let started = self
             .await_bridge_started(&mut child, stdout, &bridge_key, pid)
             .await?;
-        reap_bridge(Arc::clone(&self.active_bridges), child, bridge_key, pid);
+        reap_bridge(
+            Arc::clone(&self.active_bridges),
+            Arc::clone(&self.x11vnc),
+            child,
+            bridge_key,
+            pid,
+        );
         Ok(started)
     }
 
@@ -296,8 +302,13 @@ async fn start_bridge_process(
 
 /// Background task: wait for the process to exit (prevents zombie processes) and forget the PID
 /// when it does.
+///
+/// A bridge that exits on its own, still the one its key names, takes its x11vnc with it. One that
+/// was stopped or replaced does not: a stop stops its own x11vnc, and a reopen has already started
+/// the one that belongs to the newer bridge under the same key.
 fn reap_bridge(
     active_bridges: Arc<Mutex<HashMap<String, u32>>>,
+    x11vnc: Arc<crate::x11vnc::X11vncServers>,
     mut child: Child,
     bridge_key: String,
     pid: u32,
@@ -309,21 +320,25 @@ fn reap_bridge(
             }
             Err(e) => error!("bridge wait error: key={} err={}", bridge_key, e),
         }
-        forget_bridge_pid(&active_bridges, &bridge_key, pid).await;
+        if forget_bridge_pid(&active_bridges, &bridge_key, pid).await {
+            x11vnc.stop(&bridge_key).await;
+        }
     });
 }
 
 /// Forget `bridge_key`'s PID — only while the key still names *this* bridge.
 ///
 /// A restart records a newer pid under the same key, and forgetting that one would leave the
-/// running process unstoppable.
+/// running process unstoppable. Returns whether it did forget it.
 async fn forget_bridge_pid(
     active_bridges: &Mutex<HashMap<String, u32>>,
     bridge_key: &str,
     pid: u32,
-) {
+) -> bool {
     let mut bridges = active_bridges.lock().await;
-    if bridges.get(bridge_key) == Some(&pid) {
+    let names_this_bridge = bridges.get(bridge_key) == Some(&pid);
+    if names_this_bridge {
         bridges.remove(bridge_key);
     }
+    names_this_bridge
 }
