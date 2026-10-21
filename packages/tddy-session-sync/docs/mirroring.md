@@ -39,7 +39,8 @@ behalf, with no daemon in it, which is indistinguishable from the `DaemonAbsent`
 
 `attach(credentials, connector)` takes an `Arc<dyn RoomConnector>` from
 [`tddy-room-client`](../../tddy-room-client/docs/room-client.md); the library names no transport and the
-`tddy-session-sync` binary hands it LiveKit's. `join_session_room(address, livekit, identity, wait,
+`tddy-session-sync` binary, built by [`tddy-session-sync-cli`](../../tddy-session-sync-cli/README.md),
+hands it LiveKit's. `join_session_room(address, livekit, identity, wait,
 connector)` is the room half: it asks for `session-{id}` as the `syncer-…` identity, with API
 credentials and a six-hour token lifetime (LiveKit's default), waiting for `daemon-{instance_id}`.
 `RoomConnectError::Room` becomes `AttachError::Room` and `PeerAbsent` becomes `AttachError::DaemonAbsent`;
@@ -136,7 +137,9 @@ The full flag/environment table is in the [README](../README.md#credentials).
 | `tests/mirror_acceptance.rs` | Ownership refusals, sequence de-duplication, apply outcomes, and every reconcile reason naming its expected and actual values. |
 | `tests/attach_acceptance.rs` | Session resolution and the room/identity rules, and that `open_session_room` posts `OpenSessionRoomRequest` to the room service's path and nothing else, with a 404 reported as a refusal. Joining a real room is not covered here. |
 | `tests/sync_acceptance.rs` | Every decision and every git command the loop issues, as data rather than execution. |
-| `tests/cli_acceptance.rs` | The binary's surface, including that it never prints the value of a token it found in the environment. |
+
+The binary's surface, including that it never prints the value of a token it found in the
+environment, is covered by `tests/cli_acceptance.rs` in `tddy-session-sync-cli`.
 
 ## Related
 

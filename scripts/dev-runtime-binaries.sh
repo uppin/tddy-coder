@@ -24,9 +24,9 @@ DEV_RUNTIME_PACKAGES=(
   tddy-tools           # the tool/MCP binary a session's agent calls
   tddy-sandbox-runner  # runs inside every jail the daemon spawns
   tddy-index-daemon    # the warm rust-analyzer index, spawned per workspace root
-  tddy-remote-git-repo # git's GIT_SSH_COMMAND shim
+  tddy-remote-git-repo-cli # builds `tddy-remote-git-repo`, git's GIT_SSH_COMMAND shim
   tddy-askpass         # ssh's SSH_ASKPASS helper for a daemon-run clone
-  tddy-session-sync    # mirrors a session's worktree
+  tddy-session-sync-cli # builds `tddy-session-sync`, mirrors a session's worktree
 )
 
 # Resolve the build set: DEV_RUNTIME_PACKAGES plus any extra package names passed as arguments,

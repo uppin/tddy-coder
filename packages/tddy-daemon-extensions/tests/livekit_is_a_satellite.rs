@@ -10,7 +10,9 @@
 //! test may stand up a real LiveKit server.
 //!
 //! A crate that ships a library *and* a binary cannot name a LiveKit crate for its binary alone —
-//! Cargo has no binary-only dependency, so the edge appears on the crate. Those crates are listed in
+//! Cargo has no binary-only dependency, so the edge appears on the crate. A client binary is
+//! therefore built by a wiring crate of its own ([`CLIENT_BINARIES`]), and its library
+//! ([`CLIENT_LIBRARIES`]) names LiveKit nowhere. The crates not yet split are listed in
 //! [`WIRING_WITH_A_LIBRARY`], and [`a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary`]
 //! holds their library sources clean, so the allowance stays what it claims: the binary's wiring.
 
@@ -46,6 +48,8 @@ const PLUGINS: &[&str] = &[
 const WIRING: &[&str] = &[
     "tddy-daemon",
     "tddy-coder-cli",
+    "tddy-remote-git-repo-cli",
+    "tddy-session-sync-cli",
     "tddy-rdp",
     "tddy-vnc",
     "tddy-e2e",
@@ -53,7 +57,18 @@ const WIRING: &[&str] = &[
 
 /// Crates that ship a library *and* a binary that wires LiveKit into it: the library joins rooms
 /// through `tddy-room-client`, and only `src/main.rs` names the plugin.
-const WIRING_WITH_A_LIBRARY: &[&str] = &["tddy-remote-git-repo", "tddy-session-sync", "tddy-tools"];
+const WIRING_WITH_A_LIBRARY: &[&str] = &["tddy-tools"];
+
+/// Libraries a wiring crate builds a client binary from. They join rooms through
+/// `tddy-room-client` and name LiveKit nowhere — not in their manifest, not in any source file.
+const CLIENT_LIBRARIES: &[&str] = &["tddy-remote-git-repo", "tddy-session-sync"];
+
+/// Each client binary, and the wiring crate that builds it. The binary keeps its name, so every
+/// script, config and test that resolves it by name is unaffected by which crate builds it.
+const CLIENT_BINARIES: &[(&str, &str)] = &[
+    ("tddy-remote-git-repo", "tddy-remote-git-repo-cli"),
+    ("tddy-session-sync", "tddy-session-sync-cli"),
+];
 
 fn set_of(names: &[&str]) -> BTreeSet<String> {
     names.iter().map(|name| name.to_string()).collect()
@@ -139,16 +154,27 @@ fn rust_files_under(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// The sources of `krate` that are not its binary's entry point.
-fn library_sources(krate: &str) -> Vec<PathBuf> {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+/// The `src/` directory of workspace crate `krate`.
+fn source_dir(krate: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join(krate)
-        .join("src");
+        .join("src")
+}
+
+/// The sources of `krate` that are not its binary's entry point.
+fn library_sources(krate: &str) -> Vec<PathBuf> {
+    let src = source_dir(krate);
     rust_files_under(&src)
         .into_iter()
         .filter(|file| file != &src.join("main.rs"))
         .collect()
+}
+
+/// Whether `file` contains a path into a LiveKit crate.
+fn names_a_livekit_path(file: &Path) -> bool {
+    let source = std::fs::read_to_string(file).expect("a source file is readable");
+    LIVEKIT_PATHS.iter().any(|path| source.contains(path))
 }
 
 #[test]
@@ -158,15 +184,46 @@ fn a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary() {
     let naming_livekit: Vec<String> = WIRING_WITH_A_LIBRARY
         .iter()
         .flat_map(|krate| library_sources(krate))
-        .filter(|file| {
-            let source = std::fs::read_to_string(file).expect("a source file is readable");
-            LIVEKIT_PATHS.iter().any(|path| source.contains(path))
-        })
+        .filter(|file| names_a_livekit_path(file))
         .map(|file| file.display().to_string())
         .collect();
 
     // Then none does: the library reaches a room through the client port
     assert_eq!(naming_livekit, Vec::<String>::new());
+}
+
+#[test]
+fn a_client_library_names_livekit_nowhere_in_its_sources() {
+    // Given the libraries a wiring crate builds a client binary from
+    // When every source file under their `src/`, a `main.rs` included, is read for a path into LiveKit
+    let naming_livekit: Vec<String> = CLIENT_LIBRARIES
+        .iter()
+        .flat_map(|krate| rust_files_under(&source_dir(krate)))
+        .filter(|file| names_a_livekit_path(file))
+        .map(|file| file.display().to_string())
+        .collect();
+
+    // Then none does: the binding to LiveKit is the wiring crate's alone
+    assert_eq!(naming_livekit, Vec::<String>::new());
+}
+
+#[test]
+fn each_client_binary_is_built_by_its_wiring_crate() {
+    // Given the workspace as Cargo resolves it
+    let graph = WorkspaceGraph::load();
+
+    // When the crates building each client binary are read
+    let built_by: Vec<(&str, BTreeSet<String>)> = CLIENT_BINARIES
+        .iter()
+        .map(|(binary, _)| (*binary, graph.crates_building(binary)))
+        .collect();
+
+    // Then each is built by its wiring crate and by nothing else — its library builds no binary
+    let expected: Vec<(&str, BTreeSet<String>)> = CLIENT_BINARIES
+        .iter()
+        .map(|(binary, wiring)| (*binary, set_of(&[*wiring])))
+        .collect();
+    assert_eq!(built_by, expected);
 }
 
 #[test]

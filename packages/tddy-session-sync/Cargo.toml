@@ -8,16 +8,10 @@ description = "Mirror a tddy session's worktree locally by watching its LiveKit 
 name = "tddy_session_sync"
 path = "src/lib.rs"
 
-[[bin]]
-name = "tddy-session-sync"
-path = "src/main.rs"
-
 [dependencies]
-# Named by the binary alone (`src/main.rs` wires `LiveKitRoomConnector`); the library joins rooms
-# through `tddy-room-client`. `tddy-daemon-extensions`' ratchet holds the library to it.
-tddy-livekit = { path = "../tddy-livekit" }
+# The library joins rooms through `tddy-room-client`; `tddy-session-sync-cli` wires LiveKit.
+# `tddy-daemon-extensions`' ratchet holds the library to it.
 tddy-rpc = { path = "../tddy-rpc" }
-# The client room transport port: the library joins through it, the binary wires LiveKit.
 tddy-room-client = { path = "../tddy-room-client" }
 # The RPC surface this binary dials, and `session_activity::NO_TICK` — the wire's "no poll tick has
 # covered this call yet". Read from the crate that owns `activity.proto` rather than spelled as a
@@ -26,7 +20,6 @@ tddy-room-client = { path = "../tddy-room-client" }
 # `livekit` and `teloxide` tree that has no business inside it.
 tddy-service = { path = "../tddy-service" }
 clap = { version = "4", features = ["derive", "env"] }
-env_logger = "0.11"
 log = "0.4"
 prost = "0.13"
 # The daemon's Connect-HTTP leg, as tddy-remote-git-repo uses it: RefreshSession is a protobuf POST.

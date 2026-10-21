@@ -1,0 +1,19 @@
+[package]
+name = "tddy-remote-git-repo-cli"
+version = "0.1.0"
+edition = "2021"
+description = "The tddy-remote-git-repo binary: the git shim library wired to the LiveKit room connector"
+
+# The binary keeps the name `tddy-remote-git-repo`: git's `GIT_SSH_COMMAND` and the daemon resolve
+# `target/{debug,release}/tddy-remote-git-repo`. Only the package that builds it is named
+# differently, so the shim library (`tddy-remote-git-repo`) can stay free of a LiveKit dependency.
+[[bin]]
+name = "tddy-remote-git-repo"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+env_logger = "0.11"
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-remote-git-repo = { path = "../tddy-remote-git-repo" }
+tokio = { version = "1", features = ["full"] }

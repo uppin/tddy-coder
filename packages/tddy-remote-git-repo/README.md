@@ -21,7 +21,7 @@ before the usage below works:
 | `./install --systemd --user` | `INSTALL_BIN_DIR`, default `~/.local/bin` |
 | the `tddy` `.deb` (`./publish.sh`) | `/usr/bin` |
 
-Built it yourself instead? `./release` (or `cargo build --release -p tddy-remote-git-repo`) leaves
+Built it yourself instead? `./release` (or `cargo build --release -p tddy-remote-git-repo-cli`) leaves
 it at `target/release/tddy-remote-git-repo`, which is not on anyone's `PATH` — point
 `GIT_SSH_COMMAND` at the absolute path, or copy it somewhere that is:
 
@@ -92,7 +92,8 @@ is exchanged for one via `auth.AuthService/RefreshSession` first.
 | HTTP | `auth.LiveKitTokenService/MintLiveKitToken` | access token → room JWT, LiveKit URL, room |
 | LiveKit | `remote_git.RemoteGitService/Serve` | the git stdio stream itself |
 
-The relay joins the room through `tddy_room_client::RoomConnector`, which the binary supplies
+The relay joins the room through `tddy_room_client::RoomConnector`, which the binary — built by
+[`tddy-remote-git-repo-cli`](../tddy-remote-git-repo-cli/README.md) — supplies
 (`relay::run(request, credentials, connector)`); the library names no LiveKit crate. The token is the
 one the daemon minted, so the join carries no identity of its own. `relay_over_duplex` is the seam
 between the room and stdio — it takes the opened duplex and the stdio streams — and is what
