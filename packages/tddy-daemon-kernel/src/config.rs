@@ -463,10 +463,10 @@ pub struct DaemonConfig {
     pub telegram: Option<TelegramConfig>,
     /// Claude Code CLI session configuration (spawning interactive `claude` processes in PTYs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_cli: Option<ClaudeCliConfig>,
+    pub claude_cli: Option<agent_cli::ClaudeCliConfig>,
     /// Cursor Agent CLI session configuration (spawning interactive `agent` processes in PTYs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor_cli: Option<CursorCliConfig>,
+    pub cursor_cli: Option<agent_cli::CursorCliConfig>,
     /// When set, this daemon runs in relay mode: no web bundle, idle-timeout auto-shutdown,
     /// forwards RPCs to a remote peer via LiveKit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -686,323 +686,18 @@ pub fn resolve_x11vnc_binary_path(config: &ScreenSharingConfig) -> std::path::Pa
     }
 }
 
-fn default_claude_cli_binary_path() -> String {
-    "claude".to_string()
-}
-
-fn default_cursor_cli_binary_path() -> String {
-    "agent".to_string()
-}
-
-/// Environment variable that overrides the resolved `claude` binary path (highest priority).
-/// The escape hatch for when host auto-resolution picks the wrong binary.
-pub const CLAUDE_BINARY_ENV: &str = "TDDY_CLAUDE_BINARY";
-
-/// A wrapper-shim `bin` directory whose `claude` merely re-execs the real binary from `$PATH`
-/// (e.g. Superset's `~/.superset/bin`). Such a shim can't resolve inside the jail — its `PATH` is
-/// only `/usr/bin:/bin` — so host resolution must skip these dirs. See the `claude-sandbox` script.
-fn is_wrapper_shim_dir(dir: &Path) -> bool {
-    let ends_with_bin = dir.file_name().is_some_and(|n| n == "bin");
-    ends_with_bin
-        && dir.components().any(|c| match c {
-            std::path::Component::Normal(n) => n.to_string_lossy().starts_with(".superset"),
-            _ => false,
-        })
-}
-
-#[cfg(unix)]
-fn is_executable_file(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(p)
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable_file(p: &Path) -> bool {
-    p.is_file()
-}
-
-/// Locate the real host `claude` as an absolute path: prefer `~/.local/bin/claude` (the canonical
-/// Claude Code install), then scan `$PATH` skipping wrapper-shim dirs. `None` if none is found.
-fn find_real_claude_on_host() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("HOME") {
-        let candidate = PathBuf::from(home).join(".local/bin/claude");
-        if is_executable_file(&candidate) {
-            return Some(candidate);
-        }
-    }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .filter(|d| !d.as_os_str().is_empty() && !is_wrapper_shim_dir(d))
-        .map(|d| d.join("claude"))
-        .find(|c| is_executable_file(c))
-}
-
-/// Whether the `claude` binary is taken from an explicit override or must be auto-resolved.
-enum ClaudeBinaryChoice {
-    /// Use this value as-is (an env override or an explicit config path).
-    Explicit(String),
-    /// No explicit path given — resolve the real `claude` from the host.
-    Auto,
-}
-
-/// Decide from the env override and configured value alone (no filesystem access, so it is
-/// unit-testable): a non-empty env override wins; otherwise a configured value naming a path
-/// (contains `/`) is explicit; a bare name means "auto-resolve".
-fn choose_claude_binary(env_override: Option<&str>, configured: &str) -> ClaudeBinaryChoice {
-    if let Some(env) = env_override.map(str::trim).filter(|s| !s.is_empty()) {
-        return ClaudeBinaryChoice::Explicit(env.to_string());
-    }
-    if configured.contains('/') {
-        return ClaudeBinaryChoice::Explicit(configured.to_string());
-    }
-    ClaudeBinaryChoice::Auto
-}
-
-/// Canonicalize a value that names a path (contains `/`); return a bare name unchanged. The SBPL
-/// allow-list is built from canonical (symlink-resolved) parent dirs, so a symlinked spelling would
-/// be denied at exec time.
-fn canonicalize_if_path(p: &str) -> String {
-    if p.contains('/') {
-        std::fs::canonicalize(p)
-            .map(|c| c.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| p.to_string())
-    } else {
-        p.to_string()
-    }
-}
-
-/// Resolve the `claude` binary the sandbox runner will exec, as an absolute path when possible.
-///
-/// Resolution order (first match wins):
-/// 1. `TDDY_CLAUDE_BINARY` env var, when set and non-empty ([`CLAUDE_BINARY_ENV`]).
-/// 2. `claude_cli.binary_path` in the daemon config, when it names a path (contains `/`).
-/// 3. Auto-resolution of the real host `claude`: `~/.local/bin/claude`, then `$PATH` (skipping
-///    wrapper-shim dirs like Superset's `~/.superset/bin`, which can't resolve inside the jail).
-/// 4. Fallback: the configured value as-is (bare name, default `"claude"`).
-///
-/// A bare name must never reach the runner in normal operation: `binary_exec_reads` would take its
-/// empty parent (`Path::parent` of `"claude"` is `Some("")`) and emit `(subpath "")`, which macOS
-/// `sandbox-exec` rejects. Steps 1–3 produce an absolute path; step 4 is a last resort.
-pub fn resolve_claude_binary_path(config: &DaemonConfig) -> String {
-    let configured = config
-        .claude_cli
-        .as_ref()
-        .map(|c| c.binary_path.as_str())
-        .unwrap_or("claude");
-    let env_override = std::env::var(CLAUDE_BINARY_ENV).ok();
-    match choose_claude_binary(env_override.as_deref(), configured) {
-        ClaudeBinaryChoice::Explicit(p) => canonicalize_if_path(&p),
-        ClaudeBinaryChoice::Auto => match find_real_claude_on_host() {
-            Some(real) => canonicalize_if_path(&real.to_string_lossy()),
-            None => configured.to_string(),
-        },
-    }
-}
-
-/// Claude Code CLI session configuration. Loaded from daemon YAML under `claude_cli:`.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ClaudeCliConfig {
-    /// Path to the `claude` binary. A path (contains `/`) is used verbatim; a bare name (default
-    /// `"claude"`) triggers host auto-resolution — see [`resolve_claude_binary_path`]. Override
-    /// with the `TDDY_CLAUDE_BINARY` env var when resolution picks the wrong binary.
-    #[serde(default = "default_claude_cli_binary_path")]
-    pub binary_path: String,
-    /// Absolute path to the `tddy-tools` binary for per-worktree hook commands.
-    /// When absent, the daemon resolves it from `current_exe` sibling or falls back to
-    /// `"tddy-tools"` (PATH lookup).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tddy_tools_path: Option<String>,
-    /// HTTP base URL the per-worktree hook command uses to call `ReportSessionStatus`.
-    /// When absent, defaults to `http://127.0.0.1:{web_port}` derived from the listen config.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daemon_url: Option<String>,
-    /// Persistent jail `$HOME` reused across sandboxed claude-cli sessions so auth (refreshed OAuth
-    /// tokens), session history, and settings survive between sessions. Absent → default
-    /// `$HOME/.tddy/sandbox-claude-home`. Override with the `TDDY_SANDBOX_CLAUDE_HOME` env var. A
-    /// single daemon-wide home — see [`resolve_claude_home_dir`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_home_dir: Option<PathBuf>,
-}
-
-/// Cursor Agent CLI session configuration. Loaded from daemon YAML under `cursor_cli:`.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct CursorCliConfig {
-    /// Path to the Cursor Agent CLI binary (default `"agent"`).
-    #[serde(default = "default_cursor_cli_binary_path")]
-    pub binary_path: String,
-    /// Absolute path to `tddy-tools` for per-worktree hook commands. Falls back to claude_cli or
-    /// sibling-of-daemon resolution when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tddy_tools_path: Option<String>,
-    /// HTTP base URL for `ReportSessionStatus`. Falls back to claude_cli or web_port default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daemon_url: Option<String>,
-    /// Persistent jail `$HOME` for sandboxed cursor-cli sessions (default: `$HOME/.tddy/sandbox-cursor-home`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor_home_dir: Option<PathBuf>,
-}
-
-/// Environment variable that overrides the resolved cursor `agent` binary path (highest priority).
-pub const CURSOR_BINARY_ENV: &str = "TDDY_CURSOR_AGENT";
-
-/// Locate the real cursor `agent` binary as an absolute path, mirroring [`find_real_claude_on_host`]
-/// but injectable: prefer `<home>/.local/bin/agent`, then scan `path_dirs` skipping wrapper-shim
-/// dirs. `None` if none is found. The home and search dirs are parameters (not read from env) so the
-/// resolution logic is unit-testable.
-fn find_real_agent_in(home: Option<&Path>, path_dirs: &[PathBuf]) -> Option<PathBuf> {
-    if let Some(home) = home {
-        let candidate = home.join(".local/bin/agent");
-        if is_executable_file(&candidate) {
-            return Some(candidate);
-        }
-    }
-    path_dirs
-        .iter()
-        .filter(|d| !d.as_os_str().is_empty() && !is_wrapper_shim_dir(d))
-        .map(|d| d.join("agent"))
-        .find(|c| is_executable_file(c))
-}
-
-/// Locate the real host cursor `agent` as an absolute path: prefer `~/.local/bin/agent`, then scan
-/// `$PATH` skipping wrapper-shim dirs. `None` if none is found. Env-reading wrapper around
-/// [`find_real_agent_in`], mirroring [`find_real_claude_on_host`].
-fn find_real_agent_on_host() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).collect())
-        .unwrap_or_default();
-    find_real_agent_in(home.as_deref(), &path_dirs)
-}
-
-/// Whether the cursor `agent` binary is taken from an explicit override or must be auto-resolved.
-/// Mirrors [`ClaudeBinaryChoice`].
-enum CursorBinaryChoice {
-    /// Use this value as-is (an env override or an explicit config path).
-    Explicit(String),
-    /// No explicit path given — resolve the real `agent` from the host.
-    Auto,
-}
-
-/// Decide from the env override and configured value alone (no filesystem access, so it is
-/// unit-testable): a non-empty env override wins; otherwise a configured value naming a path
-/// (contains `/`) is explicit; a bare name means "auto-resolve". Mirrors [`choose_claude_binary`].
-fn choose_cursor_binary(env_override: Option<&str>, configured: &str) -> CursorBinaryChoice {
-    if let Some(env) = env_override.map(str::trim).filter(|s| !s.is_empty()) {
-        return CursorBinaryChoice::Explicit(env.to_string());
-    }
-    if configured.contains('/') {
-        return CursorBinaryChoice::Explicit(configured.to_string());
-    }
-    CursorBinaryChoice::Auto
-}
-
-/// Resolve the Cursor Agent CLI binary the runner / model probe will exec, as an absolute path when
-/// possible. Mirrors [`resolve_claude_binary_path`] so the impersonated child never needs a PATH
-/// lookup (which would fail "binary not found: agent" once the install dir is off the child's PATH).
-///
-/// Resolution order (first match wins):
-/// 1. `TDDY_CURSOR_AGENT` env var, when set and non-empty ([`CURSOR_BINARY_ENV`]).
-/// 2. `cursor_cli.binary_path` in the daemon config, when it names a path (contains `/`).
-/// 3. Auto-resolution of the real host `agent`: `~/.local/bin/agent`, then `$PATH` (skipping
-///    wrapper-shim dirs).
-/// 4. Fallback: the configured value as-is (bare name, default `"agent"`).
-pub fn resolve_cursor_binary_path(config: &DaemonConfig) -> String {
-    let configured = config
-        .cursor_cli
-        .as_ref()
-        .map(|c| c.binary_path.as_str())
-        .unwrap_or("agent");
-    let env_override = std::env::var(CURSOR_BINARY_ENV).ok();
-    match choose_cursor_binary(env_override.as_deref(), configured) {
-        CursorBinaryChoice::Explicit(p) => canonicalize_if_path(&p),
-        CursorBinaryChoice::Auto => match find_real_agent_on_host() {
-            Some(real) => canonicalize_if_path(&real.to_string_lossy()),
-            None => configured.to_string(),
-        },
-    }
-}
-
-/// Resolve tddy-tools path for cursor-cli hooks (cursor config → claude config → default).
-pub fn resolve_cursor_cli_tddy_tools_path(config: &DaemonConfig) -> Option<String> {
-    config
-        .cursor_cli
-        .as_ref()
-        .and_then(|c| c.tddy_tools_path.clone())
-        .or_else(|| {
-            config
-                .claude_cli
-                .as_ref()
-                .and_then(|c| c.tddy_tools_path.clone())
-        })
-}
-
-/// Resolve daemon URL for cursor-cli hooks (cursor config → claude config).
-pub fn resolve_cursor_cli_daemon_url(config: &DaemonConfig) -> Option<String> {
-    config
-        .cursor_cli
-        .as_ref()
-        .and_then(|c| c.daemon_url.clone())
-        .or_else(|| {
-            config
-                .claude_cli
-                .as_ref()
-                .and_then(|c| c.daemon_url.clone())
-        })
-}
-
-/// Environment variable overriding the persistent sandbox cursor `$HOME`.
-pub const CURSOR_HOME_ENV: &str = "TDDY_SANDBOX_CURSOR_HOME";
-
-/// Resolve the single daemon-wide persistent jail `$HOME` for sandboxed cursor-cli sessions.
-pub fn resolve_cursor_home_dir(config: &DaemonConfig) -> PathBuf {
-    if let Some(env) = std::env::var_os(CURSOR_HOME_ENV).filter(|v| !v.is_empty()) {
-        return PathBuf::from(env);
-    }
-    if let Some(dir) = config
-        .cursor_cli
-        .as_ref()
-        .and_then(|c| c.cursor_home_dir.as_ref())
-    {
-        return dir.clone();
-    }
-    let base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join(".tddy").join("sandbox-cursor-home")
-}
-
-/// Environment variable overriding the persistent sandbox claude `$HOME`.
-pub const CLAUDE_HOME_ENV: &str = "TDDY_SANDBOX_CLAUDE_HOME";
-
-/// Resolve the single daemon-wide persistent jail `$HOME` for sandboxed claude-cli sessions.
-///
-/// Resolution order (first match wins):
-/// 1. `TDDY_SANDBOX_CLAUDE_HOME` env var (if set and non-empty).
-/// 2. `claude_cli.claude_home_dir` in the daemon config.
-/// 3. Default `$HOME/.tddy/sandbox-claude-home`.
-///
-/// The dir is reused across sessions and mounted read-write into the jail, so credentials/history
-/// persist. It is deliberately separate from the daemon user's real `~/.claude`.
-pub fn resolve_claude_home_dir(config: &DaemonConfig) -> PathBuf {
-    if let Some(env) = std::env::var_os(CLAUDE_HOME_ENV).filter(|v| !v.is_empty()) {
-        return PathBuf::from(env);
-    }
-    if let Some(dir) = config
-        .claude_cli
-        .as_ref()
-        .and_then(|c| c.claude_home_dir.as_ref())
-    {
-        return dir.clone();
-    }
-    let base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join(".tddy").join("sandbox-claude-home")
-}
+mod agent_cli;
+#[cfg(test)]
+use agent_cli::{
+    choose_claude_binary, choose_cursor_binary, is_wrapper_shim_dir, ClaudeBinaryChoice,
+    CursorBinaryChoice,
+};
+pub use agent_cli::{
+    resolve_claude_binary_path, resolve_claude_home_dir, resolve_cursor_binary_path,
+    resolve_cursor_cli_daemon_url, resolve_cursor_cli_tddy_tools_path, resolve_cursor_home_dir,
+    ClaudeCliConfig, CursorCliConfig, CLAUDE_BINARY_ENV, CLAUDE_HOME_ENV, CURSOR_BINARY_ENV,
+    CURSOR_HOME_ENV,
+};
 
 /// Environment variable naming the shared sandbox config file explicitly (highest priority).
 pub const SANDBOX_CONFIG_ENV: &str = "TDDY_SANDBOX_CONFIG";
@@ -2161,7 +1856,7 @@ claude_cli:
             c.claude_cli.as_ref().unwrap().claude_home_dir.as_deref(),
             Some(Path::new("/custom/claude-home"))
         );
-        if std::env::var_os(CLAUDE_HOME_ENV).is_none() {
+        if std::env::var_os(agent_cli::CLAUDE_HOME_ENV).is_none() {
             assert_eq!(
                 resolve_claude_home_dir(&c),
                 PathBuf::from("/custom/claude-home"),
@@ -2173,11 +1868,11 @@ claude_cli:
     /// With no `claude_cli` section the resolver falls back to `$HOME/.tddy/sandbox-claude-home`.
     #[test]
     fn claude_home_dir_defaults_under_tddy_when_unconfigured() {
-        if std::env::var_os(CLAUDE_HOME_ENV).is_some() {
+        if std::env::var_os(agent_cli::CLAUDE_HOME_ENV).is_some() {
             return; // env override in effect; default path not exercised
         }
         let c = DaemonConfig::default();
-        let resolved = resolve_claude_home_dir(&c);
+        let resolved = agent_cli::resolve_claude_home_dir(&c);
         assert!(
             resolved.ends_with(".tddy/sandbox-claude-home"),
             "default home must be under ~/.tddy: {}",
@@ -2299,7 +1994,7 @@ mod cursor_cli_config_tests {
         }
 
         // When — resolving the real host agent for that home, with no extra PATH dirs
-        let resolved = find_real_agent_in(Some(home.path()), &[]);
+        let resolved = agent_cli::find_real_agent_in(Some(home.path()), &[]);
 
         // Then — it is located there, as the absolute path under ~/.local/bin
         assert_eq!(resolved.as_deref(), Some(agent.as_path()));
@@ -2321,7 +2016,8 @@ mod cursor_cli_config_tests {
         }
 
         // When — resolving with that dir on the search path
-        let resolved = find_real_agent_in(Some(home.path()), &[path_dir.path().to_path_buf()]);
+        let resolved =
+            agent_cli::find_real_agent_in(Some(home.path()), &[path_dir.path().to_path_buf()]);
 
         // Then — the PATH-dir binary is returned as an absolute path
         assert_eq!(resolved.as_deref(), Some(agent.as_path()));
