@@ -18,11 +18,11 @@ pub mod credentials;
 pub mod mirror;
 pub mod sync;
 
+pub use crate::attach::daemon_http::DaemonHttpError;
 pub use apply::{ApplyOutcome, Delta, ReconcileReason};
 pub use attach::{
     attach, daemon_identity, join_session_room, open_session_room, resolve_session,
-    session_room_name, syncer_identity, AttachError, AttachedSession, DaemonHttpError,
-    SessionAddress,
+    session_room_name, syncer_identity, AttachError, AttachedSession, SessionAddress,
 };
 pub use credentials::{
     layered_environment, parse_env_file, resolve_credentials, CredentialError, Credentials,
