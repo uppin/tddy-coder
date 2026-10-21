@@ -489,6 +489,19 @@ Green pins: 5 (`counts_cfg_not_test_and_cfg_any_test_items_as_production`: today
 `tddy-tools` `a_line_count_is_answered_in_process_whatever_the_environment_names`.
 The existing 13 `runner::budget` tests still pass.
 
+### 2026-10-22 — the five splits deferred; the scoped gate at `5f0395d56`
+
+- **Decision:** the developer deferred the five file splits on 2026-10-21 ("we can defer those"), relayed by the coordinator.
+  **Deferred by developer 2026-10-21.** The entry is [2026-10-21-reshape-oversized-files-splits-deferred.md](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md).
+  No `restructure` plan was applied. A warm index daemon build started for Plan B was stopped before any plan ran, so the tree has no engine moves and no half-applied plan. `git status` was clean before the deferral commit.
+- **Commit `5f0395d56`:** the entry; `NOT_YET_SPLIT` in `engine_file_budget_shape` lists the five files; the six `engine_module_edges_shape` tests carry `#[ignore]` with their plan; the assemble todo's `Claimed by: #612` is withdrawn; this changeset marks the deferred rows.
+- **Shape tests:** `engine_file_budget_shape` passes (1 of 1). `engine_module_edges_shape` has six ignored tests. Run with `--include-ignored`, each fails for the deferred reason: five panic on a file the split creates (`src/lexical.rs`, `src/backends/rust/item_move/moving.rs` ×2, `src/crate_move/source_names.rs`, `src/runner/tidy/fixes.rs`); `the_rust_backend_does_not_reach_crate_move_for_the_masker` finds the live edge `early_return.rs -> crate::crate_move`, which Plan A removes.
+- **Scoped gate** `./test -p tddy-code-restructuring -p tddy-tools` at `5f0395d56` (exit 101, `.verify-result.txt`): 2114 passed, 1 failed, 7 ignored.
+  - The one failure is `session_action_stop_idempotent_after_terminal` (`packages/tddy-tools/tests/session_action_jobs_acceptance.rs:345`): the job had not settled within the test's 3.5 s wait while other worktrees' cargo builds ran. Re-run alone: 7 of 7 pass in 4.3 s. It is not a `StorageFull` or cargo-watcher failure and it is outside the restructuring code.
+  - The 7 ignored: the six deferred edge tests, and the pre-existing doctest `placeholder_checks.rs` (line 13), which is not this change's.
+  - Disk: 66 GiB free at the start of the gate, 58 GiB at the end.
+- **Not run in this step:** clippy with `-D warnings` on the touched packages, and the comment-line multiset with `restructure verify --against`. No move was applied, so there is nothing for the verify to account for. `cargo fmt -p tddy-code-restructuring -- --check` is clean.
+
 ## TODO
 
 - [x] PRD written and linked
