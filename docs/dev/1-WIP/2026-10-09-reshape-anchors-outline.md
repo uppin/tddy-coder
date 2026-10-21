@@ -742,6 +742,40 @@ Gates, scoped to `tddy-code-restructuring`:
   `./test` passes it): **19 passed, 0 failed**, 291.81 s. Test 21, `a_module_prefix_that_does_not_match_the_file_is_refused`,
   is among them.
 
+**Correction (found at M5, 2026-10-21).** The two "anchors by item" pins above are not the whole story. Two
+suites that were green before this milestone pin `run \`check --deep\``, which the R3(b) text no longer says:
+- `tests/repoint_call_plan_acceptance.rs:380`, `a_static_check_of_an_item_anchored_repoint_call_says_to_run_deep`;
+- `tests/retarget_impl_plan_lines.rs:279`, `a_plain_check_reports_an_item_anchored_retarget_as_unexamined_rather_than_passing_it`.
+
+Both passed against the pre-M4 wording (`… did not examine it — run \`check --deep\``, checked at `e08c0b7d2`).
+Neither test file changed. The R3(b) text the changeset specifies, `… needs \`check --deep\``, cannot satisfy both,
+because test 13 compares the whole string. This is undecided: either the R3(b) wording or those two pins must change.
+Nothing was edited here. The M4 commit `cc14a2226` is pushed and carries the two red pins.
+
+### M5 verify: STOPPED (2026-10-21)
+
+Gate `./test -p tddy-code-restructuring` (exit 101), read from `.verify-result.txt`: **1771 passed, 55 failed, 1 ignored**
+across the package. Tests 18–20 pass: `spawn_record_acceptance` 13/13, `cancellation_acceptance` 4/4,
+`workspace_root_acceptance` 5/5. `static_check_item_anchors` 7/7. `item_anchor_acceptance` 19/19, test 21 among them.
+
+Failing, by cause:
+- **M4 regressions (stop):** the two pins above.
+- **M6 red, as planned:** `src/plan.rs` `plan::tests::a_v2_header_that_still_carries_modified_parses_and_keeps_only_the_hash`
+  (test 15); `tests/snapshot_writes_a_missing_header.rs` `a_written_header_names_each_file_by_its_hash_alone` and
+  `a_plan_whose_header_carries_modified_is_checked_and_its_rewrite_drops_it` (tests 16, 17).
+- **`todo!()` stubs owned by other nodes (not this node's code):** `tests/language_support_acceptance.rs` 0/4, all on
+  `SupportRegistry::backends`/`backends_static`/`allow_list`/`support_of` (#reshape 11, which the contract-commit
+  results already record); `src/language.rs` `language::tests` 3; `src/crate_move/source_scan/test_declarations.rs`
+  3 (`test_declarations`); `src/backends/rust/impl_move/assemble` 6 (`move_impl_members`, #reshape 12);
+  `tests/move_impl_members_acceptance.rs` 10 and `tests/move_impl_members_plan_lines.rs` 6 (`move_impl_members` not
+  implemented, #reshape 12).
+- **Assertion reds, not attributed:** `tests/crate_move_test_modules.rs` 15, `tests/check_precondition_parity.rs` 1
+  (`:892`), `tests/move_module_to_crate_acceptance.rs` 1 (`:212`), `tests/extract_method_guard_lift_acceptance.rs` 1
+  (rust-analyzer did not settle within 6 s, `harness/mod.rs:508`). Their panics are in move and crate-move code this
+  node does not touch. They were not run against the base commit, so this is unverified.
+
+M5 is not green, so no M5 box is ticked.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-09-reshape-anchors-outline-initial-discovery.md`)
