@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-daemon-kernel/src/config.rs":{"sha256":"sha256:c299ceb65a698567001f83f47e1587a097b28092dcb46816f675f3b3be636779","modified":"2026-10-21T03:38:00Z"}}}
-{"id":"op-1","op":"move_item","anchor":{"kind":"items","file":"packages/tddy-daemon-kernel/src/config.rs","items":["tddy_daemon_kernel::config::<DaemonConfig>#2"],"fingerprints":["sha256:22d7095f4da90610830c401c5ba0d06ce220f61ae4b515b89a628de96348fb47"]},"name":"daemon_methods","to":"tddy_daemon_kernel::config","reexport":"outside"}
