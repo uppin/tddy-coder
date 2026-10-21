@@ -277,7 +277,7 @@ None. No node depends on this one.
 ## Scope
 
 - [x] **M1 measurement**: repo-scale cold (inside and outside `./dev`) and warm runs, recorded under Validation results
-- [ ] **`tddy-lsp`**: typed startup failure (R1), the `fake_lsp` mode, tests
+- [x] **`tddy-lsp`**: typed startup failure (R1), the `fake_lsp` mode, tests
 - [ ] **`tddy-index-daemon`**: `status_of_lsp` arm and its test
 - [ ] **Prefix rule** moved into `item_anchor/prefix.rs` (R2); the Rust resolver calls it
 - [ ] **Static check** (R3)
@@ -358,7 +358,7 @@ Plan headers carry only hashes. `rust.rs` is about 125 lines shorter.
   - (d) a second warm request.
 
   Record the command, output, timing and `which rust-analyzer` for each under Validation results. **Stop and ask the developer** if (a), (c) or (d) does not resolve `GoalId`.
-- [ ] **M2** `tddy-lsp`: R1; tests 1–6.
+- [x] **M2** `tddy-lsp`: R1; tests 1–6.
 - [ ] **M3** `tddy-index-daemon`: status arm; test 7.
 - [ ] **M4** Prefix rule move and static check (R2, R3); tests 8–14, with test 21 (existing, live) still green.
 - [ ] **M5** R5 deletions and re-pointed tests; tests 18–20 stay green.
@@ -696,6 +696,30 @@ the changeset did not predict:
   on a populated `target/`, with the rust-analyzer cache not cleared, so this is not a worst-case cold.
 - The warm requests were 0 s, so on this item the daemon buys nothing measurable over the cold request. The
   daemon's value is the repeated-request case for a larger plan, which this measurement does not show.
+
+### M2 `tddy-lsp`: R1, tests 1–6 (2026-10-21)
+
+Changed: `packages/tddy-lsp/src/server_body.rs` only. `registry.rs` is unchanged: its `Ok(Ok(Err(refusal)))`
+arm already passes the typed refusal through. The three `TODO(reshape-anchors-outline)` markers are removed.
+- A spawn error other than `NotFound` → `ServerNotStarted { program, reason: "could not be spawned: {err}" }`.
+- A missing output channel → `ServerNotStarted { reason: "its task has no output channel" }`. R1's own row says
+  no test reaches it.
+- The handshake races `LspClient::initialize` against `child.wait()`, with the answer polled first. An exit
+  that wins → `ServerNotStarted { reason: "exited before the initialize handshake completed (exit status: N)" }`,
+  with the observer told the end as before. This is why `--exit-immediately` is refused at once: before, it
+  waited out the 10 s request timeout (the note in Commit 2 above).
+- A failed `initialize` → `ServerNotStarted { reason: "the initialize handshake failed: {err}" }`.
+- A failed `child.wait()` after the race is `LspError::Io("language server wait failed: …")`. R1 has no row for
+  it, so this is a choice made here; see the report.
+- Unchanged: a server that came up and later died (`ServerExited`) and `SPAWN_TIMEOUT` (`Timeout`).
+
+Scoped gate: `./test -p tddy-lsp`, exit 0. Read from `.verify-result.txt`:
+- lib unittests: 17 passed
+- `bind_target_document_sync_test` 3, `client_roundtrip_test` 11, `fake_lsp_busy_modes_test` 3,
+  `notification_observation_test` 3, `registry_reuse_test` 9, `request_abandon_test` 4, `server_body_test` 2,
+  `server_start_failure_test` 5 (tests 1–5, finished in 0.53 s), `spawn_observer_test` 4 (test 6 among them),
+  `warm_host_document_sync_test` 6, `workspace_root_test` 5
+- **72 passed, 0 failed**
 
 ## TODO
 

@@ -125,9 +125,10 @@ impl LspServerBody {
                 let refusal = if err.kind() == std::io::ErrorKind::NotFound {
                     LspError::ServerNotFound(format!("{}: {err}", spec.program))
                 } else {
-                    // TODO(reshape-anchors-outline): implement — any other spawn error is
-                    // `ServerNotStarted { reason: "could not be spawned: {err}" }` (changeset R1).
-                    LspError::Io(message.clone())
+                    LspError::ServerNotStarted {
+                        program: spec.program.clone(),
+                        reason: format!("could not be spawned: {err}"),
+                    }
                 };
                 let _ = client_tx.send(Err(refusal));
                 return TaskStatus::Failed { message };
@@ -157,9 +158,11 @@ impl LspServerBody {
             Some(channel) => channel,
             None => {
                 let _ = child.start_kill();
-                // TODO(reshape-anchors-outline): implement — send the typed refusal over `client_tx`
-                // (`ServerNotFound` / `ServerNotStarted`, changeset R1) before returning.
                 report_end(&record, child.wait().await);
+                let _ = client_tx.send(Err(LspError::ServerNotStarted {
+                    program: spec.program.clone(),
+                    reason: "its task has no output channel".to_string(),
+                }));
                 return TaskStatus::Failed {
                     message: "language server task is missing its output channel".to_string(),
                 };
@@ -222,29 +225,56 @@ impl LspServerBody {
             }
         });
 
-        // Complete the LSP handshake and publish the client to the registry.
+        // Complete the LSP handshake and publish the client to the registry. A child that exits before
+        // it answers is refused at once, with how it ended: waiting out the request timeout would blame
+        // a slow request for a server that had already gone.
         let root_uri = format!("file://{}", root_dir.display());
-        let client = match LspClient::initialize(
-            stdin_tx,
-            out_channel.subscribe(),
-            &root_uri,
-            spec.capabilities.clone(),
-            spec.initialization_options.clone(),
-        )
-        .await
-        {
-            Ok(client) => Arc::new(client),
-            Err(err) => {
-                // TODO(reshape-anchors-outline): implement — send the typed refusal over `client_tx`
-                // (`ServerNotFound` / `ServerNotStarted`, changeset R1) before returning.
+        let handshake = tokio::select! {
+            biased;
+            initialized = LspClient::initialize(
+                stdin_tx,
+                out_channel.subscribe(),
+                &root_uri,
+                spec.capabilities.clone(),
+                spec.initialization_options.clone(),
+            ) => Handshake::Answered(initialized),
+            exit = child.wait() => Handshake::Exited(exit),
+        };
+        let client = match handshake {
+            Handshake::Answered(Ok(client)) => Arc::new(client),
+            Handshake::Answered(Err(err)) => {
                 let _ = child.start_kill();
                 report_end(&record, child.wait().await);
                 stdin_task.abort();
                 stdout_task.abort();
                 stderr_task.abort();
+                let _ = client_tx.send(Err(LspError::ServerNotStarted {
+                    program: spec.program.clone(),
+                    reason: format!("the initialize handshake failed: {err}"),
+                }));
                 return TaskStatus::Failed {
                     message: format!("language server initialize failed: {err}"),
                 };
+            }
+            Handshake::Exited(exit) => {
+                stdin_task.abort();
+                stdout_task.abort();
+                stderr_task.abort();
+                let refusal = match exit {
+                    Ok(status) => {
+                        report_end(&record, Ok(status));
+                        LspError::ServerNotStarted {
+                            program: spec.program.clone(),
+                            reason: format!(
+                                "exited before the initialize handshake completed ({status})"
+                            ),
+                        }
+                    }
+                    Err(err) => LspError::Io(format!("language server wait failed: {err}")),
+                };
+                let message = refusal.to_string();
+                let _ = client_tx.send(Err(refusal));
+                return TaskStatus::Failed { message };
             }
         };
         let _ = client_tx.send(Ok(Arc::clone(&client)));
@@ -282,6 +312,12 @@ impl LspServerBody {
         stderr_task.abort();
         TaskStatus::Cancelled
     }
+}
+
+/// How the handshake ended: the server answered `initialize`, or its child exited before it did.
+enum Handshake {
+    Answered(Result<LspClient, LspError>),
+    Exited(std::io::Result<ExitStatus>),
 }
 
 /// Tell the observer how the child ended, when one is watching and the wait produced a status.
