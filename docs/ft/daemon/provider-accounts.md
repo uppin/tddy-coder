@@ -78,8 +78,9 @@ any other harness asked to run on an account is refused as not routable in this 
 
 `accounts.AccountsService/ListProviderRoutes(session_token, harness)` answers, for one harness, the
 caller's provider accounts in vault order, each with `supported` and — when not — the `reason`, in the
-matrix's words. `harness_routable` is false for a harness no account can run (Cursor); every account
-is then unsupported and `harness_reason` says why, once. `harness` is a tool-session agent id or a CLI
+matrix's words. `harness_routable` is false for a harness no account can run — Cursor, and every
+harness whose route this build does not have yet (Codex, OpenCode, Muse Code); every account is then
+unsupported and `harness_reason` says why, once. `harness` is a tool-session agent id or a CLI
 session type; an id that names no harness is answered the same way, `harness_routable` false with
 "unknown harness". The web
 never re-derives the matrix; a daemon that has not wired it answers `FAILED_PRECONDITION` rather than

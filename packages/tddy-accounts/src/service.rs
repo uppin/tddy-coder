@@ -215,22 +215,7 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             .iter()
             .filter_map(ProviderAccount::from_record)
             .map(|account| {
-                let protocols: Vec<&str> = account
-                    .wire_protocols()
-                    .into_iter()
-                    .map(WireProtocol::as_str)
-                    .collect();
-                let verdict = match &harness_reason {
-                    Some(reason) => Err(reason.clone()),
-                    None => matrix.supports(&request.harness, account.preset.id, &protocols),
-                };
-                ProviderRouteOption {
-                    account_id: account.account.as_str().to_string(),
-                    label: account.label,
-                    preset: account.preset.id.to_string(),
-                    supported: verdict.is_ok(),
-                    reason: verdict.err().unwrap_or_default(),
-                }
+                route_option(matrix, &request.harness, harness_reason.as_deref(), account)
             })
             .collect();
         Ok(Response::new(ListProviderRoutesResponse {
@@ -404,6 +389,32 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             .map_err(link_status_for)?;
         let response = self.answer_for(linking, &request, &provider, progress)?;
         Ok(Response::new(response))
+    }
+}
+
+/// One account as `ListProviderRoutes` offers it for `harness`: the matrix's verdict verbatim, or the
+/// harness's own refusal when no account can run it.
+fn route_option(
+    matrix: &dyn RouteSupport,
+    harness: &str,
+    harness_reason: Option<&str>,
+    account: ProviderAccount,
+) -> ProviderRouteOption {
+    let protocols: Vec<&str> = account
+        .wire_protocols()
+        .into_iter()
+        .map(WireProtocol::as_str)
+        .collect();
+    let verdict = match harness_reason {
+        Some(reason) => Err(reason.to_string()),
+        None => matrix.supports(harness, account.preset.id, &protocols),
+    };
+    ProviderRouteOption {
+        account_id: account.account.as_str().to_string(),
+        label: account.label,
+        preset: account.preset.id.to_string(),
+        supported: verdict.is_ok(),
+        reason: verdict.err().unwrap_or_default(),
     }
 }
 

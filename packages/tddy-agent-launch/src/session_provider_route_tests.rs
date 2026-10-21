@@ -361,3 +361,81 @@ fn a_resumed_session_on_its_vendor_gets_no_route_env() {
         Vec::<(String, String)>::new()
     );
 }
+
+#[test]
+fn a_routed_claude_cli_start_records_its_account_in_the_session_dir_it_creates() {
+    // Given Ada holds her Meta account in an unlocked vault
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let sessions_base = tempfile::tempdir().expect("a sessions base");
+
+    // When a claude-cli start on it creates its session directory
+    let (session_dir, route) = crate::claude_cli_spawn::create_routed_session_dir(
+        sessions_base.path(),
+        "sess-1",
+        &access,
+        &on_account("meta-hackathon"),
+        "muse-wonder-1.0",
+    )
+    .expect("the start proceeds");
+
+    // Then the directory exists and records the account the route runs on
+    assert!(route.is_some());
+    assert_eq!(
+        read_session_provider_account(&session_dir).expect("the record reads"),
+        Some(SessionProviderAccount {
+            account_id: "meta-hackathon".to_string(),
+            model: "muse-wonder-1.0".to_string(),
+        })
+    );
+}
+
+#[test]
+fn a_refused_claude_cli_start_creates_no_session_dir() {
+    // Given Ada's vault is locked
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], false);
+    let sessions_base = tempfile::tempdir().expect("a sessions base");
+
+    // When a claude-cli start chooses her account
+    let refusal = crate::claude_cli_spawn::create_routed_session_dir(
+        sessions_base.path(),
+        "sess-1",
+        &access,
+        &on_account("meta-hackathon"),
+        "muse-wonder-1.0",
+    )
+    .expect_err("a locked vault refuses");
+
+    // Then nothing was created on disk
+    assert_eq!(refusal.code(), Code::FailedPrecondition);
+    assert_eq!(
+        std::fs::read_dir(sessions_base.path())
+            .expect("the base reads")
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn a_claude_cli_start_on_its_vendor_creates_its_session_dir_with_no_record() {
+    // Given
+    let (_dir, access) = a_daemon_where_ada_holds(&[], true);
+    let sessions_base = tempfile::tempdir().expect("a sessions base");
+
+    // When
+    let (session_dir, route) = crate::claude_cli_spawn::create_routed_session_dir(
+        sessions_base.path(),
+        "sess-1",
+        &access,
+        &RouteSources::default(),
+        "opus",
+    )
+    .expect("the start proceeds");
+
+    // Then
+    assert!(route.is_none());
+    assert!(session_dir.is_dir());
+    assert_eq!(
+        read_session_provider_account(&session_dir).expect("absent reads"),
+        None
+    );
+}

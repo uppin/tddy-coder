@@ -27,5 +27,12 @@ resolver is its own module, so `backend/mod.rs` is not grown. Both records stay 
 `packages/tddy-agent-launch/docs/code-issues/complexity-svc-resume-claude-cli-session-resume-claude-cli-session.md`
 is left unchanged in length by this PR: the resume's route environment is assembled in
 `LaunchSessions::resumed_agent_env`, not in `resume_claude_cli_session`'s body.
-`packages/tddy-accounts/src/service.rs` grew 647 → 703 production lines (`list_provider_routes`,
+`packages/tddy-accounts/src/service.rs` grew 647 → 712 production lines (`list_provider_routes`,
 `with_route_support`); its file-budget entry stays deferred for the stack-shared reason it records.
+
+`spawn_claude_cli_session_inner` (`tddy-agent-launch/src/claude_cli_spawn.rs`) measures complexity
+13, CRAP 182 (never executed) on `tddy-tools analyze`: the route resolution and the session
+directory it records into are `create_routed_session_dir`, which its own unit tests cover. The
+function is 281 → 288 lines (the route-sources parameter, the call and the route env). Routability
+has one source, `provider_route::route_body`, read by both `resolve_route` and `harness_routable`,
+so `ListProviderRoutes` offers no account for a harness whose route is not built.
