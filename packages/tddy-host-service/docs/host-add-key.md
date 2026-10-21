@@ -26,7 +26,7 @@ successful add.
 | `host_prompt_stream.rs` | the `StreamHostPrompts` pump, and its teardown |
 | `host_private_key.rs` | reading the key an operator named — as that operator, out of their own home — and listing the keys they could pick from |
 | `ssh_agent_add.rs` | handing an unlocked identity to that user's agent over the wire protocol |
-| `service.rs` | the four handlers, their routing and their auth |
+| `service.rs`, `service/host_keys.rs`, `service/prompts.rs`, `service/peer_forwards.rs` | the four handlers: the trait methods delegate to `add_host_key_impl` (session → OS user, the passphrase prompt and its wait, the unlock on the blocking pool), `list_host_key_candidates_impl`, `stream_host_prompts_impl` and `answer_host_prompt_impl`; their routing to the addressed daemon is `peer_forwards` |
 
 ## The prompt registry
 

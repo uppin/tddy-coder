@@ -7,9 +7,16 @@ telemetry, the prompts it raises and the ssh keys it can be given — served as 
 
 The crate is the host subsystem plus the host-key path, and nothing else.
 
+**Handler bodies live in inherent methods.** `#[async_trait]` expands each trait method's body inside a
+macro, where the restructure engine cannot extract from it, so every `HostService` method's body is an
+inherent `HostServiceImpl::<name>_impl` (`pub(crate)`) and the trait method only calls it
+(`self.<name>_impl(request).await`). The two streaming methods name their stream types
+(`MpscHostPromptStream`, `MpscHostStatsStream`) because an inherent method has no `Self::…Stream`.
+
 | Group | Files | What is in them |
 |---|---|---|
-| `service.rs` | 1 | `HostServiceImpl` — the nine handlers, the state they read, and the `with_*` builders that inject each OS seam |
+| `service.rs` | 1 | `HostServiceImpl` — the struct, the state it reads, the stats intervals, and the `HostService` trait impl, whose nine methods are one-line delegators to inherent `*_impl` methods |
+| `service/` | 6 | the inherent `impl HostServiceImpl` blocks: `builders` (`new`, the `with_*` builders that inject each OS seam, the accessors, `cached_tooling`), `peer_forwards` (RPC-activity recording, eligible instances, addressed-daemon routing and the peer relays), `listings` (`list_eligible_daemons_impl`, `list_known_hosts_impl`, `get_host_tooling_impl`), `prompts` (`stream_host_prompts_impl`, `answer_host_prompt_impl`), `host_keys` (`add_host_key_impl` and its three steps, `list_host_key_candidates_impl`, `list_ssh_config_hosts_impl`), `stats_stream` (`stream_host_stats_impl`) |
 | `stream.rs` | 1 | `MpscHostPromptStream`, `MpscHostStatsStream` — the two server-streaming adapters |
 | the registry | `host_registry`, `multi_host`, `host_session_service` | which machines exist, and which project lives on which |
 | routing | `peer_routing` | `PeerRouting` — which daemon serves an addressed request ([below](#peerrouting--which-daemon-serves-an-addressed-request)) |
@@ -156,7 +163,7 @@ wait, the third blocks on a Unix socket, and `gh auth status` can reach the netw
 worker is not parked for its duration. The
 response stamps `local_instance_id_for_config`, so a relayed answer names the host that produced it.
 
-Backed by **`host_tooling.rs`** — the `HostToolingProbe` trait, injected via
+Backed by **`host_tooling.rs`** (with `host_tooling/{desktop_probes, readings, subprocess}.rs`) — the `HostToolingProbe` trait, injected via
 `HostServiceImpl::with_host_tooling` so tests substitute a deterministic double, with a
 `SubprocessHostToolingProbe` that runs `git config --global --get` and `gh auth status` as the
 host's OS user under one 5 s deadline. Program resolution, the deadline's kill-and-reap, and the rule
