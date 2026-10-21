@@ -242,50 +242,7 @@ impl RdpClient {
         let mut framed = TokioFramed::new(stream);
 
         // 2. Connector config
-        let config = Config {
-            desktop_size: DesktopSize {
-                width: 256,
-                height: 256,
-            },
-            desktop_scale_factor: 0,
-            credentials: Credentials::UsernamePassword {
-                username: credentials.username.clone().unwrap_or_default(),
-                password: credentials.password.clone().unwrap_or_default(),
-            },
-            enable_tls: true,
-            enable_credssp: true,
-            domain: credentials.domain.clone(),
-            client_build: 0,
-            client_name: "tddy-rdp".into(),
-            keyboard_type: KeyboardType::IbmEnhanced,
-            keyboard_subtype: 0,
-            keyboard_functional_keys_count: 12,
-            keyboard_layout: 0x0409,
-            ime_file_name: String::new(),
-            // Empty codec list so the server uses raw-pixel SetSurfaceBits (CODEC_ID_NONE)
-            // instead of QOI/QoiZ codecs that ironrdp-session doesn't support by default.
-            bitmap: Some(BitmapConfig {
-                lossy_compression: false,
-                color_depth: 32,
-                codecs: BitmapCodecs(vec![]),
-            }),
-            dig_product_id: String::new(),
-            client_dir: String::new(),
-            alternate_shell: String::new(),
-            work_dir: String::new(),
-            platform: MajorPlatformType::UNSPECIFIED,
-            hardware_id: None,
-            request_data: None,
-            autologon: false,
-            enable_audio_playback: false,
-            performance_flags: Default::default(),
-            license_cache: None,
-            timezone_info: Default::default(),
-            compression_type: None,
-            enable_server_pointer: false,
-            pointer_software_rendering: false,
-            multitransport_flags: None,
-        };
+        let config = connector_config(credentials);
 
         let client_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
         let mut connector = ClientConnector::new(config, client_addr);
@@ -361,6 +318,54 @@ impl RdpClient {
         }
         Ok(())
     }
+}
+
+fn connector_config(credentials: &tddy_screenshare::Credentials) -> Config {
+    let config = Config {
+        desktop_size: DesktopSize {
+            width: 256,
+            height: 256,
+        },
+        desktop_scale_factor: 0,
+        credentials: Credentials::UsernamePassword {
+            username: credentials.username.clone().unwrap_or_default(),
+            password: credentials.password.clone().unwrap_or_default(),
+        },
+        enable_tls: true,
+        enable_credssp: true,
+        domain: credentials.domain.clone(),
+        client_build: 0,
+        client_name: "tddy-rdp".into(),
+        keyboard_type: KeyboardType::IbmEnhanced,
+        keyboard_subtype: 0,
+        keyboard_functional_keys_count: 12,
+        keyboard_layout: 0x0409,
+        ime_file_name: String::new(),
+        // Empty codec list so the server uses raw-pixel SetSurfaceBits (CODEC_ID_NONE)
+        // instead of QOI/QoiZ codecs that ironrdp-session doesn't support by default.
+        bitmap: Some(BitmapConfig {
+            lossy_compression: false,
+            color_depth: 32,
+            codecs: BitmapCodecs(vec![]),
+        }),
+        dig_product_id: String::new(),
+        client_dir: String::new(),
+        alternate_shell: String::new(),
+        work_dir: String::new(),
+        platform: MajorPlatformType::UNSPECIFIED,
+        hardware_id: None,
+        request_data: None,
+        autologon: false,
+        enable_audio_playback: false,
+        performance_flags: Default::default(),
+        license_cache: None,
+        timezone_info: Default::default(),
+        compression_type: None,
+        enable_server_pointer: false,
+        pointer_software_rendering: false,
+        multitransport_flags: None,
+    };
+    config
 }
 
 /// X11 keysym → PS/2 Set 1 scancode (make code).
