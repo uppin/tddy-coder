@@ -285,7 +285,7 @@ None. No node depends on this one.
 - [x] **`FileHint.modified` removed** (R4); skill `plan-schema.md` updated
 - [ ] **Package documentation** at wrap (list under Affected Packages); both code issues and the todo deleted with their final measurement
 - [ ] **Testing**: `./test -p tddy-code-restructuring -p tddy-lsp -p tddy-index-daemon`, scoped; CI for the rest
-- [ ] **Code quality**: `cargo check --all-targets` for the three packages; `cargo clippy -p <each> --all-targets -- -D warnings`; `cargo fmt`; `item_anchor.rs` production lines stay ≤ 500, which is why the rule goes into a child module
+- [x] **Code quality**: `cargo check --all-targets` for the three packages; `cargo clippy -p <each> --all-targets -- -D warnings`; `cargo fmt`; `item_anchor.rs` production lines stay ≤ 500, which is why the rule goes into a child module
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -363,7 +363,7 @@ Plan headers carry only hashes. `rust.rs` is about 125 lines shorter.
 - [x] **M4** Prefix rule move and static check (R2, R3); tests 8–14, with test 21 (existing, live) still green.
 - [x] **M5** R5 deletions and re-pointed tests; tests 18–20 stay green.
 - [x] **M6** R4; tests 15–17; skill reference.
-- [ ] **M7** Scoped gates, length gate, docs staged for wrap.
+- [x] **M7** Scoped gates, length gate, docs staged for wrap.
 
 ## Testing plan
 
@@ -806,6 +806,54 @@ Gates, scoped to `tddy-code-restructuring`, run before the `cargo fmt` pass, whi
 - `./test -p tddy-code-restructuring --test static_check_item_anchors`: **7 passed, 0 failed**.
 - `./test -p tddy-code-restructuring --test item_anchor_acceptance` (live, `--test-threads=1`): **19 passed, 0 failed**,
   74.44 s.
+
+### M7 gates (2026-10-21)
+
+Scoped to the three packages this node touches. No whole-workspace run.
+
+Formatting, `cargo fmt -p <pkg>` then `cargo fmt -p <pkg> -- --check`: tddy-lsp exit 0, tddy-index-daemon exit 0,
+tddy-code-restructuring exit 0. The format pass changed nothing in M7.
+
+`./dev cargo check -p <pkg> --all-targets` and `./dev cargo clippy -p <pkg> --all-targets -- -D warnings`:
+exit 0 for all three packages, with no warnings. The clippy fix that M7 needed, `large_enum_variant` on the
+`Handshake` enum in `tddy-lsp`, is `5be5d6e7a`.
+
+Tests, `./test -p <pkg>`, read from `.verify-result.txt`:
+- `tddy-lsp`: **72 passed, 0 failed**.
+- `tddy-index-daemon`: **175 passed, 0 failed, 12 ignored**. `root_progress_acceptance` is green since `3617f341e`.
+- `tddy-code-restructuring` (full package): **1775 passed, 49 failed, 1 ignored**, exit 101.
+- Standalone: `--test repoint_call_plan_acceptance` 12/12, `--test retarget_impl_plan_lines` 12/12,
+  `--test extract_method_guard_lift_acceptance` 10/10. The last one timed out on rust-analyzer in the earlier run
+  and passes now, so it was a flake.
+
+The 49 failures, by target and cause. None is this node's code. This node's diff under `tddy-code-restructuring`
+does not touch `crate_move/`, or any of the three test files holding the tests-follow failures.
+- `src/lib.rs` unit tests, 12 (`language::tests` 3, `crate_move::source_scan::test_declarations::tests` 3,
+  `backends::rust::impl_move::assemble::assemble_tests` 6). Inherited: `todo!` stubs (`SupportRegistry`, #reshape 11;
+  `test_declarations`, #reshape 13) and the `move_impl_members` "not implemented yet (#reshape 12/24)" stub.
+- `tests/language_support_acceptance.rs`, 4. Inherited: `todo!` in `SupportRegistry` (#reshape 11).
+- `tests/move_impl_members_acceptance.rs`, 10, and `tests/move_impl_members_plan_lines.rs`, 6. Inherited: the
+  "not implemented yet (#reshape 12/24)" stub.
+- `tests/crate_move_test_modules.rs`, 15, `tests/check_precondition_parity.rs`, 1
+  (`a_static_check_reports_a_following_test_module_whose_target_already_exists_in_the_destination`, #reshape 13 test 17),
+  `tests/move_module_to_crate_acceptance.rs`, 1 (`moves_a_module_with_its_sibling_test_module_and_every_crate_compiles_with_its_tests`).
+  Inherited, but not `todo!` panics. The failing tests were added by `5206b5a4e` (#reshape 13, tests-follow contract);
+  `crate_move_test_modules.rs` was created there, and the other two files were extended there. They fail
+  on the missing follow-test-module behaviour: empty findings, `apply: Ok(())`, dry runs that omit the test module. This
+  node's diff does not change any of it. They were not run against the base commit, so the attribution is by
+  evidence, not by a base run.
+- Not in the failing list: `check_precondition_parity` 23 other tests, and the item-anchor static-check wording. The
+  failure at `check_precondition_parity.rs:892` is not about item-anchor wording.
+
+Remaining markers, `grep` over `packages`: no `TODO(reshape-anchors-outline)` is left. `TODO(sharpen)` remains at
+`src/plan/codec/groups.rs:1`, which is not this node's, and is left alone. The codec.rs:224 and file_hint.rs:1 markers
+are gone (M6).
+
+Length gate: `src/item_anchor.rs` production lines are 459, under the 500 cap.
+
+`println!` count in `src/`: 7, the same as the base `5051c36ae`. No new print.
+
+Testing scope box: not ticked. The package run is not green, because of the 49 inherited failures above.
 
 ## TODO
 
