@@ -208,3 +208,54 @@ impl LaunchSessions {
         .await
     }
 }
+
+impl LaunchSessions {
+    pub(super) async fn start_opencode_cli_from_request(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        start: CliStart,
+        mut started_agents: Vec<tddy_core::SessionAgentRecord>,
+        clones: tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant,
+        progress: &AttachmentProgressSink,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        crate::opencode_cli_spawn::start_opencode_cli_session(
+            crate::opencode_cli_spawn::OpenCodeCliStart {
+                config: &self.config,
+                tddy_data_dir: &self.tddy_data_dir,
+                cli_manager: &self.claude_cli_manager,
+                os_user,
+                session_id: &start.session_id,
+                session_token: &req.session_token,
+                sessions_base: start.sessions_base,
+                model: req.model.trim(),
+                project_id: req.project_id.trim(),
+                repo_path: req.repo_path.trim(),
+                branch_worktree_intent: req.branch_worktree_intent.trim(),
+                new_branch_name: req.new_branch_name.trim(),
+                selected_integration_base_ref: req.selected_integration_base_ref.trim(),
+                selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
+                stack_parent: match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
+                    Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
+                        session_id,
+                        daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
+                        stack_node_id: req.stack_node_id.trim(),
+                        session_token: &req.session_token,
+                        host: self,
+                    },
+                    None => stack_parent::SpawnStackParent::NoParent,
+                },
+                initial_prompt: &start.initial_prompt,
+                agents: &mut started_agents,
+                semantic_index: req.semantic_index,
+                create_remote_branch: req.create_remote_branch,
+                task_registry: &self.task_registry,
+                agent_clones: &clones,
+                account_access: &self.host.session_account_access(&req.session_token),
+                route_sources: &session_route_sources(req),
+                progress,
+            },
+        )
+        .await
+    }
+}

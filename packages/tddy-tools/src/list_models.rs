@@ -15,14 +15,18 @@ use tddy_core::backend::{render_models_json, resolve_agent_models, BackendCliPat
 #[derive(Parser)]
 #[command(name = "list-models")]
 pub struct ListModelsArgs {
-    /// Agent id ("claude", "claude-acp", "cursor", "codex", "codex-acp", "stub") or the
-    /// pseudo-agent "claude-cli".
+    /// Agent id ("claude", "claude-acp", "cursor", "codex", "codex-acp", "stub") or a CLI-harness
+    /// pseudo-agent ("claude-cli", "cursor-cli", "opencode-cli").
     #[arg(long)]
     pub agent: String,
 
     /// Override the cursor (`agent`) binary path.
     #[arg(long)]
     pub cursor_cli_path: Option<PathBuf>,
+
+    /// Override the `opencode` binary path.
+    #[arg(long)]
+    pub opencode_cli_path: Option<PathBuf>,
 
     /// Override the `claude-agent-acp` binary path.
     #[arg(long)]
@@ -38,6 +42,7 @@ impl ListModelsArgs {
     fn cli_paths(&self) -> BackendCliPaths {
         BackendCliPaths {
             cursor_cli_path: self.cursor_cli_path.clone(),
+            opencode_cli_path: self.opencode_cli_path.clone(),
             claude_acp_cli_path: self.claude_acp_cli_path.clone(),
             codex_acp_cli_path: self.codex_acp_cli_path.clone(),
         }

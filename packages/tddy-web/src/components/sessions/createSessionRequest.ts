@@ -7,6 +7,15 @@ import type {
 export type SessionType = "tool" | "claude-cli" | "cursor-cli" | "opencode-cli";
 
 /**
+ * Whether the daemon cuts the session's worktree itself — and so can push the new branch to origin
+ * at start. Every CLI harness session does; a "tool" session spawns tddy-coder, which owns its own
+ * worktree.
+ */
+export function daemonCutsTheWorktree(sessionType: SessionType): boolean {
+  return sessionType !== "tool";
+}
+
+/**
  * Every form value `buildStartSessionRequest` reads. Named rather than passed one argument at a
  * time because the builder is the whole of the form's request shape and reads most of it.
  */

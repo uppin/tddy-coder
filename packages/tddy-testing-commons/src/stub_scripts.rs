@@ -196,14 +196,18 @@ pub fn read_recorded_env(env_file: &Path) -> Result<HashMap<String, String>, Str
 
 /// The most recent line appended by [`StubAgentScript::appending_argv_to`], split on tabs.
 ///
-/// Probe-shaped for [`crate::wait::eventually`].
+/// Probe-shaped for [`crate::wait::eventually`]. An invocation with no arguments logs an empty line
+/// and reads back as no arguments, not as no invocation.
 pub fn read_last_appended_argv(argv_log: &Path) -> Result<Vec<String>, String> {
     let contents = std::fs::read_to_string(argv_log)
         .map_err(|e| format!("{} is not readable yet: {e}", argv_log.display()))?;
     let last = contents
         .lines()
-        .rfind(|l| !l.is_empty())
+        .last()
         .ok_or_else(|| format!("{} recorded no invocation yet", argv_log.display()))?;
+    if last.is_empty() {
+        return Ok(Vec::new());
+    }
     Ok(last.split('\t').map(str::to_string).collect())
 }
 
@@ -212,7 +216,6 @@ pub fn appended_invocation_count(argv_log: &Path) -> usize {
     std::fs::read_to_string(argv_log)
         .unwrap_or_default()
         .lines()
-        .filter(|l| !l.trim().is_empty())
         .count()
 }
 

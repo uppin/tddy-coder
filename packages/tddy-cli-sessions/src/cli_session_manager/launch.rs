@@ -4,6 +4,8 @@ use super::CliSessionManager;
 
 use std::path::Path;
 
+use tddy_core::cli_harness::{CliHarness, CliLaunch};
+
 use super::MAIN_TERMINAL_ID;
 
 use std::sync::Arc;
@@ -11,6 +13,35 @@ use std::sync::Arc;
 use std::path::PathBuf;
 
 impl CliSessionManager {
+    /// Spawn `harness` for `session_id` in `worktree_path`, its argv built by the registry from
+    /// `launch` (`launch.resume` continues the worktree's session instead of starting one).
+    ///
+    /// `extra_args` follow the harness's own argv (a provider route's `--model`), and `env` is
+    /// applied to the child on top of the daemon's (a route's configuration variable and key).
+    pub async fn launch_cli_harness(
+        &self,
+        harness: &CliHarness,
+        session_id: &str,
+        worktree_path: PathBuf,
+        launch: &CliLaunch<'_>,
+        extra_args: Vec<String>,
+        env: Vec<(String, String)>,
+    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
+        let mut argv = (harness.argv)(launch);
+        argv.extend(extra_args);
+        self.spawn_tool(
+            session_id,
+            MAIN_TERMINAL_ID,
+            harness.session_type,
+            worktree_path,
+            launch.model,
+            argv,
+            env,
+            None,
+        )
+        .await
+    }
+
     /// Spawn a new Cursor Agent CLI process for `session_id` in `worktree_path`.
     ///
     /// `chat_id` — the Cursor chat the session owns, launched into via `--resume <chat_id>`.

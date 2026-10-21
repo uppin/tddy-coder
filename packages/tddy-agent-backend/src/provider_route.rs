@@ -312,10 +312,16 @@ fn opencode_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute
         &target.preset,
         &served_protocols(&target.endpoints),
     )?;
+    let Some(wire) = openai_wire(&target.endpoints) else {
+        return Err(RouteRefusal::ProtocolNotServed {
+            harness,
+            needs: "OpenAI Responses or Chat Completions",
+        });
+    };
     Ok(HarnessRoute {
         env: Vec::new(),
         secret_env: vec![(OPENCODE_ROUTE_KEY_ENV.to_string(), target.api_key.clone())],
-        files: vec![opencode_config_for(target)],
+        files: vec![opencode_config(&target.model, wire)],
         args: vec![
             "--model".to_string(),
             format!("{OPENCODE_ROUTE_PROVIDER_ID}/{}", target.model),
@@ -395,6 +401,25 @@ pub const OPENCODE_ROUTE_PROVIDER_ID: &str = "tddy-route";
 /// `{env:…}`, so the file itself holds no secret.
 pub const OPENCODE_ROUTE_KEY_ENV: &str = "TDDY_OPENCODE_PROVIDER_KEY";
 
+/// The OpenAI protocol an OpenCode route speaks, with the account's root for it.
+#[derive(Debug, Clone, Copy)]
+enum OpenAiWire<'a> {
+    /// Responses, preferred: reasoning is carried across turns.
+    Responses(&'a str),
+    /// Chat Completions, for an account that serves no Responses.
+    Chat(&'a str),
+}
+
+/// The wire an account's endpoints give OpenCode, Responses over Chat Completions; `None` when it
+/// serves neither.
+fn openai_wire(endpoints: &RouteEndpoints) -> Option<OpenAiWire<'_>> {
+    match (&endpoints.openai_responses, &endpoints.openai_chat) {
+        (Some(root), _) => Some(OpenAiWire::Responses(root)),
+        (None, Some(root)) => Some(OpenAiWire::Chat(root)),
+        (None, None) => None,
+    }
+}
+
 /// The `opencode.json` that declares `target`'s account as an OpenCode provider and selects
 /// `target.model` on it: `@ai-sdk/openai` over Responses (reasoning carried across turns) when the
 /// account serves Responses, `@ai-sdk/openai-compatible` over Chat Completions otherwise. The key is
@@ -406,20 +431,20 @@ pub const OPENCODE_ROUTE_KEY_ENV: &str = "TDDY_OPENCODE_PROVIDER_KEY";
 /// it builds a configuration, so this is a programming error, not an operator's input.
 #[must_use]
 pub fn opencode_config_for(target: &RouteTarget) -> RouteFile {
-    let model = target.model.as_str();
-    let (npm, root, model_entry) = match (
-        &target.endpoints.openai_responses,
-        &target.endpoints.openai_chat,
-    ) {
-        (Some(root), _) => (
+    let wire = openai_wire(&target.endpoints).expect(
+        "opencode_config_for needs an account that serves OpenAI Responses or Chat Completions",
+    );
+    opencode_config(&target.model, wire)
+}
+
+fn opencode_config(model: &str, wire: OpenAiWire<'_>) -> RouteFile {
+    let (npm, root, model_entry) = match wire {
+        OpenAiWire::Responses(root) => (
             "@ai-sdk/openai",
             root,
             serde_json::json!({ "options": { "include": ["reasoning.encrypted_content"] } }),
         ),
-        (None, Some(root)) => ("@ai-sdk/openai-compatible", root, serde_json::json!({})),
-        (None, None) => panic!(
-            "opencode_config_for needs an account that serves OpenAI Responses or Chat Completions"
-        ),
+        OpenAiWire::Chat(root) => ("@ai-sdk/openai-compatible", root, serde_json::json!({})),
     };
     let config = serde_json::json!({
         "model": format!("{OPENCODE_ROUTE_PROVIDER_ID}/{model}"),

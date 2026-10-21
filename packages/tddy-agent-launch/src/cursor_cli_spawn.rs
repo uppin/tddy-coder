@@ -8,14 +8,12 @@ use tddy_core::{write_session_metadata, SessionMetadata};
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::StartSessionResponse;
 
-use crate::hooks_and_urls::effective_spawn_branch;
-use crate::hooks_and_urls::spawned_branch_of_session;
+use crate::cli_session_worktree::{
+    provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
+};
 use crate::session_acting_identity::SessionAccountAccess;
-use crate::worktree_source::session_worktree_source;
-use crate::worktree_source::WorktreeSource;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_daemon_kernel::config::{resolve_cursor_binary_path, DaemonConfig};
-use tddy_projects::project_storage;
 use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
@@ -180,92 +178,32 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
         managed_recipe.as_deref(),
     )?;
 
-    let timeout = config.spawn_worker_request_timeout();
-    let (worktree_path, project_row) = match session_worktree_source(repo_path, project_id) {
-        WorktreeSource::Project(pid) => {
-            if pid.is_empty() {
-                return Err(Status::invalid_argument(
-                    "project_id is required for cursor-cli sessions",
-                ));
-            }
-            let (projects_dir, project) =
-                tddy_session_split::service_util::find_registered_project(
-                    tddy_data_dir,
-                    os_user,
-                    &pid,
-                )?;
-            let repo_root = tddy_session_split::service_util::project_repo_root(&project)?;
-            let project_row = project.clone();
-            let chain_base_ref = stack_parent
-                .chain_base_ref(
-                    &pid,
-                    &sessions_base,
-                    &repo_root,
-                    new_branch_name,
-                    selected_integration_base_ref,
-                )
-                .await?;
-            progress.begin_phase(StartStep::Worktree);
-            let wt = cut_cursor_cli_worktree(
-                selected_integration_base_ref,
-                create_remote_branch,
-                &session_dir,
-                intent,
-                timeout,
-                &repo_root,
-                chain_base_ref,
-            )
-            .await?;
-            progress.end_phase(StartStep::Worktree);
-            // The child's branch now exists, so the planned node it materializes can record it —
-            // which is what makes that node's descendants spawnable at all, since they base onto
-            // `<remote>/<branch>` (`Stack::base_ref_for_spawn`). Until this call a cursor-cli child
-            // of a pr-stack orchestrator recorded neither a session nor a branch on its node **on
-            // any host**, so the stack wedged behind it: the read half of the same association was
-            // threaded through here and used, while the write half was never made.
-            //
-            // Keyed on the branch the session's changeset records rather than on the requested name
-            // — it may carry a collision suffix — and a failed link is logged, not raised (D36).
-            let spawned_branch = spawned_cursor_cli_branch(
-                branch_worktree_intent,
-                new_branch_name,
-                selected_branch_to_work_on,
-                &session_dir,
-                pid,
-                projects_dir,
-                repo_root,
-            )?;
-            stack_parent
-                .link_spawned_branch_without_failing_the_spawn(
-                    &sessions_base,
-                    &spawned_branch,
-                    session_id,
-                )
-                .await;
-            (wt, Some(project_row))
-        }
-        WorktreeSource::RepoPath(path) => {
-            let canonical = std::fs::canonicalize(&path).map_err(|e| {
-                Status::invalid_argument(format!(
-                    "repo_path {} is not accessible: {e}",
-                    path.display()
-                ))
-            })?;
-            if !canonical.is_dir() {
-                return Err(Status::invalid_argument(format!(
-                    "repo_path {} is not a directory",
-                    canonical.display()
-                )));
-            }
-            log::info!(
-                target: "tddy_daemon::cursor_cli_spawn",
-                "spawn_cursor_cli_session_inner {session_id}: using client-supplied repo_path {} directly as worktree (not daemon-managed; not removed on session end)",
-                canonical.display()
-            );
-            // A client-supplied checkout belongs to no project, so no account is assigned to it.
-            (canonical, None)
-        }
-    };
+    let CliWorktree {
+        path: worktree_path,
+        project: project_row,
+    } = provision_cli_worktree(
+        &CliWorktreeStart {
+            session_type: "cursor-cli",
+            cut_label: "start_cursor_cli_session: create worktree",
+            session_id,
+            session_dir: &session_dir,
+            sessions_base: &sessions_base,
+            tddy_data_dir,
+            os_user,
+            project_id,
+            repo_path,
+            branch_worktree_intent,
+            new_branch_name,
+            selected_integration_base_ref,
+            selected_branch_to_work_on,
+            create_remote_branch,
+            intent,
+            timeout: config.spawn_worker_request_timeout(),
+        },
+        &stack_parent,
+        progress,
+    )
+    .await?;
 
     // The clones this session's seeded agents read, claimed now: the worktree they mirror exists,
     // and the peers that build them must be at work before the agent that prompts them is launched.
@@ -301,7 +239,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     // Semantic index: index the worktree into the session dir before launch (blocking; a missing
     // embedder or a failed index aborts the start — no unindexed fallback), and point the
     // `SemanticSearch` tool at the per-session index DB via the process env.
-    let mut session_env = cursor_cli_semantic_env(
+    let mut session_env = semantic_index_env(
         tddy_data_dir,
         session_id,
         semantic_index,
@@ -370,60 +308,6 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     }))
 }
 
-async fn cut_cursor_cli_worktree(
-    selected_integration_base_ref: &str,
-    create_remote_branch: bool,
-    session_dir: &Path,
-    intent: tddy_core::BranchWorktreeIntent,
-    timeout: std::time::Duration,
-    repo_root: &Path,
-    chain_base_ref: Option<String>,
-) -> Result<PathBuf, Status> {
-    let worktree_base_ref =
-        tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
-    let wt = tddy_session_split::service_util::create_session_worktree(
-        timeout,
-        "start_cursor_cli_session: create worktree",
-        repo_root,
-        session_dir,
-        worktree_base_ref,
-    )
-    .await?;
-    tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
-        create_remote_branch,
-        intent,
-        session_dir,
-        &wt,
-        timeout,
-    )
-    .await?;
-    Ok(wt)
-}
-
-fn spawned_cursor_cli_branch(
-    branch_worktree_intent: &str,
-    new_branch_name: &str,
-    selected_branch_to_work_on: &str,
-    session_dir: &Path,
-    pid: String,
-    projects_dir: PathBuf,
-    repo_root: PathBuf,
-) -> Result<String, Status> {
-    let remote =
-        project_storage::effective_remote_name_for_project(&projects_dir, &pid, &repo_root)
-            .map_err(|e| Status::internal(e.to_string()))?;
-    let spawned_branch = spawned_branch_of_session(
-        session_dir,
-        effective_spawn_branch(
-            branch_worktree_intent,
-            new_branch_name,
-            selected_branch_to_work_on,
-            &remote,
-        ),
-    );
-    Ok(spawned_branch)
-}
-
 fn prepare_cursor_cli_launch(
     config: &DaemonConfig,
     initial_prompt: &str,
@@ -445,34 +329,6 @@ fn prepare_cursor_cli_launch(
     }
     let _ = managed_codebase;
     (binary_path, initial_prompt_opt)
-}
-
-async fn cursor_cli_semantic_env(
-    tddy_data_dir: &Path,
-    session_id: &str,
-    semantic_index: bool,
-    task_registry: &tddy_task::TaskRegistry,
-    session_dir: &Path,
-    worktree_path: &Path,
-    progress: &AttachmentProgressSink,
-) -> Result<Vec<(String, String)>, Status> {
-    let mut session_env: Vec<(String, String)> = Vec::new();
-    if semantic_index {
-        progress.begin_phase(StartStep::SemanticIndex);
-        tddy_session_split::service_util::index_session_worktree(
-            tddy_data_dir,
-            task_registry,
-            session_id,
-            worktree_path,
-            session_dir,
-        )
-        .await?;
-        progress.end_phase(StartStep::SemanticIndex);
-        session_env.push(tddy_semantic_index::semantic_index::semantic_index_env(
-            session_dir,
-        ));
-    }
-    Ok(session_env)
 }
 
 async fn spawn_cursor_cli_process(

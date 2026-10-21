@@ -7,9 +7,14 @@ use std::path::Path;
 
 use tddy_core::atomic_file::write_atomic_with_mode;
 use tddy_core::cli_harness::CliHarness;
-use tddy_core::provider_route::HarnessRoute;
+use tddy_core::provider_route::{choose_route, HarnessRoute, RouteSources};
+use tddy_core::{write_session_provider_account, SessionProviderAccount};
+use tddy_rpc::Status;
 
-use crate::session_provider_route::pty_route_env;
+use crate::session_acting_identity::SessionAccountAccess;
+use crate::session_provider_route::{
+    pty_route_env, resolve_session_route, route_on_account, route_sources_on_resume,
+};
 
 /// A route file names the endpoint and holds the account's configuration, so only the owner may read
 /// it. Applied when the file is created, so its bytes are never on disk at a wider mode.
@@ -57,4 +62,58 @@ pub fn cli_route_launch(
         env,
         args: route.args.clone(),
     })
+}
+
+/// The launch a start of `harness` on `model` is given on the account `sources` choose, resolved
+/// before anything is spawned. Writes the route's files into `session_dir` and records the account
+/// and model beside them (never the key), so a resume re-applies it. `None` — and nothing written —
+/// when no account was chosen, so the harness runs on the person's own setup.
+pub fn start_cli_route(
+    access: &SessionAccountAccess,
+    harness: &CliHarness,
+    sources: &RouteSources,
+    model: &str,
+    session_dir: &Path,
+) -> Result<Option<CliRouteLaunch>, Status> {
+    let Some(account_id) = choose_route(sources) else {
+        return Ok(None);
+    };
+    let route = route_on_account(access, harness.route_harness, &account_id, model)?;
+    let launch = write_cli_route(harness, &route, session_dir)?;
+    write_session_provider_account(
+        session_dir,
+        &SessionProviderAccount {
+            account_id,
+            model: model.to_string(),
+        },
+    )
+    .map_err(|e| Status::internal(format!("failed to record the provider account: {e}")))?;
+    Ok(Some(launch))
+}
+
+/// The launch a resumed session of `harness` is given: the route its start recorded, re-resolved
+/// against the owner's vault as it stands now, its files written again. Nothing for a session on
+/// the person's own setup.
+pub fn resume_cli_route(
+    access: &SessionAccountAccess,
+    harness: &CliHarness,
+    session_dir: &Path,
+) -> Result<CliRouteLaunch, Status> {
+    let (sources, model) = route_sources_on_resume(session_dir)?;
+    let Some(model) = model else {
+        return Ok(CliRouteLaunch::default());
+    };
+    match resolve_session_route(access, harness.route_harness, &sources, &model)? {
+        Some(route) => write_cli_route(harness, &route, session_dir),
+        None => Ok(CliRouteLaunch::default()),
+    }
+}
+
+fn write_cli_route(
+    harness: &CliHarness,
+    route: &HarnessRoute,
+    session_dir: &Path,
+) -> Result<CliRouteLaunch, Status> {
+    cli_route_launch(harness, Some(route), session_dir)
+        .map_err(|e| Status::internal(format!("failed to write the provider route: {e}")))
 }

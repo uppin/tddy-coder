@@ -1,5 +1,5 @@
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
-import type { SessionType } from "./createSessionRequest";
+import { daemonCutsTheWorktree, type SessionType } from "./createSessionRequest";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 
@@ -104,10 +104,10 @@ export function CreateSessionBranchFields({
             onChange={(e) => setNewBranchName(e.target.value)}
             placeholder="e.g. feature/my-work"
           />
-          {/* Only the claude-cli / cursor-cli spawn paths create the worktree in-daemon and can push
-              it; a "tool" session spawns tddy-coder, which owns its own worktree — so we don't offer
-              the toggle there rather than show a checked box that silently does nothing. */}
-          {(sessionType === "claude-cli" || sessionType === "cursor-cli") && (
+          {/* Only the CLI-harness spawn paths create the worktree in-daemon and can push it; a
+              "tool" session spawns tddy-coder, which owns its own worktree — so we don't offer the
+              toggle there rather than show a checked box that silently does nothing. */}
+          {daemonCutsTheWorktree(sessionType) && (
             <label className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
               <input
                 data-testid="create-session-create-remote-branch-toggle"

@@ -5,15 +5,16 @@
 //! the daemon owns the parsing side, and `tddy_tools::list_models` owns the argument parsing and
 //! the line printed to stdout. See docs/ft/web/tool-session-model-selection.md.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use serde::Serialize;
 
 use super::{
-    claude_cli_models, cursor_cli_models, AnyBackend, BackendModels, ClaudeAcpBackend,
-    ClaudeCodeBackend, CodexAcpBackend, CodexBackend, CodingBackend, CursorBackend, StubBackend,
+    AnyBackend, BackendModels, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend,
+    CodingBackend, CursorBackend, StubBackend,
 };
+use crate::cli_harness::{cli_harness, models_from_listing, CliHarness, CliModelSource};
 
 /// The `claude-cli` session type is not a `CodingBackend`; it enumerates a curated catalog.
 pub const CLAUDE_CLI_AGENT: &str = "claude-cli";
@@ -27,10 +28,22 @@ pub const CURSOR_CLI_AGENT: &str = "cursor-cli";
 pub struct BackendCliPaths {
     /// Override the cursor (`agent`) binary path.
     pub cursor_cli_path: Option<PathBuf>,
+    /// Override the `opencode` binary path.
+    pub opencode_cli_path: Option<PathBuf>,
     /// Override the `claude-agent-acp` binary path.
     pub claude_acp_cli_path: Option<PathBuf>,
     /// Override the `codex-acp` binary path.
     pub codex_acp_cli_path: Option<PathBuf>,
+}
+
+impl BackendCliPaths {
+    /// The override for the binary a CLI harness lists its models with, when one was given.
+    fn listing_binary_override(&self, session_type: &str) -> Option<&Path> {
+        match session_type {
+            "opencode-cli" => self.opencode_cli_path.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// JSON wire shape for a single model in the daemon⇄tools contract.
@@ -73,7 +86,8 @@ pub fn render_models_json(models: &BackendModels) -> String {
 
 /// Enumerate the models `agent` supports.
 ///
-/// `claude-cli` and `cursor-cli` resolve to their curated catalogs directly; every other agent is
+/// A CLI harness session type (`claude-cli`, `cursor-cli`, `opencode-cli`) takes its catalogue from
+/// its registry descriptor — curated, or read from the harness's own binary. Every other agent is
 /// enumerated through its [`CodingBackend::list_models`] (querying the underlying command for
 /// cursor/ACP backends, or the curated list otherwise).
 pub async fn resolve_agent_models(
@@ -81,11 +95,11 @@ pub async fn resolve_agent_models(
     paths: &BackendCliPaths,
 ) -> anyhow::Result<BackendModels> {
     let agent = agent.trim();
-    if agent == CLAUDE_CLI_AGENT {
-        return Ok(claude_cli_models());
-    }
-    if agent == CURSOR_CLI_AGENT {
-        return Ok(cursor_cli_models());
+    if let Some(harness) = cli_harness(agent) {
+        return match harness.models {
+            CliModelSource::Curated(catalogue) => Ok(catalogue()),
+            CliModelSource::ListedByBinary(args) => list_by_binary(harness, args, paths).await,
+        };
     }
     let backend =
         build_backend(agent, paths).with_context(|| format!("no backend for agent {:?}", agent))?;
@@ -93,6 +107,36 @@ pub async fn resolve_agent_models(
         .list_models()
         .await
         .with_context(|| format!("listing models for agent {:?}", agent))
+}
+
+/// The catalogue `harness`'s own binary prints when run with `args`. A binary that cannot be run or
+/// exits non-zero is an error — an empty catalogue would read as "no models" rather than "could not
+/// ask".
+async fn list_by_binary(
+    harness: &CliHarness,
+    args: &[&str],
+    paths: &BackendCliPaths,
+) -> anyhow::Result<BackendModels> {
+    let binary = paths
+        .listing_binary_override(harness.session_type)
+        .unwrap_or_else(|| Path::new(harness.default_binary));
+    let output = tokio::process::Command::new(binary)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .with_context(|| format!("running {} {}", binary.display(), args.join(" ")))?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{} {} exited with {}: {}",
+        binary.display(),
+        args.join(" "),
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(models_from_listing(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 /// Construct the backend for `agent`, honoring any CLI-path overrides. Errors on an unknown agent.
@@ -121,7 +165,7 @@ fn build_backend(agent: &str, paths: &BackendCliPaths) -> anyhow::Result<AnyBack
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::BackendModel;
+    use crate::backend::{cursor_cli_models, BackendModel};
 
     #[test]
     fn renders_backend_models_as_the_daemon_tools_json_contract() {

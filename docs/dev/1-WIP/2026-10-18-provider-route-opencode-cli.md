@@ -123,7 +123,7 @@ As Scope. Telegram pickers and placement keep their claude-only rules (split / s
 ## Implementation Milestones
 - [x] M1 Descriptor + claude/cursor through it, existing suites green
 - [x] M2 OpenCode descriptor + route arm
-- [ ] M3 Start/resume/listing + web — the web toggle, model request and start request are green; the daemon start, resume, listing, PTY relay and `opencode-cli` model catalog are not yet implemented, and no red test pins them on this branch (open: needs red tests before green)
+- [x] M3 Start/resume/listing + web — daemon start, resume, listing, terminal relay, `opencode-cli` model catalog, remote-branch toggle; red tests added at [G] (not reviewed at 6e)
 
 ## Testing Plan
 
@@ -155,6 +155,13 @@ argv and config unit tests, launch-level acceptance with a fake `opencode` binar
   makes "the last session here" exact.
 - **Descriptor now, not later**: two new CLI types in this stack; the descriptor pays for itself at the second.
 - **Key via `{env:…}` in config**, not written into `opencode.json`, so the file holds no secret.
+
+- **Catalog probe binary** (a): `ListAgentModels` for `opencode-cli` resolves the binary with `DaemonConfig::cli_harness_binary` and forwards `--opencode-cli-path` only when absolute, as for Cursor. `cli_harness_binary` is also the start/resume spawn's resolver.
+- **Peer reachability / facilitation** (b): `opencode-cli` is facilitated like claude-cli/cursor-cli (it runs its agent on the daemon it started on); the PRD is silent, cursor is included, so mirrored.
+- **Worktree removal on deletion** (c): included, like claude-cli. Cursor is excluded only because it predates the rule and widening it would change behaviour for existing sessions; that does not apply to a new session type. A client-supplied checkout is still kept by `is_daemon_managed_worktree`.
+- **`opencode_config_for` panic** (d): `resolve_route` selects the wire through a private typed `OpenAiWire`, so no panic is reachable from it. The pub wrapper keeps its pinned signature and `# Panics`; recorded as `packages/tddy-agent-backend/docs/code-issues/panicking-api-provider-route-opencode-config-for.md`.
+- **Deliberately not extended to opencode-cli**: `ReportSessionStatus` (no hooks), conversation tailing/inference (no transcript), sandboxed start (refused with FailedPrecondition, `TODO(provider-route-jail)`, node 9), `managed_codebase` (refused).
+- **Model optional**: an opencode-cli start without a model omits `--model` and leaves the choice to OpenCode.
 
 ## Refactoring Needed
 ### From /validate-changes
@@ -196,7 +203,7 @@ Scoped: `tddy-agent-backend`, `tddy-agent-launch`, `tddy-cli-sessions`, `tddy-se
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)

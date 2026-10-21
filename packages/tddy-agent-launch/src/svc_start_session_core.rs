@@ -422,6 +422,45 @@ impl LaunchSessions {
             return Ok(started);
         }
 
+        // --- opencode-cli branch: no LiveKit; spawns OpenCode in a PTY in a daemon-cut worktree ---
+        if req.session_type.trim() == "opencode-cli" {
+            // TODO(provider-route-jail): OpenCode is not sandboxed yet (#provider-route 9/9). Refused
+            // rather than run unsandboxed.
+            if req.sandbox {
+                return Err(Status::failed_precondition(
+                    "opencode-cli sessions cannot run in a sandbox yet",
+                ));
+            }
+            // OpenCode has no workflow of its own for a managed codebase to drive.
+            if req.managed_codebase {
+                return Err(Status::invalid_argument(
+                    "managed_codebase is not supported for opencode-cli sessions",
+                ));
+            }
+            let start = self.cli_start_prelude(&req, progress, os_user).await?;
+            let started_agents = self
+                .agent_roster
+                .seeded_roster_records(&req.specialized_agents)
+                .await?;
+            let clones = DaemonSeedCloneClaimant {
+                service: self.agent_roster.clone(),
+            };
+            let sessions_base = start.sessions_base.clone();
+            let session_id = start.session_id.clone();
+            let started = self
+                .start_opencode_cli_from_request(
+                    &req,
+                    os_user,
+                    start,
+                    started_agents,
+                    clones,
+                    progress,
+                )
+                .await?;
+            self.announce_worktree_ready(&sessions_base, &session_id);
+            return Ok(started);
+        }
+
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
 

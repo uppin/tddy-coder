@@ -86,6 +86,28 @@ impl LaunchSessions {
             );
         }
 
+        // --- opencode-cli branch: resume without LiveKit ---
+        if metadata.session_type.as_deref() == Some("opencode-cli") {
+            let identity = self.host.session_identity(
+                os_user,
+                &req.session_id,
+                &metadata.project_id,
+                &req.session_token,
+            );
+            return bridge_conn_resume_response(
+                crate::opencode_cli_spawn::resume_opencode_cli_session(
+                    &self.claude_cli_manager,
+                    &self.config,
+                    &self.host.session_account_access(&req.session_token),
+                    &req.session_id,
+                    &session_dir,
+                    metadata,
+                    identity.git_environment,
+                )
+                .await,
+            );
+        }
+
         // --- workspace branch: re-provision jail when sandboxed, no LiveKit ---
         if metadata.session_type.as_deref() == Some("workspace") {
             if metadata.sandbox == Some(true)

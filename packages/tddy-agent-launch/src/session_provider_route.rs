@@ -59,7 +59,7 @@ pub fn resolve_session_route(
 }
 
 /// The route `harness` runs `model` on the account `account_id` names in the owner's vault.
-fn route_on_account(
+pub(crate) fn route_on_account(
     access: &SessionAccountAccess,
     harness: Harness,
     account_id: &str,
