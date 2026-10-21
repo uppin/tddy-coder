@@ -1,10 +1,10 @@
 use crate::host_tooling::classify_gh_auth_status;
 use crate::host_tooling::parse_git_identity;
+use crate::host_tooling::subprocess::ProbeOutput;
 use crate::host_tooling::summarise;
 use crate::host_tooling::GitIdentity;
 use crate::host_tooling::GithubCliStatus;
 use crate::host_tooling::ProbeOutcome;
-use crate::host_tooling::ProbeOutput;
 use crate::host_tooling::PROBE_TIMEOUT;
 
 /// Start the ssh-agent probe for `os_user` without waiting for it.
