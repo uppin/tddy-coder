@@ -19,6 +19,12 @@ pub mod mirror;
 pub mod sync;
 
 pub use crate::attach::daemon_http::DaemonHttpError;
+pub use crate::sync::git::first_attach_commands;
+pub use crate::sync::git::reconcile_commands;
+pub use crate::sync::git::remote_url;
+pub use crate::sync::git::wip_ref;
+pub use crate::sync::git::GitInvocation;
+pub use crate::sync::git::GitTransport;
 pub use apply::{ApplyOutcome, Delta, ReconcileReason};
 pub use attach::{
     attach, daemon_identity, join_session_room, open_session_room, resolve_session,
@@ -30,8 +36,7 @@ pub use credentials::{
 };
 pub use mirror::{Mirror, MirrorError, MirrorMarker, MARKER_FILENAME};
 pub use sync::{
-    decide_record, decide_worktree, delta_request, first_attach_commands, reassemble,
-    reconcile_commands, remote_url, run, wip_ref, DeltaError, GitInvocation, GitTransport,
-    IgnoreReason, RecordDecision, SyncError, WorktreeDecision, LOCAL_WIP_REF, MIRROR_DELTA_SCOPE,
+    decide_record, decide_worktree, delta_request, reassemble, run, DeltaError, IgnoreReason,
+    RecordDecision, SyncError, WorktreeDecision, LOCAL_WIP_REF, MIRROR_DELTA_SCOPE,
     REMOTE_GIT_SSH_COMMAND, STREAM_DELTA_METHOD,
 };
