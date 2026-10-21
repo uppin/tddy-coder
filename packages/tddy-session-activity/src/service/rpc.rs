@@ -1,5 +1,5 @@
 use crate::service::activity_delta_frames;
-use crate::service::ports::{DeltaLookup, DeltaScope, SessionDeltaStores};
+use crate::service::ports::{DeltaLookup, DeltaScope};
 use crate::service::relayed;
 use crate::service::streamed;
 use crate::service::ActivityServiceImpl;
@@ -303,7 +303,7 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
     /// The tick delta lookup — AC6-AC14 of `docs/ft/daemon/session-worktree-sync.md`.
     ///
     /// The delta lives in the session room's ring, which is why this is answered through
-    /// [`SessionDeltaStores`] rather than from disk: a patch is a measurement of a live checkout,
+    /// [`SessionDeltaStores`](crate::service::ports::SessionDeltaStores) rather than from disk: a patch is a measurement of a live checkout,
     /// and the host hosting that room is the only one that took it.
     ///
     /// Authorization comes **first**, before the ring is even looked up, for the reason AC14

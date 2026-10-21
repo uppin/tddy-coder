@@ -3,7 +3,6 @@ use crate::pty_relay::LOBBY_ROOM;
 use crate::pty_relay::ROOM_TOKEN_TTL;
 use crate::pty_relay::SERVER_PARTICIPANT_WAIT;
 use anyhow::Result;
-use std::io::Read;
 use std::sync::Arc;
 use tddy_room_client::{RoomAuth, RoomConnectError, RoomConnector, RoomJoin, RoomSession};
 

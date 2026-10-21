@@ -354,8 +354,7 @@ pub async fn build(
             );
             tddy_daemon_auth::build_auth_entries_admitting(
                 &auth_config,
-                web_host.as_str(),
-                web_port,
+                (web_host.as_str(), web_port),
                 &tddy_daemon_auth::SessionTokens::new(key, directory),
                 first_login_enrolment(&config, &options)?,
                 Arc::clone(&room_tokens),

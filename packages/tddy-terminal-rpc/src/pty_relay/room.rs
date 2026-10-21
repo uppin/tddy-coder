@@ -10,7 +10,7 @@ use crate::pty_relay::PtyRelayConfig;
 use anyhow::Result;
 use std::io::{Read, Write};
 use std::sync::Arc;
-use tddy_room_client::{RoomConnector, RoomSession};
+use tddy_room_client::RoomConnector;
 
 /// Room-backed start/connect (--daemon-identity / --server-identity).
 pub(super) async fn run_livekit_session(

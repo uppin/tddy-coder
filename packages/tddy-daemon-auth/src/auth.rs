@@ -160,24 +160,24 @@ pub fn build_auth_entries_with(
     tokens: &SessionTokens,
     minter: Arc<dyn RoomTokenMinter>,
 ) -> anyhow::Result<AuthBuildResult> {
-    build_auth_entries_admitting(config, web_host, web_port, tokens, None, minter)
+    build_auth_entries_admitting(config, (web_host, web_port), tokens, None, minter)
 }
 
 /// [`build_auth_entries_with`], with `admission` asked about every completed login before a
 /// session is minted for it — how an embedded desktop enrols its first login (see
 /// [`crate::first_login_admission`]). `None` admits every login GitHub vouches for, exactly as
 /// [`build_auth_entries_with`] does.
+// TODO(restructure-engine): `web` folds `web_host` and `web_port` into one parameter by hand to reach
+// the five-parameter limit; the engine has no operation that changes a signature.
 pub fn build_auth_entries_admitting(
     config: &DaemonConfig,
-    web_host: &str,
-    web_port: u16,
+    web: (&str, u16),
     tokens: &SessionTokens,
     admission: Option<Arc<dyn LoginAdmission>>,
     minter: Arc<dyn RoomTokenMinter>,
 ) -> anyhow::Result<AuthBuildResult> {
-    let github = match &config.github {
-        Some(g) => g,
-        None => return Ok(AuthBuildResult::unauthenticated()),
+    let Some(github) = &config.github else {
+        return Ok(AuthBuildResult::unauthenticated());
     };
     let lifetimes = crate::vault_lifetimes::VaultLifetimes::of(github)?; // refused past its ceiling
 
@@ -195,39 +195,19 @@ pub fn build_auth_entries_admitting(
     // exactly the sort of quiet degradation this replaces.
     let credential_vaults = probed_credential_vaults(config, lifetimes)?;
 
-    let redirect_uri = || {
-        github
-            .redirect_uri
-            .clone()
-            .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port))
-    };
-    let auth_entry = match github_provider_kind(github) {
-        Some(GitHubProviderKind::Stub) => {
-            let client_id = github.client_id.as_deref().unwrap_or("stub-client-id");
-            let stub = StubGitHubProvider::new_with_callback(&redirect_uri(), client_id);
-            if let Some(ref codes) = github.stub_codes {
-                stub.register_code_mappings(codes);
-            }
-            auth_service_entry(stub, tokens, credential_vaults.clone(), admission)
-        }
-        // Two configurations, neither a fallback for the other. With a secret this is a
-        // confidential client and serves the redirect flow exactly as it always has. Without one
-        // it is a public client — the shape a desktop install ships in, since a secret inside a
-        // downloadable application is public the day it ships — and signs in by the device flow,
-        // which authenticates with the client id alone.
-        Some(GitHubProviderKind::Confidential { client_id, secret }) => auth_service_entry(
-            RealGitHubProvider::new(client_id, secret, &redirect_uri()),
-            tokens,
-            credential_vaults.clone(),
-            admission,
-        ),
-        Some(GitHubProviderKind::Public { client_id }) => auth_service_entry(
-            RealGitHubProvider::new_public(client_id),
-            tokens,
-            credential_vaults.clone(),
-            admission,
-        ),
-        None => return Ok(AuthBuildResult::unauthenticated()),
+    let (web_host, web_port) = web;
+    let redirect_uri = github
+        .redirect_uri
+        .clone()
+        .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
+    let Some(auth_entry) = provider_auth_entry(
+        github,
+        &redirect_uri,
+        tokens,
+        credential_vaults.clone(),
+        admission,
+    ) else {
+        return Ok(AuthBuildResult::unauthenticated());
     };
 
     // Verify the token's signature/expiry under the key it names and extract the login. Only
@@ -246,6 +226,45 @@ pub fn build_auth_entries_admitting(
         credential_vaults,
         session_tokens: Some(tokens.clone()),
     })
+}
+
+// TODO(restructure-engine): extracted by hand — `extract_method` refuses a range holding the early
+// `return` the `None` arm made.
+fn provider_auth_entry(
+    github: &GitHubConfig,
+    redirect_uri: &str,
+    tokens: &SessionTokens,
+    credential_vaults: Option<Arc<SessionVaults>>,
+    admission: Option<Arc<dyn LoginAdmission>>,
+) -> Option<ServiceEntry> {
+    let entry = match github_provider_kind(github)? {
+        GitHubProviderKind::Stub => {
+            let client_id = github.client_id.as_deref().unwrap_or("stub-client-id");
+            let stub = StubGitHubProvider::new_with_callback(redirect_uri, client_id);
+            if let Some(ref codes) = github.stub_codes {
+                stub.register_code_mappings(codes);
+            }
+            auth_service_entry(stub, tokens, credential_vaults, admission)
+        }
+        // Two configurations, neither a fallback for the other. With a secret this is a
+        // confidential client and serves the redirect flow exactly as it always has. Without one
+        // it is a public client — the shape a desktop install ships in, since a secret inside a
+        // downloadable application is public the day it ships — and signs in by the device flow,
+        // which authenticates with the client id alone.
+        GitHubProviderKind::Confidential { client_id, secret } => auth_service_entry(
+            RealGitHubProvider::new(client_id, secret, redirect_uri),
+            tokens,
+            credential_vaults,
+            admission,
+        ),
+        GitHubProviderKind::Public { client_id } => auth_service_entry(
+            RealGitHubProvider::new_public(client_id),
+            tokens,
+            credential_vaults,
+            admission,
+        ),
+    };
+    Some(entry)
 }
 
 fn probed_credential_vaults(
