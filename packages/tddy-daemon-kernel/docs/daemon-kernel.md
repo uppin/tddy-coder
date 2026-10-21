@@ -28,9 +28,10 @@ stays exactly one definition of each.
 
 - **A subsystem.** The model registry, telegram, screen sharing, sandbox, spawn, auth and LiveKit are
   services in their own right and belong to their own crates.
-- **A module, as a rule.** `config.rs` is the first exception, and a deliberate one: four moving
+- **A module, as a rule.** `config` is the first exception, and a deliberate one: four moving
   modules and every handler in both new services take `&DaemonConfig` and read disjoint parts of it,
-  so there is no smaller cut — the symbol *is* the file. The alternative, a narrow value struct per
+  so there is no smaller cut at the crate level — the symbol *is* the module. Inside the crate it is a
+  module directory (see [`config` layout](#config-layout)). The alternative, a narrow value struct per
   consuming crate, is authoring rather than moving, and every later node would repeat it. The other
   two are whole leaf modules with no session-host state, which the host and the RPC families above
   it both reach, and which no subsystem crate owns: `relay_idle` (`RpcActivity`, the handle every RPC
@@ -188,7 +189,7 @@ not in a crate with seventeen dependents that only parses the setting.
 
 `pending_login_ttl.rs` and `open_vault_idle_ttl.rs` now hold only their module doc and the parsing
 tests (absent, `0`, a value past the ceiling read as given, and the two refusals naming the
-setting), so `config.rs` — far over its size budget — carries each field and a one-line pointer.
+setting), so `config.rs` carries each field and a one-line pointer.
 
 ## `peer_forward_timeout_secs` and `CommonRoom` — how long a forward to a peer waits
 
@@ -301,3 +302,29 @@ crate authenticates a caller exactly as the session host does, without holding t
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)
 - [`docs/ft/daemon/host-worktree-services.md`](../../../docs/ft/daemon/host-worktree-services.md)
 - [changesets/](./changesets/)
+
+## `config` layout
+
+`config.rs` holds `DaemonConfig` with its `Default` and its field-level `impl`, `SupervisorClientConfig`,
+`TelegramConfig`, `ListenConfig`, `LiveKitConfig`, the serde defaults those name, and the facades below.
+About 440 production lines (production code excluding `#[cfg(test)]` items). Eight modules under
+`src/config/` hold the rest:
+
+| Module | Holds |
+|---|---|
+| `agent_cli` | `ClaudeCliConfig`, `CursorCliConfig`, their defaults, every `resolve_claude_*` / `resolve_cursor_*`, the `CLAUDE_*` / `CURSOR_*` env consts, the shim and `PATH` search |
+| `daemon_methods` | the second `impl DaemonConfig`: `load`, the accessors, `apply_*_env_override(s)`, `validate_for_relay` |
+| `sections` | `RelayConfig`, `LocalConfig`, `KeyringConfig`, `GitConfig`, `SandboxCgroupConfig`, `IndexDaemonConfig` with their defaults |
+| `env_overrides` | `merge_timing_env`, `merge_telegram_env` and their parsers |
+| `timings` | `AgentWarmupConfig`, `SessionRoomConfig`, their defaults and consts |
+| `screen_sharing` | `ScreenSharingConfig`, `resolve_{vnc,rdp,x11vnc}_binary_path` |
+| `sandbox_paths` | `SANDBOX_CONFIG_*`, `sandbox_config_os_token`, `resolve_sandbox_config_path{,_with}` |
+| `access` | `GitHubConfig`, `UserMapping`, `AllowedTool`, `AllowedAgent` (`pub(crate)`: in-crate code names the module) |
+
+`config.rs` re-exports the items a caller outside the crate uses, so `tddy_daemon_kernel::config::…`
+paths are unchanged for them. **Seven items have no path outside the crate:** `LocalConfig`,
+`KeyringConfig`, `SandboxCgroupConfig`, `GitConfig`, `AgentWarmupConfig`, `SessionRoomConfig` and
+`AllowedTool`. A caller reads them through the `DaemonConfig` fields but cannot name the types. To give one
+a public path, add it to a `pub use` in `config.rs` (for example `pub use sections::{LocalConfig, …};`).
+`ListenConfig` and `LiveKitConfig` stay in `config.rs` because the serde defaults they name are not contiguous
+with them.

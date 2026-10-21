@@ -16,7 +16,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::config::GitHubConfig;
+    use crate::config::access::GitHubConfig;
 
     /// The `github:` block `yaml` describes, as the daemon's config loader reads it.
     fn a_github_block(yaml: &str) -> Result<GitHubConfig, String> {

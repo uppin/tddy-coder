@@ -1,7 +1,9 @@
 //! Daemon configuration — users, tools, LiveKit, GitHub, etc.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(test)]
 use std::time::Duration;
 
 use tddy_core::LogConfig;
@@ -45,326 +47,13 @@ pub fn default_spawn_startup_poll_interval_ms() -> u64 {
     25
 }
 
-/// Matches the sandbox-ready timeout: a cold model load is allowed to take minutes.
-fn default_agent_warmup_timeout_secs() -> u64 {
-    120
-}
-
-fn default_agent_warmup_retry_interval_ms() -> u64 {
-    1000
-}
-
-fn default_agent_warmup_request_timeout_secs() -> u64 {
-    120
-}
-
-/// Timing budget for the specialized-subagent warm-up gate (`agent_warmup:` YAML section).
-///
-/// The defaults reproduce `tddy_discovery::warmup::WarmupOptions::default()` exactly — this
-/// section exists so a host whose agents live somewhere faster (or slower) than a cold local
-/// model server can say so, without any code path branching on how it was started.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AgentWarmupConfig {
-    /// Total budget to get a single agent ready before the session fails to start.
-    #[serde(default = "default_agent_warmup_timeout_secs")]
-    pub timeout_secs: u64,
-    /// Wait between transient-failure retries.
-    #[serde(default = "default_agent_warmup_retry_interval_ms")]
-    pub retry_interval_ms: u64,
-    /// Per-probe HTTP timeout — a cold model load must fit inside it.
-    #[serde(default = "default_agent_warmup_request_timeout_secs")]
-    pub request_timeout_secs: u64,
-}
-
-impl Default for AgentWarmupConfig {
-    fn default() -> Self {
-        Self {
-            timeout_secs: default_agent_warmup_timeout_secs(),
-            retry_interval_ms: default_agent_warmup_retry_interval_ms(),
-            request_timeout_secs: default_agent_warmup_request_timeout_secs(),
-        }
-    }
-}
-
-/// Today's freshness for a session room: fast enough that an agent notices a commit within a
-/// couple of seconds, slow enough that a host with many checkouts is not spending its time shelling
-/// out to git.
-fn default_session_room_poll_interval_ms() -> u64 {
-    2000
-}
-
-/// A `git rev-parse` / `status` / `diff` trio that has not answered in this long is a repository in
-/// trouble (a stale index lock, a filesystem that stopped responding), not a slow one. It is also
-/// the budget one measurement of a checkout gets when the caller names none, which is why
-/// `tddy_daemon::session_room` reads it from here — a single definition, so the shipped default and the
-/// unconfigured default cannot drift apart.
-///
-/// The number lives on this side of that pair deliberately. Read the other way round — `config`
-/// naming `session_room`, and `session_room` naming `config` for its [`DaemonConfig`] — the two
-/// modules are mutually dependent, and no crate boundary can be drawn between a wiring layer and a
-/// LiveKit worktree room while that is true.
-pub const DEFAULT_SESSION_ROOM_GIT_TIMEOUT: Duration = Duration::from_millis(5_000);
-
-fn default_session_room_git_timeout_ms() -> u64 {
-    DEFAULT_SESSION_ROOM_GIT_TIMEOUT.as_millis() as u64
-}
-
-/// The shortest interval and git budget a session room accepts.
-///
-/// Not a clamp. Below this a room is not "fast", it is a git storm: one poll runs four `git`
-/// subprocesses against the checkout, so a mistyped `poll_interval_ms: 0` or `: 1` would ask for
-/// thousands of processes a second, per room, forever. An operator who wrote that meant something
-/// else, and being told so at startup is cheaper than finding it in a load average. The same floor
-/// covers `git_timeout_ms`, where anything shorter kills every measurement before git can answer.
-const MIN_WORKTREE_ROOM_INTERVAL_MS: u64 = 100;
-
-/// Cadence and patience of the session-room poll loop (`session_room:` YAML section).
-///
-/// Polling is how a checkout's activity is detected (`docs/ft/daemon/session-room.md`
-/// FR5), so its interval is the freshness the room offers. The defaults reproduce the shipped
-/// behaviour exactly — this section exists so an operator can say something different, not so a
-/// caller can branch on how the daemon was started.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct SessionRoomConfig {
-    /// How often the facilitating daemon measures the checkout it hosts. At least
-    /// [`MIN_WORKTREE_ROOM_INTERVAL_MS`].
-    #[serde(default = "default_session_room_poll_interval_ms")]
-    pub poll_interval_ms: u64,
-    /// Wall-clock budget for one poll's git work; a `git` that overruns it is killed. Exceeding it
-    /// costs that worktree's freshness for a tick and nothing else — the daemon never waits on git
-    /// on a request path. At least [`MIN_WORKTREE_ROOM_INTERVAL_MS`].
-    #[serde(default = "default_session_room_git_timeout_ms")]
-    pub git_timeout_ms: u64,
-}
-
-impl SessionRoomConfig {
-    /// Refuse a section that asks for something no room should do, naming the value and the floor.
-    ///
-    /// Refused rather than clamped: a clamp turns an operator's mistake into behaviour they did not
-    /// ask for and cannot see, and this particular mistake — a sub-100 ms poll — is one that
-    /// saturates a host.
-    fn validate(&self) -> anyhow::Result<()> {
-        for (field, value) in [
-            ("poll_interval_ms", self.poll_interval_ms),
-            ("git_timeout_ms", self.git_timeout_ms),
-        ] {
-            if value < MIN_WORKTREE_ROOM_INTERVAL_MS {
-                anyhow::bail!(
-                    "session_room.{field} is {value}; it must be at least {MIN_WORKTREE_ROOM_INTERVAL_MS} \
-                     (each poll runs four git subprocesses per hosted worktree). Remove the field to \
-                     use the default."
-                );
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Default for SessionRoomConfig {
-    fn default() -> Self {
-        Self {
-            poll_interval_ms: default_session_room_poll_interval_ms(),
-            git_timeout_ms: default_session_room_git_timeout_ms(),
-        }
-    }
-}
+pub use crate::config::timings::DEFAULT_SESSION_ROOM_GIT_TIMEOUT;
 
 fn default_codex_oauth_loopback_proxy_eligible() -> bool {
     true
 }
 
-fn default_relay_idle_timeout_secs() -> u64 {
-    1800
-}
-
-/// Configuration for relay daemon mode (`--relay` / `relay:` YAML section).
-///
-/// In relay mode the daemon forwards RPCs to a remote peer via LiveKit, does not require a
-/// `web_bundle_path`, and shuts down automatically after `idle_timeout_secs` of inactivity.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct RelayConfig {
-    #[serde(default = "default_relay_idle_timeout_secs")]
-    pub idle_timeout_secs: u64,
-}
-
-impl Default for RelayConfig {
-    fn default() -> Self {
-        Self {
-            idle_timeout_secs: default_relay_idle_timeout_secs(),
-        }
-    }
-}
-
-/// Local Unix-domain socket transport (`local:` YAML section). The daemon serves its
-/// `ConnectionService` over this socket with SO_PEERCRED peer-trust auth, so same-host clients
-/// (e.g. tddy-sandbox-app) can mint a session token without an OAuth round-trip.
-#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LocalConfig {
-    /// Path the daemon binds the local socket at. When unset, resolved at bind time to
-    /// `${XDG_RUNTIME_DIR:-/run}/tddy-daemon.sock` (see [`DaemonConfig::local_socket_path`]).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub socket_path: Option<PathBuf>,
-}
-
-/// Which peers this daemon will propagate credentials to.
-///
-/// The section is optional, and its absence means **this daemon syncs credentials with nobody** —
-/// not "with everyone in the room". Room membership carries no attestation that a participant runs
-/// `tddy-daemon` (`docs/ft/daemon/livekit-peer-discovery.md` § *Trust model*), and handing a
-/// person's GitHub credential to anything holding the room's LiveKit credentials is the property
-/// `#keyring` exists to remove. A desktop install with no fleet is the common case for leaving it
-/// unset, and it must work.
-#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct KeyringConfig {
-    /// The shared secret that authorises a peer to hold this deployment's credentials.
-    ///
-    /// **One of two required checks, never sufficient alone.** It answers *may that daemon hold my
-    /// credentials* — a per-deployment authorisation decision with no cryptographic answer. The
-    /// other check is `#keyring` 1/9's Ed25519 signature, which answers *did that daemon send
-    /// this*; a peer passing only one of the two receives nothing and is journaled as refused.
-    ///
-    /// The secret itself never travels: a peer advertises an HMAC of a fresh challenge under it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group_secret: Option<String>,
-}
-
-/// Git behavior for daemon-side operations that contact a remote (fetching integration bases).
-#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct GitConfig {
-    /// Overrides `GIT_SSH_COMMAND` for the daemon's `git fetch` calls only — it is not exported to
-    /// the process environment or to spawned children. Point git at an ssh binary that can
-    /// authenticate non-interactively; e.g. on macOS the system ssh has Keychain support that the
-    /// Nix-provided ssh lacks: `/usr/bin/ssh -o BatchMode=yes -o ConnectTimeout=10`. When unset, git
-    /// inherits the ambient environment. Regardless of this value, daemon remote fetches run with
-    /// stdin closed and `GIT_TERMINAL_PROMPT=0`, so a missing key/passphrase fails fast instead of
-    /// hanging the daemon on a prompt it can never answer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ssh_command: Option<String>,
-}
-
-/// Linux rootless cgroups sandbox delegation (`sandbox_cgroup:` YAML section). All fields optional
-/// so the backend derives defaults at runtime (delegated base from `/proc/self/cgroup`, controllers
-/// `memory cpu pids`, supervisor leaf `supervisor`) — nothing is hardcoded in the crate. Consulted
-/// only by the Linux cgroups backend; ignored on macOS / QEMU.
-#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct SandboxCgroupConfig {
-    /// Explicit delegated cgroup base directory; skips `/proc/self/cgroup` derivation when set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_path: Option<PathBuf>,
-    /// cgroup v2 unified mount root (default `/sys/fs/cgroup`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mount_root: Option<PathBuf>,
-    /// Controllers enabled in the base's `cgroup.subtree_control`; empty means `[memory, cpu, pids]`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub controllers: Vec<String>,
-    /// Leaf cgroup the daemon relocates its own process into (default `supervisor`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub supervisor_leaf: Option<String>,
-    /// Default `memory.max` (bytes) applied when a plan carries no explicit limits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory_max: Option<u64>,
-    /// Default `cpu.max` applied when a plan carries no explicit limits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cpu_max: Option<String>,
-    /// Default `pids.max` applied when a plan carries no explicit limits.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pids_max: Option<u64>,
-}
-
-/// The warm code-intelligence index this daemon manages (`index_daemon:` YAML section).
-///
-/// The section is optional and only overrides the defaults: every daemon manages an index daemon
-/// lazily, started by the first request that needs it. A `tddy-index-daemon` that cannot be started is an error on the request that needed it — not a
-/// quiet fall back to a cold rust-analyzer, which would turn a misconfiguration into six minutes
-/// of unexplained latency per request.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct IndexDaemonConfig {
-    /// The binary to run. When unset it is resolved at spawn time, from the daemon's own
-    /// executable's directory or from `PATH`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binary_path: Option<PathBuf>,
-    /// The AF_UNIX socket the index daemon is told to bind and this daemon dials. When unset,
-    /// resolved to `${XDG_RUNTIME_DIR:-/run}/tddy-index-daemon.sock` — see
-    /// [`IndexDaemonConfig::resolved_socket_path`], which mirrors [`DaemonConfig::local_socket_path`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub socket_path: Option<PathBuf>,
-    /// How long a freshly started index daemon has to bind that socket. A budget on *binding*
-    /// only: indexing is not waited for here, and a process that dies in the meantime is reported
-    /// at once rather than at this deadline.
-    #[serde(default = "default_index_daemon_ready_timeout_secs")]
-    pub ready_timeout_secs: u64,
-    /// How long the index daemon may sit unused before the reaper stops it. Generous by default:
-    /// the warm index it holds costs minutes to rebuild.
-    #[serde(default = "default_index_daemon_idle_timeout_secs")]
-    pub idle_timeout_secs: u64,
-    /// The rust-analyzer the index daemon runs, passed to it as `--rust-analyzer`. When unset the
-    /// index daemon runs `rust-analyzer` from its own `PATH`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rust_analyzer_path: Option<PathBuf>,
-    /// Environment variables set on the index daemon, and so inherited by the rust-analyzer it
-    /// starts and the `cargo` / `rustc` that one runs to load a workspace — the toolchain a host
-    /// launched outside a developer shell does not otherwise have. Added to the daemon's own
-    /// environment, overriding a variable of the same name.
-    // TODO: one environment for every workspace root; a per-project toolchain (a checkout's own
-    // nix/direnv shell) is not expressible here yet.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub env: BTreeMap<String, String>,
-}
-
-/// 60s. Binding a socket is immediate; this covers a cold start of the process around it.
-fn default_index_daemon_ready_timeout_secs() -> u64 {
-    60
-}
-
-/// 30 minutes. The index behind this process costs six to ten minutes to rebuild on this
-/// workspace, so reaping it eagerly would cost more than holding it.
-fn default_index_daemon_idle_timeout_secs() -> u64 {
-    30 * 60
-}
-
-impl Default for IndexDaemonConfig {
-    fn default() -> Self {
-        Self {
-            binary_path: None,
-            socket_path: None,
-            ready_timeout_secs: default_index_daemon_ready_timeout_secs(),
-            idle_timeout_secs: default_index_daemon_idle_timeout_secs(),
-            rust_analyzer_path: None,
-            env: BTreeMap::new(),
-        }
-    }
-}
-
-impl IndexDaemonConfig {
-    /// The socket path this daemon tells the index daemon to bind, resolving the default when the
-    /// section names none.
-    pub fn resolved_socket_path(&self) -> PathBuf {
-        if let Some(path) = &self.socket_path {
-            return path.clone();
-        }
-        // `/run` exists only on Linux hosts; elsewhere (Tddy Desktop on macOS) the temp dir is the
-        // one place an unprivileged process can bind.
-        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                let run = PathBuf::from("/run");
-                if run.is_dir() {
-                    run
-                } else {
-                    std::env::temp_dir()
-                }
-            });
-        runtime_dir.join("tddy-index-daemon.sock")
-    }
-}
+pub use crate::config::sections::{IndexDaemonConfig, RelayConfig};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
@@ -463,10 +152,10 @@ pub struct DaemonConfig {
     pub telegram: Option<TelegramConfig>,
     /// Claude Code CLI session configuration (spawning interactive `claude` processes in PTYs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_cli: Option<ClaudeCliConfig>,
+    pub claude_cli: Option<agent_cli::ClaudeCliConfig>,
     /// Cursor Agent CLI session configuration (spawning interactive `agent` processes in PTYs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor_cli: Option<CursorCliConfig>,
+    pub cursor_cli: Option<agent_cli::CursorCliConfig>,
     /// When set, this daemon runs in relay mode: no web bundle, idle-timeout auto-shutdown,
     /// forwards RPCs to a remote peer via LiveKit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -610,469 +299,44 @@ pub struct TelegramConfig {
     pub chat_ids: Vec<i64>,
 }
 
-/// Screen-sharing bridge binary configuration. Loaded from daemon YAML under `screen_sharing:`.
-#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ScreenSharingConfig {
-    /// Path to the `tddy-vnc` bridge binary.
-    /// Empty string (default) → resolved at runtime: current_exe sibling, then PATH.
-    #[serde(default)]
-    pub vnc_binary_path: String,
-    /// Path to the `tddy-rdp` bridge binary.
-    /// Empty string (default) → resolved at runtime: current_exe sibling, then PATH.
-    #[serde(default)]
-    pub rdp_binary_path: String,
-    /// Path to `x11vnc`, which serves an X11 display to the VNC bridge. Not shipped with tddy.
-    /// Empty string (default) → `x11vnc` on PATH.
-    #[serde(default)]
-    pub x11vnc_binary_path: String,
-    /// Directory holding the X server sockets (`X<N>`) whose displays are offered as channels.
-    /// Empty string (default) → `/tmp/.X11-unix`.
-    #[serde(default)]
-    pub x11_socket_dir: String,
-}
+pub use crate::config::screen_sharing::{
+    resolve_rdp_binary_path, resolve_vnc_binary_path, resolve_x11vnc_binary_path,
+    ScreenSharingConfig,
+};
 
-/// Resolve the actual path to the `tddy-vnc` binary.
-///
-/// Resolution order:
-/// 1. Explicit `vnc_binary_path` in `screen_sharing` config (if non-empty).
-/// 2. Sibling of the current executable (same directory).
-/// 3. Fallback to `"tddy-vnc"` (PATH lookup).
-pub fn resolve_vnc_binary_path(config: &DaemonConfig) -> String {
-    let explicit = config
-        .screen_sharing
-        .as_ref()
-        .map(|c| c.vnc_binary_path.as_str())
-        .unwrap_or("");
-    if !explicit.is_empty() {
-        return explicit.to_string();
-    }
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("tddy-vnc")))
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "tddy-vnc".to_string())
-}
+pub(crate) mod access;
+mod agent_cli;
+mod daemon_methods;
+mod env_overrides;
+mod sandbox_paths;
+mod screen_sharing;
+mod sections;
+mod timings;
+#[cfg(test)]
+use agent_cli::{
+    choose_claude_binary, choose_cursor_binary, is_wrapper_shim_dir, ClaudeBinaryChoice,
+    CursorBinaryChoice,
+};
+pub use agent_cli::{
+    resolve_claude_binary_path, resolve_claude_home_dir, resolve_cursor_binary_path,
+    resolve_cursor_cli_daemon_url, resolve_cursor_cli_tddy_tools_path, resolve_cursor_home_dir,
+    ClaudeCliConfig, CursorCliConfig, CLAUDE_BINARY_ENV, CLAUDE_HOME_ENV, CURSOR_BINARY_ENV,
+    CURSOR_HOME_ENV,
+};
 
-/// Resolve the actual path to the `tddy-rdp` binary.
-///
-/// Resolution order:
-/// 1. Explicit `rdp_binary_path` in `screen_sharing` config (if non-empty).
-/// 2. Sibling of the current executable (same directory).
-/// 3. Fallback to `"tddy-rdp"` (PATH lookup).
-pub fn resolve_rdp_binary_path(config: &DaemonConfig) -> String {
-    let explicit = config
-        .screen_sharing
-        .as_ref()
-        .map(|c| c.rdp_binary_path.as_str())
-        .unwrap_or("");
-    if !explicit.is_empty() {
-        return explicit.to_string();
-    }
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("tddy-rdp")))
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "tddy-rdp".to_string())
-}
-
-/// Resolve the path to `x11vnc`: the explicit `x11vnc_binary_path`, else the bare name for a PATH
-/// lookup. No current-exe sibling step — x11vnc is a system package, never shipped beside tddy.
-pub fn resolve_x11vnc_binary_path(config: &ScreenSharingConfig) -> std::path::PathBuf {
-    if config.x11vnc_binary_path.is_empty() {
-        std::path::PathBuf::from("x11vnc")
-    } else {
-        std::path::PathBuf::from(&config.x11vnc_binary_path)
-    }
-}
-
-fn default_claude_cli_binary_path() -> String {
-    "claude".to_string()
-}
-
-fn default_cursor_cli_binary_path() -> String {
-    "agent".to_string()
-}
-
-/// Environment variable that overrides the resolved `claude` binary path (highest priority).
-/// The escape hatch for when host auto-resolution picks the wrong binary.
-pub const CLAUDE_BINARY_ENV: &str = "TDDY_CLAUDE_BINARY";
-
-/// A wrapper-shim `bin` directory whose `claude` merely re-execs the real binary from `$PATH`
-/// (e.g. Superset's `~/.superset/bin`). Such a shim can't resolve inside the jail — its `PATH` is
-/// only `/usr/bin:/bin` — so host resolution must skip these dirs. See the `claude-sandbox` script.
-fn is_wrapper_shim_dir(dir: &Path) -> bool {
-    let ends_with_bin = dir.file_name().is_some_and(|n| n == "bin");
-    ends_with_bin
-        && dir.components().any(|c| match c {
-            std::path::Component::Normal(n) => n.to_string_lossy().starts_with(".superset"),
-            _ => false,
-        })
-}
-
-#[cfg(unix)]
-fn is_executable_file(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(p)
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable_file(p: &Path) -> bool {
-    p.is_file()
-}
-
-/// Locate the real host `claude` as an absolute path: prefer `~/.local/bin/claude` (the canonical
-/// Claude Code install), then scan `$PATH` skipping wrapper-shim dirs. `None` if none is found.
-fn find_real_claude_on_host() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("HOME") {
-        let candidate = PathBuf::from(home).join(".local/bin/claude");
-        if is_executable_file(&candidate) {
-            return Some(candidate);
-        }
-    }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .filter(|d| !d.as_os_str().is_empty() && !is_wrapper_shim_dir(d))
-        .map(|d| d.join("claude"))
-        .find(|c| is_executable_file(c))
-}
-
-/// Whether the `claude` binary is taken from an explicit override or must be auto-resolved.
-enum ClaudeBinaryChoice {
-    /// Use this value as-is (an env override or an explicit config path).
-    Explicit(String),
-    /// No explicit path given — resolve the real `claude` from the host.
-    Auto,
-}
-
-/// Decide from the env override and configured value alone (no filesystem access, so it is
-/// unit-testable): a non-empty env override wins; otherwise a configured value naming a path
-/// (contains `/`) is explicit; a bare name means "auto-resolve".
-fn choose_claude_binary(env_override: Option<&str>, configured: &str) -> ClaudeBinaryChoice {
-    if let Some(env) = env_override.map(str::trim).filter(|s| !s.is_empty()) {
-        return ClaudeBinaryChoice::Explicit(env.to_string());
-    }
-    if configured.contains('/') {
-        return ClaudeBinaryChoice::Explicit(configured.to_string());
-    }
-    ClaudeBinaryChoice::Auto
-}
-
-/// Canonicalize a value that names a path (contains `/`); return a bare name unchanged. The SBPL
-/// allow-list is built from canonical (symlink-resolved) parent dirs, so a symlinked spelling would
-/// be denied at exec time.
-fn canonicalize_if_path(p: &str) -> String {
-    if p.contains('/') {
-        std::fs::canonicalize(p)
-            .map(|c| c.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| p.to_string())
-    } else {
-        p.to_string()
-    }
-}
-
-/// Resolve the `claude` binary the sandbox runner will exec, as an absolute path when possible.
-///
-/// Resolution order (first match wins):
-/// 1. `TDDY_CLAUDE_BINARY` env var, when set and non-empty ([`CLAUDE_BINARY_ENV`]).
-/// 2. `claude_cli.binary_path` in the daemon config, when it names a path (contains `/`).
-/// 3. Auto-resolution of the real host `claude`: `~/.local/bin/claude`, then `$PATH` (skipping
-///    wrapper-shim dirs like Superset's `~/.superset/bin`, which can't resolve inside the jail).
-/// 4. Fallback: the configured value as-is (bare name, default `"claude"`).
-///
-/// A bare name must never reach the runner in normal operation: `binary_exec_reads` would take its
-/// empty parent (`Path::parent` of `"claude"` is `Some("")`) and emit `(subpath "")`, which macOS
-/// `sandbox-exec` rejects. Steps 1–3 produce an absolute path; step 4 is a last resort.
-pub fn resolve_claude_binary_path(config: &DaemonConfig) -> String {
-    let configured = config
-        .claude_cli
-        .as_ref()
-        .map(|c| c.binary_path.as_str())
-        .unwrap_or("claude");
-    let env_override = std::env::var(CLAUDE_BINARY_ENV).ok();
-    match choose_claude_binary(env_override.as_deref(), configured) {
-        ClaudeBinaryChoice::Explicit(p) => canonicalize_if_path(&p),
-        ClaudeBinaryChoice::Auto => match find_real_claude_on_host() {
-            Some(real) => canonicalize_if_path(&real.to_string_lossy()),
-            None => configured.to_string(),
-        },
-    }
-}
-
-/// Claude Code CLI session configuration. Loaded from daemon YAML under `claude_cli:`.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ClaudeCliConfig {
-    /// Path to the `claude` binary. A path (contains `/`) is used verbatim; a bare name (default
-    /// `"claude"`) triggers host auto-resolution — see [`resolve_claude_binary_path`]. Override
-    /// with the `TDDY_CLAUDE_BINARY` env var when resolution picks the wrong binary.
-    #[serde(default = "default_claude_cli_binary_path")]
-    pub binary_path: String,
-    /// Absolute path to the `tddy-tools` binary for per-worktree hook commands.
-    /// When absent, the daemon resolves it from `current_exe` sibling or falls back to
-    /// `"tddy-tools"` (PATH lookup).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tddy_tools_path: Option<String>,
-    /// HTTP base URL the per-worktree hook command uses to call `ReportSessionStatus`.
-    /// When absent, defaults to `http://127.0.0.1:{web_port}` derived from the listen config.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daemon_url: Option<String>,
-    /// Persistent jail `$HOME` reused across sandboxed claude-cli sessions so auth (refreshed OAuth
-    /// tokens), session history, and settings survive between sessions. Absent → default
-    /// `$HOME/.tddy/sandbox-claude-home`. Override with the `TDDY_SANDBOX_CLAUDE_HOME` env var. A
-    /// single daemon-wide home — see [`resolve_claude_home_dir`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_home_dir: Option<PathBuf>,
-}
-
-/// Cursor Agent CLI session configuration. Loaded from daemon YAML under `cursor_cli:`.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct CursorCliConfig {
-    /// Path to the Cursor Agent CLI binary (default `"agent"`).
-    #[serde(default = "default_cursor_cli_binary_path")]
-    pub binary_path: String,
-    /// Absolute path to `tddy-tools` for per-worktree hook commands. Falls back to claude_cli or
-    /// sibling-of-daemon resolution when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tddy_tools_path: Option<String>,
-    /// HTTP base URL for `ReportSessionStatus`. Falls back to claude_cli or web_port default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daemon_url: Option<String>,
-    /// Persistent jail `$HOME` for sandboxed cursor-cli sessions (default: `$HOME/.tddy/sandbox-cursor-home`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor_home_dir: Option<PathBuf>,
-}
-
-/// Environment variable that overrides the resolved cursor `agent` binary path (highest priority).
-pub const CURSOR_BINARY_ENV: &str = "TDDY_CURSOR_AGENT";
-
-/// Locate the real cursor `agent` binary as an absolute path, mirroring [`find_real_claude_on_host`]
-/// but injectable: prefer `<home>/.local/bin/agent`, then scan `path_dirs` skipping wrapper-shim
-/// dirs. `None` if none is found. The home and search dirs are parameters (not read from env) so the
-/// resolution logic is unit-testable.
-fn find_real_agent_in(home: Option<&Path>, path_dirs: &[PathBuf]) -> Option<PathBuf> {
-    if let Some(home) = home {
-        let candidate = home.join(".local/bin/agent");
-        if is_executable_file(&candidate) {
-            return Some(candidate);
-        }
-    }
-    path_dirs
-        .iter()
-        .filter(|d| !d.as_os_str().is_empty() && !is_wrapper_shim_dir(d))
-        .map(|d| d.join("agent"))
-        .find(|c| is_executable_file(c))
-}
-
-/// Locate the real host cursor `agent` as an absolute path: prefer `~/.local/bin/agent`, then scan
-/// `$PATH` skipping wrapper-shim dirs. `None` if none is found. Env-reading wrapper around
-/// [`find_real_agent_in`], mirroring [`find_real_claude_on_host`].
-fn find_real_agent_on_host() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).collect())
-        .unwrap_or_default();
-    find_real_agent_in(home.as_deref(), &path_dirs)
-}
-
-/// Whether the cursor `agent` binary is taken from an explicit override or must be auto-resolved.
-/// Mirrors [`ClaudeBinaryChoice`].
-enum CursorBinaryChoice {
-    /// Use this value as-is (an env override or an explicit config path).
-    Explicit(String),
-    /// No explicit path given — resolve the real `agent` from the host.
-    Auto,
-}
-
-/// Decide from the env override and configured value alone (no filesystem access, so it is
-/// unit-testable): a non-empty env override wins; otherwise a configured value naming a path
-/// (contains `/`) is explicit; a bare name means "auto-resolve". Mirrors [`choose_claude_binary`].
-fn choose_cursor_binary(env_override: Option<&str>, configured: &str) -> CursorBinaryChoice {
-    if let Some(env) = env_override.map(str::trim).filter(|s| !s.is_empty()) {
-        return CursorBinaryChoice::Explicit(env.to_string());
-    }
-    if configured.contains('/') {
-        return CursorBinaryChoice::Explicit(configured.to_string());
-    }
-    CursorBinaryChoice::Auto
-}
-
-/// Resolve the Cursor Agent CLI binary the runner / model probe will exec, as an absolute path when
-/// possible. Mirrors [`resolve_claude_binary_path`] so the impersonated child never needs a PATH
-/// lookup (which would fail "binary not found: agent" once the install dir is off the child's PATH).
-///
-/// Resolution order (first match wins):
-/// 1. `TDDY_CURSOR_AGENT` env var, when set and non-empty ([`CURSOR_BINARY_ENV`]).
-/// 2. `cursor_cli.binary_path` in the daemon config, when it names a path (contains `/`).
-/// 3. Auto-resolution of the real host `agent`: `~/.local/bin/agent`, then `$PATH` (skipping
-///    wrapper-shim dirs).
-/// 4. Fallback: the configured value as-is (bare name, default `"agent"`).
-pub fn resolve_cursor_binary_path(config: &DaemonConfig) -> String {
-    let configured = config
-        .cursor_cli
-        .as_ref()
-        .map(|c| c.binary_path.as_str())
-        .unwrap_or("agent");
-    let env_override = std::env::var(CURSOR_BINARY_ENV).ok();
-    match choose_cursor_binary(env_override.as_deref(), configured) {
-        CursorBinaryChoice::Explicit(p) => canonicalize_if_path(&p),
-        CursorBinaryChoice::Auto => match find_real_agent_on_host() {
-            Some(real) => canonicalize_if_path(&real.to_string_lossy()),
-            None => configured.to_string(),
-        },
-    }
-}
-
-/// Resolve tddy-tools path for cursor-cli hooks (cursor config → claude config → default).
-pub fn resolve_cursor_cli_tddy_tools_path(config: &DaemonConfig) -> Option<String> {
-    config
-        .cursor_cli
-        .as_ref()
-        .and_then(|c| c.tddy_tools_path.clone())
-        .or_else(|| {
-            config
-                .claude_cli
-                .as_ref()
-                .and_then(|c| c.tddy_tools_path.clone())
-        })
-}
-
-/// Resolve daemon URL for cursor-cli hooks (cursor config → claude config).
-pub fn resolve_cursor_cli_daemon_url(config: &DaemonConfig) -> Option<String> {
-    config
-        .cursor_cli
-        .as_ref()
-        .and_then(|c| c.daemon_url.clone())
-        .or_else(|| {
-            config
-                .claude_cli
-                .as_ref()
-                .and_then(|c| c.daemon_url.clone())
-        })
-}
-
-/// Environment variable overriding the persistent sandbox cursor `$HOME`.
-pub const CURSOR_HOME_ENV: &str = "TDDY_SANDBOX_CURSOR_HOME";
-
-/// Resolve the single daemon-wide persistent jail `$HOME` for sandboxed cursor-cli sessions.
-pub fn resolve_cursor_home_dir(config: &DaemonConfig) -> PathBuf {
-    if let Some(env) = std::env::var_os(CURSOR_HOME_ENV).filter(|v| !v.is_empty()) {
-        return PathBuf::from(env);
-    }
-    if let Some(dir) = config
-        .cursor_cli
-        .as_ref()
-        .and_then(|c| c.cursor_home_dir.as_ref())
-    {
-        return dir.clone();
-    }
-    let base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join(".tddy").join("sandbox-cursor-home")
-}
-
-/// Environment variable overriding the persistent sandbox claude `$HOME`.
-pub const CLAUDE_HOME_ENV: &str = "TDDY_SANDBOX_CLAUDE_HOME";
-
-/// Resolve the single daemon-wide persistent jail `$HOME` for sandboxed claude-cli sessions.
-///
-/// Resolution order (first match wins):
-/// 1. `TDDY_SANDBOX_CLAUDE_HOME` env var (if set and non-empty).
-/// 2. `claude_cli.claude_home_dir` in the daemon config.
-/// 3. Default `$HOME/.tddy/sandbox-claude-home`.
-///
-/// The dir is reused across sessions and mounted read-write into the jail, so credentials/history
-/// persist. It is deliberately separate from the daemon user's real `~/.claude`.
-pub fn resolve_claude_home_dir(config: &DaemonConfig) -> PathBuf {
-    if let Some(env) = std::env::var_os(CLAUDE_HOME_ENV).filter(|v| !v.is_empty()) {
-        return PathBuf::from(env);
-    }
-    if let Some(dir) = config
-        .claude_cli
-        .as_ref()
-        .and_then(|c| c.claude_home_dir.as_ref())
-    {
-        return dir.clone();
-    }
-    let base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join(".tddy").join("sandbox-claude-home")
-}
-
-/// Environment variable naming the shared sandbox config file explicitly (highest priority).
-pub const SANDBOX_CONFIG_ENV: &str = "TDDY_SANDBOX_CONFIG";
-
-/// Basename (no extension) of the shared claude-sandbox config file. The per-OS variant inserts the
-/// OS token: `claude-sandbox.<os>.yaml`; the generic form is `claude-sandbox.yaml`.
-pub const SANDBOX_CONFIG_BASENAME: &str = "claude-sandbox";
-
-/// OS token used in per-OS config filenames (e.g. `claude-sandbox.darwin.yaml`).
-///
-/// Uses the repo's convention — `"darwin"` for macOS (matching the `tddy-sandbox-darwin` crate),
-/// `"linux"` for Linux — rather than Rust's `std::env::consts::OS` (`"macos"`). A per-OS file is
-/// host-neutral: the same `claude-sandbox.darwin.yaml` works on any macOS host.
-pub fn sandbox_config_os_token() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "darwin"
-    }
-    #[cfg(target_os = "linux")]
-    {
-        "linux"
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        std::env::consts::OS
-    }
-}
-
-/// Resolve which shared claude-sandbox config file the daemon should load, searching `base_dir`.
-///
-/// Order (first existing wins):
-/// 1. `TDDY_SANDBOX_CONFIG` env — an explicit path, used as-is when it exists.
-/// 2. Per-OS `<base>/claude-sandbox.<os>.yaml` (e.g. `claude-sandbox.darwin.yaml`) — committed per
-///    platform, host-neutral within that OS.
-/// 3. Generic `<base>/claude-sandbox.yaml`.
-///
-/// `None` → no file found; the daemon falls back to built-in defaults (zero-config still works).
-pub fn resolve_sandbox_config_path(base_dir: &Path) -> Option<PathBuf> {
-    resolve_sandbox_config_path_with(
-        base_dir,
-        sandbox_config_os_token(),
-        std::env::var(SANDBOX_CONFIG_ENV).ok().as_deref(),
-        |p| p.is_file(),
-    )
-}
-
-/// Pure core of [`resolve_sandbox_config_path`] — env override, OS token, and an existence probe
-/// are all injected so the precedence is unit-testable without touching the real filesystem/env.
-fn resolve_sandbox_config_path_with(
-    base_dir: &Path,
-    os_token: &str,
-    env_override: Option<&str>,
-    exists: impl Fn(&Path) -> bool,
-) -> Option<PathBuf> {
-    if let Some(env) = env_override.map(str::trim).filter(|s| !s.is_empty()) {
-        let p = PathBuf::from(env);
-        if exists(&p) {
-            return Some(p);
-        }
-    }
-    let per_os = base_dir.join(format!("{SANDBOX_CONFIG_BASENAME}.{os_token}.yaml"));
-    if exists(&per_os) {
-        return Some(per_os);
-    }
-    let generic = base_dir.join(format!("{SANDBOX_CONFIG_BASENAME}.yaml"));
-    if exists(&generic) {
-        return Some(generic);
-    }
-    None
-}
+use crate::config::access::AllowedTool;
+#[cfg(test)]
+use crate::config::sandbox_paths::resolve_sandbox_config_path_with;
+pub use crate::config::sandbox_paths::{
+    resolve_sandbox_config_path, sandbox_config_os_token, SANDBOX_CONFIG_BASENAME,
+    SANDBOX_CONFIG_ENV,
+};
+use crate::config::sections::GitConfig;
+use crate::config::sections::KeyringConfig;
+use crate::config::sections::LocalConfig;
+use crate::config::sections::SandboxCgroupConfig;
+use crate::config::timings::AgentWarmupConfig;
+use crate::config::timings::SessionRoomConfig;
 
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
@@ -1164,407 +428,7 @@ impl LiveKitConfig {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct GitHubConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_secret: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub redirect_uri: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stub: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stub_codes: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")] // `pending_login_ttl.rs`
-    pub pending_login_ttl_seconds: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")] // `open_vault_idle_ttl.rs`
-    pub open_vault_idle_ttl_seconds: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct UserMapping {
-    pub github_user: String,
-    pub os_user: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AllowedTool {
-    pub path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AllowedAgent {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-}
-
-impl DaemonConfig {
-    /// Default subdirectory under home for cloned project repos when `repos_base_path` is unset.
-    pub fn repos_base_path_or_default(&self) -> &str {
-        self.repos_base_path.as_deref().unwrap_or("repos")
-    }
-
-    /// Load config from a YAML file.
-    pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| anyhow::anyhow!("failed to read config {}: {}", path.display(), e))?;
-        let config: Self = serde_yaml::from_str(&contents)
-            .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
-        config
-            .session_room
-            .validate()
-            .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
-        Ok(config)
-    }
-
-    /// Resolve OS user for a GitHub user. Returns None if not mapped.
-    pub fn os_user_for_github(&self, github_user: &str) -> Option<String> {
-        self.users.os_user_for_github(github_user)
-    }
-
-    /// Resolve the local caller's identity from its peer uid (SO_PEERCRED), for the local peer-trust
-    /// auth path used by same-host clients (e.g. tddy-sandbox-app). `uid_to_username` maps a uid to
-    /// an OS username — injected so this is host-independent and unit-testable — and the result is
-    /// matched against a configured `users[]` entry by `os_user`. Returns None when the uid has no
-    /// username or no matching user mapping.
-    pub fn local_identity_for_uid(
-        &self,
-        uid: u32,
-        uid_to_username: impl Fn(u32) -> Option<String>,
-    ) -> Option<UserMapping> {
-        let username = uid_to_username(uid)?;
-        self.users.mapping_for_os_user(&username)
-    }
-
-    /// The GitHub login for a local caller's peer uid (SO_PEERCRED), used to mint its access token
-    /// in the local peer-trust auth path. Thin wrapper over [`Self::local_identity_for_uid`].
-    pub fn local_token_login_for_uid(
-        &self,
-        uid: u32,
-        uid_to_username: impl Fn(u32) -> Option<String>,
-    ) -> Option<String> {
-        self.local_identity_for_uid(uid, uid_to_username)
-            .map(|m| m.github_user)
-    }
-
-    /// Resolve the path the local Unix-domain socket binds at. Uses the explicit `local.socket_path`
-    /// when configured; otherwise `${XDG_RUNTIME_DIR}/tddy-daemon.sock`, falling back to
-    /// `/run/tddy-daemon.sock` when `XDG_RUNTIME_DIR` is unset.
-    pub fn local_socket_path(&self) -> PathBuf {
-        if let Some(path) = &self.local.socket_path {
-            return path.clone();
-        }
-        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/run"));
-        runtime_dir.join("tddy-daemon.sock")
-    }
-
-    /// List allowed tools with path and label.
-    pub fn allowed_tools(&self) -> &[AllowedTool] {
-        &self.allowed_tools
-    }
-
-    /// The tool path to spawn when nothing more specific was requested — the first configured
-    /// `allowed_tools` entry (e.g. `"target/debug/tddy-coder"` in dev), falling back to a bare
-    /// `"tddy-coder"` only when no tools are configured at all. Single source of truth: callers
-    /// (`StartSession`'s Telegram workflow spawn path, `ResumeSession`'s no-recorded-tool
-    /// fallback) must not each hardcode their own default, or they can silently drift apart.
-    pub fn default_tool_path(&self) -> String {
-        self.allowed_tools
-            .first()
-            .map(|t| t.path.clone())
-            .unwrap_or_else(|| "tddy-coder".to_string())
-    }
-
-    /// This deployment's tddy toolchain — where its binaries are, resolved absolutely.
-    ///
-    /// Never derived from `allowed_tools`: that list is the operator's menu of `tddy-coder`
-    /// builds, not a statement about where the toolchain lives.
-    pub fn toolchain(&self) -> crate::toolchain::TddyToolchain {
-        crate::toolchain::TddyToolchain::resolve(self.toolchain_dir.as_deref())
-    }
-
-    /// Allowed agent ids (`StartSession.agent` / `tddy-coder --agent`) and display labels.
-    pub fn allowed_agents(&self) -> &[AllowedAgent] {
-        &self.allowed_agents
-    }
-
-    /// Wall-clock limit for blocking clone/spawn operations (spawn worker or in-process).
-    pub fn spawn_worker_request_timeout(&self) -> Duration {
-        let secs = self.spawn_worker_request_timeout_secs.max(1);
-        Duration::from_secs(secs)
-    }
-
-    /// How long a forward to a peer daemon waits for its answer (see `peer_forward_timeout_secs`).
-    pub fn peer_forward_timeout(&self) -> Duration {
-        Duration::from_secs(self.peer_forward_timeout_secs.max(1))
-    }
-
-    /// How long to watch a freshly spawned session process for an immediate exit.
-    pub fn spawn_startup_grace_period(&self) -> Duration {
-        Duration::from_millis(self.spawn_startup_grace_period_ms.max(1))
-    }
-
-    /// How often that watch polls.
-    pub fn spawn_startup_poll_interval(&self) -> Duration {
-        Duration::from_millis(self.spawn_startup_poll_interval_ms.max(1))
-    }
-
-    /// The warm-up gate's timing budget, in the form `tddy_discovery` takes it.
-    ///
-    /// On a default config this is exactly `WarmupOptions::default()` — the config path is a way
-    /// to say something different, not a change of production behaviour.
-    pub fn agent_warmup_options(&self) -> tddy_discovery::warmup::WarmupOptions {
-        tddy_discovery::warmup::WarmupOptions {
-            timeout: Duration::from_secs(self.agent_warmup.timeout_secs.max(1)),
-            retry_interval: Duration::from_millis(self.agent_warmup.retry_interval_ms.max(1)),
-            request_timeout: Duration::from_secs(self.agent_warmup.request_timeout_secs.max(1)),
-        }
-    }
-
-    /// How often a hosted worktree is measured.
-    ///
-    /// Not clamped: a value below [`MIN_WORKTREE_ROOM_INTERVAL_MS`] is refused when the config is
-    /// loaded, so what an operator wrote is what runs.
-    pub fn session_room_poll_interval(&self) -> Duration {
-        Duration::from_millis(self.session_room.poll_interval_ms)
-    }
-
-    /// Wall-clock budget for one poll's git work. See [`Self::session_room_poll_interval`].
-    pub fn session_room_git_timeout(&self) -> Duration {
-        Duration::from_millis(self.session_room.git_timeout_ms)
-    }
-
-    /// Wall-clock budget for one common-room daemon-advertisement `set_metadata` round (the LiveKit SDK
-    /// still uses **5 s per attempt**; we retry until this budget elapses or the publish succeeds).
-    pub fn common_room_set_metadata_attempt_budget(&self) -> Duration {
-        let secs = self
-            .livekit
-            .as_ref()
-            .map(|l| l.common_room_set_metadata_timeout_secs)
-            .unwrap_or_else(default_common_room_set_metadata_timeout_secs)
-            .max(1);
-        Duration::from_secs(secs)
-    }
-
-    /// Merge Telegram settings from process environment (after YAML load).
-    ///
-    /// Variables:
-    /// - `TDDY_TELEGRAM_BOT_TOKEN` — Bot API token; when set, assigns the token. If there was no
-    ///   `telegram:` block in YAML, a new block is created.
-    /// - `TDDY_TELEGRAM_CHAT_IDS` — Comma-separated chat ids (e.g. `-1001234567890,123456`).
-    /// - `TDDY_TELEGRAM_ENABLED` — `true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off` (case-insensitive).
-    ///
-    /// When a new `telegram` block is created solely because `TDDY_TELEGRAM_BOT_TOKEN` is set,
-    /// `enabled` defaults to `true` unless `TDDY_TELEGRAM_ENABLED` is set. When merging into an
-    /// existing YAML `telegram` block, `enabled` is not changed by the token alone (set
-    /// `TDDY_TELEGRAM_ENABLED` explicitly).
-    pub fn apply_telegram_env_overrides(&mut self) {
-        let bot_token = tddy_core::spawn_env::env_non_empty("TDDY_TELEGRAM_BOT_TOKEN");
-        let chat_ids_csv = tddy_core::spawn_env::env_non_empty("TDDY_TELEGRAM_CHAT_IDS");
-        let enabled = tddy_core::spawn_env::env_non_empty("TDDY_TELEGRAM_ENABLED");
-        merge_telegram_env(
-            self,
-            bot_token.as_deref(),
-            chat_ids_csv.as_deref(),
-            enabled.as_deref(),
-        );
-    }
-
-    /// Validate that this config is suitable for relay mode.
-    ///
-    /// Relay mode requires the `relay:` section to be present. It does not require
-    /// `web_bundle_path` — relay daemons do not serve static files.
-    pub fn validate_for_relay(&self) -> anyhow::Result<()> {
-        if self.relay.is_some() {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("relay section is required in relay mode"))
-        }
-    }
-
-    /// Override [`Self::codex_oauth_loopback_proxy_eligible`] from `TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE`
-    /// (`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`, case-insensitive). Call after YAML load.
-    pub fn apply_oauth_loopback_proxy_env_override(&mut self) {
-        if let Some(s) =
-            tddy_core::spawn_env::env_non_empty("TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE")
-        {
-            if let Some(b) = parse_env_bool(&s) {
-                self.codex_oauth_loopback_proxy_eligible = b;
-            } else {
-                log::warn!(
-                    target: "tddy_daemon::config",
-                    "TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE: expected true/false/1/0/yes/no/on/off, ignoring"
-                );
-            }
-        }
-    }
-
-    /// Override the spawn-startup watch and the warm-up budget from the environment — the last
-    /// layer of `defaults ← daemon.yaml ← TDDY_*`. Call after YAML load.
-    ///
-    /// All seven take a whole number; an unparseable value warns and keeps the file/default value:
-    /// - `TDDY_SPAWN_STARTUP_GRACE_PERIOD_MS`
-    /// - `TDDY_SPAWN_STARTUP_POLL_INTERVAL_MS`
-    /// - `TDDY_AGENT_WARMUP_TIMEOUT_SECS`
-    /// - `TDDY_AGENT_WARMUP_RETRY_INTERVAL_MS`
-    /// - `TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS`
-    /// - `TDDY_SESSION_ROOM_POLL_INTERVAL_MS`
-    /// - `TDDY_SESSION_ROOM_GIT_TIMEOUT_MS`
-    ///
-    /// The two session-room values are additionally refused below
-    /// [`MIN_WORKTREE_ROOM_INTERVAL_MS`], the same floor the YAML section is loaded under — a floor
-    /// an environment variable could step under would not be one.
-    pub fn apply_timing_env_overrides(&mut self) {
-        merge_timing_env(self, tddy_core::spawn_env::env_non_empty);
-    }
-}
-
-/// The pure half of [`DaemonConfig::apply_timing_env_overrides`]. `lookup` stands in for the
-/// process environment so the precedence rules are testable without mutating it — which no test
-/// running alongside others can do safely.
-fn merge_timing_env(config: &mut DaemonConfig, lookup: impl Fn(&str) -> Option<String>) {
-    if let Some(ms) = env_u64(&lookup, "TDDY_SPAWN_STARTUP_GRACE_PERIOD_MS") {
-        config.spawn_startup_grace_period_ms = ms;
-    }
-    if let Some(ms) = env_u64(&lookup, "TDDY_SPAWN_STARTUP_POLL_INTERVAL_MS") {
-        config.spawn_startup_poll_interval_ms = ms;
-    }
-    if let Some(secs) = env_u64(&lookup, "TDDY_AGENT_WARMUP_TIMEOUT_SECS") {
-        config.agent_warmup.timeout_secs = secs;
-    }
-    if let Some(ms) = env_u64(&lookup, "TDDY_AGENT_WARMUP_RETRY_INTERVAL_MS") {
-        config.agent_warmup.retry_interval_ms = ms;
-    }
-    if let Some(secs) = env_u64(&lookup, "TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS") {
-        config.agent_warmup.request_timeout_secs = secs;
-    }
-    if let Some(ms) = env_session_room_ms(&lookup, "TDDY_SESSION_ROOM_POLL_INTERVAL_MS") {
-        config.session_room.poll_interval_ms = ms;
-    }
-    if let Some(ms) = env_session_room_ms(&lookup, "TDDY_SESSION_ROOM_GIT_TIMEOUT_MS") {
-        config.session_room.git_timeout_ms = ms;
-    }
-}
-
-/// A session-room millisecond override, or `None` (with a warning) when it is not a whole number
-/// at or above [`MIN_WORKTREE_ROOM_INTERVAL_MS`]. Keeping the file/default value on a bad input is
-/// how every other override in [`merge_timing_env`] behaves.
-fn env_session_room_ms(lookup: &impl Fn(&str) -> Option<String>, name: &str) -> Option<u64> {
-    let ms = env_u64(lookup, name)?;
-    if ms < MIN_WORKTREE_ROOM_INTERVAL_MS {
-        log::warn!(
-            target: "tddy_daemon::config",
-            "{name}: {ms} is below the {MIN_WORKTREE_ROOM_INTERVAL_MS}ms floor (each poll runs four git subprocesses per hosted worktree), ignoring"
-        );
-        return None;
-    }
-    Some(ms)
-}
-
-/// A whole-number environment override, or `None` (with a warning) when it is not one.
-fn env_u64(lookup: &impl Fn(&str) -> Option<String>, name: &str) -> Option<u64> {
-    let raw = lookup(name)?;
-    match raw.trim().parse() {
-        Ok(parsed) => Some(parsed),
-        Err(_) => {
-            log::warn!(
-                target: "tddy_daemon::config",
-                "{name}: expected a whole number, ignoring {raw:?}"
-            );
-            None
-        }
-    }
-}
-
-fn parse_chat_ids_csv(s: &str) -> Result<Vec<i64>, ()> {
-    let mut out = Vec::new();
-    for part in s.split(',') {
-        let p = part.trim();
-        if p.is_empty() {
-            continue;
-        }
-        let n: i64 = p.parse().map_err(|_| ())?;
-        out.push(n);
-    }
-    Ok(out)
-}
-
-fn parse_env_bool(s: &str) -> Option<bool> {
-    match s.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    }
-}
-
-fn merge_telegram_env(
-    config: &mut DaemonConfig,
-    bot_token: Option<&str>,
-    chat_ids_csv: Option<&str>,
-    enabled: Option<&str>,
-) {
-    if bot_token.is_none() && chat_ids_csv.is_none() && enabled.is_none() {
-        return;
-    }
-
-    let mut created_from_env_token = false;
-    if config.telegram.is_none() {
-        if bot_token.is_none() {
-            if chat_ids_csv.is_some() || enabled.is_some() {
-                log::warn!(
-                    target: "tddy_daemon::config",
-                    "telegram: set TDDY_TELEGRAM_BOT_TOKEN or add a `telegram:` block to the config file before using TDDY_TELEGRAM_CHAT_IDS / TDDY_TELEGRAM_ENABLED"
-                );
-            }
-            return;
-        }
-        created_from_env_token = true;
-        config.telegram = Some(TelegramConfig {
-            enabled: false,
-            bot_token: String::new(),
-            chat_ids: Vec::new(),
-        });
-    }
-
-    let tg = config.telegram.as_mut().expect("telegram just ensured");
-
-    if let Some(t) = bot_token {
-        tg.bot_token = t.trim().to_string();
-    }
-
-    if let Some(csv) = chat_ids_csv {
-        match parse_chat_ids_csv(csv) {
-            Ok(ids) if !ids.is_empty() => tg.chat_ids = ids,
-            Ok(_) => {}
-            Err(()) => log::warn!(
-                target: "tddy_daemon::config",
-                "TDDY_TELEGRAM_CHAT_IDS: expected comma-separated integers, ignoring"
-            ),
-        }
-    }
-
-    if let Some(e) = enabled {
-        match parse_env_bool(e) {
-            Some(b) => tg.enabled = b,
-            None => log::warn!(
-                target: "tddy_daemon::config",
-                "TDDY_TELEGRAM_ENABLED: expected true/false/1/0/yes/no/on/off, ignoring"
-            ),
-        }
-    } else if bot_token.is_some() && created_from_env_token {
-        tg.enabled = true;
-    }
-}
+pub use crate::config::access::{AllowedAgent, GitHubConfig, UserMapping};
 
 /// The single source of truth for "what tool should a session run when nothing more specific was
 /// requested" — used by `StartSession`/`ResumeSession`/Telegram workflow spawn alike, so they
@@ -1576,6 +440,7 @@ fn merge_telegram_env(
 #[cfg(test)]
 mod default_tool_path_tests {
     use super::*;
+    use crate::config::access::AllowedTool;
 
     #[test]
     fn default_tool_path_uses_the_first_configured_allowed_tool() {
@@ -1614,6 +479,7 @@ mod default_tool_path_tests {
 #[cfg(test)]
 mod telegram_env_tests {
     use super::*;
+    use crate::config::env_overrides::merge_telegram_env;
 
     #[test]
     fn token_from_env_creates_telegram_and_enables_by_default() {
@@ -1728,6 +594,7 @@ mod spawn_timeout_tests {
 mod startup_and_warmup_timing_tests {
     use super::*;
 
+    use crate::config::env_overrides::merge_timing_env;
     use tddy_discovery::warmup::WarmupOptions;
 
     fn a_daemon_configured_by(yaml: &str) -> DaemonConfig {
@@ -2161,7 +1028,7 @@ claude_cli:
             c.claude_cli.as_ref().unwrap().claude_home_dir.as_deref(),
             Some(Path::new("/custom/claude-home"))
         );
-        if std::env::var_os(CLAUDE_HOME_ENV).is_none() {
+        if std::env::var_os(agent_cli::CLAUDE_HOME_ENV).is_none() {
             assert_eq!(
                 resolve_claude_home_dir(&c),
                 PathBuf::from("/custom/claude-home"),
@@ -2173,11 +1040,11 @@ claude_cli:
     /// With no `claude_cli` section the resolver falls back to `$HOME/.tddy/sandbox-claude-home`.
     #[test]
     fn claude_home_dir_defaults_under_tddy_when_unconfigured() {
-        if std::env::var_os(CLAUDE_HOME_ENV).is_some() {
+        if std::env::var_os(agent_cli::CLAUDE_HOME_ENV).is_some() {
             return; // env override in effect; default path not exercised
         }
         let c = DaemonConfig::default();
-        let resolved = resolve_claude_home_dir(&c);
+        let resolved = agent_cli::resolve_claude_home_dir(&c);
         assert!(
             resolved.ends_with(".tddy/sandbox-claude-home"),
             "default home must be under ~/.tddy: {}",
@@ -2299,7 +1166,7 @@ mod cursor_cli_config_tests {
         }
 
         // When — resolving the real host agent for that home, with no extra PATH dirs
-        let resolved = find_real_agent_in(Some(home.path()), &[]);
+        let resolved = agent_cli::find_real_agent_in(Some(home.path()), &[]);
 
         // Then — it is located there, as the absolute path under ~/.local/bin
         assert_eq!(resolved.as_deref(), Some(agent.as_path()));
@@ -2321,7 +1188,8 @@ mod cursor_cli_config_tests {
         }
 
         // When — resolving with that dir on the search path
-        let resolved = find_real_agent_in(Some(home.path()), &[path_dir.path().to_path_buf()]);
+        let resolved =
+            agent_cli::find_real_agent_in(Some(home.path()), &[path_dir.path().to_path_buf()]);
 
         // Then — the PATH-dir binary is returned as an absolute path
         assert_eq!(resolved.as_deref(), Some(agent.as_path()));
