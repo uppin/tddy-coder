@@ -383,8 +383,12 @@ fn the_crates_a_following_test_module_names_join_dev_dependencies() {
         .unwrap_or((manifest.as_str(), ""));
     assert_eq!(
         (
-            dev_dependencies.lines().any(|line| line == "tempfile = \"3\""),
-            dev_dependencies.lines().any(|line| line.starts_with("other ")),
+            dev_dependencies
+                .lines()
+                .any(|line| line == "tempfile = \"3\""),
+            dev_dependencies
+                .lines()
+                .any(|line| line.starts_with("other ")),
             dependencies.contains("tempfile"),
         ),
         (true, true, false),
