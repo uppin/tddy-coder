@@ -295,11 +295,11 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             command: Command::Warm,
             ..Options::default()
         },
-        RestructureCommand::Lines(lines) => {
-            // TODO(reshape-oversized-files): implement
-            let _ = lines;
-            todo!("restructure lines: carry the named files into Options::files")
-        }
+        RestructureCommand::Lines(lines) => Options {
+            command: Command::Lines,
+            files: lines.files,
+            ..Options::default()
+        },
     }
 }
 

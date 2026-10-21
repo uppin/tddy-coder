@@ -3,6 +3,7 @@
 //! How many production lines each file a plan names has in the tree as it stands, and which of them are over the
 //! budget — a record of where the tree stands rather than a verdict on the plan.
 
+use crate::crate_move::source_scan::test_only_spans;
 use crate::{Anchor, Plan, RefactorOp, RestructureError, Result};
 use std::path::Path;
 
@@ -33,28 +34,43 @@ pub(super) fn files_named_by(plan: &Plan) -> Vec<String> {
     named
 }
 
-/// The lines of Rust source before its test module — the length the repository's file budget and
-/// every code-issue record count.
+/// The lines of Rust source that are production code: every line but those wholly inside a
+/// test-only item.
 ///
-/// The test module opens at the first `#[cfg(test)]` whose next non-blank line starts a `mod`, so a
-/// `#[cfg(test)] use ...;` above it does not end the count early. A text with no such module is
-/// production throughout.
+/// A line is test-only when every byte of it that is not whitespace lies inside one of the spans
+/// [`test_only_spans`] names. A blank line is test-only only when it lies inside one, so the blank
+/// lines between production items count.
 pub(crate) fn production_lines(text: &str) -> usize {
-    let lines: Vec<&str> = text.lines().collect();
-    let opens_a_test_module = |index: usize| {
-        lines[index].trim_start().starts_with("#[cfg(test)]")
-            && lines[index + 1..]
-                .iter()
-                .map(|line| line.trim_start())
-                .find(|line| !line.is_empty())
-                .is_some_and(|line| line.starts_with("mod ") || line.starts_with("pub mod "))
-    };
-    (0..lines.len())
-        .find(|&index| opens_a_test_module(index))
-        .unwrap_or(lines.len())
+    let mut in_test = vec![false; text.len()];
+    for span in test_only_spans(text) {
+        in_test[span].fill(true);
+    }
+
+    let bytes = text.as_bytes();
+    let mut production = 0;
+    let mut start = 0;
+    for line in text.split_inclusive('\n') {
+        let end = start + line.len();
+        if !is_test_only(&bytes[start..end], &in_test[start..end]) {
+            production += 1;
+        }
+        start = end;
+    }
+    production
 }
 
-/// Production lines of a file: Rust is cut at its test module, any other language has none.
+/// Whether a line is test-only, given its bytes and which of them lie inside a test-only span.
+fn is_test_only(line: &[u8], in_test: &[bool]) -> bool {
+    if line.iter().all(|byte| byte.is_ascii_whitespace()) {
+        return in_test[0];
+    }
+    line.iter()
+        .zip(in_test)
+        .all(|(byte, covered)| *covered || byte.is_ascii_whitespace())
+}
+
+/// Production lines of a file: Rust counts every line but those of its test-only items, and any
+/// other language counts every line.
 ///
 /// The one count the repository's file budget is measured by — `check --budget`, `restructure
 /// lines`, `/pr-wrap`'s file-length gate and every code-issue record.

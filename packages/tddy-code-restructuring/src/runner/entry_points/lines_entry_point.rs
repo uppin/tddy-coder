@@ -8,16 +8,32 @@
 use std::path::Path;
 
 use super::super::{FileLines, Options};
-use crate::Result;
+use crate::{production_lines_of_file, RestructureError, Result};
 
 /// Measure every file `options.files` names, relative to `root`, in the order they were named.
 ///
 /// A file that cannot be read is refused by its path, and nothing is reported for the others: a
 /// gate that compared a partial answer would pass vacuously on the file it could not see.
 pub fn lines(root: &Path, options: &Options) -> Result<Vec<FileLines>> {
-    // TODO(reshape-oversized-files): implement
-    let _ = (root, options);
-    todo!("restructure lines: measure each named file with production_lines_of_file")
+    options
+        .files
+        .iter()
+        .map(|file| {
+            let path = file.to_str().ok_or_else(|| {
+                RestructureError::MalformedPlan(format!(
+                    "`{}` is not valid UTF-8, so it cannot be measured",
+                    file.display()
+                ))
+            })?;
+            let text = std::fs::read_to_string(root.join(file)).map_err(|error| {
+                RestructureError::MalformedPlan(format!("`{path}` cannot be measured: {error}"))
+            })?;
+            Ok(FileLines {
+                path: path.to_string(),
+                lines: production_lines_of_file(path, &text),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

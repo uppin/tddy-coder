@@ -12,9 +12,8 @@ use tddy_code_restructuring::production_lines_of_file;
 const BUDGET: usize = 500;
 
 /// Files allowed over the budget for now, as paths relative to the package.
-// TODO(reshape-oversized-files): `rust.rs` is exempt because its split node, rust-backend-split
-// (#614), was closed in the 2026-10-19 replan and no open node splits it now — the developer
-// decides who empties this list.
+// `rust.rs` is exempt until its backlog entry is worked: docs/dev/todo/2026-09-16-backends-rust-rs-is-4500-production-lines.md
+// owns this exemption (rust-backend-split #614 was closed in the 2026-10-19 replan).
 const NOT_YET_SPLIT: [&str; 1] = ["src/backends/rust.rs"];
 
 fn package_root() -> PathBuf {

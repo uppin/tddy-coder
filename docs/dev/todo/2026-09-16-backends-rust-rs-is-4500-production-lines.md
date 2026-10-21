@@ -3,6 +3,12 @@
 **Category:** Deferred refactor
 **Source:** `2026-09-15-warm-code-intelligence-daemon` changeset, wave-2 structural pass
 
+**Update 2026-10-21 — this entry owns the file-budget exemption.** `rust-backend-split` (#614) was closed in
+the 2026-10-19 replan, so no open node splits this file. `tests/engine_file_budget_shape.rs` exempts
+`src/backends/rust.rs` from the 500-line gate (`NOT_YET_SPLIT`) and points here: the exemption is removed
+when this entry is worked. Its size is re-measured by `restructure lines` at the `#reshape` 17/24 base; the
+figures below predate that count.
+
 **Update 2026-10-03 — partly closed, narrowed.** `#live-plan` 7/15 ([#539](https://github.com/uppin/tddy-coder/pull/539))
 moved the last row of the table below — the free helpers, in nine modules (`line_diff`,
 `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`,

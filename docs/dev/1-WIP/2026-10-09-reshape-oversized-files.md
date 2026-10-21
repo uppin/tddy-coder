@@ -3,6 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Refactor (behaviour-preserving splits) + Bug fix (the production-line counter)
+**Complexity**: 4/5 — two packages, file splits, new restructure lines subcommand
 **Stack**: `#reshape` 17/24, branch `feature/reshape/oversized-files`, green wave 2. PR title:
 `refactor(code-restructuring): engine files fit 500 lines, counted past test-only items (#reshape 17/24)`.
 Base in the linear stack: `feature/reshape/move-impl-members` (K=12). **Real edges**: `multi-seam-extract → oversized-files`
@@ -367,6 +368,26 @@ All in `packages/tddy-code-restructuring/`. Red on the base for the reason given
 
 ## Validation Results
 
+**2026-10-21 — green stage, counter and `lines` (rebased onto K16's current tip).** The branch was rebased with
+`git rebase --onto 822c39570baa3f9147f18f56a7a5b635952f0c50 7ea43efdd`, not onto `origin/master`: PR #609 (K16) is still open against master, and
+K16's remote history was rewritten, so `7ea43efdd` is no longer in its ancestry. `--onto master` would have dropped K16's
+changes from this PR's diff.
+
+- **Baseline** (pre-change tree, `./test -p tddy-code-restructuring -p tddy-tools`, `--no-fail-fast`, `--test-threads=1`):
+  2101 passed, 18 failed, 1 ignored; exit 101, three targets red. The 18, by name:
+  `crate_move::source_scan::test_only::tests::spans_an_out_of_line_test_module_declaration_from_its_attribute_to_its_semicolon`;
+  `restructure_args::tests::lines_carries_the_files_it_measures`;
+  `runner::budget::tests::{a_brace_in_a_string_or_comment_does_not_end_a_test_item, keeps_counting_past_an_out_of_line_test_module_declaration, leaves_out_a_test_only_member_of_a_production_impl, leaves_out_an_item_marked_cfg_all_test, leaves_out_every_test_only_item_wherever_it_sits, leaves_out_the_doc_comment_and_attributes_above_a_test_only_item, measures_a_file_whose_extracted_test_module_is_declared_at_the_top}`;
+  `runner::entry_points::lines_entry_point::tests::{prints_the_production_lines_of_each_file_in_argument_order, refuses_a_file_it_cannot_read_naming_it}`;
+  `tests/engine_file_budget_shape.rs::every_production_file_of_the_engine_is_within_500_lines`;
+  `tests/engine_module_edges_shape.rs::{item_move_siblings_do_not_import_from_assemble, nothing_but_crate_move_names_test_binary, the_lexical_masker_depends_on_no_engine_module, the_record_of_a_move_does_not_reach_the_modules_that_read_it, the_rust_backend_does_not_reach_crate_move_for_the_masker, tidy_parts_do_not_import_the_rounds}`.
+- **After the counter and `lines`** (scoped): `cargo test -p tddy-code-restructuring --lib`: 1139 passed, **1 failed**
+  (`does_not_end_early_at_a_test_only_import_above_the_module`, asserts 4; acceptance 2 requires 2). Shape tests: budget
+  red on the over-500 list below; edges 6 red. `tddy-tools` routing test `a_line_count_is_answered_in_process_whatever_the_environment_names`: ok.
+- **Measurement at this base** (`production_lines_of_file`, the items rule): the only files over 500 in the gate are
+  `crate_move/test_binary.rs` 967 · `crate_move/test_modules.rs` 664 (**not in State B; needs a plan**) ·
+  `verify/retarget.rs` 631 · `runner/tidy.rs` 542 · `backends/rust/item_move/assemble.rs` 521. `backends/rust.rs` is exempt.
+
 **Commit 2 re-landed 2026-10-20 at base `feature/reshape/anchors-outline` (9f60da0f4, #609).** The 2026-10-09 contract
 (`backup/reshape-2026-10-11/oversized-files`, 60af9b689) was cherry-picked; the one conflict was in
 `crate_move/source_scan.rs`, where K13 (#611) had added `attached_trivia_starts_at` and `mod test_declarations` at the
@@ -466,10 +487,13 @@ The existing 13 `runner::budget` tests still pass.
 - [x] Initial discovery written (Exploration 2)
 - [x] Prerequisites and claimed entries listed
 - [x] Draft PR contract pushed (failing tests 1–4, 6–10, 12–13; 5 is a green pin) — re-landed 2026-10-20 on #609
-- [ ] USER REVIEW — acceptance tests
+- [x] USER REVIEW — acceptance tests (approved 2026-10-09; re-land approved 2026-10-20)
 - [x] Baseline recorded (node 1's: 1334 passed, 0 failed; scoped check/clippy/fmt clean at this base)
-- [ ] Counter and `lines` green
+- [ ] Counter and `lines` green — **partly** (2026-10-21): every acceptance test 1–10 passes except acceptance 2's
+  existing pin `does_not_end_early_at_a_test_only_import_above_the_module` (budget.rs), which expects `#[cfg(test)] use`
+  to count as production. Acceptance 2 says it is test-only. Left red for the developer; see Validation Results 2026-10-21
 - [ ] Plans A, B, C (and any F1 additions) applied, one commit each
+- [ ] Plan D: `verify/retarget.rs` (631) and `crate_move/test_modules.rs` (664, not in State B) — not started
 - [ ] Final gate; shape tests green
 - [ ] Wrap: feature doc, package docs, code-issue record and todos closed
 
