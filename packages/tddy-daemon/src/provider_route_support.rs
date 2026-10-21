@@ -2,27 +2,26 @@
 //! for the accounts service, which does not depend on the harness crates.
 
 use tddy_accounts::RouteSupport;
-use tddy_core::provider_route::{route_supported, Harness, RouteRefusal};
+use tddy_core::provider_route::{harness_routable, route_supported, Harness};
 
 fn harness_named(id: &str) -> Result<Harness, String> {
     Harness::from_agent_or_session_type(id).ok_or_else(|| format!("unknown harness {id:?}"))
 }
 
-/// [`RouteSupport`] over [`tddy_core::provider_route::route_supported`].
+/// [`RouteSupport`] over [`tddy_core::provider_route`]: a harness this build cannot route yet is
+/// reported unroutable, so no account is offered for a start that would be refused.
 pub struct HarnessRouteSupport;
 
 impl RouteSupport for HarnessRouteSupport {
     fn harness_routable(&self, harness: &str) -> Result<(), String> {
-        // A harness is routable when any account could run it; Cursor is the one that never is.
-        // `route_supported` answers HarnessCannotBeRouted before it looks at the account.
-        match route_supported(harness_named(harness)?, "", &[]) {
-            Err(refusal @ RouteRefusal::HarnessCannotBeRouted { .. }) => Err(refusal.to_string()),
-            _ => Ok(()),
-        }
+        harness_routable(harness_named(harness)?).map_err(|refusal| refusal.to_string())
     }
 
     fn supports(&self, harness: &str, preset: &str, protocols: &[&str]) -> Result<(), String> {
-        route_supported(harness_named(harness)?, preset, protocols).map_err(|r| r.to_string())
+        let harness = harness_named(harness)?;
+        harness_routable(harness)
+            .and_then(|()| route_supported(harness, preset, protocols))
+            .map_err(|refusal| refusal.to_string())
     }
 }
 
@@ -49,6 +48,19 @@ mod tests {
             .supports("claude-cli", "baseten", &["openai-chat"])
             .expect_err("baseten serves no Anthropic Messages");
         assert!(reason.contains("Anthropic Messages"));
+    }
+
+    #[test]
+    fn a_harness_whose_route_is_not_built_yet_is_not_offered_any_account() {
+        for harness in ["codex", "codex-acp", "opencode", "opencode-cli", "muse-cli"] {
+            let reason = HarnessRouteSupport
+                .harness_routable(harness)
+                .expect_err("not routable in this build");
+            assert!(reason.contains("in this build yet"), "{harness}: {reason}");
+            assert!(HarnessRouteSupport
+                .supports(harness, "meta", &["openai-responses", "openai-chat"])
+                .is_err());
+        }
     }
 
     #[test]

@@ -254,12 +254,15 @@ fn protocol_display_name(accepted: &[&'static str]) -> &'static str {
     }
 }
 
-/// What `harness` needs to run on `target`.
-pub fn resolve_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
+/// Builds the route of one harness family on one account.
+type RouteBody = fn(Harness, &RouteTarget) -> Result<HarnessRoute, RouteRefusal>;
+
+/// The route body this build has for `harness` — the one place a harness becomes routable. Each
+/// later harness replaces its `NotYetRoutable` arm here, which flips both [`harness_routable`] and
+/// [`resolve_route`] at once.
+fn route_body(harness: Harness) -> Result<RouteBody, RouteRefusal> {
     match harness {
-        Harness::Claude | Harness::ClaudeAcp | Harness::ClaudeCli => {
-            claude_code_route(harness, target)
-        }
+        Harness::Claude | Harness::ClaudeAcp | Harness::ClaudeCli => Ok(claude_code_route),
         Harness::Cursor | Harness::CursorCli => {
             Err(RouteRefusal::HarnessCannotBeRouted { harness })
         }
@@ -269,6 +272,18 @@ pub fn resolve_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRo
         | Harness::OpenCodeCli
         | Harness::MuseCli => Err(RouteRefusal::NotYetRoutable(harness)),
     }
+}
+
+/// Whether this build can run `harness` on any provider account at all: `Err` for a harness that
+/// can never be redirected (Cursor) and for one whose route is not built yet. [`route_supported`]
+/// answers the per-account matrix; this answers whether the harness can be routed today.
+pub fn harness_routable(harness: Harness) -> Result<(), RouteRefusal> {
+    route_body(harness).map(|_| ())
+}
+
+/// What `harness` needs to run on `target`.
+pub fn resolve_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
+    route_body(harness)?(harness, target)
 }
 
 /// Claude Code reads its endpoint, key and every model choice from the environment: the base URL is

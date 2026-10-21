@@ -8,8 +8,8 @@
 //! Feature: docs/ft/daemon/provider-accounts.md (Running a harness on an account)
 
 use tddy_agent_backend::provider_route::{
-    choose_route, resolve_route, route_supported, Harness, RouteChoice, RouteEndpoints,
-    RouteRefusal, RouteSecret, RouteSources, RouteTarget,
+    choose_route, harness_routable, resolve_route, route_supported, Harness, RouteChoice,
+    RouteEndpoints, RouteRefusal, RouteSecret, RouteSources, RouteTarget,
 };
 
 const META_KEY: &str = "a-meta-key";
@@ -224,4 +224,34 @@ fn a_route_can_be_logged_without_its_key() {
 
     // Then
     assert!(!format!("{route:?}").contains(META_KEY));
+}
+
+#[test]
+fn only_the_harnesses_with_a_built_route_answer_routable() {
+    // Then Claude Code is routable today, Cursor never is, and the rest wait for their route
+    for harness in [Harness::Claude, Harness::ClaudeAcp, Harness::ClaudeCli] {
+        assert_eq!(harness_routable(harness), Ok(()));
+    }
+    for harness in [Harness::Cursor, Harness::CursorCli] {
+        assert_eq!(
+            harness_routable(harness),
+            Err(RouteRefusal::HarnessCannotBeRouted { harness })
+        );
+    }
+    for harness in [
+        Harness::Codex,
+        Harness::CodexAcp,
+        Harness::OpenCode,
+        Harness::OpenCodeCli,
+        Harness::MuseCli,
+    ] {
+        assert_eq!(
+            harness_routable(harness),
+            Err(RouteRefusal::NotYetRoutable(harness))
+        );
+        assert_eq!(
+            resolve_route(harness, &a_meta_account_running("muse-spark-1.3")),
+            Err(RouteRefusal::NotYetRoutable(harness))
+        );
+    }
 }
