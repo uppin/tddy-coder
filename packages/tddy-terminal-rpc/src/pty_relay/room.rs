@@ -1,10 +1,10 @@
 use crate::local_terminal::RawMode;
 use crate::pty_relay::build_start_session_request;
-use crate::pty_relay::connectrpc_post;
+use crate::pty_relay::daemon_http::connectrpc_post;
+use crate::pty_relay::daemon_http::exchange_stub_session_token;
+use crate::pty_relay::daemon_http::join_terminal_room;
+use crate::pty_relay::daemon_http::open_session_room_over_http;
 use crate::pty_relay::encode_resize;
-use crate::pty_relay::exchange_stub_session_token;
-use crate::pty_relay::join_terminal_room;
-use crate::pty_relay::open_session_room_over_http;
 use crate::pty_relay::run_grpc_terminal;
 use crate::pty_relay::PtyRelayConfig;
 use anyhow::Result;
