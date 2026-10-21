@@ -71,7 +71,7 @@ enum PublishTarget {
     /// whatever connection is current, so a publisher outlives any single one of them without
     /// opening a second connection — which for a session room would put a second identity in a
     /// room whose whole claim is that only the facilitating daemon is in it.
-    Connection(crate::participant::SharedPublisher),
+    Connection(crate::participant::publisher::SharedPublisher),
 }
 
 /// The publishing half of a topic, on a connection someone else is serving.
@@ -94,7 +94,7 @@ impl BroadcastPublisher {
 
     /// Publish through a served connection, following it across reconnects.
     pub(crate) fn for_connection(
-        publisher: crate::participant::SharedPublisher,
+        publisher: crate::participant::publisher::SharedPublisher,
         topic: impl Into<String>,
     ) -> Self {
         Self {
