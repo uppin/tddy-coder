@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 86 | 5 | 6 | 3 | first detection |
+| 2026-10-22 | 86 | — | — | — | touched by `#provider-route` 3/9 (#664) and **unchanged by it**: the file gained `BranchIntentPolicy::opencode_cli()` beside the other policies; `resolve_branch_workflow` is 86 lines (fn line to closing brace) on the base and on HEAD |
 
 ## What the tool found
 

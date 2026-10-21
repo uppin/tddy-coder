@@ -13,6 +13,7 @@
 |---|---|---|
 | 2026-10-04 | 785 | first detection — already over before #571 (783 at base `c3567fde`); +2 in #571. Deferred because dependent #572 touches this file (the stack rule: no split lands mid-stack) |
 | 2026-10-18 | 795 | unchanged — #652 touched one line (the Create Remote Branch default) |
+| 2026-10-22 | 822 | `#provider-route` 3/9 (#664): 828 → 822 against `origin/feature/provider-route/claude-route`. The OpenCode model field adds one mount; the per-session-type pseudo-agent constants and their nested ternary became `sessionType === "tool" ? selectedAgentId : sessionType`. Still over, not grown |
 
 ## What would close it
 

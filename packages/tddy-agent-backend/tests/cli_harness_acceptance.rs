@@ -1,7 +1,7 @@
 //! What the CLI harness registry says about each terminal-pane harness, and the argument lists it
 //! builds for OpenCode.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-opencode-cli.md
+//! Feature: docs/ft/daemon/opencode-cli-session.md
 
 use tddy_agent_backend::cli_harness::{cli_harness, cli_harnesses, models_from_listing, CliLaunch};
 use tddy_agent_backend::provider_route::Harness;

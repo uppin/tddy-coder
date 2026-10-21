@@ -74,15 +74,12 @@ pub fn context_globs_for_session_type(session_type: &str) -> &'static [&'static 
 /// themselves would let a caller name a path set, which is exactly what the compiled-in table exists
 /// to prevent.
 pub fn context_agent_for_session_type(session_type: &str) -> &'static str {
-    match session_type.trim() {
-        "claude-cli" => "claude",
-        "cursor-cli" => "cursor",
-        "opencode-cli" => "opencode",
-        // Every other session type either runs no agent at all (`workspace`) or is not one this
-        // mapping knows, and both answer with the empty name so `context_globs_for_agent` yields
-        // its shared base — narrower than any backend's row, never the union of them.
-        _ => "",
-    }
+    // A CLI harness session is served its descriptor's agent. Every other session type either runs
+    // no agent at all (`workspace`) or is not one this mapping knows, and both answer with the empty
+    // name so `context_globs_for_agent` yields its shared base — narrower than any backend's row,
+    // never the union of them.
+    tddy_core::cli_harness::cli_harness(session_type.trim())
+        .map_or("", |harness| harness.context_agent)
 }
 
 /// The agent whose allow-list a **session** is served, read from what the daemon persisted about it

@@ -19,7 +19,9 @@ pub enum FacilitatedCheckout {
 /// whether it runs an agent here and therefore has a session room of its own.
 ///
 /// The PRD's Roles table as a predicate (`docs/ft/daemon/session-room.md` § Roles): the room
-/// belongs to the daemon running the session's agent. `claude-cli`, `cursor-cli` and `opencode-cli` run one here.
+/// belongs to the daemon running the session's agent. Every CLI harness session type
+/// (`claude-cli`, `cursor-cli`, `opencode-cli` — [`tddy_core::cli_harness::cli_harnesses`]) runs one
+/// here.
 /// A `workspace` session runs none — it is the codebase half of a split session or a standalone
 /// checkout, and whatever agent it has is on another daemon. A `tool` (tddy-coder) session's
 /// terminal is a room `tddy-coder` joins for itself, which this daemon neither creates nor serves.
@@ -28,10 +30,7 @@ pub enum FacilitatedCheckout {
 /// session also bridges its PTY into the lobby, and `ConnectSession` answers about a *terminal*
 /// room none of these types has. Three different rooms; this names one of them.
 pub fn session_type_is_facilitated_here(session_type: &str) -> bool {
-    matches!(
-        session_type.trim(),
-        "claude-cli" | "cursor-cli" | "opencode-cli"
-    )
+    tddy_core::cli_harness::cli_harness(session_type.trim()).is_some()
 }
 
 /// The one rule for "a session this daemon facilitates over a checkout it holds", shared by

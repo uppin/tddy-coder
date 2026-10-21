@@ -425,16 +425,12 @@ fn openai_wire(endpoints: &RouteEndpoints) -> Option<OpenAiWire<'_>> {
 /// account serves Responses, `@ai-sdk/openai-compatible` over Chat Completions otherwise. The key is
 /// referenced as `{env:…}` and never written into the file.
 ///
-/// # Panics
-///
-/// When the account serves neither OpenAI protocol. [`resolve_route`] refuses such an account before
-/// it builds a configuration, so this is a programming error, not an operator's input.
+/// `None` when the account serves neither OpenAI protocol — there is no configuration OpenCode
+/// could run on it; [`resolve_route`] refuses such an account as
+/// [`RouteRefusal::ProtocolNotServed`].
 #[must_use]
-pub fn opencode_config_for(target: &RouteTarget) -> RouteFile {
-    let wire = openai_wire(&target.endpoints).expect(
-        "opencode_config_for needs an account that serves OpenAI Responses or Chat Completions",
-    );
-    opencode_config(&target.model, wire)
+pub fn opencode_config_for(target: &RouteTarget) -> Option<RouteFile> {
+    openai_wire(&target.endpoints).map(|wire| opencode_config(&target.model, wire))
 }
 
 fn opencode_config(model: &str, wire: OpenAiWire<'_>) -> RouteFile {

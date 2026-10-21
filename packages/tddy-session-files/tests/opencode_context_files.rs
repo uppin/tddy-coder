@@ -1,7 +1,7 @@
 //! An OpenCode session is served OpenCode's context files: `AGENTS.md`, `opencode.json` and the
 //! `.opencode/` directory, on top of the shared base.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-opencode-cli.md
+//! Feature: docs/ft/daemon/opencode-cli-session.md
 
 use tddy_core::backend::context_globs_for_agent;
 use tddy_session_files::context_files::context_agent_for_session_type;
@@ -15,10 +15,7 @@ fn an_opencode_session_is_served_opencodes_context_files() {
     // Then
     assert_eq!(agent, "opencode");
     for expected in ["AGENTS.md", "opencode.json", ".opencode/**"] {
-        assert!(
-            globs.contains(&expected),
-            "{expected} in {globs:?}"
-        );
+        assert!(globs.contains(&expected), "{expected} in {globs:?}");
     }
 }
 

@@ -5,11 +5,6 @@ import { BUILT_IN_PROVIDER } from "./CreateSessionProviderField";
 import type { CreateSessionPaneProps } from "./createSessionPaneProps";
 import type { SessionType } from "./createSessionRequest";
 
-/** Pseudo-agent key used to fetch the claude-cli session type's model catalog. */
-const CLAUDE_CLI_AGENT = "claude-cli";
-const CURSOR_CLI_AGENT = "cursor-cli";
-const OPENCODE_CLI_AGENT = "opencode-cli";
-
 export interface UseCreateSessionModelArgs {
   catalogClient: CreateSessionPaneProps["catalogClient"];
   accountsClient: CreateSessionPaneProps["accountsClient"];
@@ -44,15 +39,8 @@ export function useCreateSessionModel({
   const [providerChoice, setProviderChoice] = useState<string | null>(null);
 
   // The model catalog is enumerated per selected backend: the chosen agent for tool sessions, and
-  // the "claude-cli", "cursor-cli" or "opencode-cli" pseudo-agent for a CLI session type.
-  const modelAgentKey =
-    sessionType === "claude-cli"
-      ? CLAUDE_CLI_AGENT
-      : sessionType === "cursor-cli"
-        ? CURSOR_CLI_AGENT
-        : sessionType === "opencode-cli"
-          ? OPENCODE_CLI_AGENT
-          : selectedAgentId;
+  // for a CLI session type the pseudo-agent named after it ("claude-cli", "cursor-cli", …).
+  const modelAgentKey = sessionType === "tool" ? selectedAgentId : sessionType;
   const vendorModels = useAgentModels(catalogClient, sessionToken, modelAgentKey, daemonInstanceId);
 
   // The provider field is offered for the CLI session types; the daemon says which accounts the

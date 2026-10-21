@@ -4,7 +4,7 @@
 //! These pin the descriptor refactor as behaviour-preserving: every pair below must stay equal for
 //! the start and resume shapes those sessions use.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-opencode-cli.md
+//! Feature: docs/ft/daemon/opencode-cli-session.md
 
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_core::cli_harness::{cli_harness, CliLaunch};

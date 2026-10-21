@@ -1,6 +1,6 @@
 //! Unit tests: a routed CLI launch writes its files owner-only and points the harness at them.
 //!
-//! Changeset: docs/dev/1-WIP/2026-10-18-provider-route-opencode-cli.md
+//! Feature: docs/ft/daemon/opencode-cli-session.md
 
 use std::os::unix::fs::PermissionsExt;
 

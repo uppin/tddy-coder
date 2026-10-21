@@ -2,7 +2,7 @@
 //! it runs its agent there, so `ConnectSession` and the room extensions treat it as they treat a
 //! `claude-cli` or `cursor-cli` session.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-opencode-cli.md
+//! Feature: docs/ft/daemon/opencode-cli-session.md
 
 use std::path::PathBuf;
 

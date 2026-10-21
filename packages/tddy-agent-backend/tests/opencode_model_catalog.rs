@@ -2,7 +2,7 @@
 //! itself lists (`opencode models`), enumerated through the same `list-models` contract the other
 //! agents use.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-opencode-cli.md
+//! Feature: docs/ft/daemon/opencode-cli-session.md
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

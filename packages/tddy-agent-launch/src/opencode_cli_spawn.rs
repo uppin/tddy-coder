@@ -19,7 +19,9 @@ use tddy_core::{write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::start_phase::Step as StartStep;
-use tddy_service::proto::session::{ResumeSessionResponse, StartSessionResponse};
+use tddy_service::proto::session::{
+    ResumeSessionRequest, ResumeSessionResponse, StartSessionResponse,
+};
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
@@ -254,10 +256,39 @@ pub(crate) async fn start_opencode_cli_session(
     }))
 }
 
+impl crate::launch_ports::LaunchSessions {
+    /// The `opencode-cli` resume: the session's commit identity and its owner's vault, then
+    /// [`resume_opencode_cli_session`].
+    pub(crate) async fn resume_opencode_cli(
+        &self,
+        os_user: &str,
+        req: &ResumeSessionRequest,
+        session_dir: &Path,
+        metadata: SessionMetadata,
+    ) -> Result<Response<ResumeSessionResponse>, Status> {
+        let identity = self.host.session_identity(
+            os_user,
+            &req.session_id,
+            &metadata.project_id,
+            &req.session_token,
+        );
+        resume_opencode_cli_session(
+            &self.claude_cli_manager,
+            &self.config,
+            &self.host.session_account_access(&req.session_token),
+            &req.session_id,
+            session_dir,
+            metadata,
+            identity.git_environment,
+        )
+        .await
+    }
+}
+
 /// Resume an OpenCode session: `opencode --continue` in its worktree, with its provider route
 /// re-resolved from the vault as it stands now. Refused when the worktree is gone — there is
 /// nothing for `--continue` to continue.
-pub(crate) async fn resume_opencode_cli_session(
+async fn resume_opencode_cli_session(
     cli_manager: &Arc<CliSessionManager>,
     config: &DaemonConfig,
     account_access: &SessionAccountAccess,

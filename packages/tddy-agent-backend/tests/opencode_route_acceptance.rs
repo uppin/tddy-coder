@@ -1,7 +1,7 @@
 //! The OpenCode route: a generated `opencode.json` that declares the account as a provider and
 //! selects the model on it, with the key read from the environment rather than written to the file.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-opencode-cli.md
+//! Feature: docs/ft/daemon/opencode-cli-session.md
 
 use serde_json::Value;
 use tddy_agent_backend::provider_route::{
@@ -35,7 +35,7 @@ fn on_baseten(model: &str) -> RouteTarget {
 }
 
 fn config_of(target: &RouteTarget) -> Value {
-    let file = opencode_config_for(target);
+    let file = opencode_config_for(target).expect("an account that serves an OpenAI protocol");
     assert_eq!(file.name, "opencode.json");
     serde_json::from_str(&file.contents).expect("valid JSON")
 }
@@ -81,7 +81,7 @@ fn opencode_on_baseten_uses_chat_completions() {
 #[test]
 fn the_generated_config_holds_no_key() {
     // When
-    let file = opencode_config_for(&on_meta("muse-spark-1.3"));
+    let file = opencode_config_for(&on_meta("muse-spark-1.3")).expect("Meta serves Responses");
 
     // Then
     assert!(!file.contents.contains("a-meta-key"));
@@ -97,7 +97,7 @@ fn an_opencode_route_carries_the_config_the_key_and_the_model_argument() {
         // Then
         assert_eq!(
             route.files,
-            vec![opencode_config_for(&on_meta("muse-wonder-1.0"))]
+            vec![opencode_config_for(&on_meta("muse-wonder-1.0")).expect("Meta serves Responses")]
         );
         let secrets: Vec<(&str, &str)> = route
             .secret_env
@@ -130,4 +130,21 @@ fn opencode_refuses_an_account_that_serves_neither_openai_protocol() {
 
     // Then
     assert!(resolve_route(Harness::OpenCodeCli, &anthropic_only).is_err());
+}
+
+#[test]
+fn no_config_is_generated_for_an_account_that_serves_neither_openai_protocol() {
+    // Given
+    let anthropic_only = RouteTarget {
+        preset: "anthropic-compatible".to_string(),
+        endpoints: RouteEndpoints {
+            anthropic_messages: Some("https://llm.example.com".to_string()),
+            ..RouteEndpoints::default()
+        },
+        api_key: RouteSecret::new("k"),
+        model: "m".to_string(),
+    };
+
+    // Then
+    assert_eq!(opencode_config_for(&anthropic_only), None);
 }

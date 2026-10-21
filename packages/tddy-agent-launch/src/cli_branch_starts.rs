@@ -210,7 +210,45 @@ impl LaunchSessions {
 }
 
 impl LaunchSessions {
-    pub(super) async fn start_opencode_cli_from_request(
+    /// The `opencode-cli` start: refused in a sandbox or over a managed codebase, otherwise the
+    /// shared CLI prelude, the seeded roster resolved before the spawn, then OpenCode in a PTY.
+    pub(super) async fn start_opencode_cli(
+        &self,
+        req: &StartSessionRequest,
+        progress: &AttachmentProgressSink,
+        os_user: &str,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        // TODO(provider-route-jail): OpenCode is not sandboxed yet (#provider-route 9/9). Refused
+        // rather than run unsandboxed.
+        if req.sandbox {
+            return Err(Status::failed_precondition(
+                "opencode-cli sessions cannot run in a sandbox yet",
+            ));
+        }
+        // OpenCode has no workflow of its own for a managed codebase to drive.
+        if req.managed_codebase {
+            return Err(Status::invalid_argument(
+                "managed_codebase is not supported for opencode-cli sessions",
+            ));
+        }
+        let start = self.cli_start_prelude(req, progress, os_user).await?;
+        let started_agents = self
+            .agent_roster
+            .seeded_roster_records(&req.specialized_agents)
+            .await?;
+        let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
+            service: self.agent_roster.clone(),
+        };
+        let sessions_base = start.sessions_base.clone();
+        let session_id = start.session_id.clone();
+        let started = self
+            .start_opencode_cli_from_request(req, os_user, start, started_agents, clones, progress)
+            .await?;
+        self.announce_worktree_ready(&sessions_base, &session_id);
+        Ok(started)
+    }
+
+    async fn start_opencode_cli_from_request(
         &self,
         req: &StartSessionRequest,
         os_user: &str,

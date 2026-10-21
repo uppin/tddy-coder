@@ -1,7 +1,7 @@
 //! Integration tests: the `opencode-cli` session type through the daemon's session host — start,
 //! resume, listing and the terminal relay — against a stub `opencode` binary that records its argv.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-opencode-cli.md
+//! Feature: docs/ft/daemon/opencode-cli-session.md
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -279,6 +279,29 @@ async fn a_sandboxed_opencode_session_is_refused_until_it_can_be_jailed() {
     // Then it is refused, not run unsandboxed
     assert_eq!(refusal.code, Code::FailedPrecondition);
     assert!(refusal.message.contains("sandbox"), "{}", refusal.message);
+}
+
+#[tokio::test]
+async fn an_opencode_session_over_a_managed_codebase_is_refused() {
+    // Given — OpenCode has no workflow of its own for a managed codebase to drive
+    let daemon = an_opencode_daemon();
+    let mut req = an_opencode_start_request();
+    req.managed_codebase = true;
+
+    // When
+    let refusal = daemon
+        .start(req)
+        .await
+        .expect_err("no managed OpenCode codebase");
+
+    // Then it is refused, and nothing is spawned
+    assert_eq!(refusal.code, Code::InvalidArgument);
+    assert!(
+        refusal.message.contains("managed_codebase"),
+        "{}",
+        refusal.message
+    );
+    assert!(!daemon.argv_log.exists(), "opencode was spawned");
 }
 
 // ---------------------------------------------------------------------------

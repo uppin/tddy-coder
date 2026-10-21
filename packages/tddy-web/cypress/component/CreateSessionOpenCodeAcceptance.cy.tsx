@@ -5,7 +5,7 @@
  * daemon's (`ListAgentModels` for the `opencode-cli` pseudo-agent — `opencode models`, one
  * `provider/model` per line), and Create sends `session_type = "opencode-cli"`.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-opencode-cli.md
+ * Feature: docs/ft/daemon/opencode-cli-session.md
  */
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
