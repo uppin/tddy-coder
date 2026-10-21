@@ -48,6 +48,38 @@ impl HostServiceImpl {
             return Ok(Response::new(answered));
         }
 
+        let (github_user, os_user) = self.os_user_for_session(&req)?;
+
+        // Stamped with the GitHub user that raised it, which is what makes it *this* operator's
+        // question: nobody else is shown it, and nobody else can spend its one answer.
+        let answer = self.await_passphrase_answer(&req, github_user).await;
+        let Some(encrypted_answer) = answer else {
+            return Ok(Response::new(crate::host_messages::add_key_failed(
+                AddHostKeyOutcome::PromptExpired,
+                "nobody answered the passphrase prompt before it expired".to_string(),
+            )));
+        };
+
+        // Everything that follows blocks — an RSA decrypt, a bcrypt-pbkdf unlock and a socket
+        // conversation with the agent — so it runs on the blocking pool rather than parking a
+        // runtime worker. It also puts the whole life of the plaintext inside one closure, which
+        // ends when the closure returns.
+        let added = self
+            .add_key_on_blocking_pool(&req, os_user, encrypted_answer)
+            .await?;
+
+        // The outcome only — never the reason, and never anything derived from the answer.
+        log::debug!(
+            "AddHostKey: {} -> {}",
+            req.subject,
+            AddHostKeyOutcome::try_from(added.outcome)
+                .unwrap_or(AddHostKeyOutcome::Unspecified)
+                .as_str_name()
+        );
+        Ok(Response::new(added))
+    }
+
+    fn os_user_for_session(&self, req: &AddHostKeyRequest) -> Result<(String, String), Status> {
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         // The agent the key lands in is the one belonging to this host's OS user, resolved exactly
@@ -58,9 +90,14 @@ impl HostServiceImpl {
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
             .to_string();
+        Ok((github_user, os_user))
+    }
 
-        // Stamped with the GitHub user that raised it, which is what makes it *this* operator's
-        // question: nobody else is shown it, and nobody else can spend its one answer.
+    async fn await_passphrase_answer(
+        &self,
+        req: &AddHostKeyRequest,
+        github_user: String,
+    ) -> Option<Vec<u8>> {
         let prompt = self.host_prompts.issue(
             &github_user,
             PromptKind::SshKeyPassphrase,
@@ -76,17 +113,15 @@ impl HostServiceImpl {
             // which for the operator is indistinguishable from one that ran out of time.
             None => None,
         };
-        let Some(encrypted_answer) = answer else {
-            return Ok(Response::new(crate::host_messages::add_key_failed(
-                AddHostKeyOutcome::PromptExpired,
-                "nobody answered the passphrase prompt before it expired".to_string(),
-            )));
-        };
+        answer
+    }
 
-        // Everything that follows blocks — an RSA decrypt, a bcrypt-pbkdf unlock and a socket
-        // conversation with the agent — so it runs on the blocking pool rather than parking a
-        // runtime worker. It also puts the whole life of the plaintext inside one closure, which
-        // ends when the closure returns.
+    async fn add_key_on_blocking_pool(
+        &self,
+        req: &AddHostKeyRequest,
+        os_user: String,
+        encrypted_answer: Vec<u8>,
+    ) -> Result<AddHostKeyResponse, Status> {
         let keypair = Arc::clone(&self.host_keypair);
         let adder = Arc::clone(&self.ssh_agent_key_adder);
         let files = Arc::clone(&self.host_user_files);
@@ -105,16 +140,7 @@ impl HostServiceImpl {
         // The panic's own message is deliberately not repeated: a panic raised inside the unlock is
         // the one string in this flow that could carry key material with it.
         .map_err(|_| Status::internal("adding this key to the agent did not complete"))?;
-
-        // The outcome only — never the reason, and never anything derived from the answer.
-        log::debug!(
-            "AddHostKey: {} -> {}",
-            req.subject,
-            AddHostKeyOutcome::try_from(added.outcome)
-                .unwrap_or(AddHostKeyOutcome::Unspecified)
-                .as_str_name()
-        );
-        Ok(Response::new(added))
+        Ok(added)
     }
 
     /// Body of [`HostService::list_host_key_candidates`]; the trait method delegates here.
