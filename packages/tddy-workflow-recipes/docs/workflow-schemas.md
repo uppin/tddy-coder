@@ -30,7 +30,7 @@ Exposes **`proto_root()`**, **`expected_proto_basenames()`**, and **`generated_m
 
 1. Edit **`goals.json`** together with the matching **`.schema.json`** (under `generated/{recipe}/`) and **`.proto`** files.
 2. Run **`cargo build -p tddy-workflow-recipes`** (or any build that compiles **`tddy-tools`**) to re-validate.
-3. Run **`cargo test -p tddy-tools -p tddy-workflow-recipes`**.
+3. Run **`cargo test -p tddy-tools -p tddy-tools-cli -p tddy-workflow-recipes`** (`tddy-tools-cli` holds the suites that run `tddy-tools get-schema` / `list-schemas` / `submit` against the built binary).
 
 ## Related
 

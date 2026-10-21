@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 93 | 4 | 11 | 3 | first detection |
+| 2026-10-21 | 93 | 4 | 11 | 3 | unchanged. #690 (`#satellite` 15/15) re-parented `cli.rs` from the `tddy-tools` binary root into the library and repointed one path inside the body (`tddy_tools::server::PermissionServer` → `crate::server::PermissionServer`); still at `cli.rs:525` |
 
 ## What the tool found
 
