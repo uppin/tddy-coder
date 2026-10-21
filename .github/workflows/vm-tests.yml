@@ -212,6 +212,12 @@ jobs:
                   ls -la dist
                   exit 0
                   ;;
+                completed/cancelled)
+                  # The run was cancelled while it was still the newest candidate (its
+                  # conclusion lands after its jobs'): a newer run for this commit replaced
+                  # it. Keep waiting for that one rather than failing on the cancel.
+                  echo "Rust build in run $run_id was cancelled; looking for the run that replaced it…"
+                  ;;
                 completed/*)
                   echo "::error::CI's Rust build for $HEAD_SHA ended $build — nothing to deploy."
                   exit 1
