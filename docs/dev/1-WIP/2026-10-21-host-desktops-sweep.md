@@ -1,7 +1,7 @@
 # Changeset: Split `config.rs` into per-concern modules, under the 500-line budget
 
 **Date**: 2026-10-21
-**Status**: 🚧 In Progress — planned and reviewed (`6e`, 2026-10-21); plans proven with `restructure check --deep`; not applied
+**Status**: 🚧 In Progress — planned and reviewed (`6e`, 2026-10-21); plans proven with `restructure check --deep`; applied (eight commits, one per plan), validated
 **Type**: Refactor
 **Complexity**: 3/5 — one crate (`tddy-daemon-kernel`), eight engine plans moving ~1,175 lines out of one file inside the crate, eleven in-file test modules re-pointed, a wide consumer fan-out kept stable by named facades (eleven crates to `cargo check`), and a known rebase conflict for an open PR (#664)
 **Stack**: `#host-desktops` 9/10 — first of the two sweep PRs, a plain PR. Base: `master` `ea5ba6fb1`. Sibling, independent: `feature/host-desktops/sweep-host-service` (`#host-desktops` 10/10)
@@ -34,7 +34,9 @@ Recorded from the developer's review of the plan (`6e`), relayed by the orchestr
 
 The module layout of `packages/tddy-daemon-kernel/src/config.rs`: `config.rs` plus eight modules under
 `src/config/`, cut by `tddy-tools restructure`, with every `tddy_daemon_kernel::config::…` path a caller
-outside the library uses kept stable through named facades.
+outside the library actually uses kept stable through facades. Seven items that no caller outside the crate uses
+(`LocalConfig`, `KeyringConfig`, `SandboxCgroupConfig`, `GitConfig`, `AgentWarmupConfig`, `SessionRoomConfig`,
+`AllowedTool`) lose their public path — see `## Public surface`.
 
 ## Boundaries
 
@@ -96,7 +98,7 @@ where the code they sit beside now lives:
 
 ## Affected Packages
 
-- **tddy-daemon-kernel**: [README.md](../../../packages/tddy-daemon-kernel/README.md) — `config` becomes a module directory; every `tddy_daemon_kernel::config::…` path keeps resolving through named facades
+- **tddy-daemon-kernel**: [README.md](../../../packages/tddy-daemon-kernel/README.md) — `config` becomes a module directory; every `tddy_daemon_kernel::config::…` path a caller outside the crate uses keeps resolving through facades (seven unused items do not: `## Public surface`)
   - [daemon-kernel.md](../../../packages/tddy-daemon-kernel/docs/daemon-kernel.md) — module rules (`:31`) and the `#keyring` note (`:191`)
 
 ## Related Feature Documentation
@@ -106,8 +108,9 @@ None — behaviour-preserving restructure. No PRD.
 ## Summary
 
 `config.rs` (1,575 production lines) is cut into eight topic modules by `tddy-tools restructure`. Every path
-a caller outside the library uses keeps resolving through a named facade (`reexport: "outside"`, and
-`"named"` on the one `extract_module`), so no file outside `tddy-daemon-kernel` is edited.
+a caller outside the library uses keeps resolving through a facade (`reexport: "outside"` on plans 03, 05, 06,
+07, 08, 09; `"named"` on plans 01 and 04), so no file outside `tddy-daemon-kernel` is edited. The exception is seven
+items nothing outside the crate uses: they are no longer reachable from outside (`## Public surface`).
 
 ## Background
 
@@ -158,7 +161,7 @@ item-anchored. One commit per plan.
 |---|---|---|---|---|
 | 1 | `01-config-agent-cli` | `extract_module` `agent_cli`, `to_file`, `reexport: named` | range `config.rs:689:1–1005:2` | ✅ no findings |
 | 2 | `03-config-screen-sharing` | `move_item` + `name: screen_sharing`, `reexport: outside` | items (4) | ✅ no findings |
-| 3 | `04-config-sandbox-paths` | `move_item` + `name: sandbox_paths` | items (5) | ✅ no findings |
+| 3 | `04-config-sandbox-paths` | `move_item` + `name: sandbox_paths`, `reexport: named` (five items keep their `config::*` paths; the first apply used `outside`, clippy raised 7 `dead_code` errors, it was reset and redone) | items (5) | ✅ no findings |
 | 4 | `05-config-env-overrides` | `move_item` + `name: env_overrides` | items (6) | ✅ no findings |
 | 5 | `06-config-timings` | `move_item` + `name: timings` | items (12) | ✅ no findings |
 | 6 | `07-config-sections` | `move_item` + `name: sections` | items (12) | ✅ no findings |
@@ -176,7 +179,8 @@ string names …`).
 | | |
 |---|---|
 | External importers | 17 files across `tddy-agent-launch`, `tddy-daemon-rpc`, `tddy-host-service`, `tddy-screen-sharing`, `tddy-session-lifecycle`, `tddy-session-split`, `tddy-telegram-control` and the crate's own `tests/`; the moved structs also from `tddy-daemon`, `tddy-daemon-auth`, `tddy-daemon-livekit`, `tddy-code-restructuring` |
-| Facade | `reexport: "outside"` on every `move_item`; `reexport: "named"` on the `extract_module` |
+| In-crate files re-pointed (plan 08, `access`) | `first_login_enrolment.rs` (`UserMapping` via `config::access`, `DaemonConfig` via `config`), `live_users.rs` (`UserMapping`), `open_vault_idle_ttl.rs` and `pending_login_ttl.rs` (`GitHubConfig`, in their test modules) — `access` is `pub(crate)`, so in-crate paths name the module |
+| Facade | `reexport: "outside"` on plans 03, 05–09; `reexport: "named"` on plans 01 and 04 |
 | Consequence | no file outside `tddy-daemon-kernel` changes. The eleven in-file test modules (`use super::*;`) are re-pointed by the engine |
 
 **The apply's compile gate does not see the facade consumers**: it checks only the package it wrote. After
@@ -184,13 +188,14 @@ the last plan, `cargo check -p` each of the eleven consumer crates above, one at
 
 ## Visibility
 
-Widenings `check --deep` reported (completed from the apply):
+Widenings `check --deep` reported, completed from the apply; `restructure verify` counts 12 visibility-normalised items:
 
 | Item | Was | Is | Why |
 |---|---|---|---|
 | `is_wrapper_shim_dir`, `ClaudeBinaryChoice`, `choose_claude_binary`, `find_real_agent_in`, `CursorBinaryChoice`, `choose_cursor_binary` | private | `pub(crate)` | `config.rs` tests call them; `extract_module` widens to `pub(crate)` |
 | `resolve_sandbox_config_path_with` | private | `pub(super)` | `config.rs` tests |
-| `parse_env_bool`, `merge_telegram_env` | private | `pub(super)` | called from the `impl DaemonConfig` and tests |
+| `parse_env_bool`, `merge_telegram_env`, `merge_timing_env` | private | `pub(super)` | called from the `impl DaemonConfig` and tests (`merge_timing_env` added by plan 05) |
+| `find_real_agent_in` | private | `pub(crate)` | `config.rs` tests (same widening as the choosers) |
 | `MIN_WORKTREE_ROOM_INTERVAL_MS`, `SessionRoomConfig::validate` | private | `pub(super)` | `DaemonConfig` validation |
 
 None of these privacies enforced an invariant: each is a helper whose callers now sit one module up.
@@ -204,11 +209,22 @@ tddy-daemon-kernel` run on `fa9b42215` gave the same count.
 
 | Gate | Before | After |
 |---|---|---|
-| `tddy-daemon-kernel` — unit 115; `common_room_forwarding` 12, `first_login_enrolment_acceptance` 4, `kernel_surface_acceptance` 4, `peer_calls` 3, `relay_mode_acceptance` 4, `spawn_as_user_github_tokens` 1, `telegram_extraction_shape` 9, `x11vnc_binary_resolution` 2 | **154 passed / 0 failed / 0 ignored** | |
-| facade consumers — `cargo check -p` each of the eleven crates in `## Callers` | not run at planning | |
+| `tddy-daemon-kernel` — unit 115; `common_room_forwarding` 12, `first_login_enrolment_acceptance` 4, `kernel_surface_acceptance` 4, `peer_calls` 3, `relay_mode_acceptance` 4, `spawn_as_user_github_tokens` 1, `telegram_extraction_shape` 9, `x11vnc_binary_resolution` 2 | **154 passed / 0 failed / 0 ignored** | **154 passed / 0 failed** — after the apply and again after the rebase onto `35fcc585f` |
+| facade consumers — `cargo check -p` each of the eleven crates in `## Callers` | not run at planning | all eleven clean ([G]), plus `tddy-daemon-extensions` and `tddy-daemon` after the rebase onto `35fcc585f` |
 
 **No failing test**; the failing set the applied tree is held to is empty. No known-flaky test in this
 crate's suite.
+
+## Public surface
+
+Seven items were `pub` in `pub mod config` on `master` and have **no path outside `tddy-daemon-kernel`
+any more**: `LocalConfig`, `KeyringConfig`, `SandboxCgroupConfig`, `GitConfig`, `AgentWarmupConfig`,
+`SessionRoomConfig`, `AllowedTool`. They moved under `reexport: outside`, which re-exports only what a
+caller outside the crate uses, and nothing does (checked on `master` and in open PRs' added lines, best
+effort). Every field of `DaemonConfig` still holds them, so a caller can read `config.local`, `config.git` and
+so on; it just cannot *name* the type. **Decision (developer, 2026-10-21): accept the narrowing and document
+it.** Restoring a path later is a `named` facade: add `pub use sections::{LocalConfig, …};` (or the `timings` /
+`access` equivalent) to `config.rs`. No facade is added here.
 
 ## Plan
 
@@ -237,3 +253,36 @@ Tasks executed by `/wrap-context-docs` before this changeset is deleted.
 - [ ] `packages/tddy-daemon-kernel/docs/daemon-kernel.md` § module rules (`:31`) and the `#keyring` note (`:191`) — "`config.rs` is the first exception … far over its size budget" → `config` is a module directory under budget; name the eight modules and what each holds
 - Triaged as still true (no item): `daemon-kernel.md:271–273` (`resolve_vnc_binary_path` / `resolve_rdp_binary_path` / `resolve_x11vnc_binary_path` keep their `tddy_daemon_kernel::config` path through the facade)
 - [ ] Re-run the doc triage (`grep -rn` of every moved symbol and old path over the package's README/docs) against what landed
+
+## Validation Results
+
+Run 2026-10-21 by `/validate-changes` at head `2dffd218b` (rebased onto `origin/master` `35fcc585f`; no
+upstream commit touched `packages/tddy-daemon-kernel`).
+
+**Stack gate:** plain PR on `master` (no stack parent); `git log origin/master..HEAD` is this PR's own ten
+commits (two docs, eight plans). The branch shares the `feature/host-desktops/` namespace with the independent
+sibling #693; no edge.
+
+**Behaviour preservation (`restructure verify --against origin/master`, run after the rebase):** `403277
+statements before, 403278 after; 7 statement(s) re-pointed through a module qualifier, 12 visibility-normalised,
+110 cfg(test) gate line(s) excused; every statement accounted for`. Moved bodies are unchanged; tests changed
+only by the mechanical re-pointing.
+
+| Gate (scoped) | Result |
+|---|---|
+| `cargo test --no-fail-fast -p tddy-daemon-kernel -- --test-threads=1` | ✅ 154 passed / 0 failed (baseline 154/0) |
+| `cargo clippy -p tddy-daemon-kernel --all-targets -- -D warnings` | ✅ clean |
+| `cargo fmt -p tddy-daemon-kernel -- --check` | ✅ clean |
+| `cargo check -p tddy-daemon-extensions`, `-p tddy-daemon` (post-rebase) | ✅ clean |
+| eleven facade consumers | ✅ clean ([G], pre-rebase) |
+
+**`config.rs` measurement (two numbers, deliberately).** The engine left `#[cfg(test)] use …;` lines at
+`config.rs:3` and `:6`. A count that stops at the first `#[cfg(test)]` line (the `/pr-wrap` step 3.5 script and
+the code-issue record's own `Detected:` method) reports **2** production lines — wrong. The honest count is
+production code excluding `#[cfg(test)]` items, by script: **438 lines (398 non-blank)**; `[G]`'s count to the
+test modules was 439. All under 500; every new module is under 330. The record is closed on the honest number.
+
+**Review items:** (1) measured and recorded, record closes at wrap; (2) public surface narrowing accepted and
+documented, `## Public surface`; (3) changeset drift corrected (plan 04 `named`, Callers, Visibility, 12
+normalised); (4) #664 merge note present here and in the PR body; (5) behaviour preserved, see above; (6) no
+further finding.
