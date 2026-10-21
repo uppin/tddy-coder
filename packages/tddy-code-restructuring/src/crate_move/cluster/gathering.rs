@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use super::super::Result;
 use super::MergedChanges;
 use super::ModuleReferences;
-use crate::crate_move::{carried, header, module_files, moving, refusals};
+use crate::crate_move::{carried, header, module_files, moving, refusals, Survey};
 use crate::edit::FileEdit;
 use crate::registry::Workspace;
 
@@ -71,6 +71,12 @@ impl Gathering<'_> {
             header::extend_once(&mut origin_paths, header.origin_paths);
             if file.below.is_empty() {
                 totals.surveys.push(survey);
+            } else {
+                totals.carried.push(Survey {
+                    source: file.from.clone(),
+                    reexported_by: None,
+                    ..survey
+                });
             }
             rewrites.extend(file_rewrites);
         }

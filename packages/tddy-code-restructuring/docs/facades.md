@@ -82,8 +82,10 @@ does not declare is left alone.** Unit tests pin both.
 
 `parent_reexports_of` reads lines: a `use <module>::*;` or `use <module>::{…};` at column 0 and brace
 depth 0, whatever its visibility. Text after `//` is ignored when counting depth; a brace inside a
-string literal can still throw the count off. A parent glob names no items, so nothing is counted as
-reached from outside the crate — only the rewrite is done.
+string literal can still throw the count off. A parent glob names no items, so it counts nothing as
+reached by itself; a cross-crate move treats every non-private top-level item of the module as reached
+through it and widens those to `pub` (see [path-survey.md](path-survey.md#widening)), and `check --deep`
+names the glob on the survey line.
 
 ## Following a facade to its crate
 

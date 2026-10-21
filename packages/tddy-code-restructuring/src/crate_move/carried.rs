@@ -383,6 +383,9 @@ impl TheSet {
 #[derive(Default)]
 pub(super) struct SetTotals {
     pub(super) surveys: Vec<Survey>,
+    /// A survey of each child file a member carries, which names the child as its `source`: the
+    /// declarations of a carried file need widening as a member's own do.
+    pub(super) carried: Vec<Survey>,
     /// The callers' re-points of every member, written together once the whole set is read.
     pub(super) callers: Vec<PlannedRewrite>,
     pub(super) crates_named: BTreeSet<String>,

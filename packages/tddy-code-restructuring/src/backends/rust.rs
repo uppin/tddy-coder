@@ -29,6 +29,7 @@ use tddy_lsp::LanguageId;
 use tokio_util::sync::CancellationToken;
 
 mod chatter;
+mod declarations;
 mod documents;
 mod early_return;
 mod escaping_types;
@@ -1508,17 +1509,13 @@ impl RustBackend {
         )?;
 
         let mut found = Vec::new();
-        for item in path_reached_within(&symbols, whole_of(&text)) {
-            // An item nested in an inline module is reached through that module's own name, which
-            // is itself one of these — so re-pointing the outer name carries the inner path with
-            // it, and naming the inner one flat would write a facade line that resolves to nothing.
-            if !item.within.is_empty() {
-                continue;
-            }
-
+        for declared in declarations::declarations_within(&symbols) {
             found.push(ItemReferences {
-                referenced_at: self.references_outside(&uri, &item.position, workspace)?,
-                item: item.name,
+                referenced_at: self.references_outside(&uri, &declared.position, workspace)?,
+                declared_at: character_column(&text, LspPoint::read(Some(&declared.position))?),
+                within: declared.within,
+                kind: declared.kind,
+                item: declared.name,
             });
         }
 
@@ -2769,17 +2766,6 @@ fn collect_path_reached(
                 collect_path_reached(children, range, &inside, found);
             }
         }
-    }
-}
-
-/// The range covering a whole document, for a survey that asks about all of it.
-fn whole_of(text: &str) -> Range {
-    Range {
-        start: Position { line: 1, col: 1 },
-        end: Position {
-            line: text.lines().count() as u32 + 1,
-            col: 1,
-        },
     }
 }
 

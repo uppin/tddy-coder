@@ -157,6 +157,37 @@ refuses the move. The
 destination appearing in either set is `MalformedPlan` from `destination_manifest` — an assertion, since
 the survey reads the destination's own items as `crate::`.
 
+## Widening
+
+A cross-crate move widens in the same pass that surveys it. `ModuleReferences::outside_references`
+returns **every declaration** of a moving file as `ItemReferences { item, referenced_at, declared_at,
+within, kind }`: the name's position (one-based, in characters), the containers it sits in outermost first
+(an inline module's name, `impl T`, `impl Tr for T`, a struct or enum name) and a `DeclarationKind` — `Item`,
+`Field`, `InherentMember`, or `NoVisibility` for trait-impl members, trait items and enum variants.
+`backends/rust/declarations.rs` reads them from the `documentSymbol` tree (identifier names only), so a
+tuple field `0` is skipped. `surveyed` keeps its caller logic by reading only top-level `Item`s and carries
+the whole list on `Survey.declarations`, plus the parent's re-export on `Survey.reexported_by`.
+
+`crate_move/widening.rs` decides and writes, after `cluster_edits`, over the edit and the surveys:
+`reach` (a declaration with a reference outside the moving files and outside the destination's directory,
+plus the inline `mod`s on an item's path), `glob` (every non-private top-level item when the parent
+re-exports by glob, found with `parent_reexports_of`), `escaping` (the fixpoint over types a widened
+signature names, read from the masked text) and `declaration` (the visibility keyword at `declared_at`,
+replaced with `pub`; a keyword on a line above its name is a `SeamRefused`). Edits merge into each member's
+existing change in pre-move coordinates, one change per file. `resolved_cluster` returns the edit and the
+`Vec<VisibilityChange>` report for both created and existing destinations; `cluster_resolution` puts the
+report into `Resolution.report`, which the runner prints as `visibility:` lines and `check --deep`
+prints through `rehearsed_lines`. `VisibilityChange.reason` is `None` for a plain reference and states
+the glob or the signature otherwise; journal records written before it existed read it as `None`.
+
+The cost is one `textDocument/references` request per declaration instead of per top-level item: on the
+roster fixture of `move_to_crate_widening_acceptance`, nine instead of three. A request for a trait-impl
+member is asked and its answer is not read.
+
+Not widened: tuple-struct fields, `macro_rules!` items and in-file `use` re-exports, associated types of an
+inherent `impl`, and an item only a macro expansion in the origin names. A shadowing type of the same
+name that a widened signature seems to name is widened too.
+
 ## `source_scan.rs`
 
 The token reading under the survey. The file is masked first — comments and literals blanked byte for

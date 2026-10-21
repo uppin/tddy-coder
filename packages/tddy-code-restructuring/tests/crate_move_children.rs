@@ -1,4 +1,4 @@
-//! A cross-crate move carries a module's **directory children** — `#reshape` 5/19.
+//! A cross-crate move carries a module's **directory children** — `#reshape` 5/24.
 //!
 //! A Rust 2018 module `a` is `a.rs`, and the files of its children sit in `a/`. Moving `a.rs` alone
 //! strands them (`E0583`), which is what `#live-plan` 12/15 and `#carve` 21/21 R3, R4 and R7 each
@@ -8,7 +8,9 @@
 
 use std::collections::BTreeMap;
 
-use tddy_code_restructuring::crate_move::{self, ItemReferences, ModuleReferences, Reference};
+use tddy_code_restructuring::crate_move::{
+    self, DeclarationKind, ItemReferences, ModuleReferences, Reference,
+};
 use tddy_code_restructuring::registry::Workspace;
 use tddy_code_restructuring::{
     Anchor, Destination, FileEdit, ModuleHome, MovingCluster, Overlay, Position, Reexport,
@@ -128,6 +130,7 @@ impl AKnownReferenceSet {
         workspace: &AWorkspace,
     ) -> Self {
         let text = workspace.read(from);
+        let declaration = workspace.read(declared_in);
         let referenced_at = text
             .match_indices(item)
             .map(|(offset, _)| Reference {
@@ -141,6 +144,12 @@ impl AKnownReferenceSet {
             .push(ItemReferences {
                 item: item.to_string(),
                 referenced_at,
+                declared_at: position_of(
+                    &declaration,
+                    declaration.find(item).expect("the file declares the item"),
+                ),
+                within: Vec::new(),
+                kind: DeclarationKind::Item,
             });
         self
     }

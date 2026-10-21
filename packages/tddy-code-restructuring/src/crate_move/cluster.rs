@@ -19,7 +19,7 @@ use super::new_crate::{self, NewCrate};
 
 use super::malformed;
 use crate::crate_move::{carried, moving, test_modules};
-use crate::edit::{FileEdit, TextEdit};
+use crate::edit::{FileEdit, TextEdit, VisibilityChange};
 
 /// A set of modules that move to one destination **as a single unit**.
 ///
@@ -119,8 +119,21 @@ pub fn resolve_cluster(
     workspace: &Workspace<'_>,
     cluster: &MovingCluster,
 ) -> Result<WorkspaceEdit> {
+    resolved_cluster(engine, workspace, cluster).map(|(edit, _)| edit)
+}
+
+/// [`resolve_cluster`]'s edit, and the report of every visibility it widens.
+///
+/// # Errors
+///
+/// Refuses for every reason [`resolve_cluster`] does.
+pub(crate) fn resolved_cluster(
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    cluster: &MovingCluster,
+) -> Result<(WorkspaceEdit, Vec<VisibilityChange>)> {
     match &cluster.creates {
-        None => cluster_edits(engine, workspace, cluster),
+        None => widened_cluster(engine, workspace, cluster),
         Some(creation) => creating(engine, workspace, cluster, creation),
     }
 }
@@ -134,7 +147,7 @@ fn creating(
     workspace: &Workspace<'_>,
     cluster: &MovingCluster,
     creation: &NewCrate,
-) -> Result<WorkspaceEdit> {
+) -> Result<(WorkspaceEdit, Vec<VisibilityChange>)> {
     let first = cluster
         .members
         .first()
@@ -157,18 +170,36 @@ fn creating(
     by_name
         .members
         .sort_by(|left, right| left.path.cmp(&right.path));
-    let edit = cluster_edits(engine, &seeded, &by_name)?;
-    Ok(WorkspaceEdit {
+    let (edit, report) = widened_cluster(engine, &seeded, &by_name)?;
+    let folded = WorkspaceEdit {
         changes: new_crate::folded(&skeleton, edit.changes)?,
-    })
+    };
+    Ok((folded, report))
 }
 
-/// The edits of a set moving into a crate that exists in `workspace`.
+/// [`resolve_cluster`]'s edit with the visibilities the move has to widen written into it, and the
+/// report of them: every declaration of a moving file that something staying outside still reaches
+/// becomes `pub`, because nothing narrower reaches across a crate boundary.
+///
+/// # Errors
+///
+/// Refuses for every reason [`resolve_cluster`] does, and for a reached declaration whose
+/// visibility cannot be edited in place.
+pub(crate) fn widened_cluster(
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    cluster: &MovingCluster,
+) -> Result<(WorkspaceEdit, Vec<VisibilityChange>)> {
+    let (edit, surveys) = cluster_edits(engine, workspace, cluster)?;
+    super::widening::widened(workspace, cluster, edit, &surveys)
+}
+
+/// The edit of a whole cluster before any visibility is widened, and each member's survey.
 fn cluster_edits(
     engine: &mut dyn ModuleReferences,
     workspace: &Workspace<'_>,
     cluster: &MovingCluster,
-) -> Result<WorkspaceEdit> {
+) -> Result<(WorkspaceEdit, Vec<super::Survey>)> {
     let members = read_members(workspace, cluster)?;
     let mut the_set = carried::TheSet::of(workspace, &members)?;
     let following = test_modules::following_of(engine, workspace, &members)?;
@@ -195,6 +226,7 @@ fn cluster_edits(
         totals:
             carried::SetTotals {
                 surveys,
+                carried: children,
                 callers,
                 crates_named,
                 mut dev_crates_named,
@@ -225,9 +257,12 @@ fn cluster_edits(
     merged.absorb_all(across_the_set.dependents_on_the_destination(workspace, &keeps_naming_it)?);
     merged.absorb_all(across_the_set.workspace_members(workspace)?);
 
-    Ok(WorkspaceEdit {
-        changes: merged.changes(),
-    })
+    Ok((
+        WorkspaceEdit {
+            changes: merged.changes(),
+        },
+        surveys.into_iter().chain(children).collect(),
+    ))
 }
 
 /// Every member as the move it is, refusing a set that cannot be resolved as one.
@@ -324,7 +359,7 @@ pub(crate) use stranded::stranded_siblings;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crate_move::{manifest_edits, ItemReferences, Reference};
+    use crate::crate_move::{manifest_edits, DeclarationKind, ItemReferences, Reference};
     use crate::plan::{Anchor, RefactorKind};
 
     const ORIGIN: &str = "crates/origin";
@@ -436,12 +471,22 @@ mod tests {
                 })
                 .collect();
 
+            let declaration = workspace.read(in_module);
+            let declared_at = manifest_edits::position_of(
+                &declaration,
+                declaration
+                    .find(item)
+                    .expect("the module declares the item"),
+            );
             self.by_module
                 .entry(in_module.to_string())
                 .or_default()
                 .push(ItemReferences {
                     item: item.to_string(),
                     referenced_at,
+                    declared_at,
+                    within: Vec::new(),
+                    kind: DeclarationKind::Item,
                 });
             self
         }
