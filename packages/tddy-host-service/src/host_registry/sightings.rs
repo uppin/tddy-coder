@@ -28,7 +28,6 @@ pub(super) fn apply_sighting(
     };
     let label = bounded_label(&sighting.label);
     let repos_base_path = bounded_repos_base_path(sighting.repos_base_path.as_deref());
-
     let Some(known) = hosts
         .iter_mut()
         .find(|host| host.instance_id == instance_id)
