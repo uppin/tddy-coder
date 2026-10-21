@@ -15,7 +15,9 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
 use crate::host_tooling::subprocess::start_probe;
+#[cfg(unix)]
 use crate::host_tooling::subprocess::ProbeOutput;
 #[cfg(unix)]
 use crate::host_tooling::{summarise, PROBE_TIMEOUT};

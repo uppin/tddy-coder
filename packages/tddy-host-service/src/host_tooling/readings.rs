@@ -1,5 +1,6 @@
 use crate::host_tooling::classify_gh_auth_status;
 use crate::host_tooling::parse_git_identity;
+#[cfg(unix)]
 use crate::host_tooling::subprocess::ProbeOutput;
 use crate::host_tooling::summarise;
 use crate::host_tooling::GitIdentity;

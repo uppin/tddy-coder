@@ -30,13 +30,21 @@ use std::time::Duration;
 use crate::host_tooling::desktop_probes::desktop_readings_of;
 use crate::host_tooling::desktop_probes::start_desktop_probes;
 use crate::host_tooling::desktop_probes::warn_if_a_desktop_probe_failed;
+#[cfg(unix)]
 use crate::host_tooling::readings::agent_status_of;
+#[cfg(unix)]
 use crate::host_tooling::readings::git_config_value;
+#[cfg(unix)]
 use crate::host_tooling::readings::git_identity_of;
+#[cfg(unix)]
 use crate::host_tooling::readings::github_cli_of;
+#[cfg(unix)]
 use crate::host_tooling::readings::not_on_path;
+#[cfg(unix)]
 use crate::host_tooling::readings::start_agent_probe;
+#[cfg(unix)]
 use crate::host_tooling::readings::warn_if_failed;
+#[cfg(unix)]
 use crate::host_tooling::subprocess::start_probe;
 use crate::remote_desktop_probe::{DesktopProtocol, DesktopReachability, RemoteDesktopProbe};
 
@@ -397,8 +405,11 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::host_tooling::readings::github_cli_of;
+    #[cfg(unix)]
     use crate::host_tooling::subprocess::start_probe;
+    #[cfg(unix)]
     use crate::host_tooling::subprocess::StartedProbe;
 
     #[test]
