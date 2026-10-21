@@ -141,15 +141,15 @@ None in `#reshape`: no node consumes this behaviour. The second stack (crate spl
 
 ## Scope
 
-- [ ] Declaration reader with spans, `#[path]` detection
-- [ ] Test-throughout gate for followers and node 5's gated children
-- [ ] `reach` reads `defined_at` and the file's tree root
-- [ ] Classification, earlier-operation case, outside references
-- [ ] Follow edits, travelling set, destination declaration, dev-dependencies
-- [ ] Static refusal with check/apply parity
-- [ ] Notes and count parity
-- [ ] Compiled live case
-- [ ] Docs at wrap; claimed todo deleted
+- [x] Declaration reader with spans, `#[path]` detection
+- [x] Test-throughout gate for followers and node 5's gated children
+- [x] `reach` reads `defined_at` and the file's tree root
+- [x] Classification, earlier-operation case, outside references
+- [x] Follow edits, travelling set, destination declaration, dev-dependencies
+- [x] Static refusal with check/apply parity
+- [x] Notes and count parity
+- [x] Compiled live case
+- [x] Docs at wrap; claimed todo deleted
 
 ## Technical changes
 
@@ -184,7 +184,7 @@ None in `#reshape`: no node consumes this behaviour. The second stack (crate spl
 - [x] **M5** `follow_changes`, `travelling`; tests 1–4, 6, 14
 - [x] **M6** `unfollowable`, notes; tests 15, 17, 18
 - [x] **M7** live case 22
-- [ ] **M8** docs at wrap
+- [x] **M8** docs at wrap
 
 ## Testing plan
 
@@ -198,13 +198,13 @@ Fixture for `tests/crate_move_test_modules.rs`: `origin/src/lib.rs` declares `pu
 
 ### Coverage Requirements
 
-- [ ] Follows: sibling of a nested member, of a top-level member, with its own children, `reexport` glob and none
-- [ ] Paths: `super::` to the moved module, `super::` through the parent's glob, `crate::` through a facade, `self::` inside the test module kept
-- [ ] Manifest: dev-dependencies for followers and gated carried children
-- [ ] Stays: mixed, unrelated, `#[path]`, referenced from outside
-- [ ] Multi-operation plan
-- [ ] Refusal parity; notes; count parity
-- [ ] Pins: non-gated `*_tests` module is not considered; existing suites untouched
+- [x] Follows: sibling of a nested member, of a top-level member, with its own children, `reexport` glob and none
+- [x] Paths: `super::` to the moved module, `super::` through the parent's glob, `crate::` through a facade, `self::` inside the test module kept
+- [x] Manifest: dev-dependencies for followers and gated carried children
+- [x] Stays: mixed, unrelated, `#[path]`, referenced from outside
+- [x] Multi-operation plan
+- [x] Refusal parity; notes; count parity
+- [x] Pins: non-gated `*_tests` module is not considered; existing suites untouched
 
 ## Acceptance tests
 
@@ -307,27 +307,24 @@ Taken by the developer (2026-10-21), on the `/green` stop for two red tests of t
 
 ## Validation Results
 
-**Contract commit (wave 2, 2026-10-09)** — scoped runs only; `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --all --check` clean.
+**Green, 2026-10-21** — scoped to `tddy-code-restructuring`. `cargo fmt -p tddy-code-restructuring --check` and `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` clean.
 
-| Test | File | State | Why |
-|---|---|---|---|
-| 1 sibling moves | `tests/crate_move_test_modules.rs` | 🔴 red | only `a.rs` renamed |
-| 2 origin loses declaration | same | 🔴 red | `parent.rs` still declares `a_tests` |
-| 3 destination declares it | same | 🔴 red | root reads `pub mod a;` only |
-| 4, 5, 6 paths | same | 🔴 red | `a_tests` is not moved or re-pointed |
-| 7 dev-dependencies | same | 🔴 red | destination manifest gains no `tempfile` |
-| 8 gated carried child | same | 🔴 red | nothing carried yet (node 5) and no test gate |
-| 9, 10, 11, 15 notes | same | 🔴 red | panic in node 5's `crate_move::cluster_resolution` `todo!()` (`crate_move.rs:251`) — red until node 5 is green, then on this node's notes |
-| 12 unrelated left alone | same | 🟢 green pin | |
-| 13 two operations | same | 🔴 red | `ab_tests` not renamed at the second operation |
-| 14 no caller rewrite | same | 🔴 red | `a_tests` gains `use destination::a::Thing;` as a caller |
-| 16 member through parent glob | same | 🔴 red | resolve refuses as a cycle: `b.rs still names origin (origin::parent::a::recipe)` |
-| 17 static merge finding | `tests/check_precondition_parity.rs` | 🔴 red | no finding |
-| 18 check/apply same message | `tests/crate_move_test_modules.rs` | 🔴 red | apply `Ok(())`, check `[]` |
-| 19, 20, 20a declaration reader | `src/crate_move/source_scan/test_declarations.rs` | 🔴 red | `todo!("test_declarations")` |
-| 22 live | `tests/move_module_to_crate_acceptance.rs` | 🔴 red | dry run `5 file(s)`, no follow note, test file stays |
+| Test | File | State |
+|---|---|---|
+| 1-11, 13-16, 18 | `tests/crate_move_test_modules.rs` | 🟢 green (19 tests with the two added below) |
+| 12 unrelated left alone | same | 🟢 green pin |
+| 17 static merge finding | `tests/check_precondition_parity.rs` | 🟢 green (24 tests) |
+| 19, 20, 20a declaration reader | `src/crate_move/source_scan/test_declarations.rs` | 🟢 green (lib: 1107 passed) |
+| 22 live | `tests/move_module_to_crate_acceptance.rs` | 🟢 green (6 passed) |
+| 21 existing suites | `crate_move_children`, `cluster_move`, `move_facades_acceptance`, `move_paths_acceptance`, `nested_module_move_acceptance` | 🟢 12 / 18 / 19 / 12 / 11 / 4 passed, unchanged |
+| 8b (added) carried child gated inside an inline module | `tests/crate_move_test_modules.rs` | 🟢 red before the fix, green after |
+| 17b (added) two-operation static check reports the merge once | same | 🟢 green |
 
-Test 13's fixture gives `b` no `super::recipe`: through an earlier operation's facade, the re-export walk cannot follow `pub use a::*;` once `a` is `pub use destination::a;` (a `use`-bound name, not a child), which refuses `b` as a cycle — a separate gap, reported to the orchestrator as a proposed todo.
+Validation findings, all settled in this PR: the `TODO(reshape-tests-follow)` in `test_gated` is solved (declarations inside inline modules on the path are read); `sorted` takes an empty `earlier` on the resolve path by design (an operation resolved in `apply` reads text its earlier operations already edited; test 13 pins it) and the static path passes `moved_by_earlier_operations` (17b pins it); `unfollowable` now returns empty only for the carry refusal `uncarriable` names, every other refusal of `sorted` propagates as `apply` does.
+
+Full-package `./test -p tddy-code-restructuring` was started and stopped (the live rust-analyzer suites take hours); before the stop it showed 8 failures in `extract_method_clean_acceptance` and `extract_facade_acceptance`-adjacent live suites that this PR does not touch.
+
+**File length (pr-wrap 3.5):** `crate_move/test_modules.rs` is new in this PR at 0 -> 650 production lines. Its decomposition (engine `extract_module` of the classification and follow edits) was proposed and the developer declined the run; it is left for a human, not deferred by this stage.
 
 ## TODO
 
@@ -335,25 +332,25 @@ Test 13's fixture gives `b` no `super::recipe`: through an earlier operation's f
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-tests-follow.md`)
 - [x] Create changeset (this document)
-- [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point, not edited while planning)
+- [x] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point, not edited while planning)
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved 2026-10-09)
 - [x] TDD Red — write failing unit/integration tests (contract surface + its unit tests)
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) and verify 100% pass; CI answers for the rest of the workspace
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
-- [ ] Wrap documentation (/wrap-context-docs) when the PR is set ready for review; deletes `2026-10-09-reshape-tests-follow-initial-discovery.md` and the claimed todo
-- [ ] USER REVIEW — work complete, decide next steps
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the scoped tests (`./test -p tddy-code-restructuring`) and verify 100% pass; CI answers for the rest of the workspace
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] USER REVIEW — development complete
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
+- [x] Wrap documentation (/wrap-context-docs) when the PR is set ready for review; deletes `2026-10-09-reshape-tests-follow-initial-discovery.md` and the claimed todo
+- [x] USER REVIEW — work complete, decide next steps
