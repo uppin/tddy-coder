@@ -44,48 +44,12 @@ fn of_member(
     masked: &str,
     parameter: &str,
 ) -> Vec<String> {
-    let mut found = Vec::new();
-    let shown = format!("`{}::{}`", block.self_type, member.name);
-    if block.is_trait {
-        found.push(located(
-            file,
-            member.name_line,
-            format!(
-                "`{}` is a member of `{}`: trait members stay methods",
-                member.name, block.label
-            ),
-        ));
-    }
+    let mut found: Vec<String> = declaration_reasons(block, member)
+        .into_iter()
+        .map(|reason| located(file, member.name_line, reason))
+        .collect();
     if member.declaration.kind == Kind::ConstOrType {
-        found.push(located(
-            file,
-            member.name_line,
-            format!("{shown} is an associated const or type: there is nothing to detach"),
-        ));
         return found;
-    }
-    match &member.receiver {
-        Some(Receiver::ByValue { .. }) => found.push(located(
-            file,
-            member.name_line,
-            format!("{shown} takes `self` by value: a function over a reference cannot take it"),
-        )),
-        Some(Receiver::Typed { .. }) => found.push(located(
-            file,
-            member.name_line,
-            format!(
-                "{shown} takes `self` through an explicit type: this run detaches `self`, `&self` \
-                 and `&mut self` only"
-            ),
-        )),
-        Some(Receiver::Borrowed { .. }) | None => {}
-    }
-    if member.public {
-        found.push(located(
-            file,
-            member.name_line,
-            format!("{shown} is `pub` and may have callers outside the workspace"),
-        ));
     }
     if let Some(offset) = shadowing_write(member, masked, parameter) {
         let line = scan::line_of(text, offset);
@@ -110,6 +74,41 @@ fn of_member(
         ));
     }
     found
+}
+
+/// The refusals the member's declaration alone decides, all reported at its name: a trait member,
+/// an associated const or type, a receiver this run does not detach, a `pub` member.
+fn declaration_reasons(block: &Block, member: &Member) -> Vec<String> {
+    let shown = format!("`{}::{}`", block.self_type, member.name);
+    let mut reasons = Vec::new();
+    if block.is_trait {
+        reasons.push(format!(
+            "`{}` is a member of `{}`: trait members stay methods",
+            member.name, block.label
+        ));
+    }
+    if member.declaration.kind == Kind::ConstOrType {
+        reasons.push(format!(
+            "{shown} is an associated const or type: there is nothing to detach"
+        ));
+        return reasons;
+    }
+    match &member.receiver {
+        Some(Receiver::ByValue { .. }) => reasons.push(format!(
+            "{shown} takes `self` by value: a function over a reference cannot take it"
+        )),
+        Some(Receiver::Typed { .. }) => reasons.push(format!(
+            "{shown} takes `self` through an explicit type: this run detaches `self`, `&self` \
+             and `&mut self` only"
+        )),
+        Some(Receiver::Borrowed { .. }) | None => {}
+    }
+    if member.public {
+        reasons.push(format!(
+            "{shown} is `pub` and may have callers outside the workspace"
+        ));
+    }
+    reasons
 }
 
 /// The first place the member's own text writes `parameter` as a name: a binding, a parameter or

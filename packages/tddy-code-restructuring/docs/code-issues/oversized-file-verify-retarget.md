@@ -5,7 +5,7 @@
 **Detected:** 2026-10-14 by the `/pr-wrap` file-length gate on #603 (`#reshape` 6/19)
 **Metrics:** **555 production lines** (2026-10-14; 341 before #603) · budget 500
 **Restructure:** required
-**Status:** Open
+**Status:** Open — regressed 2026-10-21 (#677, `#reshape` 15/24: `Declared.detaches` and `Declared::with_detaches`)
 **Claimed by:** none
 
 ## Measurement history
@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-14 | 555 | #603 (`#reshape` 6/19): R3 (delegator signatures and forwarding calls) added about 214 lines, counted to the first `#[cfg(test)]`. 341 at the merge base |
+| 2026-10-21 | 631 | #677 (`#reshape` 15/24, `detach-method`): +30 over the 601 at its base `feature/reshape/move-widen` (counted to the first `#[cfg(test)]`). The `detaches` field and the `with_detaches` builder, which adds the rebind a detach implies; R-detach itself is `verify/detach.rs`. Split not done here: stack-shared, and `#reshape` 17 owns the split of this file |
 
 ## What the gate found
 

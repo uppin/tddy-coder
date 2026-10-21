@@ -16,7 +16,7 @@ use super::block::Block;
 use super::calls::{Reach, UseLine};
 use super::member::Receiver;
 use super::splice::{render, Splice};
-use super::survey::{Call, Surveyed};
+use super::survey::{Call, Site, Surveyed};
 use crate::edit::{FileEdit, Resolution, WorkspaceEdit};
 use crate::Result;
 
@@ -31,36 +31,62 @@ pub(super) fn resolution(surveyed: Surveyed) -> Result<Resolution> {
         findings: _,
     } = surveyed;
 
-    let mut splices: BTreeMap<String, Vec<Splice>> = BTreeMap::new();
+    let mut splices = call_splices(&sites, &block);
+    let block_file = texts.get(&file).map(String::as_str).unwrap_or_default();
+    let anchored = splices.calls.entry(file.clone()).or_default();
+    anchored.extend(member_splices(block_file, &block, &parameter));
+
+    let (block_text, emptied) = block_text(block_file, &block, anchored);
+    anchored.push(Splice::Text {
+        span: line_start(block_file, block.header_line)
+            ..line_start(block_file, block.close_line + 1),
+        text: block_text,
+    });
+
+    let note = note_of(
+        &block,
+        &parameter,
+        sites.len(),
+        splices.files,
+        splices.use_lines,
+        emptied,
+    );
+    Ok(Resolution {
+        edit: WorkspaceEdit {
+            changes: changes_of(&texts, &splices.calls),
+        },
+        report: Vec::new(),
+        notes: vec![note],
+    })
+}
+
+/// The splices every re-pointed call makes, per file, with the `use` lines they add.
+struct CallSplices {
+    calls: BTreeMap<String, Vec<Splice>>,
+    /// How many files hold a re-pointed call.
+    files: usize,
+    /// How many `use` lines were added.
+    use_lines: usize,
+}
+
+/// R4: each call re-pointed, and each `use` a call from another module needs, inserted once.
+fn call_splices(sites: &[Site], block: &Block) -> CallSplices {
+    let mut calls: BTreeMap<String, Vec<Splice>> = BTreeMap::new();
     let mut inserted_uses: BTreeSet<(String, usize)> = BTreeSet::new();
     let mut files: BTreeSet<&str> = BTreeSet::new();
     let mut use_lines = 0usize;
-    for site in &sites {
+    for site in sites {
         files.insert(site.file.as_str());
-        let list = splices.entry(site.file.clone()).or_default();
+        let list = calls.entry(site.file.clone()).or_default();
         let (written, uses) = match &site.reach {
             Reach::Here => (String::new(), None),
             Reach::Through { written, uses } => (written.clone(), uses.as_ref()),
         };
-        match &site.call {
-            Call::Method {
-                span,
-                receiver,
-                lend,
-                args,
-            } => list.push(Splice::Call {
-                span: span.clone(),
-                written,
-                method: block.members[site.member].name.clone(),
-                lend: *lend,
-                receiver: receiver.clone(),
-                args: args.clone(),
-            }),
-            Call::Path { qualifier } => list.push(Splice::Text {
-                span: qualifier.clone(),
-                text: written,
-            }),
-        }
+        list.push(call_splice(
+            &site.call,
+            written,
+            &block.members[site.member].name,
+        ));
         if let Some(line) = uses {
             if inserted_uses.insert((site.file.clone(), line.at)) {
                 list.push(Splice::Text {
@@ -71,9 +97,40 @@ pub(super) fn resolution(surveyed: Surveyed) -> Result<Resolution> {
             }
         }
     }
+    CallSplices {
+        files: files.len(),
+        calls,
+        use_lines,
+    }
+}
 
-    let block_file = texts.get(&file).map(String::as_str).unwrap_or_default();
-    let anchored = splices.entry(file.clone()).or_default();
+/// The splice one call makes: a method call becomes a function call, a path loses its qualifier.
+fn call_splice(call: &Call, written: String, method: &str) -> Splice {
+    match call {
+        Call::Method {
+            span,
+            receiver,
+            lend,
+            args,
+        } => Splice::Call {
+            span: span.clone(),
+            written,
+            method: method.to_string(),
+            lend: *lend,
+            receiver: receiver.clone(),
+            args: args.clone(),
+        },
+        Call::Path { qualifier } => Splice::Text {
+            span: qualifier.clone(),
+            text: written,
+        },
+    }
+}
+
+/// R1 and R2 for every detached member: its receiver becomes `parameter: &T`, its `self` and
+/// `Self` are rewritten.
+fn member_splices(block_file: &str, block: &Block, parameter: &str) -> Vec<Splice> {
+    let mut splices = Vec::new();
     for index in block.detached.clone() {
         let member = &block.members[index];
         let receiver = member.receiver.as_ref().map(Receiver::span);
@@ -86,7 +143,7 @@ pub(super) fn resolution(surveyed: Surveyed) -> Result<Resolution> {
             let lifetime = lifetime
                 .as_deref()
                 .map_or(String::new(), |name| format!("{name} "));
-            anchored.push(Splice::Text {
+            splices.push(Splice::Text {
                 span: span.clone(),
                 text: format!(
                     "{parameter}: &{lifetime}{}{}",
@@ -99,34 +156,31 @@ pub(super) fn resolution(surveyed: Surveyed) -> Result<Resolution> {
             .into_iter()
             .filter(|site| !receiver.is_some_and(|span| span.contains(&site.offset)))
             .collect();
-        for (span, replacement) in edits::rewrites(
-            block_file,
-            member.span.clone(),
-            &parameter,
-            "self",
-            &block.self_type,
-            &own_sites,
-            &BTreeSet::new(),
-        ) {
-            if !span.is_empty() {
-                anchored.push(Splice::Text {
-                    span,
-                    text: replacement,
-                });
-            }
-        }
+        splices.extend(
+            edits::rewrites(
+                block_file,
+                member.span.clone(),
+                parameter,
+                "self",
+                &block.self_type,
+                &own_sites,
+                &BTreeSet::new(),
+            )
+            .into_iter()
+            .filter(|(span, _)| !span.is_empty())
+            .map(|(span, text)| Splice::Text { span, text }),
+        );
     }
+    splices
+}
 
-    let known = splices.get(&file).cloned().unwrap_or_default();
-    let (block_text, emptied) = block_text(block_file, &block, &known);
-    splices.entry(file.clone()).or_default().push(Splice::Text {
-        span: line_start(block_file, block.header_line)
-            ..line_start(block_file, block.close_line + 1),
-        text: block_text,
-    });
-
+/// The file edits the splices make, leaving out a file they do not change.
+fn changes_of(
+    texts: &BTreeMap<String, String>,
+    splices: &BTreeMap<String, Vec<Splice>>,
+) -> Vec<FileEdit> {
     let mut changes = Vec::new();
-    for (path, list) in &splices {
+    for (path, list) in splices {
         let original = texts.get(path).map(String::as_str).unwrap_or_default();
         let rendered = render(original, 0..original.len(), list);
         if rendered != original {
@@ -136,20 +190,7 @@ pub(super) fn resolution(surveyed: Surveyed) -> Result<Resolution> {
             });
         }
     }
-
-    let note = note_of(
-        &block,
-        &parameter,
-        sites.len(),
-        files.len(),
-        use_lines,
-        emptied,
-    );
-    Ok(Resolution {
-        edit: WorkspaceEdit { changes },
-        report: Vec::new(),
-        notes: vec![note],
-    })
+    changes
 }
 
 /// The line a `use` is inserted as, with the blank line that follows it when the module had none.

@@ -58,7 +58,7 @@ tddy-tools restructure check <plan.jsonl> [--deep] [--budget LINES]
 tddy-tools restructure snapshot <plan.jsonl>
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at L:C[-L:C]
-tddy-tools restructure verify --against <git-ref> [--retarget OLD=NEW]... [--repoint OLD=NEW]... [--rebind NAME]...
+tddy-tools restructure verify --against <git-ref> [--retarget OLD=NEW]... [--repoint OLD=NEW]... [--rebind NAME]... [--detach TYPE=NAME]...
 tddy-tools restructure warm
 ```
 
@@ -82,7 +82,7 @@ same path `apply` takes and writes nothing, so it is the only form that reports 
 refusal before an index has been paid for. `no findings` from a plain `check` has been followed by an
 apply that refused more than once — see
 [§ Known limitations](#known-limitations).
-| `verify` | Logical-statement comparison against a git ref; see [Verify](#verify). `--retarget OLD=NEW`, `--repoint OLD=NEW` and `--rebind NAME` (each repeatable) declare a `retarget_impl`, a `repoint_call` and a `read_fields_through` the author made, so the comparison accounts for them. The declarations also travel to the index daemon's `Verify` RPC |
+| `verify` | Logical-statement comparison against a git ref; see [Verify](#verify). `--retarget OLD=NEW`, `--repoint OLD=NEW`, `--rebind NAME` and `--detach TYPE=NAME` (each repeatable) declare a `retarget_impl`, a `repoint_call`, a `read_fields_through` and a `detach_method` the author made, so the comparison accounts for them. The declarations also travel to the index daemon's `Verify` RPC |
 
 ## Plan format
 
@@ -325,6 +325,7 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `reparent_module` | Move a module's file, and the directory of its children, under **another parent of the same crate**. See [Same-crate moves](#same-crate-moves) |
 | `retarget_impl` | Rewrite an inherent `impl`'s self type to **another type of the same crate** — the whole block, or the run of members its anchor names. See [`retarget_impl`](#retarget_impl). With `variant: "leave_delegator"` and `expr`, each moved method leaves a forwarding method on the old type |
 | `move_impl_members` | Move a contiguous run of members of one inherent `impl` into an `impl` of the same type in **another module of the same crate**. See [`move_impl_members`](#move_impl_members) |
+| `detach_method` | Turn the members of one inherent `impl` into free functions over a parameter `name`, in the same module, and re-point every caller. See [`detach_method`](#detach_method) |
 | `read_fields_through` | Rebind the `self` a **range** of a method reads to a local inserted before it: `let <name> = <expr>;`, then `<name>.<field>` for every field read (field mode) or `<name>` for every `self` (self mode), so a following `extract_method` writes a free function. See [`read_fields_through`](#read_fields_through) |
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
@@ -590,6 +591,42 @@ a member of a trait `impl` (a trait `impl` moves whole with `move_item`), an ite
 member (a macro invocation), an inline destination written on one line, and a name the moved lines reach in
 the origin that the destination binds to something else — one it declares, or one it imports by a path
 other than the origin's. Behaviour and limits: [`docs/impl-move.md`](../../../packages/tddy-code-restructuring/docs/impl-move.md).
+
+### `detach_method`
+
+The members of one inherent `impl T` become free functions over a named parameter, and every caller the
+language server reports is re-pointed, in one plan line:
+
+```json
+{"op":"detach_method","anchor":{"kind":"items","file":"src/host.rs","items":["c::host::Host::bump","c::host::Host::total"],"fingerprints":["sha256:…","sha256:…"]},"name":"session"}
+```
+
+The anchor is an `items` anchor over a contiguous run of members (as `restructure anchors --items` emits
+it), or one `item` anchor on a single member. `name` is one identifier, not `self` and not a keyword.
+
+- **Signature.** `&mut self` becomes `name: &mut T` and `&self` becomes `name: &T`, a receiver lifetime
+  kept; an associated function keeps its parameters. Doc comments, attributes and visibility are unchanged.
+- **Body.** `self` becomes `name` and `Self` becomes the block header's self type.
+- **Placement.** The functions follow the block, in member order, in the same module. A block the run
+  empties is removed and the functions take its place.
+- **Callers.** `R.m(args)` becomes `m(R, args)`: a place receiver is borrowed (`&mut R` or `&R`), a
+  reference is passed as it is, and the arguments are kept byte for byte. `Self::m` and `T::m` become
+  `m`. From another module the call is written `M::m(…)`, and a `use` of `M` is added when the file does
+  not bind it. Comments are not edited.
+
+`check --deep` and `apply` refuse, before anything is written, naming the file and line of each: a member
+that takes `self` by value or through an explicit type; an `impl` with generics or a `where` clause; a
+member of a trait `impl` (trait members stay methods); a `pub` member, which may have callers outside the
+workspace; an associated const or type; a `name` the member's body already writes; a function name the
+module already declares or imports; a call whose receiver is another type (`Box<T>`, `Rc<T>`, named in
+the refusal); and a reference inside a macro invocation. Plain `check`, with no server, refuses a missing
+or malformed `name`, an anchor that names no members (a range or a symbol), and every field the operation
+does not define, by name.
+
+The run note names the result: ``detach_method: Host::bump, Host::total became functions over `session`;
+3 calls in 2 files re-pointed (1 `use` added); the block was emptied and removed``. `verify --detach
+T=name` accounts for it (see [Verify](#verify)). Behaviour and limits:
+[`docs/detach-method.md`](../../../packages/tddy-code-restructuring/docs/detach-method.md).
 
 ### `read_fields_through`
 
@@ -1048,6 +1085,14 @@ rebound `self.` to have gone; and one gained `let NAME = …;` is excused per de
 `repointed`. `NAME` is one identifier other than `self`. A rebind nobody declared, a second `let` and a
 changed argument stay reported. As with `--retarget`, `verify` proves the differences have the shape the
 declaration produces, not that the plan produced them.
+
+`--detach TYPE=NAME` (repeatable) tells `verify` that the members of `impl TYPE` were detached into
+functions over `NAME` by `detach_method`. It implies `--rebind NAME`, since a detached body is a rebound
+body. A lost and a gained statement then pair when the gained signature's receiver became `NAME: &mut
+TYPE` or `NAME: &TYPE` (`Self` written `TYPE`), when a call `R.m(a)` became `m(R, a)`, `M::m(R, a)`,
+`m(&mut R, a)` or `m(&R, a)`, or when `Self::m(a)` became `m(a)`. The pairs count into `repointed`. The
+`impl TYPE {` header of an emptied block is scaffolding and never a lost statement. A detach nobody
+declared, a changed argument and a receiver changed other than by the borrow stay reported.
 
 `--repoint OLD=NEW` (repeatable) tells `verify` of a call re-point the author made. It pairs a lost
 statement with a gained one equal to it once every call written `OLD` becomes `NEW` — an `OLD`

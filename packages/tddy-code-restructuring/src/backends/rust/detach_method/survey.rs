@@ -10,7 +10,7 @@ use std::ops::Range;
 use super::super::character_column;
 use super::super::item_move::text::enclosing_modules;
 use super::super::{failure, server_defect, LspPoint};
-use super::block::{self, Block};
+use super::block::{self, Block, Member};
 use super::calls::{self, Lend, Reach, Shape};
 use super::member::{Kind, Receiver};
 use super::refusals;
@@ -116,11 +116,7 @@ pub(super) fn survey(
         let at = character_column(&texts[&file], LspPoint::read(Some(&member.position))?);
         for reference in server.references(workspace, &file, at)? {
             let path = reference.path.clone();
-            if !texts.contains_key(&path) {
-                let read = workspace.read(&path)?;
-                maskeds.insert(path.clone(), scan::masked(&read));
-                texts.insert(path.clone(), read);
-            }
+            read_once(workspace, &path, &mut texts, &mut maskeds)?;
             let referring = &texts[&path];
             let masked = &maskeds[&path];
             let offset = scan::offset_of(referring, reference.at);
@@ -140,40 +136,12 @@ pub(super) fn survey(
                         continue;
                     }
                 };
-            let call = match &shape {
-                Shape::Method {
-                    receiver,
-                    receiver_name,
-                    span,
-                    args,
-                    ..
-                } => {
-                    let hover = server.hover(
-                        workspace,
-                        &path,
-                        scan::position_of(referring, receiver.start),
-                    )?;
-                    let receiver_type = calls::type_of(&hover, receiver_name)?;
-                    let mutable = matches!(
-                        member.receiver,
-                        Some(Receiver::Borrowed { mutable: true, .. })
-                    );
-                    match calls::lend_of(&shape, &receiver_type, &block.self_type, mutable) {
-                        Ok(lend) => Call::Method {
-                            span: span.clone(),
-                            receiver: receiver.clone(),
-                            lend,
-                            args: args.clone(),
-                        },
-                        Err(reason) => {
-                            findings.push(refusals::located(&path, line, reason));
-                            continue;
-                        }
-                    }
+            let call = match call_of(server, workspace, &path, referring, &shape, member, &block)? {
+                Ok(call) => call,
+                Err(reason) => {
+                    findings.push(refusals::located(&path, line, reason));
+                    continue;
                 }
-                Shape::Path { qualifier, .. } => Call::Path {
-                    qualifier: qualifier.clone(),
-                },
             };
             let prefix = match &shape {
                 Shape::Path { prefix, .. } => prefix.as_deref(),
@@ -198,6 +166,67 @@ pub(super) fn survey(
         sites,
         findings,
     })
+}
+
+/// Read `path` and its masked text into the survey's maps, once.
+fn read_once(
+    workspace: &Workspace<'_>,
+    path: &str,
+    texts: &mut BTreeMap<String, String>,
+    maskeds: &mut BTreeMap<String, String>,
+) -> Result<()> {
+    if !texts.contains_key(path) {
+        let read = workspace.read(path)?;
+        maskeds.insert(path.to_string(), scan::masked(&read));
+        texts.insert(path.to_string(), read);
+    }
+    Ok(())
+}
+
+/// The call a reference's shape is, or the reason it cannot be re-pointed. A method call asks the
+/// server for its receiver's type, which decides how the receiver is lent.
+fn call_of(
+    server: &mut dyn DetachServer,
+    workspace: &Workspace<'_>,
+    path: &str,
+    referring: &str,
+    shape: &Shape,
+    member: &Member,
+    block: &Block,
+) -> Result<std::result::Result<Call, String>> {
+    match shape {
+        Shape::Method {
+            receiver,
+            receiver_name,
+            span,
+            args,
+            ..
+        } => {
+            let hover = server.hover(
+                workspace,
+                path,
+                scan::position_of(referring, receiver.start),
+            )?;
+            let receiver_type = calls::type_of(&hover, receiver_name)?;
+            let mutable = matches!(
+                member.receiver,
+                Some(Receiver::Borrowed { mutable: true, .. })
+            );
+            Ok(
+                calls::lend_of(shape, &receiver_type, &block.self_type, mutable).map(|lend| {
+                    Call::Method {
+                        span: span.clone(),
+                        receiver: receiver.clone(),
+                        lend,
+                        args: args.clone(),
+                    }
+                }),
+            )
+        }
+        Shape::Path { qualifier, .. } => Ok(Ok(Call::Path {
+            qualifier: qualifier.clone(),
+        })),
+    }
 }
 
 /// The member names an `items` or `item` anchor names; a range names none, and its members are the
