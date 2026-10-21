@@ -1,0 +1,19 @@
+[package]
+name = "tddy-session-sync-cli"
+version = "0.1.0"
+edition = "2021"
+description = "The tddy-session-sync binary: the worktree mirror library wired to the LiveKit room connector"
+
+# The binary keeps the name `tddy-session-sync`: the daemon and every session-start script resolve
+# `target/{debug,release}/tddy-session-sync`. Only the package that builds it is named differently,
+# so the mirror library (`tddy-session-sync`) can stay free of a LiveKit dependency.
+[[bin]]
+name = "tddy-session-sync"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+env_logger = "0.11"
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-session-sync = { path = "../tddy-session-sync" }
+tokio = { version = "1", features = ["full"] }

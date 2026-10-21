@@ -89,6 +89,7 @@ members = [
     "packages/tddy-remote-git-repo",
     "packages/tddy-remote-git-repo-cli",
     "packages/tddy-session-sync",
+    "packages/tddy-session-sync-cli",
     "packages/tddy-subagent-worktree",
     "packages/tddy-tool-engine",
     "packages/tddy-semantic-index",
