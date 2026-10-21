@@ -22,6 +22,8 @@ targets:
       srcs:
         - "packages/tddy-coder/src/**/*.rs"
         - "packages/tddy-coder/Cargo.toml"
+        - "packages/tddy-coder-cli/src/**/*.rs"
+        - "packages/tddy-coder-cli/Cargo.toml"
       outputs:
         - path: "target/debug/tddy-coder"
           kind: file

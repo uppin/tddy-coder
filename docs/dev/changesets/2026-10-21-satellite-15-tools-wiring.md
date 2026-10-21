@@ -22,7 +22,7 @@ for a library that ships a binary. Every client binary is built by a wiring crat
 - **Scripts and build.** `release`, `test`, `claude-sandbox`, `run-index-daemon` and
   `scripts/dev-runtime-binaries.sh` build `-p tddy-tools-cli`. `packages/tddy-tools/BUILD.yaml`
   names `package: tddy-tools-cli` with both crates in `srcs`; `packages/tddy-coder/BUILD.yaml` names
-  `package: tddy-coder-cli` (a defect left by #630; its `srcs` are recorded in the backlog).
+  `package: tddy-coder-cli` and lists both crates in `srcs` (a defect left by #630).
   Binary-name lists (`install`, `publish.sh`, CI staging) are unchanged.
 - **Ratchet.** `tddy-tools-cli` joins `WIRING`; `tddy-tools` joins `CLIENT_LIBRARIES` and
   `CLIENT_BINARIES`; `WIRING_WITH_A_LIBRARY` and
@@ -50,7 +50,8 @@ comment-only `TODO(restructure-engine)` markers were added at the three refusal 
   client binaries (no feature on the wiring crates); the entry stays for the daemon.
 - `2026-10-08-tddy-tools-server-rs-is-3-9k-lines-and-the-crate-mixes-several-responsibilities`:
   ⚠ DURING, not fixed: the binary's wiring left the crate, the crate split did not happen; kept unchanged.
-- New: `2026-10-21-tddy-coder-build-yaml-srcs-miss-the-cli-crate`.
+- `2026-10-21-tddy-coder-build-yaml-srcs-miss-the-cli-crate`: recorded during this wrap and resolved
+  here (`srcs` now cover `tddy-coder-cli`); deleted.
 
 ## Known over-budget files (not grown here)
 
