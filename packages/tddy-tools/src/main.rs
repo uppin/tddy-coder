@@ -3,13 +3,6 @@
 //! - CLI mode (default): `submit` and `ask` subcommands relay to tddy-coder via Unix socket
 //! - MCP mode (`--mcp`): Retains approval_prompt MCP server for backwards compatibility
 
-mod cli;
-mod index_client;
-mod index_console;
-mod pty_relay;
-mod remote_cli;
-mod session_hook;
-
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -17,6 +10,7 @@ use clap::Parser;
 use rmcp::ServiceExt;
 use tddy_room_client::RoomConnector;
 use tddy_tools::server::PermissionServer;
+use tddy_tools::{cli, index_client, pty_relay, remote_cli, session_hook};
 
 #[derive(Parser)]
 #[command(name = "tddy-tools")]

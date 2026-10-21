@@ -46,6 +46,9 @@ pub trait ItemResolver {
 pub fn module_path_of(root: &Path, file: &str) -> Result<Vec<String>> {
     let (package_dir, package) = owning_package(root, file)?;
     let source_dir = package_dir.join("src");
+    // TODO(restructure-engine): a test crate (`tests/*.rs`) or any other file outside `src/`
+    // cannot be moved. See
+    // docs/dev/todo/2026-10-21-restructure-cannot-move-a-binary-root-or-a-test-crate.md
     let within_src = Path::new(file).strip_prefix(&source_dir).map_err(|_| {
         malformed(format!(
             "{file} is not under {}, so it is no module of the package `{package}`",

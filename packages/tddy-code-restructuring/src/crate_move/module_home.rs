@@ -18,6 +18,10 @@ pub(crate) fn module_name(source: &str) -> Result<String> {
         .and_then(|stem| stem.to_str())
         .ok_or_else(|| malformed(format!("`{source}` is not a Rust module file")))?;
 
+    // TODO(restructure-engine): moving a binary or crate root (`main.rs`, `lib.rs`) is not a
+    // supported move. See
+    // docs/dev/todo/2026-10-21-restructure-cannot-move-a-binary-root-or-a-test-crate.md and
+    // docs/dev/todo/2026-10-21-restructure-cannot-reparent-modules-declared-in-a-binary-root.md
     if matches!(stem, "lib" | "main" | "mod") {
         return Err(malformed(format!(
             "`{source}` is a crate or module root, not a module — moving one moves everything it \
