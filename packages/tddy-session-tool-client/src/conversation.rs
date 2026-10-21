@@ -14,11 +14,12 @@ use tddy_service::proto::exec_tools::{
 };
 
 use crate::livekit_session;
+use crate::room_transport::dispatch_request_via_livekit;
+use crate::room_transport::LiveKitRoomKey;
 use crate::{
     clamp_remote_blocking_args, connect_sandbox_ipc, detect_session_tool_transport,
-    dispatch_request_via_daemon_http, dispatch_request_via_livekit,
-    dispatch_request_via_rpc_transport, execute_tool_request, incomplete_livekit_error,
-    not_configured_error, LiveKitRoomKey, SessionToolEnvelope, SessionToolTransport,
+    dispatch_request_via_daemon_http, dispatch_request_via_rpc_transport, execute_tool_request,
+    incomplete_livekit_error, not_configured_error, SessionToolEnvelope, SessionToolTransport,
 };
 
 /// A worktree operation a conversation asks its daemon for.
