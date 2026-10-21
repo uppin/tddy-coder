@@ -14,7 +14,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { HostRemoteDesktopSchema, ProbeOutcome } from "../../src/gen/host_pb";
-import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
+import { DesktopAuthMethod, Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -59,6 +59,11 @@ function aHostWhoseDesktopRefusesTheSignIn() {
   return anInMemoryRpcBackend().implement(ScreenSharingService, {
     listHostTargets: async () => ({ targets: [] }),
     addHostTarget: async () => ({ targetId: A_HOST_TARGET }),
+    inspectHostDesktop: async () => ({
+      offered: [DesktopAuthMethod.VNC_PASSWORD],
+      unsupportedVncTypes: [],
+      remembered: false,
+    }),
     startHostStream: async () => {
       throw new ConnectError(THE_DESKTOPS_REASON, Code.Unauthenticated);
     },
@@ -71,6 +76,11 @@ function aHostWhoseDesktopOpensAt(size: { width: number; height: number }) {
   return anInMemoryRpcBackend().implement(ScreenSharingService, {
     listHostTargets: async () => ({ targets: [] }),
     addHostTarget: async () => ({ targetId: A_HOST_TARGET }),
+    inspectHostDesktop: async () => ({
+      offered: [DesktopAuthMethod.NONE],
+      unsupportedVncTypes: [],
+      remembered: false,
+    }),
     startHostStream: async () => ({
       livekitRoom: `host-desktop-${HOST}`,
       livekitUrl: "wss://livekit.example.test",

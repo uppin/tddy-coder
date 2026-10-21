@@ -22,6 +22,7 @@
 
 mod bridge_config;
 pub mod bridge_readiness;
+pub mod host_desktop_sign_in;
 pub mod screen_sharing_records;
 pub mod screen_sharing_service;
 pub mod session_vault_target_store;
@@ -30,6 +31,9 @@ pub mod x11vnc;
 use std::sync::Arc;
 
 pub use bridge_readiness::{await_bridge_readiness, BridgeStarted, DEFAULT_BRIDGE_READY_TIMEOUT};
+pub use host_desktop_sign_in::{
+    decrypt_desktop_credential_answer, remembered_account, RememberedDesktopCredentials,
+};
 pub use screen_sharing_records::{
     account_for, record_for, screen_sharing_provider, target_from, ScreenSharingTargetStore,
     TargetError, META_HOST, META_PORT, META_PROTOCOL, META_USERNAME, SCREEN_SHARING_PROVIDER,

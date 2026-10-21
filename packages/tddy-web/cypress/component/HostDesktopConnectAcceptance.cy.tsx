@@ -9,7 +9,7 @@
  * PRD: docs/ft/web/1-WIP/PRD-2026-09-06-desktop-connect.md
  */
 
-import { create } from "@bufbuild/protobuf";
+import { create, fromBinary } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AuthService } from "../../src/gen/auth_pb";
 import {
@@ -18,7 +18,12 @@ import {
   HostService,
   ProbeOutcome,
 } from "../../src/gen/host_pb";
-import { ScreenSharingService } from "../../src/gen/screen_sharing_pb";
+import {
+  DesktopAuthMethod,
+  DesktopCredentialAnswerSchema,
+  ScreenSharingService,
+  type DesktopCredentialAnswer,
+} from "../../src/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { HostRowTooling } from "../../src/components/hosts/HostRowTooling";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -41,7 +46,7 @@ import { ConnectionProviders } from "../../src/rpc/connections/registry";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { useHostPrompts } from "../../src/rpc/useHostPrompts";
-import { hostDesktopPage, hostPassphraseDialogPage } from "../support/pages/hostsScreenPage";
+import { hostDesktopPage, hostDesktopSignInPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
 /** The directory lists the host its row is about — a row exists only for a listed host. */
@@ -234,12 +239,27 @@ function theDesktopPasswordQuestion(): HostPromptFrame {
   return {
     promptId: A_PROMPT,
     daemonInstanceId: HOST,
-    kind: HostPromptKind.DESKTOP_PASSWORD,
+    kind: HostPromptKind.DESKTOP_CREDENTIALS,
     subject: THE_DESKTOP,
     hostPublicKey,
     hostPublicKeyFingerprint: HOST_KEY_FINGERPRINT,
+    offeredAuthMethods: [DesktopAuthMethod.VNC_PASSWORD],
   };
 }
+
+/** What the desktop advertises: a VNC password, the case a prompted password is about. */
+const A_DESKTOP_WITH_A_PASSWORD = {
+  offered: [DesktopAuthMethod.VNC_PASSWORD],
+  unsupportedVncTypes: [] as number[],
+  remembered: false,
+};
+
+/** What a desktop that needs no sign in advertises. */
+const A_DESKTOP_WITHOUT_A_PASSWORD = {
+  offered: [DesktopAuthMethod.NONE],
+  unsupportedVncTypes: [] as number[],
+  remembered: false,
+};
 
 /** A key passphrase question, on the same host and the same feed — and not this surface's. */
 function aKeyPassphraseQuestion(): HostPromptFrame {
@@ -266,6 +286,7 @@ function aDaemonAwaitingADesktopPassword(feed: HostPromptFeed): InMemoryRpcBacke
     .implement(ScreenSharingService, {
       listHostTargets: async () => ({ targets: [] }),
       addHostTarget: async () => ({ targetId: A_HOST_TARGET }),
+      inspectHostDesktop: async () => A_DESKTOP_WITH_A_PASSWORD,
       // Never settles: the host has raised its question and is waiting on the answer, which is the
       // whole point of prompting rather than storing.
       startHostStream: () => new Promise(() => undefined),
@@ -297,11 +318,11 @@ function everythingStoredBy(win: Cypress.AUTWindow): string {
 /**
  * What the host — and only the host — reads out of the single answer the browser sent it.
  *
- * Yields the plaintext, so a spec asserts the password that was typed rather than the size of the
- * block it came in. Decryption is done with the private half the prompt's key was generated with,
+ * Yields the decoded `DesktopCredentialAnswer`, so a spec asserts the password that was typed rather
+ * than the size of the block it came in. Decryption is done with the private half the prompt's key was generated with,
  * so a payload encrypted for anything else fails here by name (see `cypress/support/hostKeys.ts`).
  */
-function theAnswerTheHostCanRead(backend: InMemoryRpcBackend): Cypress.Chainable<string> {
+function theAnswerTheHostCanRead(backend: InMemoryRpcBackend): Cypress.Chainable<DesktopCredentialAnswer> {
   return cy
     .wrap(backend)
     .should((b: InMemoryRpcBackend) =>
@@ -311,8 +332,9 @@ function theAnswerTheHostCanRead(backend: InMemoryRpcBackend): Cypress.Chainable
       ).to.have.length(1),
     )
     .then((b: InMemoryRpcBackend) =>
-      hostKey.decrypt(b.callsTo(HostService.method.answerHostPrompt)[0].encryptedAnswer),
-    );
+      hostKey.decryptBytes(b.callsTo(HostService.method.answerHostPrompt)[0].encryptedAnswer),
+    )
+    .then((plaintext) => fromBinary(DesktopCredentialAnswerSchema, plaintext as Uint8Array));
 }
 
 describe("Host desktop password", () => {
@@ -338,14 +360,14 @@ describe("Host desktop password", () => {
     });
 
     // Then the operator is asked, for the desktop the host named and under the key to verify
-    hostPassphraseDialogPage
+    hostDesktopSignInPage
       .root(HOST)
       .should("contain.text", THE_DESKTOP)
       .and("contain.text", HOST_KEY_FINGERPRINT);
 
     // When they answer
-    hostPassphraseDialogPage.input().type(THE_DESKTOP_PASSWORD);
-    hostPassphraseDialogPage.submit().click();
+    hostDesktopSignInPage.password().type(THE_DESKTOP_PASSWORD);
+    hostDesktopSignInPage.submit().click();
 
     // Then exactly one answer went back to the host that asked. Asserted before anything about
     // absence: a password that never left is trivially not in a request and not in storage, and an
@@ -360,7 +382,9 @@ describe("Host desktop password", () => {
     // …and what that answer says, read as only this host can read it, is the password the operator
     // typed. A dialog that encrypted a constant, or the empty string, produces a ciphertext of
     // exactly the same size and fails only here.
-    theAnswerTheHostCanRead(backend).should("equal", THE_DESKTOP_PASSWORD);
+    theAnswerTheHostCanRead(backend)
+      .its("password")
+      .should("equal", THE_DESKTOP_PASSWORD);
 
     // …and nothing the browser sent this host carries the password in the clear — not the answer,
     // and not the start or the target it was opened through.
@@ -380,7 +404,7 @@ describe("Host desktop password", () => {
     });
 
     // …and it is not left on screen either.
-    hostPassphraseDialogPage.input().should("have.value", "");
+    hostDesktopSignInPage.password().should("have.value", "");
   });
 });
 
@@ -393,13 +417,8 @@ describe("Host desktop password", () => {
  *
  * The prompt is raised on **every** start because the host cannot know in advance whether the
  * desktop it is about to open wants a password. So an operator whose desktop has none is asked a
- * question whose only truthful answer is nothing at all — and a dialog that refuses an empty answer
- * refuses them the desktop itself, which is AC-2 gone for that entire class of host.
- *
- * The opposite mistake — taking an empty answer where one cannot possibly be right — is pinned on
- * the other flow this same dialog serves, by `HostAddKeyAcceptance`'s "refuses to send an empty
- * passphrase, which unlocks no key". The two together are what stop this from being satisfied by a
- * dialog that simply always accepts.
+ * question whose only truthful answer is nothing at all. Since `#host-desktops 8/8` the overlay
+ * inspects the desktop first, and one that advertises no authentication is answered without a form.
  */
 
 const A_LIVEKIT_ROOM = "host-desktop-workstation-1";
@@ -415,7 +434,10 @@ const THE_TRACK = "desktop";
  * on screen evidence that the empty answer got through, rather than evidence that a stub resolved
  * on its own.
  */
-function aDesktopReleasedByTheAnswer(feed: HostPromptFeed): InMemoryRpcBackend {
+function aDesktopReleasedByTheAnswer(
+  feed: HostPromptFeed,
+  advertising: typeof A_DESKTOP_WITH_A_PASSWORD = A_DESKTOP_WITH_A_PASSWORD,
+): InMemoryRpcBackend {
   let theAnswerArrived: () => void = () => undefined;
   const answered = new Promise<void>((resolve) => {
     theAnswerArrived = resolve;
@@ -431,6 +453,7 @@ function aDesktopReleasedByTheAnswer(feed: HostPromptFeed): InMemoryRpcBackend {
     .implement(ScreenSharingService, {
       listHostTargets: async () => ({ targets: [] }),
       addHostTarget: async () => ({ targetId: A_HOST_TARGET }),
+      inspectHostDesktop: async () => advertising,
       startHostStream: async () => {
         await answered;
         return {
@@ -464,45 +487,25 @@ describe("Host desktop without a password", () => {
     cy.clearLocalStorage();
   });
 
-  it("opens a desktop that has no password from an empty answer", () => {
-    // Given a host asking for the password of a desktop that does not have one
+  it("opens a desktop that has no password without asking the operator", () => {
+    // Given a desktop that advertises no authentication, whose host asks its question anyway
     const feed = aHostPromptFeed();
-    const backend = aDesktopReleasedByTheAnswer(feed);
+    const backend = aDesktopReleasedByTheAnswer(feed, A_DESKTOP_WITHOUT_A_PASSWORD);
     connectAndBeAskedFor(backend, feed);
 
-    // When the operator sends without typing one
-    hostPassphraseDialogPage.submit().click();
-
-    // Then that answer reached the host that asked, and reached it encrypted: an empty password is
-    // still a password, and a dialog that shortcut the encryption for it would be sending plaintext
-    // on the one call this node exists to keep secret.
+    // Then the answer that reached the host was sent without a form: an operator is not asked for
+    // what the desktop does not want. What the host reads out of it says no authentication, and
+    // every ciphertext under this key is 256 bytes, so only decrypting tells that apart.
+    theAnswerTheHostCanRead(backend).its("method").should("equal", DesktopAuthMethod.NONE);
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
       const answers = b.callsTo(HostService.method.answerHostPrompt);
-      expect(answers, "the empty answer must reach the host that raised the prompt").to.have.length(
-        1,
-      );
       expect(answers[0].promptId).to.equal(A_PROMPT);
     });
-
-    // …and what the host reads out of it is the empty answer itself, not some stand-in the dialog
-    // substituted. Every ciphertext under this key is 256 bytes, so this is the only assertion that
-    // tells the no-password case apart from the password one at all.
-    theAnswerTheHostCanRead(backend).should("equal", "");
+    hostDesktopSignInPage.root(HOST).should("not.exist");
 
     // …and the desktop the question was blocking opened. The start settles on the answer and on
-    // nothing else, so a stream on screen is that empty answer accepted end to end.
+    // nothing else, so a stream on screen is that answer accepted end to end.
     hostDesktopPage.stream().should("exist");
-  });
-
-  it("says the answer may be left blank when the desktop has no password", () => {
-    // Given a host asking for the password of a desktop that does not have one
-    const feed = aHostPromptFeed();
-    connectAndBeAskedFor(aDesktopReleasedByTheAnswer(feed), feed);
-
-    // Then the dialog says so, rather than leaving an operator to guess that nothing is an answer
-    // and invent a password the desktop never had. Matched as a pattern: what has to be true is
-    // that blankness is named, not which sentence names it.
-    hostPassphraseDialogPage.root(HOST).invoke("text").should("match", /blank/i);
   });
 });
 
@@ -697,7 +700,7 @@ describe("Host desktop password among the hosts other questions", () => {
 
     // Then the operator is asked. Stated first, so the absence below is this overlay declining a
     // question rather than an overlay that never asks anything at all.
-    hostPassphraseDialogPage.root(HOST).should("contain.text", THE_DESKTOP);
+    hostDesktopSignInPage.root(HOST).should("contain.text", THE_DESKTOP);
 
     // When the same host instead raises the other question this feed carries — a key passphrase
     const keyFeed = aHostPromptFeed();
@@ -711,7 +714,7 @@ describe("Host desktop password among the hosts other questions", () => {
 
     // Then the operator is not asked it here. A desktop password typed into a key passphrase prompt
     // is sent as the answer to it: a secret handed to a question nobody on this surface asked.
-    hostPassphraseDialogPage.root(HOST).should("not.exist");
+    hostDesktopSignInPage.root(HOST).should("not.exist");
   });
 
   it("keeps the desktop question answerable when another prompt lands mid answer", () => {
@@ -722,8 +725,8 @@ describe("Host desktop password among the hosts other questions", () => {
     cy.then(() => {
       feed.raise(theDesktopPasswordQuestion());
     });
-    hostPassphraseDialogPage.root(HOST).should("contain.text", THE_DESKTOP);
-    hostPassphraseDialogPage.input().type(THE_DESKTOP_PASSWORD);
+    hostDesktopSignInPage.root(HOST).should("contain.text", THE_DESKTOP);
+    hostDesktopSignInPage.password().type(THE_DESKTOP_PASSWORD);
 
     // When an add-key passphrase question for the same host lands on the same feed
     cy.then(() => {
@@ -736,17 +739,19 @@ describe("Host desktop password among the hosts other questions", () => {
     // Then the desktop's question is still in front of them, with what they typed still in it — a
     // dialog that unmounted here loses the typing and leaves the host's start blocked until the
     // prompt expires, with nothing left on screen to answer it.
-    hostPassphraseDialogPage.root(HOST).should("contain.text", THE_DESKTOP);
-    hostPassphraseDialogPage.input().should("have.value", THE_DESKTOP_PASSWORD);
+    hostDesktopSignInPage.root(HOST).should("contain.text", THE_DESKTOP);
+    hostDesktopSignInPage.password().should("have.value", THE_DESKTOP_PASSWORD);
 
     // …and it is still answerable, against the prompt the desktop is blocked on.
-    hostPassphraseDialogPage.submit().click();
+    hostDesktopSignInPage.submit().click();
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
       const answers = b.callsTo(HostService.method.answerHostPrompt);
       expect(answers, "the desktop question must still be answerable").to.have.length(1);
       expect(answers[0].promptId).to.equal(A_PROMPT);
     });
-    theAnswerTheHostCanRead(backend).should("equal", THE_DESKTOP_PASSWORD);
+    theAnswerTheHostCanRead(backend)
+      .its("password")
+      .should("equal", THE_DESKTOP_PASSWORD);
   });
 });
 

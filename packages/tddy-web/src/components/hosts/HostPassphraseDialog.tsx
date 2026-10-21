@@ -1,10 +1,11 @@
 /**
- * Asks the operator for a secret, on behalf of a host that is waiting on it.
+ * Asks the operator for an SSH key's passphrase, on behalf of a host that is waiting on it
+ * (`#hosts-screen 6/8`).
  *
- * One dialog for every question on `StreamHostPrompts` — a key passphrase (`#hosts-screen 6/8`) and
- * a desktop password (`#hosts-screen 8/8`) — because what has to be got right is the same for both:
- * the fingerprint is shown, a changed key blocks the answer, and the plaintext never leaves this
- * component. Only the words differ, and they are the caller's to supply.
+ * The `KEY_PASSPHRASE` question on `StreamHostPrompts`. A desktop's credentials are the other
+ * question on that feed, and are answered by `HostDesktopSignInDialog` (`#host-desktops 8/8`), which
+ * keeps this dialog's guarantees: the fingerprint is shown, a changed key blocks the answer, and the
+ * plaintext never leaves the component.
  *
  * Server-initiated: the host raised the question on `StreamHostPrompts` and is blocked until an
  * answer comes back. It is the last place in this app that asks a person for a secret before a
@@ -25,22 +26,7 @@
 import React, { useState } from "react";
 import { encryptForHost } from "../../lib/encryptForHost";
 import type { KeyPinVerdict } from "../../lib/hostKeyPinning";
-
-/**
- * The words one question is asked in.
- *
- * The dialog is the same on both of this feed's flows — a host is waiting, and the answer leaves as
- * ciphertext — but what it is waiting *for* is not, and an operator told a desktop password is going
- * into an ssh-agent has been told something untrue.
- */
-export interface HostPromptWording {
-  /** The line the dialog leads with. */
-  title: string;
-  /** One sentence saying what the host will do with the answer. */
-  explanation: string;
-  /** What the operator is being asked to type. */
-  placeholder: string;
-}
+import { HostKeyContinuityNotices, keyContinuityBlocks } from "./HostKeyContinuityNotices";
 
 export interface HostPassphraseDialogProps {
   hostId: string;
@@ -73,24 +59,6 @@ export interface HostPassphraseDialogProps {
    * here would make the feature unusable in any browser that will not store a pin.
    */
   keyContinuity: KeyPinVerdict;
-  /**
-   * The words to ask in. Defaults to the key passphrase this dialog was built for
-   * (`#hosts-screen 6/8`), so a caller answering that question says nothing.
-   */
-  wording?: HostPromptWording;
-  /**
-   * Whether nothing is a real answer to this question.
-   *
-   * Defaults to `false`, which is the key passphrase (`#hosts-screen 6/8`): an empty passphrase
-   * unlocks no encrypted key, so sending one only spends the single-use prompt the host is blocked
-   * on. A desktop password (`#hosts-screen 8/8`) is the opposite case — plenty of desktops have
-   * none, and the host asks on every start because it cannot know in advance which — so refusing an
-   * empty answer there refuses the desktop itself.
-   *
-   * Whether an empty answer means anything is a property of the question, and only the caller knows
-   * which question it asked; this dialog cannot read it off the prompt.
-   */
-  allowEmpty?: boolean;
   /** Receives the RSA-OAEP ciphertext — the answer itself never leaves this component. */
   onSubmit: (encryptedAnswer: Uint8Array) => void;
   /**
@@ -111,36 +79,20 @@ export function HostPassphraseDialog({
   fingerprint,
   spkiDer,
   keyContinuity,
-  wording,
-  allowEmpty = false,
   onSubmit,
   onAcceptChangedKey,
   onCancel,
 }: HostPassphraseDialogProps): React.ReactElement {
-  const words = wording ?? {
-    title: `Passphrase for ${subject}`,
-    explanation: `${hostId} is waiting to unlock ${subject} and load it into its ssh-agent.`,
-    placeholder: "Passphrase",
-  };
-  const keyChanged = keyContinuity.kind === "changed";
-  const keyUnverified = keyContinuity.kind === "unverified";
-  const keyMismatched = keyContinuity.kind === "mismatched";
-  const keyUnderivable = keyContinuity.kind === "underivable";
-  // The key arrived and its digest is not back. Nothing is said about it and nothing may be sent to
-  // it: a fingerprint shown now would be the *previous* key's, which is the one substitution the pin
-  // exists to catch, and it would be wearing that key's approval.
-  const keyUnchecked = keyContinuity.kind === "unchecked";
   const [passphrase, setPassphrase] = useState("");
   const [encrypting, setEncrypting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [changeVerified, setChangeVerified] = useState(false);
 
-  // Empty is refused because an empty answer only wastes the host's single-use prompt — unless the
-  // caller said that nothing IS a real answer here, which is true of a desktop with no password.
-  // `encrypting` is refused because one prompt accepts exactly one answer. Each blocking key state
-  // is refused for a reason of its own, spelled out beside its notice below.
-  const keyBlocks = keyChanged || keyMismatched || keyUnderivable || keyUnchecked;
-  const answerMissing = !allowEmpty && passphrase.length === 0;
+  // Empty is refused because an empty answer only wastes the host's single-use prompt: an empty
+  // passphrase unlocks no encrypted key. `encrypting` is refused because one prompt accepts exactly
+  // one answer. Each blocking key state is refused for a reason of its own, spelled out beside its
+  // notice below.
+  const keyBlocks = keyContinuityBlocks(keyContinuity);
+  const answerMissing = passphrase.length === 0;
   const blocked = keyBlocks || encrypting || answerMissing;
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -176,86 +128,16 @@ export function HostPassphraseDialog({
         onSubmit={handleSubmit}
         className="bg-background border border-border rounded-md p-4 w-96 flex flex-col gap-3"
       >
-        <p className="text-sm font-medium">{words.title}</p>
-        <p className="text-xs text-muted-foreground">{words.explanation}</p>
-        {fingerprint !== null && !keyMismatched && (
-          <p className="text-xs text-muted-foreground break-all">
-            Answer encrypted for host key <span className="font-mono">{fingerprint}</span>
-          </p>
-        )}
-        {keyChanged && (
-          <>
-            <p
-              data-testid="host-key-changed-warning"
-              className="text-xs text-destructive border border-destructive rounded px-2 py-1"
-            >
-              This host&apos;s key has changed since you last answered a prompt from it. Verify the
-              fingerprint above with the host before sending anything.
-            </p>
-            <div className="flex flex-col gap-1 border border-border rounded px-2 py-1">
-              <label className="text-xs flex items-start gap-2">
-                <input
-                  data-testid="host-key-accept-confirm"
-                  type="checkbox"
-                  checked={changeVerified}
-                  onChange={(e) => setChangeVerified(e.target.checked)}
-                />
-                <span>
-                  I checked the fingerprint above with {hostId} itself, and its key changed because
-                  the host changed it.
-                </span>
-              </label>
-              <button
-                type="button"
-                data-testid="host-key-accept-submit"
-                disabled={!changeVerified}
-                onClick={onAcceptChangedKey}
-                className="self-end px-3 py-1 text-xs border border-destructive rounded hover:bg-muted disabled:opacity-50"
-              >
-                Accept this key for {hostId}
-              </button>
-            </div>
-          </>
-        )}
-        {keyMismatched && (
-          <p
-            data-testid="host-key-mismatch-warning"
-            className="text-xs text-destructive border border-destructive rounded px-2 py-1"
-          >
-            This prompt contradicts itself: it advertises host key{" "}
-            <span className="font-mono break-all">{keyContinuity.advertisedFingerprint}</span>, but
-            the key it carries is{" "}
-            <span className="font-mono break-all">{keyContinuity.derivedFingerprint}</span>. A host
-            describing its own key gets it right, so something rewrote this in flight. Nothing can be
-            sent to it.
-          </p>
-        )}
-        {keyUnderivable && (
-          <p
-            data-testid="host-key-underivable-notice"
-            className="text-xs text-destructive border border-destructive rounded px-2 py-1"
-          >
-            This host&apos;s key cannot be checked or encrypted to from this page:{" "}
-            {keyContinuity.reason}. Nothing has been sent.
-          </p>
-        )}
-        {keyUnchecked && (
-          <p
-            data-testid="host-key-unchecked-notice"
-            className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
-          >
-            Checking the key this host is presenting. Nothing can be sent until it is checked.
-          </p>
-        )}
-        {keyUnverified && (
-          <p
-            data-testid="host-key-unverified-notice"
-            className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
-          >
-            Could not check whether this host&apos;s key has changed since last time. Verify the
-            fingerprint above with the host before sending anything.
-          </p>
-        )}
+        <p className="text-sm font-medium">Passphrase for {subject}</p>
+        <p className="text-xs text-muted-foreground">
+          {hostId} is waiting to unlock {subject} and load it into its ssh-agent.
+        </p>
+        <HostKeyContinuityNotices
+          hostId={hostId}
+          fingerprint={fingerprint}
+          keyContinuity={keyContinuity}
+          onAcceptChangedKey={onAcceptChangedKey}
+        />
         {failure !== null && (
           <p data-testid="host-passphrase-failure" className="text-xs text-destructive">
             Nothing was sent: {failure}
@@ -269,7 +151,7 @@ export function HostPassphraseDialog({
           disabled={keyBlocks}
           onChange={(e) => setPassphrase(e.target.value)}
           className="border border-border rounded px-2 py-1 text-sm bg-background"
-          placeholder={words.placeholder}
+          placeholder="Passphrase"
         />
         <div className="flex gap-2 justify-end">
           <button

@@ -47,7 +47,12 @@ and the same overlay — see [Two scopes](#two-scopes-a-sessions-desktop-and-a-h
 - As a user adding an RDP target, the port field defaults to 3389.
 - As an operator I can open a host's desktop from its row on the Hosts screen, without creating a
   session for it first.
-- As an operator I am asked for that desktop's password each time I open it, and it is kept nowhere.
+- As an operator I am asked only for what that desktop's sign-in method needs — nothing for a
+  desktop that needs no sign-in, a password for VNC Authentication, a username and password for
+  VeNCrypt, Apple Remote Desktop and RDP over TLS, and a username, optional domain and password for
+  RDP with NLA.
+- As an operator I can tick **Remember** so the next open of that desktop asks me nothing; unticked,
+  what I type is kept nowhere.
 - As an operator I do not see a connect action on a host tddy could not stream from, so I am never
   offered a control that cannot work.
 
@@ -252,12 +257,33 @@ control is absent, not disabled.
 A host whose desktop the probe found unreachable, or whose daemon has no bridge binary, offers no
 connect action either.
 
-### AC-SS-15: The desktop password is asked for, never stored
+### AC-SS-15: The desktop credential is asked for, and stored only on Remember
 
-Opening a host's desktop asks the operator for that desktop's password on the host's encrypted
-prompt channel, uses it once and keeps it nowhere — not on disk, not in daemon state past the call,
-and never in a process argument. An empty answer is a valid one and opens a password-less desktop.
-A question nobody answers before it expires fails the start and spawns no bridge.
+Opening a host's desktop asks the operator for that desktop's credential on the host's encrypted
+prompt channel. Unless the operator ticks **Remember**, it is used once and kept nowhere — not on
+disk, not in daemon state past the call, and never in a process argument. With Remember ticked, it
+is kept in the operator's own credential vault once the desktop has accepted it, and the next open
+uses it without asking. A desktop that refuses a remembered credential marks it refused, and a
+refused credential is not used again until the operator replaces it. A question nobody answers
+before it expires fails the start and spawns no bridge.
+
+### AC-SS-19: The sign-in form asks for what the desktop advertises
+
+Opening a host's desktop first inspects it (`InspectHostDesktop`): the bridge reads the RFB
+security-type list, or the RDP X.224 negotiation response, and disconnects without signing in. The
+form then asks for the chosen method's fields only:
+
+| Advertised | Asked for |
+|---|---|
+| VNC None | nothing — the desktop opens with no form |
+| VNC Authentication | password |
+| VeNCrypt Plain / TLSPlain, Apple Remote Desktop, RDP over TLS | username, password |
+| RDP with NLA | username, domain (optional), password |
+
+With several methods advertised, the strongest is preselected and the operator can switch. A
+desktop that refuses the sign-in re-opens the form with the desktop's own reason. A desktop that
+advertises nothing tddy can sign in with says so, naming the VNC security types it did advertise,
+and starts no bridge. An X11 display needs no sign-in.
 
 ### AC-SS-17: One connect per desktop channel
 
@@ -307,7 +333,7 @@ where it is added from, where it is stored, and what happens to its credential �
 | Belongs to | the signed-in user, and is offered from any of their sessions | one machine in the host registry |
 | Opened from | the session inspector's Screen Sharing tab | the remote-desktop section of that host's row on the Hosts screen |
 | Stored in | a `screen-sharing` record in the signed-in user's credential store | `host-desktop-targets.json` in the daemon's host-registry directory |
-| Credential | sealed in the record, opened by the signed-in session | asked for on every open and kept nowhere |
+| Credential | sealed in the record, opened by the signed-in session | asked for on open, shaped by the desktop's sign-in method; kept nowhere unless the operator ticks Remember, then a record in the operator's vault |
 | Outlives | every session of that user; deleting a session removes nothing | every session; nothing a session does removes it |
 
 Below the addressing the two are the same feature: the same `tddy-vnc` / `tddy-rdp` bridge binaries,
@@ -356,31 +382,60 @@ from `PATH`. The displays are listed from `screen_sharing.x11_socket_dir` (defau
 Every host-scoped call carries the operator's own session token, and the daemon rejects one that
 does not — so a host's desktops are reachable only by an authenticated operator, on every wire.
 
-### The desktop password is asked for, and kept nowhere
+### The desktop credential is asked for, and kept only on Remember
 
-A host desktop's password is **prompted, never stored**, which is deliberately unlike the
-session-scoped credential record:
+**Inspection first.** Opening a host desktop starts with `InspectHostDesktop`. The daemon runs the
+target's bridge binary with `--inspect`, hands it `{host, port}` on stdin and reads one report line
+back: the sign-in methods the desktop advertises, in its own order. The VNC bridge reads the RFB
+security-type list, and for VeNCrypt its subtype list. The RDP bridge sends an X.224 Connection
+Request offering TLS and CredSSP and reads what the Connection Confirm selects or demands. Either
+way it disconnects before any sign-in begins, and no credential crosses to an inspecting bridge.
+This runs only when an operator opens a desktop. The periodic probe stays a bare TCP connect. An
+X11 display is served by a loopback `x11vnc` the daemon starts with no password, so it is reported
+as needing no sign-in without running a bridge. An inspection that times out fails with
+`DeadlineExceeded`, and a bridge that fails to inspect fails it with `Unavailable` and the bridge's
+own reason.
+
+**The form is shaped by the method** ([AC-SS-19](#ac-ss-19-the-sign-in-form-asks-for-what-the-desktop-advertises)).
+A desktop that advertises no authentication gets no form at all. The host still asks its question
+on every start, because it cannot know in advance which desktops want one, and the browser answers
+it itself with a credential that names no method's secret. An operator is never asked to type, or
+leave blank, a password a desktop does not have.
+
+**The answer is a credential, not a password.** A `DESKTOP_CREDENTIALS` question is answered with a
+protobuf-encoded `DesktopCredentialAnswer` — method, username, domain, password and `remember` —
+encrypted the same way every host-prompt answer is:
 
 1. The daemon raises the question on that host's encrypted prompt channel, stamped with the GitHub
    user whose call is blocked on it. Nobody else is shown the question and nobody else can spend its
    one answer.
 2. The browser encrypts the answer under the public key the host published with the question, having
    first checked that key against the one it pinned for this host.
-3. The daemon decrypts it, hands it to the bridge on the bridge's **stdin**, and drops it. It is
-   never written to disk, never held in daemon state past the call, and never appears in a process
+3. The daemon decrypts it and hands the username, domain and password to the bridge on the bridge's
+   **stdin**. Nothing else of the answer reaches the bridge, and none of it appears in a process
    argument.
 
-The daemon asks on **every** open, because nothing records whether a given desktop wants a password
-and a daemon that guessed would either skip the question for a desktop that needs one or lock out
-one that does not. An empty answer is therefore a real answer, and is how a password-less desktop is
-opened. A question nobody answers before it expires fails the start — the call returns
-`DeadlineExceeded` and no bridge is spawned, rather than a process left authenticating to nothing.
+A question nobody answers before it expires fails the start. The call returns `DeadlineExceeded`
+and no bridge is spawned, rather than a process left authenticating to nothing. A desktop that
+refuses the sign-in fails the start with `Unauthenticated` and its own reason, and the viewer starts
+the desktop again so the host asks again. The form is back in front of the operator, saying why.
 
-Why not the credential store. A session's desktop password is stored, so this is two postures in
-one product. The Hosts screen is the deciding context: everything else it does with a secret —
-loading an ssh key, for one — prompts and drops, and one model across that screen is easier to
-reason about than two. A host also has no session directory to keep an encrypted file in, and the
-prompt channel is the only place a host publishes the key an answer could be encrypted under.
+**Remember.** Unticked, the credential is dropped when the start returns. It is never written to
+disk and never held in daemon state past the call. Ticked, it becomes a `screen-sharing` record in
+the **operator's own** credential vault, under the account `host:<daemon_instance_id>:<target_id>`.
+It is written only once the desktop has accepted it, so a mistyped password is never kept. The
+vault is checked to be open before the bridge starts, so an operator whose vault is locked, or who
+has none, is told Remember cannot be done before anything is spawned. The next open uses the
+remembered credential without asking, and the inspection reports `remembered: true`. A desktop that
+refuses a remembered credential marks the record refused. It is kept, but never used again until a
+new one replaces it, so the next open asks. A locked vault means nothing remembered is usable right
+now: the operator is asked, and opening a host desktop never depends on the vault being open.
+Remembered host credentials do not appear among a session's screen-sharing targets.
+
+Why the operator's vault and not the host. The Hosts screen keeps no secret of its own — loading an
+ssh key, for one, prompts and drops — and a host has no session directory to keep an encrypted file
+in. The operator's vault is the one store already sealed to that operator. So a remembered desktop
+credential is theirs, not the machine's, and it is kept only when they ask.
 
 ### What the Hosts screen reports, and what it does
 

@@ -22,6 +22,11 @@ export interface AHostPromptKeypair {
   spkiDer: Uint8Array;
   /** What an answer says, read the way only the host holding the private half can read it. */
   decrypt: (ciphertext: Uint8Array) => Promise<string>;
+  /**
+   * The same, as bytes — for an answer whose plaintext is a protobuf message rather than text, such
+   * as the `DesktopCredentialAnswer` a desktop sign-in sends (`#host-desktops 8/8`).
+   */
+  decryptBytes: (ciphertext: Uint8Array) => Promise<Uint8Array>;
 }
 
 /**
@@ -41,22 +46,24 @@ export async function anRsaOaepKeypair(): Promise<AHostPromptKeypair> {
     true,
     ["encrypt", "decrypt"],
   );
+  // Rethrown with the claim it was checking: WebCrypto reports a payload that is not a ciphertext
+  // for this key as a bare `OperationError`, which names neither the key nor the question.
+  const decryptBytes = async (ciphertext: Uint8Array) =>
+    new Uint8Array(
+      await crypto.subtle
+        .decrypt({ name: "RSA-OAEP" }, keyPair.privateKey, ciphertext as BufferSource)
+        .catch((reason: unknown) => {
+          throw new Error(
+            "this payload does not decrypt under the key the prompt published, so it is not " +
+              `the answer encrypted for this host: ${String(reason)}`,
+          );
+        }),
+    );
   return {
     spkiDer: new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey)),
     decrypt: async (ciphertext: Uint8Array) =>
-      new TextDecoder().decode(
-        // Rethrown with the claim it was checking: WebCrypto reports a payload that is not a
-        // ciphertext for this key as a bare `OperationError`, which names neither the key nor the
-        // question.
-        await crypto.subtle
-          .decrypt({ name: "RSA-OAEP" }, keyPair.privateKey, ciphertext as BufferSource)
-          .catch((reason: unknown) => {
-            throw new Error(
-              "this payload does not decrypt under the key the prompt published, so it is not " +
-                `the answer encrypted for this host: ${String(reason)}`,
-            );
-          }),
-      ),
+      new TextDecoder().decode(await decryptBytes(ciphertext)),
+    decryptBytes,
   };
 }
 

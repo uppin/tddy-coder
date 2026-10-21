@@ -45,13 +45,12 @@ pub type AnswerHandoff = oneshot::Receiver<Vec<u8>>;
 pub enum PromptKind {
     /// The passphrase unlocking a private key, so it can be added to this host's ssh-agent.
     SshKeyPassphrase,
-    /// The password of one of this host's remote desktops, asked for while a `StartHostStream` is
-    /// blocked on it.
-    ///
-    /// The same three guarantees apply unchanged — expiry, single use, no plaintext at rest — and
-    /// the last is the whole reason this kind exists rather than a stored credential: a host
-    /// desktop password is prompted, used once and dropped (`#hosts-screen 8/8`, AC-7).
-    DesktopPassword,
+    /// The credential one of this host's remote desktops signs in with, shaped by the method the
+    /// desktop advertises (`#host-desktops 8/8`). The answer's plaintext is a protobuf-encoded
+    /// `screen_sharing.DesktopCredentialAnswer` rather than a bare password: a method, and the
+    /// username, domain and password it needs, and whether the operator asked for it to be
+    /// remembered.
+    DesktopCredentials,
 }
 
 /// A question awaiting an answer.

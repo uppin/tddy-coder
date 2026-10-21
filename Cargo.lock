@@ -13283,6 +13283,7 @@ dependencies = [
  "libc",
  "log",
  "pretty_assertions",
+ "prost 0.13.5",
  "rand 0.8.6",
  "rsa 0.9.10",
  "rstest 0.24.0",

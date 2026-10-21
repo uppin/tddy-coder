@@ -1,3 +1,5 @@
+use crate::inspect::AdvertisedMethod;
+
 /// What a bridge signs in to a remote desktop with.
 ///
 /// Every field is absent when the target does not ask for it: a VNC server with
@@ -21,6 +23,12 @@ pub trait ScreenSharingClient: Sized + Send + 'static {
     ///
     /// Each field of `credentials` is `None` for targets that don't require it.
     async fn connect(host: &str, port: u16, credentials: &Credentials) -> anyhow::Result<Self>;
+
+    /// The sign-in methods the desktop at `host:port` advertises, read without signing in.
+    ///
+    /// Reads the protocol's advertisement — the RFB security-type list, the X.224 Connection
+    /// Confirm — and disconnects. Never sends a credential.
+    async fn inspect(host: &str, port: u16) -> anyhow::Result<Vec<AdvertisedMethod>>;
 
     /// Current framebuffer dimensions `(width, height)` in pixels.
     ///

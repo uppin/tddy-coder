@@ -275,6 +275,29 @@ export const hostDesktopPage = {
 };
 
 /**
+ * The desktop sign-in form a host raises for a `DESKTOP_CREDENTIALS` question — added by
+ * `#host-desktops 8/8`.
+ *
+ * Shaped by the method the desktop advertises: a field that method does not use is absent, not
+ * hidden or disabled, so "asks only for a password" is asserted as the other fields not existing.
+ * The method switcher is a `<select>` whose option values are `DesktopAuthMethod` numbers.
+ */
+export const hostDesktopSignInPage = {
+  root: (instanceId: string) => byTestId(`host-desktop-sign-in-${instanceId}`),
+  method: () => byTestId("host-desktop-sign-in-method"),
+  username: () => byTestId("host-desktop-sign-in-username"),
+  domain: () => byTestId("host-desktop-sign-in-domain"),
+  password: () => byTestId("host-desktop-sign-in-password"),
+  remember: () => byTestId("host-desktop-sign-in-remember"),
+  submit: () => byTestId("host-desktop-sign-in-submit"),
+  cancel: () => byTestId("host-desktop-sign-in-cancel"),
+  /** Why the last sign-in did not open the desktop — the desktop's own reason, on a re-ask. */
+  error: () => byTestId("host-desktop-sign-in-error"),
+  /** Switch to `method`, one of the methods the desktop advertised. */
+  chooseMethod: (method: number) => hostDesktopSignInPage.method().select(String(method)),
+};
+
+/**
  * One desktop channel per Connect — added by `#host-desktops 7/8`.
  *
  * A host may offer several desktops (its endpoint probes plus one per X11 display), so each Connect

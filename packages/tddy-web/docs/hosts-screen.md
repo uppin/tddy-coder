@@ -163,22 +163,55 @@ VNC/RDP protocol client is added here, ever: the picture is always a daemon-prod
 - It joins the room the start reply names — not this page's common room — with the same
   mint-and-connect `useCommonRoom` performs.
 
-**The password question.** `StartHostStream` blocks while the host asks for the desktop's password,
-so the overlay subscribes to that host's prompt feed *only while its own start is in flight* — a
-screenful of hosts nobody is opening a desktop on opens no streams at all. The question is
-**latched** rather than read off the live feed: the feed is per host, not per surface, and a key
-passphrase prompt arriving mid-answer would otherwise replace the value a derived question reads
-from, unmounting the dialog, losing the typing and leaving the host's call blocked with nothing on
-screen to answer it. Only `HostPromptKind.DESKTOP_PASSWORD` is ever latched, because answering
-another surface's question with a desktop password would send a secret to a question nobody here
-asked.
+**Inspection, then the sign-in question.** The overlay first calls `InspectHostDesktop` for the
+target it is opening, and shapes everything after it by the answer:
 
-The dialog is the shared host passphrase dialog with this surface's own wording and with empty
-answers allowed. A desktop password is one question an empty answer can be the true answer to — the
-host asks on every start because it cannot know in advance whether this desktop wants one — so
-refusing empty would ask an operator to invent a password the desktop never had. The password itself
-never reaches `HostDesktopOverlay`: the dialog hands back ciphertext encrypted under the key the
-prompt published, after that key has been checked against the one pinned for this host.
+- **Nothing tddy supports** — the status line says so, naming the VNC security types the desktop did
+  advertise, and no start is made.
+- **`NONE`** — no form. `StartHostStream` still blocks on the host's question, because the host
+  cannot know which desktops want one. The overlay answers it itself with an encrypted
+  `DesktopCredentialAnswer { method: NONE }`, which carries no secret, so it needs no key-continuity
+  check.
+- **Anything else** — `HostDesktopSignInDialog` shows the methods' fields (see below).
+
+`StartHostStream` blocks while the host asks, so the overlay subscribes to that host's prompt feed
+*only while its own start is in flight* — a screenful of hosts nobody is opening a desktop on opens
+no streams at all. The question is **latched** rather than read off the live feed: the feed is per
+host, not per surface, and a key passphrase prompt arriving mid-answer would otherwise replace the
+value a derived question reads from, unmounting the dialog, losing the typing and leaving the host's
+call blocked with nothing on screen to answer it. Only `HostPromptKind.DESKTOP_CREDENTIALS` is ever
+latched, because answering another surface's question with a desktop credential would send a secret
+to a question nobody here asked. A question already answered is not latched again while the feed
+still holds it.
+
+**A refused sign-in asks again.** When the start fails with `Unauthenticated` after an answer this
+overlay sent, the overlay starts the desktop again. The host asks a new question, and the dialog is
+back with the desktop's own reason (`host-desktop-sign-in-error`). A refusal no answer preceded — a
+remembered credential the desktop turned down — is shown in place of "Connecting…" instead, since
+starting again at once would only spin on it. The next open asks, because the daemon marked that
+credential refused.
+
+**`HostDesktopSignInDialog`** asks for the chosen method's fields only. The methods are ranked
+strongest first, and the strongest the desktop advertised is preselected:
+
+| Method | Fields |
+|---|---|
+| RDP (NLA) | username, domain (optional), password |
+| Apple Remote Desktop | username, password |
+| VeNCrypt (TLS, username and password) / VeNCrypt (username and password) | username, password |
+| RDP (TLS) | username, password |
+| VNC password | password |
+
+A method switcher (`host-desktop-sign-in-method`) lists every advertised method the dialog can sign
+in with. **Remember** (`host-desktop-sign-in-remember`) sets the answer's `remember`. The dialog
+builds a `DesktopCredentialAnswer`, protobuf-encodes it and encrypts it under the key the question
+carried (`encryptForHost` takes bytes as well as text). The credential never reaches
+`HostDesktopOverlay`, and the password field is cleared once the answer has left or failed to. Key
+continuity is rendered by the same `HostKeyContinuityNotices` the passphrase dialog uses, so a
+changed, mismatched, underivable or still-unchecked key blocks the answer exactly as it does there.
+The dialog pins the fingerprint the question advertises (`checkHostKey`), not one derived from the
+key it encrypts under. Deriving it, as the add-key flow does with `verifyHostKey`, is recorded as
+open debt in `docs/dev/todo/`.
 
 A connected desktop takes input. `ScreenSharingOverlay` opens a `ScreenSharingInputService` stream
 at the bridge participant for as long as it is mounted and forwards the operator's pointer and
@@ -294,11 +327,14 @@ alternative considered was to accept passive-only protection and disclose it in 
 
 ## The passphrase dialog
 
-**`HostPassphraseDialog`** is server-initiated: the host raised the question and is blocked until an answer comes back. It is the
-only dialog in the app that asks for a screen-sharing secret — the session Screen Sharing tab asks
-for none, because the signed-in session already opens the credential store a desktop's password is
-sealed in. It always names the host and shows the
-derived fingerprint, so an operator can verify out of band before handing over a secret.
+**`HostPassphraseDialog`** is server-initiated: the host raised the question and is blocked until an
+answer comes back. It answers the **SSH key passphrase** question (`KEY_PASSPHRASE`) and nothing else.
+A host desktop's credential is asked for by `HostDesktopSignInDialog`, and the session Screen Sharing
+tab asks for none, because the signed-in session already opens the credential store a session
+desktop's password is sealed in. The dialog always names the host and shows the derived fingerprint,
+so an operator can verify out of band before handing over a secret. It refuses an empty answer,
+which would only waste the host's single-use prompt. The fingerprint, the continuity notices and the
+accept-a-changed-key control are `HostKeyContinuityNotices`, shared with `HostDesktopSignInDialog`.
 
 **The encryption happens inside the dialog, not in its caller.** `encryptForHost` runs there, so the
 plaintext exists only inside this component's state and every path out of it carries ciphertext. A

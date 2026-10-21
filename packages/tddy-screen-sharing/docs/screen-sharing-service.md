@@ -1,8 +1,9 @@
 # Screen-sharing service
 
 `tddy-screen-sharing` serves `screen_sharing.ScreenSharingService` and spawns the VNC/RDP bridge
-processes it streams from. It holds **no cryptography and no storage of its own**: a desktop's
-password is a record in the signed-in user's credential store (`tddy-credentials`).
+processes it streams from. It holds **no cryptography and no storage of its own**: a session
+desktop's password, and a host desktop credential an operator asked to be remembered, are records in
+that user's credential store (`tddy-credentials`).
 
 Product behaviour: [screen-sharing-sessions.md](../../../docs/ft/web/screen-sharing-sessions.md).
 
@@ -13,7 +14,8 @@ Product behaviour: [screen-sharing-sessions.md](../../../docs/ft/web/screen-shar
 | `screen_sharing_records` | the `screen-sharing` provider's record shape (`record_for`, `target_from`), `TargetError`, and the `ScreenSharingTargetStore` port |
 | `session_vault_target_store` | `SessionVaultTargetStore`, the production store over the daemon's `SessionVaults` |
 | `screen_sharing_service` | `ScreenSharingServiceImpl`: the struct and builders, the session-scoped target calls, and the trait impl, whose host-scoped methods delegate to `host_targets` |
-| `screen_sharing_service::bridge_lifecycle` | bridge spawning, the wait for its start report, and termination; the desktop-password prompt and the target-store lookup, as `impl ScreenSharingServiceImpl` members |
+| `screen_sharing_service::bridge_lifecycle` | bridge spawning, the wait for its start report, and termination; `desktop_credential_for` (a remembered credential, or the `DESKTOP_CREDENTIALS` prompt) with `SignIn` / `Remembering`, and the target-store lookup, as `impl ScreenSharingServiceImpl` members |
+| `host_desktop_sign_in` | `inspect_host_desktop` (`InspectHostDesktop`), `decrypt_desktop_credential_answer`, `remembered_account`, and `RememberedDesktopCredentials` (`usable`, `can_remember`, `remember`, `mark_refused`) |
 | `bridge_readiness` | `await_bridge_readiness`: reading a bridge's start report from its stdout within a bound, and mapping it to `BridgeStarted { width, height }` or a `Status`; `DEFAULT_BRIDGE_READY_TIMEOUT` (30 s) |
 | `screen_sharing_service::host_targets` | the bodies of the host-scoped RPCs (`list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream`) as `*_impl` members |
 | `x11vnc` | `X11vncServers`: one `x11vnc` per open X11 channel, keyed like its bridge; start (stopping the key's previous one first), wait until it accepts, stop; `x11vnc_arguments`, `X11VNC_HOST`, `DEFAULT_X11VNC_ACCEPT_TIMEOUT` (10 s) |
@@ -66,6 +68,47 @@ listening `host:port`. `start_host_stream` for one does the following:
 The x11vnc is stopped by `StopHostStream`, and by `reap_bridge` when a bridge exits on its own while
 its key still names it. A bridge that was stopped or replaced leaves the x11vnc alone, because its
 stopper owns that. A background task reaps every x11vnc child.
+
+## A host desktop's sign-in
+
+**Inspect.** `inspect_host_desktop` finds the host target, and for an X11 display answers `[NONE]`
+without running anything: the daemon's own `x11vnc` takes no password. Otherwise it resolves the
+protocol's bridge binary (`Protocol::Unspecified` is `FAILED_PRECONDITION`). It runs that binary
+with `--inspect` (`kill_on_drop`), writes an `InspectTarget { host, port }` JSON to its stdin and
+reads the first line of its stdout as an `InspectReport`
+([`tddy_daemon_extensions::desktop_inspect`](../../tddy-daemon-extensions/docs/desktop-inspect.md)).
+It answers `InspectHostDesktopResponse`: `offered`, the methods tddy can sign in with in the order
+advertised; `unsupported_vnc_types`, the VNC security types it cannot, by number; and `remembered`,
+whether a usable remembered credential exists. A bridge that exits non-zero, prints nothing or
+prints something unreadable fails it with `Unavailable` and the bridge's stderr. A bridge that runs
+past 35 s (`INSPECT_TIMEOUT`) fails it with `DeadlineExceeded`.
+
+**Credential.** `start_host_stream` settles the target, room and bridge first, then
+`desktop_credential_for` returns a `SignIn`:
+
+| Source | `Remembering` |
+|---|---|
+| a usable remembered credential (`usable`: the vault is open, a record exists, and it is not marked `refused`) | `AlreadyRemembered` |
+| the operator's answer to a `DESKTOP_CREDENTIALS` prompt, without `remember` | `Nothing` |
+| the same, with `remember` — after `can_remember` confirmed a vault is wired and open, or the start is refused `FAILED_PRECONDITION` before anything is spawned | `AfterStart` |
+
+The answer is RSA-OAEP ciphertext of a protobuf `DesktopCredentialAnswer`.
+`decrypt_desktop_credential_answer` maps a decrypt failure to `PERMISSION_DENIED`, and an undecodable
+plaintext to `INVALID_ARGUMENT` without quoting it. `PreparedBridge::for_credentials` copies only
+`username`, `domain` and `password` into the `BridgeSpawnConfig`.
+
+**Settling the vault** (`start_signed_in_bridge`). A bridge refused with `Unauthenticated` marks an
+`AlreadyRemembered` credential refused (`mark_refused`: metadata `refused`, the version bumped). An
+`AfterStart` credential is written (`remember`) only after the bridge has started. A failed write is
+logged as `log::error!`, naming `instance:target` and never the secret, and the started stream is
+still returned. A failure to record a refusal is logged the same way.
+
+**The remembered record.** It is a `screen-sharing` record in the operator's own vault, under the
+account `host:<daemon_instance_id>:<target_id>`, labelled `<target> on <instance>`. The secret is
+the password. The metadata holds `method` (the `DesktopAuthMethod` name), `username`, `domain`, and
+`refused` once refused. `SessionVaultTargetStore::list` skips every `host:` account, so remembered
+host credentials never show up as session targets. A vault that is not open has nothing usable
+remembered: `usable` answers `None` and the operator is asked.
 
 ## A target is a record
 
@@ -126,7 +169,7 @@ any `ScreenSharingTargetStore`, which is how the acceptance suite substitutes st
 ## Unchanged by the store
 
 `StartStream`, `StopStream`, bridge identity (`screenshare-<session>-<target>`), track naming,
-the host-scoped calls (host desktops are prompted for, never stored), and VNC input.
+the host-scoped calls (host desktops are prompted for, and kept only on Remember — see above), and VNC input.
 `start_stream` reads a target and its password from the store and hands the password to the bridge on
 its stdin.
 
@@ -138,6 +181,7 @@ its stdin.
 | `tests/screen_sharing_service_acceptance.rs` | the service, over an in-memory store that uses the real mapping |
 | `tests/bridge_readiness_acceptance.rs` | a start against a `/bin/sh` stand-in bridge scripted per test (`tests/common`): refused sign-in, reported size on both scopes, early exit, silence past the timeout, and that a failed bridge is stopped |
 | `tests/x11_channels_acceptance.rs` | an X11 target through the RPC against stand-in `x11vnc` and bridge scripts (`tests/common`): argv `-display :1 -localhost`, the bridge pointed at the x11vnc's port, stop on close, one x11vnc after a reopen (also when the old bridge exits with its x11vnc), never-accepts → `DeadlineExceeded` with no bridge and the x11vnc stopped, and stop when the bridge fails to start or exits after running. The stand-ins are run once with `--warm-up` before any test clock starts, because a new executable's first exec on a loaded macOS machine can outlast a short accept window |
+| `tests/host_desktop_sign_in_acceptance.rs` | inspection (the methods its bridge read, only `{host, port}` on its stdin, an X11 display answered `NONE` with no bridge run, a failing bridge → `Unavailable` with its reason, `remembered`), the `DESKTOP_CREDENTIALS` question, the domain on the bridge's stdin, and Remember over the operator's real vault: no question on reopen, sealed only after the desktop accepts it, written nowhere without Remember, a refused credential never remembered, a refused remembered one never reused, a locked vault still asks, and Remember with a locked vault refused before the bridge starts |
 | `tests/session_vault_target_store_acceptance.rs` | the store, over a real sealed vault: cross-session listing, locked, cleartext leakage |
 | `tests/screen_sharing_record_propagation.rs` | reconciliation of a screen-sharing record through the sync engine |
 | `tddy-service/tests/screen_sharing_carries_no_passphrase.rs` | the schema declares no unlock RPC and no passphrase field |

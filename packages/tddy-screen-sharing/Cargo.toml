@@ -33,6 +33,10 @@ tddy-host-service = { path = "../tddy-host-service" }
 # `bridge_readiness`: a start waits for the line its bridge reports on stdout.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 
+# `DesktopCredentialAnswer` is protobuf-encoded before it is encrypted to the host's key. The
+# version `tddy-service` generates its messages with, so it adds nothing to the lockfile.
+prost = "0.13"
+
 [target.'cfg(unix)'.dependencies]
 # `SIGTERM` to a bridge process — the daemon's own stop path.
 libc = "0.2"

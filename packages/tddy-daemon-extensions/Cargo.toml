@@ -13,7 +13,8 @@ path = "src/lib.rs"
 # that line.
 [dependencies]
 async-trait = "0.1"
-# `bridge_readiness`: the line a bridge reports its start on is JSON.
+# `bridge_readiness` and `desktop_inspect`: the lines a bridge reports its start and a desktop's
+# sign-in methods on are JSON.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tddy-rpc = { path = "../tddy-rpc" }

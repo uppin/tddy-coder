@@ -54,7 +54,7 @@ from a working one until the restart that loses everything.
 `host_desktop_targets.rs` keeps the remote desktops attached to a **host** rather than to a session,
 in `host-desktop-targets.json` in the same `host_registry_dir(tddy_data_dir)` the known-hosts file
 lives in. That is where it belongs: a desktop is a property of a machine, and the host keypair a
-desktop password is encrypted under is already resolved from this directory, so one host has one
+desktop credential is encrypted under is already resolved from this directory, so one host has one
 directory holding everything scoped to it.
 
 | | |
@@ -113,25 +113,31 @@ bridges, the LiveKit republishing and the browser overlay are reused unchanged.
   have been holding a bridge open tells the browser to tear down an overlay over a process still
   running.
 
-### The desktop password is prompted, never stored
+### The desktop credential is prompted, and stored only on Remember
 
-The session-scoped path keeps its credential as a `screen-sharing` record in the user's credential store. A host desktop's password is
-**not stored anywhere**:
+The session-scoped path keeps its credential as a `screen-sharing` record in the user's credential
+store. A host desktop's credential is **prompted**, and kept only when the operator asks for it to
+be remembered:
 
 1. `StartHostStream` settles everything that can fail without a secret first — the target, the room,
    the bridge binary, the protocol — so nobody is asked to type a password for a stream that could
    not have started.
-2. It then raises a `DESKTOP_PASSWORD` prompt on the host prompt channel, stamped with the GitHub
-   user resolved from the caller's session token. That stamping is what makes it *this* operator's
-   question: it is shown to no other browser and no other browser can spend its one answer.
-3. The browser encrypts its answer under the public key the host publishes with the prompt. The
-   daemon decrypts it with the host keypair — the same one read from this directory — hands the
-   plaintext to the bridge on the bridge's **stdin**, and drops it when the call returns. No argv,
-   no file, no daemon state.
+2. A credential the operator remembered for this desktop, and the desktop has not refused, is used
+   without asking (`tddy-screen-sharing` `RememberedDesktopCredentials`, a `screen-sharing` record
+   in the operator's own vault under `host:<daemon_instance_id>:<target_id>`).
+3. Otherwise it raises a `DESKTOP_CREDENTIALS` prompt (`PromptKind::DesktopCredentials`) on the host
+   prompt channel, stamped with the GitHub user resolved from the caller's session token. That
+   stamping is what makes it *this* operator's question: it is shown to no other browser and no
+   other browser can spend its one answer.
+4. The browser encrypts its answer — a protobuf-encoded `screen_sharing.DesktopCredentialAnswer` —
+   under the public key the host publishes with the prompt. The daemon decrypts it with the host
+   keypair, read from this directory, and hands the username, domain and password to the bridge on
+   the bridge's **stdin**. No argv, no file. Without `remember` it is dropped when the call returns.
+   With it, it is written to the operator's vault once the bridge has started.
 
-**Every start asks.** Nothing records whether a desktop wants a password, and a daemon that guessed
-would either skip the question for one that needs it or refuse one that does not; an operator
-answering with nothing is how a password-less desktop is opened.
+`HOST_PROMPT_KIND_DESKTOP_PASSWORD` stays in `host.proto` for wire compatibility and is raised by
+nothing. `HostPromptEvent.offered_auth_methods` is sent empty: the methods a desktop advertises come
+from `ScreenSharingService.InspectHostDesktop`, which the viewer calls before it opens a desktop.
 
 **The wait is exactly the prompt's own expiry.** An operator who walks away releases the call the
 moment the question stops being answerable — never later and never never. An unanswered prompt fails

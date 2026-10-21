@@ -11,10 +11,13 @@
 //! - [`peer_forwarder`] — carry an RPC to a peer daemon; the kernel's `CommonRoom` keeps the policy.
 //! - [`bridge_readiness`] — the one line a screen-sharing bridge reports its start on, read by the
 //!   daemon and written by the bridge, so neither side depends on the other to agree on it.
+//! - [`desktop_inspect`] — the one line a bridge run with `--inspect` reports a desktop's
+//!   advertised sign-in methods on, shared the same way.
 //! - [`integration_status`] — the one place an integration's live state is recorded, so "is it
 //!   configured, is it up" is answered once instead of re-derived per caller.
 
 pub mod bridge_readiness;
+pub mod desktop_inspect;
 pub mod integration_status;
 pub mod peer_forwarder;
 pub mod room_admission;

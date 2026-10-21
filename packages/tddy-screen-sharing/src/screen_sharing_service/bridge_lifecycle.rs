@@ -21,7 +21,9 @@ use super::BridgeTarget;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 
-use crate::bridge_config::decrypt_desktop_password;
+use super::target_error_to_status;
+use crate::host_desktop_sign_in::decrypt_desktop_credential_answer;
+use tddy_service::proto::screen_sharing::DesktopCredentialAnswer;
 
 use tddy_host_service::host_prompts::answer_before_expiry;
 
@@ -38,6 +40,24 @@ use tddy_rpc::Status;
 use crate::screen_sharing_records::ScreenSharingTargetStore;
 
 use std::sync::Arc;
+
+/// The credential a host-desktop start signs in with, and how it relates to the operator's vault.
+pub(crate) struct SignIn {
+    pub(crate) answer: DesktopCredentialAnswer,
+    pub(crate) remembering: Remembering,
+}
+
+/// Where a [`SignIn`]'s credential stands with the operator's vault.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Remembering {
+    /// Typed without Remember: kept nowhere.
+    Nothing,
+    /// Read from the vault, remembered at an earlier open. A desktop that refuses it marks it
+    /// refused.
+    AlreadyRemembered,
+    /// Typed with Remember: written to the vault once the desktop has accepted it, and not before.
+    AfterStart,
+}
 
 impl ScreenSharingServiceImpl {
     /// Signal a running bridge to stop and forget its PID.
@@ -80,32 +100,74 @@ impl ScreenSharingServiceImpl {
             .ok_or_else(|| Status::failed_precondition("no credential store is wired"))
     }
 
-    /// Ask this host's operator for `target`'s password, and return what they typed.
+    /// The credential to sign in to `target` with: the one the operator remembered for it, or else
+    /// what they answer when asked.
     ///
     /// The question is raised **here**, by the daemon, rather than answered by the caller. It has to
     /// be: `HostPromptEvent` is the only place a host publishes the public key an answer travels
-    /// under, so a browser that has not been asked anything has nothing to encrypt with — and a
-    /// desktop password is stored nowhere on this host, which is the whole point of prompting for
-    /// it.
+    /// under, so a browser that has not been asked anything has nothing to encrypt with.
     ///
-    /// Every start asks. Nothing records whether a desktop wants a password, and a daemon that
-    /// guessed would either skip the question for a desktop that needs one or refuse a desktop that
-    /// does not; an operator answering with nothing is how a password-less desktop is opened.
+    /// A remembered credential the desktop refused is not used again, so the operator is asked. The
+    /// answer is a protobuf `DesktopCredentialAnswer` — method, account, domain, password and
+    /// whether to remember it — whose password is kept nowhere on this host unless it says so.
+    /// An operator answering with nothing is how a password-less desktop is opened.
     ///
     /// The wait is bounded by the prompt's own expiry, so an operator who walks away releases the
     /// call at the moment the question stops being answerable — never later, and never never.
-    pub(crate) async fn prompt_for_desktop_password(
+    pub(crate) async fn desktop_credential_for(
+        &self,
+        scope: &HostScope,
+        operator: &str,
+        daemon_instance_id: &str,
+        target: &HostDesktopTarget,
+    ) -> Result<SignIn, Status> {
+        if let Some(remembered) = self.remembered_desktop_credentials() {
+            if let Some(answer) = remembered
+                .usable(operator, daemon_instance_id, &target.target_id)
+                .map_err(target_error_to_status)?
+            {
+                return Ok(SignIn {
+                    answer,
+                    remembering: Remembering::AlreadyRemembered,
+                });
+            }
+        }
+
+        let answer = self
+            .prompt_for_desktop_credentials(scope, operator, target)
+            .await?;
+        if !answer.remember {
+            return Ok(SignIn {
+                answer,
+                remembering: Remembering::Nothing,
+            });
+        }
+        // Checked, not written: the credential is written only once the desktop accepts it. Refused
+        // while nobody is yet signed in, so an operator who asked to remember is told it cannot be
+        // done rather than finding out at the next open.
+        self.remembered_desktop_credentials()
+            .ok_or_else(|| Status::failed_precondition("no credential store is wired"))?
+            .can_remember(operator)
+            .map_err(target_error_to_status)?;
+        Ok(SignIn {
+            answer,
+            remembering: Remembering::AfterStart,
+        })
+    }
+
+    /// Ask this host's operator for `target`'s credentials, and return what they answered.
+    async fn prompt_for_desktop_credentials(
         &self,
         scope: &HostScope,
         operator: &str,
         target: &HostDesktopTarget,
-    ) -> Result<String, Status> {
+    ) -> Result<DesktopCredentialAnswer, Status> {
         // Stamped with the GitHub user that raised it, which is what makes it *this* operator's
         // question: `StreamHostPrompts` shows a prompt to nobody else, and nobody else can spend
         // its one answer. Anything else here and the question reaches no browser at all.
         let prompt = scope.prompts.issue(
             operator,
-            PromptKind::DesktopPassword,
+            PromptKind::DesktopCredentials,
             &desktop_prompt_subject(target),
             tddy_host_service::host_registry::now_unix_ms(),
         );
@@ -117,16 +179,16 @@ impl ScreenSharingServiceImpl {
             // which for the operator is indistinguishable from one that ran out of time.
             None => None,
         };
-        let Some(encrypted_password) = answer else {
+        let Some(encrypted_answer) = answer else {
             // Refused rather than started without one: a bridge spawned against a desktop whose
-            // password nobody supplied authenticates to nothing, and would leave a process running
-            // for a stream that can never carry a frame.
+            // credentials nobody supplied authenticates to nothing, and would leave a process
+            // running for a stream that can never carry a frame.
             return Err(Status::deadline_exceeded(format!(
-                "nobody answered the password prompt for {} before it expired",
+                "nobody answered the sign-in prompt for {} before it expired",
                 prompt.subject
             )));
         };
-        decrypt_desktop_password(scope.keypair.as_ref(), &encrypted_password)
+        decrypt_desktop_credential_answer(scope.keypair.as_ref(), &encrypted_answer)
     }
 
     /// Spawn a bridge for the given target, and report whether its desktop came up.

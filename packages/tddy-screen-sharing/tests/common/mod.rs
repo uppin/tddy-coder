@@ -5,6 +5,11 @@
 //! (`FakeBridge`, `AnOperatorAtTheKeyboard`, `TheSessionsCredentials`, `DaemonUnderTest`), kept
 //! outside the service file so `#host-desktops` node 1's split does not move it. Only what drives
 //! the public surface is here: everything below the RPC is the production code path.
+//!
+//! `#host-desktops` 8/8 adds the sign-in half: a stand-in that also answers `--inspect`, an
+//! operator who answers a `DESKTOP_CREDENTIALS` question with a structured credential, and — for
+//! the Remember tests — the operator's real sealed credential vault in place of the in-memory
+//! session store, so what is and is not written is read back from the vault itself.
 
 #![allow(dead_code)]
 
@@ -12,10 +17,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use prost::Message as _;
 use tddy_core::session_metadata::{
     write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
 };
+use tddy_credentials::{AccountId, CredentialRecord, CredentialStore, SecretString, SessionVaults};
 use tddy_daemon_extensions::bridge_readiness::{BridgeReadiness, FailureKind};
+use tddy_daemon_extensions::desktop_inspect::{AdvertisedMethod, InspectReport};
 use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig, ScreenSharingConfig};
 use tddy_host_service::host_desktop_targets::FileHostDesktopTargetStore;
 use tddy_host_service::host_keypair::{FileHostKeypair, HostKeypair, PublishedKey};
@@ -25,13 +33,15 @@ use tddy_host_service::host_prompts::{
 };
 use tddy_rpc::{Request, Response, Status};
 use tddy_screen_sharing::screen_sharing_records::{
-    account_for, record_for, target_from, ScreenSharingTargetStore, TargetError,
+    account_for, record_for, screen_sharing_provider, target_from, ScreenSharingTargetStore,
+    TargetError,
 };
 use tddy_screen_sharing::{
     ScreenSharingServiceImpl, DEFAULT_BRIDGE_READY_TIMEOUT, DEFAULT_X11VNC_ACCEPT_TIMEOUT,
 };
 use tddy_service::proto::screen_sharing::{
-    AddHostTargetRequest, AddTargetRequest, Protocol, ScreenSharingService,
+    AddHostTargetRequest, AddTargetRequest, DesktopAuthMethod, DesktopCredentialAnswer,
+    InspectHostDesktopRequest, InspectHostDesktopResponse, Protocol, ScreenSharingService,
     ScreenSharingTarget as ProtoScreenSharingTarget, StartHostStreamRequest, StartStreamRequest,
     StartStreamResponse, StopHostStreamRequest,
 };
@@ -45,9 +55,13 @@ pub const A_HOST: &str = "workstation-1";
 pub const A_SESSION: &str = "session-with-a-desktop";
 const THE_COMMON_ROOM: &str = "tddy-hosts-lobby";
 const THE_SESSIONS_OWN_ROOM: &str = "room-of-one-session";
-const A_VNC_PORT: u32 = 5900;
-/// Every desktop here is password-less, so that is what the operator types.
+pub const A_VNC_PORT: u32 = 5900;
+pub const AN_RDP_PORT: u32 = 3389;
+/// Unless a test says otherwise every desktop here is password-less, so that is what the operator
+/// types.
 const NO_PASSWORD: &str = "";
+/// What the operator's credential vault is sealed under.
+const THE_OPERATORS_VAULT_PASSPHRASE: &str = "the-passphrase-the-operator-chose";
 const A_WRITE_CLOCK: u64 = 1_758_240_000;
 
 /// Longer than any test here runs, so a stand-in bridge only ever exits because it was stopped.
@@ -124,22 +138,73 @@ impl TheBridge {
 /// `exec sleep` rather than `sleep`, so the recorded pid is the process still running when the
 /// daemon signals it — a forked `sleep` would outlive a signalled shell and the assertion would be
 /// about the wrong process.
+///
+/// Run with `--inspect` it instead records the request on its stdin and does what the
+/// [`TheInspection`] it was installed with says — the bridge's inspect mode — without touching the
+/// pid or config it records as a bridge.
 pub struct StandInBridge {
     pub binary: PathBuf,
     pid_file: PathBuf,
-    /// What the daemon wrote to the bridge's stdin.
+    /// What the daemon wrote to the bridge's stdin, the last time it was started as a bridge.
     config_file: PathBuf,
+    /// Every config the daemon wrote, one JSON document per line, in start order.
+    configs_log: PathBuf,
+    /// What the daemon wrote to the bridge's stdin in inspect mode.
+    inspect_request_file: PathBuf,
+    /// What it does in inspect mode once it has recorded the request: the shell lines that report.
+    inspect_mode: String,
+}
+
+/// What the stand-in bridge does when it is run in inspect mode.
+pub enum TheInspection {
+    /// Prints this report line and exits zero, as a bridge that read the desktop's advertisement.
+    Reports(InspectReport),
+    /// Prints this reason to stderr and exits non-zero, as a bridge that could not reach the
+    /// desktop. The reason is single-quoted into the script, so it must not hold a `'`.
+    FailsWith(String),
+}
+
+impl TheInspection {
+    fn shell(&self) -> String {
+        match self {
+            Self::Reports(report) => {
+                let line = serde_json::to_string(report).expect("an inspect report line");
+                format!("printf '%s\\n' '{line}'\nexit 0\n")
+            }
+            Self::FailsWith(reason) => {
+                assert!(
+                    !reason.contains('\''),
+                    "a reason the script can quote: {reason:?}"
+                );
+                format!("printf '%s\\n' '{reason}' >&2\nexit 1\n")
+            }
+        }
+    }
 }
 
 impl StandInBridge {
-    fn installed_in(dir: &Path, behaviour: &TheBridge) -> Self {
+    fn installed_in(dir: &Path, behaviour: &TheBridge, inspection: &TheInspection) -> Self {
         let bridge = Self {
             binary: dir.join("tddy-vnc-stand-in"),
             pid_file: dir.join("bridge-pid"),
             config_file: dir.join("bridge-config.json"),
+            configs_log: dir.join("bridge-configs.jsonl"),
+            inspect_request_file: dir.join("bridge-inspect-request.json"),
+            inspect_mode: inspection.shell(),
         };
-        let pid = bridge.pid_file.display();
-        let config = bridge.config_file.display();
+        bridge.now_does(behaviour);
+        bridge.warm_up();
+        bridge
+    }
+
+    /// Re-script what the bridge does from its next start on — a desktop whose password changed
+    /// between two opens, say. A bridge already running keeps doing what it was started doing.
+    pub fn now_does(&self, behaviour: &TheBridge) {
+        let pid = self.pid_file.display();
+        let config = self.config_file.display();
+        let configs = self.configs_log.display();
+        let inspect_request = self.inspect_request_file.display();
+        let inspect_mode = &self.inspect_mode;
         let after_config = match behaviour {
             TheBridge::Reports(readiness) => {
                 let line = serde_json::to_string(readiness).expect("a readiness line");
@@ -158,7 +223,12 @@ impl StandInBridge {
             // so the trailing space keeps one port from matching another that it prefixes.
             TheBridge::ExitsWithItsX11vnc(readiness) => {
                 let line = serde_json::to_string(readiness).expect("a readiness line");
-                let launches = dir.join(X11VNC_LAUNCH_LOG);
+                // The stand-in x11vnc logs its launches into the directory the bridge is installed in.
+                let launches = self
+                    .binary
+                    .parent()
+                    .expect("the stand-in bridge is installed in a directory")
+                    .join(X11VNC_LAUNCH_LOG);
                 let launches = launches.display();
                 format!(
                     "port=$(sed -n 's/.*\"port\":\\([0-9]*\\).*/\\1/p' \"{config}\")\n\
@@ -170,22 +240,64 @@ impl StandInBridge {
             }
         };
         // The pid is written to a temp file and `mv -f`'d into place, so a reader sees a whole pid
-        // or none.
+        // or none. Each config is appended to the log followed by a newline, so a reader counting
+        // whole lines sees whole configs.
         std::fs::write(
-            &bridge.binary,
+            &self.binary,
             format!(
                 "#!/bin/sh\n\
                  [ \"$1\" = {WARM_UP_ARGUMENT} ] && exit 0\n\
+                 if [ \"$1\" = \"--inspect\" ]; then\n\
+                 cat > \"{inspect_request}\"\n\
+                 {inspect_mode}\
+                 fi\n\
                  echo $$ > \"{pid}.part\"\n\
                  mv -f \"{pid}.part\" \"{pid}\"\n\
                  cat > \"{config}\"\n\
+                 cat \"{config}\" >> \"{configs}\"\n\
+                 echo >> \"{configs}\"\n\
                  {after_config}"
             ),
         )
         .expect("writing the stand-in bridge");
-        make_executable(&bridge.binary);
-        bridge.warm_up();
-        bridge
+        make_executable(&self.binary);
+    }
+
+    /// The config the daemon wrote to the `nth` bridge it started (0-based), once all of it is in.
+    pub async fn nth_config_read_from_its_stdin(&self, nth: usize) -> serde_json::Value {
+        eventually(
+            "the bridge has been started and has read its whole config",
+            A_BRIDGE_RECORDS_ITS_PID_WITHIN,
+            || {
+                let log = std::fs::read_to_string(&self.configs_log).unwrap_or_default();
+                let whole_lines: Vec<&str> = log
+                    .split_inclusive('\n')
+                    .filter(|line| line.ends_with('\n'))
+                    .collect();
+                let line = whole_lines.get(nth).ok_or_else(|| {
+                    format!("{} bridge configs so far: {log:?}", whole_lines.len())
+                })?;
+                serde_json::from_str(line.trim_end())
+                    .map_err(|e| format!("config {nth} is not JSON: {e}: {line:?}"))
+            },
+        )
+        .await
+    }
+
+    /// What the daemon wrote to the bridge's stdin when it last ran it in inspect mode.
+    pub fn inspect_request(&self) -> serde_json::Value {
+        let written = std::fs::read(&self.inspect_request_file).unwrap_or_else(|e| {
+            panic!(
+                "the bridge was never run in inspect mode ({}: {e})",
+                self.inspect_request_file.display()
+            )
+        });
+        serde_json::from_slice(&written).expect("the inspect request is JSON")
+    }
+
+    /// Whether the daemon has ever run this bridge in inspect mode.
+    pub fn was_ever_inspected(&self) -> bool {
+        self.inspect_request_file.exists()
     }
 
     /// Run the freshly written script once, to completion, before any test clock starts.
@@ -486,17 +598,40 @@ fn read_launches(launch_log: &Path) -> Vec<X11vncLaunch> {
         .collect()
 }
 
-/// The operator at the browser: answers every desktop-password question with the empty password,
-/// encrypted under this host's published key exactly as the browser's `encryptForHost` does.
+/// What the operator at the browser answers every question this host raises with.
+#[derive(Debug, Clone)]
+pub enum TheOperator {
+    /// The empty password: every desktop here is password-less unless a test says otherwise.
+    TypesNoPassword,
+    /// A structured credential, as the sign-in form sends it for a `DESKTOP_CREDENTIALS` question:
+    /// the protobuf-encoded [`DesktopCredentialAnswer`].
+    SignsInWith(DesktopCredentialAnswer),
+}
+
+impl TheOperator {
+    /// The plaintext the browser encrypts.
+    fn plaintext(&self) -> Vec<u8> {
+        match self {
+            Self::TypesNoPassword => NO_PASSWORD.as_bytes().to_vec(),
+            Self::SignsInWith(answer) => answer.encode_to_vec(),
+        }
+    }
+}
+
+/// The operator at the browser: answers every question this host raises at once, encrypted under
+/// this host's published key exactly as the browser's `encryptForHost` does, and remembers every
+/// question it was asked.
 ///
 /// The registry underneath is the real [`InMemoryHostPromptRegistry`]; only who answers is stood in
 /// for.
-struct AnOperatorWhoTypesNoPassword {
+struct AnOperatorAtTheBrowser {
     registry: InMemoryHostPromptRegistry,
     keypair: Arc<FileHostKeypair>,
+    answers_with: TheOperator,
+    asked: Mutex<Vec<PendingPrompt>>,
 }
 
-impl HostPromptRegistry for AnOperatorWhoTypesNoPassword {
+impl HostPromptRegistry for AnOperatorAtTheBrowser {
     fn issue(
         &self,
         issued_for: &str,
@@ -505,7 +640,11 @@ impl HostPromptRegistry for AnOperatorWhoTypesNoPassword {
         now_unix_ms: i64,
     ) -> PendingPrompt {
         let issued = self.registry.issue(issued_for, kind, subject, now_unix_ms);
-        let ciphertext = encrypted_under(&self.keypair, NO_PASSWORD);
+        self.asked
+            .lock()
+            .expect("the questions asked")
+            .push(issued.clone());
+        let ciphertext = encrypted_under(&self.keypair, &self.answers_with.plaintext());
         self.registry
             .answer(&issued.prompt_id, THE_OS_USER, ciphertext, now_unix_ms)
             .expect("the operator answers the question raised for them");
@@ -536,8 +675,8 @@ impl HostPromptRegistry for AnOperatorWhoTypesNoPassword {
     }
 }
 
-/// A password as the browser sends it: RSA-OAEP(SHA-256) under this host's published key.
-fn encrypted_under(keypair: &FileHostKeypair, password: &str) -> Vec<u8> {
+/// An answer as the browser sends it: RSA-OAEP(SHA-256) under this host's published key.
+fn encrypted_under(keypair: &FileHostKeypair, plaintext: &[u8]) -> Vec<u8> {
     use rsa::pkcs8::DecodePublicKey;
 
     let PublishedKey { spki_der, .. } = keypair.published().expect("this host's published key");
@@ -546,9 +685,9 @@ fn encrypted_under(keypair: &FileHostKeypair, password: &str) -> Vec<u8> {
         .encrypt(
             &mut rand::thread_rng(),
             rsa::Oaep::new::<sha2::Sha256>(),
-            password.as_bytes(),
+            plaintext,
         )
-        .expect("a password fits comfortably in an OAEP payload")
+        .expect("an answer fits comfortably in an OAEP payload")
 }
 
 /// The session's credential store, in memory. Storage only: a desktop's record goes through the
@@ -618,7 +757,14 @@ pub struct DaemonUnderTest {
     service: ScreenSharingServiceImpl,
     pub bridge: StandInBridge,
     pub x11vnc: StandInX11vnc,
+    operator: Arc<AnOperatorAtTheBrowser>,
+    /// The operator's sealed credential vault, when the daemon was built over one.
+    vaults: Option<Arc<SessionVaults>>,
+    /// Everything the daemon writes — and nothing else.
     storage: tempfile::TempDir,
+    /// The stand-in binaries and what they record, kept apart from [`Self::storage`] so a search of
+    /// what the daemon wrote does not find what the test's own bridge wrote down.
+    tools: tempfile::TempDir,
 }
 
 /// Builds a [`DaemonUnderTest`] whose bridge behaves as given.
@@ -627,6 +773,11 @@ pub struct DaemonBuilder {
     ready_timeout: Duration,
     x11vnc: TheX11vnc,
     x11vnc_accept_timeout: Duration,
+    inspection: TheInspection,
+    operator: TheOperator,
+    the_operators_vault: bool,
+    /// Whether the operator's vault, when wired, is left sealed rather than unlocked.
+    the_operators_vault_locked: bool,
 }
 
 /// A daemon whose bridge does `bridge` once it is spawned.
@@ -636,10 +787,50 @@ pub fn a_daemon_whose_bridge(bridge: TheBridge) -> DaemonBuilder {
         ready_timeout: DEFAULT_BRIDGE_READY_TIMEOUT,
         x11vnc: TheX11vnc::AcceptsConnections,
         x11vnc_accept_timeout: DEFAULT_X11VNC_ACCEPT_TIMEOUT,
+        inspection: TheInspection::Reports(InspectReport {
+            methods: vec![AdvertisedMethod::VncPassword],
+        }),
+        operator: TheOperator::TypesNoPassword,
+        the_operators_vault: false,
+        the_operators_vault_locked: false,
     }
 }
 
 impl DaemonBuilder {
+    /// The bridge, run in inspect mode, reports that the desktop advertises `methods`.
+    pub fn whose_desktop_advertises(mut self, methods: Vec<AdvertisedMethod>) -> Self {
+        self.inspection = TheInspection::Reports(InspectReport { methods });
+        self
+    }
+
+    /// The bridge, run in inspect mode, fails: it prints `reason` to stderr and exits non-zero.
+    pub fn whose_desktop_cannot_be_inspected(mut self, reason: &str) -> Self {
+        self.inspection = TheInspection::FailsWith(reason.to_string());
+        self
+    }
+
+    /// The operator answers every question with `answer`.
+    pub fn whose_operator_signs_in_with(mut self, answer: DesktopCredentialAnswer) -> Self {
+        self.operator = TheOperator::SignsInWith(answer);
+        self
+    }
+
+    /// Wire the operator's real credential vault — sealed on disk under this daemon's storage and
+    /// unlocked — instead of the in-memory session store, as `runtime.rs` wires
+    /// `with_credential_vaults`.
+    pub fn with_the_operators_vault(mut self) -> Self {
+        self.the_operators_vault = true;
+        self
+    }
+
+    /// Wire the operator's real credential vault, sealed on disk but not unlocked — the state it is
+    /// in after a restart, before the operator has opened it again.
+    pub fn with_the_operators_vault_locked(mut self) -> Self {
+        self.the_operators_vault = true;
+        self.the_operators_vault_locked = true;
+        self
+    }
+
     /// Wait at most `timeout` for the bridge's readiness line — production configuration, set
     /// short here so a test about a silent bridge costs a moment rather than the default wait.
     pub fn waiting_for_readiness_at_most(mut self, timeout: Duration) -> Self {
@@ -662,8 +853,9 @@ impl DaemonBuilder {
 
     pub fn start(self) -> DaemonUnderTest {
         let storage = tempfile::tempdir().expect("a storage directory");
-        let bridge = StandInBridge::installed_in(storage.path(), &self.bridge);
-        let x11vnc = StandInX11vnc::installed_in(storage.path(), self.x11vnc);
+        let tools = tempfile::tempdir().expect("a directory for the stand-in binaries");
+        let bridge = StandInBridge::installed_in(tools.path(), &self.bridge, &self.inspection);
+        let x11vnc = StandInX11vnc::installed_in(tools.path(), self.x11vnc);
 
         let config = Arc::new(DaemonConfig {
             livekit: Some(LiveKitConfig {
@@ -676,6 +868,7 @@ impl DaemonBuilder {
             }),
             screen_sharing: Some(ScreenSharingConfig {
                 vnc_binary_path: bridge.binary.display().to_string(),
+                rdp_binary_path: bridge.binary.display().to_string(),
                 x11vnc_binary_path: x11vnc.binary.display().to_string(),
                 ..Default::default()
             }),
@@ -685,9 +878,18 @@ impl DaemonBuilder {
         let sessions_base = storage.path().to_path_buf();
         let keypair = Arc::new(FileHostKeypair::new(storage.path()));
         let targets = Arc::new(FileHostDesktopTargetStore::new(storage.path()));
-        let operator = Arc::new(AnOperatorWhoTypesNoPassword {
+        let operator = Arc::new(AnOperatorAtTheBrowser {
             registry: InMemoryHostPromptRegistry::new(),
             keypair: Arc::clone(&keypair),
+            answers_with: self.operator,
+            asked: Mutex::new(Vec::new()),
+        });
+        let vaults = self.the_operators_vault.then(|| {
+            if self.the_operators_vault_locked {
+                the_operators_locked_vault_in(storage.path())
+            } else {
+                the_operators_unlocked_vault_in(storage.path())
+            }
         });
 
         let service = ScreenSharingServiceImpl::new(
@@ -699,22 +901,181 @@ impl DaemonBuilder {
         .with_host_scope(
             targets,
             keypair as Arc<dyn HostKeypair>,
-            operator as Arc<dyn HostPromptRegistry>,
+            Arc::clone(&operator) as Arc<dyn HostPromptRegistry>,
         )
-        .with_target_store(Arc::new(TheSessionsCredentials::default()))
         .with_bridge_ready_timeout(self.ready_timeout)
         .with_x11vnc_accept_timeout(self.x11vnc_accept_timeout);
+        let service = match &vaults {
+            Some(vaults) => service.with_credential_vaults(Some(Arc::clone(vaults))),
+            None => service.with_target_store(Arc::new(TheSessionsCredentials::default())),
+        };
 
         DaemonUnderTest {
             service,
             bridge,
             x11vnc,
+            operator,
+            vaults,
             storage,
+            tools,
         }
     }
 }
 
+/// The operator's credential vault, created on disk under `storage` and unlocked — the state a
+/// signed-in operator's vault is in.
+fn the_operators_unlocked_vault_in(storage: &Path) -> Arc<SessionVaults> {
+    let vaults = Arc::new(SessionVaults::new(storage.join("auth")));
+    let passphrase = SecretString::new(THE_OPERATORS_VAULT_PASSPHRASE);
+    CredentialStore::create(&vaults.path_for(THE_OS_USER), &passphrase, THE_OS_USER)
+        .expect("the operator's vault is created");
+    vaults
+        .unlock(THE_OS_USER, &passphrase)
+        .expect("the operator's passphrase opens the vault");
+    vaults
+}
+
+/// The operator's credential vault, created on disk under `storage` and left sealed.
+fn the_operators_locked_vault_in(storage: &Path) -> Arc<SessionVaults> {
+    let vaults = Arc::new(SessionVaults::new(storage.join("auth")));
+    let passphrase = SecretString::new(THE_OPERATORS_VAULT_PASSPHRASE);
+    CredentialStore::create(&vaults.path_for(THE_OS_USER), &passphrase, THE_OS_USER)
+        .expect("the operator's vault is created");
+    vaults
+}
+
+/// A credential as the sign-in form sends it: VNC Authentication with no password, not
+/// remembered, until a test says otherwise.
+pub fn a_credential() -> DesktopCredentialAnswer {
+    DesktopCredentialAnswer {
+        method: DesktopAuthMethod::VncPassword as i32,
+        ..Default::default()
+    }
+}
+
+/// Fluent setters for [`a_credential`].
+pub trait CredentialBuilder: Sized {
+    fn for_method(self, method: DesktopAuthMethod) -> Self;
+    fn with_username(self, username: &str) -> Self;
+    fn with_domain(self, domain: &str) -> Self;
+    fn with_password(self, password: &str) -> Self;
+    /// With Remember ticked.
+    fn remembered(self) -> Self;
+}
+
+impl CredentialBuilder for DesktopCredentialAnswer {
+    fn for_method(mut self, method: DesktopAuthMethod) -> Self {
+        self.method = method as i32;
+        self
+    }
+
+    fn with_username(mut self, username: &str) -> Self {
+        self.username = username.to_string();
+        self
+    }
+
+    fn with_domain(mut self, domain: &str) -> Self {
+        self.domain = domain.to_string();
+        self
+    }
+
+    fn with_password(mut self, password: &str) -> Self {
+        self.password = password.to_string();
+        self
+    }
+
+    fn remembered(mut self) -> Self {
+        self.remember = true;
+        self
+    }
+}
+
 impl DaemonUnderTest {
+    /// Attach an RDP desktop to `host`, as the Hosts screen does for an RDP channel.
+    pub async fn attach_an_rdp_desktop_to(&self, host: &str) -> String {
+        self.service
+            .add_host_target(Request::direct(AddHostTargetRequest {
+                session_token: A_SESSION_TOKEN.to_string(),
+                daemon_instance_id: host.to_string(),
+                label: "windows box".to_string(),
+                host: "127.0.0.1".to_string(),
+                port: AN_RDP_PORT,
+                protocol: Protocol::Rdp as i32,
+                username: String::new(),
+                x11_display: None,
+                domain: String::new(),
+            }))
+            .await
+            .expect("attaching an RDP desktop to a host")
+            .into_inner()
+            .target_id
+    }
+
+    /// Ask which sign-in methods a host's desktop advertises, as the viewer does before it opens it.
+    ///
+    /// Bounded, so an inspection that never finishes fails the test instead of hanging the suite.
+    pub async fn inspect_the_desktop_of(
+        &self,
+        host: &str,
+        target_id: &str,
+    ) -> Result<InspectHostDesktopResponse, Status> {
+        tokio::time::timeout(
+            A_START_FINISHES_WITHIN,
+            self.service
+                .inspect_host_desktop(Request::direct(InspectHostDesktopRequest {
+                    session_token: A_SESSION_TOKEN.to_string(),
+                    daemon_instance_id: host.to_string(),
+                    target_id: target_id.to_string(),
+                })),
+        )
+        .await
+        .expect("the inspection finishes, one way or the other")
+        .map(Response::into_inner)
+    }
+
+    /// Every question this host has asked its operator, in order.
+    pub fn questions_asked(&self) -> Vec<PendingPrompt> {
+        self.operator
+            .asked
+            .lock()
+            .expect("the questions asked")
+            .clone()
+    }
+
+    /// The `screen-sharing` record under `account` in the operator's credential vault, if any.
+    pub fn the_operators_screen_sharing_record(&self, account: &str) -> Option<CredentialRecord> {
+        self.the_operators_vault()
+            .get(&screen_sharing_provider(), &AccountId::new(account))
+            .expect("the operator's vault is readable")
+    }
+
+    /// Every `screen-sharing` record in the operator's credential vault.
+    pub fn the_operators_screen_sharing_records(&self) -> Vec<CredentialRecord> {
+        self.the_operators_vault()
+            .list(Some(&screen_sharing_provider()))
+            .expect("the operator's vault is readable")
+    }
+
+    fn the_operators_vault(&self) -> Arc<tddy_credentials::SessionVault> {
+        self.vaults
+            .as_ref()
+            .expect("this daemon was built with_the_operators_vault()")
+            .use_open(THE_OS_USER)
+            .expect("the operator's vault is open")
+    }
+
+    /// Every file under the daemon's storage whose bytes contain `needle`.
+    pub fn files_the_daemon_wrote_holding(&self, needle: &str) -> Vec<PathBuf> {
+        files_under(self.storage.path())
+            .into_iter()
+            .filter(|path| {
+                std::fs::read(path)
+                    .map(|bytes| bytes.windows(needle.len()).any(|w| w == needle.as_bytes()))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
     /// Attach a password-less VNC desktop to `host`, as the Hosts screen does.
     pub async fn attach_a_desktop_to(&self, host: &str) -> String {
         self.service
@@ -727,6 +1088,7 @@ impl DaemonUnderTest {
                 protocol: Protocol::Vnc as i32,
                 username: THE_OS_USER.to_string(),
                 x11_display: None,
+                domain: String::new(),
             }))
             .await
             .expect("attaching a desktop to a host")
@@ -747,6 +1109,7 @@ impl DaemonUnderTest {
                 protocol: Protocol::Vnc as i32,
                 username: String::new(),
                 x11_display: Some(display),
+                domain: String::new(),
             }))
             .await
             .expect("attaching an X11 display to a host")
@@ -839,6 +1202,24 @@ impl DaemonUnderTest {
         .expect("the start finishes, one way or the other")
         .map(Response::into_inner)
     }
+}
+
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .flat_map(|entry| {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        files_under(&path)
+                    } else {
+                        vec![path]
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl Drop for DaemonUnderTest {

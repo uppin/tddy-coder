@@ -26,6 +26,7 @@ fn a_vnc_target() -> ScreenSharingTarget {
         protocol: Protocol::Vnc as i32,
         username: "ada".to_string(),
         x11_display: None,
+        domain: String::new(),
     }
 }
 
@@ -38,6 +39,7 @@ fn an_rdp_target() -> ScreenSharingTarget {
         protocol: Protocol::Rdp as i32,
         username: "tester".to_string(),
         x11_display: None,
+        domain: String::new(),
     }
 }
 

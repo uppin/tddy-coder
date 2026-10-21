@@ -143,6 +143,9 @@ fn forward(
         host_public_key: published.spki_der,
         host_public_key_fingerprint: published.fingerprint,
         expires_at_unix_ms: prompt.expires_at_unix_ms,
+        // Left empty: the methods a desktop advertises are read on demand by `InspectHostDesktop`,
+        // which the viewer calls before it opens a desktop, so no prompt carries them.
+        offered_auth_methods: Vec::new(),
     }))
     .is_ok()
 }
@@ -150,6 +153,6 @@ fn forward(
 fn wire_kind(kind: PromptKind) -> HostPromptKind {
     match kind {
         PromptKind::SshKeyPassphrase => HostPromptKind::SshKeyPassphrase,
-        PromptKind::DesktopPassword => HostPromptKind::DesktopPassword,
+        PromptKind::DesktopCredentials => HostPromptKind::DesktopCredentials,
     }
 }
