@@ -747,6 +747,8 @@ pub fn context_globs_for_agent(agent: &str) -> &'static [&'static str] {
             ".mcp.json",
         ],
         "codex" | "codex-acp" => &["AGENTS.md", ".agents/**", ".codex/**"],
+        // OpenCode's project configuration lives in `opencode.json` and the `.opencode/` tree.
+        "opencode" => &["AGENTS.md", ".agents/**", "opencode.json", ".opencode/**"],
         _ => SHARED_CONTEXT_GLOBS,
     }
 }

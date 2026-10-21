@@ -266,11 +266,10 @@ fn route_body(harness: Harness) -> Result<RouteBody, RouteRefusal> {
         Harness::Cursor | Harness::CursorCli => {
             Err(RouteRefusal::HarnessCannotBeRouted { harness })
         }
-        Harness::Codex
-        | Harness::CodexAcp
-        | Harness::OpenCode
-        | Harness::OpenCodeCli
-        | Harness::MuseCli => Err(RouteRefusal::NotYetRoutable(harness)),
+        Harness::OpenCode | Harness::OpenCodeCli => Ok(opencode_route),
+        Harness::Codex | Harness::CodexAcp | Harness::MuseCli => {
+            Err(RouteRefusal::NotYetRoutable(harness))
+        }
     }
 }
 
@@ -284,6 +283,44 @@ pub fn harness_routable(harness: Harness) -> Result<(), RouteRefusal> {
 /// What `harness` needs to run on `target`.
 pub fn resolve_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
     route_body(harness)?(harness, target)
+}
+
+/// The wire spellings of the protocols `endpoints` serves, as [`route_supported`] takes them.
+fn served_protocols(endpoints: &RouteEndpoints) -> Vec<&'static str> {
+    [
+        endpoints
+            .anthropic_messages
+            .as_ref()
+            .map(|_| ANTHROPIC_MESSAGES),
+        endpoints
+            .openai_responses
+            .as_ref()
+            .map(|_| OPENAI_RESPONSES),
+        endpoints.openai_chat.as_ref().map(|_| OPENAI_CHAT),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// OpenCode reads its provider from the file `OPENCODE_CONFIG` names, and that file reads the key
+/// from the environment, so the key travels as a secret variable and never as an argument. The
+/// model is selected on the provider the file declares, by the `--model` argument.
+fn opencode_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
+    route_supported(
+        harness,
+        &target.preset,
+        &served_protocols(&target.endpoints),
+    )?;
+    Ok(HarnessRoute {
+        env: Vec::new(),
+        secret_env: vec![(OPENCODE_ROUTE_KEY_ENV.to_string(), target.api_key.clone())],
+        files: vec![opencode_config_for(target)],
+        args: vec![
+            "--model".to_string(),
+            format!("{OPENCODE_ROUTE_PROVIDER_ID}/{}", target.model),
+        ],
+    })
 }
 
 /// Claude Code reads its endpoint, key and every model choice from the environment: the base URL is
@@ -360,10 +397,46 @@ pub const OPENCODE_ROUTE_KEY_ENV: &str = "TDDY_OPENCODE_PROVIDER_KEY";
 
 /// The `opencode.json` that declares `target`'s account as an OpenCode provider and selects
 /// `target.model` on it: `@ai-sdk/openai` over Responses (reasoning carried across turns) when the
-/// account serves Responses, `@ai-sdk/openai-compatible` over Chat Completions otherwise.
+/// account serves Responses, `@ai-sdk/openai-compatible` over Chat Completions otherwise. The key is
+/// referenced as `{env:…}` and never written into the file.
+///
+/// # Panics
+///
+/// When the account serves neither OpenAI protocol. [`resolve_route`] refuses such an account before
+/// it builds a configuration, so this is a programming error, not an operator's input.
 #[must_use]
 pub fn opencode_config_for(target: &RouteTarget) -> RouteFile {
-    let _ = target;
-    // TODO(opencode-cli): implement
-    todo!()
+    let model = target.model.as_str();
+    let (npm, root, model_entry) = match (
+        &target.endpoints.openai_responses,
+        &target.endpoints.openai_chat,
+    ) {
+        (Some(root), _) => (
+            "@ai-sdk/openai",
+            root,
+            serde_json::json!({ "options": { "include": ["reasoning.encrypted_content"] } }),
+        ),
+        (None, Some(root)) => ("@ai-sdk/openai-compatible", root, serde_json::json!({})),
+        (None, None) => panic!(
+            "opencode_config_for needs an account that serves OpenAI Responses or Chat Completions"
+        ),
+    };
+    let config = serde_json::json!({
+        "model": format!("{OPENCODE_ROUTE_PROVIDER_ID}/{model}"),
+        "provider": {
+            (OPENCODE_ROUTE_PROVIDER_ID): {
+                "npm": npm,
+                "options": {
+                    "baseURL": root,
+                    "apiKey": format!("{{env:{OPENCODE_ROUTE_KEY_ENV}}}"),
+                },
+                "models": { (model): model_entry },
+            },
+        },
+    });
+    RouteFile {
+        name: "opencode.json".to_string(),
+        contents: serde_json::to_string_pretty(&config)
+            .expect("a serde_json::Value always serializes"),
+    }
 }

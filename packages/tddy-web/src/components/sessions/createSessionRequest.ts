@@ -155,6 +155,32 @@ export function buildStartSessionRequest(
       codebaseDaemonInstanceId: "",
     };
   }
+  if (sessionType === "opencode-cli") {
+    return {
+      ...commonParams,
+      toolPath: "",
+      agent: "",
+      recipe: "",
+      stackParent,
+      stackParentDaemonInstanceId,
+      stackNodeId,
+      sessionType: "opencode-cli",
+      model,
+      // The provider field is offered to every CLI harness, so the account the operator chose
+      // goes out as chosen rather than being dropped in favour of the vendor.
+      providerAccountId,
+      providerBuiltIn,
+      permissionMode: "",
+      // OpenCode offers no first prompt, sandbox, managed codebase, specialized agents or semantic
+      // index, so the request says so rather than sending what another session type left in the form.
+      initialPrompt: "",
+      sandbox: false,
+      managedCodebase: false,
+      specializedAgents: [],
+      semanticIndex: false,
+      codebaseDaemonInstanceId: "",
+    };
+  }
   return {
     ...commonParams,
     toolPath: "",

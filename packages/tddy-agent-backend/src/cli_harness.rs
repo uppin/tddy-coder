@@ -7,7 +7,7 @@
 //! configuration file. Code that used to match on `"claude-cli" | "cursor-cli"` asks the registry
 //! instead, so a further harness is one more descriptor rather than another arm in every match.
 
-use crate::backend::BackendModels;
+use crate::backend::{claude_cli_models, cursor_cli_models, BackendModel, BackendModels};
 use crate::provider_route::Harness;
 
 /// What one start or resume of a CLI harness is launched with.
@@ -64,25 +64,134 @@ pub struct CliHarness {
     pub models: CliModelSource,
 }
 
+/// The registry, in the order the session-type toggle offers the harnesses.
+static CLI_HARNESSES: [CliHarness; 3] = [
+    CliHarness {
+        session_type: "claude-cli",
+        label: "Claude CLI",
+        route_harness: Harness::ClaudeCli,
+        context_agent: "claude",
+        default_binary: "claude",
+        binary_env: "TDDY_CLAUDE_BINARY",
+        route_config_env: None,
+        argv: claude_cli_argv,
+        models: CliModelSource::Curated(claude_cli_models),
+    },
+    CliHarness {
+        session_type: "cursor-cli",
+        label: "Cursor CLI",
+        route_harness: Harness::CursorCli,
+        context_agent: "cursor",
+        default_binary: "agent",
+        binary_env: "TDDY_CURSOR_AGENT",
+        route_config_env: None,
+        argv: cursor_cli_argv,
+        models: CliModelSource::Curated(cursor_cli_models),
+    },
+    CliHarness {
+        session_type: "opencode-cli",
+        label: "OpenCode",
+        route_harness: Harness::OpenCodeCli,
+        context_agent: "opencode",
+        default_binary: "opencode",
+        binary_env: "TDDY_OPENCODE_CLI",
+        route_config_env: Some("OPENCODE_CONFIG"),
+        argv: opencode_cli_argv,
+        models: CliModelSource::ListedByBinary(&["models"]),
+    },
+];
+
 /// Every CLI harness, in the order the session-type toggle offers them.
 pub fn cli_harnesses() -> &'static [CliHarness] {
-    // TODO(opencode-cli): implement
-    todo!()
+    &CLI_HARNESSES
 }
 
 /// The CLI harness `session_type` selects; `None` for a tool or workspace session.
 #[must_use]
 pub fn cli_harness(session_type: &str) -> Option<&'static CliHarness> {
-    let _ = session_type;
-    // TODO(opencode-cli): implement
-    todo!()
+    cli_harnesses()
+        .iter()
+        .find(|harness| harness.session_type == session_type)
 }
 
 /// The catalogue a harness that lists its own models printed — one `provider/model` per line, as
 /// `opencode models` does. Blank lines are skipped; the first model is the default.
 #[must_use]
 pub fn models_from_listing(stdout: &str) -> BackendModels {
-    let _ = stdout;
-    // TODO(opencode-cli): implement
-    todo!()
+    let models: Vec<BackendModel> = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(|id| BackendModel::new(id, id))
+        .collect();
+    let default_model = models
+        .first()
+        .map(|model| model.id.clone())
+        .unwrap_or_default();
+    BackendModels {
+        models,
+        default_model,
+    }
+}
+
+/// A value with its surrounding whitespace removed, or `None` when nothing but whitespace is left.
+fn non_blank(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+/// `claude`: the argv the Claude Code CLI has always been started with — see
+/// [`crate::claude_argv::build_claude_base_argv`]. A blank permission mode is `auto`, and a blank
+/// first prompt is no prompt.
+fn claude_cli_argv(launch: &CliLaunch<'_>) -> Vec<String> {
+    let mode = non_blank(launch.permission_mode).unwrap_or("auto");
+    let mut argv = crate::claude_argv::build_claude_base_argv(
+        launch.binary,
+        launch.model,
+        launch.session_id,
+        mode,
+        launch.dangerously_skip_permissions,
+        launch.resume,
+    );
+    if let Some(prompt) = non_blank(launch.initial_prompt) {
+        argv.push(prompt.to_string());
+    }
+    argv
+}
+
+/// `agent`: `--resume <chat>` only for a non-blank chat id — `--resume` takes an optional argument,
+/// so a bare flag would open an interactive picker — then `--model` when a model is named, then the
+/// first prompt when it is not blank.
+fn cursor_cli_argv(launch: &CliLaunch<'_>) -> Vec<String> {
+    let mut argv = vec![launch.binary.to_string()];
+    if let Some(chat_id) = non_blank(launch.conversation_id) {
+        argv.push("--resume".to_string());
+        argv.push(chat_id.to_string());
+    }
+    if !launch.model.is_empty() {
+        argv.push("--model".to_string());
+        argv.push(launch.model.to_string());
+    }
+    if let Some(prompt) = non_blank(launch.initial_prompt) {
+        argv.push(prompt.to_string());
+    }
+    argv
+}
+
+/// `opencode`: a fresh start names its model when it has one and opens with its first prompt;
+/// a resume continues the worktree's last session, which is this one (one session per worktree).
+fn opencode_cli_argv(launch: &CliLaunch<'_>) -> Vec<String> {
+    let mut argv = vec![launch.binary.to_string()];
+    if launch.resume {
+        argv.push("--continue".to_string());
+        return argv;
+    }
+    if !launch.model.is_empty() {
+        argv.push("--model".to_string());
+        argv.push(launch.model.to_string());
+    }
+    if let Some(prompt) = non_blank(launch.initial_prompt) {
+        argv.push("--prompt".to_string());
+        argv.push(prompt.to_string());
+    }
+    argv
 }

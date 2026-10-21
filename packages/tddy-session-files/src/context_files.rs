@@ -77,6 +77,7 @@ pub fn context_agent_for_session_type(session_type: &str) -> &'static str {
     match session_type.trim() {
         "claude-cli" => "claude",
         "cursor-cli" => "cursor",
+        "opencode-cli" => "opencode",
         // Every other session type either runs no agent at all (`workspace`) or is not one this
         // mapping knows, and both answer with the empty name so `context_globs_for_agent` yields
         // its shared base — narrower than any backend's row, never the union of them.

@@ -2,10 +2,18 @@
 //! directory, the harness's configuration variable pointed at them, and its environment and
 //! arguments collected for the PTY.
 
+use std::io;
 use std::path::Path;
 
+use tddy_core::atomic_file::write_atomic_with_mode;
 use tddy_core::cli_harness::CliHarness;
 use tddy_core::provider_route::HarnessRoute;
+
+use crate::session_provider_route::pty_route_env;
+
+/// A route file names the endpoint and holds the account's configuration, so only the owner may read
+/// it. Applied when the file is created, so its bytes are never on disk at a wider mode.
+const ROUTE_FILE_MODE: u32 = 0o600;
 
 /// What a routed CLI launch adds to the harness's own argv and environment.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -23,8 +31,30 @@ pub fn cli_route_launch(
     harness: &CliHarness,
     route: Option<&HarnessRoute>,
     session_dir: &Path,
-) -> std::io::Result<CliRouteLaunch> {
-    let _ = (harness, route, session_dir);
-    // TODO(opencode-cli): implement
-    todo!()
+) -> io::Result<CliRouteLaunch> {
+    let Some(route) = route else {
+        return Ok(CliRouteLaunch::default());
+    };
+    for file in &route.files {
+        write_atomic_with_mode(
+            &session_dir.join(&file.name),
+            &file.contents,
+            ROUTE_FILE_MODE,
+        )?;
+    }
+    let mut env = pty_route_env(route);
+    if let (Some(config_env), Some(config)) = (harness.route_config_env, route.files.first()) {
+        let path = session_dir.join(&config.name);
+        let path_text = path.to_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} is not valid UTF-8", path.display()),
+            )
+        })?;
+        env.push((config_env.to_string(), path_text.to_string()));
+    }
+    Ok(CliRouteLaunch {
+        env,
+        args: route.args.clone(),
+    })
 }

@@ -165,9 +165,22 @@ impl DaemonConfig {
         default_binary: &str,
         binary_env: &str,
     ) -> String {
-        let _ = (session_type, default_binary, binary_env);
-        // TODO(opencode-cli): implement
-        todo!()
+        // Blank values count as unset, as they do for `TDDY_CLAUDE_BINARY` and `TDDY_CURSOR_AGENT`.
+        let from_env = std::env::var(binary_env).ok();
+        let from_env = from_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let from_config = self
+            .cli_harnesses
+            .get(session_type)
+            .and_then(|harness| harness.binary_path.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        from_env
+            .or(from_config)
+            .unwrap_or(default_binary)
+            .to_string()
     }
 }
 

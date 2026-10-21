@@ -3,6 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
+**Complexity**: 5 — M1/M2 span six packages (tddy-agent-backend, tddy-agent-launch, tddy-cli-sessions, tddy-daemon-kernel, tddy-session-files, tddy-web) with a spawned-process seam; M3 adds daemon start, resume, listing, terminal relay and the model catalog for `opencode-cli` across tddy-agent-launch, tddy-session-activity and tddy-daemon-rpc, so start-before-resume ordering and a daemon RPC seam are added, and the facilitation, deletion and catalog-probe designs are still open
 **Stack**: #provider-route 3/9. Base: `feature/provider-route/claude-route`. PR: [#664](https://github.com/uppin/tddy-coder/pull/664).
 
 ## Initial Discovery
@@ -120,9 +121,9 @@ and the key in `TDDY_OPENCODE_PROVIDER_KEY`.
 As Scope. Telegram pickers and placement keep their claude-only rules (split / sandboxed codebase stay claude-cli only).
 
 ## Implementation Milestones
-- [ ] M1 Descriptor + claude/cursor through it, existing suites green
-- [ ] M2 OpenCode descriptor + route arm
-- [ ] M3 Start/resume/listing + web
+- [x] M1 Descriptor + claude/cursor through it, existing suites green
+- [x] M2 OpenCode descriptor + route arm
+- [ ] M3 Start/resume/listing + web — the web toggle, model request and start request are green; the daemon start, resume, listing, PTY relay and `opencode-cli` model catalog are not yet implemented, and no red test pins them on this branch (open: needs red tests before green)
 
 ## Testing Plan
 
