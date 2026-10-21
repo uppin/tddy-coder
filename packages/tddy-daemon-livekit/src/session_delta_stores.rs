@@ -1,23 +1,16 @@
 //! The delta rings of the session rooms this daemon hosts, as the activity service reads them.
 //!
-//! The ring is filled by the session room's poll loop in `tddy-daemon-livekit`; what the activity
-//! service wants is its own port, [`SessionDeltaStores`]. This daemon is where the two are brought
-//! together, so neither crate names the other.
-//!
-//! TODO(#satellite follow-up): the adapter belongs in the plugin, beside the ring it reads, which
-//! needs a `tddy-daemon-livekit` → `tddy-session-activity` dependency edge nobody has agreed to
-//! yet. `docs/dev/todo/2026-10-21-session-delta-stores-adapter-lives-in-the-daemon.md`.
+//! The ring is filled by the session room's poll loop ([`crate::session_room`]); what the activity
+//! service wants is its own port, [`SessionDeltaStores`], which this crate implements beside the ring.
 
 use std::sync::Arc;
 
-use tddy_daemon_livekit::session_room::{
+use crate::session_room::{
     ActivityDelta, DeltaLookupError, DeltaScope as RoomDeltaScope, SessionDeltaStore,
     SessionRoomRegistry,
 };
 use tddy_rpc::Status;
-use tddy_session_lifecycle::activity_service::{
-    DeltaLookup, DeltaScope, MeasuredDelta, SessionDeltaStores,
-};
+use tddy_session_activity::service::{DeltaLookup, DeltaScope, MeasuredDelta, SessionDeltaStores};
 
 /// The delta rings of the session rooms this daemon hosts.
 ///
@@ -133,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn each_scope_is_read_from_the_ring_as_the_same_scope() {
+    fn the_activity_service_reads_deltas_through_the_plugins_store() {
         let store = a_ring_with_one_attributed_call();
 
         let call = found_patch(lookup_in(&store, "call-1", DeltaScope::Call));

@@ -46,6 +46,10 @@ tddy-rpc = { path = "../tddy-rpc" }
 # `tddy-session-sync` reads the same constants from the other end of the same wire: a first delta
 # numbered 0 there would be indistinguishable from "no tick".
 tddy-service = { path = "../tddy-service" }
+# `SessionDeltaStores`, the activity service's port over the delta rings this crate fills:
+# `session_delta_stores` implements it beside the ring. One-directional — the activity service names
+# no LiveKit crate.
+tddy-session-activity = { path = "../tddy-session-activity" }
 # `list_session_attachments`, beside the `session_attachments_root` that names the directory it
 # reads: a session room publishes the basenames in its metadata.
 tddy-workflow = { path = "../tddy-workflow" }

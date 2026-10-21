@@ -11,11 +11,10 @@ use tddy_daemon_extensions::RoomTokenMinter;
 use tddy_daemon_livekit::agent_room_ports::RosterDirectory;
 use tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config;
 use tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry;
+use tddy_daemon_livekit::session_delta_stores::RoomsHostedByThisDaemon;
 use tddy_daemon_livekit::session_room::SessionRoomRegistry;
 use tddy_daemon_livekit::LiveKitRoomConnector;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-
-use crate::session_delta_stores::RoomsHostedByThisDaemon;
 
 /// `host` with the plugin's room ports installed: `rooms` hosts, broadcasts in and answers deltas
 /// for the session rooms, `admissions` holds the owning daemons admitted to them, `room_tokens`

@@ -12432,6 +12432,7 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-session-activity",
  "tddy-testing-commons",
  "tddy-workflow",
  "tddy-worktree-service",
