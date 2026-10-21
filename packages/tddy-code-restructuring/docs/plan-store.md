@@ -70,7 +70,7 @@ anchored range marks the operation `StaleReason::EditedBy { plan, op }` and leav
 Nothing changes unless every plan could be folded.
 
 **`reresolve_files(files, resolver)`** re-resolves every held item anchor in `files`. An intact item
-rewrites its hint and the plan's per-file hint (`sha256`, `modified`); an item whose text changed is
+rewrites its hint and the plan's per-file hint (`sha256`); an item whose text changed is
 `ItemChanged`; one the file no longer declares is `ItemNotFound { file }`. Re-resolution clears `ItemChanged` / `ItemNotFound` once the tree says
 the item is intact again, but never `EditedBy`. Files the store's own runs wrote since the last call are
 skipped: the run already carried every plan through those edits.
