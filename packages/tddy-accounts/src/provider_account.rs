@@ -10,8 +10,10 @@
 //! A preset fixes, per wire protocol, the root a client is pointed at. Which harness can run on an
 //! account follows from the protocols it serves, so an account never records a harness.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
-use tddy_credentials::{AccountId, CredentialRecord, SecretString};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 
 use crate::store::AccountsError;
 
@@ -30,8 +32,11 @@ impl WireProtocol {
     /// The wire spelling: `"anthropic-messages"`, `"openai-responses"`, `"openai-chat"`.
     #[must_use]
     pub fn as_str(self) -> &'static str {
-        // TODO(accounts): implement
-        todo!()
+        match self {
+            Self::AnthropicMessages => "anthropic-messages",
+            Self::OpenAiResponses => "openai-responses",
+            Self::OpenAiChat => "openai-chat",
+        }
     }
 }
 
@@ -92,16 +97,58 @@ pub enum ProviderAccountError {
 
 /// Every preset an account can be connected with, in the order the Accounts screen offers them.
 pub fn presets() -> &'static [ProviderPreset] {
-    // TODO(accounts): implement
-    todo!()
+    use PresetEndpoint::{Fixed, NotServed, OperatorSupplied};
+    static PRESETS: [ProviderPreset; 6] = [
+        ProviderPreset {
+            id: "meta",
+            label: "Meta",
+            anthropic_messages: Fixed("https://api.meta.ai"),
+            openai_responses: Fixed("https://api.meta.ai/v1"),
+            openai_chat: Fixed("https://api.meta.ai/v1"),
+        },
+        ProviderPreset {
+            id: "fireworks",
+            label: "Fireworks",
+            anthropic_messages: Fixed("https://api.fireworks.ai/inference"),
+            openai_responses: NotServed,
+            openai_chat: Fixed("https://api.fireworks.ai/inference/v1"),
+        },
+        ProviderPreset {
+            id: "baseten",
+            label: "Baseten",
+            anthropic_messages: NotServed,
+            openai_responses: NotServed,
+            openai_chat: Fixed("https://inference.baseten.co/v1"),
+        },
+        ProviderPreset {
+            id: "modal",
+            label: "Modal",
+            anthropic_messages: NotServed,
+            openai_responses: NotServed,
+            openai_chat: OperatorSupplied,
+        },
+        ProviderPreset {
+            id: "openai-compatible",
+            label: "OpenAI-compatible",
+            anthropic_messages: NotServed,
+            openai_responses: OperatorSupplied,
+            openai_chat: OperatorSupplied,
+        },
+        ProviderPreset {
+            id: "anthropic-compatible",
+            label: "Anthropic-compatible",
+            anthropic_messages: OperatorSupplied,
+            openai_responses: NotServed,
+            openai_chat: NotServed,
+        },
+    ];
+    &PRESETS
 }
 
 /// The preset with this id.
 #[must_use]
 pub fn preset(id: &str) -> Option<&'static ProviderPreset> {
-    let _ = id;
-    // TODO(accounts): implement
-    todo!()
+    presets().iter().find(|preset| preset.id == id)
 }
 
 /// The endpoints an account connected with `preset` serves, given the roots the operator supplied.
@@ -113,9 +160,77 @@ pub fn endpoints_for(
     anthropic_base_url: Option<&str>,
     openai_base_url: Option<&str>,
 ) -> Result<ProviderEndpoints, ProviderAccountError> {
-    let _ = (preset, anthropic_base_url, openai_base_url);
-    // TODO(accounts): implement
-    todo!()
+    // Chat is resolved before Responses: it is the protocol every OpenAI-speaking preset serves,
+    // so it is the one a refusal names.
+    let anthropic_messages = resolve_root(
+        preset.id,
+        WireProtocol::AnthropicMessages,
+        preset.anthropic_messages,
+        anthropic_base_url,
+    )?;
+    let openai_chat = resolve_root(
+        preset.id,
+        WireProtocol::OpenAiChat,
+        preset.openai_chat,
+        openai_base_url,
+    )?;
+    let openai_responses = resolve_root(
+        preset.id,
+        WireProtocol::OpenAiResponses,
+        preset.openai_responses,
+        openai_base_url,
+    )?;
+    Ok(ProviderEndpoints {
+        anthropic_messages,
+        openai_responses,
+        openai_chat,
+    })
+}
+
+/// The root one protocol is served at: the preset's fixed one, or the operator's, validated.
+fn resolve_root(
+    preset: &'static str,
+    protocol: WireProtocol,
+    source: PresetEndpoint,
+    supplied: Option<&str>,
+) -> Result<Option<String>, ProviderAccountError> {
+    match (source, supplied) {
+        (PresetEndpoint::NotServed, _) => Ok(None),
+        (PresetEndpoint::Fixed(root), None) => Ok(Some(root.to_string())),
+        (PresetEndpoint::Fixed(_), Some(_)) => {
+            Err(ProviderAccountError::FixedBaseUrl { preset, protocol })
+        }
+        (PresetEndpoint::OperatorSupplied, None) => {
+            Err(ProviderAccountError::MissingBaseUrl { preset, protocol })
+        }
+        (PresetEndpoint::OperatorSupplied, Some(root)) => valid_root(root).map(Some),
+    }
+}
+
+/// `root` without a trailing slash, when it is an `http(s)` URL with a host and nothing that would
+/// smuggle a credential or reshape the request (userinfo, query, fragment, whitespace).
+fn valid_root(root: &str) -> Result<String, ProviderAccountError> {
+    let invalid = || ProviderAccountError::InvalidBaseUrl(root.to_string());
+    let rest = root
+        .strip_prefix("https://")
+        .or_else(|| root.strip_prefix("http://"))
+        .ok_or_else(invalid)?;
+    let authority = rest.split('/').next().unwrap_or_default();
+    let unusable = authority.is_empty()
+        || authority.contains('@')
+        || root.contains(['?', '#'])
+        || root.chars().any(char::is_whitespace);
+    if unusable {
+        return Err(invalid());
+    }
+    Ok(root.trim_end_matches('/').to_string())
+}
+
+const META_PRESET: &str = "preset";
+const META_PROBED_AT: &str = "probed_at";
+
+fn endpoint_key(protocol: WireProtocol) -> String {
+    format!("endpoint.{}", protocol.as_str())
 }
 
 /// A model-provider account, decoded from the vault record that holds it.
@@ -130,27 +245,75 @@ pub struct ProviderAccount {
 
 impl ProviderAccount {
     /// The vault record that holds this account, written at `now` (seconds since the epoch).
+    ///
+    /// `now` is also when the key was last shown to work, since an account is only ever written
+    /// straight after its endpoint listed models.
     #[must_use]
     pub fn to_record(&self, now: u64) -> CredentialRecord {
-        let _ = now;
-        // TODO(accounts): implement
-        todo!()
+        let mut metadata = BTreeMap::from([
+            (META_PRESET.to_string(), self.preset.id.to_string()),
+            (META_PROBED_AT.to_string(), now.to_string()),
+        ]);
+        for (protocol, root) in self.served() {
+            metadata.insert(endpoint_key(protocol), root.to_string());
+        }
+        CredentialRecord {
+            provider: ProviderId::new(self.preset.id),
+            account: self.account.clone(),
+            label: self.label.clone(),
+            secret: self.api_key.clone(),
+            metadata,
+            updated_at: now,
+            version: FIRST_VERSION,
+        }
     }
 
     /// The provider account `record` holds, or `None` when it holds some other kind of account
     /// (a GitHub login, a screen-sharing password).
     #[must_use]
     pub fn from_record(record: &CredentialRecord) -> Option<ProviderAccount> {
-        let _ = record;
-        // TODO(accounts): implement
-        todo!()
+        let preset = preset(record.metadata.get(META_PRESET)?)?;
+        if record.provider.as_str() != preset.id {
+            return None;
+        }
+        let root = |protocol| record.metadata.get(&endpoint_key(protocol)).cloned();
+        Some(ProviderAccount {
+            account: record.account.clone(),
+            preset,
+            label: record.label.clone(),
+            endpoints: ProviderEndpoints {
+                anthropic_messages: root(WireProtocol::AnthropicMessages),
+                openai_responses: root(WireProtocol::OpenAiResponses),
+                openai_chat: root(WireProtocol::OpenAiChat),
+            },
+            api_key: record.secret.clone(),
+        })
     }
 
     /// The protocols this account's endpoint serves, in [`WireProtocol`] order.
     #[must_use]
     pub fn wire_protocols(&self) -> Vec<WireProtocol> {
-        // TODO(accounts): implement
-        todo!()
+        self.served()
+            .into_iter()
+            .map(|(protocol, _)| protocol)
+            .collect()
+    }
+
+    fn served(&self) -> Vec<(WireProtocol, &str)> {
+        [
+            (
+                WireProtocol::AnthropicMessages,
+                &self.endpoints.anthropic_messages,
+            ),
+            (
+                WireProtocol::OpenAiResponses,
+                &self.endpoints.openai_responses,
+            ),
+            (WireProtocol::OpenAiChat, &self.endpoints.openai_chat),
+        ]
+        .into_iter()
+        .filter_map(|(protocol, root)| root.as_deref().map(|root| (protocol, root)))
+        .collect()
     }
 }
 

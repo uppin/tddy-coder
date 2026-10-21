@@ -21,6 +21,8 @@ function anAccount(accountId: string, label: string, subject: string): AccountRo
     updatedAtUnixSeconds: 1_726_700_000n,
     hasSecret: true,
     syncStatus: null,
+    preset: "",
+    wireProtocols: [],
   };
 }
 

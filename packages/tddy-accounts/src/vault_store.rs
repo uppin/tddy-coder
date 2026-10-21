@@ -1,6 +1,7 @@
 //! The production [`AccountStore`]: the vaults a daemon holds, found by the session's subject.
 
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError, VaultState,
@@ -146,9 +147,12 @@ impl ProviderAccountStore for SessionVaultAccountStore {
         session_token: &str,
         account: &ProviderAccount,
     ) -> Result<CredentialRecord, AccountsError> {
-        let _ = (session_token, account);
-        // TODO(accounts): implement
-        todo!()
+        let (subject, vault) = self.vault_for(session_token)?;
+        let record = account.to_record(now_secs()?);
+        vault
+            .put(record.clone())
+            .map_err(|error| refusal_of(&subject, error))?;
+        Ok(record)
     }
 
     fn provider_account(
@@ -156,10 +160,25 @@ impl ProviderAccountStore for SessionVaultAccountStore {
         session_token: &str,
         account: &AccountId,
     ) -> Result<ProviderAccount, AccountsError> {
-        let _ = (session_token, account);
-        // TODO(accounts): implement
-        todo!()
+        let (subject, vault) = self.vault_for(session_token)?;
+        vault
+            .list(None)
+            .map_err(|error| refusal_of(&subject, error))?
+            .iter()
+            .filter(|record| &record.account == account)
+            .find_map(ProviderAccount::from_record)
+            .ok_or_else(|| AccountsError::NotFound {
+                provider: ProviderId::new("provider-account"),
+                account: account.clone(),
+            })
     }
+}
+
+fn now_secs() -> Result<u64, AccountsError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .map_err(|error| AccountsError::Unavailable(error.to_string()))
 }
 
 #[cfg(test)]

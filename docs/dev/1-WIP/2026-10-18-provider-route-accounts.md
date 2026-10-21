@@ -3,6 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
+**Complexity**: 5 — four packages (tddy-accounts, tddy-daemon, tddy-service, tddy-web), proto contract change
 **Stack**: #provider-route 1/9. Base: `master`. PR: [#662](https://github.com/uppin/tddy-coder/pull/662).
 
 ## Initial Discovery
@@ -142,9 +143,9 @@ As Scope. `tddy-accounts` does not depend on `tddy-model-registry`; the probe is
 the daemon with the HTTP client the daemon already links.
 
 ## Implementation Milestones
-- [ ] M1 Presets + codec + unit tests
-- [ ] M2 Service RPCs over an in-memory store and fake probe
-- [ ] M3 Daemon probe + wiring; web form
+- [x] M1 Presets + codec + unit tests
+- [x] M2 Service RPCs over an in-memory store and fake probe
+- [x] M3 Daemon probe + wiring; web form
 
 ## Testing Plan
 
@@ -220,7 +221,7 @@ Scoped verification — `tddy-accounts`, `tddy-daemon` (Rust), one Cypress spec 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)

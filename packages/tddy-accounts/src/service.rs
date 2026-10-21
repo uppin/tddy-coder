@@ -5,7 +5,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use tddy_credential_sync::AccountSyncSummary;
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::accounts::{
     AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse,
@@ -21,7 +21,10 @@ use crate::linking::{
     record_for_link, removal_allowed, AccountLinker, LinkError, LinkProgress, LinkedAccountStore,
     LinkedIdentity, META_SUBJECT,
 };
-use crate::provider_account::{ProviderAccountStore, ProviderModelProbe};
+use crate::provider_account::{
+    endpoints_for, preset, ProviderAccount, ProviderAccountError, ProviderAccountStore,
+    ProviderModelProbe, ProviderPreset,
+};
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
 
@@ -126,6 +129,15 @@ impl<S> AccountsServiceImpl<S> {
         self
     }
 
+    /// The provider-account half, or the refusal a daemon that never wired one owes the caller.
+    fn require_provider_accounts(&self) -> Result<&ProviderAccountPorts, Status> {
+        self.provider_accounts.as_ref().ok_or_else(|| {
+            Status::failed_precondition(
+                "this daemon cannot connect provider accounts: no store is wired",
+            )
+        })
+    }
+
     /// The linking half, or the refusal a daemon that never wired one owes the caller.
     ///
     /// A refusal rather than a pretend-empty answer: a person who asked to add an account and was
@@ -144,22 +156,86 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         &self,
         request: Request<ConnectProviderAccountRequest>,
     ) -> Result<Response<ConnectProviderAccountResponse>, Status> {
-        let _ = request;
-        let _ports = self
-            .provider_accounts
-            .as_ref()
-            .map(|ports| (&ports.store, &ports.probe));
-        // TODO(accounts): implement
-        todo!()
+        let request = request.into_inner();
+        let ports = self.require_provider_accounts()?;
+        let preset = preset(&request.preset).ok_or_else(|| {
+            refusal_of_provider_account(ProviderAccountError::UnknownPreset(request.preset.clone()))
+        })?;
+        if request.api_key.is_empty() {
+            return Err(refusal_of_provider_account(
+                ProviderAccountError::MissingApiKey,
+            ));
+        }
+        let endpoints = endpoints_for(
+            preset,
+            non_blank(&request.anthropic_base_url),
+            non_blank(&request.openai_base_url),
+        )
+        .map_err(refusal_of_provider_account)?;
+        let api_key = SecretString::new(request.api_key);
+
+        // The vault is consulted before the network: a locked vault refuses without the key ever
+        // leaving this daemon, and the held ids are what a new account's id must not collide with.
+        let held = self
+            .store
+            .list(&request.session_token)
+            .map_err(status_for)?;
+        ports
+            .probe
+            .list_models(&endpoints, &api_key)
+            .await
+            .map_err(|reason| {
+                Status::invalid_argument(format!(
+                    "the {} endpoint did not accept this key: {reason}",
+                    preset.label
+                ))
+            })?;
+
+        let account = ProviderAccount {
+            account: new_account_id(preset, &request.label, &held),
+            preset,
+            label: request.label,
+            endpoints,
+            api_key,
+        };
+        let record = ports
+            .store
+            .put_provider_account(&request.session_token, &account)
+            .map_err(status_for)?;
+        Ok(Response::new(ConnectProviderAccountResponse {
+            account: Some(summary_of(&record, self.sync_status.as_deref())),
+        }))
     }
 
     async fn list_provider_account_models(
         &self,
         request: Request<ListProviderAccountModelsRequest>,
     ) -> Result<Response<ListProviderAccountModelsResponse>, Status> {
-        let _ = request;
-        // TODO(accounts): implement
-        todo!()
+        let request = request.into_inner();
+        let ports = self.require_provider_accounts()?;
+        let account = ports
+            .store
+            .provider_account(&request.session_token, &AccountId::new(&request.account_id))
+            .map_err(|refusal| match refusal {
+                AccountsError::NotFound { .. } => Status::not_found(format!(
+                    "no provider account {} is connected",
+                    request.account_id
+                )),
+                other => status_for(other),
+            })?;
+        let model_ids = ports
+            .probe
+            .list_models(&account.endpoints, &account.api_key)
+            .await
+            .map_err(|reason| {
+                Status::unavailable(format!(
+                    "the {} endpoint did not list its models: {reason}",
+                    account.preset.label
+                ))
+            })?;
+        Ok(Response::new(ListProviderAccountModelsResponse {
+            model_ids,
+        }))
     }
 
     async fn list_accounts(
@@ -456,6 +532,66 @@ fn grouped_by_provider(
     groups
 }
 
+/// A request string with nothing in it is a field the client left unset.
+fn non_blank(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+/// Every [`ProviderAccountError`] is a request the operator can correct.
+fn refusal_of_provider_account(error: ProviderAccountError) -> Status {
+    let reason = match error {
+        ProviderAccountError::UnknownPreset(preset) => {
+            format!("{preset:?} is not a known provider")
+        }
+        ProviderAccountError::MissingBaseUrl { preset, protocol } => format!(
+            "the {preset} provider needs a base URL for {}",
+            protocol.as_str()
+        ),
+        ProviderAccountError::FixedBaseUrl { preset, protocol } => format!(
+            "the {preset} provider's {} endpoint is fixed and cannot be replaced",
+            protocol.as_str()
+        ),
+        ProviderAccountError::InvalidBaseUrl(url) => format!(
+            "{url:?} is not an http(s) URL with a host and without credentials, query or fragment"
+        ),
+        ProviderAccountError::MissingApiKey => "an API key is required".to_string(),
+    };
+    Status::invalid_argument(reason)
+}
+
+/// An id for a new provider account that no held record uses: the preset and the label's slug,
+/// numbered when that is taken.
+fn new_account_id(preset: &ProviderPreset, label: &str, held: &[CredentialRecord]) -> AccountId {
+    let slug: String = label
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let base = if slug.is_empty() {
+        preset.id.to_string()
+    } else {
+        format!("{}-{slug}", preset.id)
+    };
+    let taken = |id: &str| held.iter().any(|record| record.account.as_str() == id);
+    let mut candidate = base.clone();
+    let mut n = 2;
+    while taken(&candidate) {
+        candidate = format!("{base}-{n}");
+        n += 1;
+    }
+    AccountId::new(candidate)
+}
+
 /// What a person may see of a record. The secret is reduced to whether one is present.
 fn summary_of(
     record: &CredentialRecord,
@@ -464,6 +600,7 @@ fn summary_of(
     let sync_status = sync_status
         .and_then(|source| source.status_for(&record.provider, &record.account))
         .map_or(SyncStatus::Unspecified, sync_status_proto_of);
+    let provider_account = ProviderAccount::from_record(record);
     AccountSummary {
         provider: record.provider.as_str().to_string(),
         account_id: record.account.as_str().to_string(),
@@ -476,8 +613,16 @@ fn summary_of(
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
         has_secret: !record.secret.expose().is_empty(),
         sync_status: sync_status as i32,
-        // TODO(accounts): a provider account's preset and wire protocols
-        ..AccountSummary::default()
+        preset: provider_account
+            .as_ref()
+            .map_or_else(String::new, |account| account.preset.id.to_string()),
+        wire_protocols: provider_account.map_or_else(Vec::new, |account| {
+            account
+                .wire_protocols()
+                .into_iter()
+                .map(|protocol| protocol.as_str().to_string())
+                .collect()
+        }),
     }
 }
 
