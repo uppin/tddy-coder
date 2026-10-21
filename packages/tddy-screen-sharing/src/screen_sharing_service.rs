@@ -251,6 +251,80 @@ impl ScreenSharingServiceImpl {
             .ok_or_else(|| Status::internal("sessions base not found for user"))?;
         Ok(base.join("sessions").join(session_id))
     }
+
+    /// Body of [`ScreenSharingService::start_stream`]; the trait method delegates here.
+    pub(crate) async fn start_stream_impl(
+        &self,
+        request: Request<StartStreamRequest>,
+    ) -> Result<Response<StartStreamResponse>, Status> {
+        let req = request.into_inner();
+        let session_dir = self.resolve_session_dir(&req.session_token, &req.session_id)?;
+        let store = self.require_target_store()?;
+
+        let metadata = tddy_core::session_metadata::read_session_metadata(&session_dir)
+            .map_err(|e| Status::internal(format!("failed to read session metadata: {}", e)))?;
+        let livekit_room = metadata.livekit_room.unwrap_or_default();
+
+        let bridge_identity = format!("screenshare-{}-{}", req.session_id, req.target_id);
+        let track_name = screenshare_track_name(&req.target_id);
+
+        let livekit_url = self
+            .config
+            .as_deref()
+            .map(browser_livekit_url)
+            .unwrap_or_default();
+
+        // Spawn the bridge process when daemon config is available. The start waits for that bridge
+        // to report its desktop up, so a refused sign-in or a bridge that never came up fails this
+        // call rather than handing back coordinates for a stream that will never carry a frame.
+        let mut started = None;
+        if let Some(ref config) = self.config {
+            let target = store
+                .list(&req.session_token)
+                .map_err(target_error_to_status)?
+                .into_iter()
+                .find(|t| t.id == req.target_id);
+            match target {
+                Some(target) => {
+                    let password = store
+                        .password_for(&req.session_token, &req.target_id)
+                        .map_err(target_error_to_status)?;
+                    match BridgeTarget::from_proto(&target) {
+                        Ok(bridge_target) => {
+                            started = Some(
+                                self.try_spawn_bridge(
+                                    config,
+                                    &bridge_target,
+                                    target.username.clone(),
+                                    password,
+                                    &bridge_identity,
+                                    &track_name,
+                                    &livekit_room,
+                                    session_bridge_key(&req.session_id, &req.target_id),
+                                )
+                                .await?,
+                            );
+                        }
+                        Err(e) => error!("start_stream: target '{}': {}", req.target_id, e),
+                    }
+                }
+                None => error!("start_stream: target '{}' not found", req.target_id),
+            }
+        }
+
+        // With no bridge started there is no desktop to have measured, so the size is zero rather
+        // than a guess.
+        let (width, height) = started.map_or((0, 0), |bridge| (bridge.width, bridge.height));
+
+        Ok(Response::new(StartStreamResponse {
+            livekit_room,
+            livekit_url,
+            bridge_identity,
+            track_name,
+            width,
+            height,
+        }))
+    }
 }
 
 mod bridge_lifecycle;
@@ -393,73 +467,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         &self,
         request: Request<StartStreamRequest>,
     ) -> Result<Response<StartStreamResponse>, Status> {
-        let req = request.into_inner();
-        let session_dir = self.resolve_session_dir(&req.session_token, &req.session_id)?;
-        let store = self.require_target_store()?;
-
-        let metadata = tddy_core::session_metadata::read_session_metadata(&session_dir)
-            .map_err(|e| Status::internal(format!("failed to read session metadata: {}", e)))?;
-        let livekit_room = metadata.livekit_room.unwrap_or_default();
-
-        let bridge_identity = format!("screenshare-{}-{}", req.session_id, req.target_id);
-        let track_name = screenshare_track_name(&req.target_id);
-
-        let livekit_url = self
-            .config
-            .as_deref()
-            .map(browser_livekit_url)
-            .unwrap_or_default();
-
-        // Spawn the bridge process when daemon config is available. The start waits for that bridge
-        // to report its desktop up, so a refused sign-in or a bridge that never came up fails this
-        // call rather than handing back coordinates for a stream that will never carry a frame.
-        let mut started = None;
-        if let Some(ref config) = self.config {
-            let target = store
-                .list(&req.session_token)
-                .map_err(target_error_to_status)?
-                .into_iter()
-                .find(|t| t.id == req.target_id);
-            match target {
-                Some(target) => {
-                    let password = store
-                        .password_for(&req.session_token, &req.target_id)
-                        .map_err(target_error_to_status)?;
-                    match BridgeTarget::from_proto(&target) {
-                        Ok(bridge_target) => {
-                            started = Some(
-                                self.try_spawn_bridge(
-                                    config,
-                                    &bridge_target,
-                                    target.username.clone(),
-                                    password,
-                                    &bridge_identity,
-                                    &track_name,
-                                    &livekit_room,
-                                    session_bridge_key(&req.session_id, &req.target_id),
-                                )
-                                .await?,
-                            );
-                        }
-                        Err(e) => error!("start_stream: target '{}': {}", req.target_id, e),
-                    }
-                }
-                None => error!("start_stream: target '{}' not found", req.target_id),
-            }
-        }
-
-        // With no bridge started there is no desktop to have measured, so the size is zero rather
-        // than a guess.
-        let (width, height) = started.map_or((0, 0), |bridge| (bridge.width, bridge.height));
-
-        Ok(Response::new(StartStreamResponse {
-            livekit_room,
-            livekit_url,
-            bridge_identity,
-            track_name,
-            width,
-            height,
-        }))
+        self.start_stream_impl(request).await
     }
 
     async fn stop_stream(
