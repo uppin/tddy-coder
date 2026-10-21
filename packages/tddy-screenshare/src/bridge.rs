@@ -262,34 +262,8 @@ async fn start_bridge<C: ScreenSharingClient>(
     info!("bridge: framebuffer {}x{}", width, height);
 
     // Channel: input RPC handler → pump loop
-    let (input_tx, input_rx) = mpsc::channel::<InputCmd>(128);
-
-    // Single LiveKit connection: serves ScreenSharingInputService over data channel
-    let input_svc = ScreenSharingInputServiceServer::new(InputForwarder { tx: input_tx });
-    let participant = LiveKitParticipant::connect(
-        &config.livekit_url,
-        &config.livekit_token,
-        input_svc,
-        RoomOptions::default(),
-        None,
-        None,
-    )
-    .await
-    .context("LiveKit connect failed")
-    .map_err(|e| classify(e, FailureKind::LiveKit))?;
-
-    // Publish the video track on the same room connection
-    let local = participant.room().local_participant().clone();
-    let streamer =
-        ScreenSharingStreamer::from_local_participant(local, &config.track_name, width, height)
-            .await
-            .context("failed to publish video track")
-            .map_err(|e| classify(e, FailureKind::LiveKit))?;
-
-    info!("bridge: LiveKit track '{}' published", config.track_name);
-
-    // Drive the RPC event loop in the background
-    tokio::spawn(async move { participant.run().await });
+    // TODO(host-desktops sweep): the extract assist copied start_bridge's generic onto publish_to_livekit, which does not use it (E0283); drop both the parameter and this turbofish once the engine infers it
+    let (input_rx, streamer) = publish_to_livekit::<C>(config, width, height).await?;
 
     client
         .request_frame_update(false)
@@ -303,6 +277,38 @@ async fn start_bridge<C: ScreenSharingClient>(
         width,
         height,
     })
+}
+
+async fn publish_to_livekit<C: ScreenSharingClient>(
+    config: &BridgeConfig,
+    width: u32,
+    height: u32,
+) -> Result<(mpsc::Receiver<InputCmd>, ScreenSharingStreamer), StartFailure> {
+    let (input_tx, input_rx) = mpsc::channel::<InputCmd>(128);
+    // Single LiveKit connection: serves ScreenSharingInputService over data channel
+    let input_svc = ScreenSharingInputServiceServer::new(InputForwarder { tx: input_tx });
+    let participant = LiveKitParticipant::connect(
+        &config.livekit_url,
+        &config.livekit_token,
+        input_svc,
+        RoomOptions::default(),
+        None,
+        None,
+    )
+    .await
+    .context("LiveKit connect failed")
+    .map_err(|e| classify(e, FailureKind::LiveKit))?;
+    // Publish the video track on the same room connection
+    let local = participant.room().local_participant().clone();
+    let streamer =
+        ScreenSharingStreamer::from_local_participant(local, &config.track_name, width, height)
+            .await
+            .context("failed to publish video track")
+            .map_err(|e| classify(e, FailureKind::LiveKit))?;
+    info!("bridge: LiveKit track '{}' published", config.track_name);
+    // Drive the RPC event loop in the background
+    tokio::spawn(async move { participant.run().await });
+    Ok((input_rx, streamer))
 }
 
 /// Poll events until the client reports non-zero framebuffer dimensions.
