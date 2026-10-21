@@ -12,9 +12,8 @@
 //! A crate that ships a library *and* a binary cannot name a LiveKit crate for its binary alone —
 //! Cargo has no binary-only dependency, so the edge appears on the crate. A client binary is
 //! therefore built by a wiring crate of its own ([`CLIENT_BINARIES`]), and its library
-//! ([`CLIENT_LIBRARIES`]) names LiveKit nowhere. The crates not yet split are listed in
-//! [`WIRING_WITH_A_LIBRARY`], and [`a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary`]
-//! holds their library sources clean, so the allowance stays what it claims: the binary's wiring.
+//! ([`CLIENT_LIBRARIES`]) names LiveKit nowhere. There is no exception for a library that builds a
+//! binary: the `#satellite` stack split the last three such crates.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -50,24 +49,22 @@ const WIRING: &[&str] = &[
     "tddy-coder-cli",
     "tddy-remote-git-repo-cli",
     "tddy-session-sync-cli",
+    "tddy-tools-cli",
     "tddy-rdp",
     "tddy-vnc",
     "tddy-e2e",
 ];
 
-/// Crates that ship a library *and* a binary that wires LiveKit into it: the library joins rooms
-/// through `tddy-room-client`, and only `src/main.rs` names the plugin.
-const WIRING_WITH_A_LIBRARY: &[&str] = &["tddy-tools"];
-
 /// Libraries a wiring crate builds a client binary from. They join rooms through
 /// `tddy-room-client` and name LiveKit nowhere — not in their manifest, not in any source file.
-const CLIENT_LIBRARIES: &[&str] = &["tddy-remote-git-repo", "tddy-session-sync"];
+const CLIENT_LIBRARIES: &[&str] = &["tddy-remote-git-repo", "tddy-session-sync", "tddy-tools"];
 
 /// Each client binary, and the wiring crate that builds it. The binary keeps its name, so every
 /// script, config and test that resolves it by name is unaffected by which crate builds it.
 const CLIENT_BINARIES: &[(&str, &str)] = &[
     ("tddy-remote-git-repo", "tddy-remote-git-repo-cli"),
     ("tddy-session-sync", "tddy-session-sync-cli"),
+    ("tddy-tools", "tddy-tools-cli"),
 ];
 
 fn set_of(names: &[&str]) -> BTreeSet<String> {
@@ -120,11 +117,7 @@ fn the_extension_ports_reach_no_livekit_crate() {
 fn only_plugins_and_wiring_name_a_livekit_crate() {
     // Given the workspace as Cargo resolves it
     let graph = WorkspaceGraph::load();
-    let allowed: BTreeSet<String> = set_of(PLUGINS)
-        .into_iter()
-        .chain(set_of(WIRING))
-        .chain(set_of(WIRING_WITH_A_LIBRARY))
-        .collect();
+    let allowed: BTreeSet<String> = set_of(PLUGINS).into_iter().chain(set_of(WIRING)).collect();
 
     // When every crate naming a LiveKit crate is collected
     let naming = crates_naming_livekit(&graph);
@@ -162,34 +155,10 @@ fn source_dir(krate: &str) -> PathBuf {
         .join("src")
 }
 
-/// The sources of `krate` that are not its binary's entry point.
-fn library_sources(krate: &str) -> Vec<PathBuf> {
-    let src = source_dir(krate);
-    rust_files_under(&src)
-        .into_iter()
-        .filter(|file| file != &src.join("main.rs"))
-        .collect()
-}
-
 /// Whether `file` contains a path into a LiveKit crate.
 fn names_a_livekit_path(file: &Path) -> bool {
     let source = std::fs::read_to_string(file).expect("a source file is readable");
     LIVEKIT_PATHS.iter().any(|path| source.contains(path))
-}
-
-#[test]
-fn a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary() {
-    // Given the crates that ship a library and a binary
-    // When their sources, apart from the binary's entry point, are read for a path into LiveKit
-    let naming_livekit: Vec<String> = WIRING_WITH_A_LIBRARY
-        .iter()
-        .flat_map(|krate| library_sources(krate))
-        .filter(|file| names_a_livekit_path(file))
-        .map(|file| file.display().to_string())
-        .collect();
-
-    // Then none does: the library reaches a room through the client port
-    assert_eq!(naming_livekit, Vec::<String>::new());
 }
 
 #[test]
