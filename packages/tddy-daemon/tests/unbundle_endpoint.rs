@@ -114,7 +114,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 36] = [
+    const ENDPOINT: [&str; 37] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -180,6 +180,11 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // deliberately carries no network stack, so only the crate that holds the HTTP client can
         // implement the port.
         "provider_model_probe.rs",
+        // `#provider-route` 2/9's `RouteSupport` adapter: `tddy-accounts`' port answered by the
+        // harness route matrix in `tddy-agent-backend`. Wiring by the same criterion — no RPC
+        // method, no session state, built only by `account_linking::accounts_service_over` — and
+        // it lives here because `tddy-accounts` deliberately does not depend on the harness crates.
+        "provider_route_support.rs",
         // The session room's delta ring as `tddy-session-activity`'s `SessionDeltaStores`. Wiring
         // by the same criterion as `common_room_key_directory.rs` — no RPC method, no session
         // state, built only by `runtime.rs` — and it can live nowhere else: the activity service
