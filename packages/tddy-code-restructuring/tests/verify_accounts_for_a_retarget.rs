@@ -78,7 +78,8 @@ fn a_split_retarget_accounts_for_the_two_headers_it_adds() {
     let declared = comparing_declared(before, after, &["Host=Roster"]);
     let undeclared = compare(&a_crate_holding(before), &a_crate_holding(after));
 
-    // Then the declaration accounts for both added headers, and without it both are reported
+    // Then the declaration accounts for both added headers; without it the repeat of the ref's own
+    // header is excused (a whole generic header the ref holds) and the renamed header is reported
     assert!(
         declared.holds(),
         "the repeated clauses were reported: {declared:?}"
@@ -87,10 +88,7 @@ fn a_split_retarget_accounts_for_the_two_headers_it_adds() {
         undeclared.added,
         vec![
             "T: Copy,".to_string(),
-            "T: Copy,".to_string(),
-            "impl<T> Host<T>".to_string(),
             "impl<T> Roster<T>".to_string(),
-            "where".to_string(),
             "where".to_string()
         ]
     );

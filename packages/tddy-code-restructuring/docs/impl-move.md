@@ -40,10 +40,15 @@ and member widening. The dependency is one way: `item_move` and `retarget_impl` 
   its whole move.
 - A name the destination imports by a different spelling of the same path (`super::step`) is refused as
   bound elsewhere. It over-refuses rather than binding silently.
-- A member run out of a generic block that opens a new block repeats the generic header and its `where`
-  clause, which `verify` reads as added statements.
 - A tuple field read through `self.0` from outside the struct's module is not widened; the compile gate
   names it.
+
+## `verify`
+
+A member run out of a generic block that opens a new block repeats the generic header, its `where` and its
+predicate lines, which `verify` reads as statements. `verify` excuses a gained copy of a whole generic header the
+ref already holds, once per copy, with no declaration (`verify/retarget.rs`, `repeated_generic_headers`). A gained
+`where` or predicate with no whole header beside it stays reported.
 
 ## Rule codes in the source
 

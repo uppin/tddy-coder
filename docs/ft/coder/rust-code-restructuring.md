@@ -1030,6 +1030,11 @@ rename that was not declared, a changed argument, and any lost statement or comm
 plan made them — a hand edit that renames `OLD` to `NEW` is excused too, because the author declared
 it.
 
+With no declaration at all, a gained copy of a whole generic `impl` header the ref already holds (`impl<T> Host<T>`,
+its `where` and every predicate line) is excused, once per copy: a member run that opens a new block repeats the
+header of the block it leaves (`move_impl_members`). A gained `where` or predicate with no whole header beside
+it stays reported.
+
 With a declared `--retarget`, the delegators `leave_delegator` writes are excused too (rule R3): a gained
 signature line equal to one the ref already has, once per such ref statement, and a gained forwarding
 statement `<receiver>.<m>(<parameter names>)`, its `.await` form, or `New::<m>(…)`, when the method and
@@ -1202,8 +1207,7 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
 - **`move_impl_members` leaves a stayed member in an inline module of an ancestor un-widened.** The members
   of an ancestor module are read from its file's top-level outline, so a block of the type written inside
   an inline `mod` there is not surveyed; a private member in it that the moved lines name stays private and the
-  compile gate refuses the run. A member run from a *generic* block that opens a new block repeats the
-  header, which `verify` reads as added statements.
+  compile gate refuses the run.
 - **`remove_unused_param` reports every refusal from the server as a used parameter.** The refusal
   names the parameter and says it is used, with the server's own reason in parentheses; a parameter
   rust-analyzer declines to remove for another reason (a trait method whose impls would diverge, for

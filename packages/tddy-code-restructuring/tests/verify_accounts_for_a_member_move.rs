@@ -107,3 +107,100 @@ fn a_dropped_statement_in_the_moved_run_is_still_reported() {
     // Then the lost statement is reported
     assert_eq!(comparison.missing, vec!["self.n += 1;".to_string()]);
 }
+
+const A_GENERIC_PAIR_OF_TWO_MEMBERS: &str = concat!(
+    "pub struct Pair<T> {\n",
+    "    a: T,\n",
+    "}\n",
+    "\n",
+    "impl<T: Clone> Pair<T>\n",
+    "where\n",
+    "    T: Default,\n",
+    "{\n",
+    "    pub fn first(&self) -> T {\n",
+    "        self.a.clone()\n",
+    "    }\n",
+    "\n",
+    "    pub fn reset(&mut self) {\n",
+    "        self.a = T::default();\n",
+    "    }\n",
+    "}\n",
+);
+const THE_PAIR_AFTER_RESET_LEFT: &str = concat!(
+    "pub struct Pair<T> {\n",
+    "    a: T,\n",
+    "}\n",
+    "\n",
+    "impl<T: Clone> Pair<T>\n",
+    "where\n",
+    "    T: Default,\n",
+    "{\n",
+    "    pub fn first(&self) -> T {\n",
+    "        self.a.clone()\n",
+    "    }\n",
+    "}\n",
+);
+const A_MODULE_HOLDING_RESET_IN_A_NEW_BLOCK: &str = concat!(
+    "use super::Pair;\n",
+    "\n",
+    "impl<T: Clone> Pair<T>\n",
+    "where\n",
+    "    T: Default,\n",
+    "{\n",
+    "    pub fn reset(&mut self) {\n",
+    "        self.a = T::default();\n",
+    "    }\n",
+    "}\n",
+);
+
+fn a_pair_crate(pair: &str, extra: Option<(&str, &str)>) -> BTreeMap<String, String> {
+    let mut files = BTreeMap::from([
+        ("src/lib.rs".to_string(), "pub mod pair;\n".to_string()),
+        ("src/pair.rs".to_string(), pair.to_string()),
+    ]);
+    if let Some((path, text)) = extra {
+        files.insert(path.to_string(), text.to_string());
+    }
+    files
+}
+
+#[test]
+fn a_repeated_generic_header_of_a_member_run_is_no_difference() {
+    // Given `reset` moved out of `impl<T: Clone> Pair<T> where T: Default` into a new block that
+    // repeats the header
+    let before = a_pair_crate(A_GENERIC_PAIR_OF_TWO_MEMBERS, None);
+    let after = a_pair_crate(
+        THE_PAIR_AFTER_RESET_LEFT,
+        Some(("src/roster.rs", A_MODULE_HOLDING_RESET_IN_A_NEW_BLOCK)),
+    );
+
+    // When the two trees are compared
+    let comparison = compare(&before, &after);
+
+    // Then the repeated header is excused, and nothing is reported
+    assert!(
+        comparison.holds(),
+        "the repeated header was reported: {comparison:?}"
+    );
+}
+
+#[test]
+fn a_gained_where_clause_without_the_whole_header_is_still_reported() {
+    // Given the same tree, with a `where` clause and a predicate added to an unrelated block
+    let before = a_pair_crate(A_GENERIC_PAIR_OF_TWO_MEMBERS, None);
+    let stray = "fn stray<T>(value: T)\nwhere\n    T: Default,\n{\n    drop(value);\n}\n";
+    let after = a_pair_crate(
+        A_GENERIC_PAIR_OF_TWO_MEMBERS,
+        Some(("src/roster.rs", stray)),
+    );
+
+    // When the two trees are compared
+    let comparison = compare(&before, &after);
+
+    // Then the header lines are not excused: a hand edit is not a repeated header
+    assert!(
+        comparison.added.contains(&"where".to_string())
+            && comparison.added.contains(&"T: Default,".to_string()),
+        "a stray `where` clause was excused: {comparison:?}"
+    );
+}

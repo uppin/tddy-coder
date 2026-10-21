@@ -208,7 +208,9 @@ pub fn compare_with(
 
     let widened = pair_by(missing, added, visibility_key);
     let accounted = retarget::account(widened.missing, widened.added, declared, &before_statements);
-    let rebound = rebind::account(accounted.missing, accounted.added, declared);
+    let headed =
+        retarget::repeated_generic_headers(accounted.missing, accounted.added, &before_statements);
+    let rebound = rebind::account(headed.missing, headed.added, declared);
     let called = repoint::account(rebound.missing, rebound.added, declared);
     let paired = pair_by(called.missing, called.added, re_point_key);
     let reflowed = reflow_pass(paired.missing, paired.added);
@@ -220,6 +222,7 @@ pub fn compare_with(
         added: reflowed.added,
         excused: Excused {
             repointed: accounted.pairs
+                + headed.pairs
                 + rebound.pairs
                 + called.pairs
                 + paired.pairs
