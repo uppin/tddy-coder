@@ -142,6 +142,12 @@ VNC/RDP protocol client is added here, ever: the picture is always a daemon-prod
   on `(host, port, protocol)` and adds one only when none matches — which is what stops one target
   accumulating per connect. The address is the daemon's own loopback, because that is where the
   probe made its reading.
+- **A failed start says why, in place of "Connecting…".** `screenSharingStartFailureText`
+  (`lib/screenSharingStartFailure.ts`) turns an `Unauthenticated` reply into "The desktop refused
+  the sign-in: <reason>" and any other `ConnectError` into its raw message. The session tab's target
+  rows use the same text, beside the row that was started.
+- **Input is scaled into the reported size.** The start reply's `width`/`height` are the desktop's
+  framebuffer size as its bridge saw it, and the overlay passes them to `useScreenSharingInput`.
 - **Start on mount, stop on unmount**, against the target the start actually used rather than one
   re-resolved at close, so the bridge process lives exactly as long as the overlay.
 - **`sessionToken` is passed explicitly on all four host-scoped calls.** The daemon gates every one

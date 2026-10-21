@@ -23,6 +23,8 @@ livekit-api = "0.5"
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
+# `bridge_readiness`: the start report `run_bridge` writes to stdout, re-exported at the crate root.
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 
 [dev-dependencies]
 rstest = { workspace = true }

@@ -19,7 +19,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
-use tddy_screenshare::{Credentials, ScreenSharingClient};
+use tddy_screenshare::{AuthenticationRefused, Credentials, ScreenSharingClient};
 use tddy_vnc::vnc_client::VncClientState;
 
 // ── RFB security type numbers ─────────────────────────────────────────────────
@@ -921,4 +921,28 @@ async fn an_apple_rfb_3_889_announcement_is_answered_as_rfb_3_8() {
     // Then
     assert_eq!(server.client_version(), Some(*b"RFB 003.008\n"));
     assert_eq!(first_pixel_of_a_frame(&mut client).await, SCREEN_RGBA);
+}
+
+#[tokio::test]
+async fn a_refused_vnc_password_is_reported_as_an_authentication_failure() {
+    // Given
+    let server = a_vnc_server().offering(&[VNC_AUTH]).start().await;
+
+    // When
+    let err = sign_in(&server, &a_password_only("not-the-password"))
+        .await
+        .err()
+        .expect("sign-in fails with the wrong password");
+
+    // Then — tagged by type, so the bridge reports it without matching on the server's words
+    let refusal = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<AuthenticationRefused>())
+        .unwrap_or_else(|| {
+            panic!(
+                "the error chain carries no AuthenticationRefused: {}",
+                error_text(&err)
+            )
+        });
+    assert_eq!(refusal.0, WRONG_PASSWORD_REASON);
 }

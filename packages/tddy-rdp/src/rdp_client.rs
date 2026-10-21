@@ -146,11 +146,14 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
         )
         .await
         .map_err(|e| {
-            let stage = match e.kind() {
-                ConnectorErrorKind::Credssp(_) => "connect_finalize: NLA authentication failed",
-                _ => "connect_finalize",
-            };
-            anyhow::Error::new(e).context(stage)
+            // An NLA failure is how the desktop turns a sign-in down, so it is tagged by type for
+            // the bridge to report as an authentication failure.
+            if matches!(e.kind(), ConnectorErrorKind::Credssp(_)) {
+                anyhow::Error::new(tddy_screenshare::AuthenticationRefused(e.to_string()))
+                    .context("connect_finalize: NLA authentication failed")
+            } else {
+                anyhow::Error::new(e).context("connect_finalize")
+            }
         })?;
 
         let image = DecodedImage::new(

@@ -30,6 +30,7 @@ import { useAuthContext } from "../../hooks/authProvider";
 import { useCommonRoom } from "../../hooks/useCommonRoom";
 import { checkHostKey, type KeyPinVerdict } from "../../lib/hostKeyPinning";
 import { presenceIdentityForUser } from "../../lib/presenceIdentity";
+import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
 import { useHostClient } from "../../rpc/connections/registry";
 import { useHostPrompts, type HostPromptEventLike } from "../../rpc/useHostPrompts";
 import { ScreenSharingOverlay } from "../sessions/ScreenSharingOverlay";
@@ -138,7 +139,9 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
         setStream(started);
       } catch (e) {
         if (cancelled) return;
-        setError(messageOf(e));
+        // The start failed, and the overlay says why in place of "Connecting…": a refused sign-in
+        // names the desktop's reason, and nothing here waits for a stream that will not come.
+        setError(screenSharingStartFailureText(e));
       }
     })();
 

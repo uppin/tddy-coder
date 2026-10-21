@@ -13,9 +13,36 @@ Product behaviour: [screen-sharing-sessions.md](../../../docs/ft/web/screen-shar
 | `screen_sharing_records` | the `screen-sharing` provider's record shape (`record_for`, `target_from`), `TargetError`, and the `ScreenSharingTargetStore` port |
 | `session_vault_target_store` | `SessionVaultTargetStore`, the production store over the daemon's `SessionVaults` |
 | `screen_sharing_service` | `ScreenSharingServiceImpl`: the struct and builders, the session-scoped target calls, and the trait impl, whose host-scoped methods delegate to `host_targets` |
-| `screen_sharing_service::bridge_lifecycle` | bridge spawning and termination, the desktop-password prompt and the target-store lookup, as `impl ScreenSharingServiceImpl` members |
+| `screen_sharing_service::bridge_lifecycle` | bridge spawning, the wait for its start report, and termination; the desktop-password prompt and the target-store lookup, as `impl ScreenSharingServiceImpl` members |
+| `bridge_readiness` | `await_bridge_readiness`: reading a bridge's start report from its stdout within a bound, and mapping it to `BridgeStarted { width, height }` or a `Status`; `DEFAULT_BRIDGE_READY_TIMEOUT` (30 s) |
 | `screen_sharing_service::host_targets` | the bodies of the host-scoped RPCs (`list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream`) as `*_impl` members |
 | `bridge_config` | `BridgeSpawnConfig` and `PreparedBridge`, how a bridge's spawn configuration is built (`prepare_bridge`, `build_bridge_spawn_config`), and the bridge key, identity, track-name and LiveKit-room naming |
+
+## A start waits for its bridge
+
+`spawn_bridge` pipes the bridge's stdin and stdout, writes the `BridgeSpawnConfig` JSON to stdin and
+closes it, records the pid, then waits for the bridge's start report
+([`tddy_daemon_extensions::bridge_readiness`](../../tddy-daemon-extensions/docs/bridge-readiness.md))
+through `await_bridge_readiness`:
+
+| Report | Start returns |
+|---|---|
+| `Ready { width, height }` | `StartStreamResponse` with that size |
+| `Failed { kind: Authentication }` | `Unauthenticated`, carrying the desktop's reason |
+| `Failed { kind: Connect \| LiveKit }` | `Unavailable`, carrying the bridge's reason |
+| stdout closes first | `Unavailable` |
+| nothing within the timeout | `DeadlineExceeded` |
+
+On every failure the child is killed and its pid forgotten (only while the key still names that pid)
+before the call returns. The pid is recorded **before** the wait, so a stop that arrives while a
+bridge is still starting reaches it. On success a background task reaps the child when it exits.
+The timeout is `DEFAULT_BRIDGE_READY_TIMEOUT` unless `with_bridge_ready_timeout` sets another.
+
+Both scopes report the outcome. `start_host_stream` and the session-scoped `try_spawn_bridge` return
+the bridge's size or its failure, and a session target whose bridge cannot be prepared
+(it names no protocol, the daemon has no LiveKit configuration, or no room token can be minted) fails `FAILED_PRECONDITION`. `BridgeSpawnConfig.width/height` are `0`: no
+size is hinted to a bridge, which takes it from the desktop. A session start with no daemon config,
+or for a target that is not in the store, spawns nothing and answers with a `0×0` size.
 
 ## A target is a record
 
@@ -76,7 +103,7 @@ any `ScreenSharingTargetStore`, which is how the acceptance suite substitutes st
 ## Unchanged by the store
 
 `StartStream`, `StopStream`, bridge identity (`screenshare-<session>-<target>`), track naming,
-dimensions, the host-scoped calls (host desktops are prompted for, never stored), and VNC input.
+the host-scoped calls (host desktops are prompted for, never stored), and VNC input.
 `start_stream` reads a target and its password from the store and hands the password to the bridge on
 its stdin.
 
@@ -86,6 +113,7 @@ its stdin.
 |---|---|
 | `tests/screen_sharing_records_unit.rs` | the record mapping, malformed records, the AEAD tamper |
 | `tests/screen_sharing_service_acceptance.rs` | the service, over an in-memory store that uses the real mapping |
+| `tests/bridge_readiness_acceptance.rs` | a start against a `/bin/sh` stand-in bridge scripted per test (`tests/common`): refused sign-in, reported size on both scopes, early exit, silence past the timeout, and that a failed bridge is stopped |
 | `tests/session_vault_target_store_acceptance.rs` | the store, over a real sealed vault: cross-session listing, locked, cleartext leakage |
 | `tests/screen_sharing_record_propagation.rs` | reconciliation of a screen-sharing record through the sync engine |
 | `tddy-service/tests/screen_sharing_carries_no_passphrase.rs` | the schema declares no unlock RPC and no passphrase field |

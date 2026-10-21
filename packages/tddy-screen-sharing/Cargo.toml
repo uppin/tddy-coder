@@ -29,7 +29,8 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # password to, and the prompt channel that password is asked for on. Reused rather than
 # reimplemented — one key per host, and one decryption path for everything the browser encrypts.
 tddy-host-service = { path = "../tddy-host-service" }
-# `RoomTokenMinter`: a bridge's room token is minted through the daemon's one minter.
+# `RoomTokenMinter`: a bridge's room token is minted through the daemon's one minter, and
+# `bridge_readiness`: a start waits for the line its bridge reports on stdout.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 
 [target.'cfg(unix)'.dependencies]

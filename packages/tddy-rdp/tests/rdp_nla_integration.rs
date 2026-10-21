@@ -23,6 +23,7 @@ use tokio::sync::mpsc;
 
 use tddy_rdp::rdp_client::RdpClient;
 use tddy_screenshare::client::{Credentials, ScreenSharingClient as _};
+use tddy_screenshare::AuthenticationRefused;
 
 /// How long a sign-in may take before the test calls it a hang.
 ///
@@ -338,6 +339,27 @@ async fn a_wrong_password_on_an_nla_server_fails_to_connect_as_an_authentication
     assert!(
         message.to_lowercase().contains("authentication"),
         "expected the refusal to name an authentication failure, got: {message}"
+    );
+}
+
+#[tokio::test]
+async fn a_wrong_password_on_an_nla_server_is_tagged_as_a_refused_sign_in() {
+    // Given
+    let desktop = a_desktop_that_requires_nla().start().await;
+
+    // When
+    let refusal = desktop
+        .sign_in_with(&alices_credentials_with_a_wrong_password())
+        .await
+        .err()
+        .expect("signing in with a wrong password fails");
+
+    // Then — tagged by type, so the bridge reports it as an authentication failure
+    assert!(
+        refusal
+            .chain()
+            .any(|cause| cause.is::<AuthenticationRefused>()),
+        "the error chain carries no AuthenticationRefused: {refusal:#}"
     );
 }
 

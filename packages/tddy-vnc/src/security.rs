@@ -12,10 +12,9 @@
 //! the handshake bytes vnc-rs expects to read and swallows the bytes it writes in answer, so
 //! vnc-rs sees a server that has already authenticated and carries on from ClientInit.
 //!
-//! - VNC Authentication and None are left to vnc-rs (it owns the DES step, and no DES crate is
-//!   a dependency): the stream replays the negotiated version and the single chosen type, and
-//!   vnc-rs runs the rest of the exchange against the real server.
-//! - VeNCrypt and Apple Remote Desktop are run here; the stream then replays RFB 3.3 with
+//! - None is left to vnc-rs: the stream replays the negotiated version and the single chosen type.
+//! - VNC Authentication, VeNCrypt and Apple Remote Desktop are run here (VNC Authentication's DES
+//!   response and SecurityResult too, so a refusal is a typed [`SecurityError::Refused`]); the stream then replays RFB 3.3 with
 //!   security type None, which makes vnc-rs read nothing further before ClientInit.
 //!
 //! # TLSPlain trust
@@ -62,6 +61,9 @@ const MAX_ARD_KEY_LEN: usize = 512;
 /// Size of each of the username and password fields of the ARD credentials block.
 const ARD_FIELD_LEN: usize = 64;
 const RFB_VERSION_LEN: usize = 12;
+/// VNC Authentication: the challenge and the response are 16 bytes, the DES key 8.
+const VNC_AUTH_CHALLENGE_LEN: usize = 16;
+const VNC_AUTH_KEY_LEN: usize = 8;
 /// How long the whole sign-in (version, security handshake, TLS, credentials) may take.
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -236,7 +238,7 @@ where
 {
     match sign_in {
         VncSignIn::None => Ok(delegate_to_vnc_rs(stream, version, TYPE_NONE)),
-        VncSignIn::VncAuth => Ok(delegate_to_vnc_rs(stream, version, TYPE_VNC_AUTH)),
+        VncSignIn::VncAuth => sign_in_vnc_authentication(stream, version, credentials).await,
         VncSignIn::AppleRemoteDesktop => {
             sign_in_apple_remote_desktop(stream, version, credentials).await
         }
@@ -304,7 +306,58 @@ fn require_selectable_types(version: RfbVersion) -> Result<(), SecurityError> {
     }
 }
 
-/// Leave the rest of VNC Authentication / None to vnc-rs: replay the version the server and we
+/// VNC Authentication: answer the 16-byte challenge with the password and read the SecurityResult
+/// here, so a refused password is a typed [`SecurityError::Refused`] rather than whatever vnc-rs
+/// makes of it.
+async fn sign_in_vnc_authentication<S>(
+    mut stream: S,
+    version: RfbVersion,
+    credentials: &Credentials,
+) -> Result<SecuredStream, SecurityError>
+where
+    S: Transport + 'static,
+{
+    // `choose_sign_in` only picks VNC Authentication when a password was supplied.
+    let password = credentials
+        .password
+        .as_deref()
+        .ok_or(SecurityError::MissingCredential("password"))?;
+    // RFB 3.3 servers dictate the type; from 3.7 the client chooses it.
+    if version != RfbVersion::V33 {
+        stream.write_all(&[TYPE_VNC_AUTH]).await?;
+    }
+    let mut challenge = [0u8; VNC_AUTH_CHALLENGE_LEN];
+    stream.read_exact(&mut challenge).await?;
+    stream
+        .write_all(&vnc_auth_response(&challenge, password))
+        .await?;
+    read_security_result(stream, version).await
+}
+
+/// The VNC Authentication response: the challenge's two DES blocks encrypted with the password as
+/// key. The key is the first eight password bytes (zero padded), each with its bits reversed.
+fn vnc_auth_response(
+    challenge: &[u8; VNC_AUTH_CHALLENGE_LEN],
+    password: &str,
+) -> [u8; VNC_AUTH_CHALLENGE_LEN] {
+    use des::cipher::{BlockCipherEncrypt, KeyInit};
+
+    let mut key = [0u8; VNC_AUTH_KEY_LEN];
+    for (slot, byte) in key.iter_mut().zip(password.bytes()) {
+        *slot = byte.reverse_bits();
+    }
+    let cipher = des::Des::new(&key.into());
+    let mut response = *challenge;
+    for chunk in response.chunks_exact_mut(VNC_AUTH_KEY_LEN) {
+        let mut block = des::cipher::Block::<des::Des>::try_from(&*chunk)
+            .expect("a chunk of the DES block length is a DES block");
+        cipher.encrypt_block(&mut block);
+        chunk.copy_from_slice(&block);
+    }
+    response
+}
+
+/// Leave the rest of None to vnc-rs: replay the version the server and we
 /// agreed on and the one security type, and drop vnc-rs's echo of the version.
 fn delegate_to_vnc_rs<S: Transport + 'static>(
     stream: S,

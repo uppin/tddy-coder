@@ -35,8 +35,6 @@ use tddy_service::proto::screen_sharing::{
     StopStreamResponse,
 };
 
-pub(crate) const DEFAULT_STREAM_WIDTH: u32 = 1920;
-pub(crate) const DEFAULT_STREAM_HEIGHT: u32 = 1080;
 pub(crate) const DEFAULT_STREAM_FPS: u32 = 30;
 
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -113,6 +111,8 @@ pub struct ScreenSharingServiceImpl {
     /// a service built without one reports that rather than answering as though the person has no
     /// desktops.
     target_store: Option<Arc<dyn ScreenSharingTargetStore>>,
+    /// How long a start waits for its bridge to report the desktop ready.
+    bridge_ready_timeout: std::time::Duration,
 }
 
 impl ScreenSharingServiceImpl {
@@ -125,7 +125,16 @@ impl ScreenSharingServiceImpl {
             active_bridges: Arc::new(Mutex::new(HashMap::new())),
             host_scope: None,
             target_store: None,
+            bridge_ready_timeout: crate::bridge_readiness::DEFAULT_BRIDGE_READY_TIMEOUT,
         }
+    }
+
+    /// How long a start waits for its bridge's readiness line before failing the start and
+    /// stopping the bridge.
+    #[must_use]
+    pub fn with_bridge_ready_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.bridge_ready_timeout = timeout;
+        self
     }
 
     /// Supply the credential store a session's screen-sharing targets are records in.
@@ -358,7 +367,10 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             .map(browser_livekit_url)
             .unwrap_or_default();
 
-        // Spawn the bridge process when daemon config is available.
+        // Spawn the bridge process when daemon config is available. The start waits for that bridge
+        // to report its desktop up, so a refused sign-in or a bridge that never came up fails this
+        // call rather than handing back coordinates for a stream that will never carry a frame.
+        let mut started = None;
         if let Some(ref config) = self.config {
             let target = store
                 .list(&req.session_token)
@@ -372,17 +384,19 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
                         .map_err(target_error_to_status)?;
                     match BridgeTarget::from_proto(&target) {
                         Ok(bridge_target) => {
-                            self.try_spawn_bridge(
-                                config,
-                                &bridge_target,
-                                target.username.clone(),
-                                password,
-                                &bridge_identity,
-                                &track_name,
-                                &livekit_room,
-                                session_bridge_key(&req.session_id, &req.target_id),
-                            )
-                            .await;
+                            started = Some(
+                                self.try_spawn_bridge(
+                                    config,
+                                    &bridge_target,
+                                    target.username.clone(),
+                                    password,
+                                    &bridge_identity,
+                                    &track_name,
+                                    &livekit_room,
+                                    session_bridge_key(&req.session_id, &req.target_id),
+                                )
+                                .await?,
+                            );
                         }
                         Err(e) => error!("start_stream: target '{}': {}", req.target_id, e),
                     }
@@ -391,13 +405,17 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             }
         }
 
+        // With no bridge started there is no desktop to have measured, so the size is zero rather
+        // than a guess.
+        let (width, height) = started.map_or((0, 0), |bridge| (bridge.width, bridge.height));
+
         Ok(Response::new(StartStreamResponse {
             livekit_room,
             livekit_url,
             bridge_identity,
             track_name,
-            width: DEFAULT_STREAM_WIDTH,
-            height: DEFAULT_STREAM_HEIGHT,
+            width,
+            height,
         }))
     }
 
@@ -489,8 +507,10 @@ mod tests {
         haystack.windows(needle.len()).any(|w| w == needle)
     }
 
-    /// A stand-in for `tddy-vnc`: records how the daemon invoked it, then stays alive until it is
-    /// signalled.
+    /// A stand-in for `tddy-vnc`: records how the daemon invoked it, reports its desktop ready at
+    /// 1920×1080, then stays alive until it is signalled.
+    ///
+    /// The ready line is serialised by the real readiness type, so it is the line a bridge writes.
     ///
     /// `exec sleep` rather than a plain `sleep`, deliberately. What a stop has to prove is that the
     /// **recorded pid** is gone, so that pid must belong to the process that is still running when
@@ -510,6 +530,13 @@ mod tests {
                 stdin_file: dir.join("bridge-stdin.json"),
             };
             let (argv, stdin) = (bridge.argv_file.display(), bridge.stdin_file.display());
+            let ready = serde_json::to_string(
+                &tddy_daemon_extensions::bridge_readiness::BridgeReadiness::Ready {
+                    width: 1920,
+                    height: 1080,
+                },
+            )
+            .expect("a readiness line");
             // Each record is written to a temp file and `mv -f`'d over the target, the way
             // `stub_scripts` does it: a reader must see a whole record or none, never a
             // half-written one that would read as the daemon having built the wrong invocation.
@@ -521,6 +548,7 @@ mod tests {
                      mv -f \"{argv}.part\" \"{argv}\"\n\
                      cat > \"{stdin}.part\"\n\
                      mv -f \"{stdin}.part\" \"{stdin}\"\n\
+                     printf '%s\\n' '{ready}'\n\
                      exec sleep {A_BRIDGE_STAYS_UP_FOR_SECS}\n"
                 ),
             )
