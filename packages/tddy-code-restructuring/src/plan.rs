@@ -127,10 +127,6 @@ pub use item_path::{Fingerprint, ItemPath, ItemSegment};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileHint {
     pub sha256: String,
-    /// RFC 3339, when the file's modification time is one it can state — absent for a time before
-    /// the epoch rather than a date that is not the file's. Never read; it is there for a person.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modified: Option<String>,
 }
 
 pub use crate::plan::refactor_kind::RefactorKind;
@@ -350,7 +346,7 @@ impl Anchor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{plan::codec::rfc3339, RestructureError};
+    use crate::RestructureError;
 
     const HEADER: &str = r#"{"v":1,"snapshot":{"src/shapes.ts":"sha256:ab12"}}"#;
 
@@ -1334,7 +1330,6 @@ mod tests {
                 "lib.rs".to_string(),
                 FileHint {
                     sha256: "sha256:stale".to_string(),
-                    modified: Some("2020-01-01T00:00:00Z".to_string()),
                 },
             )]),
             ops: vec![],
@@ -1363,13 +1358,7 @@ mod tests {
         let plan = Plan {
             version: 2,
             snapshot: BTreeMap::new(),
-            files: BTreeMap::from([(
-                "gone.rs".to_string(),
-                FileHint {
-                    sha256: empty,
-                    modified: None,
-                },
-            )]),
+            files: BTreeMap::from([("gone.rs".to_string(), FileHint { sha256: empty })]),
             ops: vec![],
         };
 
@@ -1378,20 +1367,6 @@ mod tests {
 
         // Then the missing file is named as drifted
         assert_eq!(drifted, vec!["gone.rs"]);
-    }
-
-    #[test]
-    fn a_timestamp_is_written_as_rfc_3339_utc() {
-        let time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
-
-        assert_eq!(rfc3339(time).as_deref(), Some("2001-09-09T01:46:40Z"));
-    }
-
-    #[test]
-    fn a_time_before_the_epoch_is_left_out_rather_than_written_as_1970() {
-        let time = std::time::UNIX_EPOCH - std::time::Duration::from_secs(60);
-
-        assert_eq!(rfc3339(time), None);
     }
 
     #[test]

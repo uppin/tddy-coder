@@ -328,10 +328,7 @@ impl AFixtureWorkspace {
         for op in ops {
             let file = op.anchor.file();
             let hash = hash_file(&self.root.join(file)).expect("the anchored file hashes");
-            files.insert(
-                file.to_string(),
-                serde_json::json!({ "sha256": hash, "modified": "2026-09-26T00:00:00Z" }),
-            );
+            files.insert(file.to_string(), serde_json::json!({ "sha256": hash }));
         }
 
         let mut lines = vec![serde_json::json!({ "v": 2, "files": files }).to_string()];

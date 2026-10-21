@@ -282,7 +282,7 @@ None. No node depends on this one.
 - [x] **Prefix rule** moved into `item_anchor/prefix.rs` (R2); the Rust resolver calls it
 - [x] **Static check** (R3)
 - [x] **Dead path deleted** (R5); 3 tests re-pointed (F6)
-- [ ] **`FileHint.modified` removed** (R4); skill `plan-schema.md` updated
+- [x] **`FileHint.modified` removed** (R4); skill `plan-schema.md` updated
 - [ ] **Package documentation** at wrap (list under Affected Packages); both code issues and the todo deleted with their final measurement
 - [ ] **Testing**: `./test -p tddy-code-restructuring -p tddy-lsp -p tddy-index-daemon`, scoped; CI for the rest
 - [ ] **Code quality**: `cargo check --all-targets` for the three packages; `cargo clippy -p <each> --all-targets -- -D warnings`; `cargo fmt`; `item_anchor.rs` production lines stay ≤ 500, which is why the rule goes into a child module
@@ -362,7 +362,7 @@ Plan headers carry only hashes. `rust.rs` is about 125 lines shorter.
 - [ ] **M3** `tddy-index-daemon`: status arm; test 7.
 - [x] **M4** Prefix rule move and static check (R2, R3); tests 8–14, with test 21 (existing, live) still green.
 - [x] **M5** R5 deletions and re-pointed tests; tests 18–20 stay green.
-- [ ] **M6** R4; tests 15–17; skill reference.
+- [x] **M6** R4; tests 15–17; skill reference.
 - [ ] **M7** Scoped gates, length gate, docs staged for wrap.
 
 ## Testing plan
@@ -775,6 +775,37 @@ Fresh run, `./test -p tddy-code-restructuring --test spawn_record_acceptance --t
   results already said.
 
 M5 gate met for tests 18–20. `language_support_acceptance` is red on the inherited stubs, so it is not counted as green.
+
+### M6 R4: `FileHint.modified` removed; tests 15–17; skill reference (2026-10-21)
+
+Changed:
+- `src/plan.rs`: `FileHint` is `{ pub sha256: String }`. The `modified` field and its doc are gone. The test import of
+  `rfc3339` is gone. The `modified` literals in `a_v2_header_is_restated_…` and `a_hinted_file_that_is_gone_…` are
+  gone. The two `rfc3339` unit tests (`a_timestamp_is_written_as_rfc_3339_utc`, `a_time_before_the_epoch_is_left_out_…`)
+  are removed, because they test the removed function (R4).
+- `src/plan/codec/file_hint.rs`: `hint_of` is `Ok(FileHint { sha256: hash_file(path)? })`. `rfc3339` is removed. The
+  line-1 `TODO(sharpen)` is removed, and so is the `malformed` import that only the metadata read used.
+  **Behaviour change:** `hint_of` on a missing file no longer errors with "could not be read". It hashes the empty
+  content, as `apply::hash_file` already does for a missing file. R4 asks for this. Callers: `codec.rs:106`,
+  `headerless.rs:75`, `plan_store/live.rs:144`.
+- `src/plan/codec.rs`: the `TODO(sharpen)` at :224 and the `#[cfg(test)]` re-export of `rfc3339` are removed. `hint_of`
+  stays.
+- `tests/harness/mod.rs`: the `"modified"` key is removed from `a_hinted_plan_of`'s fixture header. This is the planned
+  test-file edit.
+- `.agents/skills/code-restructuring/references/plan-schema.md`: the header example drops `modified`, and the
+  "informational" sentence is removed.
+- `cargo fmt -p tddy-code-restructuring` reformatted the two lines this edit made shorter, in `plan.rs` and
+  `tests/harness/mod.rs`, and nothing else.
+
+Gates, scoped to `tddy-code-restructuring`, run before the `cargo fmt` pass, which only reflows:
+- `./test -p tddy-code-restructuring --test snapshot_writes_a_missing_header`: **12 passed, 0 failed**. Test 16,
+  `a_written_header_names_each_file_by_its_hash_alone`, and test 17,
+  `a_plan_whose_header_carries_modified_is_checked_and_its_rewrite_drops_it`, both pass.
+- `./test -p tddy-code-restructuring --lib plan::`: **77 passed, 0 failed**. Test 15,
+  `plan::tests::a_v2_header_that_still_carries_modified_parses_and_keeps_only_the_hash`, passes.
+- `./test -p tddy-code-restructuring --test static_check_item_anchors`: **7 passed, 0 failed**.
+- `./test -p tddy-code-restructuring --test item_anchor_acceptance` (live, `--test-threads=1`): **19 passed, 0 failed**,
+  74.44 s.
 
 ## TODO
 
