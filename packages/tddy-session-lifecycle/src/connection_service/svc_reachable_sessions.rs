@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use tddy_agent_launch::session_coordinate_handlers::{facilitated_checkout, FacilitatedCheckout};
 use tddy_daemon_extensions::{ReachableSessions, ReachedSession, SessionReach};
-use tddy_daemon_livekit::session_room::SessionTerminalBridge;
 use tddy_rpc::{RequestTransport, Status};
 
 use crate::connection_service::DaemonSessionHost;
@@ -65,6 +64,6 @@ impl ReachableSessions for DaemonSessionHost {
     }
 
     async fn expose_terminal(&self, session_id: &str) -> Result<(), Status> {
-        SessionTerminalBridge::bridge(self, session_id).await
+        self.expose_session_terminal(session_id).await
     }
 }

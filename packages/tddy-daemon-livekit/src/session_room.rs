@@ -11,7 +11,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -27,7 +26,10 @@ use tddy_rpc::Status;
 
 use tddy_daemon_kernel::config::{DaemonConfig, DEFAULT_SESSION_ROOM_GIT_TIMEOUT};
 use tddy_daemon_kernel::peer_forwarding::daemon_rpc_identity;
-use tddy_worktree_service::worktrees::{parse_git_diff_numstat, WorktreeNumstat};
+use tddy_worktree_service::worktree_measurement::{git_output, git_stdout, git_stdout_with};
+pub use tddy_worktree_service::worktree_measurement::{
+    snapshot_worktree, snapshot_worktree_within,
+};
 
 /// The data-channel topic worktree activity is broadcast on, re-exported from where its payload's
 /// schema lives: `tddy-tools` receives on the same topic and reaches `tddy-service`
@@ -49,71 +51,7 @@ pub use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, Worktree
 
 pub use tddy_daemon_kernel::peer_forwarding::session_room_name;
 
-/// Whether a session of this type is *facilitated* by the daemon it was started on — that is,
-/// whether it runs an agent here and therefore has a session room of its own.
-///
-/// The PRD's Roles table as a predicate (`docs/ft/daemon/session-room.md` § Roles): the room
-/// belongs to the daemon running the session's agent. `claude-cli` and `cursor-cli` run one here.
-/// A `workspace` session runs none — it is the codebase half of a split session or a standalone
-/// checkout, and whatever agent it has is on another daemon. A `tool` (tddy-coder) session's
-/// terminal is a room `tddy-coder` joins for itself, which this daemon neither creates nor serves.
-///
-/// Deliberately **not** a statement about whether a session type "uses LiveKit". A `claude-cli`
-/// session also bridges its PTY into the lobby, and `ConnectSession` answers about a *terminal*
-/// room none of these types has. Three different rooms; this names one of them.
-pub fn session_type_is_facilitated_here(session_type: &str) -> bool {
-    matches!(session_type.trim(), "claude-cli" | "cursor-cli")
-}
-
 pub use tddy_daemon_kernel::worktree_snapshot::WorktreeSnapshot;
-
-/// Measure `worktree_root` as it stands right now, within [`DEFAULT_SESSION_ROOM_GIT_TIMEOUT`].
-///
-/// The counts come from the same `git diff --numstat HEAD` the Worktrees screen reads, parsed by
-/// the same [`parse_git_diff_numstat`], so a room and the screen can never quote different totals
-/// for one checkout. Untracked files are counted and nothing more: a HEAD-relative diff cannot
-/// produce line counts for a path git does not track, and inventing them is exactly how the two
-/// would diverge.
-///
-/// A checkout git cannot read snapshots as empty rather than failing — this feeds a periodic poll
-/// whose only recourse is to try again on the next tick.
-pub fn snapshot_worktree(worktree_root: &Path) -> WorktreeSnapshot {
-    snapshot_worktree_within(worktree_root, DEFAULT_SESSION_ROOM_GIT_TIMEOUT)
-}
-
-/// [`snapshot_worktree`] with the whole measurement — every `git` it runs — bounded by `budget`.
-///
-/// The budget is a deadline over the sequence, not a per-command allowance, so a repository that
-/// answers three commands slowly cannot spend three budgets: what the poll loop waits for is what
-/// the operator configured (`session_room.git_timeout_ms`), once.
-pub fn snapshot_worktree_within(worktree_root: &Path, budget: Duration) -> WorktreeSnapshot {
-    let deadline = Instant::now() + budget;
-    let numstat = numstat_within(worktree_root, deadline);
-    WorktreeSnapshot {
-        head_commit: git_stdout(worktree_root, &["rev-parse", "HEAD"], deadline),
-        branch: git_stdout(
-            worktree_root,
-            &["rev-parse", "--abbrev-ref", "HEAD"],
-            deadline,
-        ),
-        changed_paths: numstat.paths,
-        changed_files: numstat.changed_files,
-        lines_added: numstat.lines_added,
-        lines_removed: numstat.lines_removed,
-        untracked_files: untracked_file_count(worktree_root, deadline),
-        // Deliberately NOT measured here. Writing a WIP tree is not a read: `git add -A` stages
-        // the whole checkout and materialises loose blob and tree objects in the project's shared
-        // object database. Doing that inside a function named "snapshot" would make every poll of
-        // every hosted room — twice a second by default — leave objects behind that nothing
-        // references, in a repository shared by every worktree, held for git's two-week prune
-        // grace period.
-        //
-        // So the tree is measured by whoever is about to *use* it, via [`write_wip_tree_within`],
-        // and published as a ref in the same breath ([`publish_wip_ref`]) so the objects it writes
-        // are reachable from the moment they exist.
-        wip_tree: String::new(),
-    }
-}
 
 /// The tree object of `worktree_root`'s whole working tree, staged into a temporary index.
 ///
@@ -924,16 +862,6 @@ pub fn changed_paths_between(
         .collect())
 }
 
-/// The working tree's diff against HEAD, run and parsed exactly as [`tddy_worktree_service::worktrees`] does it for
-/// the Worktrees screen — only under this module's deadline.
-fn numstat_within(worktree_root: &Path, deadline: Instant) -> WorktreeNumstat {
-    parse_git_diff_numstat(&git_stdout(
-        worktree_root,
-        &["diff", "--numstat", "HEAD"],
-        deadline,
-    ))
-}
-
 /// What has to be announced to turn `prev` into `next`, numbered from `next_seq`.
 ///
 /// Identical snapshots announce nothing. Polling is how change is detected here, so a poll that
@@ -1038,139 +966,6 @@ fn activity_event(
     }
 }
 
-/// How many files in the checkout git has never been told about: the `??` entries of
-/// `git status --porcelain`, and only those. Every other status line describes a path the numstat
-/// diff has already accounted for.
-fn untracked_file_count(worktree_root: &Path, deadline: Instant) -> u32 {
-    git_stdout(worktree_root, &["status", "--porcelain"], deadline)
-        .lines()
-        .filter(|line| line.starts_with("??"))
-        .count() as u32
-}
-
-/// Trimmed stdout of a git command in `worktree_root`, or the empty string when git could not
-/// answer before `deadline`.
-///
-/// The child is **killed** on expiry rather than abandoned. This runs on a blocking-pool thread, and
-/// a `git` that never returns — the stale `index.lock` case, or a network filesystem that stopped
-/// answering — would otherwise cost one live process and one occupied pool thread *per poll*,
-/// forever: at a two-second interval that is a room quietly eating a process-wide pool (512 threads
-/// by default) that the spawn worker and every other blocking caller shares.
-fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String {
-    git_stdout_with(worktree_root, args, &[], deadline)
-}
-
-/// [`git_stdout`] with extra environment for the child — `GIT_INDEX_FILE` for the WIP tree, the
-/// identity [`publish_wip_ref`] signs with — and the same "empty string when git could not answer".
-fn git_stdout_with(
-    worktree_root: &Path,
-    args: &[&str],
-    envs: &[(&str, &OsStr)],
-    deadline: Instant,
-) -> String {
-    match git_output(worktree_root, args, envs, deadline) {
-        Ok(stdout) => String::from_utf8_lossy(&stdout).trim().to_string(),
-        Err(reason) => {
-            warn!("snapshot_worktree: {reason}");
-            String::new()
-        }
-    }
-}
-
-/// The raw stdout of a git command in `worktree_root`, or why it could not be had.
-///
-/// Bytes rather than a string, and un-trimmed, because a patch is neither: a `git diff --binary` of
-/// a checkout holding a file that is not valid UTF-8 would not survive being decoded, and a patch
-/// missing its final newline is one `git apply` rejects.
-///
-/// The failure is returned rather than logged here because the callers differ in what a failure
-/// means: a measurement that could not be taken is a warning and an empty reading, while a WIP ref
-/// that could not be published is an error its caller has to see.
-fn git_output(
-    worktree_root: &Path,
-    args: &[&str],
-    envs: &[(&str, &OsStr)],
-    deadline: Instant,
-) -> Result<Vec<u8>, String> {
-    let budget = deadline.saturating_duration_since(Instant::now());
-    if budget.is_zero() {
-        return Err(format!(
-            "no time left for git {args:?} in {worktree_root:?}; the measurement is incomplete"
-        ));
-    }
-    let mut command = Command::new("git");
-    for (name, value) in envs {
-        command.env(name, value);
-    }
-    let mut child = match command
-        .current_dir(worktree_root)
-        .args(args)
-        // This measures a checkout somebody is *working in*, several times a second. `git status`
-        // and `git diff` refresh the index as a side effect, which takes `index.lock` — the same
-        // lock the developer's own `git add`, `git commit` or rebase needs, and which only one
-        // process can hold. Polling would then both lose its own measurement to whoever holds it
-        // and fail the developer's git for as long as this one runs. `GIT_OPTIONAL_LOCKS=0` is
-        // git's own answer for read-only observers: skip the refresh rather than take the lock.
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        // A git that decides to ask for credentials would sit on a prompt no one can answer until
-        // the kill below; closed stdin makes it fail instead.
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(e) => {
-            return Err(format!(
-                "git {args:?} in {worktree_root:?} could not be run: {e}"
-            ))
-        }
-    };
-
-    // Drained on its own thread, and the thread's completion is what the deadline is measured
-    // against: git blocks once it has written ~64 KB into an unread pipe, so a caller that watched
-    // only the exit status would time out and kill a healthy `git diff` over a large change set.
-    // EOF here means git closed stdout, which it does as it exits.
-    let Some(stdout) = child.stdout.take() else {
-        return Err(format!(
-            "git {args:?} in {worktree_root:?} produced no stdout pipe"
-        ));
-    };
-    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        // Bytes, decoded lossily below: a repository can hold a path that is not valid UTF-8, and
-        // losing the whole measurement over one such filename would be worse than showing it with
-        // replacement characters.
-        let mut collected = Vec::new();
-        let read = std::io::Read::read_to_end(&mut std::io::BufReader::new(stdout), &mut collected);
-        let _ = finished_tx.send(read.map(|_| collected));
-    });
-
-    match finished_rx.recv_timeout(budget) {
-        Ok(Ok(collected)) => match child.wait() {
-            Ok(status) if status.success() => Ok(collected),
-            Ok(status) => Err(format!("git {args:?} in {worktree_root:?} exited {status}")),
-            Err(e) => Err(format!(
-                "git {args:?} in {worktree_root:?} could not be waited on: {e}"
-            )),
-        },
-        Ok(Err(e)) => Err(format!(
-            "reading git {args:?} in {worktree_root:?} failed: {e}"
-        )),
-        Err(_) => {
-            // Killed *and* reaped: a `git` left running holds an index lock and a file handle on a
-            // directory the daemon may be about to remove, and an unreaped one stays a zombie for
-            // the life of the daemon.
-            let _ = child.kill();
-            let _ = child.wait();
-            Err(format!(
-                "git {args:?} in {worktree_root:?} did not answer within {}ms and was killed",
-                budget.as_millis()
-            ))
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Room lifecycle
 // ---------------------------------------------------------------------------
@@ -1252,7 +1047,7 @@ pub struct SessionRoomHosting<'a> {
     pub session_dir: &'a Path,
 }
 
-pub use tddy_daemon_extensions::OpenedSessionRoom;
+pub use tddy_daemon_extensions::OpenedRoom;
 
 /// What makes a session's terminal drivable over LiveKit, named here so [`SessionRoomRegistry`] can
 /// establish it in the same breath as the room without knowing what a PTY is.
@@ -1420,7 +1215,7 @@ impl SessionRoomRegistry {
         &self,
         hosting: &SessionRoomHosting<'_>,
         service: S,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
+    ) -> Result<Option<OpenedRoom>, Status> {
         self.open_measured_by(hosting, move || Ok(service), Self::local_checkout(hosting)?)
             .await
     }
@@ -1457,7 +1252,7 @@ impl SessionRoomRegistry {
         hosting: &SessionRoomHosting<'_>,
         service: impl FnOnce() -> Result<S, Status>,
         source: Arc<dyn WorktreeSource>,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
+    ) -> Result<Option<OpenedRoom>, Status> {
         self.open_staged(hosting, service, source)
             .await
             .map_err(RoomOpenFailure::into_status)
@@ -1469,7 +1264,7 @@ impl SessionRoomRegistry {
         hosting: &SessionRoomHosting<'_>,
         service: impl FnOnce() -> Result<S, Status>,
         source: Arc<dyn WorktreeSource>,
-    ) -> Result<Option<OpenedSessionRoom>, RoomOpenFailure> {
+    ) -> Result<Option<OpenedRoom>, RoomOpenFailure> {
         use RoomOpenFailure::{Elsewhere, Server};
         let Some(credentials) = LiveKitCredentials::from_config(hosting.config) else {
             log::debug!(
@@ -1514,7 +1309,7 @@ impl SessionRoomRegistry {
             "session_room: hosting {room_name} as {identity} for worktree {:?}",
             hosting.worktree_root
         );
-        Ok(Some(OpenedSessionRoom {
+        Ok(Some(OpenedRoom {
             room: room_name,
             url: credentials.url,
             server_identity: identity,
@@ -1544,7 +1339,7 @@ impl SessionRoomRegistry {
         hosting: &SessionRoomHosting<'_>,
         service: impl FnOnce() -> Result<S, Status>,
         terminal: &dyn SessionTerminalBridge,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
+    ) -> Result<Option<OpenedRoom>, Status> {
         self.ensure_open_staged(hosting, service, terminal)
             .await
             .map_err(RoomOpenFailure::into_status)
@@ -1557,7 +1352,7 @@ impl SessionRoomRegistry {
         hosting: &SessionRoomHosting<'_>,
         service: impl FnOnce() -> Result<S, Status>,
         terminal: &dyn SessionTerminalBridge,
-    ) -> Result<Option<OpenedSessionRoom>, RoomOpenFailure> {
+    ) -> Result<Option<OpenedRoom>, RoomOpenFailure> {
         let opening = self.opening_lock(hosting.codebase_session_id);
         let _opening_this_session = opening.lock().await;
         let room = match self.already_open(hosting) {
@@ -1614,12 +1409,12 @@ impl SessionRoomRegistry {
     /// daemon's instance id and the URL from its configuration, so a room reported here is
     /// described exactly as the call that opened it described it. Storing the answer would be a
     /// second copy of three values that cannot disagree.
-    fn already_open(&self, hosting: &SessionRoomHosting<'_>) -> Option<OpenedSessionRoom> {
+    fn already_open(&self, hosting: &SessionRoomHosting<'_>) -> Option<OpenedRoom> {
         if !self.hosts(hosting.codebase_session_id) {
             return None;
         }
         let credentials = LiveKitCredentials::from_config(hosting.config)?;
-        Some(OpenedSessionRoom {
+        Some(OpenedRoom {
             room: session_room_name(hosting.codebase_session_id),
             url: credentials.url,
             server_identity: daemon_rpc_identity(hosting.instance_id),
@@ -2853,66 +2648,6 @@ fn unix_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|since| since.as_millis() as u64)
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod snapshot_worktree_tests {
-    use super::*;
-
-    fn git(dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "Test")
-            .env("GIT_AUTHOR_EMAIL", "t@t.com")
-            .env("GIT_COMMITTER_NAME", "Test")
-            .env("GIT_COMMITTER_EMAIL", "t@t.com")
-            .output()
-            .expect("git must be on PATH");
-        assert!(
-            output.status.success(),
-            "git {args:?} failed in {dir:?}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    /// A checkout with one committed file and one untracked file beside it.
-    fn a_checkout_with_an_untracked_file() -> tempfile::TempDir {
-        let repo = tempfile::tempdir().unwrap();
-        git(repo.path(), &["init", "-q", "-b", "main"]);
-        std::fs::write(repo.path().join("shipped.txt"), "shipped\n").unwrap();
-        git(repo.path(), &["add", "shipped.txt"]);
-        git(repo.path(), &["commit", "-qm", "seed"]);
-        std::fs::write(repo.path().join("scratch.txt"), "not added\n").unwrap();
-        repo
-    }
-
-    /// Take the index lock the way a developer's own `git add` does for the moment it runs.
-    fn while_another_git_holds_the_index_lock(repo: &Path) {
-        std::fs::write(repo.join(".git").join("index.lock"), b"").unwrap();
-    }
-
-    #[test]
-    fn a_checkout_is_measured_while_another_git_holds_the_index_lock() {
-        // Given a checkout whose index is locked, as it is for the moment any `git add`, `git
-        // commit` or rebase in it is running
-        let repo = a_checkout_with_an_untracked_file();
-        while_another_git_holds_the_index_lock(repo.path());
-
-        // When the room polls it
-        let snapshot = snapshot_worktree(repo.path());
-
-        // Then the poll still measured the checkout. This runs against a worktree a developer is
-        // working in, several times a second: a measurement that needs the index lock both loses
-        // the race — reporting `head_commit: ""`, which reads as a commit to the empty sha — and
-        // takes the lock often enough to fail the developer's own git.
-        assert_eq!(snapshot.branch, "main");
-        assert_eq!(snapshot.untracked_files, 1);
-        assert!(
-            !snapshot.head_commit.is_empty(),
-            "HEAD must still resolve while the index is locked"
-        );
-    }
 }
 
 #[cfg(test)]

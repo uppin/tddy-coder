@@ -7,6 +7,8 @@
 //! AC: relay idle monitor spawns a task that checks `IdleTimeoutTracker::should_shutdown()`
 //! and fires the external shutdown channel, causing `run_server` to exit cleanly.
 
+mod daemon_rpc_participant;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -208,7 +210,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
             sessions_b.path().to_path_buf(),
             valid_user_resolver(),
             None,
-            None, // B has no discovery of its own — it only serves its local tools
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b), // B has no discovery of its own — it only serves its local tools
             None,
             Arc::new(ClaudeCliSessionManager::new()),
         ))
@@ -227,10 +229,8 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     let token_b = livekit
         .generate_token(relay_room(), &rpc_identity(RELAY_PEER_ID))
         .expect("LiveKit token for remote peer B");
-    let peer_run = tddy_session_lifecycle::test_util::serve_daemon_rpc_participant(
-        &ws_url, &token_b, &service_b,
-    )
-    .await;
+    let peer_run =
+        daemon_rpc_participant::serve_daemon_rpc_participant(&ws_url, &token_b, &service_b).await;
 
     // ── Service A: the relay. Has LiveKit discovery that will see B.
     let (_tmp_a, path_a) = write_daemon_yaml(&ws_url, None);
@@ -259,15 +259,18 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     )
     .with_eligible_daemon_source(Arc::clone(&eligible));
     let service_a = TestDaemon::from_host(DaemonSessionHost::new(
-        config_a,
+        config_a.clone(),
         sessions_resolver(sessions_a.path().to_path_buf()),
         sessions_a.path().to_path_buf(),
         valid_user_resolver(),
         None,
-        Some(LiveKitDiscoveryHandles {
-            eligible_daemon_source: eligible,
-            common_room_livekit_room: room_slot,
-        }),
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config_a,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: room_slot,
+            }),
+        ),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     ));

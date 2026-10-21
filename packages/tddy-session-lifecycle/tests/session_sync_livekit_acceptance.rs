@@ -38,7 +38,9 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_auth::SessionTokens;
 use tddy_daemon_extensions::IntegrationStatusBoard;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_daemon_livekit::session_room::SessionRoomRegistry;
+use tddy_daemon_livekit::session_room::{
+    DeltaLookupError, DeltaScope as RoomDeltaScope, SessionRoomRegistry,
+};
 use tddy_daemon_livekit::{LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
 use tddy_livekit::room_connector::LiveKitRoomConnector;
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
@@ -47,6 +49,7 @@ use tddy_projects::project_storage::{write_projects, ProjectData};
 use tddy_rpc::{RequestMetadata, RequestTransport, RpcMessage, RpcResult};
 use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
 use tddy_service::proto::session_room::OpenSessionRoomRequest;
+use tddy_session_activity::{DeltaLookup, DeltaScope, MeasuredDelta, SessionDeltaStores};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::RpcFamiliesNotUnderTest;
 use tddy_session_sync::{Credentials, DaemonToken, LiveKitCredentials};
@@ -55,6 +58,48 @@ use tddy_testing_commons::wait::eventually;
 use tddy_worktree_service::remote_git_service::{
     ProjectsDirResolver, RemoteGitServiceImpl, UserResolver,
 };
+
+/// The delta rings of the rooms in `SessionRoomRegistry`, as the activity service reads them.
+///
+/// What `tddy-daemon` wires in production (`RoomsHostedByThisDaemon`); written out here because
+/// this crate's tests cannot depend on the daemon.
+// TODO(#satellite follow-up): one adapter, in the plugin, once `tddy-daemon-livekit` may depend on
+// `tddy-session-activity`; this copy and the daemon's then go
+// (`docs/dev/todo/2026-10-21-session-delta-stores-adapter-lives-in-the-daemon.md`).
+struct DeltaRingsOf(Arc<SessionRoomRegistry>);
+
+impl SessionDeltaStores for DeltaRingsOf {
+    fn delta_for_call(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        scope: DeltaScope,
+    ) -> Result<DeltaLookup, tddy_rpc::Status> {
+        let Some(store) = self.0.delta_store(session_id) else {
+            return Ok(DeltaLookup::NoRoomHere);
+        };
+        let scope = match scope {
+            DeltaScope::Call => RoomDeltaScope::Call,
+            DeltaScope::Residual => RoomDeltaScope::Residual,
+            DeltaScope::Tick => RoomDeltaScope::Tick,
+        };
+        let looked_up = store
+            .lock()
+            .expect("the delta store is not poisoned")
+            .delta_for_call(call_id, scope);
+        Ok(match looked_up {
+            Ok(delta) => DeltaLookup::Found(MeasuredDelta {
+                seq: delta.seq,
+                prev_seq: delta.prev_seq,
+                base_commit: delta.base_commit,
+                patch: delta.patch,
+                scoped_paths: delta.scoped_paths,
+            }),
+            Err(DeltaLookupError::UnknownCall { .. }) => DeltaLookup::UnknownCall,
+            Err(DeltaLookupError::AgedOut { seq, .. }) => DeltaLookup::AgedOut { seq },
+        })
+    }
+}
 
 /// The daemon under test: it runs the session, hosts its room, serves the deltas and serves the
 /// project as a git remote. One instance id for all four, because a participant addresses one
@@ -243,11 +288,12 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
             data_dir.clone(),
             user_resolver.clone(),
             None,
-            None,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             None,
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
-        .with_session_rooms(rooms)
+        .with_session_rooms(rooms.clone())
+        .with_session_delta_stores(Arc::new(DeltaRingsOf(rooms)))
         .with_session_reach(livekit_reach.clone())
         .with_rpc_families(Arc::new(RpcFamiliesNotUnderTest)),
     );

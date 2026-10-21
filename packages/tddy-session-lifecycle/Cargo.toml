@@ -42,7 +42,6 @@ tddy-github = { path = "../tddy-github" }
 tddy-pr-stack = { path = "../tddy-pr-stack" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-workflow = { path = "../tddy-workflow" }
-tddy-livekit = { path = "../tddy-livekit" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
@@ -85,7 +84,6 @@ tddy-telegram = { path = "../tddy-telegram" }
 # The moved auth subsystem: `runtime.rs` calls `build_auth_entries`, and the daemon re-exports the
 # three of its seven modules that something here still names.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
-tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 # Which GitHub account a project acts as: one `acting_identity` resolution at the session edge, whose
 # commit identity `tddy-daemon-livekit::session_git_environment` turns into the agent's `GIT_*`
@@ -126,6 +124,10 @@ tddy-testing-commons = { path = "../tddy-testing-commons" }
 # fail-closed tests mount `ConnectionServiceImpl`, so the suite stays with the service it exercises.
 tddy-supervisor = { path = "../tddy-supervisor" }
 tddy-github = { path = "../tddy-github" }
+# LiveKit is a plugin: the host is built against its ports, and the suites that run a real room
+# wire the plugin in themselves.
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+tddy-livekit = { path = "../tddy-livekit" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 livekit = "0.7"
 serial_test = "3"

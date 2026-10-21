@@ -43,9 +43,26 @@ pub trait ReachableSessions: Send + Sync {
     async fn expose_terminal(&self, session_id: &str) -> Result<(), Status>;
 }
 
+/// Where a session's room is, once opened: what a caller needs to join it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenedRoom {
+    pub room: String,
+    pub url: String,
+    /// The participant serving the session in that room.
+    pub server_identity: String,
+}
+
 /// Something that extends a session's reach beyond this host.
 #[async_trait::async_trait]
 pub trait SessionReach: Send + Sync {
+    /// Open the session's room now, for a caller that cannot proceed without it; it fails loudly.
+    /// `Ok(None)`: no integration hosts rooms on this daemon.
+    async fn open_now(
+        &self,
+        session: ReachedSession,
+        host: Arc<dyn ReachableSessions>,
+    ) -> Result<Option<OpenedRoom>, Status>;
+
     /// `session` was reached. An `Err` fails the request that reached it, so an implementation
     /// returns one only when that caller cannot be served without what failed.
     async fn session_reached(
@@ -61,6 +78,14 @@ pub struct NoSessionReach;
 
 #[async_trait::async_trait]
 impl SessionReach for NoSessionReach {
+    async fn open_now(
+        &self,
+        _session: ReachedSession,
+        _host: Arc<dyn ReachableSessions>,
+    ) -> Result<Option<OpenedRoom>, Status> {
+        Ok(None)
+    }
+
     async fn session_reached(
         &self,
         _session: ReachedSession,
@@ -99,6 +124,19 @@ mod tests {
             worktree_root: PathBuf::from("/worktrees/my-app/feat-x"),
             arrived_over: transport,
         }
+    }
+
+    #[tokio::test]
+    async fn with_nothing_wired_opening_a_room_now_opens_none_without_asking_the_host() {
+        let opened = NoSessionReach
+            .open_now(
+                a_session_reached_over(RequestTransport::Http),
+                Arc::new(AHostNothingMayAsk),
+            )
+            .await
+            .expect("no integration is not a failure");
+
+        assert_eq!(opened, None);
     }
 
     #[tokio::test]

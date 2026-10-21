@@ -54,6 +54,7 @@ pub mod worktree_source;
 
 #[cfg(test)]
 mod conversation_spawn_wiring_tests;
+mod facilitation;
 #[cfg(test)]
 mod host_session_socket_tests;
 #[cfg(test)]

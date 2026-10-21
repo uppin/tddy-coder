@@ -6,7 +6,7 @@
 **Metrics:** **2,874 production lines** (3,029 total, first `#[cfg(test)]` at `:2875`) · budget 500 · **5.7× over**
 **Thresholds breached:** length 2874 > 500
 **Restructure:** required — `extract_module --to_file` seams, designed below, not applied
-**Status:** Open — regressed 2026-10-17 (+61 from #623, `#satellite` 1/13; deferred with the developer's consent), then narrowed 2026-10-20 by #633 (2,935 → 2,885) and #634 (2,885 → 2,857), still over 500; **unclaimed** · pre-existing; #508 rewrote comments only (net 0 lines)
+**Status:** Open — narrowed 2026-10-21 (−205, #635, `#satellite` 13/13); regressed 2026-10-17 (+61 from #623, `#satellite` 1/13; deferred with the developer's consent), then narrowed 2026-10-20 by #633 (2,935 → 2,885) and #634 (2,885 → 2,857), still over 500; **unclaimed** · pre-existing; #508 rewrote comments only (net 0 lines)
 
 ## Measurement history
 
@@ -17,6 +17,7 @@
 
 | 2026-10-20 | 2,935 → 2,885 (−50) | `#satellite` 11/13 (#633): `WorktreeSnapshot` moves to `tddy-daemon-kernel::worktree_snapshot` and `OpenedSessionRoom` to `tddy-daemon-extensions` (re-exported here); the registry gains the `agents_outbox` field. Smaller, still 5.8× over. Seam A starts at the measurement functions now that `WorktreeSnapshot` is gone |
 | 2026-10-20 | 2,885 → 2,857 (−28) | `#satellite` 12/13 (#634): `SessionTokenMinter` and `RemoteSnapshotSource` move to `tddy_daemon_extensions::split_rooms` (re-exported here), and `WorktreeSnapshot` is defined there too (the kernel re-exports it). Smaller, still 5.7× over. Not split here: #633 and #635 in the same stack touch this file |
+| 2026-10-21 | 2,857 → 2,652 (−205) | `#satellite` 13/13 (#635): the measurement functions (`snapshot_worktree*`, `git_output`, `git_stdout*`, `numstat_within`, `untracked_file_count`) move to `tddy_worktree_service::worktree_measurement` (re-exported here), `session_type_is_facilitated_here` to `tddy-agent-launch`, `OpenedSessionRoom` becomes `OpenedRoom`. Smaller, still 5.3× over; seam A's measurement half is gone |
 
 ## What the gate found
 

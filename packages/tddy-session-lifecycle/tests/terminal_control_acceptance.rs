@@ -68,12 +68,12 @@ fn make_service(
         }
     });
     let service = DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base,
         tddy_data_dir,
         user_resolver,
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         None,
         manager,
     );

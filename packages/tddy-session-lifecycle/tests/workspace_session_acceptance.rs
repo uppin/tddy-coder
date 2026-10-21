@@ -48,12 +48,12 @@ fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> TestDaemon {
         }
     });
     TestDaemon::from_arc(Arc::new(DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
         user_resolver,
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )))

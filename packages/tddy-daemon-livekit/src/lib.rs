@@ -67,6 +67,35 @@ pub use session_room::{
     WorktreeSource,
 };
 pub use split_rooms::LiveKitSplitRooms;
+/// How this process joins a room as a client, over LiveKit: the `RoomConnector` a session host's
+/// agent roster is wired with.
+pub use tddy_livekit::room_connector::LiveKitRoomConnector;
+
+/// Bytes to leave free in a LiveKit data packet for everything in a frame that is not payload: the
+/// RPC envelope (request id, service/method metadata, sender identity) plus the frame's own fields —
+/// `total_byte_size` for a document chunk, `error_message` / `job_id` / the flags for a tool-result
+/// chunk. Mirrors the web's `UPLOAD_REQUEST_ENVELOPE_HEADROOM`, which sizes the same budget from the
+/// other end of the same transport.
+const FRAME_ENVELOPE_HEADROOM: usize = 8 * 1024;
+
+/// A frame plus its envelope must fit in one LiveKit data packet. Past that budget the transport
+/// splits each frame into chunk frames, and one lost chunk frame leaves the peer's reassembler
+/// permanently incomplete — the call is then never answered and never fails
+/// (`docs/ft/coder/rpc-multi-transport.md`). A build failure here is the point: the host's
+/// document frames are sized to "without their own chunk framing", and raising the frame size to
+/// 64 KiB would silently make that false. One assert covers `tddy-daemon-rpc`'s
+/// `EXEC_TOOL_FRAME_BYTES` too, which is defined as this same constant.
+///
+/// [`FRAME_ENVELOPE_HEADROOM`] is a *shared* budget, not a per-field one, and one frame type spends
+/// more of it than the rest: `ContextFileBatchChunk` repeats `rel_path` on every frame, so a deeply
+/// nested `.claude/skills/…/SKILL.md` eats path-length bytes out of the same 8 KiB the RPC envelope
+/// uses. 8 KiB against a path bounded by `PATH_MAX` leaves that comfortable today — this is a note
+/// for whoever narrows the headroom or adds a frame field, not a live risk.
+const _: () = assert!(
+    tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES + FRAME_ENVELOPE_HEADROOM
+        <= tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES,
+    "HOST_DOCUMENT_FRAME_BYTES must fit in one LiveKit data packet with envelope headroom"
+);
 
 #[cfg(test)]
 mod tests {

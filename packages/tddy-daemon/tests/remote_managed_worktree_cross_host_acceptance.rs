@@ -23,6 +23,8 @@
 //! so they own it alone. Placement *validation* needs none of this and lives in
 //! `tests/remote_managed_worktree_acceptance.rs`.
 
+mod daemon_rpc_participant;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -274,23 +276,32 @@ async fn a_daemon(
     );
 
     let service = DaemonSessionHost::new(
-        config,
+        config.clone(),
         resolver,
         sessions.path().to_path_buf(),
         user_resolver,
         None,
-        Some(LiveKitDiscoveryHandles {
-            eligible_daemon_source: eligible,
-            common_room_livekit_room: room_slot,
-        }),
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: room_slot,
+            }),
+        ),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_session_tokens(tokens);
+    let rooms = Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
+    let service = daemon_rpc_participant::with_the_livekit_room_ports(
+        service,
+        Arc::clone(&rooms),
+        Arc::new(tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry::new()),
+    );
     // The split-room port the daemon installs, over this host's own room registry.
     let split_rooms = split_room_hosting(
         service.config(),
-        service.session_rooms(),
+        rooms,
         room_token_minter(service.config().livekit.as_ref()),
     );
     let service = service.with_split_rooms(split_rooms);
@@ -309,7 +320,7 @@ async fn a_daemon(
 
 /// Joins the common room as `daemon-{instance_id}` — the identity a forward addresses — serving
 /// every coordinate a forward can name. The coordinate list is
-/// [`test_util::serve_daemon_rpc_participant`]'s rather than this suite's: a split start forwards
+/// [`daemon_rpc_participant::serve_daemon_rpc_participant`]'s rather than this suite's: a split start forwards
 /// both a `the pre-unbundle monolithic RPC coordinate` call and the `session_files.SessionFilesService` context
 /// reads, and a suite-local list is how one of them stops being served.
 async fn serve_rpc_participant(
@@ -321,7 +332,7 @@ async fn serve_rpc_participant(
     let token = livekit
         .generate_token(the_common_room(), &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
-    test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
+    daemon_rpc_participant::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
 
 /// 45s: both daemons publish their advertisement on the common room's own metadata cadence, and a

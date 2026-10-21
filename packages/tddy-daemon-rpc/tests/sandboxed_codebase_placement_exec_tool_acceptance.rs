@@ -213,7 +213,7 @@ fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) 
             sessions_base,
             user_resolver_valid(),
             None,
-            discovery,
+            tddy_daemon_livekit::peer_routing::peer_routing_over(&test_config(), discovery),
             None,
             Arc::new(ClaudeCliSessionManager::new()),
         )

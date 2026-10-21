@@ -98,14 +98,13 @@ impl LaunchSessions {
                     "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
                 )
             })?;
-        let inner =
-            tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit_within(
-                slot,
-                &peer_instance_id,
-                req,
-                start_forward_deadline(&self.config),
-            )
-            .await?;
+        let inner = tddy_daemon_kernel::peer_calls::forward_start_session_within(
+            slot,
+            &peer_instance_id,
+            req,
+            start_forward_deadline(&self.config),
+        )
+        .await?;
         log::info!(
             "StartSession: forward succeeded session_id={} livekit_server_identity={}",
             inner.session_id,

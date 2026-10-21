@@ -18,7 +18,7 @@ use pretty_assertions::assert_eq;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_extensions::{
-    IntegrationState, IntegrationStatusBoard, ReachableSessions, ReachedSession,
+    IntegrationState, IntegrationStatusBoard, ReachableSessions, ReachedSession, SessionReach,
 };
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::session_room::{session_room_name, SessionRoomRegistry};
@@ -202,7 +202,7 @@ async fn a_room_that_cannot_be_opened_reports_livekit_unreachable_with_the_failu
 
     // When it is asked to open the session's room now
     let refused = reach
-        .open_now(&host.session, host.clone())
+        .open_now(host.session.clone(), host.clone())
         .await
         .expect_err("a room LiveKit cannot create must not be reported as opened");
 
@@ -224,7 +224,7 @@ async fn a_daemon_with_no_livekit_block_opens_no_room_and_reports_livekit_disabl
 
     // When it is asked to open the session's room
     let opened = reach
-        .open_now(&host.session, host.clone())
+        .open_now(host.session.clone(), host.clone())
         .await
         .expect("a daemon with no LiveKit has nothing to fail at");
 
@@ -246,7 +246,7 @@ async fn a_room_opened_on_a_reachable_server_reports_livekit_connected() {
 
     // When it opens the session's room
     let opened = reach
-        .open_now(&host.session, host.clone())
+        .open_now(host.session.clone(), host.clone())
         .await
         .expect("opening a room on a reachable server must succeed")
         .expect("a daemon configured with LiveKit hosts a room");
@@ -273,7 +273,7 @@ async fn a_terminal_that_cannot_be_exposed_fails_the_open_and_leaves_the_livekit
 
     // When it opens the session's room
     let refused = reach
-        .open_now(&host.session, host.clone())
+        .open_now(host.session.clone(), host.clone())
         .await
         .expect_err("a terminal that cannot be exposed must still fail the request");
 
@@ -302,7 +302,7 @@ async fn a_host_that_cannot_build_the_room_services_fails_the_open_and_leaves_th
 
     // When it opens the session's room
     let refused = reach
-        .open_now(&host.session, host.clone())
+        .open_now(host.session.clone(), host.clone())
         .await
         .expect_err("a room whose services cannot be built must not open");
 

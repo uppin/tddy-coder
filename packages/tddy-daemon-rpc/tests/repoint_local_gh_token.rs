@@ -173,12 +173,12 @@ impl World {
             Arc::new(|token| (token == TOKEN).then(|| "u".to_string()));
         TestDaemon::from_host(
             DaemonSessionHost::new(
-                config,
+                config.clone(),
                 sessions_base_resolver,
                 data_dir,
                 user_resolver,
                 None,
-                None,
+                tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
                 None,
                 Arc::new(CliSessionManager::new()),
             )

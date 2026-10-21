@@ -27,7 +27,7 @@ use crate::daemon_settings::{apply_update, redacted_settings};
 /// Defined in `tddy-daemon-livekit` beside its one implementation, because the supervisor that
 /// implements it moved there and a trait cannot be implemented across a dependency the wrong way
 /// round. Re-exported so this service's callers name it where they always did.
-pub use tddy_session_lifecycle::common_room_supervisor::CommonRoomSupervisor;
+pub use tddy_daemon_livekit::common_room_supervisor::CommonRoomSupervisor;
 
 /// Decides whether the caller's `session_token` may read or write the daemon's configuration.
 /// `true` admits the call; `false` refuses it with `UNAUTHENTICATED`.

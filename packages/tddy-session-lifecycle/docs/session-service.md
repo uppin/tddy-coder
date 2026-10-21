@@ -129,7 +129,7 @@ defines (`rpc_families.rs`, re-exported as `tddy_session_lifecycle::DaemonRpcFam
 |---|---|
 | `resolve(token, session_id)` | The connect handler's token → user → session-directory path, then the `facilitated_checkout` rule: `failed_precondition` for a session type this daemon does not facilitate or one that records no checkout. The result's `arrived_over` is `Direct`. |
 | `session_services()` | The session-room roster, the RPC surface a room serves. |
-| `expose_terminal(session_id)` | `SessionTerminalBridge::bridge`, putting the participant that serves the session's terminal into the lobby. |
+| `expose_terminal(session_id)` | `expose_session_terminal` (`terminal_bridge_impl.rs`): hands the session's PTY to the host's `TerminalExposure` port, putting the participant that serves the session's terminal into the lobby. |
 
 `test_util::RpcFamiliesNotUnderTest` is the fixture for a suite that opens a session room without
 exercising any of the four families: its room serves none of them, and its `pr_stack_handler`

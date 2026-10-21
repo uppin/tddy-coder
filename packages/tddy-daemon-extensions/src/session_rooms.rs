@@ -7,14 +7,6 @@
 
 use std::path::Path;
 
-/// Where a hosted room is, for the response that announces it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenedSessionRoom {
-    pub room: String,
-    pub url: String,
-    pub server_identity: String,
-}
-
 /// The rooms this daemon hosts, by session.
 pub trait SessionRooms: Send + Sync {
     /// Whether this daemon currently hosts `session_id`'s room.

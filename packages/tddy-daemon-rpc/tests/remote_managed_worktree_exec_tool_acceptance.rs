@@ -101,12 +101,12 @@ fn service_with_known_codebase_peer_and_config(
         common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
     };
     TestDaemon::from_host(DaemonSessionHost::new(
-        config,
+        config.clone(),
         resolver,
         sessions_base,
         user_resolver_valid(),
         None,
-        Some(discovery),
+        tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     ))
@@ -126,7 +126,7 @@ fn service_with_a_user_this_daemon_does_not_map(sessions_base: PathBuf) -> TestD
         sessions_base,
         unmapped_user,
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     ))

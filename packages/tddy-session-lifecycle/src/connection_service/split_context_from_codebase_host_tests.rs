@@ -55,12 +55,12 @@ fn a_split_session_whose_codebase_read_may_take(budget_secs: u64) -> ASplitSessi
     let users: tddy_daemon_kernel::SessionUserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| TEST_USER.to_string()));
     let service = DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base,
         data_dir.path().to_path_buf(),
         users,
         None,
-        None,
+        crate::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(CliSessionManager::new()),
     );

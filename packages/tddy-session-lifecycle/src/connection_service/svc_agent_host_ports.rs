@@ -9,9 +9,7 @@ mod session_room_opening;
 use std::path::Path;
 use std::sync::Arc;
 
-use tddy_daemon_livekit::session_room::{
-    OpenedSessionRoom, RemoteSnapshotSource, WorktreeSnapshot,
-};
+use tddy_daemon_extensions::{OpenedRoom, RemoteSnapshotSource, WorktreeSnapshot};
 use tddy_rpc::{Request, Response, Status};
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
@@ -72,7 +70,7 @@ impl AgentHostCallbacks for DaemonSessionHost {
         session_id: &str,
         session_dir: &Path,
         worktree_root: &Path,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
+    ) -> Result<Option<OpenedRoom>, Status> {
         DaemonSessionHost::ensure_session_room(self, session_id, session_dir, worktree_root).await
     }
 }

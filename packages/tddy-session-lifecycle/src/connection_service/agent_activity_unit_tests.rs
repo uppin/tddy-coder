@@ -33,12 +33,12 @@ fn make_unit_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
     let user_resolver: SessionUserResolver =
         Arc::new(|token| (token == "valid").then(|| "u".to_string()));
     DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         sessions_base,
         user_resolver,
         None,
-        None,
+        crate::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(CliSessionManager::new()),
     )

@@ -50,11 +50,11 @@ use super::SESSION_FILES_SERVICE;
 
 use tddy_worktree_service::stream::MpscResultStream;
 
-use crate::livekit_peer_discovery::PeerRoute;
+use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 
 use tddy_rpc::Status;
 
-use crate::livekit_peer_discovery::CommonRoom;
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 
 use tddy_session_files::SessionFilesServiceImpl;
 
@@ -258,11 +258,10 @@ impl SessionFilesService for PeerRoutedSessionFiles {
             &req.session_token,
             &req.daemon_instance_id,
         )? {
-            let answer =
-                crate::livekit_peer_discovery::forward_upload_staged_attachment_chunk_via_livekit(
-                    slot, &peer, req,
-                )
-                .await?;
+            let answer = tddy_daemon_kernel::peer_calls::forward_upload_staged_attachment_chunk(
+                slot, &peer, req,
+            )
+            .await?;
             return Ok(Response::new(answer));
         }
         self.local.upload_staged_attachment_chunk(request).await
@@ -280,10 +279,8 @@ impl SessionFilesService for PeerRoutedSessionFiles {
             &req.daemon_instance_id,
         )? {
             let answer =
-                crate::livekit_peer_discovery::forward_list_staged_attachments_via_livekit(
-                    slot, &peer, req,
-                )
-                .await?;
+                tddy_daemon_kernel::peer_calls::forward_list_staged_attachments(slot, &peer, req)
+                    .await?;
             return Ok(Response::new(answer));
         }
         self.local.list_staged_attachments(request).await
@@ -301,10 +298,8 @@ impl SessionFilesService for PeerRoutedSessionFiles {
             &req.daemon_instance_id,
         )? {
             let answer =
-                crate::livekit_peer_discovery::forward_delete_staged_attachment_via_livekit(
-                    slot, &peer, req,
-                )
-                .await?;
+                tddy_daemon_kernel::peer_calls::forward_delete_staged_attachment(slot, &peer, req)
+                    .await?;
             return Ok(Response::new(answer));
         }
         self.local.delete_staged_attachment(request).await
@@ -321,10 +316,9 @@ impl SessionFilesService for PeerRoutedSessionFiles {
             &req.session_token,
             &req.daemon_instance_id,
         )? {
-            let answer = crate::livekit_peer_discovery::forward_read_host_document_via_livekit(
-                slot, &peer, req,
-            )
-            .await?;
+            let answer =
+                tddy_daemon_kernel::peer_calls::forward_read_host_document(slot, &peer, req)
+                    .await?;
             return Ok(Response::new(answer));
         }
         self.local.read_host_document(request).await
@@ -347,10 +341,8 @@ impl SessionFilesService for PeerRoutedSessionFiles {
             // own cap, so nothing is read here. A peer-side failure — or a stream that stops without
             // its terminator — arrives as an error item, terminating this stream.
             let frames =
-                crate::livekit_peer_discovery::forward_stream_read_host_document_via_livekit(
-                    slot, &peer, req,
-                )
-                .await?;
+                tddy_daemon_kernel::peer_calls::forward_stream_read_host_document(slot, &peer, req)
+                    .await?;
             return Ok(Response::new(MpscResultStream::from(frames)));
         }
         self.local.stream_read_host_document(request).await

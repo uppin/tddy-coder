@@ -87,7 +87,7 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         sessions.path().to_path_buf(),
         user_resolver,
         None,
-        None,
+        crate::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(CliSessionManager::new()),
     );

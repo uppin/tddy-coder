@@ -77,19 +77,8 @@ pub mod host_tonic_adapter {
     pub use tddy_service::proto::host::HostServiceTonicAdapter;
 }
 
-/// The five LiveKit modules, which now live in `tddy-daemon-livekit`.
-///
-/// Named one by one for the reason the worktree and host facades above give: every module keeps
-/// its own name in the crate it moved to, so `crate::session_room::X` goes on resolving here and
-/// no caller in this crate changed.
-pub use tddy_daemon_livekit::{
-    common_room_supervisor, livekit_peer_discovery, livekit_rooms_stream, livekit_service,
-    session_room,
-};
 /// Which daemon serves an addressed request, shared with the families served above this crate. The
-/// routing lives in `tddy-host-service`. The OAuth loopback tunnel and room admission are LiveKit
-/// features, so they live in `tddy-daemon-livekit`.
-pub use tddy_daemon_livekit::{oauth_loopback_tunnel, session_admission_service};
+/// routing lives in `tddy-host-service`.
 pub use tddy_host_service::peer_routing;
 /// The nine host modules and the four host-key ones, which now live in `tddy-host-service`.
 ///
@@ -117,7 +106,8 @@ pub use tddy_session_activity::{
 /// lives in `tddy-session-activity`. Named one by one, not globbed, for the reason the facades above
 /// give; every module keeps its name, so `crate::session_reader::X` goes on resolving here.
 pub use tddy_session_activity::{
-    session_deletion, session_list_enrichment, session_reader, user_sessions_path,
+    service as activity_service, session_deletion, session_list_enrichment, session_reader,
+    user_sessions_path,
 };
 /// The other three session-agent modules, which now live in `tddy-session-agents`.
 ///

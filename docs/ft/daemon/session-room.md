@@ -219,6 +219,12 @@ a client that asks for the room by name, that needs LiveKit, so a deployment who
 down goes on starting and attaching to sessions. What LiveKit is doing — disabled, misconfigured,
 connecting, connected, unreachable — is readable as the [integration status](daemon-settings.md#integration-status).
 
+Rooms are an optional integration in the code as well as in the configuration. The session host and
+the session-launch code reach every room capability through the daemon's extension ports, and the
+LiveKit integration implements them; only the daemon's own wiring brings the two together. A daemon
+whose wiring leaves LiveKit out starts, attaches to, resumes and deletes sessions as one with no
+`livekit:` block does.
+
 | Key | Default | Role |
 |---|---|---|
 | `session_room.poll_interval_ms` | 2000 | How often the checkout is measured. Lower means fresher activity and heavier git load: every tick spawns git subprocesses per hosted room. Rejected at config load if out of range, rather than clamped — a `0` would otherwise become a silent git storm. |

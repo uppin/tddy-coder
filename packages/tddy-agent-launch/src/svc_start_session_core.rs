@@ -96,29 +96,26 @@ impl LaunchSessions {
 
         let requested_daemon = req.daemon_instance_id.trim();
         let (local_id, eligible_ids) = self.eligible_daemon_ids();
-        let route =
-            match tddy_daemon_livekit::livekit_peer_discovery::classify_start_session_peer_route(
-                &local_id,
-                requested_daemon,
-                &eligible_ids,
-            ) {
-                Ok(r) => r,
-                Err(msg) => {
-                    log::info!("StartSession: rejected daemon routing: {}", msg);
-                    return Err(Status::failed_precondition(msg));
-                }
-            };
+        let route = match tddy_daemon_kernel::peer_forwarding::classify_peer_route(
+            &local_id,
+            requested_daemon,
+            &eligible_ids,
+        ) {
+            Ok(r) => r,
+            Err(msg) => {
+                log::info!("StartSession: rejected daemon routing: {}", msg);
+                return Err(Status::failed_precondition(msg));
+            }
+        };
 
         match route {
-            tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Forward {
-                peer_instance_id,
-            } => {
+            tddy_daemon_kernel::peer_forwarding::PeerRoute::Forward { peer_instance_id } => {
                 let inner = self
                     .forward_start_naming_local_source(&req, os_user, peer_instance_id)
                     .await?;
                 return Ok(Response::new(inner));
             }
-            tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
+            tddy_daemon_kernel::peer_forwarding::PeerRoute::Local => {}
         }
 
         // The agent runs here; where its worktree goes is the second, independent placement. A

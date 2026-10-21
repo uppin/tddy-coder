@@ -135,12 +135,12 @@ fn a_workspace_service_with_cap(max_attachment_bytes: u64) -> Fixture {
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
 
     let service = DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         sessions_base.clone(),
         user_resolver,
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )

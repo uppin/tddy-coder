@@ -76,12 +76,12 @@ impl ADaemon {
             Arc::new(|token| (token == A_KNOWN_TOKEN).then(|| GITHUB_USER.to_string()));
 
         let host = DaemonSessionHost::new(
-            config,
+            config.clone(),
             sessions_base_resolver,
             tddy_data_dir.clone(),
             user_resolver,
             None,
-            None,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             None,
             Arc::new(CliSessionManager::new()),
         );

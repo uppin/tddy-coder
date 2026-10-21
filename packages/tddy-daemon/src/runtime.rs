@@ -26,7 +26,7 @@ use tokio::sync::Mutex;
 
 use crate::config::DaemonConfig;
 use crate::daemon_config_service::{CommonRoomSupervisor, DaemonConfigServiceImpl};
-use tddy_session_lifecycle::common_room_supervisor::{
+use tddy_daemon_livekit::common_room_supervisor::{
     cloned_entries, CommonRoomSupervisorTask, CommonRoomTarget, DaemonCommonRoomConnector,
     PeerDiscoveryHandles, SupervisedCommonRoom,
 };
@@ -276,7 +276,7 @@ struct OauthLoopbackTunnel {
 /// [`CommonRoomPeerRegistry`]: tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry
 ///
 /// The daemon itself does not use it: its discovery loop is owned by
-/// [`tddy_session_lifecycle::common_room_supervisor`], which stops and restarts it when the configured room changes,
+/// [`tddy_daemon_livekit::common_room_supervisor`], which stops and restarts it when the configured room changes,
 /// while the tunnel supervisor follows `room_slot` across that and so is started once. It composes
 /// a loop from `tddy-daemon-livekit` with a supervisor from `tddy-daemon-auth`, and this is the
 /// only crate that has both — which is why it is assembly and lives here rather than with either
@@ -784,6 +784,11 @@ pub async fn build(
     // there. Two registries would mean a room only one of them could ever stop hosting.
     let shared_session_rooms =
         Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
+    // The owning daemons admitted to those rooms: the host records the first admit, the admission
+    // service served on the common room refreshes it, and the delete paths revoke against the same
+    // set.
+    let shared_session_admissions =
+        Arc::new(tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry::new());
 
     // What each optional integration reports about itself, read by `GetIntegrationStatus`; and the
     // LiveKit plugin behind the session host's `SessionReach` port. The plugin shares the host's
@@ -1166,20 +1171,24 @@ pub async fn build(
             .map_err(|e| anyhow::anyhow!("bind the askpass endpoint on loopback: {e}"))?,
         );
 
-        let mut connection_impl =
-            tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
-                config.clone(),
-                sessions_base_resolver.clone(),
-                tddy_data_dir.clone(),
-                user_resolver,
-                options.spawn_client.clone(),
-                livekit_discovery,
-                telegram_hooks.clone().map(|hooks| {
-                    hooks as tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink
-                }),
-                Arc::clone(&shared_claude_cli_manager),
-            )
-            .with_session_rooms(Arc::clone(&shared_session_rooms))
+        let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver.clone(),
+            tddy_data_dir.clone(),
+            user_resolver,
+            options.spawn_client.clone(),
+            tddy_daemon_livekit::peer_routing::peer_routing_over(&config, livekit_discovery),
+            telegram_hooks.clone().map(|hooks| {
+                hooks as tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink
+            }),
+            Arc::clone(&shared_claude_cli_manager),
+        );
+        let mut connection_impl = crate::livekit_host_ports::with_livekit_room_ports(
+            connection_impl,
+            Arc::clone(&shared_session_rooms),
+            Arc::clone(&shared_session_admissions),
+            Arc::clone(&room_tokens),
+        )
             .with_session_reach(
                 Arc::clone(&livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
             )
@@ -1226,7 +1235,7 @@ pub async fn build(
         // The admission registry is shared with the SessionAdmissionService served on the
         // common room (PRD § "What attach does" step 3); capture it before `connection_arc`
         // moves into the ConnectionServiceServer below.
-        let session_admissions = connection_arc.session_admissions();
+        let session_admissions = Arc::clone(&shared_session_admissions);
 
         // Register the build-catalog provider so a populated session catalog includes the
         // repository's `BUILD.yaml` targets (discovery lives in `tddy-bsp` on top of
@@ -1500,7 +1509,7 @@ pub async fn build(
         // session room (but whose token is expiring) can still reach this daemon over the
         // common room it never left.
         let session_admission_server = tddy_service::SessionAdmissionServiceServer::new(
-            tddy_session_lifecycle::session_admission_service::SessionAdmissionServiceImpl::new(
+            tddy_daemon_livekit::session_admission_service::SessionAdmissionServiceImpl::new(
                 remote_git_user_resolver.clone(),
                 config_arc.clone(),
                 session_admissions,

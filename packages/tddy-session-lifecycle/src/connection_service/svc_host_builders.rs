@@ -2,14 +2,7 @@ use super::DaemonSessionHost;
 
 use std::time::Duration;
 
-use tddy_daemon_kernel::peer_forwarding::CommonRoom;
-use tddy_daemon_livekit::{
-    livekit_peer_discovery::LiveKitDiscoveryHandles,
-    livekit_rooms_stream::{room_roster_from_config, RoomRoster},
-    LiveKitPeerForwarder,
-};
-
-use tddy_host_service::multi_host::LocalOnlyEligibleDaemonSource;
+use tddy_host_service::peer_routing::PeerRouting;
 use tddy_spawn::spawn_worker;
 use tddy_task::TaskRegistry;
 
@@ -17,6 +10,11 @@ use crate::{
     connection_service::ROSTER_KEEPALIVE_INTERVAL, multi_host::EligibleDaemonSource,
     CliSessionManager,
 };
+use tddy_daemon_extensions::{
+    NoRoomAdmission, NoRoomBroadcast, NoRoomDirectory, NoRoomTokens, NoSessionRooms, RoomAdmission,
+    RoomBroadcast, RoomDirectory, RoomTokenMinter, SessionRooms,
+};
+use tddy_session_agents::agent_host_callbacks::{NoRoomTransport, RoomConnector};
 
 use std::sync::Arc;
 
@@ -34,41 +32,20 @@ impl DaemonSessionHost {
         tddy_data_dir: PathBuf,
         user_resolver: tddy_daemon_kernel::SessionUserResolver,
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
-        livekit_discovery: Option<LiveKitDiscoveryHandles>,
+        peer_routing: PeerRouting,
         presenter_event_sink: Option<SharedPresenterEventSink>,
         claude_cli_manager: Arc<CliSessionManager>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
-        let (eligible_daemon_source, common_room_livekit_room) = match livekit_discovery {
-            Some(h) => (h.eligible_daemon_source, Some(h.common_room_livekit_room)),
-            // No discovery: this machine is the only host, named the way its own configuration
-            // names it — not by its hostname, which is merely the default when no
-            // `daemon_instance_id` is set.
-            None => (
-                Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config))
-                    as Arc<dyn EligibleDaemonSource>,
-                None,
-            ),
-        };
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let host_session_sockets =
             Arc::new(super::host_session_socket::HostSessionSockets::default());
-        let room_roster = room_roster_from_config(config.livekit.as_ref());
         // Built here rather than inline below because the roster store reads it: an entry's
         // `clone_state` is the state of the checkout serving it, and two stores would let a roster
         // report READY for a clone nobody built.
         let session_agent_clones =
             Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
-        // The LiveKit forwarder is built here, where both the plugin and the routing are in scope:
-        // the routing takes the built room and names no transport itself.
-        let common_room = common_room_livekit_room
-            .map(|slot| CommonRoom::new(LiveKitPeerForwarder::new(slot), &config));
-        let peer_routing = crate::peer_routing::PeerRouting::new(
-            config.clone(),
-            eligible_daemon_source,
-            common_room,
-        );
         Self {
             config,
             sessions_base_for_user,
@@ -90,7 +67,11 @@ impl DaemonSessionHost {
             jail_relaunch: Arc::new(super::jail_relaunch::JailRelaunch::default()),
             task_registry,
             rpc_activity: crate::relay_idle::RpcActivity::default(),
-            room_roster,
+            room_directory: Arc::new(NoRoomDirectory),
+            room_tokens: Arc::new(NoRoomTokens),
+            room_connector: Arc::new(NoRoomTransport),
+            session_delta_stores: Arc::new(tddy_session_activity::NoSessionDeltaStores),
+            room_broadcast: Arc::new(NoRoomBroadcast),
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
             host_session_sockets,
@@ -102,7 +83,7 @@ impl DaemonSessionHost {
             github_cli: tddy_host_service::GithubCli::on_spawn_child_path(),
             session_tokens: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
-            session_rooms: Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new()),
+            session_rooms: Arc::new(NoSessionRooms),
             model_registry: None,
             session_agent_rosters: Arc::new(
                 crate::session_agent_roster::SessionAgentRosterStore::new(
@@ -112,9 +93,7 @@ impl DaemonSessionHost {
             ),
             session_agent_clones,
             hosted_agent_clones: Arc::new(crate::session_agent_clone::HostedAgentClones::new()),
-            session_admissions: Arc::new(
-                crate::session_admission_service::SessionAdmissionRegistry::new(),
-            ),
+            session_admissions: Arc::new(NoRoomAdmission),
             agent_conversations: Arc::new(tddy_session_agents::OpenAgentConversations::new()),
             // No bus until one is installed with `with_session_notification_bus`: the subscribers
             // are the daemon's to choose, and this service names none of them.
@@ -172,39 +151,78 @@ impl DaemonSessionHost {
         self
     }
 
-    /// The per-session admission registry — shared with the `SessionAdmissionService` served on
-    /// the common room, so the attach path records the first admit, the RPC refreshes it, and the
-    /// detach/session-delete paths revoke against the same set (PRD § "What attach does" step 3).
-    pub fn session_admissions(
-        &self,
-    ) -> Arc<crate::session_admission_service::SessionAdmissionRegistry> {
-        Arc::clone(&self.session_admissions)
-    }
-
     /// Whether this daemon currently hosts the session room for `session_id` — the
     /// `SessionAdmissionService`'s `session_exists` check, exposed so a test fixture wiring the
-    /// admission service against this daemon's registry can build the same checker `main.rs` does
+    /// admission service against this daemon's rooms can build the same checker `main.rs` does
     /// without reaching into private fields.
     pub fn hosts_session(&self, session_id: &str) -> bool {
-        self.session_rooms.contains(session_id)
+        self.session_rooms.hosts(session_id)
     }
 
-    /// The shared session-room registry — so a test fixture wiring `SessionAdmissionService`
-    /// against this daemon can build the `session_exists` checker `main.rs` builds over the same
-    /// registry the connection service updates when it opens and closes a session room.
-    pub fn session_rooms(&self) -> Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry> {
-        Arc::clone(&self.session_rooms)
-    }
-
-    /// Share the daemon's session-room registry (builder) with everything else that opens or
-    /// closes rooms — Telegram's Delete path holds the same `Arc`. Without it this service keeps
-    /// the private registry it was constructed with, which is right for a test fixture and wrong
-    /// for a daemon, where a room opened here has to be closable from there.
-    pub fn with_session_rooms(
-        mut self,
-        rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
-    ) -> Self {
+    /// Install the rooms this daemon hosts for its sessions (builder), shared with everything else
+    /// that opens or closes rooms — Telegram's Delete path holds the same `Arc`. Without it nothing
+    /// is hosted and closing is a no-op, which is right for a daemon with no room integration and
+    /// wrong for one with, where a room opened here has to be closable from there.
+    #[must_use]
+    pub fn with_session_rooms(mut self, rooms: Arc<dyn SessionRooms>) -> Self {
         self.session_rooms = rooms;
+        self
+    }
+
+    /// Install which owning daemons are admitted to the rooms this daemon hosts (builder). Without
+    /// it no admission is ever recorded.
+    #[must_use]
+    pub fn with_room_admission(mut self, admission: Arc<dyn RoomAdmission>) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_room_admission");
+        self.session_admissions = admission;
+        self
+    }
+
+    /// Install the reader of who is in a room (builder). Without it, reading a room's participants
+    /// is a failed precondition.
+    #[must_use]
+    pub fn with_room_directory(mut self, directory: Arc<dyn RoomDirectory>) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_room_directory");
+        self.room_directory = directory;
+        self
+    }
+
+    /// Install what publishes to everyone in a session's room (builder). Without it a broadcast
+    /// reaches nobody.
+    #[must_use]
+    pub fn with_room_broadcast(mut self, broadcast: Arc<dyn RoomBroadcast>) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_room_broadcast");
+        self.room_broadcast = broadcast;
+        self
+    }
+
+    /// Install what mints a room access token (builder). Without it every mint is a failed
+    /// precondition.
+    #[must_use]
+    pub fn with_room_tokens(mut self, tokens: Arc<dyn RoomTokenMinter>) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_room_tokens");
+        self.room_tokens = tokens;
+        self
+    }
+
+    /// Install how this daemon joins a room as a client (builder). Without it every join is
+    /// refused.
+    #[must_use]
+    pub fn with_room_connector(mut self, connector: Arc<dyn RoomConnector>) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_room_connector");
+        self.room_connector = connector;
+        self
+    }
+
+    /// Install the delta rings of the session rooms this daemon hosts (builder). Without it every
+    /// session has no room here, so no delta.
+    #[must_use]
+    pub fn with_session_delta_stores(
+        mut self,
+        stores: Arc<dyn tddy_session_activity::service::SessionDeltaStores>,
+    ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_session_delta_stores");
+        self.session_delta_stores = stores;
         self
     }
 
@@ -359,13 +377,6 @@ impl DaemonSessionHost {
         >,
     ) {
         self.workspace_sandbox_provisioner = provisioner;
-    }
-
-    /// Substitute the LiveKit rooms reader (builder pattern) — lets tests drive a scripted roster
-    /// sequence in place of a live LiveKit server.
-    pub fn with_room_roster(mut self, room_roster: Arc<dyn RoomRoster>) -> Self {
-        self.room_roster = room_roster;
-        self
     }
 
     /// Override the `StreamSessionAgents` keepalive cadence (builder pattern) — lets tests observe a

@@ -21,6 +21,7 @@ use tddy_service::proto::session::{
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use crate::connection_service::DaemonSessionHost;
+use crate::peer_routing::PeerRouting;
 use crate::{DaemonRpcFamilies, PrStackHandler};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
@@ -66,12 +67,12 @@ pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
         }
     });
     DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         tddy_data_dir,
         user_resolver,
         None,
-        None,
+        PeerRouting::local_only(&config),
         None,
         Arc::new(CliSessionManager::new()),
     )
@@ -315,8 +316,8 @@ pub async fn wait_until_peer_discovered(
     }
 }
 
-/// Join `ws_url` with `token`, serving every coordinate a daemon's RPC participant answers a
-/// *forwarded* call on, and run it until the returned handle is dropped or aborted.
+/// Every coordinate a daemon's RPC participant answers a *forwarded* call on — what a room
+/// participant for `service` is built from.
 ///
 /// One helper rather than one per suite. Which coordinates a peer serves is a fact about the
 /// daemon, not about the suite that pins a forward, and a peer that does not mount a coordinate
@@ -331,12 +332,12 @@ pub async fn wait_until_peer_discovered(
 ///
 /// The families served above this crate are whatever `service` was given as its
 /// [`DaemonRpcFamilies`]; a host never given any panics here, as its room would refuse.
-pub async fn serve_daemon_rpc_participant(
-    ws_url: &str,
-    token: &str,
-    service: &Arc<DaemonSessionHost>,
-) -> tokio::task::JoinHandle<()> {
-    let roster = tddy_rpc::MultiRpcService::new(
+///
+/// Joining a room with it is a transport's business: the suites that do join through LiveKit's own
+/// participant, from `tddy-daemon`'s tests.
+#[must_use]
+pub fn daemon_rpc_roster(service: &Arc<DaemonSessionHost>) -> tddy_rpc::MultiRpcService {
+    tddy_rpc::MultiRpcService::new(
         vec![
             service.session_files_entry(),
             service.session_agents_entry(),
@@ -351,16 +352,5 @@ pub async fn serve_daemon_rpc_participant(
                 .service_entries(),
         )
         .collect(),
-    );
-    let participant = tddy_livekit::LiveKitParticipant::connect(
-        ws_url,
-        token,
-        roster,
-        Default::default(),
-        None,
-        None,
     )
-    .await
-    .expect("daemon joins the room as its RPC participant");
-    tokio::spawn(async move { participant.run().await })
 }

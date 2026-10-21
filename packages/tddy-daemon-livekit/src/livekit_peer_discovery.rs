@@ -374,23 +374,6 @@ pub use tddy_daemon_kernel::peer_forwarding::{
     PEER_FORWARD_STREAM_IDLE_TIMEOUT, PEER_FORWARD_TIMEOUT,
 };
 
-/// Backwards-compatible alias kept so that the internal `StartSession` handler (which references
-/// the old name) continues to compile without a separate refactor pass.
-pub type StartSessionPeerRoute = PeerRoute;
-
-/// Backwards-compatible wrapper around [`classify_peer_route`].
-pub fn classify_start_session_peer_route(
-    local_instance_id: &str,
-    requested_instance_id: &str,
-    eligible_instance_ids: &[String],
-) -> Result<StartSessionPeerRoute, String> {
-    classify_peer_route(
-        local_instance_id,
-        requested_instance_id,
-        eligible_instance_ids,
-    )
-}
-
 /// Registry of remote daemons observed in the shared common room (excludes the local row).
 ///
 /// Keyed by the peer's routing instance id, because that is what an RPC is forwarded to. Each row
@@ -2035,19 +2018,18 @@ mod tests {
     }
 
     #[test]
-    fn classify_start_session_peer_route_treats_empty_request_as_local() {
-        let route = classify_start_session_peer_route("local", "", &[]).expect("classify");
-        assert_eq!(route, StartSessionPeerRoute::Local);
+    fn classify_peer_route_treats_empty_request_as_local() {
+        let route = classify_peer_route("local", "", &[]).expect("classify");
+        assert_eq!(route, PeerRoute::Local);
     }
 
     #[test]
-    fn classify_start_session_peer_route_forwards_when_peer_is_eligible() {
-        let route =
-            classify_start_session_peer_route("local", "remote-peer", &["remote-peer".to_string()])
-                .expect("classify");
+    fn classify_peer_route_forwards_when_peer_is_eligible() {
+        let route = classify_peer_route("local", "remote-peer", &["remote-peer".to_string()])
+            .expect("classify");
         assert_eq!(
             route,
-            StartSessionPeerRoute::Forward {
+            PeerRoute::Forward {
                 peer_instance_id: "remote-peer".to_string(),
             }
         );

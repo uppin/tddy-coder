@@ -26,6 +26,8 @@
 //! These need the LiveKit testkit container (Docker or `LIVEKIT_TESTKIT_WS_URL`) and are
 //! `#[serial]` so they own it alone.
 
+mod daemon_rpc_participant;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -47,7 +49,7 @@ use tddy_rpc::Request;
 use tddy_service::proto::session::{ResumeSessionRequest, SessionService as SessionServiceTrait};
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered};
+use tddy_session_lifecycle::test_util::wait_until_peer_discovered;
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_argv};
 use tddy_testing_commons::wait::eventually_blocking;
 
@@ -232,23 +234,32 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
     );
 
     let service = DaemonSessionHost::new(
-        config,
+        config.clone(),
         resolver,
         tddy_data_dir,
         user_resolver,
         None,
-        Some(LiveKitDiscoveryHandles {
-            eligible_daemon_source: eligible,
-            common_room_livekit_room: room_slot,
-        }),
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: eligible,
+                common_room_livekit_room: room_slot,
+            }),
+        ),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     )
     .with_session_tokens(tokens);
+    let rooms = Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
+    let service = daemon_rpc_participant::with_the_livekit_room_ports(
+        service,
+        Arc::clone(&rooms),
+        Arc::new(tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry::new()),
+    );
     // The split-room port the daemon installs, over this host's own room registry.
     let split_rooms = split_room_hosting(
         service.config(),
-        service.session_rooms(),
+        rooms,
         room_token_minter(service.config().livekit.as_ref()),
     );
     tddy_daemon_rpc::RpcHandlers::install(service.with_split_rooms(split_rooms)).0
@@ -257,7 +268,7 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
 /// Serve a daemon on the common room under its production identity — the one `forward_to_peer`
 /// addresses. Without this the routed roster read reaches nobody.
 ///
-/// Which coordinates it serves is [`test_util::serve_daemon_rpc_participant`]'s answer rather than
+/// Which coordinates it serves is [`daemon_rpc_participant::serve_daemon_rpc_participant`]'s answer rather than
 /// this suite's: a resume forwards a `the pre-unbundle monolithic RPC coordinate` roster read *and* the
 /// `session_files.SessionFilesService` context reads the agent host prefetches from the codebase
 /// host, and a suite-local list is how one of them stops being served.
@@ -270,7 +281,7 @@ async fn serve_on_the_common_room(
     let token = livekit
         .generate_token(the_common_room(), &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
-    test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
+    daemon_rpc_participant::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
 
 /// `eventually_awaiting` rather than a hand-rolled poll: when the peer never shows up it panics with
@@ -820,12 +831,12 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
         }),
     };
     let service = DaemonSessionHost::new(
-        config,
+        config.clone(),
         resolver,
         tddy_data_dir,
         user_resolver,
         None,
-        discovery,
+        tddy_daemon_livekit::peer_routing::peer_routing_over(&config, discovery),
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     )

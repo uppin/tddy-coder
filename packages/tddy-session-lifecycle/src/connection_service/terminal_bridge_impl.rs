@@ -18,8 +18,7 @@ impl DaemonSessionHost {
     }
 }
 
-#[async_trait::async_trait]
-impl tddy_daemon_livekit::session_room::SessionTerminalBridge for DaemonSessionHost {
+impl DaemonSessionHost {
     /// Expose the session's PTY in the room a remote client drives it from.
     ///
     /// The same coordinates `StartSession` reported and the Telegram attach hint hands out — the
@@ -32,7 +31,7 @@ impl tddy_daemon_livekit::session_room::SessionTerminalBridge for DaemonSessionH
     /// this was called alongside has just been created, so LiveKit answered a moment ago, and a
     /// caller told its session is reachable over LiveKit when its terminal is not would find that
     /// out by typing into nothing.
-    async fn bridge(&self, session_id: &str) -> Result<(), Status> {
+    pub(crate) async fn expose_session_terminal(&self, session_id: &str) -> Result<(), Status> {
         let Some(lk) = spawner::livekit_creds_from_config(&self.config) else {
             return Ok(());
         };

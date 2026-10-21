@@ -159,7 +159,16 @@ those types do not have), the session's terminal room otherwise.
 "Facilitated here, over a checkout this daemon holds" is one rule, `facilitated_checkout(metadata)`,
 answering `NotFacilitated`, `NoCheckout` or `Checkout(path)`. `ConnectSession` and an integration's
 own RPC (through `ReachableSessions::resolve`) both apply it, so the two cannot disagree about which
-sessions get a room.
+sessions get a room. Its type half is `session_type_is_facilitated_here(session_type)` — `claude-cli`
+and `cursor-cli` run an agent here, so they have a session room of their own; a `workspace` or `tool`
+session does not. It lives here rather than in the LiveKit plugin because it is a statement about
+session types, not about any transport.
+
+This crate names no LiveKit crate. It reaches the plugin only through ports: `LaunchSessions` holds
+`Arc<dyn SessionRooms>` and `Arc<dyn RoomAdmission>`, routes with
+`tddy_host_service::peer_routing::PeerRouting` and `tddy_daemon_kernel::peer_forwarding::classify_peer_route`,
+forwards a start with `tddy_daemon_kernel::peer_calls`, and measures a checkout for
+`GetWorktreeSnapshot` with `tddy_worktree_service::worktree_measurement::snapshot_worktree_within`.
 
 ## Stacked, child and conversation spawns
 

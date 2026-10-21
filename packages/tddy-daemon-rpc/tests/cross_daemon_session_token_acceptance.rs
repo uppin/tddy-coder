@@ -89,12 +89,12 @@ fn a_peer_daemon(
     let base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     TestDaemon::from_host(DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         data_dir,
         resolver,
         None,
-        None,
+        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         None,
         Arc::new(CliSessionManager::new()),
     ))

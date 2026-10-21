@@ -61,8 +61,8 @@ module, so it reads the host's private fields directly and needs `pub(super)` at
 | `svc_activity_ports.rs`, `svc_terminal_ports.rs` | the activity and terminal families' ports |
 
 The `PeerRouted*` wrappers stay in this crate rather than in `tddy-session-agents` and `tddy-session-files`:
-the routing needs the eligible-daemon roster, the common room slot and the LiveKit forwarding clients, and
-those crates deliberately do not grow a transport.
+the routing needs the eligible-daemon roster and the common room slot (`PeerRouting`, from `tddy-host-service`),
+and those crates deliberately do not grow a transport.
 
 ### Other files at the crate root
 
@@ -101,7 +101,6 @@ The value and its methods are defined in the receiver, so an inherent `impl` mov
 | Attachments | `AttachmentState<'a>`, borrowed for one call | `tddy-session-files` (`svc_materialize_staged_attachment.rs`) | `attachment_state()` |
 | Presenter observer | `PresenterObserverDeps` | `tddy-session-activity` (`presenter_observer_spawn.rs`) | `presenter_observer_deps()` |
 | Demo VM | `DemoVmState` | `tddy-demo-vm-service` (`activity_hub.rs`) | `demo_vm_service_state()` |
-| Admission token, OS user | no state: free functions of the fields they read | `tddy-daemon-livekit` (`first_admission_token.rs`, `os_user_resolution.rs`) | `mint_first_admission_token` in `handler_state.rs` |
 
 The three callback traits are implemented once, in `svc_agent_host_ports.rs`:
 `AgentHostCallbacks` (the agent topic's), `SplitHost: AgentHostCallbacks` (`start_workspace_session`,
@@ -121,7 +120,6 @@ them exactly as they name this crate's own modules.
 | the split topic's public items (`resolve_tddy_tools_path`, `service_util`'s two `pub use`, `workspace_session`) | `tddy-session-split` | `pub use tddy_session_split::{…}` in `connection_service.rs` |
 | `activity_hub`, `demo_vm_coordinate_handlers`, `demo_vm_service` | `tddy-demo-vm-service` | `pub use tddy_demo_vm_service::{…};` in `connection_service.rs` |
 | `agent_list_mapping`, `config`, `daemon_hook_urls`, `relay_idle`, `local_token_tonic_adapter` | `tddy-daemon-kernel` | `pub use tddy_daemon_kernel::{agent_list_mapping, config};` and `pub use tddy_daemon_kernel::*;` |
-| `first_admission_token`, `os_user_resolution`, `placement`, `session_admission_service`, `oauth_loopback_tunnel`, the five LiveKit modules | `tddy-daemon-livekit` | `pub use tddy_daemon_livekit::{…};` |
 | `peer_routing` | `tddy-host-service` | `pub use tddy_host_service::peer_routing;` |
 | the ten session-file modules, `attachment_progress`, `svc_materialize_staged_attachment`, `session_attachment_materialization` | `tddy-session-files` | `pub use tddy_session_files::{…};`, and `pub(crate) use tddy_session_files::attachment_progress::*;` |
 | `session_reader`, `user_sessions_path`, `session_deletion`, `session_list_enrichment`, `presenter_intent_client`, `presenter_observer_task`, `remote_git_pack_execution`, `session_notification_publishing`, `session_notification_subscribers` | `tddy-session-activity` | `pub use tddy_session_activity::{…};` |
@@ -143,8 +141,7 @@ The topic detail of each receiver is in its own docs: [`tddy-agent-launch`](../.
 [`tddy-demo-vm-service`](../../tddy-demo-vm-service/docs/demo-vm-service.md),
 [`tddy-session-agents`](../../tddy-session-agents/docs/agent-clone-roster.md),
 [`tddy-session-files`](../../tddy-session-files/docs/attachment-materialization.md),
-[`tddy-session-activity`](../../tddy-session-activity/docs/presenter-observer.md),
-[`tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/placement-and-admission.md) and
+[`tddy-session-activity`](../../tddy-session-activity/docs/presenter-observer.md) and
 [`tddy-daemon-kernel`](../../tddy-daemon-kernel/docs/daemon-kernel.md).
 
 ## Definitions this crate takes from below
@@ -153,7 +150,7 @@ The topic detail of each receiver is in its own docs: [`tddy-agent-launch`](../.
 |---|---|---|
 | `tddy-pty` | `strip_resize`, the decoder for the in-band OSC resize `\x1b]resize;{cols};{rows}\x07` a terminal client writes into a PTY's input | a copy in the CLI session manager. `tddy-coder`'s session participant and `tddy-sandbox-runner` use the same one |
 | `tddy-worktree-service` | `MpscResultStream` (with `into_receiver`), re-exported at `connection_service::MpscResultStream` | a copy in `connection_service.rs` |
-| `tddy-session-activity` | the activity delta framing behind `activity_delta_frames` (a public one-line delegate here, through the `measured_delta` conversion both callers share; its frame-headroom `const _: assert!` stays beside it) | a stale copy |
+| `tddy-session-activity` | the activity delta framing (`activity_delta_frames`) and the `SessionDeltaStores` port the host answers `StreamAgentActivityDelta` through, re-exported as `tddy_session_lifecycle::activity_service`. The frame-headroom `const _: assert!` moved to `tddy-daemon-livekit`'s `lib.rs`, the one crate that sees both the frame size and LiveKit's packet budget | a stale copy |
 | `tddy-daemon-kernel` | `trim_to_option` | ten inline copies |
 
 ## Coupling

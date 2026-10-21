@@ -23,14 +23,13 @@ lower layer knows about LiveKit.
 | **`WORKTREE_ACTIVITY_TOPIC`** | Re-export of the topic constant from `tddy-service`, where the payload schema lives — `tddy-tools` receives on the same topic and depends on `tddy-service` unconditionally. |
 | **`WorktreeActivityEvent`**, **`WorktreeActivityKind`** | Re-exports of the generated broadcast types, so one import reaches both the topic and its payload. |
 | **`WorktreeSnapshot`** | `head_commit`, `branch`, `changed_paths`, `changed_files`, `lines_added`, `lines_removed`, `untracked_files`, `wip_tree`. Re-exported from `tddy_daemon_extensions::split_rooms`, where it is defined. |
-| **`snapshot_worktree`** / **`snapshot_worktree_within`** | Measure a local checkout; the `_within` form bounds the whole sequence of git commands by one deadline, not each command separately. |
+| **`snapshot_worktree`** / **`snapshot_worktree_within`** | Measure a local checkout; the `_within` form bounds the whole sequence of git commands by one deadline, not each command separately. Re-exported from `tddy_worktree_service::worktree_measurement`, where they live beside the deadline-bounded `git_output` / `git_stdout` this module's WIP-ref writers also run through; `GetWorktreeSnapshot` (`tddy-agent-launch`) measures with the same function. |
 | **`activity_between`** | Two snapshots plus a starting `seq` → the events that announce the difference. Pure. |
 | **`room_metadata_json`** | The room's metadata document, `changed_paths` capped at **`MAX_METADATA_CHANGED_PATHS`** (200) with `changed_paths_truncated` when it is. |
 | **`WorktreeSource`** | One measurement, however obtained. Implemented by `LocalCheckout` and **`RemoteCheckout`**. |
 | **`RemoteSnapshotSource`**, **`SessionTokenMinter`** | One `GetWorktreeSnapshot` call, and the per-poll credential it carries. Re-exported from `tddy_daemon_extensions::split_rooms`; session-split supplies the implementations. |
 | **`RemoteCheckout`** | A `WorktreeSource` that measures by asking the codebase daemon. |
 | **`LiveKitSplitRooms`** (`split_rooms.rs`) | The plugin's `SplitRoomHosting`: `host_remote_worktree` opens the split session's room in this registry, measured by a `RemoteCheckout` (no LiveKit credentials → no room, `Ok`); `agent_join` takes the common room's URL and mints through the `RoomTokenMinter`, refusing with `FailedPrecondition` when the common room cannot be resolved. `tests/split_rooms.rs` verifies the join with LiveKit's own verifier and checks no field carries the API secret. |
-| **`session_type_is_facilitated_here`** | Whether a session of this type runs an agent on this daemon and therefore has a room here — the product doc's Roles table as a predicate. Deliberately not a statement about whether a session type "uses LiveKit": there are three rooms in play and this names one. |
 | **`SessionTerminalBridge`** | Puts a participant serving a session's terminal into the room a remote client drives it from. A trait so the registry can establish it in the same breath as the room without knowing what a PTY is. |
 | **`DaemonRoomHosting`** | This daemon as a host of rooms; `for_worktree` (local) and `for_remote_worktree` (split) build a `SessionRoomHosting`. |
 | **`SessionRoomRegistry`** | `ensure_open`, `ensure_open_staged`, `open`, `open_measured_by`, `hosts`, `close`, `close_for_worktree`. Holds the live rooms, keyed by session. |
@@ -41,13 +40,13 @@ lower layer knows about LiveKit.
 | **`wip_ref_name`** / **`publish_wip_ref`** / **`delete_wip_ref`** | `refs/tddy/session/{id}/wip`, the commit published under it, and its removal at close. |
 | **`ActivityDelta`** | One patch plus what a client needs to place it: `seq`, `prev_seq`, `base_commit`, `patch`, `scoped_paths`. |
 | **`SessionDeltaStore`** | The bounded ring of recent ticks and the `call_id → seq` index over it; `delta_for_call` narrows a tick to one call's files. |
-| **`OpenedSessionRoom`** | Room, url and server identity of a room that was opened. |
+| **`OpenedRoom`** | Room, url and server identity of a room that was opened: `tddy_daemon_extensions::OpenedRoom`, what `SessionReach::open_now` answers. |
 
 ## Measurement
 
 `snapshot_worktree_within` runs `git rev-parse HEAD`, `git rev-parse --abbrev-ref HEAD`,
 `git diff --numstat HEAD` and `git status --porcelain` under a single deadline, killing any child
-that overruns it. The numstat is parsed by `tddy_worktree_service::worktrees::parse_git_diff_numstat` — the same parser the
+that overruns it. The function lives in `tddy_worktree_service::worktree_measurement`. The numstat is parsed by `tddy_worktree_service::worktrees::parse_git_diff_numstat` — the same parser the
 Worktrees screen reads — so a room and that screen can never quote different totals for one checkout.
 
 A checkout git cannot read snapshots as empty rather than failing: this feeds a periodic poll whose

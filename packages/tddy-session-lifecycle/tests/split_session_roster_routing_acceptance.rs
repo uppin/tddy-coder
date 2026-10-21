@@ -207,15 +207,18 @@ fn a_daemon_in_the_common_room(sessions: tempfile::TempDir) -> ADaemonInTheCommo
     });
 
     let service = DaemonSessionHost::new(
-        config,
+        config.clone(),
         sessions_base_resolver,
         sessions.path().to_path_buf(),
         user_resolver,
         None,
-        Some(LiveKitDiscoveryHandles {
-            eligible_daemon_source: Arc::new(ACommonRoomWithTheCodebaseHost),
-            common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
-        }),
+        tddy_daemon_livekit::peer_routing::peer_routing_over(
+            &config,
+            Some(LiveKitDiscoveryHandles {
+                eligible_daemon_source: Arc::new(ACommonRoomWithTheCodebaseHost),
+                common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+            }),
+        ),
         None,
         Arc::new(CliSessionManager::new()),
     );

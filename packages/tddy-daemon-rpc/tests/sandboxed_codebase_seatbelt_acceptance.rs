@@ -145,12 +145,12 @@ claude_cli:
     });
     TestDaemon::from_host(
         DaemonSessionHost::new(
-            config,
+            config.clone(),
             resolver,
             sessions_base,
             user_resolver,
             None,
-            None,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             None,
             Arc::new(ClaudeCliSessionManager::new()),
         )

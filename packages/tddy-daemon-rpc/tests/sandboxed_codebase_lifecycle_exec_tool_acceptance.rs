@@ -188,7 +188,7 @@ fn a_daemon_with_no_common_room(sessions_base: PathBuf) -> TestDaemon {
             sessions_base,
             user_resolver_valid(),
             None,
-            None,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()),
             None,
             Arc::new(ClaudeCliSessionManager::new()),
         )

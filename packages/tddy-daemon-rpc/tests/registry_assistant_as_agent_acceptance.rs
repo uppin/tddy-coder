@@ -185,12 +185,12 @@ async fn a_daemon_with_a_registry() -> Harness {
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
     let service = TestDaemon::from_host(
         DaemonSessionHost::new(
-            config,
+            config.clone(),
             sessions_base_resolver,
             tddy_data_dir,
             user_resolver,
             None,
-            None,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             None,
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
