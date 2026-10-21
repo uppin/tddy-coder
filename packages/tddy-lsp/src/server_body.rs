@@ -237,25 +237,27 @@ impl LspServerBody {
                 &root_uri,
                 spec.capabilities.clone(),
                 spec.initialization_options.clone(),
-            ) => Handshake::Answered(initialized),
+            ) => Handshake::Answered(Box::new(initialized)),
             exit = child.wait() => Handshake::Exited(exit),
         };
         let client = match handshake {
-            Handshake::Answered(Ok(client)) => Arc::new(client),
-            Handshake::Answered(Err(err)) => {
-                let _ = child.start_kill();
-                report_end(&record, child.wait().await);
-                stdin_task.abort();
-                stdout_task.abort();
-                stderr_task.abort();
-                let _ = client_tx.send(Err(LspError::ServerNotStarted {
-                    program: spec.program.clone(),
-                    reason: format!("the initialize handshake failed: {err}"),
-                }));
-                return TaskStatus::Failed {
-                    message: format!("language server initialize failed: {err}"),
-                };
-            }
+            Handshake::Answered(answer) => match *answer {
+                Ok(client) => Arc::new(client),
+                Err(err) => {
+                    let _ = child.start_kill();
+                    report_end(&record, child.wait().await);
+                    stdin_task.abort();
+                    stdout_task.abort();
+                    stderr_task.abort();
+                    let _ = client_tx.send(Err(LspError::ServerNotStarted {
+                        program: spec.program.clone(),
+                        reason: format!("the initialize handshake failed: {err}"),
+                    }));
+                    return TaskStatus::Failed {
+                        message: format!("language server initialize failed: {err}"),
+                    };
+                }
+            },
             Handshake::Exited(exit) => {
                 stdin_task.abort();
                 stdout_task.abort();
@@ -315,8 +317,10 @@ impl LspServerBody {
 }
 
 /// How the handshake ended: the server answered `initialize`, or its child exited before it did.
+///
+/// The answer is boxed so the enum is no larger than its `Exited` arm.
 enum Handshake {
-    Answered(Result<LspClient, LspError>),
+    Answered(Box<Result<LspClient, LspError>>),
     Exited(std::io::Result<ExitStatus>),
 }
 
