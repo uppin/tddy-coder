@@ -18,7 +18,7 @@ use super::module_home;
 use super::new_crate::{self, NewCrate};
 
 use super::malformed;
-use crate::crate_move::{carried, moving};
+use crate::crate_move::{carried, moving, test_modules};
 use crate::edit::{FileEdit, TextEdit};
 
 /// A set of modules that move to one destination **as a single unit**.
@@ -170,12 +170,22 @@ fn cluster_edits(
     cluster: &MovingCluster,
 ) -> Result<WorkspaceEdit> {
     let members = read_members(workspace, cluster)?;
-    let the_set = carried::TheSet::of(workspace, &members)?;
+    let mut the_set = carried::TheSet::of(workspace, &members)?;
+    let following = test_modules::following_of(engine, workspace, &members)?;
+    the_set.travelling =
+        test_modules::travelling(&members, &the_set.carried.concat(), &following.following);
+    let (follow_edits, follow_dev_crates) = test_modules::follow_changes(
+        workspace,
+        &members,
+        &following.following,
+        &the_set.co_moving,
+    )?;
 
     let mut gathering = gathering::Gathering {
         the_set: &the_set,
         merged: MergedChanges::default(),
         totals: carried::SetTotals::default(),
+        gated: test_modules::test_gated(workspace, &the_set.carried.concat())?,
     };
     for (member, files) in members.iter().zip(&the_set.carried) {
         gathering.member_changes(engine, workspace, member, files)?;
@@ -200,6 +210,8 @@ fn cluster_edits(
     }
     merged.absorb_all(moving::left_behind(workspace, &members, &surveys)?);
     merged.absorb_all(moving::declared_in_destination(workspace, &members)?);
+    merged.absorb_all(follow_edits);
+    dev_crates_named.extend(follow_dev_crates);
 
     // Read off the first member because every member shares them: `read_members` refuses a set
     // whose members leave different crates, and the destination is the set's own field.

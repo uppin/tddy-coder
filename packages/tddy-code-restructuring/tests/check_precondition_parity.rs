@@ -490,7 +490,7 @@ fn a_cluster_member_reaching_the_module_that_anchors_the_cluster_in_a_body_is_no
     );
 }
 
-/// A body path to an item of the crate root is the finding `apply` refuses on (`#reshape` 7/19).
+/// A body path to an item of the crate root is the finding `apply` refuses on (`#reshape` 7/24).
 ///
 /// `crate::helper()` is inside no module, so the body-path finding has no module to name — but the
 /// destination would still name `origin`, and `apply`'s cycle refusal reads every path
@@ -858,5 +858,44 @@ fn a_struct_update_path_into_a_module_staying_behind_is_a_finding_naming_the_lin
          `crate::host::defaults` in a body at line 4, and `host` stays behind in `origin` — after \
          the move that path names nothing in `destination`, and naming `origin` from there is a \
          cycle. Cut the body's dependency on `host` before moving the module."
+    );
+}
+
+/// Test 17 (`#reshape` 13/24) — a test module that would follow the move, but whose landing file the
+/// destination already holds, is reported by a plain `check`: taking it along would merge two
+/// modules, which `apply` refuses.
+#[test]
+fn a_static_check_reports_a_following_test_module_whose_target_already_exists_in_the_destination() {
+    // Given `parent::a` moving, `parent` declaring `a_tests` beside it — which names only `a` — and a
+    // destination that already holds `a_tests.rs`
+    let workspace = an_origin_holding(&[
+        ("crates/origin/src/lib.rs", "pub mod parent;\n"),
+        (
+            "crates/origin/src/parent.rs",
+            "pub mod a;\n\n#[cfg(test)]\nmod a_tests;\n",
+        ),
+        ("crates/origin/src/parent/a.rs", "pub struct Thing;\n"),
+        (
+            "crates/origin/src/parent/a_tests.rs",
+            "use super::a::Thing;\n\n#[test]\nfn builds() {\n    let _ = Thing;\n}\n",
+        ),
+        ("crates/destination/src/a_tests.rs", "// already here\n"),
+    ]);
+
+    // When the move of `a` is checked
+    let findings = unrunnable_in(
+        workspace.path(),
+        &[a_move_of("crates/origin/src/parent/a.rs", "parent::a")],
+    );
+
+    // Then the test module and the target in its way are named
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.contains("`a_tests`")
+                && finding.contains("crates/destination/src/a_tests.rs"))
+            .count(),
+        1,
+        "{findings:?}"
     );
 }

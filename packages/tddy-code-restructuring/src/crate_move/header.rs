@@ -69,8 +69,33 @@ pub(crate) fn repointed_header_at(
     below: &[String],
     co_moving: &BTreeSet<String>,
 ) -> Result<Header> {
-    let module_path: Vec<String> = moving.home.path.iter().chain(below).cloned().collect();
-    let survey = survey::survey_moved_file(workspace, text, &moving.origin, &module_path)?;
+    let file = FileInTree::carried(moving, below, Gate::AsWritten);
+    repointed_header_in(workspace, text, moving, &file, co_moving)
+}
+
+/// The header pass over a file at an explicit place in a moving tree: [`repointed_header_at`]
+/// for a file below the moved module, and for a test module that follows the move from beside it.
+///
+/// A path is co-moving when what it reaches is inside `co_moving` as written **or** after following
+/// the origin's re-exports (`defined_at`), the reading the body precondition already takes; it then
+/// lands at `crate::<landing>…`. Under [`Gate::Test`] every surveyed path is test code.
+///
+/// # Errors
+///
+/// Refuses for every reason [`repointed_header_at`] does.
+pub(crate) fn repointed_header_in(
+    workspace: &Workspace<'_>,
+    text: &str,
+    moving: &Move,
+    file: &FileInTree,
+    co_moving: &BTreeSet<String>,
+) -> Result<Header> {
+    let mut survey = survey::survey_moved_file(workspace, text, &moving.origin, &file.module_path)?;
+    if file.gate == Gate::Test {
+        for path in &mut survey.paths {
+            path.in_test = true;
+        }
+    }
 
     let mut header = Header {
         edits: Vec::new(),
@@ -86,7 +111,7 @@ pub(crate) fn repointed_header_at(
     {
         let reaches: Vec<Reach> = group
             .iter()
-            .map(|path| reach(path, moving, co_moving))
+            .map(|path| reach(path, moving, co_moving, &file.tree_root))
             .collect();
 
         for (path, reached) in group.iter().zip(&reaches) {
@@ -121,6 +146,40 @@ pub(crate) fn extend_once(into: &mut Vec<String>, paths: Vec<String>) {
     }
 }
 
+/// How the paths of a file the move re-points are read before the header pass decides on them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Gate {
+    /// Each path is test code only where the file itself marks it `#[cfg(test)]`.
+    AsWritten,
+    /// The file is reached through a `#[cfg(test)] mod` declaration, so every path in it is test
+    /// code: its crates are `[dev-dependencies]` and it makes no edge back to the origin.
+    Test,
+}
+
+/// Where a file the move re-points sits, for the survey and for the `self::`/`super::` rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileInTree {
+    /// The file's own module path in the origin, outermost first: what its `self::` and `super::`
+    /// resolve against.
+    pub(crate) module_path: Vec<String>,
+    /// The module path of the tree the file travels in — the moved module for a carried file, the
+    /// test module itself for a following test module. A `self::`/`super::` path that stays inside
+    /// it is left as written; one that leaves it for a co-moving module is rewritten to `crate::`.
+    pub(crate) tree_root: Vec<String>,
+    pub(crate) gate: Gate,
+}
+
+impl FileInTree {
+    /// A file a moved module carries, `below` it, in the tree the moved module roots.
+    pub(crate) fn carried(moving: &Move, below: &[String], gate: Gate) -> Self {
+        FileInTree {
+            module_path: moving.home.path.iter().chain(below).cloned().collect(),
+            tree_root: moving.home.path.clone(),
+            gate,
+        }
+    }
+}
+
 fn push_once(paths: &mut Vec<String>, path: &str) {
     if !paths.iter().any(|known| known == path) {
         paths.push(path.to_string());
@@ -140,13 +199,29 @@ struct Reach {
     narrowed: bool,
 }
 
-fn reach(path: &SurveyedPath, moving: &Move, co_moving: &BTreeSet<String>) -> Reach {
+/// Where one path of a file in the tree rooted at `tree_root` lands. A `self::` or `super::` path
+/// that stays inside that tree is left as written; one that leaves it for a co-moving module is
+/// rewritten to `crate::`.
+fn reach(
+    path: &SurveyedPath,
+    moving: &Move,
+    co_moving: &BTreeSet<String>,
+    tree_root: &[String],
+) -> Reach {
     let origin = &moving.origin.extern_name;
 
+    if stays_inside_its_tree(path, origin, tree_root) {
+        return Reach {
+            rewritten: None,
+            names: None,
+            edge_back: false,
+            narrowed: false,
+        };
+    }
     let inside_the_origin = path.resolved.strip_prefix(&format!("{origin}::"));
     if let Some(reached) = inside_the_origin
         .and_then(|rest| travels_with(rest, co_moving).map(|member| (rest, member)))
-        .map(|(rest, member)| travelling_reach(path, moving, rest, member))
+        .map(|(rest, member)| travelling_reach(rest, member))
     {
         return reached;
     }
@@ -179,14 +254,20 @@ fn reach(path: &SurveyedPath, moving: &Move, co_moving: &BTreeSet<String>) -> Re
     }
 }
 
+/// Whether a `self::` or `super::` path resolves inside the tree the file travels in: such a path
+/// names the same tree wherever the tree lands, so it is left as written.
+fn stays_inside_its_tree(path: &SurveyedPath, origin: &str, tree_root: &[String]) -> bool {
+    let head = path.written.split("::").next().unwrap_or_default();
+    let root = format!("{origin}::{}", tree_root.join("::"));
+    matches!(head, "self" | "super")
+        && (path.resolved == root || path.resolved.starts_with(&format!("{root}::")))
+}
+
 /// A path whose own spelling reaches `member`, one of the modules moving together: `rest` is what
 /// follows the origin's name in it.
-fn travelling_reach(path: &SurveyedPath, moving: &Move, rest: &str, member: &str) -> Reach {
-    let head = path.written.split("::").next().unwrap_or_default();
-    let stays_inside_the_module =
-        matches!(head, "self" | "super") && member == moving.home.path.join("::");
+fn travelling_reach(rest: &str, member: &str) -> Reach {
     Reach {
-        rewritten: (!stays_inside_the_module).then(|| landing_in_the_destination(rest, member)),
+        rewritten: Some(landing_in_the_destination(rest, member)),
         names: None,
         edge_back: false,
         narrowed: false,

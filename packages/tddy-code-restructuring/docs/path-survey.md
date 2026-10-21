@@ -41,6 +41,33 @@ lands at the destination root under its last segment (`header.rs`).
 `module_files::relocated` is the one rule for where a carried file lands relative to the module: the
 cross-crate move and `reparent_module` (`backends/rust/module_reparent/relocation.rs`) both call it.
 
+## Test modules
+
+A `#[cfg(test)] mod t;` declared in the file that declares a moved module, when that file stays, is a
+sibling of the moved code. `source_scan::test_declarations` reads the top-level declarations with the span
+of their attributes and doc comments and whether `#[path]` places one; `crate_move::test_modules` decides
+which follow. Each considered module's files (`module_files::files_of`) are surveyed at the declaring
+file's module path plus `t`. A path is read as naming the origin when `defining_crate` is the origin and
+the path does not resolve inside the test module itself. It *reaches the move* when `resolved` or
+`defined_at` is inside the moving set: members, their carried files, and the modules earlier operations
+of the plan moved (`moved_by_earlier_operations` for a static check; in `apply` those moves are already in
+the text the workspace overlay reads, so the resolve path passes none). The module follows when every
+origin-naming path reaches the move and one does, and it is not placed by `#[path]`. At resolve time
+`ModuleReferences::outside_references` keeps back a follower whose items a file outside the travelling set
+names. Notes say which follow and which stay.
+
+A follower is renamed with `module_files::relocated` beside the member it names first, its header goes
+through `repointed_header_in` with `Gate::Test` and its own module as the tree root, its declaration leaves
+the origin and is appended to the destination root, and its files join the travelling set before the caller
+survey. `header::Gate::Test` marks every surveyed path `in_test`; `test_modules::test_gated` gives the same
+reading to a carried file at or below a `#[cfg(test)]` declaration, looked up in the scope the inline
+modules on the way down open. A static `unfollowable` check reports a landing that exists or is already
+declared, with the text `apply` refuses with.
+
+The header pass reads a path's `defined_at` as well as `resolved` for co-moving, and keys "stays inside
+the module" on the file's own tree root (`header::FileInTree.tree_root`): a sibling's `super::moved` is
+rewritten, a test module's `self::helpers` is not.
+
 ## The surface
 
 `PathSurvey { paths: Vec<SurveyedPath> }`, `pub(crate)`, in the order the file writes them.

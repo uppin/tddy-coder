@@ -374,6 +374,9 @@ pub(crate) fn attached_trivia_starts_at(text: &str, line: u32) -> u32 {
     first
 }
 
+mod test_declarations;
+pub(crate) use test_declarations::{test_declarations, TestDeclaration};
+
 #[cfg(test)]
 mod tests {
     use super::*;
