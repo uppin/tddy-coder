@@ -4,7 +4,7 @@
 //! roots already end in `/v1`, and a second one would 404), the key travels as a bearer token, and
 //! an Anthropic-only endpoint is asked at `/v1/models` with `x-api-key`.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-accounts.md
+//! Feature: docs/ft/daemon/provider-accounts.md
 
 use std::sync::{Arc, Mutex};
 

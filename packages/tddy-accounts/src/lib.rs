@@ -34,8 +34,9 @@ pub use linking::{
     LinkedAccountStore, LinkedIdentity, RemovalRefusal, META_SUBJECT, META_SUBJECT_ID,
 };
 pub use provider_account::{
-    endpoints_for, preset, presets, PresetEndpoint, ProviderAccount, ProviderAccountError,
-    ProviderAccountStore, ProviderEndpoints, ProviderModelProbe, ProviderPreset, WireProtocol,
+    account_id_for, endpoints_for, preset, presets, unclaimed_account_id, PresetEndpoint,
+    ProviderAccount, ProviderAccountError, ProviderAccountStore, ProviderEndpoints,
+    ProviderModelProbe, ProviderPreset, WireProtocol,
 };
 pub use resolver::{resolve_account, AccountResolution};
 pub use service::{build_accounts_entry, AccountsServiceImpl, Clock};

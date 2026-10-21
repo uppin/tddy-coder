@@ -1,13 +1,13 @@
 //! The production [`AccountStore`]: the vaults a daemon holds, found by the session's subject.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError, VaultState,
 };
 
-use crate::provider_account::{ProviderAccount, ProviderAccountStore};
+use crate::provider_account::{unclaimed_account_id, ProviderAccount, ProviderAccountStore};
 use crate::store::{AccountStore, AccountsError};
 
 /// Resolve a `session_token` to the subject whose vault it may open, or `None` when the token names
@@ -22,12 +22,20 @@ pub type SessionSubjectResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sy
 pub struct SessionVaultAccountStore {
     vaults: Arc<SessionVaults>,
     subject_of: SessionSubjectResolver,
+    /// Held from choosing a new provider account's id to writing it, so two connects cannot pick
+    /// the same free id and the second overwrite the first. The vault serialises each operation,
+    /// not the read-then-write between them.
+    new_provider_accounts: Mutex<()>,
 }
 
 impl SessionVaultAccountStore {
     #[must_use]
     pub fn new(vaults: Arc<SessionVaults>, subject_of: SessionSubjectResolver) -> Self {
-        Self { vaults, subject_of }
+        Self {
+            vaults,
+            subject_of,
+            new_provider_accounts: Mutex::new(()),
+        }
     }
 
     /// The subject the token's session belongs to, and its vault, open on this daemon.
@@ -148,6 +156,18 @@ impl ProviderAccountStore for SessionVaultAccountStore {
         account: &ProviderAccount,
     ) -> Result<CredentialRecord, AccountsError> {
         let (subject, vault) = self.vault_for(session_token)?;
+        // The guard protects no data of its own, so a panic while it was held leaves nothing torn.
+        let _choosing_an_id = self
+            .new_provider_accounts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let held = vault
+            .list(None)
+            .map_err(|error| refusal_of(&subject, error))?;
+        let account = ProviderAccount {
+            account: unclaimed_account_id(&account.account, &held),
+            ..account.clone()
+        };
         let record = account.to_record(now_secs()?);
         vault
             .put(record.clone())
@@ -466,5 +486,78 @@ mod tests {
 
         // Then
         assert_eq!(refusal, AccountsError::Unavailable(reason));
+    }
+
+    fn a_meta_account(account: &str) -> ProviderAccount {
+        let meta = crate::provider_account::preset("meta").expect("the meta preset");
+        ProviderAccount {
+            account: AccountId::new(account),
+            preset: meta,
+            label: "Meta hackathon".to_string(),
+            endpoints: crate::provider_account::endpoints_for(meta, None, None)
+                .expect("meta endpoints"),
+            api_key: SecretString::new("a-meta-key"),
+        }
+    }
+
+    #[test]
+    fn simultaneous_connects_asking_for_one_id_are_each_stored_under_their_own() {
+        // Given
+        let (_dir, vault, store) = ada_unlocked_her_vault_holding(vec![]);
+        let store = Arc::new(store);
+
+        // When
+        let written: Vec<String> = std::thread::scope(|scope| {
+            let connects: Vec<_> = (0..8)
+                .map(|_| {
+                    let store = Arc::clone(&store);
+                    scope.spawn(move || {
+                        store
+                            .put_provider_account(ADAS_SESSION, &a_meta_account("meta-hackathon"))
+                            .expect("the account is stored")
+                    })
+                })
+                .collect();
+            connects
+                .into_iter()
+                .map(|connect| connect.join().expect("the connect finished"))
+                .map(|record| record.account.as_str().to_string())
+                .collect()
+        });
+
+        // Then
+        let mut stored =
+            accounts_in(vault.list(None).map_err(|e| refusal_of(ADA, e))).expect("the vault lists");
+        stored.sort();
+        let mut written = written;
+        written.sort();
+        assert_eq!(stored, written);
+        assert_eq!(stored.len(), 8);
+    }
+
+    #[test]
+    fn a_connect_asking_for_a_held_id_is_numbered_and_leaves_the_held_record_alone() {
+        // Given
+        let (_dir, vault, store) = ada_unlocked_her_vault_holding(vec![]);
+        store
+            .put_provider_account(ADAS_SESSION, &a_meta_account("meta-hackathon"))
+            .expect("the first account is stored");
+
+        // When
+        let second = ProviderAccount {
+            api_key: SecretString::new("a-second-key"),
+            ..a_meta_account("meta-hackathon")
+        };
+        let record = store
+            .put_provider_account(ADAS_SESSION, &second)
+            .expect("the second account is stored");
+
+        // Then
+        assert_eq!(record.account, AccountId::new("meta-hackathon-2"));
+        let first = vault
+            .get(&ProviderId::new("meta"), &AccountId::new("meta-hackathon"))
+            .expect("the vault reads")
+            .expect("the first account is still held");
+        assert_eq!(first.secret.expose(), "a-meta-key");
     }
 }

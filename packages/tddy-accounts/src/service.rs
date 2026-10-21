@@ -22,8 +22,8 @@ use crate::linking::{
     LinkedIdentity, META_SUBJECT,
 };
 use crate::provider_account::{
-    endpoints_for, preset, ProviderAccount, ProviderAccountError, ProviderAccountStore,
-    ProviderModelProbe, ProviderPreset,
+    account_id_for, endpoints_for, preset, ProviderAccount, ProviderAccountError,
+    ProviderAccountStore, ProviderModelProbe,
 };
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
@@ -158,49 +158,26 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
     ) -> Result<Response<ConnectProviderAccountResponse>, Status> {
         let request = request.into_inner();
         let ports = self.require_provider_accounts()?;
-        let preset = preset(&request.preset).ok_or_else(|| {
-            refusal_of_provider_account(ProviderAccountError::UnknownPreset(request.preset.clone()))
-        })?;
-        if request.api_key.is_empty() {
-            return Err(refusal_of_provider_account(
-                ProviderAccountError::MissingApiKey,
-            ));
-        }
-        let endpoints = endpoints_for(
-            preset,
-            non_blank(&request.anthropic_base_url),
-            non_blank(&request.openai_base_url),
-        )
-        .map_err(refusal_of_provider_account)?;
-        let api_key = SecretString::new(request.api_key);
+        let session_token = request.session_token.clone();
+        let account = requested_account(request).map_err(refusal_of_provider_account)?;
 
         // The vault is consulted before the network: a locked vault refuses without the key ever
-        // leaving this daemon, and the held ids are what a new account's id must not collide with.
-        let held = self
-            .store
-            .list(&request.session_token)
-            .map_err(status_for)?;
+        // leaving this daemon.
+        self.store.list(&session_token).map_err(status_for)?;
         ports
             .probe
-            .list_models(&endpoints, &api_key)
+            .list_models(&account.endpoints, &account.api_key)
             .await
             .map_err(|reason| {
                 Status::invalid_argument(format!(
                     "the {} endpoint did not accept this key: {reason}",
-                    preset.label
+                    account.preset.label
                 ))
             })?;
 
-        let account = ProviderAccount {
-            account: new_account_id(preset, &request.label, &held),
-            preset,
-            label: request.label,
-            endpoints,
-            api_key,
-        };
         let record = ports
             .store
-            .put_provider_account(&request.session_token, &account)
+            .put_provider_account(&session_token, &account)
             .map_err(status_for)?;
         Ok(Response::new(ConnectProviderAccountResponse {
             account: Some(summary_of(&record, self.sync_status.as_deref())),
@@ -532,6 +509,29 @@ fn grouped_by_provider(
     groups
 }
 
+/// The account a connect request describes, before anything is asked of the vault or the network.
+fn requested_account(
+    request: ConnectProviderAccountRequest,
+) -> Result<ProviderAccount, ProviderAccountError> {
+    let preset = preset(&request.preset)
+        .ok_or_else(|| ProviderAccountError::UnknownPreset(request.preset.clone()))?;
+    if request.api_key.is_empty() {
+        return Err(ProviderAccountError::MissingApiKey);
+    }
+    let endpoints = endpoints_for(
+        preset,
+        non_blank(&request.anthropic_base_url),
+        non_blank(&request.openai_base_url),
+    )?;
+    Ok(ProviderAccount {
+        account: account_id_for(preset, &request.label),
+        preset,
+        label: request.label,
+        endpoints,
+        api_key: SecretString::new(request.api_key),
+    })
+}
+
 /// A request string with nothing in it is a field the client left unset.
 fn non_blank(value: &str) -> Option<&str> {
     let value = value.trim();
@@ -552,44 +552,16 @@ fn refusal_of_provider_account(error: ProviderAccountError) -> Status {
             "the {preset} provider's {} endpoint is fixed and cannot be replaced",
             protocol.as_str()
         ),
+        ProviderAccountError::UnservedBaseUrl { preset, protocol } => format!(
+            "the {preset} provider does not serve {}, so it takes no base URL for it",
+            protocol.as_str()
+        ),
         ProviderAccountError::InvalidBaseUrl(url) => format!(
             "{url:?} is not an http(s) URL with a host and without credentials, query or fragment"
         ),
         ProviderAccountError::MissingApiKey => "an API key is required".to_string(),
     };
     Status::invalid_argument(reason)
-}
-
-/// An id for a new provider account that no held record uses: the preset and the label's slug,
-/// numbered when that is taken.
-fn new_account_id(preset: &ProviderPreset, label: &str, held: &[CredentialRecord]) -> AccountId {
-    let slug: String = label
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    let base = if slug.is_empty() {
-        preset.id.to_string()
-    } else {
-        format!("{}-{slug}", preset.id)
-    };
-    let taken = |id: &str| held.iter().any(|record| record.account.as_str() == id);
-    let mut candidate = base.clone();
-    let mut n = 2;
-    while taken(&candidate) {
-        candidate = format!("{base}-{n}");
-        n += 1;
-    }
-    AccountId::new(candidate)
 }
 
 /// What a person may see of a record. The secret is reduced to whether one is present.

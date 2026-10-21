@@ -41,8 +41,10 @@ export interface ConnectProviderAccountFormProps {
 
 /**
  * The presets the form offers, in the order the daemon's table lists them. Which ones need a URL
- * mirrors `tddy_accounts::provider_account::presets()`; the daemon refuses a request that
- * disagrees, so a drift here shows up as a refusal and never as a wrong endpoint.
+ * mirrors `tddy_accounts::provider_account::presets()`, and the daemon stays the authority: it
+ * refuses an unknown preset, a missing operator-supplied URL, a URL for a fixed endpoint and a URL
+ * for a protocol the preset does not serve. So a drift here shows up as a refusal on screen, never
+ * as an account pointed at the wrong endpoint.
  */
 export const PROVIDER_PRESET_OPTIONS: ProviderPresetOption[] = [
   { id: "meta", label: "Meta", needsOpenAiBaseUrl: false, needsAnthropicBaseUrl: false },

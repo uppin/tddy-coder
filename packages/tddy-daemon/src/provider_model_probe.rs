@@ -60,7 +60,10 @@ impl ProviderModelProbe for HttpProviderModelProbe {
             .map_err(|error| format!("the endpoint could not be reached: {error}"))?;
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|error| format!("(its body could not be read: {error})"));
             let body: String = body.trim().chars().take(REFUSAL_BODY_LIMIT).collect();
             return Err(if body.is_empty() {
                 status.to_string()

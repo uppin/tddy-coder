@@ -51,6 +51,14 @@ pub enum PresetEndpoint {
     OperatorSupplied,
 }
 
+impl PresetEndpoint {
+    /// Whether the provider serves this protocol at all.
+    #[must_use]
+    pub fn is_served(self) -> bool {
+        self != Self::NotServed
+    }
+}
+
 /// One connectable provider, and the roots it serves per protocol.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ProviderPreset {
@@ -86,6 +94,12 @@ pub enum ProviderAccountError {
     },
     /// The preset's endpoint is fixed and the request tried to replace it.
     FixedBaseUrl {
+        preset: &'static str,
+        protocol: WireProtocol,
+    },
+    /// The request supplied a root for a protocol the preset does not serve. Refused rather than
+    /// dropped: a URL the operator typed is never silently ignored.
+    UnservedBaseUrl {
         preset: &'static str,
         protocol: WireProtocol,
     },
@@ -154,12 +168,26 @@ pub fn preset(id: &str) -> Option<&'static ProviderPreset> {
 /// The endpoints an account connected with `preset` serves, given the roots the operator supplied.
 ///
 /// A fixed root is taken from the preset and may not be supplied; an operator-supplied root must
-/// be. One `openai_base_url` serves both OpenAI protocols where the preset serves both.
+/// be; a root for a protocol the preset does not serve is refused. One `openai_base_url` serves
+/// both OpenAI protocols where the preset serves both, so it is unserved only when neither is.
 pub fn endpoints_for(
     preset: &ProviderPreset,
     anthropic_base_url: Option<&str>,
     openai_base_url: Option<&str>,
 ) -> Result<ProviderEndpoints, ProviderAccountError> {
+    let unserved = |protocol| ProviderAccountError::UnservedBaseUrl {
+        preset: preset.id,
+        protocol,
+    };
+    if anthropic_base_url.is_some() && !preset.anthropic_messages.is_served() {
+        return Err(unserved(WireProtocol::AnthropicMessages));
+    }
+    if openai_base_url.is_some()
+        && !preset.openai_chat.is_served()
+        && !preset.openai_responses.is_served()
+    {
+        return Err(unserved(WireProtocol::OpenAiChat));
+    }
     // Chat is resolved before Responses: it is the protocol every OpenAI-speaking preset serves,
     // so it is the one a refusal names.
     let anthropic_messages = resolve_root(
@@ -231,6 +259,51 @@ const META_PROBED_AT: &str = "probed_at";
 
 fn endpoint_key(protocol: WireProtocol) -> String {
     format!("endpoint.{}", protocol.as_str())
+}
+
+/// The id a new account connected with `preset` and `label` asks for: the preset and the label's
+/// slug (`prod` on Fireworks is `fireworks-prod`), the slug alone when it already starts with the
+/// preset id (`Meta hackathon` is `meta-hackathon`, not `meta-meta-hackathon`), or the bare preset
+/// id when the label has no letters or digits. The store numbers it when that id is taken — see
+/// [`unclaimed_account_id`].
+#[must_use]
+pub fn account_id_for(preset: &ProviderPreset, label: &str) -> AccountId {
+    let lowered: String = label
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let slug = lowered
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let names_its_preset = slug == preset.id || slug.starts_with(&format!("{}-", preset.id));
+    if slug.is_empty() {
+        AccountId::new(preset.id)
+    } else if names_its_preset {
+        AccountId::new(slug)
+    } else {
+        AccountId::new(format!("{}-{slug}", preset.id))
+    }
+}
+
+/// `wanted`, or the first of `<wanted>-2`, `<wanted>-3`, … that no record in `held` uses.
+#[must_use]
+pub fn unclaimed_account_id(wanted: &AccountId, held: &[CredentialRecord]) -> AccountId {
+    let taken = |id: &str| held.iter().any(|record| record.account.as_str() == id);
+    let mut candidate = wanted.as_str().to_string();
+    let mut n = 2;
+    while taken(&candidate) {
+        candidate = format!("{}-{n}", wanted.as_str());
+        n += 1;
+    }
+    AccountId::new(candidate)
 }
 
 /// A model-provider account, decoded from the vault record that holds it.
@@ -333,7 +406,12 @@ pub trait ProviderModelProbe: Send + Sync {
 
 /// Where provider accounts are written and read, per signed-in session.
 pub trait ProviderAccountStore: Send + Sync {
-    /// Store a newly connected account in the session owner's vault. The record as written.
+    /// Store a newly connected account in the session owner's vault, never over a held record.
+    ///
+    /// The account is stored under `account.account`, or — when that id is already held — under
+    /// [`unclaimed_account_id`] of it, decided atomically with the write: two connects asking for
+    /// the same id at once get two ids, and neither replaces the other. The record as written,
+    /// carrying the id it was given.
     fn put_provider_account(
         &self,
         session_token: &str,
@@ -463,6 +541,107 @@ mod tests {
             overridden,
             Err(ProviderAccountError::FixedBaseUrl { preset: "meta", .. })
         ));
+    }
+
+    #[test]
+    fn a_root_for_a_protocol_the_preset_does_not_serve_is_refused() {
+        // When
+        let anthropic_for_modal = endpoints_for(
+            the_preset("modal"),
+            Some("https://llm.example.com"),
+            Some("https://modal.example/v1"),
+        );
+        let openai_for_anthropic_compatible = endpoints_for(
+            the_preset("anthropic-compatible"),
+            Some("https://llm.example.com"),
+            Some("https://llm.example.com/v1"),
+        );
+        let anthropic_for_baseten =
+            endpoints_for(the_preset("baseten"), Some("https://llm.example.com"), None);
+
+        // Then
+        assert_eq!(
+            anthropic_for_modal,
+            Err(ProviderAccountError::UnservedBaseUrl {
+                preset: "modal",
+                protocol: WireProtocol::AnthropicMessages,
+            })
+        );
+        assert_eq!(
+            openai_for_anthropic_compatible,
+            Err(ProviderAccountError::UnservedBaseUrl {
+                preset: "anthropic-compatible",
+                protocol: WireProtocol::OpenAiChat,
+            })
+        );
+        assert!(matches!(
+            anthropic_for_baseten,
+            Err(ProviderAccountError::UnservedBaseUrl {
+                preset: "baseten",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn modal_takes_its_openai_root_although_it_serves_only_chat() {
+        // When
+        let endpoints = endpoints_for(the_preset("modal"), None, Some("https://modal.example/v1/"))
+            .expect("endpoints");
+
+        // Then
+        assert_eq!(
+            endpoints,
+            ProviderEndpoints {
+                anthropic_messages: None,
+                openai_responses: None,
+                openai_chat: Some("https://modal.example/v1".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn a_new_account_asks_for_the_preset_and_its_labels_slug() {
+        // Then
+        assert_eq!(
+            account_id_for(the_preset("meta"), "Meta  Hackathon (2026)!"),
+            AccountId::new("meta-hackathon-2026")
+        );
+        assert_eq!(
+            account_id_for(the_preset("fireworks"), "Prod"),
+            AccountId::new("fireworks-prod")
+        );
+        assert_eq!(
+            account_id_for(the_preset("meta"), "Metabase"),
+            AccountId::new("meta-metabase")
+        );
+        assert_eq!(
+            account_id_for(the_preset("fireworks"), "  ***  "),
+            AccountId::new("fireworks")
+        );
+    }
+
+    #[test]
+    fn a_held_id_is_numbered_from_two() {
+        // Given
+        let held = vec![
+            a_meta_account().to_record(1),
+            ProviderAccount {
+                account: AccountId::new("meta-hackathon-2"),
+                ..a_meta_account()
+            }
+            .to_record(1),
+        ];
+
+        // Then
+        assert_eq!(
+            unclaimed_account_id(&AccountId::new("meta-hackathon"), &held),
+            AccountId::new("meta-hackathon-3")
+        );
+        assert_eq!(
+            unclaimed_account_id(&AccountId::new("meta-other"), &held),
+            AccountId::new("meta-other")
+        );
     }
 
     #[test]

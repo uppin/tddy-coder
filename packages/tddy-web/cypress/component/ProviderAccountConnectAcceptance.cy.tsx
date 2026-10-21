@@ -7,7 +7,7 @@
  * and nothing is added. The key is typed into a password field and never appears on screen again —
  * `accounts.proto` has no field to send it back in.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-accounts.md
+ * PRD: docs/ft/daemon/provider-accounts.md
  */
 
 import { Code, ConnectError } from "@connectrpc/connect";

@@ -5,15 +5,15 @@
 //! the first session that tries to use it. The store and the probe are in-memory fakes: the vault's
 //! cryptography and the network are other crates' concerns.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-accounts.md
+//! Feature: docs/ft/daemon/provider-accounts.md
 
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
 use tddy_accounts::{
-    AccountStore, AccountsError, AccountsServiceImpl, ProviderAccount, ProviderAccountStore,
-    ProviderEndpoints, ProviderModelProbe,
+    unclaimed_account_id, AccountStore, AccountsError, AccountsServiceImpl, ProviderAccount,
+    ProviderAccountStore, ProviderEndpoints, ProviderModelProbe,
 };
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString};
 use tddy_rpc::{Code, Request, Status};
@@ -97,8 +97,13 @@ impl ProviderAccountStore for AnInMemoryVault {
         if let Some(refusal) = self.answer_for(session_token) {
             return Err(refusal);
         }
+        let mut records = self.records.lock().unwrap();
+        let account = ProviderAccount {
+            account: unclaimed_account_id(&account.account, &records),
+            ..account.clone()
+        };
         let record = account.to_record(1_760_000_000);
-        self.records.lock().unwrap().push(record.clone());
+        records.push(record.clone());
         Ok(record)
     }
 
@@ -310,6 +315,49 @@ async fn a_fixed_preset_refuses_a_url_override() {
     // Then
     assert_eq!(refusal.code(), Code::InvalidArgument);
     assert!(world.endpoint.asked.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_base_url_for_a_protocol_the_preset_does_not_serve_is_refused() {
+    // Given
+    let world = a_world(a_vault());
+    let request = ConnectProviderAccountRequest {
+        anthropic_base_url: "https://llm.example.com".to_string(),
+        openai_base_url: "https://modal.example/v1".to_string(),
+        ..a_connect("modal", "My Modal deployment", A_META_KEY)
+    };
+
+    // When
+    let refusal = world
+        .connect(request)
+        .await
+        .expect_err("unserved URL refused");
+
+    // Then
+    assert_eq!(refusal.code(), Code::InvalidArgument);
+    assert!(refusal.message().contains("anthropic-messages"));
+    assert!(world.endpoint.asked.lock().unwrap().is_empty());
+    assert!(world.vault.stored().is_empty());
+}
+
+#[tokio::test]
+async fn a_second_account_with_the_same_label_gets_its_own_id() {
+    // Given
+    let world = a_world(a_vault());
+    world
+        .connect(a_connect("meta", "Meta hackathon", A_META_KEY))
+        .await
+        .expect("the first connect succeeds");
+
+    // When
+    let second = world
+        .connect(a_connect("meta", "Meta hackathon", A_META_KEY))
+        .await
+        .expect("the second connect succeeds");
+
+    // Then
+    assert_eq!(second.account_id, "meta-hackathon-2");
+    assert_eq!(world.vault.stored().len(), 2);
 }
 
 #[tokio::test]

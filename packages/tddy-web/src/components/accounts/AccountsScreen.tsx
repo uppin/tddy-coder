@@ -117,37 +117,10 @@ export function AccountsScreen({
   connectError = null,
   onListModels,
 }: AccountsScreenProps) {
-  const [connecting, setConnecting] = useState(false);
-  const [connectPending, setConnectPending] = useState(false);
   return (
     <div data-testid="accounts-screen">
       {onConnectProviderAccount && outcome.kind === "listed" ? (
-        <div className="mb-4">
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="accounts-connect-api-key"
-            onClick={() => setConnecting(true)}
-          >
-            Connect API key
-          </Button>
-          {connecting ? (
-            <ConnectProviderAccountForm
-              presets={PROVIDER_PRESET_OPTIONS}
-              pending={connectPending}
-              error={connectError}
-              onCancel={() => setConnecting(false)}
-              onSubmit={(input) => {
-                setConnectPending(true);
-                onConnectProviderAccount(input)
-                  .then((added) => {
-                    if (added) setConnecting(false);
-                  })
-                  .finally(() => setConnectPending(false));
-              }}
-            />
-          ) : null}
-        </div>
+        <ConnectApiKey onConnect={onConnectProviderAccount} error={connectError} />
       ) : null}
       {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels)}
       {linkAttempt ? <LinkAttemptView attempt={linkAttempt} /> : null}
@@ -395,6 +368,46 @@ function AccountRowView({
         </Button>
       )}
     </li>
+  );
+}
+
+/** "Connect API key" and, once pressed, its form; closes when the daemon added the account. */
+function ConnectApiKey({
+  onConnect,
+  error,
+}: {
+  onConnect: NonNullable<AccountsScreenProps["onConnectProviderAccount"]>;
+  error: string | null;
+}) {
+  const [connecting, setConnecting] = useState(false);
+  const [pending, setPending] = useState(false);
+  return (
+    <div className="mb-4">
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="accounts-connect-api-key"
+        onClick={() => setConnecting(true)}
+      >
+        Connect API key
+      </Button>
+      {connecting ? (
+        <ConnectProviderAccountForm
+          presets={PROVIDER_PRESET_OPTIONS}
+          pending={pending}
+          error={error}
+          onCancel={() => setConnecting(false)}
+          onSubmit={(input) => {
+            setPending(true);
+            onConnect(input)
+              .then((added) => {
+                if (added) setConnecting(false);
+              })
+              .finally(() => setPending(false));
+          }}
+        />
+      ) : null}
+    </div>
   );
 }
 
