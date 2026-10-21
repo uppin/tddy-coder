@@ -318,8 +318,8 @@ mod tests {
         // When
         let lines = production_lines(text);
 
-        // Then the import and the item after it still count
-        assert_eq!(lines, 4);
+        // Then the import is test-only (acceptance 2) and the item after it still counts
+        assert_eq!(lines, 2);
     }
 
     /// Blank lines between the attribute and `mod` do not make it something else.
