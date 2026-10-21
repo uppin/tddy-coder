@@ -103,53 +103,64 @@ impl WorkspaceGraph {
         let packages = metadata["packages"]
             .as_array()
             .expect("metadata lists packages");
-        let names = packages
-            .iter()
-            .map(|package| {
-                let name = package["name"].as_str().expect("a package has a name");
-                let dependencies = package["dependencies"]
-                    .as_array()
-                    .expect("a package lists its dependencies")
-                    .iter()
-                    // `kind` is null for `[dependencies]`, "build" or "dev" otherwise.
-                    .filter(|dependency| dependency["kind"].as_str() != Some("dev"))
-                    .map(|dependency| {
-                        dependency["name"]
-                            .as_str()
-                            .expect("a dependency has a name")
-                            .to_string()
-                    })
-                    .collect();
-                (name.to_string(), dependencies)
-            })
-            .collect();
-        let binaries = packages
-            .iter()
-            .map(|package| {
-                let name = package["name"].as_str().expect("a package has a name");
-                let bins = package["targets"]
-                    .as_array()
-                    .expect("a package lists its targets")
-                    .iter()
-                    .filter(|target| {
-                        target["kind"]
-                            .as_array()
-                            .expect("a target lists its kinds")
-                            .iter()
-                            .any(|kind| kind.as_str() == Some("bin"))
-                    })
-                    .map(|target| {
-                        target["name"]
-                            .as_str()
-                            .expect("a target has a name")
-                            .to_string()
-                    })
-                    .collect();
-                (name.to_string(), bins)
-            })
-            .collect();
-        Self { names, binaries }
+        Self {
+            names: dependency_names(packages),
+            binaries: binary_names(packages),
+        }
     }
+}
+
+/// Each package and the crates it names in `[dependencies]` / `[build-dependencies]`.
+fn dependency_names(packages: &[serde_json::Value]) -> BTreeMap<String, BTreeSet<String>> {
+    packages
+        .iter()
+        .map(|package| {
+            let name = package["name"].as_str().expect("a package has a name");
+            let dependencies = package["dependencies"]
+                .as_array()
+                .expect("a package lists its dependencies")
+                .iter()
+                // `kind` is null for `[dependencies]`, "build" or "dev" otherwise.
+                .filter(|dependency| dependency["kind"].as_str() != Some("dev"))
+                .map(|dependency| {
+                    dependency["name"]
+                        .as_str()
+                        .expect("a dependency has a name")
+                        .to_string()
+                })
+                .collect();
+            (name.to_string(), dependencies)
+        })
+        .collect()
+}
+
+/// Each package and the names of its `bin` targets.
+fn binary_names(packages: &[serde_json::Value]) -> BTreeMap<String, BTreeSet<String>> {
+    packages
+        .iter()
+        .map(|package| {
+            let name = package["name"].as_str().expect("a package has a name");
+            let bins = package["targets"]
+                .as_array()
+                .expect("a package lists its targets")
+                .iter()
+                .filter(|target| {
+                    target["kind"]
+                        .as_array()
+                        .expect("a target lists its kinds")
+                        .iter()
+                        .any(|kind| kind.as_str() == Some("bin"))
+                })
+                .map(|target| {
+                    target["name"]
+                        .as_str()
+                        .expect("a target has a name")
+                        .to_string()
+                })
+                .collect();
+            (name.to_string(), bins)
+        })
+        .collect()
 }
 
 #[cfg(test)]
