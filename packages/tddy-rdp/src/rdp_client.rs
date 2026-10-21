@@ -145,6 +145,96 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
         port: u16,
         credentials: &tddy_screenshare::Credentials,
     ) -> Result<Self> {
+        Self::connect_impl(host, port, credentials).await
+    }
+
+    fn framebuffer_dimensions(&self) -> (u32, u32) {
+        (self.image.width().into(), self.image.height().into())
+    }
+
+    fn get_rgba_frame(&self) -> &[u8] {
+        self.image.data()
+    }
+
+    async fn poll_events(&mut self) -> Result<bool> {
+        let (action, frame) = self.framed.read_pdu().await.context("read PDU")?;
+        let outputs = self
+            .active
+            .process(&mut self.image, action, &frame)
+            .context("process PDU")?;
+
+        let mut updated = false;
+        for output in outputs {
+            match output {
+                ActiveStageOutput::GraphicsUpdate(_) => updated = true,
+                ActiveStageOutput::ResponseFrame(frame) => {
+                    self.framed
+                        .write_all(&frame)
+                        .await
+                        .context("write response")?;
+                }
+                ActiveStageOutput::Terminate(_) => anyhow::bail!("RDP session terminated"),
+                _ => {}
+            }
+        }
+        Ok(updated)
+    }
+
+    async fn request_frame_update(&mut self, _incremental: bool) -> Result<()> {
+        // RDP is server-push; the server sends updates without explicit requests.
+        Ok(())
+    }
+
+    async fn inject_pointer(&mut self, x: u32, y: u32, button_mask: u32) -> Result<()> {
+        let mut flags = PointerFlags::MOVE;
+        if button_mask & 1 != 0 {
+            flags |= PointerFlags::LEFT_BUTTON | PointerFlags::DOWN;
+        }
+        if button_mask & 2 != 0 {
+            flags |= PointerFlags::RIGHT_BUTTON | PointerFlags::DOWN;
+        }
+        if button_mask & 4 != 0 {
+            flags |= PointerFlags::MIDDLE_BUTTON_OR_WHEEL | PointerFlags::DOWN;
+        }
+        let event = FastPathInputEvent::MouseEvent(MousePdu {
+            flags,
+            number_of_wheel_rotation_units: 0,
+            x_position: x as u16,
+            y_position: y as u16,
+        });
+        self.send_input_events(&[event]).await
+    }
+
+    async fn inject_key(&mut self, keysym: u32, pressed: bool) -> Result<()> {
+        let scancode = keysym_to_scancode(keysym);
+        let flags = if pressed {
+            KeyboardFlags::empty()
+        } else {
+            KeyboardFlags::RELEASE
+        };
+        let event = FastPathInputEvent::KeyboardEvent(flags, scancode);
+        self.send_input_events(&[event]).await
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        if let Ok(outputs) = self.active.graceful_shutdown() {
+            for output in outputs {
+                if let ActiveStageOutput::ResponseFrame(frame) = output {
+                    let _ = self.framed.write_all(&frame).await;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl RdpClient {
+    /// Body of [`ScreenSharingClient::connect`]; the trait method delegates here.
+    pub(crate) async fn connect_impl(
+        host: &str,
+        port: u16,
+        credentials: &tddy_screenshare::Credentials,
+    ) -> Result<Self> {
         // 1. TCP
         let stream = TcpStream::connect(format!("{host}:{port}"))
             .await
@@ -256,87 +346,6 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
         })
     }
 
-    fn framebuffer_dimensions(&self) -> (u32, u32) {
-        (self.image.width().into(), self.image.height().into())
-    }
-
-    fn get_rgba_frame(&self) -> &[u8] {
-        self.image.data()
-    }
-
-    async fn poll_events(&mut self) -> Result<bool> {
-        let (action, frame) = self.framed.read_pdu().await.context("read PDU")?;
-        let outputs = self
-            .active
-            .process(&mut self.image, action, &frame)
-            .context("process PDU")?;
-
-        let mut updated = false;
-        for output in outputs {
-            match output {
-                ActiveStageOutput::GraphicsUpdate(_) => updated = true,
-                ActiveStageOutput::ResponseFrame(frame) => {
-                    self.framed
-                        .write_all(&frame)
-                        .await
-                        .context("write response")?;
-                }
-                ActiveStageOutput::Terminate(_) => anyhow::bail!("RDP session terminated"),
-                _ => {}
-            }
-        }
-        Ok(updated)
-    }
-
-    async fn request_frame_update(&mut self, _incremental: bool) -> Result<()> {
-        // RDP is server-push; the server sends updates without explicit requests.
-        Ok(())
-    }
-
-    async fn inject_pointer(&mut self, x: u32, y: u32, button_mask: u32) -> Result<()> {
-        let mut flags = PointerFlags::MOVE;
-        if button_mask & 1 != 0 {
-            flags |= PointerFlags::LEFT_BUTTON | PointerFlags::DOWN;
-        }
-        if button_mask & 2 != 0 {
-            flags |= PointerFlags::RIGHT_BUTTON | PointerFlags::DOWN;
-        }
-        if button_mask & 4 != 0 {
-            flags |= PointerFlags::MIDDLE_BUTTON_OR_WHEEL | PointerFlags::DOWN;
-        }
-        let event = FastPathInputEvent::MouseEvent(MousePdu {
-            flags,
-            number_of_wheel_rotation_units: 0,
-            x_position: x as u16,
-            y_position: y as u16,
-        });
-        self.send_input_events(&[event]).await
-    }
-
-    async fn inject_key(&mut self, keysym: u32, pressed: bool) -> Result<()> {
-        let scancode = keysym_to_scancode(keysym);
-        let flags = if pressed {
-            KeyboardFlags::empty()
-        } else {
-            KeyboardFlags::RELEASE
-        };
-        let event = FastPathInputEvent::KeyboardEvent(flags, scancode);
-        self.send_input_events(&[event]).await
-    }
-
-    async fn stop(&mut self) -> Result<()> {
-        if let Ok(outputs) = self.active.graceful_shutdown() {
-            for output in outputs {
-                if let ActiveStageOutput::ResponseFrame(frame) = output {
-                    let _ = self.framed.write_all(&frame).await;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl RdpClient {
     async fn send_input_events(&mut self, events: &[FastPathInputEvent]) -> Result<()> {
         let outputs = self
             .active
