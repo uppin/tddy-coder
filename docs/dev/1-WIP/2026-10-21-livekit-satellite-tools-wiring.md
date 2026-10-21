@@ -145,10 +145,10 @@ graph LR
 
 ## Final Checklist
 
-- [ ] All `livekit_is_a_satellite` tests pass; the file has no `WIRING_WITH_A_LIBRARY`
-- [ ] `cargo tree -p tddy-tools -e normal,build | grep -ci livekit` prints 0
-- [ ] `grep -n 'features\]' packages/tddy-tools/Cargo.toml` finds nothing
-- [ ] the 35 moved suites pass in `tddy-tools-cli`, with `git diff -M` showing pure renames apart from any path fix-ups recorded here; the 19 library suites still pass in `tddy-tools`
+- [x] All `livekit_is_a_satellite` tests pass; the file has no `WIRING_WITH_A_LIBRARY`
+- [x] `cargo tree -p tddy-tools -e normal,build | grep -ci livekit` prints 0
+- [x] `grep -n 'features\]' packages/tddy-tools/Cargo.toml` finds nothing
+- [x] the 35 moved suites pass in `tddy-tools-cli`, with `git diff -M` showing pure renames apart from any path fix-ups recorded here; the 19 library suites still pass in `tddy-tools`
 - [ ] `./test -p tddy-sandbox-darwin` (or another cross-package suite) still finds `target/debug/tddy-tools` after `./test`'s prebuild
 - [ ] `./run-index-daemon`, `./claude-sandbox`, `./release` and `./web-dev --build` build `tddy-tools`
 
@@ -167,14 +167,14 @@ Every client binary is a wiring crate that binds `LiveKitRoomConnector` to a lib
 
 ## Scope
 
-- [ ] Re-parent the six binary-only modules into `tddy-tools`' `lib.rs` (`tddy_tools::` → `crate::` inside them)
-- [ ] `packages/tddy-tools-cli`: `Cargo.toml`, moved `src/main.rs` (its `mod` lines become `use tddy_tools::…`; `room_connector()` loses its `cfg` arms), and the 35 moved suites with their dev-dependencies
-- [ ] `tddy-tools` manifest: drop `[[bin]] tddy-tools`, `tddy-livekit`, `[features]`, and `main.rs`-only dependencies; keep `execute-tool-stdio-fixture`
-- [ ] `BUILD.yaml`: `package: tddy-tools-cli`; `srcs` cover both crates
-- [ ] Root `Cargo.toml` members; `Cargo.lock`
-- [ ] Scripts: `release:61`, `test:25`, `claude-sandbox:93`, `run-index-daemon:25,118,221,333`, `scripts/dev-runtime-binaries.sh:24`
-- [ ] Text: `packages/tddy-coder/src/run.rs:197`, `packages/tddy-tools/README.md:11,23`, `.agents/skills/darwin-sandbox/SKILL.md:67`, `docs/ft/coder/warm-code-intelligence-daemon.md:166`
-- [ ] Ratchet green (contract tests)
+- [x] Re-parent the six binary-only modules into `tddy-tools`' `lib.rs` (`tddy_tools::` → `crate::` inside them)
+- [x] `packages/tddy-tools-cli`: `Cargo.toml`, moved `src/main.rs` (its `mod` lines become `use tddy_tools::…`; `room_connector()` loses its `cfg` arms), and the 35 moved suites with their dev-dependencies
+- [x] `tddy-tools` manifest: drop `[[bin]] tddy-tools`, `tddy-livekit`, `[features]`, and `main.rs`-only dependencies; keep `execute-tool-stdio-fixture`
+- [x] `BUILD.yaml`: `package: tddy-tools-cli`; `srcs` cover both crates
+- [x] Root `Cargo.toml` members; `Cargo.lock`
+- [x] Scripts: `release:61`, `test:25`, `claude-sandbox:93`, `run-index-daemon:25,118,221,333`, `scripts/dev-runtime-binaries.sh:24`
+- [x] Text: `packages/tddy-coder/src/run.rs:197`, `packages/tddy-tools/README.md:11,23`, `.agents/skills/darwin-sandbox/SKILL.md:67`, `docs/ft/coder/warm-code-intelligence-daemon.md:166`
+- [x] Ratchet green (contract tests)
 
 ## Technical Changes
 
@@ -201,10 +201,10 @@ builds `tddy-tools`.
 As listed in Scope.
 
 ## Implementation Milestones
-- [ ] M1 Re-parent the six modules into the library (no behaviour change; `cargo test -p tddy-tools` green)
-- [ ] M2 `tddy-tools-cli` with the moved `main.rs`; library manifest trimmed; feature gone
-- [ ] M3 Move the 35 suites and their dev-dependencies
-- [ ] M4 Scripts, `BUILD.yaml` and text; ratchet green
+- [x] M1 Re-parent the six modules into the library (no behaviour change; `cargo test -p tddy-tools` green)
+- [x] M2 `tddy-tools-cli` with the moved `main.rs`; library manifest trimmed; feature gone
+- [x] M3 Move the 35 suites and their dev-dependencies
+- [x] M4 Scripts, `BUILD.yaml` and text; ratchet green
 
 **How the moves are made.** Use the restructure engine for the code moves (`move_module_to_crate` /
 `move_cluster_to_crate` for suites, the same-crate operations for the re-parent). `main.rs` is a
@@ -274,13 +274,13 @@ the rest.
 - [x] Run acceptance tests (verify they fail): 3 passed, 3 failed, each failure list naming `tddy-tools` beside 14/15's two crates
 - [ ] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests (none beyond the ratchet: this node adds no production surface)
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped)
+- [x] Linting and formatting (scoped)
 - [ ] Wrap documentation (/wrap-context-docs)
 - [ ] USER REVIEW — work complete

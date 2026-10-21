@@ -90,7 +90,7 @@ echo "=== claude binary: $CLAUDE_BIN ===" >&2
 # toolchain; the built binary runs on the host afterward (so it inherits `claude` on PATH).
 if [ "$DO_BUILD" -eq 1 ]; then
   echo "=== building tddy-sandbox-app + tddy-tools + tddy-sandbox-runner ($PROFILE) ===" >&2
-  cargo_flags=(--manifest-path "$ROOT/Cargo.toml" -p tddy-sandbox-app -p tddy-tools -p tddy-sandbox-runner)
+  cargo_flags=(--manifest-path "$ROOT/Cargo.toml" -p tddy-sandbox-app -p tddy-tools-cli -p tddy-sandbox-runner)
   [ "$PROFILE" = "release" ] && cargo_flags+=(--release)
   nix develop "$ROOT" --profile "$ROOT/.nix-profile" -c cargo build "${cargo_flags[@]}"
 fi

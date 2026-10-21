@@ -8,7 +8,7 @@ an `rmcp` MCP server over stdio that routes every tool a session can call.
 
 ### Build
 ```bash
-cargo build -p tddy-tools
+cargo build -p tddy-tools-cli   # builds the `tddy-tools` binary
 ```
 
 ### Run
@@ -20,13 +20,15 @@ tddy-tools list-schemas
 
 ### Test
 ```bash
-cargo test -p tddy-tools
+cargo test -p tddy-tools       # the library
+cargo test -p tddy-tools-cli   # the suites that run the binary
 ```
 
 ## Architecture
 
-`main.rs` parses arguments and dispatches; `server.rs` is the MCP server. Almost nothing else is
-implemented here. Each subcommand's logic lives in the crate that owns its domain —
+The binary's `main.rs`, in `tddy-tools-cli`, parses arguments and dispatches; `server.rs` is the MCP
+server. Almost nothing else is implemented here. Each subcommand's logic lives in the crate that
+owns its domain —
 `tddy_bsp::build_cli`, `tddy_code_analysis::analyze_cli`,
 `tddy_code_restructuring::restructure_cli`, `tddy_workflow_recipes::schema`,
 `tddy_core::toolcall::client` — and each MCP tool's implementation likewise, in

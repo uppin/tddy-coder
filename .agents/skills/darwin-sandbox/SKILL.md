@@ -64,7 +64,7 @@ sandbox-exec -f /path/to/rendered.sb /bin/echo hi
 
 ```bash
 ./dev cargo test -p tddy-sandbox-darwin
-./dev cargo test -p tddy-tools --test sandbox_runner_acceptance --test sandbox_runner_behavior_acceptance
+./dev cargo test -p tddy-sandbox-darwin --test sandbox_runner_acceptance --test sandbox_runner_behavior_acceptance
 ./dev cargo test -p tddy-daemon --test sandbox_behavior_acceptance --test sandboxed_claude_cli_acceptance --test sandboxed_session_lifecycle_acceptance
 ```
 

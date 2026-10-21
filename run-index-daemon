@@ -22,7 +22,7 @@
 #
 # To use it:
 #   eval $(./run-index-daemon | grep '^export ')
-#   cargo run -p tddy-tools -- restructure check plan.jsonl
+#   cargo run -p tddy-tools-cli -- restructure check plan.jsonl
 #
 # Everything else — what it did, where the log is, how to stop it — goes to stderr, so the eval
 # above sees exactly one assignment.
@@ -115,7 +115,7 @@ TOOLS_BINARY="$(dirname "$BINARY")/tddy-tools"
 # and saying otherwise would send a caller to start a daemon that is already there.
 warm_checkout() {
   if [[ ! -x "$TOOLS_BINARY" ]]; then
-    narrate "Not warming: ${TOOLS_BINARY} is not an executable file (build it: cargo build -p tddy-tools)."
+    narrate "Not warming: ${TOOLS_BINARY} is not an executable file (build it: cargo build -p tddy-tools-cli)."
     return 0
   fi
   narrate "Warming ${ROOT_DIR}: loading its crate graph (minutes on a cold start; --no-warm skips this)"
@@ -218,7 +218,7 @@ announce() {
   narrate ""
   narrate "To run against it:"
   narrate "  eval \$(./run-index-daemon | grep '^export ')"
-  narrate "  cargo run -p tddy-tools -- restructure check plan.jsonl"
+  narrate "  cargo run -p tddy-tools-cli -- restructure check plan.jsonl"
   narrate ""
   echo "export TDDY_INDEX_SOCKET=${SOCKET}"
 }
@@ -330,7 +330,7 @@ if [[ -n "$PREBUILT_BINARY" ]]; then
 else
   # The client is built with the daemon only when it will be used, so `--no-warm` costs what it did.
   BUILD_PACKAGES=(-p tddy-index-daemon)
-  [[ "$WARM" == 1 ]] && BUILD_PACKAGES+=(-p tddy-tools)
+  [[ "$WARM" == 1 ]] && BUILD_PACKAGES+=(-p tddy-tools-cli)
   narrate "Building: ${BUILD_PACKAGES[*]}"
   record_start "build-daemon" "nix" "-" develop --profile ./.nix-profile -c cargo build "${BUILD_PACKAGES[@]}"
   if nix develop --profile ./.nix-profile -c cargo build "${BUILD_PACKAGES[@]}" >&2; then
