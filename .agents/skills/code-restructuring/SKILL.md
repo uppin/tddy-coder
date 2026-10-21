@@ -7,7 +7,7 @@ description: Restructure Rust code without writing moved code by hand — split 
 
 **You never write the moved or extracted code.** You write a plan of *intents*. `tddy-tools restructure` resolves each intent through rust-analyzer (via `tddy-lsp`).
 
-**v1 scope:** Rust only — twenty-six operations, ten subcommands. No TypeScript.
+**v1 scope:** Rust only — twenty-seven operations, ten subcommands. No TypeScript.
 
 ## CLI
 
@@ -64,7 +64,8 @@ record's.
 3. **Understand shape** — LSP outline, references, cohesion; write `docs/dev/1-WIP/{slug}-initial-discovery.md`.
    Decide which operation each seam needs: items into a module of the same crate is `move_item`, a module
    under another parent is `reparent_module`, a cut inside one file is `extract_module`, members of
-   one type's `impl` into another type of the same crate is `retarget_impl`, and a file or module whose
+   one type's `impl` into another type of the same crate is `retarget_impl`, members of one type's `impl`
+   into another module of the same crate (a new `impl` of the same type there) is `move_impl_members`, and a file or module whose
    paths go through a `pub use` facade of another crate (a `crate::<facade>::…` that must be named by
    the crate that defines it) is `repoint_facade_imports`; see
    [Gathering a topic module](#gathering-a-topic-module). A method body that must leave a type that

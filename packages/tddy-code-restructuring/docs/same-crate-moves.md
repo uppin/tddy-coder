@@ -65,6 +65,11 @@ where each of those files lands under a new directory (`MovedFile { from, to, be
 (`module_reparent/relocation.rs`) and the cross-crate moves (`Move::carried`) both call it. It is read
 from the workspace, so an earlier operation's pending edits are seen.
 
+`move_impl_members`, the third same-crate operation, moves members of an `impl` rather than items of a
+module and has its own page: [impl-move.md](impl-move.md). It shares `item_move`'s imports, placement,
+creation, rebase and member widening, and is folded into the same `check` and `resolve_opening` arms
+(`same_crate_dispatch.rs`).
+
 ## Emptied directories
 
 `apply::remove_emptied_directories` runs at the end of `apply_workspace_edit` over the `from` of every

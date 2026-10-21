@@ -52,7 +52,11 @@ pub(crate) struct ReachedMember {
 /// The edits that widen the members, and the report of every widening.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct MemberWidening {
+    /// The edits to the file the members were read from (the origin, for a member move).
     pub(crate) edits: Vec<Edit>,
+    /// The edits to other files, by path: a member an ancestor module of the origin holds, which a
+    /// member move widens for a destination outside that module. `item_move` has none.
+    pub(crate) other_files: BTreeMap<String, Vec<Edit>>,
     pub(crate) report: Vec<VisibilityChange>,
 }
 

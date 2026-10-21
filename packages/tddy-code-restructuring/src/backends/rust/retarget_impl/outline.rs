@@ -14,47 +14,60 @@ use crate::edit::Range;
 use crate::Result;
 
 /// One member of an `impl`, with what the operation needs about it.
-pub(super) struct Member {
-    pub(super) name: String,
+pub(in crate::backends::rust) struct Member {
+    pub(in crate::backends::rust) name: String,
     /// Where the server reports the member's name, which is where a reference query asks about it.
-    pub(super) position: Value,
+    pub(in crate::backends::rust) position: Value,
     /// The one-based first line of the member, its attached trivia (docs, attributes, comments)
     /// included.
-    pub(super) first_line: u32,
+    pub(in crate::backends::rust) first_line: u32,
     /// The one-based last line of the member.
-    pub(super) last_line: u32,
+    pub(in crate::backends::rust) last_line: u32,
 }
 
 /// The `impl` an anchor lands in, its members, and which run of them moves.
-pub(super) struct Run {
-    pub(super) members: Vec<Member>,
+pub(in crate::backends::rust) struct Run {
+    pub(in crate::backends::rust) members: Vec<Member>,
     /// The index of the first moved member.
-    pub(super) first_moved: usize,
+    pub(in crate::backends::rust) first_moved: usize,
     /// One past the index of the last moved member.
-    pub(super) moved_end: usize,
+    pub(in crate::backends::rust) moved_end: usize,
     /// The `impl`'s self type as the outline names it: `Host` of `impl<T> Host<T>`.
-    pub(super) self_type: String,
+    pub(in crate::backends::rust) self_type: String,
     /// The one-based line the `impl` keyword is on.
-    pub(super) header_line: u32,
+    pub(in crate::backends::rust) header_line: u32,
     /// The one-based line the closing `}` is on.
-    pub(super) close_line: u32,
+    pub(in crate::backends::rust) close_line: u32,
 }
 
 impl Run {
     /// The members the anchor moves.
-    pub(super) fn moved(&self) -> &[Member] {
+    pub(in crate::backends::rust) fn moved(&self) -> &[Member] {
         &self.members[self.first_moved..self.moved_end]
     }
 
     /// Whether the run is every member of the block, so the self type alone changes.
-    pub(super) fn whole_block(&self) -> bool {
+    pub(in crate::backends::rust) fn whole_block(&self) -> bool {
         self.first_moved == 0 && self.moved_end == self.members.len()
     }
 }
 
+/// The operation a run is read for. The refusals that name the operation differ between them; the
+/// rest of the reading is the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::backends::rust) enum Operation {
+    RetargetImpl,
+    MoveImplMembers,
+}
+
 /// The `impl` block `range` lands in and the run of members it moves, or the refusal for why none
 /// can be.
-pub(super) fn read(symbols: &Value, text: &str, range: Range) -> Result<Run> {
+pub(in crate::backends::rust) fn read(
+    symbols: &Value,
+    text: &str,
+    range: Range,
+    operation: Operation,
+) -> Result<Run> {
     let overlapping: Vec<&Value> = symbols
         .as_array()
         .into_iter()
@@ -69,14 +82,25 @@ pub(super) fn read(symbols: &Value, text: &str, range: Range) -> Result<Run> {
              `impl`",
             range.start.line, range.end.line
         ))),
-        [one] => block(one, text, range),
-        many => Err(seam_refusal(format!(
-            "the members anchored sit in more than one `impl` block ({} of them): a retarget changes \
-             one block's self type, and one operation cannot change {}",
-            many.len(),
-            many.len()
-        ))),
+        [one] => {
+            refuse_a_trait_impl(one, operation)?;
+            block(one, text, range)
+        }
+        many => Err(seam_refusal(two_blocks_reason(operation, many.len()))),
     }
+}
+
+/// S1: the members anchored sit in more than one block, which one operation cannot change.
+fn two_blocks_reason(operation: Operation, count: usize) -> String {
+    let change = match operation {
+        Operation::RetargetImpl => {
+            "a retarget changes one block's self type, and one operation cannot change"
+        }
+        Operation::MoveImplMembers => {
+            "a member move takes one run from one block, and one operation cannot take from"
+        }
+    };
+    format!("the members anchored sit in more than one `impl` block ({count} of them): {change} {count}")
 }
 
 /// The members of one `impl` block, and which run of them `range` moves.
@@ -133,6 +157,28 @@ fn refuse_a_cut_member(members: &[Member], moved: &[usize], range: Range) -> Res
         }
     }
     Ok(())
+}
+
+/// S3: a member move cannot take a member of a trait `impl`, which moves whole with `move_item`.
+fn refuse_a_trait_impl(impl_node: &Value, operation: Operation) -> Result<()> {
+    let label = label_of(impl_node);
+    match operation {
+        Operation::MoveImplMembers if is_trait_impl(&label) => Err(seam_refusal(format!(
+            "`{label}` is a member of a trait `impl`, and a trait `impl` moves whole with `move_item`"
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// Whether an `impl` label names a trait: `impl Display for Host`, not `impl<T> Host<T>`.
+fn is_trait_impl(label: &str) -> bool {
+    let rest = label.strip_prefix("impl").unwrap_or(label).trim_start();
+    let rest = if rest.starts_with('<') {
+        after_generics(rest).unwrap_or(rest)
+    } else {
+        rest
+    };
+    rest.contains(" for ")
 }
 
 /// One outline child as a member, when it carries the name and range a member needs.
@@ -238,7 +284,7 @@ mod tests {
             end: crate::edit::Position { line: 7, col: 1 },
         };
 
-        let refused = read(&symbols, "", range);
+        let refused = read(&symbols, "", range, Operation::RetargetImpl);
 
         assert!(refused
             .map(|_| ())

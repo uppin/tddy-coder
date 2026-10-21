@@ -255,6 +255,16 @@ pub(super) fn visibilities(
         landing.written.push((item.name.clone(), written));
     }
 
+    widen_reached_items(moving, source, destination, &mut landing)?;
+    Ok(landing)
+}
+
+fn widen_reached_items(
+    moving: &Moving<'_>,
+    source: &[String],
+    destination: &[String],
+    landing: &mut Landing,
+) -> Result<()> {
     for item in &moving.reached.items {
         let written = read_scope(item, source)?;
         let widened = written.clone().widened_to(destination);
@@ -273,7 +283,7 @@ pub(super) fn visibilities(
             });
         }
     }
-    Ok(landing)
+    Ok(())
 }
 
 /// The modules that name the item from outside the lines that move, or `None` when a file outside

@@ -23,16 +23,16 @@ use crate::crate_move::use_group::split_use;
 use crate::crate_move::use_group::use_statements;
 
 /// The source module, as the code being moved sees it.
-pub(super) struct Source<'a> {
-    pub(super) text: &'a str,
-    pub(super) scope: Range<usize>,
-    pub(super) module: &'a [String],
+pub(in crate::backends::rust) struct Source<'a> {
+    pub(in crate::backends::rust) text: &'a str,
+    pub(in crate::backends::rust) scope: Range<usize>,
+    pub(in crate::backends::rust) module: &'a [String],
     /// How the source module is named from the crate root: `crate::pairing`.
-    pub(super) qualifier: &'a str,
+    pub(in crate::backends::rust) qualifier: &'a str,
 }
 
 /// The `use` items to write into the destination.
-pub(super) fn needed(
+pub(in crate::backends::rust) fn needed(
     source: &Source<'_>,
     taken: &BTreeSet<String>,
     left_behind_named: &[String],

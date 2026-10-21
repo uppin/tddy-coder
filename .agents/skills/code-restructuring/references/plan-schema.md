@@ -129,6 +129,7 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 | `move_item` | `items` anchor (or one `item` anchor) over whole module-level items of one file | `to` (the destination module; with `name`, its parent), `name` (creates the destination), `reexport` = `glob` \| `named` \| `none` \| `outside` | — | ✅ |
 | `reparent_module` | `items` anchor on the module's `mod` declaration | `to` (the new parent), `reexport` = `glob` \| `none` \| `outside` | — | ✅ |
 | `retarget_impl` | `item` anchor on `<Type>` (or `<Type>#N`), or `items`/`item` on members `c::m::Type::member` of one inherent `impl` | `to_type` (the new self type); `variant` = `leave_delegator` with `expr` (the receiver the delegators forward through) | — | ✅ |
+| `move_impl_members` | `items` anchor on members `c::m::Type::member` of one inherent `impl`, contiguous (or one `item` on a single member) | `to` (the destination module; with `name`, its parent), `name` (creates the destination) | — | ✅ |
 | `read_fields_through` | `range`, or `item` with a relative range, inside a method with a `self` receiver | `name` (the new binding), `expr` (its value; `self`, `&*self` or `&mut *self` select self mode) | — | ✅ |
 | `extract_trait` | range at the `impl` keyword | `name` | — | ✅ |
 | `inline_method` | symbol | — | — | ✅ |
@@ -297,6 +298,27 @@ attributes and respells its visibility only as far as the callers need, re-point
 the module, and rebases the relative paths inside the moved files (`super::x`, `use super::*;`) so
 they reach what they reached. Files in the module's directory that no declaration reaches stay behind,
 and the directories the move empties stay on disk.
+
+### `move_impl_members`
+
+```jsonl
+{"op":"move_impl_members","anchor":{"kind":"items","file":"src/host.rs","items":["app::host::Host::put","app::host::Host::last"],"fingerprints":["sha256:…","sha256:…"]},"to":"app::roster"}
+{"op":"move_impl_members","anchor":{"kind":"items","file":"src/backends/rust.rs","items":["app::backends::rust::Backend::start","app::backends::rust::Backend::request"],"fingerprints":["sha256:…","sha256:…"]},"name":"transport","to":"app::backends::rust"}
+```
+
+| Field | Meaning |
+|---|---|
+| `anchor` | An `items` anchor on members `c::m::Type::member` of **one inherent** `impl`, contiguous, or one `item` anchor on a single member. A `range` or `symbol` anchor, an `item` anchor on `<Type>` (that is `move_item`) and `<T as Trait>::m` are refused |
+| `to` | Required: the destination module, rooted at the package name, in the **same crate**. With `name`, its parent |
+| `name` | Creates the module `name` in `to` before the members land |
+
+Every other field (`reexport`, `canonical_paths`, `to_type`, `to_file`, `also`, `variant`, `expr`, `callee`,
+`type`, `order`, `with_private_deps`) is refused before a server starts. The members are cut byte for byte and
+join the destination's one token-equal inherent `impl`, or open a new block; the origin block is removed when
+the run empties it. Imports the moved text needs are written in the destination, and each private item the
+split puts out of reach is widened as little as it needs and reported. No caller is edited. Refused by
+`check --deep` and `apply`: members in two blocks, a cut member, a trait-impl member, a non-member item in the
+run, and a name the destination binds to a different item.
 
 ### `retarget_impl`
 

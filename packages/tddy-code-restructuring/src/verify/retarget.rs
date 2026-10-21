@@ -418,6 +418,52 @@ fn repeated_headers(
     }
 }
 
+/// R4, repeated generic headers: a member move that opens a new block repeats the `impl` header of
+/// the block it leaves — `impl<T> Host<T>`, its `where` clause and predicate lines are statements
+/// `verify` reads. Needs no declaration, because the repeat is a whole header the ref already holds:
+/// for each generic header group of `before`, a gained copy of **every** line of it (the `impl<…>`
+/// line, the `where`, each predicate) is excused, once per copy. A gained `where` or predicate with
+/// no whole header beside it, and a header the ref does not have, stay reported.
+pub(crate) fn repeated_generic_headers(
+    missing: Vec<String>,
+    added: Vec<String>,
+    before: &[String],
+) -> Passed {
+    let mut added = added;
+    let mut pairs = 0;
+    for group in header_groups(before)
+        .into_iter()
+        .filter(|group| statements::strip_visibility(&group[0]).starts_with("impl<"))
+    {
+        while let Some(positions) = positions_of(&added, &group) {
+            for at in positions.into_iter().rev() {
+                added.remove(at);
+            }
+            pairs += group.len();
+        }
+    }
+    Passed {
+        missing,
+        added,
+        pairs,
+    }
+}
+
+/// The index in `added` of one copy of each line of `group` (a line twice in the group takes two),
+/// when `added` holds every one.
+fn positions_of(added: &[String], group: &[String]) -> Option<Vec<usize>> {
+    let mut taken: Vec<usize> = Vec::new();
+    for line in group {
+        let at = added
+            .iter()
+            .enumerate()
+            .position(|(at, candidate)| candidate == line && !taken.contains(&at))?;
+        taken.push(at);
+    }
+    taken.sort_unstable();
+    Some(taken)
+}
+
 /// The inherent `impl` header groups among `statements`, in source order: a line that opens a
 /// header, then its `where` and each predicate line (one ending with a comma).
 fn header_groups(statements: &[String]) -> Vec<Vec<String>> {
