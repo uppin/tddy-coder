@@ -1319,7 +1319,7 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_header_is_restated_with_the_hash_and_time_the_file_holds_now() {
+    fn a_v2_header_is_restated_with_the_hash_the_file_holds_now() {
         // Given a v2 plan hinting at one file, and that file's content
         let workspace = tempfile::tempdir().unwrap();
         std::fs::write(workspace.path().join("lib.rs"), "pub struct A;\n").unwrap();
@@ -1347,6 +1347,55 @@ mod tests {
         );
         assert_eq!(plan.drifted_hints(workspace.path()), vec!["lib.rs"]);
         assert_eq!(reread.drifted_hints(workspace.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_v2_header_naming_a_deleted_file_is_restated_as_the_empty_hash_not_refused() {
+        // Given a v2 plan hinting at a file the author has since deleted
+        let workspace = tempfile::tempdir().unwrap();
+        let plan = Plan {
+            version: 2,
+            snapshot: BTreeMap::new(),
+            files: BTreeMap::from([(
+                "gone.rs".to_string(),
+                FileHint {
+                    sha256: "sha256:stale".to_string(),
+                },
+            )]),
+            ops: vec![],
+        };
+
+        // When its header is rehashed — `snapshot` restating the header, as a v1 one already is
+        let header = plan.rehashed_header(workspace.path()).unwrap();
+
+        // Then the hint is the empty file's hash: a hint never refuses, so a deleted file is drift
+        // for the report to name, not an error that stops the rewrite
+        let reread = Plan::parse(&header).unwrap();
+        assert_eq!(
+            reread.files["gone.rs"].sha256,
+            crate::apply::hash_file(&workspace.path().join("gone.rs")).unwrap()
+        );
+        assert_eq!(reread.drifted_hints(workspace.path()), vec!["gone.rs"]);
+    }
+
+    #[test]
+    fn a_header_is_not_written_for_an_item_anchor_on_a_missing_file() {
+        // Given a plan of bare operations whose item anchor names a file the tree does not hold
+        let workspace = tempfile::tempdir().unwrap();
+        let plan = Plan::parse_headerless(concat!(
+            r#"{"op":"extract_module","anchor":{"kind":"items","file":"src/absent.rs","#,
+            r#""items":["demo::foo"],"fingerprints":["sha256:aa"]},"name":"grouped"}"#
+        ))
+        .unwrap();
+
+        // When its header is written
+        let refused = plan.header_for_anchored_files(workspace.path());
+
+        // Then it is refused naming the file: `hint_of` hashing a missing file as empty never
+        // reaches a header the author is writing for the first time
+        assert!(refused
+            .err()
+            .is_some_and(|error| error.to_string().contains("src/absent.rs is not a file")));
     }
 
     #[test]
