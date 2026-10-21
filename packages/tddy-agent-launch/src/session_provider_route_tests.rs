@@ -15,11 +15,14 @@ use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
 use tddy_rpc::Code;
 use tddy_service::proto::session::StartSessionRequest;
 
+use crate::cli_route_launch::{resume_cli_route, start_cli_route};
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::session_provider_route::{
     pty_route_env, refuse_route_in_sandbox, resolve_session_route, resume_route_env,
     route_sources_on_resume, session_route_sources, start_route,
 };
+use std::os::unix::fs::PermissionsExt;
+use tddy_core::cli_harness::cli_harness;
 use tddy_core::{
     read_session_provider_account, write_session_provider_account, SessionProviderAccount,
     SESSION_PROVIDER_ACCOUNT_FILENAME,
@@ -437,5 +440,182 @@ fn a_claude_cli_start_on_its_vendor_creates_its_session_dir_with_no_record() {
     assert_eq!(
         read_session_provider_account(&session_dir).expect("absent reads"),
         None
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A CLI harness that routes through files and arguments (OpenCode)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_opencode_start_on_a_meta_account_writes_its_config_and_launches_with_it() {
+    // Given Ada holds her Meta account, and OpenCode's session directory is empty
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let session_dir = tempfile::tempdir().expect("a session directory");
+    let opencode = cli_harness("opencode-cli").expect("registered");
+
+    // When an opencode-cli start chooses the account
+    let launch = start_cli_route(
+        &access,
+        opencode,
+        &on_account("meta-hackathon"),
+        "muse-wonder-1.0",
+        session_dir.path(),
+    )
+    .expect("the route resolves")
+    .expect("a route, not the vendor");
+
+    // Then opencode.json is in the session directory, owner-only, and OPENCODE_CONFIG names it
+    let config = session_dir.path().join("opencode.json");
+    let mode = std::fs::metadata(&config)
+        .expect("written")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+    assert_eq!(
+        value_of(&launch.env, "OPENCODE_CONFIG"),
+        Some(config.to_str().expect("utf-8"))
+    );
+    // And the key is in the child's environment and nowhere on disk
+    assert_eq!(
+        value_of(&launch.env, "TDDY_OPENCODE_PROVIDER_KEY"),
+        Some(META_KEY)
+    );
+    assert!(!std::fs::read_to_string(&config)
+        .expect("readable")
+        .contains(META_KEY));
+    // And the model is selected on the generated provider
+    assert_eq!(launch.args, vec!["--model", "tddy-route/muse-wonder-1.0"]);
+}
+
+#[test]
+fn an_opencode_start_that_chooses_nothing_writes_nothing_and_records_nothing() {
+    // Given
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let session_dir = tempfile::tempdir().expect("a session directory");
+    let opencode = cli_harness("opencode-cli").expect("registered");
+
+    // When
+    let launch = start_cli_route(
+        &access,
+        opencode,
+        &RouteSources::default(),
+        "anthropic/claude-sonnet-4",
+        session_dir.path(),
+    )
+    .expect("no choice is not an error");
+
+    // Then OpenCode runs on the person's own setup
+    assert_eq!(launch, None);
+    assert_eq!(
+        std::fs::read_dir(session_dir.path()).expect("dir").count(),
+        0
+    );
+}
+
+#[test]
+fn an_opencode_start_records_its_account_and_model_but_never_its_key() {
+    // Given
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let session_dir = tempfile::tempdir().expect("a session directory");
+    let opencode = cli_harness("opencode-cli").expect("registered");
+
+    // When
+    start_cli_route(
+        &access,
+        opencode,
+        &on_account("meta-hackathon"),
+        "muse-wonder-1.0",
+        session_dir.path(),
+    )
+    .expect("the route resolves");
+
+    // Then
+    assert_eq!(
+        read_session_provider_account(session_dir.path()).expect("readable"),
+        Some(SessionProviderAccount {
+            account_id: "meta-hackathon".to_string(),
+            model: "muse-wonder-1.0".to_string(),
+        })
+    );
+    let record =
+        std::fs::read_to_string(session_dir.path().join(SESSION_PROVIDER_ACCOUNT_FILENAME))
+            .expect("the record");
+    assert!(!record.contains(META_KEY));
+}
+
+#[test]
+fn an_opencode_start_on_an_account_that_serves_neither_openai_protocol_is_refused() {
+    // Given an account that serves only Anthropic Messages
+    let anthropic = preset("anthropic-compatible").expect("the anthropic-compatible preset");
+    let account = ProviderAccount {
+        account: AccountId::new("anthropic-direct"),
+        preset: anthropic,
+        label: "Anthropic".to_string(),
+        endpoints: endpoints_for(anthropic, Some("https://llm.example.com"), None)
+            .expect("anthropic endpoints"),
+        api_key: SecretString::new("an-anthropic-key"),
+    };
+    let (_dir, access) = a_daemon_where_ada_holds(&[account], true);
+    let session_dir = tempfile::tempdir().expect("a session directory");
+    let opencode = cli_harness("opencode-cli").expect("registered");
+
+    // When
+    let refusal = start_cli_route(
+        &access,
+        opencode,
+        &on_account("anthropic-direct"),
+        "claude-sonnet-4",
+        session_dir.path(),
+    )
+    .expect_err("the harness cannot run on the account");
+
+    // Then it is refused before anything is written
+    assert_eq!(refusal.code(), Code::InvalidArgument);
+    assert_eq!(
+        std::fs::read_dir(session_dir.path()).expect("dir").count(),
+        0
+    );
+}
+
+#[test]
+fn a_resumed_opencode_session_regenerates_its_config_from_the_vault_as_it_stands() {
+    // Given a session recorded on the Meta account
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let session_dir = tempfile::tempdir().expect("a session directory");
+    write_session_provider_account(
+        session_dir.path(),
+        &SessionProviderAccount {
+            account_id: "meta-hackathon".to_string(),
+            model: "muse-wonder-1.0".to_string(),
+        },
+    )
+    .expect("recorded at start");
+    let opencode = cli_harness("opencode-cli").expect("registered");
+
+    // When it resumes
+    let launch = resume_cli_route(&access, opencode, session_dir.path()).expect("re-resolved");
+
+    // Then the config is written again and the key comes from the vault
+    assert!(session_dir.path().join("opencode.json").is_file());
+    assert_eq!(
+        value_of(&launch.env, "TDDY_OPENCODE_PROVIDER_KEY"),
+        Some(META_KEY)
+    );
+    assert_eq!(launch.args, vec!["--model", "tddy-route/muse-wonder-1.0"]);
+}
+
+#[test]
+fn a_resumed_opencode_session_on_its_own_setup_gets_no_route() {
+    // Given a session directory with no account record
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let session_dir = tempfile::tempdir().expect("a session directory");
+    let opencode = cli_harness("opencode-cli").expect("registered");
+
+    // When / Then
+    assert_eq!(
+        resume_cli_route(&access, opencode, session_dir.path()).expect("no record"),
+        crate::cli_route_launch::CliRouteLaunch::default()
     );
 }

@@ -97,4 +97,32 @@ describe("CreateSessionPane — OpenCode terminal sessions", () => {
       expect(calls[0].model).to.eq("openai/gpt-5.6");
     });
   });
+
+  it("offers Create Remote Branch for a new OpenCode branch, unchecked", () => {
+    mountWith(aBackend());
+    byTestId(TEST_IDS.createSessionTypeOpenCodeCliBtn).click();
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+
+    byTestId(TEST_IDS.createSessionNewBranchNameInput).type("feature/opencode");
+
+    byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle).should("not.be.checked");
+  });
+
+  it("sends createRemoteBranch = true for an opencode-cli session when the toggle is checked", () => {
+    const backend = aBackend();
+    mountWith(backend);
+    byTestId(TEST_IDS.createSessionTypeOpenCodeCliBtn).click();
+    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
+
+    byTestId(TEST_IDS.createSessionNewBranchNameInput).type("feature/opencode");
+    byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle).check();
+    byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
+
+    cy.wrap(null).should(() => {
+      const calls = backend.callsTo(SessionService.method.startSession);
+      expect(calls).to.have.length(1);
+      expect(calls[0].sessionType).to.eq("opencode-cli");
+      expect(calls[0].createRemoteBranch).to.eq(true);
+    });
+  });
 });
