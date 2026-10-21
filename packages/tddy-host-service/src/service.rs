@@ -117,6 +117,131 @@ impl HostService for HostServiceImpl {
         &self,
         request: Request<ListEligibleDaemonsRequest>,
     ) -> Result<Response<ListEligibleDaemonsResponse>, Status> {
+        self.list_eligible_daemons_impl(request).await
+    }
+
+    /// Every host this daemon has a record of, live or not.
+    ///
+    /// `ListEligibleDaemons` answers "who can I route to now" and forgets a host the moment it
+    /// leaves the room. This answers "what machines does tddy know about", which is what an operator
+    /// staring at an unreachable host needs. Liveness is resolved per call, by intersecting the
+    /// durable registry with the live roster — never read from disk.
+    ///
+    /// The join itself belongs to [`crate::host_registry::HostRegistry::known_hosts`], including
+    /// the guarantee that the serving daemon always has a row: doing half of it here as well would
+    /// leave the invariant provable only against a double that behaves like neither store.
+    async fn list_known_hosts(
+        &self,
+        request: Request<ListKnownHostsRequest>,
+    ) -> Result<Response<ListKnownHostsResponse>, Status> {
+        self.list_known_hosts_impl(request).await
+    }
+
+    /// What a host has installed and configured.
+    ///
+    /// Addressed by `daemon_instance_id`; the existing peer routing relays it so the probes run on
+    /// that host, as that host's OS user. Both facts are per-user — `git config` reads
+    /// `$HOME/.gitconfig`, `gh auth status` reads `$HOME/.config/gh/hosts.yml` — so running them as
+    /// the daemon's own user would answer for the wrong account.
+    ///
+    /// Routed **before** the caller is authenticated, like the roster RPCs and
+    /// [`Self::resolve_stack_base`]: the token is verified by the daemon that serves the call, and
+    /// a peer's user mapping is not this one's to judge. Authenticating first would refuse an
+    /// operator whose GitHub user maps to an OS user on the host being probed but not on whichever
+    /// host their browser happens to be talking to.
+    async fn get_host_tooling(
+        &self,
+        request: Request<GetHostToolingRequest>,
+    ) -> Result<Response<GetHostToolingResponse>, Status> {
+        self.get_host_tooling_impl(request).await
+    }
+
+    /// Questions this host is waiting on an operator to answer.
+    ///
+    /// ⚠ The stream is silent almost all the time, so the sampling task **must** select on
+    /// `tx.closed()` as well as breaking on a send error — see [`MpscHostPromptStream`]. The
+    /// regression test for it is `packages/tddy-daemon/tests/stream_host_prompts_rpc.rs`.
+    async fn stream_host_prompts(
+        &self,
+        request: Request<StreamHostPromptsRequest>,
+    ) -> Result<Response<Self::StreamHostPromptsStream>, Status> {
+        self.stream_host_prompts_impl(request).await
+    }
+
+    /// Submit the encrypted answer to a pending prompt.
+    ///
+    /// The request carries ciphertext only; the plaintext exists in this process for the duration of
+    /// the unlock and is never persisted or logged.
+    async fn answer_host_prompt(
+        &self,
+        request: Request<AnswerHostPromptRequest>,
+    ) -> Result<Response<AnswerHostPromptResponse>, Status> {
+        self.answer_host_prompt_impl(request).await
+    }
+
+    /// Load a private key into this host's ssh-agent.
+    ///
+    /// This is the call that raises a passphrase prompt: it issues one, waits for the answer to
+    /// arrive on `AnswerHostPrompt`, decrypts it with this host's private key, unlocks the key at
+    /// `subject`, hands the identity to the agent and drops the plaintext. It returns only once the
+    /// add has succeeded or failed, so the browser learns the outcome from the call it started.
+    ///
+    /// Nothing about the answer — decrypted or not — is logged here at any level.
+    async fn add_host_key(
+        &self,
+        request: Request<AddHostKeyRequest>,
+    ) -> Result<Response<AddHostKeyResponse>, Status> {
+        self.add_host_key_impl(request).await
+    }
+
+    /// The private keys this host's operator could load into their agent.
+    ///
+    /// What makes the key field on the Hosts row a picker instead of a typed path. Every path it
+    /// offers is a path [`add_host_key`](Self::add_host_key) will accept: the same OS user, the
+    /// same home, the same confinement — a listing whose choices the add then refused would be
+    /// worse than no listing.
+    ///
+    /// Routed like the add for the same reason: the keys are files on one machine.
+    ///
+    /// Says nothing about what is on disk beyond the keys themselves — see
+    /// [`crate::host_private_key::list_key_candidates`] for why an absent `~/.ssh`, an unreadable
+    /// one and an empty one are one answer.
+    async fn list_host_key_candidates(
+        &self,
+        request: Request<ListHostKeyCandidatesRequest>,
+    ) -> Result<Response<ListHostKeyCandidatesResponse>, Status> {
+        self.list_host_key_candidates_impl(request).await
+    }
+
+    /// Explicit OpenSSH `Host` aliases in this OS user's `~/.ssh/config`.
+    ///
+    /// Routed like [`Self::list_host_key_candidates`]: the file is on one machine. Honesty is the
+    /// opposite of that listing: unreadable is FAILED, not empty.
+    async fn list_ssh_config_hosts(
+        &self,
+        request: Request<ListSshConfigHostsRequest>,
+    ) -> Result<Response<ListSshConfigHostsResponse>, Status> {
+        self.list_ssh_config_hosts_impl(request).await
+    }
+
+    /// Stream host telemetry for the selected daemon. Authenticates `session_token`, then spawns a
+    /// sampling task that emits one `HostStatsEvent` immediately (both CPU and disk), then refreshes
+    /// CPU and disk on two independent cadences, pushing an event carrying the latest CPU and disk
+    /// snapshot on each tick. The task ends when the receiver is dropped (client unsubscribe).
+    async fn stream_host_stats(
+        &self,
+        request: Request<StreamHostStatsRequest>,
+    ) -> Result<Response<Self::StreamHostStatsStream>, Status> {
+        self.stream_host_stats_impl(request).await
+    }
+}
+
+impl HostServiceImpl {
+    /// Body of [`HostService::list_eligible_daemons`]; the trait method delegates here.
+    pub(crate) async fn list_eligible_daemons_impl(
+        &self,
+        request: Request<ListEligibleDaemonsRequest>,
+    ) -> Result<Response<ListEligibleDaemonsResponse>, Status> {
         let req = request.into_inner();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
@@ -140,17 +265,8 @@ impl HostService for HostServiceImpl {
         Ok(Response::new(ListEligibleDaemonsResponse { daemons }))
     }
 
-    /// Every host this daemon has a record of, live or not.
-    ///
-    /// `ListEligibleDaemons` answers "who can I route to now" and forgets a host the moment it
-    /// leaves the room. This answers "what machines does tddy know about", which is what an operator
-    /// staring at an unreachable host needs. Liveness is resolved per call, by intersecting the
-    /// durable registry with the live roster — never read from disk.
-    ///
-    /// The join itself belongs to [`crate::host_registry::HostRegistry::known_hosts`], including
-    /// the guarantee that the serving daemon always has a row: doing half of it here as well would
-    /// leave the invariant provable only against a double that behaves like neither store.
-    async fn list_known_hosts(
+    /// Body of [`HostService::list_known_hosts`]; the trait method delegates here.
+    pub(crate) async fn list_known_hosts_impl(
         &self,
         request: Request<ListKnownHostsRequest>,
     ) -> Result<Response<ListKnownHostsResponse>, Status> {
@@ -187,19 +303,8 @@ impl HostService for HostServiceImpl {
         Ok(Response::new(ListKnownHostsResponse { hosts }))
     }
 
-    /// What a host has installed and configured.
-    ///
-    /// Addressed by `daemon_instance_id`; the existing peer routing relays it so the probes run on
-    /// that host, as that host's OS user. Both facts are per-user — `git config` reads
-    /// `$HOME/.gitconfig`, `gh auth status` reads `$HOME/.config/gh/hosts.yml` — so running them as
-    /// the daemon's own user would answer for the wrong account.
-    ///
-    /// Routed **before** the caller is authenticated, like the roster RPCs and
-    /// [`Self::resolve_stack_base`]: the token is verified by the daemon that serves the call, and
-    /// a peer's user mapping is not this one's to judge. Authenticating first would refuse an
-    /// operator whose GitHub user maps to an OS user on the host being probed but not on whichever
-    /// host their browser happens to be talking to.
-    async fn get_host_tooling(
+    /// Body of [`HostService::get_host_tooling`]; the trait method delegates here.
+    pub(crate) async fn get_host_tooling_impl(
         &self,
         request: Request<GetHostToolingRequest>,
     ) -> Result<Response<GetHostToolingResponse>, Status> {
@@ -244,15 +349,11 @@ impl HostService for HostServiceImpl {
         }))
     }
 
-    /// Questions this host is waiting on an operator to answer.
-    ///
-    /// ⚠ The stream is silent almost all the time, so the sampling task **must** select on
-    /// `tx.closed()` as well as breaking on a send error — see [`MpscHostPromptStream`]. The
-    /// regression test for it is `packages/tddy-daemon/tests/stream_host_prompts_rpc.rs`.
-    async fn stream_host_prompts(
+    /// Body of [`HostService::stream_host_prompts`]; the trait method delegates here.
+    pub(crate) async fn stream_host_prompts_impl(
         &self,
         request: Request<StreamHostPromptsRequest>,
-    ) -> Result<Response<Self::StreamHostPromptsStream>, Status> {
+    ) -> Result<Response<MpscHostPromptStream>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
 
@@ -294,11 +395,8 @@ impl HostService for HostServiceImpl {
         Ok(Response::new(MpscHostPromptStream { rx }))
     }
 
-    /// Submit the encrypted answer to a pending prompt.
-    ///
-    /// The request carries ciphertext only; the plaintext exists in this process for the duration of
-    /// the unlock and is never persisted or logged.
-    async fn answer_host_prompt(
+    /// Body of [`HostService::answer_host_prompt`]; the trait method delegates here.
+    pub(crate) async fn answer_host_prompt_impl(
         &self,
         request: Request<AnswerHostPromptRequest>,
     ) -> Result<Response<AnswerHostPromptResponse>, Status> {
@@ -353,15 +451,8 @@ impl HostService for HostServiceImpl {
         }))
     }
 
-    /// Load a private key into this host's ssh-agent.
-    ///
-    /// This is the call that raises a passphrase prompt: it issues one, waits for the answer to
-    /// arrive on `AnswerHostPrompt`, decrypts it with this host's private key, unlocks the key at
-    /// `subject`, hands the identity to the agent and drops the plaintext. It returns only once the
-    /// add has succeeded or failed, so the browser learns the outcome from the call it started.
-    ///
-    /// Nothing about the answer — decrypted or not — is logged here at any level.
-    async fn add_host_key(
+    /// Body of [`HostService::add_host_key`]; the trait method delegates here.
+    pub(crate) async fn add_host_key_impl(
         &self,
         request: Request<AddHostKeyRequest>,
     ) -> Result<Response<AddHostKeyResponse>, Status> {
@@ -448,19 +539,8 @@ impl HostService for HostServiceImpl {
         Ok(Response::new(added))
     }
 
-    /// The private keys this host's operator could load into their agent.
-    ///
-    /// What makes the key field on the Hosts row a picker instead of a typed path. Every path it
-    /// offers is a path [`add_host_key`](Self::add_host_key) will accept: the same OS user, the
-    /// same home, the same confinement — a listing whose choices the add then refused would be
-    /// worse than no listing.
-    ///
-    /// Routed like the add for the same reason: the keys are files on one machine.
-    ///
-    /// Says nothing about what is on disk beyond the keys themselves — see
-    /// [`crate::host_private_key::list_key_candidates`] for why an absent `~/.ssh`, an unreadable
-    /// one and an empty one are one answer.
-    async fn list_host_key_candidates(
+    /// Body of [`HostService::list_host_key_candidates`]; the trait method delegates here.
+    pub(crate) async fn list_host_key_candidates_impl(
         &self,
         request: Request<ListHostKeyCandidatesRequest>,
     ) -> Result<Response<ListHostKeyCandidatesResponse>, Status> {
@@ -509,11 +589,8 @@ impl HostService for HostServiceImpl {
         }))
     }
 
-    /// Explicit OpenSSH `Host` aliases in this OS user's `~/.ssh/config`.
-    ///
-    /// Routed like [`Self::list_host_key_candidates`]: the file is on one machine. Honesty is the
-    /// opposite of that listing: unreadable is FAILED, not empty.
-    async fn list_ssh_config_hosts(
+    /// Body of [`HostService::list_ssh_config_hosts`]; the trait method delegates here.
+    pub(crate) async fn list_ssh_config_hosts_impl(
         &self,
         request: Request<ListSshConfigHostsRequest>,
     ) -> Result<Response<ListSshConfigHostsResponse>, Status> {
@@ -568,14 +645,11 @@ impl HostService for HostServiceImpl {
         }
     }
 
-    /// Stream host telemetry for the selected daemon. Authenticates `session_token`, then spawns a
-    /// sampling task that emits one `HostStatsEvent` immediately (both CPU and disk), then refreshes
-    /// CPU and disk on two independent cadences, pushing an event carrying the latest CPU and disk
-    /// snapshot on each tick. The task ends when the receiver is dropped (client unsubscribe).
-    async fn stream_host_stats(
+    /// Body of [`HostService::stream_host_stats`]; the trait method delegates here.
+    pub(crate) async fn stream_host_stats_impl(
         &self,
         request: Request<StreamHostStatsRequest>,
-    ) -> Result<Response<Self::StreamHostStatsStream>, Status> {
+    ) -> Result<Response<MpscHostStatsStream>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
         let _github_user = (self.user_resolver)(&req.session_token)
