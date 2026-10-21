@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-host-service/src/service.rs":{"sha256":"sha256:839aebca6be784a98d6370b866b137f4ace4faf6392511a16cee758d560bbe89","modified":"2026-10-21T15:26:29Z"}}}
+{"id":"op-1","op":"extract_module","anchor":{"kind":"items","file":"packages/tddy-host-service/src/service.rs","items":["tddy_host_service::service::HostServiceImpl::stream_host_stats_impl"],"fingerprints":["sha256:843d7a142d6c8aab551fc0a0a5947b47ab1002ae1f40d43381371c39de9e4647"]},"name":"stats_stream","reexport":"none","to_file":true}

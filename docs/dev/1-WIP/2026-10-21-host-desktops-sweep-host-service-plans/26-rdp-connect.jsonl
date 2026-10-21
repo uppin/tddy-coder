@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-rdp/src/rdp_client.rs":{"sha256":"sha256:733872f5d4891348893ad871e15e651a0f08f4668a63c0aa047983498a0d939e","modified":"2026-10-21T16:00:16Z"}}}
+{"id":"op-1","op":"extract_method","anchor":{"kind":"item","item":"tddy_rdp::rdp_client::RdpClient::connect_impl","file":"packages/tddy-rdp/src/rdp_client.rs","start":{"line":14,"col":9},"end":{"line":57,"col":11},"fingerprint":"sha256:58a663a14eb022464e82a65b6575a36821fdd85ab44f8d0bcf5822c2ac14e48e","hint":{"line":245,"col":9}},"name":"connector_config"}

@@ -1,7 +1,7 @@
 # Changeset: Split `host_tooling.rs` and `service.rs` under the 500-line budget, and shorten the desktop start paths
 
 **Date**: 2026-10-21
-**Status**: 🚧 In Progress — planned and reviewed (`6e`, 2026-10-21); engine plans proven with `restructure check --deep`; hand moves consented; nothing applied
+**Status**: 🚧 In Progress — applied (plans 10–14, 16, 17, 20–25, 27, plan 26 reduced; hand moves H1–H11); validated (`/validate-changes`, 2026-10-21); wrap pending
 **Type**: Refactor
 **Complexity**: 5/5 — four crates (`tddy-host-service`, `tddy-screen-sharing`, `tddy-screenshare`, `tddy-rdp`); eleven consented hand moves of `#[async_trait]` trait-method bodies (byte-identity proven by script) followed by engine plans that can only be anchored after them; seven engine plans proven now; two oversized files and four over-length functions; a crate-internal caller re-pointed
 **Stack**: `#host-desktops` 10/10 — second of the two sweep PRs, a plain PR. Base: `master` `ea5ba6fb1`. Sibling, independent: #692 (`feature/host-desktops/sweep`, `config.rs`, 9/10)
@@ -37,7 +37,7 @@ Recorded from the developer's review of the plan (`6e`), relayed by the orchestr
 | [`oversized-file-service.md`](../../../packages/tddy-host-service/docs/code-issues/oversized-file-service.md) — 972 (its 961 corrected in this commit) | **✅ RESOLVED HERE** — projected ~245 | plans 14, 13, hand moves H1–H9, plans 20–23. Unclaimed |
 | [`2026-10-20-hosts-mount-service-rs-grew-while-over-budget.md`](../todo/2026-10-20-hosts-mount-service-rs-grew-while-over-budget.md) | **✅ RESOLVED HERE** | #656's deferral of the same split; corrected to 972 in this commit |
 | [`2026-10-20-screen-sharing-start-functions-over-length.md`](../todo/2026-10-20-screen-sharing-start-functions-over-length.md) | **✅ RESOLVED HERE** | `start_host_stream_impl` 76 → ~53 (plan 16), `start_bridge` 58 → ~33 (plan 17), `start_stream` 72 → ~43 (H10 + plans 24–25). Its "do it together with the no-bridge entry" is not followed: that entry changes behaviour (out of scope) |
-| [`2026-10-20-rdp-connect-config-builder-extraction.md`](../todo/2026-10-20-rdp-connect-config-builder-extraction.md) | **✅ RESOLVED HERE** | `RdpClient::connect` 115 → ~49 (H11 + plan 26): the `Config` builder and the finalize step, exactly the entry's fix shape |
+| [`2026-10-20-rdp-connect-config-builder-extraction.md`](../todo/2026-10-20-rdp-connect-config-builder-extraction.md) | **⚠️ NARROWED HERE** (was ✅ RESOLVED HERE) | `RdpClient::connect` 115 → `connect_impl` **72** (H11 + plan 26 reduced): `connector_config` extracted; the finalize step was refused by the engine (E0121, `server_cert` has a type the assist cannot spell), so the entry is narrowed to that remainder, not deleted |
 | `packages/tddy-screenshare/docs/changesets/2026-10-20-bridge-ready.md` dead link (`../bridge-readiness.md`) | **✅ RESOLVED HERE** at wrap | a new correction entry (Final Checklist); the wrapped entry is not edited |
 | [`2026-10-20-screen-sharing-two-stand-in-bridges.md`](../todo/2026-10-20-screen-sharing-two-stand-in-bridges.md) | **Leave it** (decision 2) | stays open; the engine-refusal reason and the decision are appended to it in this commit |
 | [`2026-10-19-restructure-extract-method-refused-under-async-trait.md`](../todo/2026-10-19-restructure-extract-method-refused-under-async-trait.md) | ⚠ DURING — engine gap, reconfirmed | three refusals today (probes a–c); the wrap adds them as evidence and records that the gap was worked around by consented hand moves again |
@@ -78,7 +78,7 @@ Every node of `#host-desktops` is **MERGED into `master`**; this PR consumes not
 | n6 bridge-ready | #658 — `34c046a99` | `start_bridge` split; the readiness wait in `start_stream` | change the readiness protocol |
 | n7 x11-channels | #659 — `1be99ce05` | X11 channels in `host_tooling.rs` (+31), X11 in `start_host_stream_impl` | change their behaviour |
 | n8 sign-in-form | #660 — `fa9b42215` | desktop sign-in in `host_targets.rs`, `rdp_client.rs` | change sign-in |
-| sibling 9/10 | #692 (unmerged) | nothing — **no edge** (discovery § 7) | consume `config/` module paths; every `tddy_daemon_kernel::config::…` path used here resolves with or without #692 |
+| sibling 9/10 | #692 (**merged** before this wrap; `master` `e0256b346` carries it and changed none of this PR's four crates since its base) | nothing — **no edge** (discovery § 7) | consume `config/` module paths; every `tddy_daemon_kernel::config::…` path used here resolves with or without #692 |
 
 ## Draft PR contract
 
@@ -126,9 +126,9 @@ consented hand step.
 
 - [x] **Plan**: layout proposed, seam order fixed, engine plans snapshotted and proven with `check --deep`
 - [x] **Consent** (`6e`, 2026-10-21): see `## Developer decisions`
-- [ ] **Apply, in the order of `## Delta`**: engine plans by dry run then apply + `verify --against HEAD`; hand moves by hand + the proof script + `cargo check`; one commit each
-- [ ] **Baseline after**: the four packages back to the recorded names
-- [ ] **Code Quality**: `cargo fmt --check`; `cargo clippy -p <four packages> --all-targets -- -D warnings`
+- [x] **Apply, in the order of `## Delta`**: engine plans by dry run then apply + `verify --against HEAD`; hand moves by hand + the proof script + `cargo check`; one commit each ✅ (plan 26 reduced to `connector_config`: see `## Applied`)
+- [x] **Baseline after**: the four packages back to the recorded names ✅ (see `## Baseline`, After column)
+- [x] **Code Quality**: `cargo fmt --check`; `cargo clippy -p <four packages> --all-targets -- -D warnings` ✅
 - [ ] **Documentation**: Final Checklist executed at wrap
 
 ## Hand moves (consented)
@@ -250,7 +250,7 @@ attributes included, measured by script) moved, plus estimated facade/`mod`/sign
 | `screen_sharing_service/session_stream.rs` | `start_stream_impl` (72 → ~43), `start_session_bridge` | ~82 |
 | `host_targets.rs` `start_host_stream_impl` | + `start_bridge_for_desktop`, `find_host_target` | **76 → ~53** |
 | `bridge.rs` `start_bridge` | + `publish_to_livekit` | **58 → ~33** |
-| `rdp_client.rs` | `connect` delegates to `RdpClient::connect_impl` (115 → ~49) + `connector_config`, `finalize_connection` | **446 → ~470** (≤ 500) |
+| `rdp_client.rs` | `connect` delegates to `RdpClient::connect_impl` (115 → ~49) + `connector_config`, `finalize_connection` | **446 → ~470** (≤ 500) — *applied: 459, `connect_impl` 72, `finalize_connection` refused (see `## Applied`)* |
 | `add_host_key_impl` | + `os_user_for_session`, `await_passphrase_answer`, `add_key_on_blocking_pool` | **86 → ~48** |
 
 ### Delta — in apply order
@@ -289,6 +289,73 @@ this seam cannot be cut here: rust-analyzer offers no "extract into function" as
 **A post-move plan the engine refuses is a stop**, not a licence for another hand move: the consent covers
 H1–H11 only.
 
+## Applied
+
+Everything above was applied in `## Delta` order, one commit per plan or hand-move file (20 commits over the
+docs commit `3970ed4f4`), except as recorded here. The post-move plans 20–27, written at implementation, are
+copied into the plans directory; their operations:
+
+| Plan | Operation(s) | Anchor |
+|---|---|---|
+| `20-service-host-keys` | `extract_module` `host_keys`, `to_file`, `reexport: none` | items `HostServiceImpl::{add_host_key_impl, list_host_key_candidates_impl, list_ssh_config_hosts_impl}` |
+| `21-service-prompts` | `extract_module` `prompts`, same flags | items `{stream_host_prompts_impl, answer_host_prompt_impl}` |
+| `22-service-listings` | `extract_module` `listings`, same flags | items `{list_eligible_daemons_impl, list_known_hosts_impl, get_host_tooling_impl}` |
+| `23-service-stats-stream` | `extract_module` `stats_stream`, same flags | item `stream_host_stats_impl` |
+| `24-start-stream-bridge` | `extract_method` `start_session_bridge` | item `start_stream_impl`, relative 26:9–59:10 |
+| `25-start-stream-module` | `extract_module` `session_stream`, same flags | items `{start_stream_impl, start_session_bridge}` |
+| `26-rdp-connect` (**reduced**) | `extract_method` `connector_config` only | item `RdpClient::connect_impl`, relative 14:9–57:11 |
+| `27-service-add-host-key` | 3 × `extract_method`, bottom-up: `add_key_on_blocking_pool`, `await_passphrase_answer`, `os_user_for_session` | item `service::host_keys::HostServiceImpl::add_host_key_impl`, relative 59:9–76:90, 33:9–47:11, 20:9–29:26 |
+
+**Engine refusal (not worked around):** plan 26's `finalize_connection` (`let server_public_key …` → `})?;`) was
+refused by `check --deep`, twice, against a warm index: the assist wrote `server_cert: _` (E0121, the TLS
+certificate type `ironrdp_tls::upgrade` returns cannot be spelled). Developer decision (2026-10-21): apply
+`connector_config` alone. `connect_impl` is **72** lines, not the projected 49. Entry:
+`docs/dev/todo/2026-10-21-restructure-extract-assist-cannot-spell-an-opaque-parameter-type.md`; the rdp todo
+entry is narrowed to the finalize step.
+
+**Hand edits beyond H1–H11** (each developer-approved 2026-10-21 as a post-move build or lint fix; one engine
+defect entry each):
+
+| # | Class | File | Edit | Entry |
+|---|---|---|---|---|
+| E1 | build fix, E0446 | `host_tooling/subprocess.rs` | `struct RunningProbe` → `pub(super) struct RunningProbe` + `TODO` | `2026-10-21-restructure-widened-field-leaves-its-private-type` |
+| E2 | build fix, E0277 | `screen_sharing_service/host_targets.rs` (`find_host_target`) | one stray `*` before `format!(` deleted | `2026-10-21-restructure-extract-assist-writes-a-stray-deref-before-format` |
+| E3 | build fix E0283, then lint fix `clippy::extra_unused_type_parameters` | `tddy-screenshare/src/bridge.rs` (`publish_to_livekit`) | first a `::<C>` turbofish at the call; then the copied, unused `<C: ScreenSharingClient>` and the turbofish deleted | `2026-10-21-restructure-extract-assist-copies-an-unused-generic` |
+| E4 | lint fix, `clippy::let_and_return` | `tddy-rdp/src/rdp_client.rs` (`connector_config`) | returns the `Config { … }` literal instead of `let config = …; config` | `2026-10-21-restructure-extract-leaves-a-let-and-return` |
+| E5 | build fix (non-unix targets), found by `/validate-changes` | `github_cli.rs`, `host_tooling.rs`, `host_tooling/readings.rs` | `#[cfg(unix)]` restored on the `use` lines plans 11–12 wrote for `#[cfg(unix)]` items (at `origin/master` the `github_cli.rs` import was `#[cfg(unix)]`) | `2026-10-21-restructure-move-drops-cfg-on-repointed-imports` |
+
+**Tool edits:** `cargo fix` removed 13 unused imports in `subprocess.rs` (plan 12) and the now-unused `mut` on
+`prepared` (plan 16); `cargo fmt` on every touched package.
+
+**`restructure verify --against origin/master`** ([G]'s run on the final engine head; not re-run at
+`/validate-changes`, which relied on it and proved the residue by script instead): `406953 → 407018`
+statements, 20 visibility-normalised, `tokens lost: none`, and `Error: 2 statement(s) the tree lost and 67 it
+gained`. The two lost: `let mut prepared = prepare_bridge(` (the `mut`, E-tool) and the `started = Some(self.try_spawn_bridge(…` 
+statement plan 24 moved, whose arguments now read the helper's `&str` parameters. Both are shown equivalent in
+`## Validation Results`; the 67 gained are the delegators, signatures, call sites and returns listed under
+`## Visibility` § moved-line diff.
+
+**Measurements (applied tree)** — production lines measured two ways by script (`honest`: total minus every
+`#[cfg(test)]`-gated item; `first`: lines before the first `#[cfg(test)]`); the two agree on every file here:
+
+| File / function | Before | After |
+|---|---|---|
+| `host_tooling.rs` | 806 | **396** |
+| `host_tooling/{desktop_probes, readings, subprocess}.rs` | — | 100, 164, 184 |
+| `service.rs` | 972 | **242** |
+| `service/{builders, host_keys, listings, peer_forwards, prompts, stats_stream}.rs` | — | 234, 251, 135, 137, 123, 123 |
+| `screen_sharing_service.rs` | 482 | 415 |
+| `screen_sharing_service/session_stream.rs` | — | 116 |
+| `screen_sharing_service/host_targets.rs` | 323 | 346 |
+| `tddy-screenshare/src/bridge.rs` | 399 | 404 |
+| `tddy-rdp/src/rdp_client.rs` | 446 | 459 |
+| `start_stream` → `start_stream_impl` | 72 | **41** (+ `start_session_bridge` 44) |
+| `start_host_stream_impl` | 76 | **53** (+ `start_bridge_for_desktop` 26, `find_host_target` 18) |
+| `start_bridge` | 58 | **31** (+ `publish_to_livekit` 31) |
+| `RdpClient::connect` → `connect_impl` | 115 | **72** (+ `connector_config` 46) — projected 49 not reached |
+| `add_host_key` → `add_host_key_impl` | 86 | **48** |
+| `stream_host_stats` → `stream_host_stats_impl` | 96 | 96 — unchanged, out of scope (`## Boundaries`) |
+
 ## Callers
 
 | | |
@@ -299,16 +366,37 @@ H1–H11 only.
 
 ## Visibility
 
-Widenings `check --deep` reported (completed from the applies; the hand-moved `*_impl` methods are
-`pub(crate)` by design):
+Every widening, **read from the diff** (`git diff origin/master...HEAD`, each `pub(super)`/`pub(crate)` at
+HEAD compared with the item at `origin/master`; `/validate-changes`, 2026-10-21). Items already `pub(crate)` at
+`origin/master` (`ProbeOutput` and its fields, `StartedProbe`, `start_probe`, `StartedProbe::collect`,
+`summarise`, `HOST_CPU_INTERVAL`, `HOST_DISK_INTERVAL`) are not widenings. The hand-moved `*_impl` methods and
+`start_session_bridge` are new items, `pub(crate)` by design. No widened item's privacy was enforcing an
+invariant: each is a free function or a field read by the tests of the same parent module, or a method of the
+same type now reached from a sibling module.
 
-| Item | Was | Is | Why |
-|---|---|---|---|
-| `desktop_readings_of`, `warn_if_a_desktop_probe_failed` | private | `pub(super)` | the two `probe` impls in `host_tooling.rs` |
-| `git_config_value`, `github_cli_of` | private | `pub(super)` | `host_tooling.rs` tests |
-| `StartedProbe::running`, `RunningProbe::child` (fields) | private | `pub(super)` | `host_tooling.rs` tests |
-| `common_room_slot`, `rpc_served_by_peer`, `stream_served_by_peer` | private | `pub(crate)` | the trait impl and (later) the `*_impl` modules call them |
-| `cached_tooling` | private | `pub(crate)` | `get_host_tooling_impl` |
+| Item | Plan | Was | Is | Why it had to widen | Doc comment fixed |
+|---|---|---|---|---|---|
+| `mod subprocess` (new module) | 12 | — | `pub(crate) mod` | `github_cli.rs` imports `start_probe`, `ProbeOutput` from it | n/a |
+| `start_desktop_probes`, `desktop_readings_of`, `warn_if_a_desktop_probe_failed` | 10 | private | `pub(super)` | the `probe` impl in `host_tooling.rs` | n/a |
+| `start_agent_probe`, `agent_status_of`, `not_on_path`, `warn_if_failed`, `git_identity_of`, `git_config_value`, `github_cli_of` | 11 | private | `pub(super)` | the `probe` impl in `host_tooling.rs`; `github_cli_of` also its tests | n/a |
+| `StartedProbe::running`, `RunningProbe::child` (fields) | 12 | private | `pub(super)` | `host_tooling.rs` tests | n/a |
+| `struct RunningProbe` | 12 (hand edit E1) | private | `pub(super)` | E0446: the widened `StartedProbe::running` names it; marked `TODO` | n/a |
+| `record_rpc_activity`, `eligible_instance_ids`, `classify_addressed_daemon_route`, `common_room_slot`, `rpc_served_by_peer`, `stream_served_by_peer` | 13 | private | `pub(crate)` | called from `service.rs` and the `service/*` handler modules | n/a |
+| `cached_tooling` | 14 | private | `pub(crate)` | `get_host_tooling_impl` (`service/listings.rs`) | n/a |
+| `start_session_bridge` (new in plan 24) | 25 | private | `pub(crate)` | `extract_module`'s default for a moved member; called only from `start_stream_impl` in the same module | n/a |
+
+Plans 16, 17, 20–24, 26 and 27 widen nothing: `find_host_target`, `start_bridge_for_desktop`,
+`publish_to_livekit`, `connector_config`, `os_user_for_session`, `await_passphrase_answer` and
+`add_key_on_blocking_pool` are private.
+
+**Moved-line diff** (`/validate-changes`, scripted: removed vs added lines over `origin/master...HEAD` per
+package, whitespace and visibility normalised, `use`/`mod`/blank lines ignored): **no comment line lost** in
+any package; the residue is only (a) the eleven hand-move signatures, doc lines and delegators, (b) the
+extracted helpers' signatures, call sites and `Ok(..)` returns, (c) three signatures rustfmt re-wrapped once
+`pub(super)` lengthened them (`start_agent_probe`, `git_identity_of`, `git_config_value`), (d) re-wrapped
+`use` lists, (e) the `RunningProbe` TODO, (f) `let mut prepared` → `let prepared` and `let config = Config {`
+→ `Config {` (hand edit E4). The `&bridge_identity`/`&track_name`/`&livekit_room` arguments now pass the
+helper's `&str` parameters (see `## Validation Results` § behaviour).
 
 ## Baseline
 
@@ -319,12 +407,14 @@ disk). `./test -p` runs on `fa9b42215` gave the same counts for the first three.
 
 | Gate | Before | After |
 |---|---|---|
-| `tddy-host-service` — unit 177; `askpass_prompt_rpc` 11, `clone_grants` 5, `github_cli_environment` 1, `peer_routing` 2, `stream_host_prompts_rpc` 3 | **199 passed / 0 failed / 0 ignored** | |
-| `tddy-screen-sharing` — unit 19; `bridge_readiness_acceptance` 6, `dead_vnc_service_removed` 3, `host_desktop_sign_in_acceptance` 15, `screen_sharing_record_propagation` 3, `screen_sharing_records_unit` 10, `screen_sharing_service_acceptance` 8, `session_vault_target_store_acceptance` 6, `x11_channels_acceptance` 9 | **79 / 0 / 0** | |
-| `tddy-screenshare` — unit 9 | **9 / 0 / 0** | |
-| `tddy-rdp` — `rdp_client_integration` 5, `rdp_inspect_integration` 2, `rdp_nla_integration` 4 | **11 / 0 / 0** | |
+| `tddy-host-service` — unit 177; `askpass_prompt_rpc` 11, `clone_grants` 5, `github_cli_environment` 1, `peer_routing` 2, `stream_host_prompts_rpc` 3 | **199 passed / 0 failed / 0 ignored** | **199 / 0 / 0** ✅ |
+| `tddy-screen-sharing` — unit 19; `bridge_readiness_acceptance` 6, `dead_vnc_service_removed` 3, `host_desktop_sign_in_acceptance` 15, `screen_sharing_record_propagation` 3, `screen_sharing_records_unit` 10, `screen_sharing_service_acceptance` 8, `session_vault_target_store_acceptance` 6, `x11_channels_acceptance` 9 | **79 / 0 / 0** | **79 / 0 / 0** ✅ |
+| `tddy-screenshare` — unit 9 | **9 / 0 / 0** | **9 / 0 / 0** ✅ |
+| `tddy-rdp` — `rdp_client_integration` 5, `rdp_inspect_integration` 2, `rdp_nla_integration` 4 | **11 / 0 / 0** | **11 / 0 / 0** ✅ |
 
 **No failing test**; the failing set the applied tree is held to is empty.
+
+**After** (`/validate-changes`, 2026-10-21, on the applied tree + E5, same command, one package at a time): **298 passed / 0 failed / 0 ignored**, equal to the baseline by name (empty failing set both sides). `cargo clippy -p <each> --all-targets -- -D warnings` clean on all four; `cargo fmt --check` clean.
 
 **Known load-sensitive tests** (green here under a load average of 260–280; one of these failing alone, under
 load, is re-run alone before it is called a regression):
@@ -337,11 +427,85 @@ load, is re-run alone before it is called a regression):
   10 s launch deadline) and `tests/bridge_readiness_acceptance.rs` (six; `StandInBridge`, 20 s start
   deadline): `/bin/sh` stand-ins a starved scheduler can miss. Workaround: the same.
 
+## Validation Results
+
+### `/validate-changes` (2026-10-21, [W])
+
+**Stack gate:** base `master`, merge-base = `origin/master` `e0256b346` (fetched; no rebase needed); `origin/master..HEAD`
+is this PR's 21 commits only; no file outside the four packages' `src/` and docs is in the diff.
+
+**Behaviour — hand moves, proved independently** (a script of the validator's own, not the commit messages:
+body of each trait method at `origin/master` vs the `*_impl` body at the hand-move commit, byte for byte, and vs
+HEAD with whitespace normalised; brace counting skips string literals and `//` comments):
+
+| Move | Body lines | At hand-move commit | Delegator | At HEAD |
+|---|---|---|---|---|
+| H1–H5, H7–H9 | 21, 31, 39, 39, 49, 43, 49, 91 | byte-identical (`61cebebf4`) | one line `self.<name>_impl(request).await` | identical (moved whole to `service/*`) |
+| H6 `add_host_key` | 81 | byte-identical (`61cebebf4`) | one line | 43: the three plan-27 ranges replaced by their calls |
+| H10 `start_stream` | 67 | byte-identical (`ae0257247`) | one line | 36: the plan-24 range replaced by its call |
+| H11 `connect` | 109 | byte-identical (`cc74002e0`) | `Self::connect_impl(host, port, credentials).await` | 66: the plan-26 range replaced by its call |
+
+**Behaviour — helper extractions, read in the diff:** every extracted body is the original range verbatim (the
+moved-line diff loses no line but the bound names below); each call passes the same values in the same order;
+`?`, `.await` and `map_err` sit where they were; no extracted helper owns a value with a `Drop` side effect
+that is now dropped earlier (`PendingPrompt`, `StartStreamRequest`, `StartHostStreamRequest` are plain data).
+
+- plan 27: `os_user_for_session(&req)?` returns `(github_user, os_user)` with the same two `ok_or_else`
+  mappings; `await_passphrase_answer(&req, github_user)` issues, claims and awaits exactly as before (it ends
+  `let answer = match …; answer`, the assist's form — clippy-clean, untouched); `add_key_on_blocking_pool(&req,
+  os_user, encrypted_answer).await?` moves the same values into the same `spawn_blocking` closure with the same
+  `map_err`.
+- plan 16: `find_host_target(&req, scope)?` is the original chain; `start_bridge_for_desktop(req, operator,
+  config, target, prepared, sign_in).await?` runs the X11 start, `start_signed_in_bridge` and their `?`s in the
+  original order and returns `started`, from which the caller builds the same `StartStreamResponse`.
+- plan 17: `publish_to_livekit(config, width, height).await?` creates the channel, connects, publishes and spawns
+  the RPC loop in the original order before `request_frame_update`; errors keep their `classify(…, FailureKind::…)`.
+- plan 26: `connector_config(credentials)` builds the same literal, still after the TCP connect; it reads only
+  `credentials`.
+
+**The two statements `restructure verify` reported lost:**
+
+1. `let mut prepared = prepare_bridge(` → `let prepared` — **equivalent.** The only mutation (`&mut prepared` for
+   the X11 start) moved into `start_bridge_for_desktop`, whose parameter is `mut prepared: PreparedBridge`; the
+   outer binding is moved into that call and never touched again (the compiler accepts the immutable binding,
+   which it would reject if it were mutated).
+2. `started = Some(self.try_spawn_bridge(config, &bridge_target, target.username.clone(), password,
+   &bridge_identity, &track_name, &livekit_room, session_bridge_key(…)).await?)` → the same statement inside
+   `start_session_bridge` with `bridge_identity, track_name, livekit_room` — **equivalent.** At `origin/master`
+   the arguments were `&String` deref-coerced to `try_spawn_bridge`'s `&str` parameters; now the caller passes
+   `&bridge_identity`, `&track_name`, `&livekit_room` to `start_session_bridge`'s `&str` parameters (the same
+   coercion, one call earlier) and they are forwarded unchanged: the same three strings, borrowed from the same
+   locals of `start_stream_impl`, which still own them and still move them into `StartStreamResponse`
+   afterwards. `config` is still `ref config` from `self.config`; `store` is the same `&Arc<dyn
+   ScreenSharingTargetStore>` (`require_target_store` returns a reference); `req` moves into the helper, and
+   `start_stream_impl` reads none of its fields after the call. The `?` inside the helper returns the same
+   `Status`, and the caller's `.await?` propagates it unchanged; the `None`/`Err` arms still only log.
+
+**Hand edits E1–E4 and tool edits** (see `## Applied`): each is one of the approved classes and none touches a
+moved body. **E5** (new, from this validation): `#[cfg(unix)]` restored on the re-pointed `use` lines — on unix
+targets a no-op, on others it restores what `origin/master` compiled.
+
+**Tests changed only mechanically:** no `#[test]`, `#[tokio::test]`, `#[ignore]`, sleep or `.skip` added or
+removed in the diff; no file under any `tests/` changed; the only test-code edits are three re-pointed `use`
+lines in `host_tooling.rs`'s `mod tests`.
+
+**`restructure verify`:** not re-run here (the index daemon is a 6–10 minute cold load on a tight disk); relied on
+[G]'s run and accounted for its 2 lost / 67 gained by the scripts above.
+
+**Code issues:** no record under the four packages' `docs/code-issues/` carries `Claimed by:`.
+`oversized-file-host-tooling.md` (396) and `oversized-file-service.md` (242) close; `oversized-file-host-registry.md`
+and `complexity-host-messages-unlock-and-add.md` name files this PR does not touch.
+
+**Risk summary:** Critical 0 · Warning 1 (the dropped `#[cfg(unix)]`, fixed as E5) · Info 2 (plan 26 reduced;
+`connect_impl` 72 and `stream_host_stats_impl` 96 stay over 60, recorded).
+
 ## Plan
 
 [`2026-10-21-host-desktops-sweep-host-service-plans/`](./2026-10-21-host-desktops-sweep-host-service-plans/) —
-the seven engine plans proven today (10–14, 16, 17) and the three refused probes. Plans 20–27 are written
-at implementation, after the hand move each follows.
+the seven engine plans proven at planning (10–14, 16, 17), the post-move plans 20–27 as written at
+implementation (copied in at `/validate-changes`; an apply rewrites a plan's anchors, so these are the
+applied files, and plan 26 holds only `connector_config`), and the three refused probes. Their operations are
+tabled in `## Applied`.
 
 ## Decisions & Trade-offs
 
