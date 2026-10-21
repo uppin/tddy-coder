@@ -3,6 +3,7 @@
 **Date**: 2026-10-19
 **Status**: 🚧 In Progress
 **Type**: Enhancement (one new Rust restructure operation)
+**Complexity**: 4/5 — three crates, VerifyRequest proto field
 **Stack**: `#reshape` 15/24, branch `feature/reshape/detach-method`, base `feature/reshape/move-widen`, green wave 1.
 **PR**: [#677](https://github.com/uppin/tddy-coder/pull/677) (draft).
 
@@ -123,9 +124,9 @@ Carved from the closed #615 (`backend-session`). Reuses node 6's self-mode rewri
   -p tddy-tools`)
 - [x] Failing acceptance tests written and verified failing on this node's `todo!()`s
 - [x] TDD Red — failing library tests (`tests/detach_method.rs`, `tests/verify_detach.rs`)
-- [ ] USER REVIEW of the acceptance tests (ticked at `/green` start)
-- [ ] Operation (R1–R6)
-- [ ] `verify --detach` (R7) and its carriers
+- [x] USER REVIEW of the acceptance tests (ticked at `/green` start; approved by the developer 2026-10-20)
+- [x] Operation (R1–R6)
+- [x] `verify --detach` (R7) and its carriers
 - [ ] Docs: `### detach_method` and `## Verify` in rust-code-restructuring.md
 - [ ] Code Quality
 
@@ -164,3 +165,22 @@ _None yet._
 - This node's 21 tests fail on its own `todo!()`s: `detach_method::check` (9), `detach_method::resolve` (6),
   `detach_fields::rules` (2 plain-check tests and both live tests, which read the plan through the runner),
   `Detach::from_str` (2 verify tests).
+
+**Green (2026-10-21), scoped to the three packages this node touches:**
+
+- `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`: this node's red set all passes:
+  `detach_method` 17/17, `verify_detach` 2/2, `detach_method_acceptance` 2/2 (live rust-analyzer, `--test-threads=1`).
+  `tddy-index-daemon` (58 lib, 29 bin, 44 `code_index_service_acceptance`, 2 `index_health_acceptance`) and `tddy-tools`
+  (85 lib, 26 bin) all pass, the `--detach` carrier test included.
+- `tddy-code-restructuring` package: 2368 passed, 49 failed. **None of the 49 is this node's, and none mentions detach or
+  verify.** Every one is a parent-owned surface still red on the base chain, in suites this node did not touch:
+  - 12 lib: 6 `impl_move::assemble` (K12, `move_impl_members` not implemented, #reshape 12/24), 3
+    `source_scan::test_declarations` (K13), 3 `language::tests` (K11, `SupportRegistry::*` `todo!()`s).
+  - 10 `move_impl_members_acceptance` + 6 `move_impl_members_plan_lines` (K12, the same "not implemented yet" refusal).
+  - 4 `language_support_acceptance` (K11, the `SupportRegistry` stubs).
+  - 15 `crate_move_test_modules` + 1 `check_precondition_parity` + 1 `move_module_to_crate_acceptance` (K13 tests-follow).
+  The stubs the lib failures panic on are at `72abacd97` (the base tip) in files this branch does not touch. The
+  integration suites were not part of the wave-2 baseline above; they are not run against the base here, so their
+  pre-existing status is inferred from those panics and the untouched code paths.
+- `cargo clippy -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools --all-targets -- -D warnings`: clean.
+- `rustfmt --edition 2021 --check` over every changed and new `.rs` file: clean.

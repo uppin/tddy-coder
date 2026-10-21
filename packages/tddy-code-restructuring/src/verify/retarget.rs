@@ -122,13 +122,24 @@ impl Declared {
         self,
         detaches: impl IntoIterator<Item = &'a String>,
     ) -> Result<Declared, String> {
-        // TODO(reshape-detach-method): each detach implies `--rebind NAME` (R7).
+        let detaches: Vec<super::Detach> = detaches
+            .into_iter()
+            .map(|text| text.parse())
+            .collect::<Result<_, _>>()?;
+        // R7: a detach implies the rebind of the parameter its receiver became, once each.
+        let mut rebinds = self.rebinds;
+        for detach in &detaches {
+            if !rebinds.iter().any(|rebind| rebind.name == detach.name) {
+                rebinds.push(super::Rebind {
+                    name: detach.name.clone(),
+                });
+            }
+        }
         Ok(Declared {
-            detaches: detaches
-                .into_iter()
-                .map(|text| text.parse())
-                .collect::<Result<_, _>>()?,
-            ..self
+            detaches,
+            rebinds,
+            retargets: self.retargets,
+            repoints: self.repoints,
         })
     }
 }

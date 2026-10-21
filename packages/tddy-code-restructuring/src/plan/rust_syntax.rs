@@ -49,6 +49,11 @@ pub fn one_expr(text: &str) -> Result<syn::Expr> {
     Ok(expr)
 }
 
+/// Whether `text` is one Rust identifier: not a keyword, `self` and `Self` among them, and not `_`.
+pub fn is_identifier(text: &str) -> bool {
+    syn::parse_str::<syn::Ident>(text).is_ok()
+}
+
 /// Whether the expression visited carries a [`syn::Stmt`] anywhere inside it.
 #[derive(Default)]
 struct Statements {

@@ -7,8 +7,8 @@
 //!   lifetime kept; an associated function keeps its parameters; doc comments, attributes and
 //!   visibility unchanged; the function is written in the member's own module, so it reaches exactly
 //!   the callers the method did and nothing is widened.
-//! - **R2 body** — `self` → `name` (`read_fields_through`'s self-mode rewrite), `Self` → the block
-//!   header's self type.
+//! - **R2 body** — `self` → `name` (`read_fields_through`'s self-mode rewrite, reused), `Self` → the
+//!   block header's self type.
 //! - **R3 placement** — the functions follow the block in member order; a block the run empties is
 //!   replaced by them.
 //! - **R4 callers** — `R.m(args)` → `m(R, args)` (a place receiver borrowed `&mut R` / `&R`, a
@@ -20,12 +20,22 @@
 //!   re-pointed (K `use` added); the block was emptied and removed`.
 //!
 //! Everything the operation asks the server goes through [`DetachServer`], whose answers are the
-//! language server's own shapes. [`RustBackend`] answers it from rust-analyzer; a library test
-//! answers it from recorded answers, so the rules are decided without a server.
+//! language server's own shapes. [`RustBackend`] answers it from rust-analyzer (`server`); a library
+//! test answers it from recorded answers, so the rules are decided without a server.
+
+mod block;
+mod build;
+mod calls;
+mod member;
+mod refusals;
+mod scan;
+mod server;
+mod splice;
+mod survey;
 
 use serde_json::Value;
 
-use super::RustBackend;
+use super::seam_refusal;
 use crate::crate_move::Reference;
 use crate::edit::{Position, Range, Resolution};
 use crate::plan::RefactorOp;
@@ -60,9 +70,7 @@ pub trait DetachServer {
 /// without a server. The plan-line refusals (a missing or malformed `name`, an anchor of the wrong
 /// kind, a field the operation does not define) are made earlier, when the plan is read.
 pub fn findings(op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Vec<String>> {
-    // TODO(reshape-detach-method): implement
-    let _ = (op, workspace);
-    todo!("TODO(reshape-detach-method): detach_method::findings")
+    survey::plain_findings(op, workspace)
 }
 
 /// The R5 refusals of a `detach_method`, as `check --deep` reports them: every member that cannot
@@ -73,9 +81,7 @@ pub fn check(
     op: &RefactorOp,
     workspace: &Workspace<'_>,
 ) -> Result<Vec<String>> {
-    // TODO(reshape-detach-method): implement
-    let _ = (server, op, workspace);
-    todo!("TODO(reshape-detach-method): detach_method::check")
+    Ok(survey::survey(server, op, workspace)?.findings)
 }
 
 /// Resolve a `detach_method` into the edits to the file that holds the block and to every file that
@@ -86,40 +92,9 @@ pub fn resolve(
     op: &RefactorOp,
     workspace: &Workspace<'_>,
 ) -> Result<Resolution> {
-    // TODO(reshape-detach-method): implement
-    let _ = (server, op, workspace);
-    todo!("TODO(reshape-detach-method): detach_method::resolve")
-}
-
-/// rust-analyzer's answers: the anchor lowered by `span_of`, the settled outline, the reference set
-/// and the hover the other authored operations already ask for.
-impl DetachServer for RustBackend {
-    fn span(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Range> {
-        // TODO(reshape-detach-method): implement
-        let _ = (op, workspace);
-        todo!("TODO(reshape-detach-method): RustBackend as DetachServer::span")
+    let surveyed = survey::survey(server, op, workspace)?;
+    if !surveyed.findings.is_empty() {
+        return Err(seam_refusal(surveyed.findings.join("\n")));
     }
-
-    fn outline(&mut self, workspace: &Workspace<'_>, file: &str) -> Result<Value> {
-        // TODO(reshape-detach-method): implement
-        let _ = (workspace, file);
-        todo!("TODO(reshape-detach-method): RustBackend as DetachServer::outline")
-    }
-
-    fn references(
-        &mut self,
-        workspace: &Workspace<'_>,
-        file: &str,
-        at: Position,
-    ) -> Result<Vec<Reference>> {
-        // TODO(reshape-detach-method): implement
-        let _ = (workspace, file, at);
-        todo!("TODO(reshape-detach-method): RustBackend as DetachServer::references")
-    }
-
-    fn hover(&mut self, workspace: &Workspace<'_>, file: &str, at: Position) -> Result<Value> {
-        // TODO(reshape-detach-method): implement
-        let _ = (workspace, file, at);
-        todo!("TODO(reshape-detach-method): RustBackend as DetachServer::hover")
-    }
+    build::resolution(surveyed)
 }
