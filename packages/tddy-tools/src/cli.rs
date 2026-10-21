@@ -10,13 +10,13 @@ use log::info;
 use std::io::{self, Read};
 use std::path::PathBuf;
 
+use crate::session_actions_cli;
 use tddy_core::toolcall::{
     dispatch_toolcall, AskQuestionItem, AskRequest, AskResponse, InvokeActionRelayRequest,
     InvokeActionRelayResponse, ListActionsRelayRequest, ListActionsRelayResponse, SubmitRequest,
     SubmitResponse, TransitionRequest,
 };
 use tddy_core::{read_changeset, write_changeset, ChangesetWorkflow};
-use tddy_tools::session_actions_cli;
 use tddy_workflow_recipes::review::persist_review_md_to_session_dir;
 use tddy_workflow_recipes::{schema, schema_manifest};
 
@@ -483,7 +483,7 @@ struct ListToolsEntry {
 /// The full session toolset: MCP workflow tools + exec catalog + subagent tools (when enabled) +
 /// the Bash CLI subcommands. Pure — safe to call without a live session/socket.
 fn all_session_tools() -> Vec<ListToolsEntry> {
-    let mut out: Vec<ListToolsEntry> = tddy_tools::server::PermissionServer::advertised_tool_defs()
+    let mut out: Vec<ListToolsEntry> = crate::server::PermissionServer::advertised_tool_defs()
         .into_iter()
         .map(|t| ListToolsEntry {
             name: t.name,
@@ -603,7 +603,7 @@ pub async fn run_call_tool(args: CallToolArgs) -> Result<()> {
     }
     // MCP workflow tool: invoke it in-process against the PermissionServer, exactly as the agent
     // would over MCP (relay tools still relay over TDDY_SOCKET from inside their methods).
-    let server = tddy_tools::server::PermissionServer::new();
+    let server = crate::server::PermissionServer::new();
     match server.call_tool_by_name(&args.name, value).await {
         Ok(out) => {
             println!("{out}");

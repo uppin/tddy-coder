@@ -6,7 +6,7 @@
 //! Changeset: docs/dev/1-WIP/specialized-subagents.md
 //!
 //! Mirrors `subagent_mcp_acceptance.rs`'s helpers exactly (each acceptance test file in this
-//! package is self-contained — see `packages/tddy-tools/tests/`).
+//! package is self-contained — see `packages/tddy-tools-cli/tests/`).
 
 use serde_json::{json, Value};
 use std::process::Stdio;

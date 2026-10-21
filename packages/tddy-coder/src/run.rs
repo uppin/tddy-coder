@@ -194,7 +194,7 @@ fn verify_tddy_tools_available(agent: &str) -> anyhow::Result<()> {
     {
         Ok(output) if output.status.success() => Ok(()),
         _ => anyhow::bail!(
-            "tddy-tools binary not found. Build it with: cargo build -p tddy-tools\n\
+            "tddy-tools binary not found. Build it with: cargo build -p tddy-tools-cli\n\
              Or ensure it's on PATH."
         ),
     }

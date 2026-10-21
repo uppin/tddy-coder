@@ -614,7 +614,7 @@ fn refuses_to_warm_without_a_daemon_and_names_the_script_that_starts_one() {
 /// deliberately:
 ///
 /// ```bash
-/// ./dev cargo test -p tddy-tools --test index_daemon_client_acceptance -- --ignored --test-threads=1
+/// ./dev cargo test -p tddy-tools-cli --test index_daemon_client_acceptance -- --ignored --test-threads=1
 /// ```
 #[test]
 #[ignore = "boots a real rust-analyzer and loads a real crate graph; needs a toolchain"]

@@ -17,11 +17,13 @@ targets:
       - "tddy-github:lib"
     config:
       type: rust_binary
-      package: tddy-coder
+      package: tddy-coder-cli
       bin_name: tddy-coder
       srcs:
         - "packages/tddy-coder/src/**/*.rs"
         - "packages/tddy-coder/Cargo.toml"
+        - "packages/tddy-coder-cli/src/**/*.rs"
+        - "packages/tddy-coder-cli/Cargo.toml"
       outputs:
         - path: "target/debug/tddy-coder"
           kind: file

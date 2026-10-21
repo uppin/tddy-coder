@@ -13,11 +13,13 @@ targets:
       - "tddy-livekit:lib"
     config:
       type: rust_binary
-      package: tddy-tools
+      package: tddy-tools-cli
       bin_name: tddy-tools
       srcs:
         - "packages/tddy-tools/src/**/*.rs"
         - "packages/tddy-tools/Cargo.toml"
+        - "packages/tddy-tools-cli/src/**/*.rs"
+        - "packages/tddy-tools-cli/Cargo.toml"
       outputs:
         - path: "target/debug/tddy-tools"
           kind: file

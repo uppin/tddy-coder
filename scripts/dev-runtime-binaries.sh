@@ -21,7 +21,7 @@
 
 DEV_RUNTIME_PACKAGES=(
   tddy-coder-cli       # builds `tddy-coder`, the session worker the daemon spawns per session
-  tddy-tools           # the tool/MCP binary a session's agent calls
+  tddy-tools-cli       # builds `tddy-tools`, the tool/MCP binary a session's agent calls
   tddy-sandbox-runner  # runs inside every jail the daemon spawns
   tddy-index-daemon    # the warm rust-analyzer index, spawned per workspace root
   tddy-remote-git-repo-cli # builds `tddy-remote-git-repo`, git's GIT_SSH_COMMAND shim

@@ -141,8 +141,8 @@ succeeds. A validation failure prints the offending paths — fix the JSON and r
 /// once. `recipe` names the workflow in the opening line, as it does for its siblings.
 ///
 /// The fenced example is pinned against the registered `write-stack-docs` schema by
-/// `packages/tddy-tools/tests/stack_docs_submit_contract_acceptance.rs`, so a prompt that tells the
-/// agent one shape while `submit` accepts another cannot ship.
+/// `packages/tddy-tools-cli/tests/stack_docs_submit_contract_acceptance.rs`, so a prompt that tells
+/// the agent one shape while `submit` accepts another cannot ship.
 pub fn write_stack_docs_system_prompt(recipe: &str) -> String {
     r##"You are assisting with the **{recipe}** workflow **write-stack-docs** step.
 

@@ -213,9 +213,8 @@ over the workspace graph read by
 |---|---|
 | `the_extension_ports_reach_the_crates_they_are_built_on` | The walk from this crate sees `tddy-rpc`, so the next test is not vacuous. |
 | `the_extension_ports_reach_no_livekit_crate` | `reaches("tddy-daemon-extensions")` shares nothing with `LIVEKIT_FAMILY`. |
-| `only_plugins_and_wiring_name_a_livekit_crate` | Every workspace crate that names a LiveKit crate directly is on `PLUGINS`, `WIRING` or `WIRING_WITH_A_LIBRARY`. |
-| `a_wiring_crate_that_ships_a_library_names_livekit_only_from_its_binary` | The sources of every `WIRING_WITH_A_LIBRARY` crate, apart from `src/main.rs`, contain no path into `livekit`, `livekit_api` or `livekit_protocol`. |
-| `a_client_library_names_livekit_nowhere_in_its_sources` | Every source file of every `CLIENT_LIBRARIES` crate, a `main.rs` included, contains no such path. |
+| `only_plugins_and_wiring_name_a_livekit_crate` | Every workspace crate that names a LiveKit crate directly is on `PLUGINS` or `WIRING`. |
+| `a_client_library_names_livekit_nowhere_in_its_sources` | Every source file of every `CLIENT_LIBRARIES` crate, a `main.rs` included, contains no path into `livekit`, `livekit_api` or `livekit_protocol`. |
 | `each_client_binary_is_built_by_its_wiring_crate` | For each `CLIENT_BINARIES` entry, `WorkspaceGraph::crates_building(binary)` is exactly the wiring crate, so a library crate never builds the client binary. |
 
 The lists, in the test file:
@@ -225,18 +224,23 @@ The lists, in the test file:
 - `PLUGINS` (LiveKit's own workspace crates, which implement the ports): `tddy-livekit`,
   `tddy-livekit-testkit`, `tddy-daemon-livekit`, `tddy-livekit-screen-capture`, `tddy-screenshare`.
 - `WIRING` (binaries' composition roots and the end-to-end harness): `tddy-daemon`,
-  `tddy-coder-cli`, `tddy-remote-git-repo-cli`, `tddy-session-sync-cli`, `tddy-rdp`, `tddy-vnc`,
-  `tddy-e2e`. `tddy-coder-cli` builds the `tddy-coder` binary and wires `LiveKitParticipantHost` into
-  the library ([participant host](../../tddy-coder/docs/participant-host.md)). The two client
-  wiring crates build the `tddy-remote-git-repo` and `tddy-session-sync` binaries and hand
-  `LiveKitRoomConnector` to their libraries' `RoomConnector` entry points.
-- `WIRING_WITH_A_LIBRARY` (crates that ship a library *and* a binary wiring LiveKit into it):
-  `tddy-tools`. Cargo has no binary-only dependency, so the edge appears on the crate; the shape test
-  above holds the library sources clean, which keeps the allowance to the binary's wiring. The
-  library joins rooms through [`tddy-room-client`](../../tddy-room-client/docs/room-client.md).
-- `CLIENT_LIBRARIES` / `CLIENT_BINARIES`: `tddy-remote-git-repo` and `tddy-session-sync`, which are
-  libraries only, and the wiring crate that builds each one's binary under its original name. They
-  name LiveKit nowhere; the binding is the wiring crate's alone.
+  `tddy-coder-cli`, `tddy-remote-git-repo-cli`, `tddy-session-sync-cli`, `tddy-tools-cli`,
+  `tddy-rdp`, `tddy-vnc`, `tddy-e2e`. `tddy-coder-cli` builds the `tddy-coder` binary and wires `LiveKitParticipantHost` into
+  the library ([participant host](../../tddy-coder/docs/participant-host.md)). The three client
+  wiring crates build the `tddy-remote-git-repo`, `tddy-session-sync` and `tddy-tools` binaries and
+  hand `LiveKitRoomConnector` to their libraries' `RoomConnector` entry points (`tddy-tools-cli`
+  through `session_tool_client::install_room_connector` and `pty_relay::run_pty_relay`). Each binds
+  LiveKit unconditionally: no wiring crate has a `livekit` feature.
+- `CLIENT_LIBRARIES` / `CLIENT_BINARIES`: `tddy-remote-git-repo`, `tddy-session-sync` and
+  `tddy-tools`, and the wiring crate that builds each one's binary under its original name. They
+  name LiveKit nowhere, not even optionally; they join rooms through
+  [`tddy-room-client`](../../tddy-room-client/docs/room-client.md), and the binding is the wiring
+  crate's alone. `tddy-tools` keeps one binary, the `execute-tool-stdio-fixture` test fixture, which
+  names no LiveKit crate.
+
+There is no exception list for a library that ships a binary wiring LiveKit: the
+`WIRING_WITH_A_LIBRARY` list and its shape test were deleted when its last member, `tddy-tools`,
+moved its binary into `tddy-tools-cli` (`#satellite` 15/15).
 
 "Names" is a `[dependencies]` or `[build-dependencies]` entry, optional ones included;
 `[dev-dependencies]` are not counted, because a test may stand up a real LiveKit server. The
@@ -245,5 +249,5 @@ edge, which is what each cluster that moves behind a port can remove.
 
 **No library crate names LiveKit.** The `#satellite` stack shrank a `KNOWN_OFFENDERS` list of library
 crates that still named a LiveKit crate, node by node, from eighteen to none, and its last node
-deleted the list. A crate that starts naming a LiveKit crate and is on none of the three lists fails
+deleted the list. A crate that starts naming a LiveKit crate and is on neither list fails
 the third test; the fix is a port, or the code moving into the plugin, never a new list entry.

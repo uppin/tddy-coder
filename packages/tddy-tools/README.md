@@ -1,14 +1,17 @@
 # tddy-tools
 
-The binary an agent talks to. Three things in one executable: a CLI of machine-readable subcommands
-an agent invokes over `TDDY_SOCKET`, a Claude Code `--permission-prompt-tool` decision engine, and
-an `rmcp` MCP server over stdio that routes every tool a session can call.
+The library behind the `tddy-tools` binary an agent talks to. Three things in one executable: a CLI
+of machine-readable subcommands an agent invokes over `TDDY_SOCKET`, a Claude Code
+`--permission-prompt-tool` decision engine, and an `rmcp` MCP server over stdio that routes every
+tool a session can call. The binary itself is built by
+[`tddy-tools-cli`](../tddy-tools-cli/README.md), which binds the LiveKit room transport; this crate
+names no LiveKit crate and has no `livekit` feature.
 
 ## Quick Start
 
 ### Build
 ```bash
-cargo build -p tddy-tools
+cargo build -p tddy-tools-cli   # builds the `tddy-tools` binary
 ```
 
 ### Run
@@ -20,13 +23,16 @@ tddy-tools list-schemas
 
 ### Test
 ```bash
-cargo test -p tddy-tools
+cargo test -p tddy-tools       # the library
+cargo test -p tddy-tools-cli   # the suites that run the binary
 ```
 
 ## Architecture
 
-`main.rs` parses arguments and dispatches; `server.rs` is the MCP server. Almost nothing else is
-implemented here. Each subcommand's logic lives in the crate that owns its domain —
+`tddy-tools-cli`'s `main.rs` parses arguments, installs the room connector and dispatches into this
+crate's public command modules (`cli`, `index_client`, `index_console`, `pty_relay`, `remote_cli`,
+`session_hook`); `server.rs` is the MCP server. Almost nothing else is implemented here. Each subcommand's logic lives in the crate that
+owns its domain —
 `tddy_bsp::build_cli`, `tddy_code_analysis::analyze_cli`,
 `tddy_code_restructuring::restructure_cli`, `tddy_workflow_recipes::schema`,
 `tddy_core::toolcall::client` — and each MCP tool's implementation likewise, in
@@ -39,14 +45,15 @@ them into one server. The six `restructure_*` tool definitions are in `restructu
 ## The rule that decides what lives here
 
 **The shape of an interface belongs to the crate that speaks that interface.** MCP shapes stay where
-`rmcp` is; clap surfaces stay where arguments are parsed; stdout stays in a binary, never in a
-library the TUI links. So the permission-decision engine, the `ServerHandler` router, the 14 `pr_*`
+`rmcp` is; clap surfaces stay where arguments are parsed; stdout stays in the command modules the
+`tddy-tools` binary dispatches to, never in a library the TUI links (nothing but `tddy-tools-cli` and
+one dev-dependency link this crate). So the permission-decision engine, the `ServerHandler` router, the 14 `pr_*`
 MCP tools' advertisement, the dynamic tool list, and `PtyRelayArgs`' twenty flags are all here — while
 the PR-stack functions behind those tools, the relay behind those flags, and the exec-tool catalog
 behind that list are not.
 
-The consequence is a small crate with a wide reach: six public modules, twelve `src` files,
-28 dependencies. `session_tool_client` and `session_agents` are re-exports of
+The consequence is a small crate with a wide reach: thirteen public modules over 24 `src` files,
+most of them thin shapes over another crate's domain. `session_tool_client` and `session_agents` are re-exports of
 `tddy_session_tool_client` and `tddy_discovery::roster`, kept at the paths they were reached by when
 they lived here.
 
@@ -138,9 +145,11 @@ where the host can read them instead of vanishing into a captured stderr.
 
 ## Testing
 
-46 test files, most of them driving the built binary from outside — `assert_cmd` over the real
-`--mcp` stdio wire, or the real CLI. That is deliberate: those suites prove the surface regardless of
-which crate now implements it, which is why they stayed here when their implementations moved.
+19 test suites here test the library in process, plus the `execute-tool-stdio-fixture` binary that
+`session_tool_stdio_rpc_dispatch.rs` drives. The 35 suites that drive the built binary from outside —
+`assert_cmd` over the real `--mcp` stdio wire, or the real CLI — live in `tddy-tools-cli/tests/`,
+because `cargo_bin_cmd!` resolves only in the package that builds the binary. They prove the surface
+regardless of which crate implements it.
 
 ## Documentation
 
@@ -161,4 +170,5 @@ which crate now implements it, which is why they stayed here when their implemen
 - [`tddy-tool-engine`](../tddy-tool-engine/README.md) — the exec-tool catalog and its execution
 - [`tddy-workflow-recipes`](../tddy-workflow-recipes/docs/workflow-schemas.md) — `goals.json`, the schemas, and the PR-stack functions
 - [`tddy-toolcall`](../tddy-toolcall/README.md), [`tddy-session-actions`](../tddy-session-actions/README.md), [`tddy-agent-backend`](../tddy-agent-backend/README.md) — the toolcall wire, session actions, and the model catalogue (all re-exported by `tddy-core`)
+- [`tddy-tools-cli`](../tddy-tools-cli/README.md) — builds the `tddy-tools` binary and wires LiveKit into it
 - [`tddy-terminal-rpc`](../tddy-terminal-rpc/) — the PTY relay behind `pty-relay`

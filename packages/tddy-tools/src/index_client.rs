@@ -32,8 +32,11 @@ use crate::index_console::{self, Rendered};
 /// that sets it.
 const TDDY_INDEX_SOCKET: &str = "TDDY_INDEX_SOCKET";
 
+// TODO(restructure-engine): widened from pub(crate) because the module was re-parented out of
+// the binary root by hand (see
+// docs/dev/todo/2026-10-21-restructure-cannot-reparent-modules-declared-in-a-binary-root.md)
 /// Run `args` against the warm daemon if one has been named, else against today's cold path.
-pub(crate) async fn run_restructure(args: RestructureArgs) -> Result<()> {
+pub async fn run_restructure(args: RestructureArgs) -> Result<()> {
     match warm_index_socket(std::env::var(TDDY_INDEX_SOCKET).ok().as_deref()) {
         Some(socket) if !answered_without_an_index(&args.command) => {
             restructure_at(&socket, args).await

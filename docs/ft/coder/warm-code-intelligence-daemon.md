@@ -163,7 +163,7 @@ TDDY_INDEX_DAEMON_BIN=/path/to/tddy-index-daemon ./run-index-daemon   # run a pr
 reused), the script runs `tddy-tools restructure warm` with the daemon's socket, from the checkout root,
 and returns when the crate graph is queryable. Without it the first real request waits for the load
 silently, for more than five minutes on this workspace. The `tddy-tools` it runs is the one beside the
-daemon binary, built with the daemon (`cargo build -p tddy-index-daemon -p tddy-tools`) unless
+daemon binary, built with the daemon (`cargo build -p tddy-index-daemon -p tddy-tools-cli`) unless
 `--no-warm` is given, and, with `TDDY_INDEX_DAEMON_BIN`, whatever sits next to that binary: when it is
 not an executable file the script says so and does not warm. The client's output goes to stderr with the
 rest of the narration, so stdout stays the one `export` line. A warm that fails is reported and changes

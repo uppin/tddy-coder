@@ -3,13 +3,6 @@
 //! - CLI mode (default): `submit` and `ask` subcommands relay to tddy-coder via Unix socket
 //! - MCP mode (`--mcp`): Retains approval_prompt MCP server for backwards compatibility
 
-mod cli;
-mod index_client;
-mod index_console;
-mod pty_relay;
-mod remote_cli;
-mod session_hook;
-
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -17,6 +10,7 @@ use clap::Parser;
 use rmcp::ServiceExt;
 use tddy_room_client::RoomConnector;
 use tddy_tools::server::PermissionServer;
+use tddy_tools::{cli, index_client, pty_relay, remote_cli, session_hook};
 
 #[derive(Parser)]
 #[command(name = "tddy-tools")]
@@ -130,15 +124,8 @@ fn init_logging() {
 
 /// The room transport this build joins rooms through. This binary is the only place that knows it
 /// is LiveKit: the libraries it calls take a [`RoomConnector`].
-#[cfg(feature = "livekit")]
 fn room_connector() -> Arc<dyn RoomConnector> {
     Arc::new(tddy_livekit::room_connector::LiveKitRoomConnector)
-}
-
-/// A build without the `livekit` feature wires no room transport, and a join says so.
-#[cfg(not(feature = "livekit"))]
-fn room_connector() -> Arc<dyn RoomConnector> {
-    Arc::new(tddy_room_client::NoRoomTransport)
 }
 
 #[tokio::main]

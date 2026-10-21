@@ -1,0 +1,57 @@
+[package]
+name = "tddy-tools-cli"
+version = "0.1.0"
+edition = "2021"
+description = "The tddy-tools binary: the tool-calling library wired to the LiveKit room connector"
+
+# The binary keeps the name `tddy-tools`: agents, the daemon, the sandbox and every script resolve
+# `target/{debug,release}/tddy-tools`. Only the package that builds it is named differently, so the
+# tool library (`tddy-tools`) can stay free of a LiveKit dependency.
+[[bin]]
+name = "tddy-tools"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+rmcp = { version = "1", features = ["server", "transport-io", "schemars", "macros"] }
+tokio = { version = "1", features = ["full"] }
+# The `build`/`build-list` dispatch lives in tddy-bsp, which owns the one plugin registry — so the
+# six `tddy-build*` crates are its dependencies, not this one's.
+tddy-bsp = { path = "../tddy-bsp" }
+tddy-code-analysis = { path = "../tddy-code-analysis" }
+tddy-code-restructuring = { path = "../tddy-code-restructuring" }
+tddy-discovery = { path = "../tddy-discovery" }
+# The LiveKit implementation of the client room transport port, wired here and nowhere in the
+# library.
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-room-client = { path = "../tddy-room-client" }
+tddy-tools = { path = "../tddy-tools" }
+
+[dev-dependencies]
+assert_cmd = "2"
+async-trait = "0.1"
+predicates = "3"
+prost = { version = "0.13" }
+serde_json = "1"
+tempfile = "3"
+tddy-core = { path = "../tddy-core" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-service = { path = "../tddy-service" }
+tddy-stdio = { path = "../tddy-stdio" }
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+tddy-tool-engine = { path = "../tddy-tool-engine" }
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+# subagent_mcp_acceptance.rs: mocks the FastContext /v1/chat/completions endpoint.
+wiremock = "0.6"
+# session_hook_cli.rs: the `/rpc/{service}/{method}` router the daemon itself serves `session-hook`'s
+# two reports on. Serving the real router — rather than a hand-rolled listener that answers any path
+# — is what makes the suite able to tell the coordinate the hook posts to from the one the daemon
+# mounts: an unmounted service is refused by `MultiRpcService`, so a hook addressing the wrong one
+# records nothing. `axum` is only the `serve` call for that router, and is already a workspace-wide
+# dependency, so no new crate enters the tree.
+tddy-connectrpc = { path = "../tddy-connectrpc" }
+axum = "0.8"

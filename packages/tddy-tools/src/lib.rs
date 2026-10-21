@@ -12,14 +12,20 @@
 //! implements them.
 
 pub mod action_tools;
+pub mod cli;
 mod github_credential;
+pub mod index_client;
+pub mod index_console;
 pub mod list_models;
 pub mod mcp_primitives;
+pub mod pty_relay;
 mod pull_ledger;
+pub mod remote_cli;
 mod reset_worktree_choice;
 pub mod restructure_tools;
 pub mod server;
 pub mod session_actions_cli;
+pub mod session_hook;
 mod subagent_diff;
 mod subagent_end;
 mod subagent_pull;

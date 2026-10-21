@@ -8,10 +8,6 @@ description = "Generic tool calling handler for tddy-coder: CLI relay (submit, a
 name = "tddy_tools"
 path = "src/lib.rs"
 
-[[bin]]
-name = "tddy-tools"
-path = "src/main.rs"
-
 # Test fixture: hosts a fake connection.ConnectionService/ExecuteTool handler over its own
 # stdin/stdout. Exercised by tests/session_tool_stdio_rpc_dispatch.rs. Its dependencies
 # (tddy-rpc, tddy-stdio, async-trait) must live in [dependencies], not [dev-dependencies]: this
@@ -30,10 +26,6 @@ tddy-core = { path = "../tddy-core" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 uuid = { version = "1", features = ["v4"] }
-# The `build`/`build-list` dispatch lives in tddy-bsp, which owns the one plugin registry — so the
-# six `tddy-build*` crates are its dependencies, not this one's.
-tddy-bsp = { path = "../tddy-bsp" }
-tddy-code-analysis = { path = "../tddy-code-analysis" }
 tddy-code-restructuring = { path = "../tddy-code-restructuring" }
 # `restructure` against a warm daemon, when `TDDY_INDEX_SOCKET` names one: the crate owns
 # `code_index.proto`, serves it, and publishes both the message types and the tonic client, so a
@@ -50,7 +42,6 @@ tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 log = "0.4"
-env_logger = "0.11"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -65,48 +56,22 @@ tddy-service = { path = "../tddy-service" }
 # daemon HTTP or the installed room transport.
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }
 prost = { version = "0.13" }
-# The client room transport port every library below joins rooms through, and — behind `livekit`,
-# named by `src/main.rs` alone — the LiveKit implementation this binary wires into it.
+# The client room transport port every library below joins rooms through; `tddy-tools-cli` wires
+# the LiveKit implementation into it.
 tddy-room-client = { path = "../tddy-room-client" }
-tddy-livekit = { path = "../tddy-livekit", optional = true }
 # The generated `CodeIndexServiceClient` and the `Status` its refusals arrive as. Transport only:
 # this crate serves no gRPC of its own.
 tonic = { version = "0.12", default-features = false, features = ["transport", "codegen", "prost"] }
 # Relay dispatch: HTTP forwarding for dispatch_dynamic_tool.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
-[features]
-# On by default: `--mcp` dispatch for a split session (agent on one host, worktree on another)
-# reaches the remote daemon over LiveKit RPC, so a shipped tddy-tools must carry the SDK. A build
-# that only ever talks stdio (in-jail) can drop it with --no-default-features; its room joins then
-# fail naming that no room transport is wired. Only `src/main.rs` names the plugin.
-default = ["livekit"]
-livekit = ["dep:tddy-livekit"]
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
 [dev-dependencies]
-assert_cmd = "2"
-predicates = "3"
 serde_json = "1"
 serial_test = "3"
 tempfile = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
-tddy-testing-commons = { path = "../tddy-testing-commons" }
-# Relay integration: `start_toolcall_listener` + CLI subprocess (`submit_relay_no_poll`).
 tddy-core = { path = "../tddy-core" }
-# subagent_mcp_acceptance.rs: mocks the FastContext /v1/chat/completions endpoint.
-wiremock = "0.6"
-# session_hook_cli.rs: the `/rpc/{service}/{method}` router the daemon itself serves `session-hook`'s
-# two reports on. Serving the real router — rather than a hand-rolled listener that answers any path
-# — is what makes the suite able to tell the coordinate the hook posts to from the one the daemon
-# mounts: an unmounted service is refused by `MultiRpcService`, so a hook addressing the wrong one
-# records nothing. `axum` is only the `serve` call for that router, and is already a workspace-wide
-# dependency, so no new crate enters the tree.
-tddy-connectrpc = { path = "../tddy-connectrpc" }
-axum = "0.8"
 # subagent_status_wait_acceptance.rs: `#[tokio::test(start_paused = true)]`, so a wait's deadline
 # and the frame that beats it are ordered by virtual time rather than by a real sleep whose length
 # the test would have to guess.

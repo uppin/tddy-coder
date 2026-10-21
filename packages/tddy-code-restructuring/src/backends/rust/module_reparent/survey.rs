@@ -111,6 +111,9 @@ fn old_parent(
             return Ok(None);
         }
     };
+    // TODO(restructure-engine): a package name resolves to its `src/lib.rs`, so a module declared
+    // in the binary root (`src/main.rs`) of a package with a library cannot be re-parented. See
+    // docs/dev/todo/2026-10-21-restructure-cannot-reparent-modules-declared-in-a-binary-root.md
     if module.file != request.file {
         findings.push(format!(
             "`{parent}` is in {}, and the anchor is in {}: the anchor must be on the `mod` \
@@ -119,6 +122,9 @@ fn old_parent(
         ));
     }
     let text = workspace.read(&module.file)?;
+    // TODO(restructure-engine): only the library root is searched for the `mod` declaration, so
+    // one in a binary root (`src/main.rs`) is reported missing. See
+    // docs/dev/todo/2026-10-21-restructure-cannot-reparent-modules-declared-in-a-binary-root.md
     let Some(declaration) = declaration::find(&text, &module.scope, &request.name)? else {
         findings.push(format!(
             "`{parent}` declares no `mod {};`: `reparent_module` is anchored on the module's \
