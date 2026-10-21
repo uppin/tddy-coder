@@ -498,6 +498,13 @@ leaves reach two crates; a range anchor that covers no `mod` declaration. See
   `reexport: glob` leaves has the same visibility. A restricted child that code outside the moved tree
   reaches by its own path is refused by `check --deep` and `apply`.
 
+  **A sibling `#[cfg(test)] mod t;` follows when it tests only moved code.** One declared at the top
+  level of the file that declares a member, when that file stays, moves beside the member it names
+  first (file, declaration with its doc comments, `[dev-dependencies]`) if every path of it that names
+  the origin reaches the moving set. One that also names code staying behind, is placed with `#[path]`
+  or has an item named from another file stays, and the resolution's notes say why. No plan field
+  controls it.
+
   A plain `check` names a **partial** set statically and with no index, which is the refusal that
   used to be discovered only at `apply`. The finding is about a *moved* module whose header still
   names a module staying behind: that makes the destination depend on the crate it left. The crate

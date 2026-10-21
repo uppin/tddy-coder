@@ -39,6 +39,11 @@ into that member before the facades are written (`carried::fold_carried_members`
 root declares only the modules the plan moved. No file arriving in the destination is given a `use` that
 names the destination crate.
 
+A sibling `#[cfg(test)] mod t;` that follows the move (`crate_move::test_modules`) gets no facade either:
+nothing outside it names it. Its declaration leaves the origin file with the attributes and doc comments
+above it, and the destination root receives `#[cfg(test)]` + `mod t;` after its last line, not in sorted
+position, because this repository keeps `#[cfg(test)] mod` lines after the production declarations.
+
 ## The declaration a move removes
 
 A `mod <module>;` declaration is removed whole (`removed_declaration`). The span runs from the first of

@@ -12,6 +12,12 @@ Two shapes stay behind even when they test only moved code:
    parent's text, so it cannot travel as a file;
 2. a test module declared elsewhere, e.g. a crate-root `#[cfg(test)] mod foo_tests;` that tests the nested `a::foo`.
 
+A third shape is read wrongly rather than left alone: a carried child declared inside an inline
+`#[cfg(test)] mod tests { mod helpers; }` is surveyed as production code, because the gate that marks a file
+as test code (`crate_move::test_modules::test_gated`) reads a `#[cfg(test)]` on an out-of-line `mod x;`
+declaration only. Its crates go to `[dependencies]` and a path of it back into the origin counts as an
+edge.
+
 ## What should happen
 
 1. Offer an `extract_module` of the inline block's relevant tests first (plan-level), or split it as part of the move.
@@ -21,3 +27,7 @@ Two shapes stay behind even when they test only moved code:
 
 Neither shape appeared in `#carve`. (1) needs a seam through a test module, which `extract_module` handles poorly today
 (apply-gaps item M); (2) widens the scan from one file to the whole crate and needs a cost bound first.
+
+Third shape: have `test_gated` also treat an inline module marked `#[cfg(test)]` on the way down as a gate
+(`source_scan::items_of_module` records no attribute on a child, so it needs one, as `test_declarations`
+reads them).

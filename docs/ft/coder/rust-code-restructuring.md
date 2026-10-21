@@ -340,7 +340,7 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `reorder_call_args` | Reorder one call's arguments. `order` names every argument position once |
 | `repoint_call` | Rewrite the part of a call **in front of** its arguments. Single form: one call's callee. Bulk form: insert hops after the receiver of every call of a method. See [`repoint_call`](#repoint_call) |
 | `repoint_facade_imports` | Re-point every path of one file (or of every file of one module) that goes through a `pub use` of **another crate** to the path where the item is **defined**. A `symbol` anchor names one file; an `items`/`item` anchor on a `mod` declaration names the module. See [`repoint_facade_imports`](#repoint_facade_imports) |
-| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate, **with the directory of its children**: `git mv` the file and every file its `mod` declarations lead to (`x.rs` and `x/mod.rs` children, children of inline modules) to the same place relative to the module under the destination's `src/`, rewrite every path they name — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required; it is a crate that exists, or one the move creates when the line carries `name` (see [Crate creation](#crate-creation)). `reexport: "glob"` leaves one grouped `<visibility> use <dest_crate>::{a, b};` per destination and visibility in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff** — the facade has the visibility of the `mod` line it replaces (`pub(crate) mod x;` leaves `pub(crate) use dest::x;`, a private `mod x;` a private `use dest::x;`), so it never widens the origin's API; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item`. The origin's `mod <module>;`, written with any visibility (`pub`, `pub(crate)`, `pub(super)`, `pub(self)`, `pub(in …)` or none), is removed with the doc and plain comments directly above it, which are written above the `pub mod <module>;` the destination's root gains; a declaration carrying any attribute (`#[cfg]`, `#[path]`, `#[allow]`) is refused by `check` and `apply` before anything is written, naming the attribute. Removing it never joins two `use` runs: where it was the only line between them, one blank line stays (after the facade, when one takes its place) so `rustfmt` sorts each run as it was. A child the move cannot carry is a finding of plain `check` (see [Path survey](#path-survey)) |
+| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate, **with the directory of its children**: `git mv` the file and every file its `mod` declarations lead to (`x.rs` and `x/mod.rs` children, children of inline modules) to the same place relative to the module under the destination's `src/`, rewrite every path they name — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required; it is a crate that exists, or one the move creates when the line carries `name` (see [Crate creation](#crate-creation)). `reexport: "glob"` leaves one grouped `<visibility> use <dest_crate>::{a, b};` per destination and visibility in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff** — the facade has the visibility of the `mod` line it replaces (`pub(crate) mod x;` leaves `pub(crate) use dest::x;`, a private `mod x;` a private `use dest::x;`), so it never widens the origin's API; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item`. The origin's `mod <module>;`, written with any visibility (`pub`, `pub(crate)`, `pub(super)`, `pub(self)`, `pub(in …)` or none), is removed with the doc and plain comments directly above it, which are written above the `pub mod <module>;` the destination's root gains; a declaration carrying any attribute (`#[cfg]`, `#[path]`, `#[allow]`) is refused by `check` and `apply` before anything is written, naming the attribute. Removing it never joins two `use` runs: where it was the only line between them, one blank line stays (after the facade, when one takes its place) so `rustfmt` sorts each run as it was. A child the move cannot carry is a finding of plain `check` (see [Path survey](#path-survey)). A `#[cfg(test)] mod t;` declared beside the module that tests only moved code **moves too**, in the same edit (see [Known limitations](#known-limitations)) |
 | `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to`, `name` and `reexport` behave as above; a cluster creates its crate once. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate`. Each member's declaration is removed, and its comments travel, as for a single module. A member that is a directory child of another member (`a::b` beside `a`) is **folded** into it: it is carried at its nested position (`a/b.rs` lands at `<dest>/src/a/b.rs`), gets no root declaration and no facade, and its parent's `mod b;` line stays as written. A member whose parent does not move lands at the destination's root under its last segment. No file arriving in the destination is given a `use` that names the destination crate |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
 
@@ -1140,6 +1140,12 @@ left, and the destination's manifest. The three cannot disagree about what the f
   inside that tree is left as written; a path out of it is re-pointed by the rules below. A reference
   from one carried file to another is not a caller. The crates a child names join the destination's
   manifest.
+- **A file reached through a `#[cfg(test)] mod` is test code throughout.** A carried file at or below a
+  `#[cfg(test)] mod x;` declaration (in the carried file above it, or inside an inline module of that
+  file), and every file of a sibling test module that follows the move, has every path read as
+  `#[cfg(test)]`: its crates are `[dev-dependencies]` entries, and a path of it back into the origin is
+  no edge. A `#[cfg(test)]` on an inline module that is the only gate of an out-of-line child is not
+  read.
 - **How it is resolved.** `self::`, `super::` (any depth) and `crate::` are resolved by segment against
   the file's module path, never by string prefix; a `super::` that climbs above the crate root is
   refused. The result is followed through the origin's re-exports — explicit `use` and glob, chained —
@@ -1157,7 +1163,9 @@ left, and the destination's manifest. The three cannot disagree about what the f
   it is refused, naming the file and the line.
 - **Facades and restrictions.** A path that reaches a co-moving member through a glob facade the origin
   holds (`pub use <module>::*;`) counts as reaching the member, so it stays `crate::`; one that
-  reaches a module that stays is an edge. A `pub(in crate::<module>)` restriction is a visibility, never an
+  reaches a module that stays is an edge. A path whose own spelling reaches a staying module but whose
+  re-exports lead into a co-moving one (`super::recipe` through the parent's `pub use a::*;`) lands at
+  `crate::<landing>::recipe`, the reading the body precondition already takes. A `pub(in crate::<module>)` restriction is a visibility, never an
   edge and never a manifest line: it becomes `pub(crate)` when the module stays and
   `pub(in crate::<landing>)` when it moves with the set.
 - **Callers.** `reexport: none` re-points every caller of every member of a cluster once, as one edit per
@@ -1337,8 +1345,20 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   `[dependencies]` and `[dev-dependencies]` only.
 - **A restricted child inside an inline module is read where it is declared; the inline module's own
   visibility is not read.** `pub(crate) mod i { pub mod d; }` is not found restricted.
-- **A module's sibling test modules do not move with it.** A `#[cfg(test)] mod x_tests;` beside the module,
-  not under it, stays in the origin: only the files below the module are carried.
+- **Only the sibling test modules that test nothing but the moved code follow it.** A
+  `#[cfg(test)] mod x_tests;` (or `#[cfg(all(test, …))]`) declared at the top level of the file that
+  declares a moved module, when that file stays, is considered. It follows when every path of it that
+  names the origin reaches the moving set (members, the files they carry, and modules earlier operations of
+  the plan moved) and at least one does. It lands beside the module it names first in plan order, its
+  declaration (with the attributes and doc comments above it) is appended to the destination root, its
+  paths are re-pointed like a moved file's, its crates are `[dev-dependencies]`, and no facade is written
+  for it. A test module that also names code staying behind, is placed with `#[path]`, or defines an item
+  another file outside the moving set names, stays, and the resolution says which path keeps it; one that
+  names nothing the move takes is left alone without a note. A follower whose landing file exists in the
+  destination, or whose name the destination root already declares, is a **merge**, refused by `apply` and
+  reported by plain `check` in the same words. The reference check for "named from another file" needs the
+  index, so plain `check` cannot see it. Inline `#[cfg(test)] mod tests { … }` blocks, test modules
+  declared outside the moved module's declaring file, and the same-crate operations are not covered.
 - **A `mod` declaration with an attribute on the same line** (`#[cfg(unix)] mod x;`) is not read as a
   declaration, so a move of `x` is refused as declaring no such `mod`.
 - **A caller that imports the module rather than the item is not re-pointed.** The survey asks
