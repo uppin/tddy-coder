@@ -2,6 +2,7 @@
 
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
+**Complexity**: 4/5 — tddy-lsp + restructuring + index-daemon error surface
 **Type**: Bug fix and hygiene. It touches the `tddy-lsp` error surface, a static-check rule, the plan
 header and removes dead code. It adds no new operation.
 **Stack**: `#reshape` 16/24, branch `feature/reshape/anchors-outline`, green wave 1, PR [#609](https://github.com/uppin/tddy-coder/pull/609).
@@ -659,7 +660,7 @@ Seen, not this node's: `--lib` reds in `language::tests`, `impl_move::assemble`,
 - [x] Create changeset (this document)
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
+- [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
