@@ -1,5 +1,5 @@
-use crate::dispatch_request_via_streaming_rpc;
-use crate::execute_tool_request;
+use crate::rpc_transports::dispatch_request_via_streaming_rpc;
+use crate::rpc_transports::execute_tool_request;
 use crate::SessionToolEnvelope;
 use std::collections::HashMap;
 use std::future::Future;
