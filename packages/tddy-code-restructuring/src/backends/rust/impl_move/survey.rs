@@ -213,6 +213,7 @@ fn reached_widenings(
                 item: item.name.clone(),
                 from: spelled(&item.visibility),
                 to: spelled(&to),
+                reason: None,
             });
         }
     }
