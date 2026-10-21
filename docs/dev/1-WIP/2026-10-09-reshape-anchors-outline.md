@@ -749,8 +749,8 @@ suites that were green before this milestone pin `run \`check --deep\``, which t
 
 Both passed against the pre-M4 wording (`… did not examine it — run \`check --deep\``, checked at `e08c0b7d2`).
 Neither test file changed. The R3(b) text the changeset specifies, `… needs \`check --deep\``, cannot satisfy both,
-because test 13 compares the whole string. This is undecided: either the R3(b) wording or those two pins must change.
-Nothing was edited here. The M4 commit `cc14a2226` is pushed and carries the two red pins.
+because test 13 compares the whole string. **Resolved 2026-10-21** (developer decision, see the last section): the two
+pins now expect `needs \`check --deep\``, and both are green (`repoint_call_plan_acceptance` 12/12, `retarget_impl_plan_lines` 7/7).
 
 ### M5 verify (2026-10-21)
 
