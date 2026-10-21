@@ -88,7 +88,7 @@ apply that refused more than once — see
 
 Line 1 is the header. Schema v1 is a snapshot, `{ "v": 1, "snapshot": { … } }` with `sha256:` content
 hashes, and a drifted file is refused (`snapshot mismatch`). Schema v2, which a plan using item anchors
-is written with, is a per-file hint: `{ "v": 2, "files": { "<path>": { "sha256": …, "modified": … } } }`.
+is written with, is a per-file hint: `{ "v": 2, "files": { "<path>": { "sha256": … } } }`.
 A v2 header never refuses a run; a file whose hash drifted, or which is gone, is reported on the
 progress line and the plan runs, because an item anchor does not depend on the rest of the file.
 `restructure snapshot` rewrites the header of whichever version the plan has.
@@ -160,7 +160,7 @@ current, not only the one being applied.
   item path. An intact item rewrites its hint; an item whose text changed is stale as `item changed`;
   one that is gone is stale as `item not found in <file>`. The files the daemon's own runs wrote are
   skipped, because the run that wrote them already carried every held plan through the edit.
-- **Per-file hints follow.** The v2 `files` hints (`sha256`, `modified`) of a folded or re-resolved
+- **Per-file hints follow.** The v2 `files` hints (`sha256`) of a folded or re-resolved
   plan are rewritten on a refresh, and the plan is flushed through the store's ordinary write-back.
 - **Stale operations are reported.** `ListPlans` and `PlanStatus` list each stale operation with its
   reason, and `check` reports one as a finding. A stale operation is never silently re-targeted; the
@@ -1318,9 +1318,10 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   while lowering anchors do not say so, and no copy of the plan as it was before the run is kept.
 - **`--from <id>` does not reach the daemon.** `ApplyRequest` carries no field for it, so the daemon path
   refuses it, naming the workaround. Journal records and `OperationApplied` events carry `op_id`.
-- **`check` without `--deep` cannot examine item anchors.** A static check has no server to resolve
-  them with, so it reports each item-anchored operation as a finding that says to run `check --deep`;
-  a plan of item anchors never passes a static check green.
+- **`check` without `--deep` cannot resolve item anchors.** A static check has no server, so beyond
+  refusing an anchor whose crate or module prefix does not match its file, it reports each
+  item-anchored operation as a finding that says it needs `check --deep`; a plan of item anchors never
+  passes a static check green.
 - **An item anchor's refusal names the item, not the operation.** It is raised while the plan is
   resolved as a whole.
 - **`check` without `--deep` cannot predict every apply refusal.** The plain form reads text and

@@ -71,18 +71,18 @@ fn a_workspace_holding_one_source_file() -> tempfile::TempDir {
 }
 
 /// Ask the backend for something that has to wait for the index, on a blocking thread — the way
-/// the runner drives it.
+/// the runner drives it. An extraction waits for the crate graph before it asks for its assist.
 fn an_operation_that_waits_for_the_index(
     mut backend: RustBackend,
     root: PathBuf,
-) -> tokio::task::JoinHandle<Result<tddy_code_restructuring::Range, RestructureError>> {
+) -> tokio::task::JoinHandle<Result<tddy_code_restructuring::Resolution, RestructureError>> {
     tokio::task::spawn_blocking(move || {
         let overlay = Overlay::new();
         let workspace = Workspace {
             root: &root,
             overlay: &overlay,
         };
-        backend.anchor_for("src/lib.rs", &["foo".to_string()], &workspace)
+        backend.resolve(&an_extraction_of_the_function_body(), &workspace)
     })
 }
 

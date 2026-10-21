@@ -145,6 +145,9 @@ pub fn status_of_lsp(error: &LspError) -> Status {
         // log hunting a server that was answering perfectly well.
         LspError::Abandoned => Status::cancelled(failure),
         LspError::ServerExited => Status::unavailable(failure),
+        // A server that never came up is the state of this host, as one that exited is, and its cause
+        // travels in the message.
+        LspError::ServerNotStarted { .. } => Status::unavailable(failure),
         // The server answered, and what it said made no sense. Nothing the caller did caused it.
         LspError::Protocol(_)
         | LspError::Server { .. }
@@ -360,6 +363,24 @@ mod tests {
 
         // Then the host's state is named, not the request
         assert_eq!(status.code(), Code::FailedPrecondition);
+    }
+
+    #[test]
+    fn reports_a_server_that_did_not_start_as_unavailable_carrying_why() {
+        // Given a language server that exited before its handshake completed
+        let failure = LspError::ServerNotStarted {
+            program: "rust-analyzer".to_string(),
+            reason: "exited before the initialize handshake completed (exit status: 1)".to_string(),
+        };
+
+        // When it is classified
+        let status = status_of_lsp(&failure);
+
+        // Then it is the host's state, and the caller reads why in the server's own words
+        assert_eq!(
+            (status.code(), status.message().to_string()),
+            (Code::Unavailable, failure.to_string())
+        );
     }
 
     #[test]

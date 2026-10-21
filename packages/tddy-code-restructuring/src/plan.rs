@@ -127,10 +127,6 @@ pub use item_path::{Fingerprint, ItemPath, ItemSegment};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileHint {
     pub sha256: String,
-    /// RFC 3339, when the file's modification time is one it can state — absent for a time before
-    /// the epoch rather than a date that is not the file's. Never read; it is there for a person.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modified: Option<String>,
 }
 
 pub use crate::plan::refactor_kind::RefactorKind;
@@ -350,7 +346,7 @@ impl Anchor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{plan::codec::rfc3339, RestructureError};
+    use crate::RestructureError;
 
     const HEADER: &str = r#"{"v":1,"snapshot":{"src/shapes.ts":"sha256:ab12"}}"#;
 
@@ -1251,8 +1247,8 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_header_carries_its_file_hints() {
-        // Given a v2 plan with one hinted file and one item-anchored op
+    fn a_v2_header_that_still_carries_modified_parses_and_keeps_only_the_hash() {
+        // Given a v2 plan whose hint still carries the `modified` time older plans were written with
         let jsonl = concat!(
             r#"{"v":2,"files":{"src/lib.rs":{"sha256":"sha256:ab","modified":"2026-09-26T00:00:00Z"}}}"#,
             "\n",
@@ -1263,18 +1259,18 @@ mod tests {
         // When it is parsed
         let plan = Plan::parse(jsonl).unwrap();
 
-        // Then the hint is kept and nothing is read as a refusing snapshot
+        // Then it is a hinted plan, nothing is read as a refusing snapshot, and the hint is the hash
         assert_eq!(plan.version, 2);
         assert_eq!(plan.snapshot, BTreeMap::new());
         assert_eq!(
-            plan.files,
-            BTreeMap::from([(
+            plan.files
+                .iter()
+                .map(|(file, hint)| (file.clone(), serde_json::to_value(hint).unwrap()))
+                .collect::<Vec<_>>(),
+            vec![(
                 "src/lib.rs".to_string(),
-                FileHint {
-                    sha256: "sha256:ab".to_string(),
-                    modified: Some("2026-09-26T00:00:00Z".to_string()),
-                }
-            )])
+                serde_json::json!({ "sha256": "sha256:ab" })
+            )]
         );
     }
 
@@ -1323,7 +1319,7 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_header_is_restated_with_the_hash_and_time_the_file_holds_now() {
+    fn a_v2_header_is_restated_with_the_hash_the_file_holds_now() {
         // Given a v2 plan hinting at one file, and that file's content
         let workspace = tempfile::tempdir().unwrap();
         std::fs::write(workspace.path().join("lib.rs"), "pub struct A;\n").unwrap();
@@ -1334,7 +1330,6 @@ mod tests {
                 "lib.rs".to_string(),
                 FileHint {
                     sha256: "sha256:stale".to_string(),
-                    modified: Some("2020-01-01T00:00:00Z".to_string()),
                 },
             )]),
             ops: vec![],
@@ -1355,6 +1350,55 @@ mod tests {
     }
 
     #[test]
+    fn a_v2_header_naming_a_deleted_file_is_restated_as_the_empty_hash_not_refused() {
+        // Given a v2 plan hinting at a file the author has since deleted
+        let workspace = tempfile::tempdir().unwrap();
+        let plan = Plan {
+            version: 2,
+            snapshot: BTreeMap::new(),
+            files: BTreeMap::from([(
+                "gone.rs".to_string(),
+                FileHint {
+                    sha256: "sha256:stale".to_string(),
+                },
+            )]),
+            ops: vec![],
+        };
+
+        // When its header is rehashed — `snapshot` restating the header, as a v1 one already is
+        let header = plan.rehashed_header(workspace.path()).unwrap();
+
+        // Then the hint is the empty file's hash: a hint never refuses, so a deleted file is drift
+        // for the report to name, not an error that stops the rewrite
+        let reread = Plan::parse(&header).unwrap();
+        assert_eq!(
+            reread.files["gone.rs"].sha256,
+            crate::apply::hash_file(&workspace.path().join("gone.rs")).unwrap()
+        );
+        assert_eq!(reread.drifted_hints(workspace.path()), vec!["gone.rs"]);
+    }
+
+    #[test]
+    fn a_header_is_not_written_for_an_item_anchor_on_a_missing_file() {
+        // Given a plan of bare operations whose item anchor names a file the tree does not hold
+        let workspace = tempfile::tempdir().unwrap();
+        let plan = Plan::parse_headerless(concat!(
+            r#"{"op":"extract_module","anchor":{"kind":"items","file":"src/absent.rs","#,
+            r#""items":["demo::foo"],"fingerprints":["sha256:aa"]},"name":"grouped"}"#
+        ))
+        .unwrap();
+
+        // When its header is written
+        let refused = plan.header_for_anchored_files(workspace.path());
+
+        // Then it is refused naming the file: `hint_of` hashing a missing file as empty never
+        // reaches a header the author is writing for the first time
+        assert!(refused
+            .err()
+            .is_some_and(|error| error.to_string().contains("src/absent.rs is not a file")));
+    }
+
+    #[test]
     fn a_hinted_file_that_is_gone_is_reported_as_drift_not_as_an_error() {
         // Given a v2 plan hinting at a file the tree no longer has — even one hinted while empty,
         // which hashes the same as a missing file
@@ -1363,13 +1407,7 @@ mod tests {
         let plan = Plan {
             version: 2,
             snapshot: BTreeMap::new(),
-            files: BTreeMap::from([(
-                "gone.rs".to_string(),
-                FileHint {
-                    sha256: empty,
-                    modified: None,
-                },
-            )]),
+            files: BTreeMap::from([("gone.rs".to_string(), FileHint { sha256: empty })]),
             ops: vec![],
         };
 
@@ -1378,20 +1416,6 @@ mod tests {
 
         // Then the missing file is named as drifted
         assert_eq!(drifted, vec!["gone.rs"]);
-    }
-
-    #[test]
-    fn a_timestamp_is_written_as_rfc_3339_utc() {
-        let time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
-
-        assert_eq!(rfc3339(time).as_deref(), Some("2001-09-09T01:46:40Z"));
-    }
-
-    #[test]
-    fn a_time_before_the_epoch_is_left_out_rather_than_written_as_1970() {
-        let time = std::time::UNIX_EPOCH - std::time::Duration::from_secs(60);
-
-        assert_eq!(rfc3339(time), None);
     }
 
     #[test]

@@ -393,7 +393,7 @@ async fn a_static_check_of_an_item_anchored_repoint_call_says_to_run_deep() {
             .iter()
             .any(|finding| finding.contains("RepointCall")
                 && finding.contains("anchors by item, which only a deep check can resolve")
-                && finding.contains("run `check --deep`")),
+                && finding.contains("needs `check --deep`")),
         "the re-point passed a plain check without being examined: {findings:?}"
     );
 }

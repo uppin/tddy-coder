@@ -458,17 +458,23 @@ async fn watching_a_root_whose_server_cannot_start_reports_it_failed_with_the_re
         .pop()
         .expect("the message reporting the failure");
 
-    // Then the request is refused as unavailable
-    assert_eq!(
-        (refusal.code(), refusal.message()),
-        (tddy_rpc::Code::Unavailable, A_SERVER_THAT_EXITS_AT_ONCE)
-    );
+    // Then the request is refused as unavailable, saying the server never started and why
+    assert_eq!(refusal.code(), tddy_rpc::Code::Unavailable);
+    assert_says_the_server_never_started(refusal.message());
     // and the watch reports the root failed, giving the refusal's reason
-    assert_eq!(failed.error, A_SERVER_THAT_EXITS_AT_ONCE);
+    assert_says_the_server_never_started(&failed.error);
 }
 
-/// Why a root whose server exits as soon as it is spawned has no index.
-const A_SERVER_THAT_EXITS_AT_ONCE: &str = "lsp server exited";
+/// Why a root whose server exits as soon as it is spawned has no index: it did not start, because it
+/// exited before the handshake. The program's path differs per machine, so it is not pinned.
+fn assert_says_the_server_never_started(message: &str) {
+    for part in [
+        "did not start",
+        "exited before the initialize handshake completed",
+    ] {
+        assert!(message.contains(part), "`{part}` missing from: {message}");
+    }
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_watch_that_joins_mid_load_names_every_phase_already_running() {

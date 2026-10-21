@@ -398,11 +398,14 @@ fn a_language_server_the_backend_starts_itself_is_recorded_with_the_names_of_its
     let mut backend = RustBackend::new(env!("CARGO_BIN_EXE_fake_lsp"), cargo_home, rustup_home)
         .with_spawn_recorder(spawns.recorder());
 
-    // When it is asked a question, which starts the server
+    // When it is asked to resolve an operation, which starts the server
     let overlay = Overlay::new();
-    let _answer = backend.anchor_for(
-        ORIGIN_LIB,
-        &["level".to_string()],
+    let an_extraction: tddy_code_restructuring::RefactorOp = serde_json::from_str(&format!(
+        r#"{{"op":"extract_method","anchor":{{"kind":"range","file":"{ORIGIN_LIB}","start":{{"line":2,"col":5}},"end":{{"line":2,"col":6}}}},"name":"extracted"}}"#
+    ))
+    .expect("an extraction parses");
+    let _answer = backend.resolve(
+        &an_extraction,
         &Workspace {
             root: workspace.path(),
             overlay: &overlay,

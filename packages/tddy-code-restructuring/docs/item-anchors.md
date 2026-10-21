@@ -68,9 +68,14 @@ operations it will execute, after checking the plan against the journal's `plan_
 (`PlanUnverifiable`). Keeping the anchors current across runs is the plan store's job; see
 [plan-store.md](plan-store.md).
 
-**Static `check` cannot examine item anchors.** A static check has no server to resolve with, so it
-reports each item-anchored operation as a finding saying to run `check --deep`; a plan of item
-anchors never passes a static check green. `check --deep` resolves them first.
+**What a static `check` can say about an item anchor.** A static check has no server, so it cannot
+tell whether the item is there, unambiguous or unchanged. It does check the crate and module prefix
+against the anchor's file (`item_anchor::prefix::refuse_a_foreign_prefix`, the same `segments_below`
+rule the deep resolver applies), and a foreign prefix is the operation's one finding, in the deep
+resolver's words. Otherwise each item-anchored operation gets one finding: `… anchors by item, which
+only a deep check can resolve: its module prefix matches the file, and whether the item is there,
+unambiguous and unchanged needs \`check --deep\``. A plan of item anchors never passes a static check
+green; `check --deep` resolves them.
 
 ## The outline wait
 
@@ -88,7 +93,7 @@ caller stops waiting. The wait has no deadline of its own.
 ## Plan header, schema v2
 
 ```jsonl
-{"v":2,"files":{"<path>":{"sha256":"sha256:<digest>","modified":"<RFC 3339>"}}}
+{"v":2,"files":{"<path>":{"sha256":"sha256:<digest>"}}}
 ```
 
 A per-file **hint**. A file whose hash drifted, or which is gone, is reported on the progress line and
@@ -96,7 +101,10 @@ the plan runs: an item anchor does not depend on the rest of the file. A v1 head
 (`{"v":1,"snapshot":{…}}`) is read as written, including the `snapshot mismatch` refusal. `restructure
 snapshot` rewrites the header of whichever version the plan has, and for a plan of item anchors
 re-resolves each anchor too (`rebase_plan_file`; see [plan-store.md](plan-store.md#live-plans)).
-`modified` is written and not read; the hashes and hints of a plan are rewritten whenever a refresh
+A header written before 2026-10-21 may still carry a `modified` time per file: it parses, the key is
+ignored, and the next rewrite omits it. A hinted file the tree no longer holds is restated as the empty
+file's hash (`hint_of` → `apply::hash_file`), as a v1 snapshot already was, so the drift report names it
+rather than the rewrite failing. The hashes and hints of a plan are rewritten whenever a refresh
 touches its files.
 
 ## The `anchors` command

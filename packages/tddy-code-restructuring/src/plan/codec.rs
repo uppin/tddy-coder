@@ -221,10 +221,7 @@ impl Plan {
     }
 }
 
-// TODO(sharpen): lint correction after the apply — rfc3339's only outside user is plan.rs's test module (changeset D4, approved 2026-10-06).
 pub(crate) use crate::plan::codec::file_hint::hint_of;
-#[cfg(test)]
-pub(crate) use crate::plan::codec::file_hint::rfc3339;
 use crate::plan::codec::groups::refuse_split_groups;
 
 /// The `v` a header line declares, read before the header's shape is known.

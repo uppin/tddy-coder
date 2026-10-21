@@ -11,12 +11,11 @@ Schema **v2** replaces the refusing snapshot with per-file hints, and is what a 
 `items` anchors is written with:
 
 ```jsonl
-{"v":2,"files":{"<path>":{"sha256":"sha256:<digest>","modified":"<RFC 3339>"}, …}}
+{"v":2,"files":{"<path>":{"sha256":"sha256:<digest>"}, …}}
 ```
 
-`modified` is informational and left out when the file's time is before the epoch. A v2 header never
-refuses a run: a file whose hash drifted, or which is gone, is reported on the progress line and the
-plan runs, because an item anchor does not depend on the rest of the file. A v1 plan is read exactly as
+A v2 header never refuses a run: a file whose hash drifted, or which is gone, is reported on the progress
+line and the plan runs, because an item anchor does not depend on the rest of the file. A v1 plan is read exactly as
 before, including the `snapshot mismatch` refusal. `restructure snapshot` rewrites the header of
 whichever version the plan has.
 

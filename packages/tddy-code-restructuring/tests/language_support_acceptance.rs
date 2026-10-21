@@ -78,6 +78,15 @@ fn a_workspace_holding(source: &str) -> tempfile::TempDir {
     workspace
 }
 
+/// An extraction of the body of the fixture's one function, parsed from a plan line so later
+/// `RefactorOp` fields do not touch it.
+fn an_extraction_of_the_function_body() -> tddy_code_restructuring::RefactorOp {
+    serde_json::from_str(
+        r#"{"op":"extract_method","anchor":{"kind":"range","file":"src/lib.rs","start":{"line":2,"col":5},"end":{"line":2,"col":6}},"name":"extracted"}"#,
+    )
+    .expect("an extraction parses")
+}
+
 /// The deterministic fake server, started the way the built-in Rust launch starts rust-analyzer.
 async fn the_fake_server_for(root: &Path) -> Arc<LspClient> {
     let mut allow = LspAllowList::new();
@@ -114,7 +123,7 @@ async fn a_document_opens_with_its_supports_language_id() {
     let client = the_fake_server_for(&root).await;
     let for_the_backend = Arc::clone(&client);
 
-    // When the file's backend opens it — asking for an anchor is enough to open the document
+    // When the file's backend opens it — resolving an operation on it is enough to open the document
     tokio::task::spawn_blocking(move || {
         let cancel = CancellationToken::new();
         let progress = discard();
@@ -133,9 +142,8 @@ async fn a_document_opens_with_its_supports_language_id() {
         let _ = backends
             .backend_of(Path::new("src/lib.rs"))
             .expect("a backend claims the Rust file")
-            .anchor_for(
-                "src/lib.rs",
-                &["foo".to_string()],
+            .resolve(
+                &an_extraction_of_the_function_body(),
                 &Workspace {
                     root: &root,
                     overlay: &overlay,

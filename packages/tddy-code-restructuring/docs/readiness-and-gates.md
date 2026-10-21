@@ -150,7 +150,7 @@ later request on that server would then read names as unresolved that resolve on
 correct seams.
 
 So `backends/rust/documents.rs` owns `did_open`, records each document a backend opens, and closes
-all of them when an entry point ends, whatever it ended with. `resolve`, `anchor_for` and
+all of them when an entry point ends, whatever it ended with. `resolve` and
 `outside_references` each run their body through `closing_what_it_opens`. When the entry point and
 the close both fail, the entry point's error is the one returned. The live test is
 `import_pass_acceptance::imports_the_parent_s_type_on_a_server_an_earlier_check_rehearsed_its_parent_on`:

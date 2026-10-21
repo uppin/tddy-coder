@@ -7,6 +7,8 @@
 //!
 //! Modes (via argv):
 //! - `--exit-immediately` — exit at startup (simulate a server that crashes on spawn).
+//! - `--refuses-initialize` — answer `initialize` with error `-32603 refused`, so the handshake fails
+//!   while the process is still running.
 //! - `--hang` — ignore `shutdown`/`exit` and keep running (simulate an unresponsive
 //!   server, so the task registry's SIGTERM→SIGKILL escalation is exercised).
 //! - `--cold-hovers N` — answer the first N `textDocument/hover` requests with `null`, the way a
@@ -105,6 +107,10 @@ fn main() {
         std::process::exit(0);
     }
     let hang = args.iter().any(|a| a == "--hang");
+    REFUSES_INITIALIZE.store(
+        args.iter().any(|a| a == "--refuses-initialize"),
+        std::sync::atomic::Ordering::SeqCst,
+    );
     let narrates_while_loading = args.iter().any(|a| a == "--narrates-while-loading");
     NARRATES_WHILE_LOADING.store(narrates_while_loading, std::sync::atomic::Ordering::SeqCst);
     let goes_busy_after_hovers = args.iter().any(|a| a == "--goes-busy-after-hovers");
@@ -172,6 +178,10 @@ static LOADS_CRATE_GRAPH_ON_SIGNAL: std::sync::Mutex<Option<std::path::PathBuf>>
 
 /// Set by `--narrates-while-loading`: a busy server reports a new build script on a timer.
 static NARRATES_WHILE_LOADING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Set by `--refuses-initialize`: `initialize` is answered with an error.
+static REFUSES_INITIALIZE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// Set by `--never-quiescent`: the server reports itself busy and never reports itself ready.
@@ -638,6 +648,9 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
     }
 
     match method {
+        "initialize" if REFUSES_INITIALIZE.load(std::sync::atomic::Ordering::SeqCst) => {
+            reply_error(id, -32603, "refused")
+        }
         "initialize" => {
             remember_initialize_params(message.get("params").cloned().unwrap_or(Value::Null));
             reply(id, initialize_result())
