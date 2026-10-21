@@ -293,7 +293,7 @@ async fn a_plain_check_reports_an_item_anchored_retarget_as_unexamined_rather_th
             .iter()
             .any(|finding| finding.contains("RetargetImpl")
                 && finding.contains("anchors by item, which only a deep check can resolve")
-                && finding.contains("run `check --deep`")),
+                && finding.contains("needs `check --deep`")),
         "the retarget passed a plain check without being examined: {findings:?}"
     );
 }

@@ -803,3 +803,15 @@ M5 is not green, so no M5 box is ticked.
 - [ ] Linting and formatting (`cargo clippy -p <pkg> --all-targets -- -D warnings` for each touched package, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-09-reshape-anchors-outline-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps
+
+## 2026-10-21: three pins R1 and R3(b) did not anticipate (developer decision)
+
+- `tddy-index-daemon/tests/root_progress_acceptance.rs` pinned the old `lsp server exited` for a server that
+  exits at once. R1 now reports it as not started; the test asserts the message's two parts ("did not
+  start", "exited before the initialize handshake completed") without the program path, which differs per
+  machine. Its intent — a server that dies early is reported unavailable, on the refusal and on the watch —
+  is unchanged.
+- `tddy-code-restructuring/tests/repoint_call_plan_acceptance.rs` and `tests/retarget_impl_plan_lines.rs`
+  pinned "run `check --deep`"; R3(b) and test 13 word the finding "needs `check --deep`", and the two pins
+  now expect that.
+Decided by the developer on 2026-10-21; edited by the orchestrator with milestone 3's `status.rs` change.

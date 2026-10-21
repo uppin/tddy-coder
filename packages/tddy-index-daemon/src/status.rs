@@ -145,9 +145,9 @@ pub fn status_of_lsp(error: &LspError) -> Status {
         // log hunting a server that was answering perfectly well.
         LspError::Abandoned => Status::cancelled(failure),
         LspError::ServerExited => Status::unavailable(failure),
-        // TODO(reshape-anchors-outline): implement — a server that never came up is the state of
-        // this host, `unavailable` (changeset R1); classified as a defect until then.
-        LspError::ServerNotStarted { .. } => Status::internal(failure),
+        // A server that never came up is the state of this host, as one that exited is, and its cause
+        // travels in the message.
+        LspError::ServerNotStarted { .. } => Status::unavailable(failure),
         // The server answered, and what it said made no sense. Nothing the caller did caused it.
         LspError::Protocol(_)
         | LspError::Server { .. }
