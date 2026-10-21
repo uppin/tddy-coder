@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 use tddy_code_restructuring::backends::LspClientBridge;
 use tddy_code_restructuring::{client_capabilities, server_settings, RestructureError};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspKey, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
 use tokio_util::sync::CancellationToken;
 
@@ -37,7 +37,7 @@ async fn a_bridge_onto_a_server_that_never_answers(
 ) -> LspClientBridge {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
             .with_capabilities(client_capabilities())
             .with_initialization_options(server_settings()),
@@ -46,7 +46,7 @@ async fn a_bridge_onto_a_server_that_never_answers(
     let service = registry
         .get_or_spawn(LspKey {
             root: root.to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("the fake language server starts");

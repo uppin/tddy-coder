@@ -78,6 +78,10 @@
 //! `{ uri: text }`, covering `didOpen`'s `text` and `didChange`'s full-text content change. A test
 //! asserts that an edit made between two binds actually reached the server.
 //!
+//! `tddy/documentLanguages` replays the `languageId` each URI was last opened as, as
+//! `{ uri: languageId }`. A test asserts what a document was announced as, which is the only place a
+//! caller's choice of `languageId` is observable.
+//!
 //! `tddy/cancelledRequests` replays the methods of the requests the client sent `$/cancelRequest`
 //! for, in arrival order. A test asserts that abandoning a request told the server to stop working
 //! on it, rather than only that the caller stopped waiting.
@@ -214,6 +218,7 @@ struct DocumentSyncEntry {
     uri: String,
     version: Option<i64>,
     text: Option<String>,
+    language_id: Option<String>,
 }
 
 fn record_document_sync(message: &Value, method: &str) {
@@ -226,6 +231,10 @@ fn record_document_sync(message: &Value, method: &str) {
             uri: notified_uri(message),
             version: notified_version(message),
             text: notified_text(message),
+            language_id: message
+                .pointer("/params/textDocument/languageId")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         });
 }
 
@@ -268,6 +277,17 @@ fn recorded_document_texts() -> Value {
     for entry in recorded_document_sync() {
         if let Some(text) = entry.text {
             by_uri.insert(entry.uri, text);
+        }
+    }
+    json!(by_uri)
+}
+
+/// `{ uri: languageId }`, the `languageId` each URI was last opened as.
+fn recorded_document_languages() -> Value {
+    let mut by_uri: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for entry in recorded_document_sync() {
+        if let Some(language_id) = entry.language_id {
+            by_uri.insert(entry.uri, language_id);
         }
     }
     json!(by_uri)
@@ -658,6 +678,8 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
         "tddy/documentSyncLog" => reply(id, recorded_document_sync_log()),
         // Replays the latest contents the client announced per URI.
         "tddy/documentTexts" => reply(id, recorded_document_texts()),
+        // Replays the `languageId` each URI was last opened as.
+        "tddy/documentLanguages" => reply(id, recorded_document_languages()),
         // Replays the methods of the requests the client asked to cancel.
         "tddy/cancelledRequests" => reply(id, recorded_cancellations()),
         // Writes more to stderr than a pipe buffer holds, then replies.

@@ -13,7 +13,7 @@ use std::time::Duration;
 use tddy_task::{ChannelKind, IdleTimeoutTracker, TaskChannel, TaskId, TaskRegistry};
 use tokio::sync::{oneshot, Mutex};
 
-use crate::allowlist::{Language, LspAllowList};
+use crate::allowlist::{LanguageId, LspAllowList};
 use crate::client::LspClient;
 use crate::error::LspError;
 use crate::server_body::{LspServerBody, ObservedServerBody};
@@ -34,7 +34,7 @@ type SpawnGate = Arc<Mutex<()>>;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LspKey {
     pub root: PathBuf,
-    pub language: Language,
+    pub language: LanguageId,
 }
 
 /// A live, reusable server: its task id plus an initialized client.
@@ -102,8 +102,10 @@ impl LspRegistry {
     /// is spawned and all of them are handed it. Without the gate the second `insert` overwrote
     /// the first, orphaning a live task that nothing could cancel or reap.
     pub async fn get_or_spawn(&self, key: LspKey) -> Result<Arc<LspService>, LspError> {
-        if !self.allow.is_allowed(key.language) {
-            return Err(LspError::LanguageNotAllowed(key.language.id().to_string()));
+        if !self.allow.is_allowed(&key.language) {
+            return Err(LspError::LanguageNotAllowed(
+                key.language.as_str().to_string(),
+            ));
         }
 
         if let Some(live) = self.live_service(&key).await {
@@ -168,9 +170,9 @@ impl LspRegistry {
     async fn spawn_service(&self, key: LspKey) -> Result<Arc<LspService>, LspError> {
         let spec = self
             .allow
-            .launch_spec(key.language)
+            .launch_spec(&key.language)
             .cloned()
-            .ok_or_else(|| LspError::LanguageNotAllowed(key.language.id().to_string()))?;
+            .ok_or_else(|| LspError::LanguageNotAllowed(key.language.as_str().to_string()))?;
 
         let channel = TaskChannel::output_only("0", "lsp", ChannelKind::Combined);
         let (client_tx, client_rx) = oneshot::channel();
@@ -186,7 +188,7 @@ impl LspRegistry {
             .task_registry
             .spawn(
                 body,
-                format!("lsp:{}", key.language.id()),
+                format!("lsp:{}", key.language.as_str()),
                 "",
                 vec![channel],
             )
@@ -309,6 +311,32 @@ impl LspRegistry {
 /// [`LspError::Io`] when a `Cargo.toml` on the walk cannot be read, since whether it declares a
 /// workspace is the whole question.
 pub fn workspace_root_for(target_dir: &Path) -> Result<PathBuf, LspError> {
+    nearest_workspace_root(target_dir, None)
+}
+
+/// [`workspace_root_for`], searching no further out than `bound`.
+///
+/// The walk stops at `bound` and examines it, so the root found is `bound` or lies beneath it. A
+/// target outside `bound` is refused rather than searched for above it: a root above the tree the
+/// caller named is the wrong tree.
+///
+/// # Errors
+///
+/// [`LspError::Io`] when `target_dir` is not beneath `bound`, or when a `Cargo.toml` on the walk
+/// cannot be read.
+pub fn workspace_root_within(target_dir: &Path, bound: &Path) -> Result<PathBuf, LspError> {
+    if !target_dir.starts_with(bound) {
+        return Err(LspError::Io(format!(
+            "{} is outside {}, so no workspace root beneath {} holds it",
+            target_dir.display(),
+            bound.display(),
+            bound.display()
+        )));
+    }
+    nearest_workspace_root(target_dir, Some(bound))
+}
+
+fn nearest_workspace_root(target_dir: &Path, bound: Option<&Path>) -> Result<PathBuf, LspError> {
     let mut nearest_manifest = None;
     for ancestor in target_dir.ancestors() {
         let manifest = ancestor.join("Cargo.toml");
@@ -320,7 +348,7 @@ pub fn workspace_root_for(target_dir: &Path) -> Result<PathBuf, LspError> {
             }
             nearest_manifest.get_or_insert_with(|| ancestor.to_path_buf());
         }
-        if ancestor.join(".git").exists() {
+        if ancestor.join(".git").exists() || Some(ancestor) == bound {
             break;
         }
     }
@@ -340,11 +368,12 @@ fn declares_workspace(manifest: &str) -> bool {
 }
 
 /// Expand a target's `srcs` (glob patterns rooted at `root`, relative to `repo_dir`) into
-/// concrete [`DocumentSource`]s with absolute `file://` URIs.
+/// concrete [`DocumentSource`]s with absolute `file://` URIs, each opened as `language_id`.
 pub fn srcs_to_document_sources(
     repo_dir: &Path,
     srcs: &[String],
     root: &str,
+    language_id: &str,
 ) -> Result<Vec<DocumentSource>, LspError> {
     let mut sources = Vec::with_capacity(srcs.len());
     for pattern in srcs {
@@ -353,7 +382,7 @@ pub fn srcs_to_document_sources(
             .map_err(|err| LspError::Io(format!("{}: {err}", path.display())))?;
         sources.push(DocumentSource {
             uri: format!("file://{}", path.display()),
-            language_id: "rust".to_string(),
+            language_id: language_id.to_string(),
             text,
         });
     }

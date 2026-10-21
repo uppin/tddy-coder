@@ -49,7 +49,13 @@ pub fn item_anchors(
     let source = options.source()?;
     let file = source.to_string_lossy().to_string();
 
-    let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
+    let mut registry = registry_for(
+        root,
+        client,
+        cancel,
+        Arc::clone(&options.progress),
+        options.trace,
+    );
     match options.at {
         Some(_) if !options.items.is_empty() => {
             Err(usage("anchors takes --items or --at, not both"))

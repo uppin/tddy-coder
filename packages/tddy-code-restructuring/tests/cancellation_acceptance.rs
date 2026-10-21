@@ -17,7 +17,7 @@ use tddy_code_restructuring::{
     client_capabilities, server_settings, Anchor, Overlay, Position, RefactorKind, RefactorOp,
     RestructureError,
 };
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspKey, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
 use tokio_util::sync::CancellationToken;
 
@@ -44,12 +44,12 @@ async fn a_backend_over_a_server_that_never_finishes_indexing(
         NEVER_FINISHES_INDEXING.to_string(),
     ];
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     let registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60));
     let service = registry
         .get_or_spawn(LspKey {
             root: root.to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("the fake language server starts");
@@ -201,7 +201,7 @@ async fn a_server_that_will_not_settle_is_refused_as_unsettled_not_as_a_malforme
     let cancel = CancellationToken::new();
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
             .with_capabilities(client_capabilities())
             .with_initialization_options(server_settings()),
@@ -210,7 +210,7 @@ async fn a_server_that_will_not_settle_is_refused_as_unsettled_not_as_a_malforme
     let service = registry
         .get_or_spawn(LspKey {
             root: workspace.path().to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("the fake language server starts");

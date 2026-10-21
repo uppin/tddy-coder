@@ -146,7 +146,13 @@ pub fn snapshot_resolving(
             "snapshot of a plan with item anchors requires a rust-analyzer LSP session".into(),
         )
     })?;
-    let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
+    let mut registry = registry_for(
+        root,
+        client,
+        cancel,
+        Arc::clone(&options.progress),
+        options.trace,
+    );
     let stale = crate::plan_store::rebase_plan_file(root, &path, &mut registry)?;
     let rewrite = snapshot(root, options)?;
     Ok(SnapshotRewrite { stale, ..rewrite })
@@ -222,9 +228,15 @@ pub fn check_plan(
                 "deep check requires a rust-analyzer LSP session".into(),
             )
         })?;
-        registry_for(client, cancel, Arc::clone(&options.progress), options.trace)
+        registry_for(
+            root,
+            client,
+            cancel,
+            Arc::clone(&options.progress),
+            options.trace,
+        )
     } else {
-        registry_for_static()
+        registry_for_static(root)
     };
     let mut findings: Vec<Finding> = Vec::new();
     // Resolved before anything reads an anchor, so every check below sees the ranges an apply would

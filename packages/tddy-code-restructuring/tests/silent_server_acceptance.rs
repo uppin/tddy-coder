@@ -30,7 +30,7 @@ use tddy_code_restructuring::{
     Resolution, RestructureError,
 };
 use tddy_lsp::client::LspClient;
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspKey, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
 use tokio_util::sync::CancellationToken;
 
@@ -131,12 +131,12 @@ async fn a_client_on_a_fake_started_with(root: &Path, args: &[&str]) -> Arc<LspC
         .with_initialization_options(server_settings());
     spec.args = args.iter().map(|arg| arg.to_string()).collect();
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     let registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60));
     let service = registry
         .get_or_spawn(LspKey {
             root: root.to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("the fake language server starts");

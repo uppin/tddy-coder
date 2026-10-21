@@ -50,7 +50,8 @@ pub(crate) async fn reresolve_loaded_plans(
         if store.list().is_empty() {
             return Ok(());
         }
-        let mut registry = runner::registry_for(client, cancel, logged_progress(), logged_trace);
+        let mut registry =
+            runner::registry_for(&root, client, cancel, logged_progress(), logged_trace);
         log::debug!(
             target: "tddy_index_daemon::plan_upkeep",
             "re-resolving the loaded plans of {} in {} changed file(s)", root.display(), files.len()

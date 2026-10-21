@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tddy_lsp::{
-    Language, LaunchSpec, LspAllowList, LspClient, LspError, LspKey, LspRegistry, Position,
+    LanguageId, LaunchSpec, LspAllowList, LspClient, LspError, LspKey, LspRegistry, Position,
 };
 use tddy_task::TaskRegistry;
 use tokio::sync::oneshot;
@@ -33,14 +33,14 @@ const A_WAIT_A_LOCAL_FAKE_CANNOT_OUTLAST: Duration = Duration::from_secs(5);
 async fn a_warm_client() -> Arc<LspClient> {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")),
     );
     let registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60));
     let service = registry
         .get_or_spawn(LspKey {
             root: PathBuf::from("/workspace"),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("a fake language server");

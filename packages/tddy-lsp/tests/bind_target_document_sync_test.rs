@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tddy_lsp::{
-    DocumentSource, Language, LaunchSpec, LspAllowList, LspClient, LspKey, LspRegistry, LspService,
+    DocumentSource, LanguageId, LaunchSpec, LspAllowList, LspClient, LspKey, LspRegistry,
+    LspService,
 };
 use tddy_task::TaskRegistry;
 
@@ -23,7 +24,7 @@ const ANOTHER_SOURCE_FILE: &str = "file:///workspace/src/main.rs";
 fn a_registry() -> LspRegistry {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")),
     );
     LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60))
@@ -32,7 +33,7 @@ fn a_registry() -> LspRegistry {
 fn a_workspace() -> LspKey {
     LspKey {
         root: PathBuf::from("/workspace"),
-        language: Language::Rust,
+        language: LanguageId::RUST,
     }
 }
 

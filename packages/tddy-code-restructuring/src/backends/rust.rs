@@ -15,7 +15,7 @@ use crate::edit::{
 };
 use crate::item_anchor::{unlowered_item_anchor, ItemAtResolver, ItemResolver};
 use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
-use crate::registry::{Language, LanguageBackend, Workspace};
+use crate::registry::{LanguageBackend, Workspace};
 use crate::spawn_record::{purpose, SpawnRecorder};
 use crate::{RestructureError, Result};
 use serde_json::{json, Value};
@@ -25,6 +25,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
+use tddy_lsp::LanguageId;
 use tokio_util::sync::CancellationToken;
 
 mod chatter;
@@ -492,6 +493,9 @@ pub struct RustBackend {
     staged_projection: Vec<(String, String)>,
     /// The workspace root a self-spawned server was started in. A bridged client carries its own.
     root: Option<PathBuf>,
+    /// The LSP `languageId` each document is opened as: the launch spec's, set by the support that
+    /// built this backend.
+    document_language: String,
     /// Where the language server this backend starts itself is recorded, when a run asks for it.
     spawns: SpawnRecorder,
     /// How often a wait that lasts says what it is waiting for. Not a budget: nothing ends at it.
@@ -519,10 +523,12 @@ pub fn discard() -> ProgressSink {
 fn discard_line(_line: &str) {}
 
 mod server_process;
+mod support;
 #[cfg(test)]
 use server_process::binds_nothing;
 #[cfg(test)]
 use server_process::without_hollow_imports;
+pub use support::RustSupport;
 
 impl RustBackend {
     pub fn new(
@@ -550,6 +556,7 @@ impl RustBackend {
             projection: projection::PlanProjection::default(),
             staged_projection: Vec::new(),
             root: None,
+            document_language: RUST_LANGUAGE.as_str().to_string(),
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
             silence_bounds: SilenceBounds::default(),
@@ -590,6 +597,12 @@ impl RustBackend {
     /// Install a diagnostic trace. Silent by default, and never on stdout by this library's choice.
     pub fn with_trace(mut self, sink: fn(&str)) -> Self {
         self.trace = sink;
+        self
+    }
+
+    /// Open documents as `language_id`, the LSP `languageId` the building support launches with.
+    pub(crate) fn with_document_language(mut self, language_id: impl Into<String>) -> Self {
+        self.document_language = language_id.into();
         self
     }
 
@@ -655,6 +668,7 @@ impl RustBackend {
             projection: projection::PlanProjection::default(),
             staged_projection: Vec::new(),
             root: None,
+            document_language: RUST_LANGUAGE.as_str().to_string(),
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
             silence_bounds: SilenceBounds::default(),
@@ -1129,9 +1143,12 @@ impl Drop for RustBackend {
     }
 }
 
+/// The language this backend answers for, as a `static` so `language()` can lend it out.
+static RUST_LANGUAGE: LanguageId = LanguageId::RUST;
+
 impl LanguageBackend for RustBackend {
-    fn language(&self) -> Language {
-        Language::Rust
+    fn language(&self) -> &LanguageId {
+        &RUST_LANGUAGE
     }
 
     fn handles_extension(&self, extension: &str) -> bool {
@@ -1278,7 +1295,7 @@ impl RustBackend {
     ) -> Result<Resolution> {
         if !self.supports(op.op) {
             return Err(RestructureError::UnsupportedOp {
-                backend: "Rust".to_string(),
+                backend: self.language().to_string(),
                 op: format!("{:?}", op.op),
             });
         }

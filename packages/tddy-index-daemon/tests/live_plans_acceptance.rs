@@ -14,7 +14,7 @@ use tddy_index_daemon::proto::code_index::{
     ApplyRequest, LoadPlansRequest, PlansResponse, RestructureEvent,
 };
 use tddy_index_daemon::{build_code_index_entry, CodeIndexPorts};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry};
 use tddy_task::TaskRegistry;
 
 const GOLDEN: &str = "crates/origin/tests/golden.rs";
@@ -23,7 +23,7 @@ const MOVED_GOLDEN: &str = "crates/destination/tests/golden.rs";
 fn a_host_over_fake_language_servers() -> tddy_rpc::ServiceEntry {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
             .with_capabilities(tddy_code_restructuring::client_capabilities())
             .with_initialization_options(tddy_code_restructuring::server_settings()),

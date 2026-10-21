@@ -37,7 +37,14 @@ impl RustBackend {
         }
         self.notify(
             "textDocument/didOpen",
-            json!({ "textDocument": { "uri": uri, "languageId": "rust", "version": 1, "text": text } }),
+            json!({
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": self.document_language,
+                    "version": 1,
+                    "text": text
+                }
+            }),
         )
     }
 

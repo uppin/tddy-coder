@@ -16,14 +16,14 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tddy_index_daemon::index::WorkspaceIndex;
 use tddy_lsp::client::LspClient;
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry};
 use tddy_task::TaskRegistry;
 
 /// A host whose warm servers are the deterministic fake.
 fn an_index_over_fake_language_servers() -> WorkspaceIndex {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")),
     );
     WorkspaceIndex::new(LspRegistry::new(

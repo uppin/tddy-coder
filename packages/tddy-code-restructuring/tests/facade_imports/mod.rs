@@ -21,7 +21,7 @@ use tddy_code_restructuring::spawn_record::SpawnRecorder;
 use tddy_code_restructuring::{
     client_capabilities, server_settings, Overlay, RefactorOp, Resolution,
 };
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspKey, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
 use tokio_util::sync::CancellationToken;
 
@@ -176,7 +176,7 @@ pub fn an_operation(json: serde_json::Value) -> RefactorOp {
 async fn a_server_nobody_asks(root: &std::path::Path) -> Arc<tddy_lsp::client::LspClient> {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
             .with_capabilities(client_capabilities())
             .with_initialization_options(server_settings()),
@@ -185,7 +185,7 @@ async fn a_server_nobody_asks(root: &std::path::Path) -> Arc<tddy_lsp::client::L
     let service = registry
         .get_or_spawn(LspKey {
             root: root.to_path_buf(),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("the fake language server starts");

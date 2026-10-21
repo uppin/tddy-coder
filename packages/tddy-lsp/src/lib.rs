@@ -16,7 +16,7 @@ pub mod registry;
 pub mod server_body;
 pub mod spawn_observer;
 
-pub use allowlist::{language_for_target_type, Language, LaunchSpec, LspAllowList};
+pub use allowlist::{language_for_target_type, LanguageId, LaunchSpec, LspAllowList};
 pub use client::{
     ActivityHook, Diagnostic, Location, LspClient, NotificationEvent, NotificationStream, Position,
     Range, ResponseError, SymbolInfo,

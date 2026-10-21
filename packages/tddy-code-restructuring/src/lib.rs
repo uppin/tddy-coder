@@ -12,6 +12,7 @@ pub mod crate_move;
 pub mod edit;
 pub mod item_anchor;
 pub mod journal;
+pub mod language;
 pub mod ledger;
 pub mod overlay;
 pub mod plan;
@@ -31,6 +32,7 @@ pub use crate_move::{
 };
 pub use edit::{FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit};
 pub use journal::{Journal, JournalRecord, OpStatus, OpenGroup, PreImage};
+pub use language::{LanguageSupport, LiveServer, ServerHandle, SupportRegistry};
 pub use ledger::{LedgerCheckpoint, PositionLedger};
 pub use overlay::Overlay;
 pub use plan::{

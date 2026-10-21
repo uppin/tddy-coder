@@ -26,7 +26,7 @@ use tddy_index_daemon::proto::code_index::{
     CheckRequest, CodeIndexService, RestructureEvent, WarmRequest,
 };
 use tddy_index_daemon::{CodeIndexPorts, CodeIndexServiceImpl};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry};
 use tddy_task::TaskRegistry;
 
 // ─── The log this suite reads ──────────────────────────────────────────────────────────────
@@ -73,7 +73,7 @@ fn a_daemon_whose_log_is_captured() -> CodeIndexServiceImpl {
 
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
             .with_capabilities(tddy_code_restructuring::client_capabilities())
             .with_initialization_options(tddy_code_restructuring::server_settings()),

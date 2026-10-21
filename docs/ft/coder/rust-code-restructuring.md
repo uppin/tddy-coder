@@ -642,15 +642,44 @@ pass (the lowercase module qualifier is deleted on both sides), and a `use` — 
 is scaffolding. Behaviour and limits:
 [`docs/repoint-facade.md`](../../../packages/tddy-code-restructuring/docs/repoint-facade.md).
 
+## Languages
+
+A language is a **support** behind one tddy interface, `LanguageSupport`
+(`tddy-code-restructuring/src/language.rs`). A support brings, in one place:
+
+- its id, a `tddy_lsp::LanguageId` (an open string; `LanguageId::RUST` is `"rust"`), which is also the
+  key its server is allowed and reused under;
+- which files it **claims**;
+- how its server **launches** (`LaunchSpec`, including the LSP `languageId` its documents are opened
+  as), or no server at all;
+- how its server's **workspace root** is found from a file, searched no further out than the run's
+  root — a file outside that root is an error, never a root chosen for it;
+- the **backend** that resolves its operations, over a live server or, for the static tier, over none.
+
+`SupportRegistry` holds the supports in registration order and is the only place the server
+allow-list (`allow_list()`) and the backend registry (`backends(server, root)`,
+`backends_static(root)`) are built. **Built-ins are registered first, and the first registration
+wins** — for a file (`support_of`) and for an id (`allow_list`). So a support registered later, such
+as an installed extension, never takes a `.rs` file and never replaces Rust's launch, even under the
+id `"rust"`.
+
+**Rust is the only built-in today** (`RustSupport`): `.rs` files, rust-analyzer with the handshake
+described under [LSP integration](#lsp-integration), the Cargo workspace-root rule, and `RustBackend`.
+Its live backend takes its workspace root from the bridged client (or from the operation that starts
+its own server), so `RustSupport::backend` does not store the `root` it is given — storing it on a
+static backend would let a text-only check reach a server spawn. An error naming the backend names it
+by id: `UnsupportedOp { backend: "rust", .. }`.
+
 ## LSP integration
 
 Restructuring reaches rust-analyzer through `tddy-lsp`'s registry, keyed by `(workspace root,
-Rust)`, so a host that outlives one request reuses one server per root.
+language id)`, so a host that outlives one request reuses one server per root.
 
 The allow-list it uses is **not** `LspAllowList::rust_only()`. That constructor advertises no client
 capabilities at all, and rust-analyzer returns no code actions and sends no `$/progress` to such a
-client — so `restructure_allow_list()` attaches `client_capabilities()` and `server_settings()`
-instead. The handshake is fixed at spawn, which is why a consumer needing assists cannot share a
+client — so the allow-list is built by `SupportRegistry::allow_list()` (see [Languages](#languages)),
+whose `RustSupport` launch attaches `client_capabilities()` and `server_settings()`. The CLI and the
+index daemon both build it there, so the two cannot drift apart. The handshake is fixed at spawn, which is why a consumer needing assists cannot share a
 registry entry with one that only needs definitions.
 
 `RustBackend` also retains a **self-spawning** transport, used when no shared client is bridged in —

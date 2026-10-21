@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspClient, LspKey, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspClient, LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
 
 const A_SOURCE_FILE: &str = "file:///workspace/src/lib.rs";
@@ -18,7 +18,7 @@ const RUST: &str = "rust";
 fn fake_allow_list() -> LspAllowList {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")),
     );
     allow
@@ -35,7 +35,7 @@ async fn a_warm_shared_client() -> Arc<LspClient> {
     let service = registry
         .get_or_spawn(LspKey {
             root: PathBuf::from("/workspace"),
-            language: Language::Rust,
+            language: LanguageId::RUST,
         })
         .await
         .expect("a fake language server");

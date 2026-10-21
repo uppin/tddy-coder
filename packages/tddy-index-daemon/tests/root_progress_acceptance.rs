@@ -17,7 +17,7 @@ use tddy_index_daemon::proto::code_index::{
     WarmRequest, WatchRootRequest, WorkspacesRequest, WorkspacesResponse,
 };
 use tddy_index_daemon::{build_code_index_entry, CodeIndexPorts};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
+use tddy_lsp::{LanguageId, LaunchSpec, LspAllowList, LspRegistry};
 use tddy_task::TaskRegistry;
 use tokio::sync::mpsc;
 
@@ -38,7 +38,7 @@ fn a_host_running_fake_lsp(args: Vec<String>) -> tddy_rpc::ServiceEntry {
         .with_initialization_options(tddy_code_restructuring::server_settings());
     spec.args = args;
     let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
+    allow.allow(LanguageId::RUST, spec);
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
         wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,

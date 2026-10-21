@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_lsp::{
-    Diagnostic, DocumentSource, Language, LaunchSpec, Location, LspAllowList, LspError, LspKey,
+    Diagnostic, DocumentSource, LanguageId, LaunchSpec, Location, LspAllowList, LspError, LspKey,
     LspRegistry, LspService, Position, Range, SymbolInfo,
 };
 use tddy_task::TaskRegistry;
@@ -19,7 +19,7 @@ const MAIN_URI: &str = "file:///workspace/src/main.rs";
 fn registry() -> LspRegistry {
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")),
     );
     LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60))
@@ -28,7 +28,7 @@ fn registry() -> LspRegistry {
 fn workspace_key() -> LspKey {
     LspKey {
         root: PathBuf::from("/workspace"),
-        language: Language::Rust,
+        language: LanguageId::RUST,
     }
 }
 
@@ -302,7 +302,7 @@ async fn advertises_the_capabilities_the_launch_spec_carries() {
     });
     let mut allow = LspAllowList::new();
     allow.allow(
-        Language::Rust,
+        LanguageId::RUST,
         LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")).with_capabilities(capabilities.clone()),
     );
     let registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60));
