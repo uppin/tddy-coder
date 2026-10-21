@@ -433,6 +433,46 @@ fn a_child_carried_under_a_cfg_test_declaration_sends_its_crates_to_dev_dependen
     );
 }
 
+/// Test 8b — the gate holds for a carried file whose `#[cfg(test)] mod` declaration sits inside an
+/// inline module of the moved file: the declaration is not at the top level of its file.
+#[test]
+fn a_child_declared_under_cfg_test_inside_an_inline_module_sends_its_crates_to_dev_dependencies() {
+    // Given `parent::a` moving, with an inline module that declares a test child naming `tempfile`
+    let workspace = a_workspace_whose_moving_module_has_test_modules_beside_it()
+        .with(
+            MODULE_A,
+            "pub struct Thing;\n\npub fn recipe() -> bool {\n    true\n}\n\n\
+             mod inline {\n    #[cfg(test)]\n    mod inner_tests;\n}\n",
+        )
+        .with(
+            "crates/origin/src/parent/a/inline/inner_tests.rs",
+            "#[test]\nfn builds() {\n    let _ = tempfile::tempdir();\n}\n",
+        )
+        .with(
+            A_TESTS,
+            "use super::a::Thing;\n\n#[test]\nfn t() {\n    let _ = Thing;\n}\n",
+        );
+    let cluster = a_cluster_of(&["a"], Reexport::Glob);
+
+    // When the move is resolved
+    let edit = resolving(&workspace, &mut nothing_reaches_anything(), &cluster);
+
+    // Then `tempfile` is a dev-dependency and not a dependency
+    let manifest = after(&workspace, &edit, DESTINATION_MANIFEST);
+    let dependencies = manifest
+        .split("[dev-dependencies]")
+        .next()
+        .unwrap_or_default();
+    assert_eq!(
+        (
+            manifest.contains("[dev-dependencies]\ntempfile = \"3\"\n"),
+            dependencies.contains("tempfile"),
+        ),
+        (true, false),
+        "{manifest}"
+    );
+}
+
 /// Test 9 — `mixed_tests` names `a` and also `super::*`, the parent that stays. It stays, unchanged,
 /// and the resolution says which path keeps it: R9's `stack_child_spawn_tests`.
 #[test]
@@ -679,5 +719,34 @@ fn check_and_apply_refuse_a_following_test_modules_merge_with_the_same_message()
         ),
         (true, true, true),
         "apply: {refusal:?}\ncheck: {findings:?}"
+    );
+}
+
+/// A plan of two moves is checked against the text no operation has edited yet, so the module the
+/// first one moves counts as moving when the check reads a test module the second one takes.
+#[test]
+fn a_static_check_of_a_second_move_reports_the_merge_of_a_test_module_both_moves_make_follow() {
+    // Given `ab_tests`, which names `a` and `b`, with a destination already holding `ab_tests.rs`
+    let workspace = a_workspace_whose_moving_module_has_test_modules_beside_it()
+        .with(MODULE_B, "pub struct Other;\n")
+        .with("crates/destination/src/ab_tests.rs", "// already here\n");
+
+    // When the plan moving `a` and then `b` is checked, and the plan moving `a` alone
+    let both = unrunnable_moves(&workspace.workspace(), &[a_move_of("a"), a_move_of("b")])
+        .expect("the preconditions read the workspace");
+    let first_alone = unrunnable_moves(&workspace.workspace(), &[a_move_of("a")])
+        .expect("the preconditions read the workspace");
+
+    // Then the second operation, which completes the set `ab_tests` names, reports the merge once,
+    // and the first alone reports nothing
+    assert_eq!(
+        (
+            both.iter()
+                .filter(|finding| finding.contains("ab_tests.rs"))
+                .count(),
+            first_alone.len(),
+        ),
+        (1, 0),
+        "{both:?}"
     );
 }

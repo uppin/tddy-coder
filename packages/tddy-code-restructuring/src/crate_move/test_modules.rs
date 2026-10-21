@@ -27,7 +27,7 @@ use super::carried::fold_carried_members;
 use super::destination::Destination;
 use super::module_files::MovedFile;
 use super::preconditions::{home_of_anchor, moved_by_earlier_operations};
-use super::source_scan::{test_declarations, TestDeclaration};
+use super::source_scan::{items_of_module, test_declarations, TestDeclaration};
 use super::{malformed, ModuleReferences, Move, MovingCluster, Result};
 
 /// A test module that follows the move.
@@ -570,21 +570,30 @@ pub(crate) fn test_gated(
 }
 
 /// Whether one of the modules `below` leads through is declared `#[cfg(test)]` in the file that
-/// declares it, among the files of its member's `tree`.
+/// holds its declaration, among the files of its member's `tree`.
 ///
-/// TODO(reshape-tests-follow): only a declaration at the top level of its declaring file is read;
-/// a test declaration inside an inline module on the way down is not.
+/// A declaration sits in the nearest file above it, directly or inside the inline modules between
+/// them (`mod inline { #[cfg(test)] mod t; }`), so each name is looked up in the scope those inline
+/// modules open.
 fn declared_under_test(
     workspace: &Workspace<'_>,
     tree: &[MovedFile],
     below: &[String],
 ) -> Result<bool> {
     for (depth, name) in below.iter().enumerate() {
-        let Some(declaring) = tree.iter().find(|file| file.below == below[..depth]) else {
+        let Some(declaring) = tree
+            .iter()
+            .filter(|file| below[..depth].starts_with(&file.below))
+            .max_by_key(|file| file.below.len())
+        else {
             continue;
         };
         let text = workspace.read(&declaring.from)?;
-        if test_declarations(&text)
+        let inline_modules = &below[declaring.below.len()..depth];
+        let Some(scope) = inline_scope(&text, inline_modules) else {
+            continue;
+        };
+        if test_declarations(&text[scope])
             .iter()
             .any(|declaration| &declaration.name == name)
         {
@@ -592,6 +601,21 @@ fn declared_under_test(
         }
     }
     Ok(false)
+}
+
+/// The span of `text` between the braces of the innermost of `inline_modules`, each declared inside
+/// the one before; the whole text for none. `None` when one of them is not an inline module there.
+fn inline_scope(text: &str, inline_modules: &[String]) -> Option<std::ops::Range<usize>> {
+    let mut scope = 0..text.len();
+    for module in inline_modules {
+        let body = items_of_module(&text[scope.clone()])
+            .children
+            .into_iter()
+            .find(|child| &child.name == module)?
+            .body?;
+        scope = scope.start + body.start..scope.start + body.end;
+    }
+    Some(scope)
 }
 
 /// Every reason operation `index` of `ops` (`op`) cannot take a following test module along, read
@@ -621,15 +645,17 @@ pub(crate) fn unfollowable(
         return Ok(Vec::new());
     };
 
-    let following = match sorted(workspace, &members, &earlier) {
-        Ok(modules) => modules.following,
-        // A carry the move refuses is named by `uncarriable`, and there is no test module to read
-        // beside a module that cannot be carried.
-        Err(RestructureError::MalformedPlan(_)) => return Ok(Vec::new()),
-        Err(other) => return Err(other),
-    };
+    // A carry the move refuses is named by `uncarriable`, and there is no test module to read
+    // beside a module that cannot be carried. Every other refusal of `sorted` is the apply's too.
+    for member in &members {
+        match member.carried(workspace) {
+            Ok(_) => {}
+            Err(RestructureError::MalformedPlan(_)) => return Ok(Vec::new()),
+            Err(other) => return Err(other),
+        }
+    }
     let mut findings = Vec::new();
-    for follower in following {
+    for follower in sorted(workspace, &members, &earlier)?.following {
         if let Some(finding) = landing_collision(workspace, member, &follower)? {
             findings.push(malformed(finding).to_string());
         }
