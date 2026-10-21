@@ -1,6 +1,6 @@
+use crate::config::timings::MIN_WORKTREE_ROOM_INTERVAL_MS;
 use crate::config::DaemonConfig;
 use crate::config::TelegramConfig;
-use crate::config::MIN_WORKTREE_ROOM_INTERVAL_MS;
 
 /// The pure half of [`DaemonConfig::apply_timing_env_overrides`]. `lookup` stands in for the
 /// process environment so the precedence rules are testable without mutating it — which no test
