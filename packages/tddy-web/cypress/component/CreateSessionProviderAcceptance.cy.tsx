@@ -8,7 +8,7 @@
  *
  * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-claude-route.md
  */
-import { createClient } from "@connectrpc/connect";
+import { Code, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { SessionService } from "../../src/gen/session_pb";
@@ -25,7 +25,8 @@ const CLAUDE_CLI_MODELS = [
 ];
 const META_MODELS = ["muse-spark-1.3", "muse-wonder-1.0"];
 
-function aBackendWithAMetaAccount(): InMemoryRpcBackend {
+/** Every stub the form needs except `ListProviderRoutes`, which each scenario answers its own way. */
+function aBackendWithoutRoutes(): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
     .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
@@ -40,36 +41,39 @@ function aBackendWithAMetaAccount(): InMemoryRpcBackend {
       models: CLAUDE_CLI_MODELS,
       defaultModel: "opus",
     }))
-    .onUnary(AccountsService.method.listProviderRoutes, (req) =>
-      req.harness.startsWith("cursor")
-        ? {
-            harnessRoutable: false,
-            harnessReason: "Cursor's agent cannot use another provider",
-            options: [],
-          }
-        : {
-            harnessRoutable: true,
-            harnessReason: "",
-            options: [
-              {
-                accountId: "baseten-kimi",
-                label: "Kimi on Baseten",
-                preset: "baseten",
-                supported: false,
-                reason: "Claude Code needs an endpoint that serves Anthropic Messages",
-              },
-              {
-                accountId: "meta-hackathon",
-                label: "Meta hackathon",
-                preset: "meta",
-                supported: true,
-                reason: "",
-              },
-            ],
-          },
-    )
     .onUnary(AccountsService.method.listProviderAccountModels, () => ({ modelIds: META_MODELS }))
     .onUnary(SessionService.method.startSession, () => ({ sessionId: "routed-sess-1" }));
+}
+
+function aBackendWithAMetaAccount(): InMemoryRpcBackend {
+  return aBackendWithoutRoutes().onUnary(AccountsService.method.listProviderRoutes, (req) =>
+    req.harness.startsWith("cursor")
+      ? {
+          harnessRoutable: false,
+          harnessReason: "Cursor's agent cannot use another provider",
+          options: [],
+        }
+      : {
+          harnessRoutable: true,
+          harnessReason: "",
+          options: [
+            {
+              accountId: "baseten-kimi",
+              label: "Kimi on Baseten",
+              preset: "baseten",
+              supported: false,
+              reason: "Claude Code needs an endpoint that serves Anthropic Messages",
+            },
+            {
+              accountId: "meta-hackathon",
+              label: "Meta hackathon",
+              preset: "meta",
+              supported: true,
+              reason: "",
+            },
+          ],
+        },
+  );
 }
 
 function mountWith(backend: InMemoryRpcBackend) {
@@ -146,6 +150,22 @@ describe("CreateSessionPane — the provider a claude-cli session runs on", () =
     byTestId(TEST_IDS.createSessionProviderUnavailable).should(
       "contain.text",
       "Cursor's agent cannot use another provider",
+    );
+  });
+
+  it("says why the accounts could not be listed, and still offers the built-in vendor", () => {
+    const backend = aBackendWithoutRoutes().failWith(
+      AccountsService.method.listProviderRoutes,
+      Code.FailedPrecondition,
+      "no route matrix is wired",
+    );
+    mountWith(backend);
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+
+    byTestId(TEST_IDS.createSessionProviderSelect).should("have.value", "builtin");
+    byTestId(TEST_IDS.createSessionProviderError).should(
+      "contain.text",
+      "no route matrix is wired",
     );
   });
 });

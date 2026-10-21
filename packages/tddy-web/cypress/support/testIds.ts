@@ -343,6 +343,8 @@ export const TEST_IDS = {
   createSessionProviderSelect: "create-session-provider-select",
   /** Why the selected harness cannot run on a provider account (Cursor), in the daemon's words. */
   createSessionProviderUnavailable: "create-session-provider-unavailable",
+  /** Why the daemon could not list the provider accounts (`ListProviderRoutes` failed). */
+  createSessionProviderError: "create-session-provider-error",
   /** Inline error shown when the model probe (ListAgentModels) fails for the selected agent. */
   createSessionModelError: "create-session-model-error",
   createSessionPermissionModeSelect: "create-session-permission-mode-select",

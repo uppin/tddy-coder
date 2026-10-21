@@ -26,6 +26,8 @@ export interface CreateSessionProviderFieldProps {
   /** `"builtin"` for the vendor, else an account id. */
   value: string;
   onChange: (value: string) => void;
+  /** Why the daemon could not list the accounts; shown under the select, never swallowed. */
+  error?: string | null;
 }
 
 /** The select's value for the harness's own vendor. */
@@ -37,6 +39,7 @@ export function CreateSessionProviderField({
   choices,
   value,
   onChange,
+  error = null,
 }: CreateSessionProviderFieldProps) {
   if (!harnessRoutable) {
     return (
@@ -72,6 +75,11 @@ export function CreateSessionProviderField({
           </option>
         ))}
       </select>
+      {error !== null && (
+        <p data-testid="create-session-provider-error" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

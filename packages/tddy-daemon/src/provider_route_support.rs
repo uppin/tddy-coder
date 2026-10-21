@@ -25,3 +25,38 @@ impl RouteSupport for HarnessRouteSupport {
         route_supported(harness_named(harness)?, preset, protocols).map_err(|r| r.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cursor_is_the_harness_no_account_can_run() {
+        let reason = HarnessRouteSupport
+            .harness_routable("cursor-cli")
+            .expect_err("cursor is never routed");
+        assert!(reason.contains("Cursor"));
+        assert_eq!(HarnessRouteSupport.harness_routable("claude-cli"), Ok(()));
+    }
+
+    #[test]
+    fn claude_code_runs_only_on_an_account_serving_anthropic_messages() {
+        assert_eq!(
+            HarnessRouteSupport.supports("claude-cli", "meta", &["anthropic-messages"]),
+            Ok(())
+        );
+        let reason = HarnessRouteSupport
+            .supports("claude-cli", "baseten", &["openai-chat"])
+            .expect_err("baseten serves no Anthropic Messages");
+        assert!(reason.contains("Anthropic Messages"));
+    }
+
+    #[test]
+    fn an_unknown_harness_is_named_in_the_refusal() {
+        let reason = HarnessRouteSupport
+            .harness_routable("stub")
+            .expect_err("stub is no harness");
+        assert!(reason.contains("\"stub\""));
+        assert!(HarnessRouteSupport.supports("stub", "meta", &[]).is_err());
+    }
+}

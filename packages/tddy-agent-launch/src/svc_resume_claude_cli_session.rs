@@ -85,20 +85,12 @@ impl LaunchSessions {
             self.host
                 .session_identity(os_user, session_id, &meta.project_id, session_token);
         let github_credential_handler = identity.github_credential;
-        let mut env_extra: Vec<(String, String)> = if is_split {
-            Vec::new()
-        } else {
-            identity.git_environment
-        };
-        env_extra.extend(split_env);
-        // The account the session's start recorded, re-read from the owner's vault: a rotated key is
-        // what the resume runs on, and a removed account refuses the resume rather than running it
-        // on the vendor.
-        env_extra.extend(resume_route_env(
-            &self.host.session_account_access(session_token),
-            Harness::ClaudeCli,
+        let mut env_extra = self.resumed_agent_env(
+            (!is_split).then_some(identity.git_environment),
+            split_env,
+            session_token,
             &session_dir,
-        )?);
+        )?;
         if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                 .map_err(Status::invalid_argument)?;
@@ -167,5 +159,31 @@ impl LaunchSessions {
             livekit_url: String::new(),
             livekit_server_identity: String::new(),
         }))
+    }
+}
+
+impl LaunchSessions {
+    /// The environment a resumed claude-cli agent starts from: the checkout's commit identity
+    /// (`None` for a split agent), the split wiring, and the provider account the session's start
+    /// recorded — re-read from the owner's vault, so a rotated key is what the resume runs on and a
+    /// removed account refuses the resume rather than running it on the vendor.
+    fn resumed_agent_env(
+        &self,
+        git_environment: Option<Vec<(String, String)>>,
+        split_env: Vec<(String, String)>,
+        session_token: &str,
+        session_dir: &Path,
+    ) -> Result<Vec<(String, String)>, Status> {
+        let route_env = resume_route_env(
+            &self.host.session_account_access(session_token),
+            Harness::ClaudeCli,
+            session_dir,
+        )?;
+        Ok(git_environment
+            .unwrap_or_default()
+            .into_iter()
+            .chain(split_env)
+            .chain(route_env)
+            .collect())
     }
 }

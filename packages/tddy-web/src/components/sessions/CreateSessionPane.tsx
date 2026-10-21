@@ -625,6 +625,7 @@ export function CreateSessionPane({
           choices={providerRoutes.choices}
           value={providerChoice ?? BUILT_IN_PROVIDER}
           onChange={setProviderChoice}
+          error={providerRoutes.error}
         />
       )}
 

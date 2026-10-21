@@ -46,18 +46,34 @@ pub fn session_route_sources(req: &StartSessionRequest) -> RouteSources {
 /// The route `harness` runs `model` on, after precedence — `None` for the harness's vendor.
 ///
 /// Reads the chosen account from the session owner's vault; refuses when it cannot be read, is not
-/// a provider account, or the harness cannot run on it.
+/// a provider account, no model was chosen, or the harness cannot run on it.
 pub fn resolve_session_route(
     access: &SessionAccountAccess,
     harness: Harness,
     sources: &RouteSources,
     model: &str,
 ) -> Result<Option<HarnessRoute>, Status> {
-    let Some(account_id) = choose_route(sources) else {
-        return Ok(None);
-    };
+    choose_route(sources)
+        .map(|account_id| route_on_account(access, harness, &account_id, model))
+        .transpose()
+}
+
+/// The route `harness` runs `model` on the account `account_id` names in the owner's vault.
+fn route_on_account(
+    access: &SessionAccountAccess,
+    harness: Harness,
+    account_id: &str,
+    model: &str,
+) -> Result<HarnessRoute, Status> {
+    // Every model alias the harness could fall through to is pinned to this one; an empty pin
+    // would leave the harness choosing a vendor model name the account does not serve.
+    if model.trim().is_empty() {
+        return Err(Status::invalid_argument(format!(
+            "a session on provider account {account_id:?} needs a model: choose one the account serves"
+        )));
+    }
     let account = access
-        .provider_account(&account_id)
+        .provider_account(account_id)
         .map_err(status_of_refusal)?;
     let target = RouteTarget {
         preset: account.preset.id.to_string(),
@@ -69,12 +85,10 @@ pub fn resolve_session_route(
         api_key: RouteSecret::new(account.api_key.expose()),
         model: model.to_string(),
     };
-    resolve_route(harness, &target)
-        .map(Some)
-        .map_err(|refusal| match refusal {
-            RouteRefusal::NotYetRoutable(_) => Status::unimplemented(refusal.to_string()),
-            other => Status::invalid_argument(other.to_string()),
-        })
+    resolve_route(harness, &target).map_err(|refusal| match refusal {
+        RouteRefusal::NotYetRoutable(_) => Status::unimplemented(refusal.to_string()),
+        other => Status::invalid_argument(other.to_string()),
+    })
 }
 
 /// A vault refusal as the status a start answers with: the same codes whichever account kind was
@@ -160,8 +174,8 @@ pub fn start_route(
     let Some(account_id) = choose_route(sources) else {
         return Ok(None);
     };
-    let route = resolve_session_route(access, harness, sources, model)?;
-    Ok(route.map(|route| StartRoute {
+    let route = route_on_account(access, harness, &account_id, model)?;
+    Ok(Some(StartRoute {
         env: pty_route_env(&route),
         account: SessionProviderAccount {
             account_id,
