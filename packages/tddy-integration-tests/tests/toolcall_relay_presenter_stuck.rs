@@ -2,7 +2,8 @@
 //! receives an activity-log notification. If the presenter never polls, `tddy-tools` still gets
 //! `{"status":"ok",...}` without waiting on the UI loop.
 //!
-//! End-to-end CLI coverage: `packages/tddy-tools/tests/submit_relay_no_poll.rs` (same invariant).
+//! End-to-end CLI coverage: `packages/tddy-tools-cli/tests/submit_relay_no_poll.rs` (same
+//! invariant).
 //!
 //! The listener started by `start_toolcall_listener` serves connections over
 //! `tddy-rpc`/`tddy-stdio`'s length-prefixed frame protocol (see `tddy_core::toolcall::listener`

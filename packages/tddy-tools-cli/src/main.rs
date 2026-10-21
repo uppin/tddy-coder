@@ -124,15 +124,8 @@ fn init_logging() {
 
 /// The room transport this build joins rooms through. This binary is the only place that knows it
 /// is LiveKit: the libraries it calls take a [`RoomConnector`].
-#[cfg(feature = "livekit")]
 fn room_connector() -> Arc<dyn RoomConnector> {
     Arc::new(tddy_livekit::room_connector::LiveKitRoomConnector)
-}
-
-/// A build without the `livekit` feature wires no room transport, and a join says so.
-#[cfg(not(feature = "livekit"))]
-fn room_connector() -> Arc<dyn RoomConnector> {
-    Arc::new(tddy_room_client::NoRoomTransport)
 }
 
 #[tokio::main]

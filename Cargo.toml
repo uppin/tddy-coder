@@ -35,6 +35,7 @@ members = [
     "packages/tddy-demo",
     "packages/tddy-demo-tui",
     "packages/tddy-tools",
+    "packages/tddy-tools-cli",
     "packages/tddy-vm",
     "packages/tddy-vm-build",
     "packages/tddy-vm-testkit",
