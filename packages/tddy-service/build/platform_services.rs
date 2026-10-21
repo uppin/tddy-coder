@@ -132,7 +132,7 @@ fn sandbox_tonic_builder(tonic_sandbox_dir: &str) -> tonic_build::Builder {
     tonic_build::configure()
         .build_server(true)
         .build_client(true)
-        .out_dir(&tonic_sandbox_dir)
+        .out_dir(tonic_sandbox_dir)
         .extern_path(
             ".exec_tools.ExecuteToolRequest",
             "crate::proto::exec_tools::ExecuteToolRequest",

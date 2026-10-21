@@ -112,7 +112,7 @@ pub fn spawn_common_room_discovery_task(
 }
 
 /// Every family reachable on the binary's local Unix-domain socket, in one bundle.
-type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices<
+pub(super) type BinaryLocalSocketServices = crate::local_socket_server::LocalSocketServices<
     tddy_session_lifecycle::SessionServiceImpl<
         tddy_session_lifecycle::connection_service::DaemonSessionHost,
     >,

@@ -294,9 +294,7 @@ fn probed_credential_vaults(
     Ok(credential_vaults)
 }
 
-fn session_user_resolver(
-    tokens: &SessionTokens,
-) -> Arc<dyn Fn(&str) -> Option<String> + Send + Sync + 'static> {
+fn session_user_resolver(tokens: &SessionTokens) -> SessionUserResolver {
     let verifier = Arc::clone(tokens.verifier());
     let user_resolver: SessionUserResolver = Arc::new(move |token: &str| {
         verifier
@@ -311,15 +309,14 @@ fn session_user_resolver(
 fn livekit_token_service_entry(
     config: &DaemonConfig,
     minter: Arc<dyn RoomTokenMinter + 'static>,
-    user_resolver: &Arc<dyn Fn(&str) -> Option<String> + Send + Sync + 'static>,
+    user_resolver: &SessionUserResolver,
 ) -> ServiceEntry {
-    let livekit_token_entry = ServiceEntry {
+    ServiceEntry {
         name: "auth.LiveKitTokenService",
         service: Arc::new(LiveKitTokenServiceServer::new(
             LiveKitTokenServiceImpl::new(user_resolver.clone(), Arc::new(config.clone()), minter),
         )) as Arc<dyn tddy_rpc::RpcService>,
-    };
-    livekit_token_entry
+    }
 }
 
 /// The rule every gated daemon RPC admits a caller by: their session token resolves to a login.
