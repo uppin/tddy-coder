@@ -321,7 +321,7 @@ impl RdpClient {
 }
 
 fn connector_config(credentials: &tddy_screenshare::Credentials) -> Config {
-    let config = Config {
+    Config {
         desktop_size: DesktopSize {
             width: 256,
             height: 256,
@@ -364,8 +364,7 @@ fn connector_config(credentials: &tddy_screenshare::Credentials) -> Config {
         enable_server_pointer: false,
         pointer_software_rendering: false,
         multitransport_flags: None,
-    };
-    config
+    }
 }
 
 /// X11 keysym → PS/2 Set 1 scancode (make code).
