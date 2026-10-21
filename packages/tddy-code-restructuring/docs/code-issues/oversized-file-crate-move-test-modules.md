@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-code-restructuring/src/crate_move/test_modules.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-21 by the `/pr-wrap` file-length gate on #611
-**Metrics:** **MEASURED production lines** (0 before this PR) · budget 500
+**Metrics:** **664 production lines** (0 before this PR) · budget 500
 **Restructure:** required — `extract_module --to_file` × 2, `/code-restructuring` territory
 **Status:** Open — overrun accepted by the developer 2026-10-21; owner is the `#reshape` stack's sweep node
 
@@ -11,7 +11,7 @@
 
 | Run | Production lines | Note |
 |---|---|---|
-| 2026-10-21 | MEASURED | first detection. The file is new in #611 (`#reshape` 13/24 `tests-follow`), so this PR created the overrun. No other node of the stack edits it, so the split is not blocked by stack overlap |
+| 2026-10-21 | 664 | first detection. The file is new in #611 (`#reshape` 13/24 `tests-follow`), so this PR created the overrun. No other node of the stack edits it, so the split is not blocked by stack overlap |
 
 ## What the gate found
 
