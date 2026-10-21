@@ -55,6 +55,7 @@ pub use crate::telegram_session_control::types::*;
 
 mod callbacks;
 mod chaining_and_listing;
+mod cli_spawns;
 mod elicitation;
 mod pickers;
 mod session_start;
