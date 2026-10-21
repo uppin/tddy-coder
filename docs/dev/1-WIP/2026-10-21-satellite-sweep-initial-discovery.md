@@ -268,6 +268,8 @@ The open question is what the extracted helpers take: most groups read six to tw
 
 ## 3. Engine limits met by this backlog
 
+As expected at planning time; § 4 records what the engine actually answered.
+
 | Item | Limit | Source |
 |---|---|---|
 | `tddy-service/build.rs` | items of a build-script crate root have no address (package name → `src/lib.rs` only) | `2026-10-21-restructure-cannot-reparent-modules-declared-in-a-binary-root` |
@@ -278,3 +280,35 @@ The open question is what the extracted helpers take: most groups read six to tw
 
 No item moves a binary root or a `tests/*.rs` suite, and no item re-parents a module declared in a
 binary root: `cli.rs` is a library module since #690.
+
+## 4. Exploration 2 — the engine's answers (2026-10-21, warm index on `bcdbb08af`)
+
+Index daemon started with `./run-index-daemon` on this worktree; `target/debug/tddy-tools` built from
+`bcdbb08af` by `./test -p tddy-daemon`. Every plan was emitted with `restructure anchors`, given its
+header with `restructure snapshot`, and run through `restructure check --deep`.
+
+| Question from § 2–3 | Answer |
+|---|---|
+| A `move_item` whose `items` include trait impls (`<T as Display>`) | accepted (plans 01, 03, 04, 05) |
+| Two `move_item` lines into one new module (the second without `name`) | refused by `check --deep` on today's tree: `` `…::room_transport` does not exist ``. `check` does not see an earlier line's module creation, so each plan creates its module in one line; `livekit_session` therefore goes to `rpc_transports` |
+| Items separated by a `// ----` banner comment | refused: `the named items are not adjacent … a seam is one contiguous range`. `pty_relay.rs` is cut along its banners (three modules) |
+| `move_impl_members` on a type declared in the parent module (`session_start.rs`) | the anchor needs the impl file's module path (`…::session_start::TelegramSessionControlHarness::member`); then accepted |
+| Whole `#[async_trait] impl ActivityService` by `move_item` | **accepted** (plan 17) |
+| `cfg(unix)` / `cfg(not(unix))` same-named pair in an `items` anchor | **refused**: `` `tddy_tools::cli::relay_list_actions` names 2 items … qualify it with the trait ``; `relay_list_actions#1` refused (`#N` is for inherent impls); `--at 738:1-866:2` refused (`inside no item`) |
+| Range `extract_module` over the pairs (probe-a) | **refused**: `no import rust-analyzer offered for `args` left fewer of its 8 unresolved occurrence(s)` |
+| Any anchor in `tddy-service/build.rs` | **refused**: `build.rs is not under packages/tddy-service/src, so it is no module of the package `tddy-service`` |
+| `extract_method` inside `runtime::build` (probe-b, the VM group 1551–1577) | accepted, no findings |
+| Three `extract_method`s in `build_auth_entries_admitting`, bottom-up | accepted (plan 18) |
+
+The full `check --deep` output of every plan, including the visibility widenings the changeset tabulates,
+was captured during planning; re-run `restructure check <plan> --deep` to reproduce it.
+
+## 5. Baseline notes
+
+- The first baseline pass ran two copies of the per-package loop at once (an interrupted session's loop
+  had not died), so `tddy-session-sync`, `tddy-telegram-control`, `tddy-service`, `tddy-tools` and
+  `tddy-daemon` were re-run alone; the changeset records only the clean runs.
+- `cargo test -p tddy-daemon` fails 18 split-session tests with `tddy toolchain binary "tddy-tools" not
+  found in …/target/debug`: since #690 the binary is built by `tddy-tools-cli`, which `cargo test -p
+  tddy-daemon` does not build. `./test -p tddy-daemon` pre-builds it; with it, one load flake remained
+  (`restores_a_clone_that_diverged_and_says_so`), which passed alone.

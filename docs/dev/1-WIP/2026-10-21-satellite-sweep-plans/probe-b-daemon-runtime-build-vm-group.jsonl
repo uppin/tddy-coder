@@ -1,0 +1,2 @@
+{"v":2,"files":{"packages/tddy-daemon/src/runtime.rs":{"sha256":"sha256:12528066f4ad847c8d3a38308adbd6ee560e287d6f9f29c473a64b161d88b019","modified":"2026-10-21T13:57:52Z"}}}
+{"op": "extract_method", "anchor": {"kind": "item", "item": "tddy_daemon::runtime::build", "file": "packages/tddy-daemon/src/runtime.rs", "start": {"line": 904, "col": 9}, "end": {"line": 930, "col": 12}, "fingerprint": "sha256:85d8f2cbd03462985a3a0e2a8c509768725f966f8e72bc66f2792a22617727b1", "hint": {"line": 1551, "col": 9}}, "name": "register_vm_service", "variant": "module"}
