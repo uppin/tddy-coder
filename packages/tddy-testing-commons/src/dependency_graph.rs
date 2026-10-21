@@ -18,6 +18,8 @@ use std::process::Command;
 pub struct WorkspaceGraph {
     /// Each workspace member and the crates it names in `[dependencies]` / `[build-dependencies]`.
     names: BTreeMap<String, BTreeSet<String>>,
+    /// Each workspace member and the names of its `bin` targets.
+    binaries: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl WorkspaceGraph {
@@ -69,6 +71,18 @@ impl WorkspaceGraph {
         reached
     }
 
+    /// The workspace crates with a `bin` target named `binary`.
+    ///
+    /// Empty when no member builds it. A caller compares the answer with the crate it expects, so a
+    /// misspelled binary fails there rather than reading as "built by nothing".
+    pub fn crates_building(&self, binary: &str) -> BTreeSet<String> {
+        self.binaries
+            .iter()
+            .filter(|(_, binaries)| binaries.contains(binary))
+            .map(|(krate, _)| krate.clone())
+            .collect()
+    }
+
     /// Run `cargo metadata` in `directory` — the one place the graph is read from.
     fn read(directory: &Path) -> Self {
         let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -109,7 +123,32 @@ impl WorkspaceGraph {
                 (name.to_string(), dependencies)
             })
             .collect();
-        Self { names }
+        let binaries = packages
+            .iter()
+            .map(|package| {
+                let name = package["name"].as_str().expect("a package has a name");
+                let bins = package["targets"]
+                    .as_array()
+                    .expect("a package lists its targets")
+                    .iter()
+                    .filter(|target| {
+                        target["kind"]
+                            .as_array()
+                            .expect("a target lists its kinds")
+                            .iter()
+                            .any(|kind| kind.as_str() == Some("bin"))
+                    })
+                    .map(|target| {
+                        target["name"]
+                            .as_str()
+                            .expect("a target has a name")
+                            .to_string()
+                    })
+                    .collect();
+                (name.to_string(), bins)
+            })
+            .collect();
+        Self { names, binaries }
     }
 }
 
@@ -297,6 +336,26 @@ mod tests {
 
         // Then neither is reached
         assert_eq!(reached, names(&[]));
+    }
+
+    #[test]
+    fn a_binary_is_built_by_the_crate_with_that_bin_target_not_by_a_library_of_the_same_name() {
+        // Given a library `app` and a crate `app-cli` whose binary is also called `app`
+        let root = a_workspace_of(&[
+            ("app", ""),
+            (
+                "app-cli",
+                "[[bin]]\nname = \"app\"\npath = \"src/main.rs\"\n",
+            ),
+        ]);
+        std::fs::write(root.path().join("app-cli/src/main.rs"), "fn main() {}\n")
+            .expect("write main.rs");
+
+        // When the crates building `app` are read
+        let building = WorkspaceGraph::of_workspace(root.path()).crates_building("app");
+
+        // Then only the crate with the bin target is: a lib target of the same name does not count
+        assert_eq!(building, names(&["app-cli"]));
     }
 
     #[test]

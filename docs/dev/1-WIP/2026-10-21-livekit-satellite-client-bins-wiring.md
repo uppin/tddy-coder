@@ -3,9 +3,10 @@
 **Date**: 2026-10-21
 **Status**: 🚧 In Progress
 **PR**: not opened yet (local planning; the orchestrator opens it)
+**Planned on**: `origin/feature/satellite/lifecycle-launch` @ `c2a84c343` (cut from `2fdcc7481`, rebased onto `c2a84c343` after the contract commit)
 **Type**: Refactor (architecture)
 **Complexity**: 3 — two crates split into library + wiring crate each (mechanical moves, no behaviour change), two script package lists, one ratchet test file plus one test-support method; the moved CLI suites spawn a process
-**Stack**: #satellite 14/15. Base: `feature/satellite/lifecycle-launch` (#635), planned on its tip `2fdcc7481`.
+**Stack**: #satellite 14/15. Base: `feature/satellite/lifecycle-launch` (#635), rebased onto its tip `c2a84c343`.
 
 ## Initial Discovery
 
@@ -67,10 +68,9 @@ implementing one here collides with the PR that owns it.
 | #630 coder-participant (merged) | The `tddy-coder-cli` pattern: a `-cli` package keeps the binary name and joins `WIRING` | The same shape, applied twice | |
 | #635 lifecycle-launch | The ratchet's final form: no `KNOWN_OFFENDERS`; `only_plugins_and_wiring_name_a_livekit_crate` is the closing assertion | Edits the lists in `livekit_is_a_satellite.rs` | re-add an offender list, or edit #635's lifecycle/agent-launch manifests |
 
-**Sequencing fact.** `only_plugins_and_wiring_name_a_livekit_crate` is a whole-workspace assertion.
-It turns green here only once #635's own green has struck `tddy-session-lifecycle` and
-`tddy-agent-launch`. Its failure output lists the crate names, so this node's share is visible: only
-`tddy-remote-git-repo` and `tddy-session-sync`.
+**Sequencing fact (re-checked at the contract).** On #635's tips `2fdcc7481` and `c2a84c343` all five ratchet tests
+pass, so #635 has already struck its crates. This node's red tests fail for this node's two crates
+alone, and no test here waits on a parent's behaviour.
 
 ## Draft PR contract
 
@@ -103,18 +103,16 @@ compile, and an empty package would be a stub.
 
 ## Green wave
 
-**Wave:** 6. It sits after #635 (wave 5) only because of the whole-workspace assertion.
-**Greenable independently:** yes for the work and for two of its three red tests
-(`each_client_binary_is_built_by_its_wiring_crate`,
-`a_client_library_names_livekit_nowhere_in_its_sources`). These read only this node's two crates.
-`only_plugins_and_wiring_name_a_livekit_crate` also needs #635 green.
-**Concurrent with:** #635's green (disjoint files apart from the ratchet's lists, which #635 does not
-change further), and #satellite 15/15's green (disjoint crates; 15/15 edits the same ratchet lines on
-top of this one).
-**Blocks:** #satellite 15/15. Its ratchet edit is textually on top of this one, and it removes
-`WIRING_WITH_A_LIBRARY`, which this node shrinks to `tddy-tools`.
+**Wave:** 5, alongside #635. No test here exercises #635's behaviour: its ratchet changes are
+already on the base, and the baseline is 5/5 green.
+**Greenable independently:** yes. All three red tests read only this node's two crates, and
+`crates_building` is published with this commit.
+**Concurrent with:** #635's remaining green/wrap commits (disjoint files), and #satellite 15/15's
+green (disjoint crates; 15/15 edits the same ratchet lines on top of this one).
+**Blocks:** nothing behaviourally. #satellite 15/15 sits on top only for the ratchet text and
+`crates_building`, both published at this contract.
 
-    #635 → n14 (ratchet closing assertion)      n14 → n15 (ratchet text; crates_building)
+    n14 → n15 (ratchet text; crates_building — surface, not behaviour)
 
 ## RPC boundary (answer to "defined by RPC boundary")
 
@@ -192,7 +190,7 @@ Neither client library names LiveKit. Its binary is built by a wiring crate that
 - `packages/tddy-remote-git-repo/Cargo.toml`: `[lib]` + `[[bin]] tddy-remote-git-repo` (`src/main.rs`, 114 lines); `tddy-livekit` in `[dependencies]` "named by the binary alone". `main.rs:14` imports `LiveKitRoomConnector`; `:86` `relay::run(request, credentials, Arc::new(LiveKitRoomConnector))`.
 - `packages/tddy-session-sync/Cargo.toml`: `[lib]` + `[[bin]] tddy-session-sync` (`src/main.rs`, 139 lines); `tddy-livekit` the same. `main.rs:15`, `:124` `attach(&credentials, Arc::new(LiveKitRoomConnector))`.
 - Only `tests/cli_acceptance.rs` in each crate uses `CARGO_BIN_EXE_*` (`env!`, so the suite must live in the package that owns the bin).
-- Cross-package users find the git shim by name next to the test executable (`current_exe()/../tddy-remote-git-repo`): `tddy-worktree-service/tests/remote_git_livekit_acceptance.rs:176`, `tddy-session-lifecycle/tests/session_sync_livekit_acceptance.rs:784`. `tddy-projects/src/project_provision.rs:24` tries `CARGO_BIN_EXE_tddy-remote-git-repo`, then the sibling, then `PATH`. None names a package.
+- Cross-package users find the git shim by name next to the test executable (`current_exe()/../tddy-remote-git-repo`): `tddy-worktree-service/tests/remote_git_livekit_acceptance.rs:176`, `tddy-session-lifecycle/tests/session_sync_livekit_acceptance.rs:740`. `tddy-projects/src/project_provision.rs:24` tries `CARGO_BIN_EXE_tddy-remote-git-repo`, then the sibling, then `PATH`. None names a package.
 - CI builds `--workspace --bins` and stages binaries by name (`.github/workflows/ci.yml:563,599`). No nextest filter names either package.
 - Ratchet: both crates on `WIRING_WITH_A_LIBRARY`, with the shape test exempting `src/main.rs`.
 
@@ -234,10 +232,10 @@ cross-package suites that run the git shim.
 |---|---|---|---|
 | `each_client_binary_is_built_by_its_wiring_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` (new) | `crates_building("tddy-remote-git-repo") == {tddy-remote-git-repo-cli}`, same for `tddy-session-sync` | ❌ fails: built by the library crates |
 | `a_client_library_names_livekit_nowhere_in_its_sources` | same (new) | Every `.rs` under each `CLIENT_LIBRARIES` crate's `src/`, `main.rs` included, has no path into LiveKit | ❌ fails: both `src/main.rs` |
-| `only_plugins_and_wiring_name_a_livekit_crate` | same (lists edited) | The two libraries are no longer allowed to name LiveKit | ❌ fails: the two libraries (plus #635's two crates until #635 is green) |
+| `only_plugins_and_wiring_name_a_livekit_crate` | same (lists edited) | The two libraries are no longer allowed to name LiveKit | ❌ fails: lists exactly `tddy-remote-git-repo`, `tddy-session-sync` |
 | `documents_the_refresh_token_flag_…` and the rest of `cli_acceptance.rs` | moved to `packages/tddy-remote-git-repo-cli/tests/` | The binary keeps its name, `--help` and exit codes | ✅ passes today in the library; moves unchanged |
 | `cli_acceptance.rs` (session-sync) | moved to `packages/tddy-session-sync-cli/tests/` | same | ✅ same |
-| `crates_building_names_the_crate_with_that_bin_target` | `packages/tddy-testing-commons/src/dependency_graph.rs` (unit) | The helper reads `bin` targets from `cargo metadata` | ✅ test infrastructure, passes at contract |
+| `a_binary_is_built_by_the_crate_with_that_bin_target_not_by_a_library_of_the_same_name` | `packages/tddy-testing-commons/src/dependency_graph.rs` (unit) | The helper reads `bin` targets from `cargo metadata` | ✅ test infrastructure, passes at contract |
 
 ## Technical Debt & Production Readiness
 
@@ -272,10 +270,10 @@ cross-package suites that run the git shim.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests (none beyond the ratchet: this node adds no production surface)
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

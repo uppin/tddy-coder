@@ -34,7 +34,7 @@
   `tddy-room-client`'s `in_memory` connector.
 - Cross-package users resolve the git shim **by name beside the test executable**:
   `tddy-worktree-service/tests/remote_git_livekit_acceptance.rs:176` and
-  `tddy-session-lifecycle/tests/session_sync_livekit_acceptance.rs:784`.
+  `tddy-session-lifecycle/tests/session_sync_livekit_acceptance.rs:740`.
   `tddy-projects/src/project_provision.rs:24` tries `CARGO_BIN_EXE_tddy-remote-git-repo`, then the
   sibling, then `PATH`. None names the package, so the move changes nothing for them, provided the
   binary is still built in a workspace run. The `-cli` crate's own test target guarantees that.
@@ -55,7 +55,7 @@
   `assert_cmd::cargo_bin_cmd!("tddy-tools")`). 19 are library tests. The
   `execute-tool-stdio-fixture` `[[bin]]` serves `tests/session_tool_stdio_rpc_dispatch.rs`, a
   library test.
-- 13 suites in other packages find `tddy-tools` through
+- 12 suites in other packages find `tddy-tools` through
   `var_os("CARGO_BIN_EXE_tddy-tools").unwrap_or(target/debug/tddy-tools)`, a path by binary name.
   `tddy-daemon-sandbox/src/sandbox_session.rs:557` does the same in production.
 - `tddy-daemon-sandbox` dev-depends on the `tddy-tools` library, with default features, so on the
@@ -67,3 +67,16 @@
   and `packages/tddy-workflow-recipes/docs/workflow-schemas.md:33` (package doc: wrap only).
 - Nothing builds `tddy-tools` with `--no-default-features`. The `livekit` feature's only consumer
   is its own `main.rs`.
+
+## Exploration 2 — the contract (2026-10-21)
+
+- Baseline on `2fdcc7481` (re-verified on `c2a84c343` after the rebase): `cargo test -p tddy-daemon-extensions --test livekit_is_a_satellite`
+  passes 5/5. #635 has already closed the ratchet.
+- After the list edit and the two new tests, three fail: `only_plugins_and_wiring_name_a_livekit_crate`
+  (it lists the two libraries), `a_client_library_names_livekit_nowhere_in_its_sources` (it lists the two
+  `src/main.rs`), and `each_client_binary_is_built_by_its_wiring_crate` (both binaries are built by
+  their library crates).
+- Found for node 15: `packages/tddy-tools/BUILD.yaml` names `package: tddy-tools` for the BSP
+  `rust_binary` target (`cargo build -p <package> --bin <bin_name>`, in `tddy-build-rust`). #630 left
+  `packages/tddy-coder/BUILD.yaml` pointing at `package: tddy-coder`, which has had no binary since
+  then. The two client crates here have no `BUILD.yaml`.
