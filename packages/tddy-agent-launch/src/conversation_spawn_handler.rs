@@ -79,6 +79,8 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             "",
             // The orchestrator's owner's vault: a child is the same owner's, on the same project.
             &self.account_access,
+            // A child conversation runs on its vendor: the orchestrator's account is not inherited.
+            &tddy_core::provider_route::RouteSources::default(),
             &self.claude_cli_manager.task_registry(),
             // Nobody watches a spawned child's start: the orchestrator is told its id, not its steps.
             &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),

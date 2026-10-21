@@ -157,25 +157,38 @@ impl SessionAccountAccess {
         &self,
         account_id: &str,
     ) -> Result<tddy_accounts::ProviderAccount, SessionIdentityRefusal> {
-        let _ = account_id;
-        // TODO(claude-route): implement
-        todo!()
+        let wanted = AccountId::new(account_id);
+        self.held_accounts()?
+            .iter()
+            .filter(|record| record.account == wanted)
+            .find_map(tddy_accounts::ProviderAccount::from_record)
+            .ok_or_else(|| {
+                SessionIdentityRefusal::Vault(AccountsError::NotFound {
+                    provider: ProviderId::new("provider"),
+                    account: wanted,
+                })
+            })
     }
 
     /// The GitHub records the session's vault holds right now.
     fn held_github_accounts(&self) -> Result<Vec<CredentialRecord>, SessionIdentityRefusal> {
+        Ok(self
+            .held_accounts()?
+            .into_iter()
+            .filter(|record| record.provider.as_str() == PROVIDER_GITHUB)
+            .collect())
+    }
+
+    /// Every record the session owner's vault holds right now.
+    fn held_accounts(&self) -> Result<Vec<CredentialRecord>, SessionIdentityRefusal> {
         let vaults = self
             .vaults
             .as_ref()
             .filter(|_| !self.session_token.is_empty())
             .ok_or(SessionIdentityRefusal::NoVaultsConfigured)?;
-        let held = SessionVaultAccountStore::new(Arc::clone(vaults), Arc::clone(&self.subject_of))
+        SessionVaultAccountStore::new(Arc::clone(vaults), Arc::clone(&self.subject_of))
             .list(&self.session_token)
-            .map_err(SessionIdentityRefusal::Vault)?;
-        Ok(held
-            .into_iter()
-            .filter(|record| record.provider.as_str() == PROVIDER_GITHUB)
-            .collect())
+            .map_err(SessionIdentityRefusal::Vault)
     }
 }
 

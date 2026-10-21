@@ -27,6 +27,7 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use crate::launch_ports::LaunchSessions;
 
 use crate::session_acting_identity::SessionAccountAccess;
+use tddy_core::provider_route::RouteSources;
 
 impl LaunchSessions {
     #[allow(clippy::too_many_arguments)]
@@ -60,6 +61,8 @@ impl LaunchSessions {
         // When true (new_branch_from_base only), push the new branch to origin at session start.
         create_remote_branch: bool,
         ssh_config_host: &str,
+        // Where the session's provider account is chosen; see `session_route_sources`.
+        route_sources: &RouteSources,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
         // A pr-stack orchestrator gets a child-spawn handler bound to its toolcall listener so the
@@ -132,6 +135,7 @@ impl LaunchSessions {
             create_remote_branch,
             ssh_config_host,
             &self.host.session_account_access(session_token),
+            route_sources,
             &self.task_registry,
             progress,
         )

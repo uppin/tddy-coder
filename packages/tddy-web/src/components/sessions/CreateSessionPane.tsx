@@ -12,6 +12,7 @@ import {
 import { prStackOrchestrators, stackBaseSessionCandidates } from "../../utils/stackParents";
 import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useAgentModels } from "../../rpc/useAgentModels";
+import { useProviderAccountModels, useProviderRoutes } from "../../rpc/useProviderRoutes";
 import {
   useSessionAttachments,
   type SessionAttachmentInit,
@@ -24,6 +25,7 @@ import { WORKFLOW_RECIPES } from "./createSessionRecipes";
 import { buildStartSessionRequest, type SessionType } from "./createSessionRequest";
 import { CreateSessionTypeToggle } from "./CreateSessionTypeToggle";
 import { CreateSessionModelField } from "./CreateSessionModelField";
+import { BUILT_IN_PROVIDER, CreateSessionProviderField } from "./CreateSessionProviderField";
 import { CreateSessionAgentPickerSection } from "./CreateSessionAgentPickerSection";
 import { CreateSessionToolFields } from "./CreateSessionToolFields";
 import { CreateSessionCursorCliFields } from "./CreateSessionCursorCliFields";
@@ -72,6 +74,7 @@ export function CreateSessionPane({
   client,
   projectClient,
   catalogClient,
+  accountsClient,
   sessionFilesClient,
   worktreeClient,
   sessionToken,
@@ -108,6 +111,10 @@ export function CreateSessionPane({
   const [prStackBaseSessionId, setPrStackBaseSessionId] = useState("");
   const [toolPath, setToolPath] = useState("");
   const [model, setModel] = useState(initialValues?.model ?? "");
+  // Where the session's harness runs. `null` until the operator chooses: an untouched form names no
+  // provider, so a default the daemon holds for the harness may still decide; choosing "built in"
+  // is an explicit choice that overrides it.
+  const [providerChoice, setProviderChoice] = useState<string | null>(null);
   const [permissionMode, setPermissionMode] = useState(initialValues?.permissionMode ?? "auto");
   const [dangerouslySkipPermissions, setDangerouslySkipPermissions] = useState(
     initialValues?.dangerouslySkipPermissions ?? false,
@@ -358,10 +365,23 @@ export function CreateSessionPane({
       : sessionType === "cursor-cli"
         ? CURSOR_CLI_AGENT
         : selectedAgentId;
-  const agentModels = useAgentModels(catalogClient, sessionToken, modelAgentKey, daemonInstanceId);
+  const vendorModels = useAgentModels(catalogClient, sessionToken, modelAgentKey, daemonInstanceId);
+
+  // The provider field is offered for the CLI session types; the daemon says which accounts the
+  // harness can run on and why not, the form keeps no matrix of its own.
+  const providerHarness = sessionType === "tool" ? null : sessionType;
+  const providerRoutes = useProviderRoutes(accountsClient, sessionToken, providerHarness);
+  useEffect(() => {
+    setProviderChoice(null);
+  }, [sessionType]);
+  const providerAccountId =
+    providerChoice !== null && providerChoice !== BUILT_IN_PROVIDER ? providerChoice : "";
+  // An account serves its own models; the vendor's catalog does not apply to it.
+  const providerModels = useProviderAccountModels(accountsClient, sessionToken, providerAccountId);
+  const agentModels = providerAccountId !== "" ? providerModels : vendorModels;
 
   // Reset the model selection to the backend's advertised default whenever the catalog changes
-  // (agent switch, session-type switch). Empty while loading or on a failed probe.
+  // (agent switch, session-type switch, provider switch). Empty while loading or on a failed probe.
   useEffect(() => {
     setModel(agentModels.defaultModel);
   }, [agentModels.defaultModel]);
@@ -461,6 +481,8 @@ export function CreateSessionPane({
         stackParentDaemonInstanceId,
         prStackBaseSessionId,
         model,
+        providerAccountId,
+        providerBuiltIn: providerChoice === BUILT_IN_PROVIDER,
         permissionMode,
         dangerouslySkipPermissions,
         placementWithdrawsPermissionBypass,
@@ -595,6 +617,16 @@ export function CreateSessionPane({
         projectId={projectId}
         setProjectId={setProjectId}
       />
+
+      {accountsClient && providerHarness !== null && (
+        <CreateSessionProviderField
+          harnessRoutable={providerRoutes.harnessRoutable}
+          harnessReason={providerRoutes.harnessReason}
+          choices={providerRoutes.choices}
+          value={providerChoice ?? BUILT_IN_PROVIDER}
+          onChange={setProviderChoice}
+        />
+      )}
 
       {/* Tool session fields */}
       {sessionType === "tool" && (

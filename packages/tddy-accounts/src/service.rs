@@ -12,8 +12,9 @@ use tddy_service::proto::accounts::{
     ConnectProviderAccountRequest, ConnectProviderAccountResponse, LinkState, ListAccountsRequest,
     ListAccountsResponse, ListProviderAccountModelsRequest, ListProviderAccountModelsResponse,
     ListProviderRoutesRequest, ListProviderRoutesResponse, PollLinkAccountRequest,
-    PollLinkAccountResponse, ProviderAccounts, RemoveAccountRequest, RemoveAccountResponse,
-    SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse, SyncStatus,
+    PollLinkAccountResponse, ProviderAccounts, ProviderRouteOption, RemoveAccountRequest,
+    RemoveAccountResponse, SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse,
+    SyncStatus,
 };
 
 use crate::attempts::{Attempts, PollAdmission};
@@ -23,7 +24,7 @@ use crate::linking::{
 };
 use crate::provider_account::{
     account_id_for, endpoints_for, preset, ProviderAccount, ProviderAccountError,
-    ProviderAccountStore, ProviderModelProbe, RouteSupport,
+    ProviderAccountStore, ProviderModelProbe, RouteSupport, WireProtocol,
 };
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
@@ -198,9 +199,45 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         &self,
         request: Request<ListProviderRoutesRequest>,
     ) -> Result<Response<ListProviderRoutesResponse>, Status> {
-        let _ = (request, &self.route_support);
-        // TODO(claude-route): implement
-        todo!()
+        let request = request.into_inner();
+        let matrix = self.route_support.as_deref().ok_or_else(|| {
+            Status::failed_precondition(
+                "this daemon cannot tell which harness runs on which provider account: \
+                 no route matrix is wired",
+            )
+        })?;
+        let records = self
+            .store
+            .list(&request.session_token)
+            .map_err(status_for)?;
+        let harness_reason = matrix.harness_routable(&request.harness).err();
+        let options = records
+            .iter()
+            .filter_map(ProviderAccount::from_record)
+            .map(|account| {
+                let protocols: Vec<&str> = account
+                    .wire_protocols()
+                    .into_iter()
+                    .map(WireProtocol::as_str)
+                    .collect();
+                let verdict = match &harness_reason {
+                    Some(reason) => Err(reason.clone()),
+                    None => matrix.supports(&request.harness, account.preset.id, &protocols),
+                };
+                ProviderRouteOption {
+                    account_id: account.account.as_str().to_string(),
+                    label: account.label,
+                    preset: account.preset.id.to_string(),
+                    supported: verdict.is_ok(),
+                    reason: verdict.err().unwrap_or_default(),
+                }
+            })
+            .collect();
+        Ok(Response::new(ListProviderRoutesResponse {
+            options,
+            harness_routable: harness_reason.is_none(),
+            harness_reason: harness_reason.unwrap_or_default(),
+        }))
     }
 
     async fn list_provider_account_models(

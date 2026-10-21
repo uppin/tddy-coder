@@ -41,16 +41,48 @@ impl Harness {
     /// (`stub`, a specialized agent definition, `tool`).
     #[must_use]
     pub fn from_agent_or_session_type(id: &str) -> Option<Harness> {
-        let _ = id;
-        // TODO(claude-route): implement
-        todo!()
+        Harness::ALL.into_iter().find(|harness| harness.id() == id)
     }
 
     /// The id this harness is named by — the inverse of [`Harness::from_agent_or_session_type`].
     #[must_use]
     pub fn id(self) -> &'static str {
-        // TODO(claude-route): implement
-        todo!()
+        match self {
+            Harness::Claude => "claude",
+            Harness::ClaudeAcp => "claude-acp",
+            Harness::ClaudeCli => "claude-cli",
+            Harness::Codex => "codex",
+            Harness::CodexAcp => "codex-acp",
+            Harness::OpenCode => "opencode",
+            Harness::OpenCodeCli => "opencode-cli",
+            Harness::MuseCli => "muse-cli",
+            Harness::Cursor => "cursor",
+            Harness::CursorCli => "cursor-cli",
+        }
+    }
+
+    const ALL: [Harness; 10] = [
+        Harness::Claude,
+        Harness::ClaudeAcp,
+        Harness::ClaudeCli,
+        Harness::Codex,
+        Harness::CodexAcp,
+        Harness::OpenCode,
+        Harness::OpenCodeCli,
+        Harness::MuseCli,
+        Harness::Cursor,
+        Harness::CursorCli,
+    ];
+
+    /// The harness's product name, for messages an operator reads.
+    fn product(self) -> &'static str {
+        match self {
+            Harness::Claude | Harness::ClaudeAcp | Harness::ClaudeCli => "Claude Code",
+            Harness::Codex | Harness::CodexAcp => "Codex",
+            Harness::OpenCode | Harness::OpenCodeCli => "OpenCode",
+            Harness::MuseCli => "Muse Code",
+            Harness::Cursor | Harness::CursorCli => "Cursor",
+        }
     }
 }
 
@@ -139,9 +171,29 @@ pub enum RouteRefusal {
 
 impl std::fmt::Display for RouteRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let _ = f;
-        // TODO(claude-route): implement
-        todo!()
+        match self {
+            RouteRefusal::HarnessCannotBeRouted { harness } => write!(
+                f,
+                "{} cannot be pointed at another provider; it always runs on its own vendor",
+                harness.product()
+            ),
+            RouteRefusal::ProtocolNotServed { harness, needs } => write!(
+                f,
+                "{} needs an account whose endpoint serves {needs}, and this one does not",
+                harness.product()
+            ),
+            RouteRefusal::PresetNotAccepted { harness, preset } => write!(
+                f,
+                "{} does not accept a {preset} account; it runs on Meta only",
+                harness.product()
+            ),
+            RouteRefusal::NotYetRoutable(harness) => write!(
+                f,
+                "{} ({}) cannot run on a provider account in this build yet",
+                harness.product(),
+                harness.id()
+            ),
+        }
     }
 }
 
@@ -153,16 +205,99 @@ pub fn route_supported(
     preset: &str,
     protocols: &[&str],
 ) -> Result<(), RouteRefusal> {
-    let _ = (harness, preset, protocols);
-    // TODO(claude-route): implement
-    todo!()
+    match harness {
+        Harness::Claude | Harness::ClaudeAcp | Harness::ClaudeCli => {
+            require_protocol(harness, protocols, &[ANTHROPIC_MESSAGES])
+        }
+        Harness::Codex | Harness::CodexAcp => {
+            require_protocol(harness, protocols, &[OPENAI_RESPONSES])
+        }
+        Harness::OpenCode | Harness::OpenCodeCli => {
+            require_protocol(harness, protocols, &[OPENAI_RESPONSES, OPENAI_CHAT])
+        }
+        Harness::MuseCli if preset == META_PRESET => Ok(()),
+        Harness::MuseCli => Err(RouteRefusal::PresetNotAccepted {
+            harness,
+            preset: preset.to_string(),
+        }),
+        Harness::Cursor | Harness::CursorCli => {
+            Err(RouteRefusal::HarnessCannotBeRouted { harness })
+        }
+    }
+}
+
+const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
+const OPENAI_RESPONSES: &str = "openai-responses";
+const OPENAI_CHAT: &str = "openai-chat";
+const META_PRESET: &str = "meta";
+
+/// Ok when any of `accepted` is among `served`; otherwise names the first accepted protocol.
+fn require_protocol(
+    harness: Harness,
+    served: &[&str],
+    accepted: &[&'static str],
+) -> Result<(), RouteRefusal> {
+    if accepted.iter().any(|protocol| served.contains(protocol)) {
+        return Ok(());
+    }
+    Err(RouteRefusal::ProtocolNotServed {
+        harness,
+        needs: protocol_display_name(accepted),
+    })
+}
+
+fn protocol_display_name(accepted: &[&'static str]) -> &'static str {
+    match accepted {
+        [ANTHROPIC_MESSAGES] => "Anthropic Messages",
+        [OPENAI_RESPONSES] => "OpenAI Responses",
+        _ => "OpenAI Responses or OpenAI Chat Completions",
+    }
 }
 
 /// What `harness` needs to run on `target`.
 pub fn resolve_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
-    let _ = (harness, target);
-    // TODO(claude-route): implement
-    todo!()
+    match harness {
+        Harness::Claude | Harness::ClaudeAcp | Harness::ClaudeCli => {
+            claude_code_route(harness, target)
+        }
+        Harness::Cursor | Harness::CursorCli => {
+            Err(RouteRefusal::HarnessCannotBeRouted { harness })
+        }
+        Harness::Codex
+        | Harness::CodexAcp
+        | Harness::OpenCode
+        | Harness::OpenCodeCli
+        | Harness::MuseCli => Err(RouteRefusal::NotYetRoutable(harness)),
+    }
+}
+
+/// Claude Code reads its endpoint, key and every model choice from the environment: the base URL is
+/// the account's Anthropic Messages root, and each alias a model choice could fall through to is
+/// pinned to `target.model`, so no request reaches Anthropic.
+fn claude_code_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
+    let Some(root) = target.endpoints.anthropic_messages.as_ref() else {
+        return Err(RouteRefusal::ProtocolNotServed {
+            harness,
+            needs: "Anthropic Messages",
+        });
+    };
+    let mut env = vec![("ANTHROPIC_BASE_URL".to_string(), root.clone())];
+    env.extend(
+        [
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ]
+        .map(|alias| (alias.to_string(), target.model.clone())),
+    );
+    Ok(HarnessRoute {
+        env,
+        secret_env: vec![("ANTHROPIC_AUTH_TOKEN".to_string(), target.api_key.clone())],
+        files: Vec::new(),
+        args: vec!["--model".to_string(), target.model.clone()],
+    })
 }
 
 /// One level's choice of where a session runs.
@@ -189,7 +324,13 @@ pub struct RouteSources {
 /// `None` for the harness's own vendor.
 #[must_use]
 pub fn choose_route(sources: &RouteSources) -> Option<String> {
-    let _ = sources;
-    // TODO(claude-route): implement
-    todo!()
+    match sources
+        .session
+        .as_ref()
+        .or(sources.agent_definition.as_ref())
+    {
+        Some(RouteChoice::Account(id)) => Some(id.clone()),
+        Some(RouteChoice::BuiltIn) => None,
+        None => sources.user_default.clone(),
+    }
 }

@@ -3,6 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
+**Complexity**: 5 — seven packages (tddy-accounts, tddy-agent-backend, tddy-agent-launch, tddy-changeset, tddy-daemon, tddy-service, tddy-web), proto contract change
 **Stack**: #provider-route 2/9. Base: `feature/provider-route/accounts`. PR: [#663](https://github.com/uppin/tddy-coder/pull/663).
 
 ## Initial Discovery

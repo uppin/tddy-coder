@@ -5,6 +5,7 @@ import type { Room } from "livekit-client";
 import { ProjectService, type ProjectEntry } from "../../gen/project_pb";
 import { SessionService, SessionEntrySchema, type SessionEntry } from "../../gen/session_pb";
 import { ActivityService } from "../../gen/activity_pb";
+import { AccountsService } from "../../gen/accounts_pb";
 import { CatalogService } from "../../gen/catalog_pb";
 import { ExecToolService } from "../../gen/exec_tools_pb";
 import { PrStackService } from "../../gen/pr_stack_pb";
@@ -109,6 +110,9 @@ export function SessionsDrawerScreen({
   const activityClient = useDaemonClient(ActivityService);
   // `#unbundle` node 8 took families A, L and P to their own services on the same daemon and wire.
   const catalogClient = useDaemonClient(CatalogService);
+  // The signed-in person's provider accounts live in this daemon's vault; the New-session form lists
+  // them for the harness it is about to start.
+  const accountsClient = useDaemonClient(AccountsService);
   const execToolClient = useDaemonClient(ExecToolService);
   const prStackClient = useDaemonClient(PrStackService);
 
@@ -955,6 +959,7 @@ export function SessionsDrawerScreen({
                   ? (activityClient ?? undefined)
                   : (activeActivityClient ?? activityClient ?? undefined)
               }
+              accountsClient={accountsClient ?? undefined}
               catalogClient={
                 mode === "creating"
                   ? (catalogClient ?? undefined)

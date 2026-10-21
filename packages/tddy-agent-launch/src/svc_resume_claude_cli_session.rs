@@ -13,6 +13,8 @@ use std::path::PathBuf;
 use crate::hooks_and_urls;
 
 use crate::launch_ports::LaunchSessions;
+use crate::session_provider_route::resume_route_env;
+use tddy_core::provider_route::Harness;
 
 impl LaunchSessions {
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
@@ -89,6 +91,14 @@ impl LaunchSessions {
             identity.git_environment
         };
         env_extra.extend(split_env);
+        // The account the session's start recorded, re-read from the owner's vault: a rotated key is
+        // what the resume runs on, and a removed account refuses the resume rather than running it
+        // on the vendor.
+        env_extra.extend(resume_route_env(
+            &self.host.session_account_access(session_token),
+            Harness::ClaudeCli,
+            &session_dir,
+        )?);
         if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                 .map_err(Status::invalid_argument)?;

@@ -6,6 +6,8 @@
  * A harness that cannot run on any provider (Cursor) shows the daemon's reason instead of a select.
  */
 
+import { inputClass, labelClass } from "./createSessionFormStyles";
+
 /** One account as the field offers it. */
 export interface ProviderRouteChoice {
   accountId: string;
@@ -26,8 +28,50 @@ export interface CreateSessionProviderFieldProps {
   onChange: (value: string) => void;
 }
 
-export function CreateSessionProviderField(props: CreateSessionProviderFieldProps) {
-  void props;
-  // TODO(claude-route): implement
-  return null;
+/** The select's value for the harness's own vendor. */
+export const BUILT_IN_PROVIDER = "builtin";
+
+export function CreateSessionProviderField({
+  harnessRoutable,
+  harnessReason,
+  choices,
+  value,
+  onChange,
+}: CreateSessionProviderFieldProps) {
+  if (!harnessRoutable) {
+    return (
+      <div>
+        <span className={labelClass}>Provider</span>
+        <p data-testid="create-session-provider-unavailable" className="text-sm text-muted-foreground">
+          {harnessReason}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <label className={labelClass} htmlFor="create-session-provider">
+        Provider
+      </label>
+      <select
+        id="create-session-provider"
+        data-testid="create-session-provider-select"
+        className={inputClass}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value={BUILT_IN_PROVIDER}>Anthropic (built in)</option>
+        {choices.map((choice) => (
+          <option
+            key={choice.accountId}
+            value={choice.accountId}
+            disabled={!choice.supported}
+            title={choice.supported ? undefined : choice.reason}
+          >
+            {choice.supported ? choice.label : `${choice.label} — ${choice.reason}`}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }

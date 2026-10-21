@@ -27,18 +27,32 @@ pub fn write_session_provider_account(
     session_dir: &Path,
     account: &SessionProviderAccount,
 ) -> Result<(), crate::WorkflowError> {
-    let _ = (session_dir, account);
-    // TODO(claude-route): implement
-    todo!()
+    let yaml = serde_yaml::to_string(account).map_err(|e| {
+        crate::WorkflowError::WriteFailed(format!("{SESSION_PROVIDER_ACCOUNT_FILENAME}: {e}"))
+    })?;
+    std::fs::write(session_dir.join(SESSION_PROVIDER_ACCOUNT_FILENAME), yaml).map_err(|e| {
+        crate::WorkflowError::WriteFailed(format!("{SESSION_PROVIDER_ACCOUNT_FILENAME}: {e}"))
+    })
 }
 
 /// The account recorded for the session in `session_dir`; `None` when it runs on its vendor.
 pub fn read_session_provider_account(
     session_dir: &Path,
 ) -> Result<Option<SessionProviderAccount>, crate::WorkflowError> {
-    let _ = session_dir;
-    // TODO(claude-route): implement
-    todo!()
+    let path = session_dir.join(SESSION_PROVIDER_ACCOUNT_FILENAME);
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(crate::WorkflowError::ChangesetInvalid(format!(
+                "{}: {e}",
+                path.display()
+            )))
+        }
+    };
+    serde_yaml::from_str(&contents)
+        .map(Some)
+        .map_err(|e| crate::WorkflowError::ChangesetInvalid(format!("{}: {e}", path.display())))
 }
 
 #[cfg(test)]

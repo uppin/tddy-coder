@@ -3,6 +3,7 @@ import { ConnectError, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { SessionService, SessionEntry } from "../../gen/session_pb";
 import type { ProjectService, ProjectEntry } from "../../gen/project_pb";
+import type { AccountsService } from "../../gen/accounts_pb";
 import type { CatalogService } from "../../gen/catalog_pb";
 import type { ExecToolService } from "../../gen/exec_tools_pb";
 import type { PrStackService } from "../../gen/pr_stack_pb";
@@ -45,6 +46,7 @@ import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 type ConnectionClient = Client<typeof SessionService>;
 type ProjectClient = Client<typeof ProjectService>;
 type CatalogClient = Client<typeof CatalogService>;
+type AccountsClient = Client<typeof AccountsService>;
 type ExecToolClient = Client<typeof ExecToolService>;
 type PrStackClient = Client<typeof PrStackService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
@@ -111,6 +113,8 @@ interface SessionMainPaneProps {
   activityClient?: ActivityClient;
   /** `catalog.CatalogService` on the same host as `client` — create form and agent pickers. */
   catalogClient?: CatalogClient;
+  /** `accounts.AccountsService` — the create form lists the person's provider accounts through it. */
+  accountsClient?: AccountsClient;
   /** `exec_tools.ExecToolService` on the same host as `client` — inspector Tools tab. */
   execToolClient?: ExecToolClient;
   /** `pr_stack.PrStackService` on the same host as `client` — PR-stack workflow view. */
@@ -199,6 +203,7 @@ export function SessionMainPane({
   sessionAgentClient,
   activityClient,
   catalogClient,
+  accountsClient,
   execToolClient,
   prStackClient,
   host,
@@ -482,6 +487,7 @@ export function SessionMainPane({
           client={client}
           projectClient={projectClient}
           catalogClient={catalogClient}
+          accountsClient={accountsClient}
           sessionFilesClient={sessionFilesClient}
           worktreeClient={worktreeClient}
           sessionToken={sessionToken}
