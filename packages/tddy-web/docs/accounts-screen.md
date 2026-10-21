@@ -51,6 +51,25 @@ account id is unique only within its provider. Each row shows the label (`…-la
 `…-rename-submit`) and a remove button (`…-remove`) whose first press only asks; the confirmation
 (`…-remove-confirm`) sends `RemoveAccount`, and Cancel sends nothing.
 
+### Connecting a provider account by API key
+
+When the page passes `onConnectProviderAccount`, a listed screen shows **Connect API key**
+(`accounts-connect-api-key`), which opens `ConnectProviderAccountForm` (`accounts-connect-form`):
+preset select (`accounts-connect-preset`), label (`accounts-connect-label`), a password-type key
+field (`accounts-connect-api-key-input`), and — only for a preset that needs one — the OpenAI root
+(`accounts-connect-openai-base-url`) or the Anthropic root (`accounts-connect-anthropic-base-url`).
+A URL typed for a preset that takes none is not sent. The page sends `ConnectProviderAccount`; on
+success it closes the form and re-reads the list, on refusal the daemon's reason is shown as
+`accounts-connect-error` and the form stays open.
+
+`PROVIDER_PRESET_OPTIONS` mirrors the daemon's preset table (`tddy_accounts::presets()`), which
+stays the authority: every request that disagrees with it is refused, so a drift shows on screen as
+a refusal, never as an account pointed at the wrong endpoint.
+
+A provider-account row (`AccountRow.preset` non-empty) also shows its preset and wire protocols
+(`…-preset`) and a **Models** toggle (`…-models-toggle`) that sends `ListProviderAccountModels` only
+when expanded, rendering `…-models` or the reason as `…-models-error`.
+
 ### The sync-status badge
 
 `AccountRow.syncStatus: AccountSyncStatus | null` — `"synced"`,
@@ -68,6 +87,7 @@ it.
 | Spec | Pins |
 |---|---|
 | `cypress/component/AccountsScreenAcceptance.cy.tsx` (page object `cypress/support/pages/accountsScreenPage.ts`) | grouping by provider; the subject beside the label; empty, uninitialized, locked and errored as four distinct notices; rename through `SetAccountLabel` with the identity unchanged; a failed rename reported beside the list; removal only after confirmation; no sync badge for `UNSPECIFIED`, a `Refused` badge, a `Synced` badge |
+| `cypress/component/ProviderAccountConnectAcceptance.cy.tsx` | connecting a Meta account adds it to its provider group with its preset; a rejected key shows the daemon's reason and adds nothing; the URL field appears only for presets whose endpoint the operator supplies; the key is never shown once sent |
 | `src/routing/appRoutes.test.ts` § accounts route | `/accounts` matches; `/accounts-archive` and `/accounts/github` do not |
 | `ModelsNavAcceptance.cy.tsx`, `PresenceCapabilityGatingAcceptance.cy.tsx` | the menu's order, with **Accounts** after **Hosts** |
 
