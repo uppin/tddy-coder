@@ -5,7 +5,7 @@ use crate::pty_relay::daemon_http::exchange_stub_session_token;
 use crate::pty_relay::daemon_http::join_terminal_room;
 use crate::pty_relay::daemon_http::open_session_room_over_http;
 use crate::pty_relay::encode_resize;
-use crate::pty_relay::run_grpc_terminal;
+use crate::pty_relay::grpc_terminal::run_grpc_terminal;
 use crate::pty_relay::PtyRelayConfig;
 use anyhow::Result;
 use std::io::{Read, Write};
