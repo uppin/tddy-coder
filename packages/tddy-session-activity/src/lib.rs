@@ -31,10 +31,15 @@ pub mod session_reader;
 pub mod streams;
 pub mod user_sessions_path;
 
-pub use service::{
-    ActivityPorts, ActivityServiceImpl, DeltaLookup, DeltaScope, MeasuredDelta,
-    NoSessionDeltaStores, OsUserResolver, SessionDeltaStores, SessionLabels,
-};
+pub use crate::service::ports::ActivityPorts;
+pub use crate::service::ports::DeltaLookup;
+pub use crate::service::ports::DeltaScope;
+pub use crate::service::ports::MeasuredDelta;
+pub use crate::service::ports::NoSessionDeltaStores;
+pub use crate::service::ports::OsUserResolver;
+pub use crate::service::ports::SessionDeltaStores;
+pub use crate::service::ports::SessionLabels;
+pub use service::ActivityServiceImpl;
 
 /// How a session's activity deltas are numbered: the wire's absent value, the first real tick, and
 /// the rule that produces the next one.
