@@ -276,7 +276,7 @@ None. No node depends on this one.
 
 ## Scope
 
-- [ ] **M1 measurement**: repo-scale cold (inside and outside `./dev`) and warm runs, recorded under Validation results
+- [x] **M1 measurement**: repo-scale cold (inside and outside `./dev`) and warm runs, recorded under Validation results
 - [ ] **`tddy-lsp`**: typed startup failure (R1), the `fake_lsp` mode, tests
 - [ ] **`tddy-index-daemon`**: `status_of_lsp` arm and its test
 - [ ] **Prefix rule** moved into `item_anchor/prefix.rs` (R2); the Rust resolver calls it
@@ -351,7 +351,7 @@ Plan headers carry only hashes. `rust.rs` is about 125 lines shorter.
 
 ## Implementation milestones
 
-- [ ] **M1** Repo-scale measurement (no code). `./dev cargo build -p tddy-tools`, then run `tddy-tools restructure anchors packages/tddy-core/src/workflow/ids.rs --items GoalId` in four ways:
+- [x] **M1** Repo-scale measurement (no code). `./dev cargo build -p tddy-tools`, then run `tddy-tools restructure anchors packages/tddy-workflow/src/ids.rs --items GoalId` (the file moved from `packages/tddy-core/src/workflow/ids.rs`; see Validation results) in four ways:
   - (a) cold inside `./dev`, with `TDDY_INDEX_SOCKET` unset;
   - (b) cold outside the dev shell;
   - (c) warm through `eval $(./run-index-daemon | grep '^export ')`;
@@ -651,6 +651,51 @@ Scoped gates: `./dev cargo clippy -p tddy-lsp -p tddy-index-daemon -p tddy-code-
 (2–4, 6, 7, 8–14, 15, 16, 17); green pins 1, 5, 18, 19 (4 tests), 20 (5 tests), 21 (live).
 Seen, not this node's: `--lib` reds in `language::tests`, `impl_move::assemble`,
 `crate_move::source_scan::test_declarations` are #reshape 11/12/13 contract `todo!`s.
+
+### M1 repo-scale measurement (2026-10-21)
+
+Machine: this Mac, `darwin`, worktree `yolo-reshape-n16`, branch `feature/reshape/anchors-outline` at `d6be4d9f5`
+(the contract commit). No source file was edited for this measurement.
+
+**The item moved.** `packages/tddy-core/src/workflow/ids.rs` no longer exists (the workflow module left
+`tddy-core` in #carve). `GoalId` is `pub struct GoalId(String)` at `packages/tddy-workflow/src/ids.rs:10`, and
+every leg below uses that path. A first attempt on the stale path is not counted: legs (a) and (b) failed on
+it, (a) with `plan is malformed: packages/tddy-core/src/workflow/ids.rs could not be read: No such file or
+directory (os error 2)`, and the warm legs were never run on it.
+
+**Builds (not timed).** `./dev cargo build -p tddy-tools` (the last crate `tddy-tools` took 4m 40s; `Finished`
+reported). `./dev cargo build -p tddy-index-daemon -p tddy-tools` before the warm legs: 1m 03s. The daemon's own
+start rebuilt `tddy-index-daemon -p tddy-tools` once more, 1m 02s, which is inside the start timing below.
+
+| Leg | How | `which rust-analyzer` | Started (UTC) | Elapsed | Exit |
+|---|---|---|---|---|---|
+| (a) cold, inside `./dev`, `TDDY_INDEX_SOCKET` unset | `./dev` then `./target/debug/tddy-tools restructure anchors packages/tddy-workflow/src/ids.rs --items GoalId` | `/nix/store/yab4lviy5v50kbykq4rlrz6irs5p98r6-rust-analyzer-2026-03-30/bin/rust-analyzer` | 10:47:24 | 2 s | 0 |
+| (b) cold, outside `./dev`, `TDDY_INDEX_SOCKET` unset | the same command from a plain shell | `none` | 10:47:26 | 0 s | 1 |
+| (c) warm, first request | `./dev`, then `eval $(./run-index-daemon \| grep '^export ')`, then the same command | the same nix path as (a) | request at 11:06:53 | 0 s | 0 |
+| (d) warm, second request | the same command again, same daemon | the same nix path as (a) | 11:06:53 | 0 s | 0 |
+
+The start-and-warm of (c) before its request took 1164 s, of which 1 m 02 s was the rebuild and about 18 minutes
+the crate-graph warm that `run-index-daemon` runs before it returns.
+
+Output of (a), (c) and (d), identical:
+`{"kind":"items","file":"packages/tddy-workflow/src/ids.rs","items":["tddy_workflow::ids::GoalId"],"fingerprints":["sha256:d1d7500c2ffb3a8226d5709a6d8f2f0bdaf263b176a6ddb5ac6a3300fb9217aa"]}`
+
+Output of (b), the whole of it:
+```
+Error: rust-analyzer LSP
+
+Caused by:
+    language server not found: rust-analyzer: No such file or directory (os error 2)
+```
+That is the State B line in this changeset, already live on this branch: #649's `NotFound` row (R1's first row).
+
+**Reading.** Every leg that the gate names (a, c, d) resolved `GoalId`, so the gate did not fire. Two things
+the changeset did not predict:
+- The single cold `--items` request answered in 2 s with no warm daemon. The 6–18 minutes this changeset
+  assumed is the daemon's crate-graph warm (about 18 minutes here), not the one-request cost. One run per leg,
+  on a populated `target/`, with the rust-analyzer cache not cleared, so this is not a worst-case cold.
+- The warm requests were 0 s, so on this item the daemon buys nothing measurable over the cold request. The
+  daemon's value is the repeated-request case for a larger plan, which this measurement does not show.
 
 ## TODO
 
