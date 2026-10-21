@@ -17,5 +17,4 @@ pub mod provider_model_probe;
 pub mod provider_route_support;
 pub mod runtime;
 pub mod server;
-pub mod session_delta_stores;
 pub mod startup;

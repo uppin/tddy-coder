@@ -199,8 +199,9 @@ one `SessionAdmissionRegistry` for the whole daemon, installed through
 admission, directory, tokens, connector), then the reach, terminal exposure and split rooms the
 runtime shares with other consumers. The suites in `tddy-daemon/tests` that stand a host up over a
 real room call the same function (`tests/daemon_rpc_participant/mod.rs`), so they cannot wire the
-plugin differently from the daemon. The delta adapter, `RoomsHostedByThisDaemon`, lives in
-`tddy-daemon` (`session_delta_stores.rs`) until the plugin may depend on `tddy-session-activity`.
+plugin differently from the daemon. The delta adapter, `RoomsHostedByThisDaemon`, is the plugin's
+(`tddy_daemon_livekit::session_delta_stores`): it implements the activity service's port beside the
+ring it reads, over a `tddy-daemon-livekit` → `tddy-session-activity` edge.
 
 ## The satellite rule and its ratchet
 
