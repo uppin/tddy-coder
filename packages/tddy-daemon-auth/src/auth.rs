@@ -193,26 +193,7 @@ pub fn build_auth_entries_admitting(
     // boot. The probe runs for a stub provider too: a stub retains nothing, but the path the
     // operator configured is unusable either way, and skipping the check for one provider kind is
     // exactly the sort of quiet degradation this replaces.
-    let credential_vaults = match config.auth_storage.as_ref() {
-        Some(dir) => {
-            probe_writable(dir).map_err(|e| {
-                anyhow::anyhow!(
-                    "config.auth_storage ({}) cannot hold credential vaults: {e}. \
-                     Every GitHub login fails until it is writable by the daemon user.",
-                    dir.display()
-                )
-            })?;
-            // Said once, here, at startup — and not repaired: see
-            // `auth_storage_looser_than_owner_only`.
-            if let Some(warning) = auth_storage_looser_than_owner_only(dir) {
-                log::warn!(target: crate::AUTH_LOG_TARGET, "{warning}");
-            }
-            Some(Arc::new(crate::vault_lifetimes::credential_vaults_in(
-                dir, &lifetimes,
-            )))
-        }
-        None => None,
-    };
+    let credential_vaults = probed_credential_vaults(config, lifetimes)?;
 
     let redirect_uri = || {
         github
@@ -252,6 +233,51 @@ pub fn build_auth_entries_admitting(
     // Verify the token's signature/expiry under the key it names and extract the login. Only
     // access-kind tokens authenticate an RPC — a long-lived refresh token is rejected here so it
     // cannot be used as an RPC credential.
+    let user_resolver = session_user_resolver(tokens);
+
+    // The room-JWT mint. It is an entry of its own rather than a method on `auth.AuthService`
+    // because it needs the daemon's own config (LiveKit endpoint, common room, `users:` map),
+    // which `AuthServiceImpl` — a tddy-github type that knows only about OAuth — does not have.
+    let livekit_token_entry = livekit_token_service_entry(config, minter, &user_resolver);
+
+    Ok(AuthBuildResult {
+        entries: vec![auth_entry, livekit_token_entry],
+        user_resolver: Some(user_resolver),
+        credential_vaults,
+        session_tokens: Some(tokens.clone()),
+    })
+}
+
+fn probed_credential_vaults(
+    config: &DaemonConfig,
+    lifetimes: crate::vault_lifetimes::VaultLifetimes,
+) -> anyhow::Result<Option<Arc<SessionVaults>>> {
+    let credential_vaults = match config.auth_storage.as_ref() {
+        Some(dir) => {
+            probe_writable(dir).map_err(|e| {
+                anyhow::anyhow!(
+                    "config.auth_storage ({}) cannot hold credential vaults: {e}. \
+                     Every GitHub login fails until it is writable by the daemon user.",
+                    dir.display()
+                )
+            })?;
+            // Said once, here, at startup — and not repaired: see
+            // `auth_storage_looser_than_owner_only`.
+            if let Some(warning) = auth_storage_looser_than_owner_only(dir) {
+                log::warn!(target: crate::AUTH_LOG_TARGET, "{warning}");
+            }
+            Some(Arc::new(crate::vault_lifetimes::credential_vaults_in(
+                dir, &lifetimes,
+            )))
+        }
+        None => None,
+    };
+    Ok(credential_vaults)
+}
+
+fn session_user_resolver(
+    tokens: &SessionTokens,
+) -> Arc<dyn Fn(&str) -> Option<String> + Send + Sync + 'static> {
     let verifier = Arc::clone(tokens.verifier());
     let user_resolver: SessionUserResolver = Arc::new(move |token: &str| {
         verifier
@@ -260,23 +286,21 @@ pub fn build_auth_entries_admitting(
             .filter(|c| c.kind == TokenKind::Access)
             .map(|c| c.login)
     });
+    user_resolver
+}
 
-    // The room-JWT mint. It is an entry of its own rather than a method on `auth.AuthService`
-    // because it needs the daemon's own config (LiveKit endpoint, common room, `users:` map),
-    // which `AuthServiceImpl` — a tddy-github type that knows only about OAuth — does not have.
+fn livekit_token_service_entry(
+    config: &DaemonConfig,
+    minter: Arc<dyn RoomTokenMinter + 'static>,
+    user_resolver: &Arc<dyn Fn(&str) -> Option<String> + Send + Sync + 'static>,
+) -> ServiceEntry {
     let livekit_token_entry = ServiceEntry {
         name: "auth.LiveKitTokenService",
         service: Arc::new(LiveKitTokenServiceServer::new(
             LiveKitTokenServiceImpl::new(user_resolver.clone(), Arc::new(config.clone()), minter),
         )) as Arc<dyn tddy_rpc::RpcService>,
     };
-
-    Ok(AuthBuildResult {
-        entries: vec![auth_entry, livekit_token_entry],
-        user_resolver: Some(user_resolver),
-        credential_vaults,
-        session_tokens: Some(tokens.clone()),
-    })
+    livekit_token_entry
 }
 
 /// The rule every gated daemon RPC admits a caller by: their session token resolves to a login.
