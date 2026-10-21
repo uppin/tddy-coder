@@ -5,7 +5,7 @@
 //! with that vault's refusals. The account record is written through `tddy_accounts`'s own codec
 //! (#provider-route 1/9), so these tests turn green only once that codec exists.
 //!
-//! Changeset: docs/dev/1-WIP/2026-10-18-provider-route-claude-route.md
+//! Feature: docs/ft/daemon/claude-cli-session.md (Running on a provider account)
 
 use std::sync::Arc;
 

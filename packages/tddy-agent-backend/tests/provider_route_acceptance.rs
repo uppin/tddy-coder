@@ -5,7 +5,7 @@
 //! Messages root with the account's key, and **every** model it might pick is pinned, so no request
 //! can fall through to Anthropic.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-claude-route.md
+//! Feature: docs/ft/daemon/provider-accounts.md (Running a harness on an account)
 
 use tddy_agent_backend::provider_route::{
     choose_route, resolve_route, route_supported, Harness, RouteChoice, RouteEndpoints,

@@ -6,7 +6,7 @@
  * (`ListProviderRoutes`); the form only renders them. Choosing an account switches the model list
  * to that account's models (`ListProviderAccountModels`), and Create sends the account id.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-claude-route.md
+ * Feature: docs/ft/web/tool-session-model-selection.md (Provider)
  */
 import { Code, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";

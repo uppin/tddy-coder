@@ -5,7 +5,7 @@
 //! here a scripted one stands in, so what is pinned is that the service asks it per account and
 //! reports its words verbatim — the web never re-derives the matrix.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-claude-route.md
+//! Feature: docs/ft/daemon/provider-accounts.md (Running a harness on an account)
 
 use std::sync::Arc;
 

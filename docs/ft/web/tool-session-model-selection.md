@@ -144,6 +144,31 @@ Constructs the backend for `<agent>` (same binary-resolution rules as `tddy-code
   not override `context["model"]`). Selecting a backend's default reproduces today's behaviour.
 - claude-cli continues to require a non-empty model (unchanged daemon precondition).
 
+## Provider
+
+For the CLI session types (`claude-cli`, `cursor-cli`) the form shows a **Provider** field beside the
+model: where the session's harness runs — its own vendor, or one of the person's
+[provider accounts](../daemon/provider-accounts.md). It is shown only when the form was given an
+`accounts.AccountsService` client; without one every session runs on its vendor. Tool sessions show
+no Provider field.
+
+- The options come from `ListProviderRoutes(harness)`; the form keeps no harness-to-provider matrix
+  of its own. For `claude-cli` the select's first option is **Anthropic (built in)**, selected by
+  default; each account follows by its label, and an account the harness cannot run on is listed
+  disabled with the daemon's reason after its label (and as its tooltip).
+- For a harness no account can run (`cursor-cli`), the field shows the daemon's reason in place of
+  a select (`create-session-provider-unavailable`).
+- A `ListProviderRoutes` failure is shown under the select (`create-session-provider-error`), never
+  swallowed; the vendor option remains.
+- Choosing an account switches the model list from `ListAgentModels` to
+  `ListProviderAccountModels(account_id)` — the account's own models — and preselects the first.
+  Choosing the vendor again switches back to the vendor's catalog.
+- Changing the session type resets the field to its untouched state.
+- On submit, a claude-cli start carries `provider_account_id` (the chosen account, else empty) and
+  `provider_built_in` (true only when the operator explicitly chose the vendor). An untouched field
+  sends neither, so a lower-level default may still decide; the daemon applies the precedence. See
+  [Claude Code CLI session § Running on a provider account](../daemon/claude-cli-session.md#running-on-a-provider-account).
+
 ## Design decisions
 
 ### Enumerate from the command; curate only where impossible
@@ -191,5 +216,6 @@ must not silently look available.
 ## Related documentation
 
 - [Session Drawer § Create Session](session-drawer.md#create-session) — the form this extends
+- [Provider accounts](../daemon/provider-accounts.md) — the accounts the Provider field offers
 - [Codex ACP backend](../coder/codex-acp-backend.md) — ACP `available_models` source
 - [Coder overview](../coder/1-OVERVIEW.md) — backend selection and `--model`

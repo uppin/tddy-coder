@@ -93,7 +93,9 @@ vault's subject)
 the two link RPCs answer `FAILED_PRECONDITION` there
 ([account-linking.md](../../tddy-accounts/docs/account-linking.md#daemon-wiring-tddy-daemon)). It
 always wires provider accounts over the same store, with `provider_model_probe::HttpProviderModelProbe`
-(`reqwest`, 20 s per probe) as the `ProviderModelProbe`
+(`reqwest`, 20 s per probe) as the `ProviderModelProbe`, and `provider_route_support::HarnessRouteSupport`
+— the `RouteSupport` port over `tddy_core::provider_route::route_supported`, which names an id that is
+no harness as `unknown harness "<id>"` — as the matrix `ListProviderRoutes` answers from
 ([provider-accounts.md](../../tddy-accounts/docs/provider-accounts.md)). The built `DaemonRuntime` keeps
 the one handle privately and exposes it read-only as `DaemonRuntime::credential_vaults()` — the very
 registry its services hold open, not a second instance over the same directory whose in-memory open

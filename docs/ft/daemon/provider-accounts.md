@@ -56,6 +56,42 @@ No RPC returns the key. `AccountSummary` carries the preset and the wire protoco
 serves (`anthropic-messages`, `openai-responses`, `openai-chat`), from which the harnesses that can
 run on the account follow.
 
+## Running a harness on an account
+
+A session's harness can run on a provider account instead of its vendor. Which harness can run on
+which account is one **capability matrix**, held by the daemon for every harness:
+
+| Harness (agent id / session type) | Runs on an account that |
+|---|---|
+| Claude Code — `claude`, `claude-acp`, `claude-cli` | serves Anthropic Messages (`meta`, `fireworks`, `anthropic-compatible`) |
+| Codex — `codex`, `codex-acp` | serves OpenAI Responses |
+| OpenCode — `opencode`, `opencode-cli` | serves OpenAI Responses or OpenAI Chat Completions |
+| Muse Code — `muse-cli` | is a `meta` account |
+| Cursor — `cursor`, `cursor-cli` | — never: Cursor's agent cannot be pointed at another provider |
+
+An unsupported pair is refused with the reason, never silently ignored. Of the harnesses the matrix
+admits, only **`claude-cli`** started unsandboxed is run on an account today
+([Claude Code CLI session § Running on a provider account](claude-cli-session.md#running-on-a-provider-account));
+any other harness asked to run on an account is refused as not routable in this build.
+
+### `ListProviderRoutes`
+
+`accounts.AccountsService/ListProviderRoutes(session_token, harness)` answers, for one harness, the
+caller's provider accounts in vault order, each with `supported` and — when not — the `reason`, in the
+matrix's words. `harness_routable` is false for a harness no account can run (Cursor); every account
+is then unsupported and `harness_reason` says why, once. `harness` is a tool-session agent id or a CLI
+session type; an id that names no harness is answered the same way, `harness_routable` false with
+"unknown harness". The web
+never re-derives the matrix; a daemon that has not wired it answers `FAILED_PRECONDITION` rather than
+guessing.
+
+### Which account a session runs on
+
+A session's account is chosen at three levels, highest first: the **session** (the operator's choice
+on start), the **agent definition** it was started with, and the **person's default** for the harness.
+An explicit "built in" choice at a level overrides any account below it. Only the session level is
+fed today.
+
 ## Out of scope
 
 - Editing a stored key in place — remove the account and connect it again.
@@ -64,4 +100,5 @@ run on the account follow.
 ## Related
 
 - [Account linking](account-linking.md) — the other way an account enters the vault.
+- [Claude Code CLI session](claude-cli-session.md#running-on-a-provider-account) — the harness that runs on an account.
 - Implementation: [tddy-accounts provider accounts](../../../packages/tddy-accounts/docs/provider-accounts.md)

@@ -121,6 +121,45 @@ unset `StartSessionRequest.github_source` from this host's row before a start is
 writes the source a start named into the new session's directory (`github-source.yaml`, owned by
 `tddy-changeset`). A start that named none records nothing.
 
+## Provider route of a session
+
+`session_provider_route.rs` applies a [provider route](../../tddy-agent-backend/docs/architecture.md#provider-routes-provider_route)
+to a claude-cli session (behaviour:
+[Claude Code CLI session § Running on a provider account](../../../docs/ft/daemon/claude-cli-session.md#running-on-a-provider-account)).
+
+- `SessionAccountAccess::provider_account(account_id)` (in `session_acting_identity.rs`) reads the
+  model-provider account from the session owner's vault through the same `held_accounts` read the
+  GitHub identity uses, with the same `SessionIdentityRefusal`s; an id the vault holds no provider
+  account under is `Vault(NotFound)`.
+- `session_route_sources(&StartSessionRequest)` maps `provider_account_id` / `provider_built_in` to
+  `RouteSources.session` (the account wins when both are sent).
+- `resolve_session_route(access, harness, sources, model)` applies `choose_route` and, for an
+  account, refuses an empty model (`INVALID_ARGUMENT`), reads the account and resolves the route.
+  Vault refusals map to `FAILED_PRECONDITION` (no vaults, locked, uninitialized), `UNAUTHENTICATED`
+  (no such session), `NOT_FOUND`, `INTERNAL` (vault unavailable); `RouteRefusal::NotYetRoutable` is
+  `UNIMPLEMENTED` and every other refusal `INVALID_ARGUMENT`.
+- `start_route(...)` → `Option<StartRoute { env, account }>`: called first in
+  `spawn_claude_cli_session_inner`, before the session directory exists; `StartRoute::record_in`
+  writes `provider-account.yaml` once the directory is created, and `env` is appended to the PTY's
+  `env_extra` after the managed-launch environment.
+- `pty_route_env(&HarnessRoute)` flattens `env` and `secret_env` into PTY pairs. The route's `args`
+  are not applied: the claude-cli argv already carries `--model <model>` for the same model.
+- `route_sources_on_resume(session_dir)` / `resume_route_env(access, harness, session_dir)` re-read
+  the record and re-resolve it against the vault; `LaunchSessions::resumed_agent_env` in
+  `svc_resume_claude_cli_session.rs` assembles the resumed agent's environment (commit identity
+  unless split, split wiring, route env) in one place.
+- `refuse_route_in_sandbox(sources)` is the sandboxed claude-cli start's guard in
+  `cli_branch_starts.rs`: a chosen account is `FAILED_PRECONDITION` "not yet supported in a sandbox"
+  (`TODO(provider-route-jail)`, lifted by `#provider-route` 9/9).
+- `StackChildSpawnHandler` and `GrillMeConversationSpawnHandler` pass `RouteSources::default()`:
+  a spawned child or conversation runs on its vendor.
+
+Tests: `src/session_provider_route_tests.rs` — a real unlocked vault holding a Meta account gives the
+PTY env and records the account and model but never the key; a start choosing nothing, a locked
+vault, an unknown account, Cursor, an empty model and a sandboxed start are each refused or left on
+the vendor as above; the request mapping; and resume with a record, with none, and after the account
+was removed.
+
 ## Placement and the session's git environment
 
 `placement.rs` classifies where a start's codebase goes: `CodebasePlacement` (co-located, split, or
