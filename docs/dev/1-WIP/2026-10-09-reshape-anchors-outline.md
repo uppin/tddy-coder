@@ -281,7 +281,7 @@ None. No node depends on this one.
 - [ ] **`tddy-index-daemon`**: `status_of_lsp` arm and its test
 - [x] **Prefix rule** moved into `item_anchor/prefix.rs` (R2); the Rust resolver calls it
 - [x] **Static check** (R3)
-- [ ] **Dead path deleted** (R5); 3 tests re-pointed (F6)
+- [x] **Dead path deleted** (R5); 3 tests re-pointed (F6)
 - [ ] **`FileHint.modified` removed** (R4); skill `plan-schema.md` updated
 - [ ] **Package documentation** at wrap (list under Affected Packages); both code issues and the todo deleted with their final measurement
 - [ ] **Testing**: `./test -p tddy-code-restructuring -p tddy-lsp -p tddy-index-daemon`, scoped; CI for the rest
@@ -361,7 +361,7 @@ Plan headers carry only hashes. `rust.rs` is about 125 lines shorter.
 - [x] **M2** `tddy-lsp`: R1; tests 1–6.
 - [ ] **M3** `tddy-index-daemon`: status arm; test 7.
 - [x] **M4** Prefix rule move and static check (R2, R3); tests 8–14, with test 21 (existing, live) still green.
-- [ ] **M5** R5 deletions and re-pointed tests; tests 18–20 stay green.
+- [x] **M5** R5 deletions and re-pointed tests; tests 18–20 stay green.
 - [ ] **M6** R4; tests 15–17; skill reference.
 - [ ] **M7** Scoped gates, length gate, docs staged for wrap.
 
@@ -752,29 +752,29 @@ Neither test file changed. The R3(b) text the changeset specifies, `… needs \`
 because test 13 compares the whole string. This is undecided: either the R3(b) wording or those two pins must change.
 Nothing was edited here. The M4 commit `cc14a2226` is pushed and carries the two red pins.
 
-### M5 verify: STOPPED (2026-10-21)
+### M5 verify (2026-10-21)
 
-Gate `./test -p tddy-code-restructuring` (exit 101), read from `.verify-result.txt`: **1771 passed, 55 failed, 1 ignored**
-across the package. Tests 18–20 pass: `spawn_record_acceptance` 13/13, `cancellation_acceptance` 4/4,
-`workspace_root_acceptance` 5/5. `static_check_item_anchors` 7/7. `item_anchor_acceptance` 19/19, test 21 among them.
+Verify only, no code. The R5 deletions are in place: `anchor_for`, `places_of`, `anchor_opening`, `module_outline`,
+`refuse_non_adjacent` and `OutlineItem` are gone from `src/`. The src deletions since the base `5051c36ae` are all
+planned: `backends/rust.rs` 131 lines and `registry.rs` 19 (R5), `segments_below` moved to `item_anchor/prefix.rs`
+(R2), and the R1 and R3 replacements.
 
-Failing, by cause:
-- **M4 regressions (stop):** the two pins above.
-- **M6 red, as planned:** `src/plan.rs` `plan::tests::a_v2_header_that_still_carries_modified_parses_and_keeps_only_the_hash`
-  (test 15); `tests/snapshot_writes_a_missing_header.rs` `a_written_header_names_each_file_by_its_hash_alone` and
-  `a_plan_whose_header_carries_modified_is_checked_and_its_rewrite_drops_it` (tests 16, 17).
-- **`todo!()` stubs owned by other nodes (not this node's code):** `tests/language_support_acceptance.rs` 0/4, all on
-  `SupportRegistry::backends`/`backends_static`/`allow_list`/`support_of` (#reshape 11, which the contract-commit
-  results already record); `src/language.rs` `language::tests` 3; `src/crate_move/source_scan/test_declarations.rs`
-  3 (`test_declarations`); `src/backends/rust/impl_move/assemble` 6 (`move_impl_members`, #reshape 12);
-  `tests/move_impl_members_acceptance.rs` 10 and `tests/move_impl_members_plan_lines.rs` 6 (`move_impl_members` not
-  implemented, #reshape 12).
-- **Assertion reds, not attributed:** `tests/crate_move_test_modules.rs` 15, `tests/check_precondition_parity.rs` 1
-  (`:892`), `tests/move_module_to_crate_acceptance.rs` 1 (`:212`), `tests/extract_method_guard_lift_acceptance.rs` 1
-  (rust-analyzer did not settle within 6 s, `harness/mod.rs:508`). Their panics are in move and crate-move code this
-  node does not touch. They were not run against the base commit, so this is unverified.
+The M4 pin regression that stopped the previous M5 attempt is fixed by `3617f341e` (the orchestrator): both pins read
+the R3(b) wording now, and the two suites pass.
 
-M5 is not green, so no M5 box is ticked.
+Fresh run, `./test -p tddy-code-restructuring --test spawn_record_acceptance --test cancellation_acceptance --test workspace_root_acceptance --test language_support_acceptance`:
+- Tests 18–20 pass: `spawn_record_acceptance` 13 passed, `cancellation_acceptance` 4 passed, `workspace_root_acceptance` 5 passed.
+- `language_support_acceptance`: 0 passed, 4 failed. All four are `todo!()` panics in the `SupportRegistry` stubs of
+  `src/language.rs`, which #reshape 11 added in `04cdc095d` and `b9b7c4f93`:
+  - `a_document_opens_with_its_supports_language_id`: `language.rs:129` `not yet implemented: SupportRegistry::backends`,
+    surfaced as a `JoinError` at `language_support_acceptance.rs:154`;
+  - `an_unsupported_operation_names_the_language_by_its_id`: `language.rs:137` `backends_static`;
+  - `the_daemon_and_the_cli_build_the_same_allow_list`: `language.rs:122` `allow_list`;
+  - `the_rust_launch_the_registry_builds_equals_the_one_the_cli_used_to_build`: `language.rs:122` `allow_list`.
+  None of them is this node's code. These four stay red until #reshape 11 implements the stubs, as the contract-commit
+  results already said.
+
+M5 gate met for tests 18–20. `language_support_acceptance` is red on the inherited stubs, so it is not counted as green.
 
 ## TODO
 
