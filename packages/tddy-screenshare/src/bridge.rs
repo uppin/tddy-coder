@@ -262,8 +262,7 @@ async fn start_bridge<C: ScreenSharingClient>(
     info!("bridge: framebuffer {}x{}", width, height);
 
     // Channel: input RPC handler → pump loop
-    // TODO(host-desktops sweep): the extract assist copied start_bridge's generic onto publish_to_livekit, which does not use it (E0283); drop both the parameter and this turbofish once the engine infers it
-    let (input_rx, streamer) = publish_to_livekit::<C>(config, width, height).await?;
+    let (input_rx, streamer) = publish_to_livekit(config, width, height).await?;
 
     client
         .request_frame_update(false)
@@ -279,7 +278,7 @@ async fn start_bridge<C: ScreenSharingClient>(
     })
 }
 
-async fn publish_to_livekit<C: ScreenSharingClient>(
+async fn publish_to_livekit(
     config: &BridgeConfig,
     width: u32,
     height: u32,

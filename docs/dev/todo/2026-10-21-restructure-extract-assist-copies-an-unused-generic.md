@@ -17,11 +17,17 @@ although the extracted lines never mention `C`, so no call can infer it.
 
 ## Workaround used
 
-Developer-approved one-token post-move build fix (2026-10-21): the call became `publish_to_livekit::<C>(...)`, with
-a `TODO(host-desktops sweep)` comment on it. `apply --resume` applied nothing, so `cargo fix` and `cargo fmt -p
-tddy-screenshare` finished the plan.
+Two steps, both developer-approved (2026-10-21):
+
+1. The call was written `publish_to_livekit::<C>(...)` with a `TODO(host-desktops sweep)` comment, so the plan's
+   apply could compile (`apply --resume` applied nothing, so `cargo fix` and `cargo fmt -p tddy-screenshare`
+   finished it).
+2. `cargo clippy -p tddy-screenshare --all-targets -- -D warnings` then failed with
+   `error: type parameter C goes unused in function definition` (`clippy::extra_unused_type_parameters`), so the
+   generic was **deleted by hand**: `<C: ScreenSharingClient>` is gone from `publish_to_livekit` and so are the
+   `::<C>` turbofish and its TODO at the call (no `#[allow]`). `start_bridge` keeps its own `C`.
 
 ## Fix
 
-The engine (or the assist) should drop type parameters the extracted range does not use. Then delete `<C: ScreenSharingClient>`
-on `publish_to_livekit` and the turbofish with its TODO.
+The engine (or the assist) should drop type parameters the extracted range does not use, so no hand edit is
+needed: the extraction should compile and lint clean as written.
