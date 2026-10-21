@@ -53,3 +53,20 @@ under `#[async_trait]` that needs the same move will hit the same refusal.
   method body of such an impl (or a dedicated operation that moves a trait-impl method body into an inherent
   method and leaves a delegator).
 - Then plan seam C as `extract_method` to inherent `*_impl` methods followed by `extract_module`.
+
+## Reconfirmed (2026-10-21, `#host-desktops` 10/10, [#693](https://github.com/uppin/tddy-coder/pull/693))
+
+Three more `check --deep` probes, one per `#[async_trait]` impl the sweep needed to shorten, all refused with the
+same text (`this seam cannot be cut here: rust-analyzer offers no "extract into function" assist for the given range
+(it offered: Extract into variable)`):
+
+| Probe | Where (on `master` before the sweep) |
+|---|---|
+| a | `ScreenSharingService::start_stream`, the bridge-start block (`tddy-screen-sharing/src/screen_sharing_service.rs:416–449`) |
+| b | `ScreenSharingClient for RdpClient::connect`, the `Config { … }` literal (`tddy-rdp/src/rdp_client.rs:155–198`) |
+| c | `HostService::add_host_key`, two `let` statements (`tddy-host-service/src/service.rs:683–692`) |
+
+The gap was worked around the same way as #653's seam C, with the developer's consent: eleven trait bodies
+(`HostService`'s nine, `start_stream`, `RdpClient::connect`) were moved by hand, byte for byte (proved by script),
+into inherent `*_impl` methods behind one-line delegators, and the engine then extracted modules and helpers from
+the inherent methods, where the same ranges were accepted. The gap stays open.

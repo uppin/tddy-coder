@@ -261,6 +261,27 @@ async fn start_bridge<C: ScreenSharingClient>(
         .map_err(|e| classify(e, FailureKind::Connect))?;
     info!("bridge: framebuffer {}x{}", width, height);
 
+    let (input_rx, streamer) = publish_to_livekit(config, width, height).await?;
+
+    client
+        .request_frame_update(false)
+        .await
+        .map_err(|e| classify(e, FailureKind::Connect))?;
+
+    Ok(StartedBridge {
+        client,
+        streamer,
+        input_rx,
+        width,
+        height,
+    })
+}
+
+async fn publish_to_livekit(
+    config: &BridgeConfig,
+    width: u32,
+    height: u32,
+) -> Result<(mpsc::Receiver<InputCmd>, ScreenSharingStreamer), StartFailure> {
     // Channel: input RPC handler → pump loop
     let (input_tx, input_rx) = mpsc::channel::<InputCmd>(128);
 
@@ -290,19 +311,7 @@ async fn start_bridge<C: ScreenSharingClient>(
 
     // Drive the RPC event loop in the background
     tokio::spawn(async move { participant.run().await });
-
-    client
-        .request_frame_update(false)
-        .await
-        .map_err(|e| classify(e, FailureKind::Connect))?;
-
-    Ok(StartedBridge {
-        client,
-        streamer,
-        input_rx,
-        width,
-        height,
-    })
+    Ok((input_rx, streamer))
 }
 
 /// Poll events until the client reports non-zero framebuffer dimensions.

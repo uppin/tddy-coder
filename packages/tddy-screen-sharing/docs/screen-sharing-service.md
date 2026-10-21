@@ -13,11 +13,12 @@ Product behaviour: [screen-sharing-sessions.md](../../../docs/ft/web/screen-shar
 |---|---|
 | `screen_sharing_records` | the `screen-sharing` provider's record shape (`record_for`, `target_from`), `TargetError`, and the `ScreenSharingTargetStore` port |
 | `session_vault_target_store` | `SessionVaultTargetStore`, the production store over the daemon's `SessionVaults` |
-| `screen_sharing_service` | `ScreenSharingServiceImpl`: the struct and builders, the session-scoped target calls, and the trait impl, whose host-scoped methods delegate to `host_targets` |
+| `screen_sharing_service` | `ScreenSharingServiceImpl`: the struct and builders, the session-scoped target calls, and the trait impl, whose host-scoped methods delegate to `host_targets` and whose `start_stream` delegates to `session_stream` (the `#[async_trait]` bodies sit in inherent `*_impl` methods, which the restructure engine can extract from) |
 | `screen_sharing_service::bridge_lifecycle` | bridge spawning, the wait for its start report, and termination; `desktop_credential_for` (a remembered credential, or the `DESKTOP_CREDENTIALS` prompt) with `SignIn` / `Remembering`, and the target-store lookup, as `impl ScreenSharingServiceImpl` members |
 | `host_desktop_sign_in` | `inspect_host_desktop` (`InspectHostDesktop`), `decrypt_desktop_credential_answer`, `remembered_account`, and `RememberedDesktopCredentials` (`usable`, `can_remember`, `remember`, `mark_refused`) |
 | `bridge_readiness` | `await_bridge_readiness`: reading a bridge's start report from its stdout within a bound, and mapping it to `BridgeStarted { width, height }` or a `Status`; `DEFAULT_BRIDGE_READY_TIMEOUT` (30 s) |
-| `screen_sharing_service::host_targets` | the bodies of the host-scoped RPCs (`list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream`) as `*_impl` members |
+| `screen_sharing_service::host_targets` | the bodies of the host-scoped RPCs (`list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream`) as `*_impl` members; `start_host_stream_impl` looks the target up with `find_host_target`, prepares the bridge and the sign-in, and hands them to `start_bridge_for_desktop` (the X11 `x11vnc` start, then the signed-in spawn) |
+| `screen_sharing_service::session_stream` | the body of the session-scoped `start_stream` as `start_stream_impl`, and `start_session_bridge`: the target lookup → password → `BridgeTarget` → spawn ladder, run only when the daemon config is present |
 | `x11vnc` | `X11vncServers`: one `x11vnc` per open X11 channel, keyed like its bridge; start (stopping the key's previous one first), wait until it accepts, stop; `x11vnc_arguments`, `X11VNC_HOST`, `DEFAULT_X11VNC_ACCEPT_TIMEOUT` (10 s) |
 | `bridge_config` | `BridgeSpawnConfig` and `PreparedBridge`, how a bridge's spawn configuration is built (`prepare_bridge`, `build_bridge_spawn_config`), and the bridge key, identity, track-name and LiveKit-room naming |
 

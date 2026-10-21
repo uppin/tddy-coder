@@ -9,6 +9,15 @@ on it can be reached — and bridged. It backs the web's Hosts rows
 ([docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)) through the
 `GetHostTooling` RPC ([host-service.md](./host-service.md)).
 
+**Where the code lives.** `host_tooling.rs` holds the types, the `HostToolingProbe` trait, the argv builders,
+the output parsers, `SubprocessHostToolingProbe` and its `probe`, and the unit tests. Three submodules hold
+what `probe` runs: `host_tooling/subprocess.rs` (`ProbeOutput`, `StartedProbe`, `start_probe` and the pipe
+plumbing — spawning as the OS user, draining both pipes, the deadline's kill-and-reap; `pub(crate)` because
+`github_cli.rs` uses it), `host_tooling/readings.rs` (the ssh-agent probe, and turning each command's output
+into a `GitIdentity`, a `GithubCliStatus` or an agent status, with the warn-on-failure logging) and
+`host_tooling/desktop_probes.rs` (`start_desktop_probes`, `desktop_readings_of`,
+`warn_if_a_desktop_probe_failed`). Everything that spawns is `#[cfg(unix)]`, and so are its imports.
+
 This is the first *capability probe* in the daemon — the first place tddy asks a machine what is on
 it rather than reporting something the daemon already holds.
 

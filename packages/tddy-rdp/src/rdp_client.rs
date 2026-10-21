@@ -145,115 +145,7 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
         port: u16,
         credentials: &tddy_screenshare::Credentials,
     ) -> Result<Self> {
-        // 1. TCP
-        let stream = TcpStream::connect(format!("{host}:{port}"))
-            .await
-            .context("TCP connect")?;
-        let mut framed = TokioFramed::new(stream);
-
-        // 2. Connector config
-        let config = Config {
-            desktop_size: DesktopSize {
-                width: 256,
-                height: 256,
-            },
-            desktop_scale_factor: 0,
-            credentials: Credentials::UsernamePassword {
-                username: credentials.username.clone().unwrap_or_default(),
-                password: credentials.password.clone().unwrap_or_default(),
-            },
-            enable_tls: true,
-            enable_credssp: true,
-            domain: credentials.domain.clone(),
-            client_build: 0,
-            client_name: "tddy-rdp".into(),
-            keyboard_type: KeyboardType::IbmEnhanced,
-            keyboard_subtype: 0,
-            keyboard_functional_keys_count: 12,
-            keyboard_layout: 0x0409,
-            ime_file_name: String::new(),
-            // Empty codec list so the server uses raw-pixel SetSurfaceBits (CODEC_ID_NONE)
-            // instead of QOI/QoiZ codecs that ironrdp-session doesn't support by default.
-            bitmap: Some(BitmapConfig {
-                lossy_compression: false,
-                color_depth: 32,
-                codecs: BitmapCodecs(vec![]),
-            }),
-            dig_product_id: String::new(),
-            client_dir: String::new(),
-            alternate_shell: String::new(),
-            work_dir: String::new(),
-            platform: MajorPlatformType::UNSPECIFIED,
-            hardware_id: None,
-            request_data: None,
-            autologon: false,
-            enable_audio_playback: false,
-            performance_flags: Default::default(),
-            license_cache: None,
-            timezone_info: Default::default(),
-            compression_type: None,
-            enable_server_pointer: false,
-            pointer_software_rendering: false,
-            multitransport_flags: None,
-        };
-
-        let client_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
-        let mut connector = ClientConnector::new(config, client_addr);
-
-        // 3. X.224 negotiation until TLS upgrade point
-        let should_upgrade = connect_begin(&mut framed, &mut connector)
-            .await
-            .context("connect_begin")?;
-
-        // 4. TLS upgrade
-        let (stream, leftover) = framed.into_inner();
-        let (tls_stream, server_cert) = ironrdp_tls::upgrade(stream, host)
-            .await
-            .context("TLS upgrade")?;
-        let mut framed = TokioFramed::new_with_leftover(tls_stream, leftover);
-
-        let upgraded = mark_as_upgraded(should_upgrade, &mut connector);
-
-        // 5. Finalize connection
-        let server_public_key = ironrdp_tls::extract_tls_server_public_key(&server_cert)
-            .unwrap_or(&[])
-            .to_vec();
-
-        let server_name = ServerName::new(host);
-
-        let result = connect_finalize(
-            upgraded,
-            connector,
-            &mut framed,
-            &mut NoKdcNetworkClient,
-            server_name,
-            server_public_key,
-            None,
-        )
-        .await
-        .map_err(|e| {
-            // An NLA failure is how the desktop turns a sign-in down, so it is tagged by type for
-            // the bridge to report as an authentication failure.
-            if matches!(e.kind(), ConnectorErrorKind::Credssp(_)) {
-                anyhow::Error::new(tddy_screenshare::AuthenticationRefused(e.to_string()))
-                    .context("connect_finalize: NLA authentication failed")
-            } else {
-                anyhow::Error::new(e).context("connect_finalize")
-            }
-        })?;
-
-        let image = DecodedImage::new(
-            PixelFormat::RgbA32,
-            result.desktop_size.width,
-            result.desktop_size.height,
-        );
-        let active = ActiveStage::new(result);
-
-        Ok(Self {
-            image,
-            active,
-            framed,
-        })
+        Self::connect_impl(host, port, credentials).await
     }
 
     fn framebuffer_dimensions(&self) -> (u32, u32) {
@@ -337,6 +229,80 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
 }
 
 impl RdpClient {
+    /// Body of [`ScreenSharingClient::connect`]; the trait method delegates here.
+    pub(crate) async fn connect_impl(
+        host: &str,
+        port: u16,
+        credentials: &tddy_screenshare::Credentials,
+    ) -> Result<Self> {
+        // 1. TCP
+        let stream = TcpStream::connect(format!("{host}:{port}"))
+            .await
+            .context("TCP connect")?;
+        let mut framed = TokioFramed::new(stream);
+
+        // 2. Connector config
+        let config = connector_config(credentials);
+
+        let client_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
+        let mut connector = ClientConnector::new(config, client_addr);
+
+        // 3. X.224 negotiation until TLS upgrade point
+        let should_upgrade = connect_begin(&mut framed, &mut connector)
+            .await
+            .context("connect_begin")?;
+
+        // 4. TLS upgrade
+        let (stream, leftover) = framed.into_inner();
+        let (tls_stream, server_cert) = ironrdp_tls::upgrade(stream, host)
+            .await
+            .context("TLS upgrade")?;
+        let mut framed = TokioFramed::new_with_leftover(tls_stream, leftover);
+
+        let upgraded = mark_as_upgraded(should_upgrade, &mut connector);
+
+        // 5. Finalize connection
+        let server_public_key = ironrdp_tls::extract_tls_server_public_key(&server_cert)
+            .unwrap_or(&[])
+            .to_vec();
+
+        let server_name = ServerName::new(host);
+
+        let result = connect_finalize(
+            upgraded,
+            connector,
+            &mut framed,
+            &mut NoKdcNetworkClient,
+            server_name,
+            server_public_key,
+            None,
+        )
+        .await
+        .map_err(|e| {
+            // An NLA failure is how the desktop turns a sign-in down, so it is tagged by type for
+            // the bridge to report as an authentication failure.
+            if matches!(e.kind(), ConnectorErrorKind::Credssp(_)) {
+                anyhow::Error::new(tddy_screenshare::AuthenticationRefused(e.to_string()))
+                    .context("connect_finalize: NLA authentication failed")
+            } else {
+                anyhow::Error::new(e).context("connect_finalize")
+            }
+        })?;
+
+        let image = DecodedImage::new(
+            PixelFormat::RgbA32,
+            result.desktop_size.width,
+            result.desktop_size.height,
+        );
+        let active = ActiveStage::new(result);
+
+        Ok(Self {
+            image,
+            active,
+            framed,
+        })
+    }
+
     async fn send_input_events(&mut self, events: &[FastPathInputEvent]) -> Result<()> {
         let outputs = self
             .active
@@ -351,6 +317,53 @@ impl RdpClient {
             }
         }
         Ok(())
+    }
+}
+
+fn connector_config(credentials: &tddy_screenshare::Credentials) -> Config {
+    Config {
+        desktop_size: DesktopSize {
+            width: 256,
+            height: 256,
+        },
+        desktop_scale_factor: 0,
+        credentials: Credentials::UsernamePassword {
+            username: credentials.username.clone().unwrap_or_default(),
+            password: credentials.password.clone().unwrap_or_default(),
+        },
+        enable_tls: true,
+        enable_credssp: true,
+        domain: credentials.domain.clone(),
+        client_build: 0,
+        client_name: "tddy-rdp".into(),
+        keyboard_type: KeyboardType::IbmEnhanced,
+        keyboard_subtype: 0,
+        keyboard_functional_keys_count: 12,
+        keyboard_layout: 0x0409,
+        ime_file_name: String::new(),
+        // Empty codec list so the server uses raw-pixel SetSurfaceBits (CODEC_ID_NONE)
+        // instead of QOI/QoiZ codecs that ironrdp-session doesn't support by default.
+        bitmap: Some(BitmapConfig {
+            lossy_compression: false,
+            color_depth: 32,
+            codecs: BitmapCodecs(vec![]),
+        }),
+        dig_product_id: String::new(),
+        client_dir: String::new(),
+        alternate_shell: String::new(),
+        work_dir: String::new(),
+        platform: MajorPlatformType::UNSPECIFIED,
+        hardware_id: None,
+        request_data: None,
+        autologon: false,
+        enable_audio_playback: false,
+        performance_flags: Default::default(),
+        license_cache: None,
+        timezone_info: Default::default(),
+        compression_type: None,
+        enable_server_pointer: false,
+        pointer_software_rendering: false,
+        multitransport_flags: None,
     }
 }
 

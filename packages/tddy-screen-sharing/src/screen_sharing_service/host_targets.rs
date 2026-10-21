@@ -96,18 +96,7 @@ impl ScreenSharingServiceImpl {
         let scope = self.require_host_scope()?;
         let config = self.require_config()?;
 
-        let target = scope
-            .targets
-            .list(&req.daemon_instance_id)
-            .map_err(Status::internal)?
-            .into_iter()
-            .find(|t| t.target_id == req.target_id)
-            .ok_or_else(|| {
-                Status::not_found(format!(
-                    "host {} has no desktop target {}",
-                    req.daemon_instance_id, req.target_id
-                ))
-            })?;
+        let target = find_host_target(&req, scope)?;
 
         let livekit_room = host_livekit_room(config)?;
         let bridge_identity = host_bridge_identity(&req.daemon_instance_id, &req.target_id);
@@ -116,7 +105,7 @@ impl ScreenSharingServiceImpl {
         // Settled before anybody is asked for a secret. A desktop this host cannot bridge — no
         // LiveKit to publish through, no protocol to speak — is refused here, so an operator is
         // never made to type a password into a dialog for a stream that could not have started.
-        let mut prepared = prepare_bridge(
+        let prepared = prepare_bridge(
             config,
             &host_target_as_bridge_target(&target),
             // The account is the operator's answer, which is not known until they have been asked.
@@ -138,6 +127,29 @@ impl ScreenSharingServiceImpl {
         // Reported: these coordinates tell a browser to mount an overlay on a room, and a bridge that
         // never joined it leaves the operator watching nothing having already typed a secret. The
         // size is the one the bridge measured, so input lands where the operator aimed.
+        let started = self
+            .start_bridge_for_desktop(req, operator, config, target, prepared, sign_in)
+            .await?;
+
+        Ok(Response::new(StartStreamResponse {
+            livekit_room,
+            livekit_url: browser_livekit_url(config),
+            bridge_identity,
+            track_name,
+            width: started.width,
+            height: started.height,
+        }))
+    }
+
+    async fn start_bridge_for_desktop(
+        &self,
+        req: StartHostStreamRequest,
+        operator: String,
+        config: &DaemonConfig,
+        target: HostDesktopTarget,
+        mut prepared: PreparedBridge,
+        sign_in: SignIn,
+    ) -> Result<BridgeStarted, Status> {
         let bridge_key = host_bridge_key(&req.daemon_instance_id, &req.target_id);
         // An X11 display has no VNC server until one is started for it, and it is started before the
         // bridge so the bridge has something to connect to.
@@ -153,15 +165,7 @@ impl ScreenSharingServiceImpl {
         let started = self
             .start_signed_in_bridge(prepared, bridge_key, sign_in, &desktop)
             .await?;
-
-        Ok(Response::new(StartStreamResponse {
-            livekit_room,
-            livekit_url: browser_livekit_url(config),
-            bridge_identity,
-            track_name,
-            width: started.width,
-            height: started.height,
-        }))
+        Ok(started)
     }
 
     /// Sign `prepared` in as `sign_in` says and spawn it under `bridge_key`, settling the vault
@@ -315,6 +319,25 @@ impl ScreenSharingServiceImpl {
 
         Ok(Response::new(StopHostStreamResponse { ok: true }))
     }
+}
+
+fn find_host_target(
+    req: &StartHostStreamRequest,
+    scope: &super::HostScope,
+) -> Result<HostDesktopTarget, Status> {
+    let target = scope
+        .targets
+        .list(&req.daemon_instance_id)
+        .map_err(Status::internal)?
+        .into_iter()
+        .find(|t| t.target_id == req.target_id)
+        .ok_or_else(|| {
+            Status::not_found(format!(
+                "host {} has no desktop target {}",
+                req.daemon_instance_id, req.target_id
+            ))
+        })?;
+    Ok(target)
 }
 
 /// The daemon's `screen_sharing:` block, or the defaults of one when it has none.

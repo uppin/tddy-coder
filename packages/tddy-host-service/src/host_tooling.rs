@@ -20,9 +20,32 @@
 //! Reporting an authenticated host as logged out is the worse error: it sends an operator to fix
 //! something that is not broken.
 
+mod desktop_probes;
+mod readings;
+pub(crate) mod subprocess;
+
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::host_tooling::desktop_probes::desktop_readings_of;
+use crate::host_tooling::desktop_probes::start_desktop_probes;
+use crate::host_tooling::desktop_probes::warn_if_a_desktop_probe_failed;
+#[cfg(unix)]
+use crate::host_tooling::readings::agent_status_of;
+#[cfg(unix)]
+use crate::host_tooling::readings::git_config_value;
+#[cfg(unix)]
+use crate::host_tooling::readings::git_identity_of;
+#[cfg(unix)]
+use crate::host_tooling::readings::github_cli_of;
+#[cfg(unix)]
+use crate::host_tooling::readings::not_on_path;
+#[cfg(unix)]
+use crate::host_tooling::readings::start_agent_probe;
+#[cfg(unix)]
+use crate::host_tooling::readings::warn_if_failed;
+#[cfg(unix)]
+use crate::host_tooling::subprocess::start_probe;
 use crate::remote_desktop_probe::{DesktopProtocol, DesktopReachability, RemoteDesktopProbe};
 
 /// How long a single probe may take before it is abandoned.
@@ -379,434 +402,15 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
     }
 }
 
-/// Start one connect per protocol, without waiting for any of them.
-///
-/// Each reading is produced on a thread of its own, like every other probe in this module and for
-/// the same reason: a connect that gets no answer costs
-/// [`crate::remote_desktop_probe::CONNECT_TIMEOUT`], and a host serving neither protocol would cost
-/// two of those in a row if they were checked one after the other.
-fn start_desktop_probes(
-    probe: &Arc<dyn RemoteDesktopProbe>,
-) -> Vec<(
-    DesktopProtocol,
-    std::sync::mpsc::Receiver<DesktopReachability>,
-)> {
-    PROBED_PROTOCOLS
-        .iter()
-        .map(|&protocol| {
-            let probe = Arc::clone(probe);
-            let (tx, reading) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
-                let _ = tx.send(probe.probe(protocol, protocol.default_port()));
-            });
-            (protocol, reading)
-        })
-        .collect()
-}
-
-/// Wait for each connect until `deadline`, then give up on it.
-///
-/// A connect bounds itself well inside [`PROBE_TIMEOUT`], so reaching this deadline means the
-/// reading never came back at all — a failed probe, and never the "nothing is serving here"
-/// finding an operator would go and act on.
-fn desktop_readings_of(
-    started: Vec<(
-        DesktopProtocol,
-        std::sync::mpsc::Receiver<DesktopReachability>,
-    )>,
-    deadline: std::time::Instant,
-) -> Vec<DesktopReachability> {
-    started
-        .into_iter()
-        .map(|(protocol, reading)| {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            match reading.recv_timeout(remaining) {
-                Ok(reading) => reading,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => desktop_probe_failed(
-                    protocol,
-                    format!(
-                        "the {protocol:?} desktop probe did not finish within {}s",
-                        PROBE_TIMEOUT.as_secs()
-                    ),
-                ),
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => desktop_probe_failed(
-                    protocol,
-                    format!("the {protocol:?} desktop probe ended without reporting"),
-                ),
-            }
-        })
-        .collect()
-}
-
-/// A reading for a protocol nothing reported on.
-///
-/// The two flags carry the same neutral values `TcpRemoteDesktopProbe` gives a connect it could not
-/// complete, and [`ProbeOutcome::Failed`] beside them is what says they are not findings. A reader
-/// keying off `desktop_reachable` alone would report "no desktop" for a host nobody reached, which
-/// is the whole reason the outcome travels with them.
-fn desktop_probe_failed(protocol: DesktopProtocol, reason: String) -> DesktopReachability {
-    DesktopReachability {
-        outcome: ProbeOutcome::Failed(reason),
-        channel: crate::remote_desktop_probe::DesktopChannel::Endpoint,
-        protocol,
-        can_bridge: false,
-        desktop_reachable: false,
-        port: protocol.default_port(),
-    }
-}
-
-/// Record a desktop probe that could not answer.
-///
-/// The same argument `warn_if_failed` makes for the three blocks beside this one: a `Failed`
-/// outcome's cause lives on this side of the wire, and without a line in the daemon log its only
-/// trace is a cell on a screen nobody may be looking at. No OS user is named, because a desktop is
-/// served by the host rather than by one of its accounts.
-fn warn_if_a_desktop_probe_failed(readings: &[DesktopReachability]) {
-    for reading in readings {
-        if let ProbeOutcome::Failed(reason) = &reading.outcome {
-            log::warn!(
-                target: "tddy_daemon::host_tooling",
-                "the {:?} desktop probe on port {} reported nothing: {reason}",
-                reading.protocol,
-                reading.port
-            );
-        }
-    }
-}
-
-/// Start the ssh-agent probe for `os_user` without waiting for it.
-///
-/// The agent conversation blocks on a socket — `ssh-agent-lib`'s client is a blocking one — so it
-/// runs on a thread of its own like the two commands beside it, and like them it is abandoned
-/// rather than killed if it overruns. This is the thread that client runs on; it starts none of its
-/// own.
-#[cfg(unix)]
-fn start_agent_probe(os_user: &str) -> std::sync::mpsc::Receiver<crate::ssh_agent::AgentStatus> {
-    use crate::ssh_agent::SshAgentProbe;
-
-    let owned_user = os_user.to_string();
-    let (tx, outcome) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let probe =
-            crate::ssh_agent::WireProtocolAgentProbe::new(crate::ssh_agent::WellKnownAgentSockets);
-        let _ = tx.send(probe.identities(&owned_user));
-    });
-    outcome
-}
-
-/// Wait for the agent probe until `deadline`, then give up on it.
-///
-/// Its own worst case is *twice* [`crate::ssh_agent::AGENT_TIMEOUT`] — one read may begin just
-/// inside its deadline and then take a full socket timeout of its own — so it is longer than
-/// [`PROBE_TIMEOUT`] and this deadline can be the one that expires first. `probe` collects the agent
-/// before the commands beside it, so reaching this deadline means the probe did have the whole of
-/// [`PROBE_TIMEOUT`] and never came back — a failure, and never the empty key list an operator would
-/// read as "this host has no keys loaded".
-#[cfg(unix)]
-fn agent_status_of(
-    started: std::sync::mpsc::Receiver<crate::ssh_agent::AgentStatus>,
-    deadline: std::time::Instant,
-) -> crate::ssh_agent::AgentStatus {
-    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-    match started.recv_timeout(remaining) {
-        Ok(status) => status,
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            crate::ssh_agent::AgentStatus::failed(format!(
-                "the ssh-agent probe did not finish within {}s",
-                PROBE_TIMEOUT.as_secs()
-            ))
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            crate::ssh_agent::AgentStatus::failed("the ssh-agent probe ended without reporting")
-        }
-    }
-}
-
-/// Why a probe could not run when its program is absent from the `PATH` its child would get.
-#[cfg(unix)]
-fn not_on_path(program: &str) -> String {
-    format!("`{program}` is not on the PATH this daemon gives a spawned child")
-}
-
-/// Record a probe that could not answer.
-///
-/// `Failed` is the one outcome whose cause lives on this side of the wire — a missing tool, a
-/// refused spawn, a timeout — and without a line in the daemon log the only trace of it is a cell
-/// on a screen nobody may be looking at.
-#[cfg(unix)]
-fn warn_if_failed(subject: &str, os_user: &str, outcome: &ProbeOutcome) {
-    if let ProbeOutcome::Failed(reason) = outcome {
-        log::warn!(
-            target: "tddy_daemon::host_tooling",
-            "the {subject} probe for OS user `{os_user}` reported nothing: {reason}"
-        );
-    }
-}
-
-/// Both halves of the identity, or the first reason one of them could not be read.
-///
-/// A half that could not be read is not a half that is unset: it makes the whole identity unknown,
-/// because the pair that could not be assembled might well have been complete.
-#[cfg(unix)]
-fn git_identity_of(name: Result<String, String>, email: Result<String, String>) -> GitIdentity {
-    match (name, email) {
-        (Ok(name), Ok(email)) => parse_git_identity(&name, &email),
-        (Err(reason), _) | (Ok(_), Err(reason)) => GitIdentity {
-            outcome: ProbeOutcome::Failed(reason),
-            name_and_email: None,
-        },
-    }
-}
-
-/// The value one `git config --global --get <key>` reported.
-///
-/// `--global` is load-bearing. Without it git reads system + global + **repo-local** config for the
-/// process's cwd, and the probe chdirs into the target user's home — which is itself a
-/// work tree whenever that user keeps their dotfiles in git. A repo-local `user.name` there would
-/// shadow the global one, and the row would report an identity that commits made anywhere else on
-/// the host would not carry.
-///
-/// An unset key is an empty value, not an error: `git config --get` exits 1 for it, and treating
-/// that as a failure would hide the very state this probe exists to report. Any other exit code is
-/// a failure, because git only reaches those for a malformed config or an unreadable file — and a
-/// `git` that cannot be started is one too, since a host whose git is missing has no identity we
-/// can claim to have read.
-#[cfg(unix)]
-fn git_config_value(probed: Result<ProbeOutput, String>, key: &str) -> Result<String, String> {
-    let output = probed?;
-    match output.status.code() {
-        Some(0) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
-        Some(1) => Ok(String::new()),
-        Some(code) => Err(format!(
-            "git config --global --get {key} exited with {code}: {}",
-            summarise(&String::from_utf8_lossy(&output.stderr))
-        )),
-        None => Err(format!(
-            "git config --global --get {key} was killed by a signal"
-        )),
-    }
-}
-
-/// The state `gh auth status` reported, or why it could not be asked.
-#[cfg(unix)]
-fn github_cli_of(probed: Result<ProbeOutput, String>) -> GithubCliStatus {
-    let failed = |reason: String| GithubCliStatus {
-        outcome: ProbeOutcome::Failed(reason),
-        installed: false,
-        authenticated: false,
-        login: None,
-    };
-    // Every `Err` here is a failure, never a finding — a spawn that never started, and a child this
-    // probe killed for overrunning its deadline, alike. `NotFound` in particular: by this point `gh`
-    // has already been *found* on the host's PATH, and a spawn also reports `NotFound` for a working
-    // directory that does not exist (the probe chdirs into the target user's home) and for an exec
-    // that could not be set up. Reading any of those as "gh is not installed" would state a fact
-    // this code has evidence against. Absence is decided by the PATH lookup in `probe`, which is the
-    // only thing that can see it.
-    let output = match probed {
-        Ok(output) => output,
-        Err(reason) => return failed(reason),
-    };
-    // A signal-killed child has no exit code, and `None` means something else entirely to
-    // `classify_gh_auth_status` — "the binary never ran", i.e. not installed. Keep the two apart.
-    let Some(code) = output.status.code() else {
-        return failed(format!(
-            "gh auth status was killed by a signal: {}",
-            output.status
-        ));
-    };
-    // `gh auth status` reports on stderr, and has moved between the two streams across releases, so
-    // classify what it wrote wherever it wrote it.
-    let mut written = String::from_utf8_lossy(&output.stdout).into_owned();
-    written.push_str(&String::from_utf8_lossy(&output.stderr));
-    classify_gh_auth_status(Some(code), &written)
-}
-
-/// What one probe command produced: how it exited, and everything it wrote.
-#[cfg(unix)]
-pub(crate) struct ProbeOutput {
-    pub(crate) status: std::process::ExitStatus,
-    pub(crate) stdout: Vec<u8>,
-    pub(crate) stderr: Vec<u8>,
-}
-
-/// The bytes a probe command wrote, once both of its pipes reached EOF.
-#[cfg(unix)]
-struct Written {
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-}
-
-/// One probe command, started as `os_user`, with its output being read on a thread of its own.
-#[cfg(unix)]
-pub(crate) struct StartedProbe {
-    /// The command line, for a failure reason an operator can act on.
-    command: String,
-    /// `Err` when the command never started: there is nothing to wait for, and nothing to kill.
-    running: Result<RunningProbe, String>,
-}
-
-/// A probe command that is running right now, and the two handles onto it.
-#[cfg(unix)]
-struct RunningProbe {
-    /// The live child, held by the **parent** rather than by the reader thread. The parent is the
-    /// side that owns the deadline, so it has to be the side that can end the child — and it ends
-    /// it through the `Child` itself, never through a pid saved off to one side, because a pid
-    /// outlives the process it named and the next signal sent to it lands on whatever the kernel
-    /// has since reused it for.
-    child: std::process::Child,
-    /// Everything the child wrote. One message, sent once both pipes are at EOF.
-    written: std::sync::mpsc::Receiver<Written>,
-}
-
-/// Start one probe command as `os_user` without waiting for it.
-///
-/// `program` is an **absolute** path — see `probe`: `start_output_as_user` would resolve a relative
-/// one against the daemon's own cwd rather than searching `PATH`.
-///
-/// Starting is not waiting: this returns as soon as the child exists, so `probe` can start all
-/// three commands before collecting any of them and spend one deadline on the lot.
-#[cfg(unix)]
-pub(crate) fn start_probe(os_user: &str, program: &std::path::Path, args: &[&str]) -> StartedProbe {
-    let owned_args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
-    let command = format!("{} {}", program.display(), args.join(" "));
-    StartedProbe {
-        running: start_running(os_user, program, &owned_args)
-            .map_err(|e| format!("could not run {command}: {e}")),
-        command,
-    }
-}
-
-/// Spawn the child and put a reader thread on its pipes.
-#[cfg(unix)]
-fn start_running(
-    os_user: &str,
-    program: &std::path::Path,
-    args: &[String],
-) -> anyhow::Result<RunningProbe> {
-    let spawned = tddy_daemon_kernel::spawn_as_user::start_output_as_user(os_user, program, args)?;
-    Ok(RunningProbe {
-        written: read_both_pipes(spawned.stdout, spawned.stderr),
-        child: spawned.child,
-    })
-}
-
-/// Read a child's two pipes to EOF on a thread, and report the bytes on a channel.
-///
-/// The thread owns **only** the pipes, never the `Child`. That is what makes the parent's kill safe
-/// and complete: killing the child closes both pipes, both reads hit EOF, and this thread ends by
-/// itself. A thread that instead waited on the child — which is what `Command::output` does inside
-/// `run_output_as_user` — is the thread that used to be left parked forever on a timeout.
-///
-/// Both pipes are read concurrently, for the reason `Command::output` reads them concurrently: a
-/// child that fills one pipe's buffer while this thread blocks on the other never drains, and would
-/// hang until the deadline killed it — turning an answer that was ready into a timeout.
-#[cfg(unix)]
-fn read_both_pipes(
-    stdout: std::process::ChildStdout,
-    stderr: std::process::ChildStderr,
-) -> std::sync::mpsc::Receiver<Written> {
-    let (tx, written) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let draining_stderr = std::thread::spawn(move || read_to_end(stderr));
-        let stdout = read_to_end(stdout);
-        // `read_to_end` has nothing to panic on, so `Err` here is unreachable; an empty stderr in
-        // its place classifies as unrecognised output, which is a probe failure — the same answer
-        // this code gives for every other thing it could not read.
-        let stderr = draining_stderr.join().unwrap_or_default();
-        let _ = tx.send(Written { stdout, stderr });
-    });
-    written
-}
-
-/// Everything a pipe holds, up to EOF or the first read error.
-///
-/// A read that fails mid-way keeps what arrived before it rather than discarding it: the classifier
-/// reads what the child wrote, and output it cannot recognise is already a probe failure.
-#[cfg(unix)]
-fn read_to_end(mut pipe: impl std::io::Read) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    let _ = pipe.read_to_end(&mut bytes);
-    bytes
-}
-
-#[cfg(unix)]
-impl StartedProbe {
-    /// Wait for this command until `deadline`, then **end it**.
-    ///
-    /// The bound is on the child, not merely on this wait. A probe that only stopped waiting would
-    /// leave the process running, its reader thread parked and its two pipe descriptors open, with
-    /// no handle left to close any of them — and the Hosts screen probes every host it lists on
-    /// every poll, so one unreachable host would leak all three per tick until the daemon ran out
-    /// of descriptors.
-    ///
-    /// A command that ran out of time reports a failure, never a finding: nothing was read, so
-    /// there is nothing this probe is entitled to say about the host.
-    pub(crate) fn collect(self, deadline: std::time::Instant) -> Result<ProbeOutput, String> {
-        let StartedProbe { command, running } = self;
-        let running = running?;
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        match running.written.recv_timeout(remaining) {
-            Ok(written) => running.finish(written),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                running.end();
-                Err(format!(
-                    "{} did not answer within {}s",
-                    command,
-                    PROBE_TIMEOUT.as_secs()
-                ))
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                running.end();
-                Err(format!("the {command} probe ended without reporting"))
-            }
-        }
-    }
-}
-
-#[cfg(unix)]
-impl RunningProbe {
-    /// The exit status of a child that has already closed both pipes.
-    ///
-    /// This wait needs no bound of its own — a child at EOF on both streams is on its way out — but
-    /// it is not optional: a child nobody waits for stays in the process table as a zombie.
-    fn finish(mut self, written: Written) -> Result<ProbeOutput, String> {
-        let status = self
-            .child
-            .wait()
-            .map_err(|e| format!("could not read how the probe exited: {e}"))?;
-        Ok(ProbeOutput {
-            status,
-            stdout: written.stdout,
-            stderr: written.stderr,
-        })
-    }
-
-    /// End a child that overran the deadline, and reap it.
-    ///
-    /// Both halves matter. Without the kill the process runs on; without the wait it lingers as a
-    /// zombie, which is a process-table entry leaked just as surely.
-    fn end(mut self) {
-        if let Err(e) = self.child.kill() {
-            log::warn!(
-                target: "tddy_daemon::host_tooling",
-                "could not end an overrunning probe: {e}"
-            );
-        }
-        // Reaped whether or not the kill succeeded: `kill` reports an error for a child that has
-        // already exited, and that child is exactly the one still waiting to be reaped.
-        if let Err(e) = self.child.wait() {
-            log::warn!(
-                target: "tddy_daemon::host_tooling",
-                "could not reap an overrunning probe: {e}"
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::host_tooling::readings::github_cli_of;
+    #[cfg(unix)]
+    use crate::host_tooling::subprocess::start_probe;
+    #[cfg(unix)]
+    use crate::host_tooling::subprocess::StartedProbe;
 
     #[test]
     fn the_gh_probe_for_a_named_host_asks_gh_about_that_host() {
