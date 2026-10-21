@@ -279,8 +279,8 @@ None. No node depends on this one.
 - [x] **M1 measurement**: repo-scale cold (inside and outside `./dev`) and warm runs, recorded under Validation results
 - [x] **`tddy-lsp`**: typed startup failure (R1), the `fake_lsp` mode, tests
 - [ ] **`tddy-index-daemon`**: `status_of_lsp` arm and its test
-- [ ] **Prefix rule** moved into `item_anchor/prefix.rs` (R2); the Rust resolver calls it
-- [ ] **Static check** (R3)
+- [x] **Prefix rule** moved into `item_anchor/prefix.rs` (R2); the Rust resolver calls it
+- [x] **Static check** (R3)
 - [ ] **Dead path deleted** (R5); 3 tests re-pointed (F6)
 - [ ] **`FileHint.modified` removed** (R4); skill `plan-schema.md` updated
 - [ ] **Package documentation** at wrap (list under Affected Packages); both code issues and the todo deleted with their final measurement
@@ -360,7 +360,7 @@ Plan headers carry only hashes. `rust.rs` is about 125 lines shorter.
   Record the command, output, timing and `which rust-analyzer` for each under Validation results. **Stop and ask the developer** if (a), (c) or (d) does not resolve `GoalId`.
 - [x] **M2** `tddy-lsp`: R1; tests 1–6.
 - [ ] **M3** `tddy-index-daemon`: status arm; test 7.
-- [ ] **M4** Prefix rule move and static check (R2, R3); tests 8–14, with test 21 (existing, live) still green.
+- [x] **M4** Prefix rule move and static check (R2, R3); tests 8–14, with test 21 (existing, live) still green.
 - [ ] **M5** R5 deletions and re-pointed tests; tests 18–20 stay green.
 - [ ] **M6** R4; tests 15–17; skill reference.
 - [ ] **M7** Scoped gates, length gate, docs staged for wrap.
@@ -720,6 +720,27 @@ Scoped gate: `./test -p tddy-lsp`, exit 0. Read from `.verify-result.txt`:
   `server_start_failure_test` 5 (tests 1–5, finished in 0.53 s), `spawn_observer_test` 4 (test 6 among them),
   `warm_host_document_sync_test` 6, `workspace_root_test` 5
 - **72 passed, 0 failed**
+
+### M4 Prefix rule and static check: R2, R3; tests 8–14; test 21 green (2026-10-21)
+
+Changed:
+- `src/item_anchor/prefix.rs`: `refuse_a_foreign_prefix` implemented. An `Item` anchor's path, or each `Items`
+  entry in order, goes through `segments_below`; `module_path_of`'s refusals pass through; `Symbol` and `Range`
+  pass. The TODO at :50 is removed.
+- `src/runner/entry_points/check_entry_points.rs`: the (b) detail is R3(b)'s wording. `item_anchor_findings` and
+  its call at :237 are the contract commit's, unchanged, so `check_plan` does not grow. The TODO at :395 is removed.
+- `src/item_anchor.rs` is not touched: 459 production lines, under the 500 cap.
+- No new `println!`/`eprintln!` in `src/`. The existing ones are in `restructure_cli.rs`, which is CLI output.
+- Two other tests pin the phrase "anchors by item, which only a deep check can resolve"
+  (`repoint_call_plan_acceptance.rs:395`, `retarget_impl_plan_lines.rs:295`). The new text still contains it.
+
+Gates, scoped to `tddy-code-restructuring`:
+- `./test -p tddy-code-restructuring --test static_check_item_anchors`: **7 passed, 0 failed** (tests 8–14). The
+  brief's `-- static_check_item_anchors` filter matches no test name, because the name is the binary's, so the
+  binary is selected with `--test`.
+- `./test -p tddy-code-restructuring --test item_anchor_acceptance` (live rust-analyzer, `--test-threads=1` as
+  `./test` passes it): **19 passed, 0 failed**, 291.81 s. Test 21, `a_module_prefix_that_does_not_match_the_file_is_refused`,
+  is among them.
 
 ## TODO
 

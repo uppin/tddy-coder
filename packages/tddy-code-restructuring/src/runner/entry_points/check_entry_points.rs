@@ -404,11 +404,10 @@ fn item_anchor_findings(plan: &Plan, root: &Path) -> Result<Vec<Finding>> {
         let detail = match refused {
             Some(RestructureError::MalformedPlan(reason)) => reason,
             Some(other) => return Err(other),
-            // TODO(reshape-anchors-outline): implement — R3(b)'s wording, saying the module prefix
-            // was verified; this is the wording from before the prefix was checked.
             None => format!(
-                "{:?} in `{}` anchors by item, which only a deep check can resolve, so this \
-                 static check did not examine it — run `check --deep`",
+                "{:?} in `{}` anchors by item, which only a deep check can resolve: its module \
+                 prefix matches the file, and whether the item is there, unambiguous and unchanged \
+                 needs `check --deep`",
                 op.op,
                 op.anchor.file()
             ),

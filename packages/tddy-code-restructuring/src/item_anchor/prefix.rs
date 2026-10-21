@@ -47,10 +47,15 @@ pub(crate) fn segments_below(
 /// [`segments_below`]'s words, and `module_path_of`'s own refusals (a file outside `src/`, or in
 /// no package) pass through. A `symbol` or `range` anchor names no item and passes.
 pub(crate) fn refuse_a_foreign_prefix(root: &Path, anchor: &Anchor) -> Result<()> {
-    // TODO(reshape-anchors-outline): implement — read the file's module path and apply
-    // `segments_below` to every item the anchor names (changeset R2). Until then nothing is
-    // refused, which is what a static check did before this node.
-    let _ = (root, anchor);
+    let (file, items): (&str, Vec<&ItemPath>) = match anchor {
+        Anchor::Item { item, file, .. } => (file, vec![item]),
+        Anchor::Items { file, items, .. } => (file, items.iter().collect()),
+        Anchor::Symbol { .. } | Anchor::Range { .. } => return Ok(()),
+    };
+    let module = super::module_path_of(root, file)?;
+    for item in items {
+        segments_below(item, &module, file)?;
+    }
     Ok(())
 }
 
