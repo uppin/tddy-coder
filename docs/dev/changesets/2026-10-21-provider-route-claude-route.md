@@ -27,7 +27,7 @@ resolver is its own module, so `backend/mod.rs` is not grown. Both records stay 
 `packages/tddy-agent-launch/docs/code-issues/complexity-svc-resume-claude-cli-session-resume-claude-cli-session.md`
 is left unchanged in length by this PR: the resume's route environment is assembled in
 `LaunchSessions::resumed_agent_env`, not in `resume_claude_cli_session`'s body.
-`packages/tddy-accounts/src/service.rs` grew 647 → 712 production lines (`list_provider_routes`,
+`packages/tddy-accounts/src/service.rs` grew 647 → 714 production lines (`list_provider_routes`,
 `with_route_support`); its file-budget entry stays deferred for the stack-shared reason it records.
 
 `spawn_claude_cli_session_inner` (`tddy-agent-launch/src/claude_cli_spawn.rs`) measures complexity

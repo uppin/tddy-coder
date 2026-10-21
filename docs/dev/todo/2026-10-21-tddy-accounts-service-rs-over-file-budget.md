@@ -16,6 +16,6 @@ the stack rule forbids (`/pr-wrap` step 4). Decompose it on a follow-up branch o
 link half (`store_link`, `state_only`, `pending`, `link_status_for`) into one beside `linking.rs`,
 via the `code-restructuring` skill, until `service.rs` is under 500 production lines.
 
-**#663 (`#provider-route` 2/9):** grew `service.rs` **647 → 712 production lines**
+**#663 (`#provider-route` 2/9):** grew `service.rs` **647 → 714 production lines**
 (`list_provider_routes`, `with_route_support`). Still deferred for the same stack-shared reason:
 later nodes (#666+) modify the file too.
