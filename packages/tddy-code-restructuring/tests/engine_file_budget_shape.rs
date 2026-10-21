@@ -14,7 +14,16 @@ const BUDGET: usize = 500;
 /// Files allowed over the budget for now, as paths relative to the package.
 // `rust.rs` is exempt until its backlog entry is worked: docs/dev/todo/2026-09-16-backends-rust-rs-is-4500-production-lines.md
 // owns this exemption (rust-backend-split #614 was closed in the 2026-10-19 replan).
-const NOT_YET_SPLIT: [&str; 1] = ["src/backends/rust.rs"];
+// The five below are deferred by the developer (2026-10-21): docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md
+// owns them, with the planned seams. Remove a line when its split lands.
+const NOT_YET_SPLIT: [&str; 6] = [
+    "src/backends/rust.rs",
+    "src/crate_move/test_binary.rs",
+    "src/crate_move/test_modules.rs",
+    "src/backends/rust/item_move/assemble.rs",
+    "src/runner/tidy.rs",
+    "src/verify/retarget.rs",
+];
 
 fn package_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

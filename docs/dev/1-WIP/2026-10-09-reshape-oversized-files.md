@@ -14,6 +14,8 @@ oversized-files` (K=1: the `tidy.rs` and `assemble.rs` seams split private field
 
 > **Replanned 2026-10-19** (`plans/reshape/zed-extensions-replan.md`): this node is `#reshape` 17/24, base `feature/reshape/anchors-outline`, green **wave 1** — every parent it waited on has merged. `rust-backend-split`, `backend-session` and `fn-sizes-backend` were dropped; references to them below are historical, as are wave numbers other than 1. **Blocks:** none. Its contract commit is re-landed at wave 2 against the current code.
 
+> **Deferred by developer 2026-10-21** ("we can defer those"): the five file splits (Plans A, B, C, D and the `test_modules.rs` split) are not applied in this node. Their planned seams, the exemptions that stand in for them, and the owner (the `#reshape` sweep node) are in [2026-10-21-reshape-oversized-files-splits-deferred.md](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md). The counter and `restructure lines` (`30d514d0c`) are not deferred.
+
 ## Initial Discovery
 
 Full codebase exploration that grounded this plan: [initial-discovery.md](./2026-10-09-reshape-oversized-files-initial-discovery.md)
@@ -29,11 +31,11 @@ touches: **no 🚧 claimed issue is in the path, no wait-or-proceed fork.**
 | Item | Verdict | What this change does about it |
 |---|---|---|
 | [2026-09-19-the-file-length-gate-stops-at-the-first-cfg-test-use.md](../todo/2026-09-19-the-file-length-gate-stops-at-the-first-cfg-test-use.md) | ✅ **RESOLVED HERE** | The robust version it asks for: each test-only item excluded on its own (token-level, strings and comments masked). `check --budget` uses it. `/pr-wrap` step 3.5 calls `restructure lines` instead of its `awk`. Deleted at wrap |
-| [oversized-file-test-binary.md](../../../packages/tddy-code-restructuring/docs/code-issues/oversized-file-test-binary.md) | ✅ **RESOLVED HERE** | Four engine moves take 967 to about 394. Its claim that the scanner alone brings the file under budget is wrong (580 left; Exploration 2 §3). Final measurement goes into the change-history entry, then the record is deleted at wrap |
-| [2026-09-19-test-binary-rs-is-950-production-lines.md](../todo/2026-09-19-test-binary-rs-is-950-production-lines.md) | ✅ **RESOLVED HERE** | Same split. Deleted at wrap |
-| [2026-10-06-restructure-item-move-assemble-past-500.md](../todo/2026-10-06-restructure-item-move-assemble-past-500.md) | ✅ **RESOLVED HERE** | `Moving` and the visibility decisions move out (507 → about 356). Its first candidate (`doc_links.rs`) already exists. Deleted at wrap |
-| `runner/tidy.rs` at ~540 real production lines (no record; reassigned to this node by the developer, 2026-10-09) | ✅ **RESOLVED HERE** | The import rounds and the fix application move to `tidy/rounds.rs` and `tidy/fixes.rs` (540 → about 196) |
-| [2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md](../todo/2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md) | ⚠ **partial**: item 3 ✅ here | Item 3 (`test_binary.rs` size). Claimed by `tidy-facades`, which narrows the entry. This node removes item 3 at its own wrap if the entry is still open |
+| [oversized-file-test-binary.md](../../../packages/tddy-code-restructuring/docs/code-issues/oversized-file-test-binary.md) | ⏸ **DEFERRED 2026-10-21** (Deferred by developer 2026-10-21; [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md)) | Four engine moves would take 967 to about 394; not applied (Plan A). Its claim that the scanner alone brings the file under budget is wrong (580 left; Exploration 2 §3). The record stays open with the deferral, not deleted at wrap |
+| [2026-09-19-test-binary-rs-is-950-production-lines.md](../todo/2026-09-19-test-binary-rs-is-950-production-lines.md) | ⏸ **DEFERRED 2026-10-21** (Deferred by developer 2026-10-21) | Same split (Plan A). Stays open; see the [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md) |
+| [2026-10-06-restructure-item-move-assemble-past-500.md](../todo/2026-10-06-restructure-item-move-assemble-past-500.md) | ⏸ **DEFERRED 2026-10-21** (Deferred by developer 2026-10-21) | `Moving` and the visibility decisions would move out (521 at this base → about 356; Plan B). Its first candidate (`doc_links.rs`) already exists. Stays open; see the [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md) |
+| `runner/tidy.rs` at ~540 real production lines (no record; reassigned to this node by the developer, 2026-10-09) | ⏸ **DEFERRED 2026-10-21** (Deferred by developer 2026-10-21) | The import rounds and the fix application would move to `tidy/rounds.rs` and `tidy/fixes.rs` (542 at this base → about 196; Plan C). See the [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md) |
+| [2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md](../todo/2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md) | ⚠ **partial**: item 3 ⏸ deferred 2026-10-21 | Item 3 (`test_binary.rs` size). Claimed by `tidy-facades`, which narrows the entry. Item 3 stays open with the deferral (Plan A) |
 | [oversized-file-backends-rust.md](../../../packages/tddy-code-restructuring/docs/code-issues/oversized-file-backends-rust.md) | — Unrelated (node 17) | Not touched. Its number is corrected to 2,959 by the new count, and `rust-backend-split` uses that count |
 | Function-size lists (whole-work discovery, Exploration 3): `assemble` 82, `visibilities` 71, `into_destination` 60, `moved_text` 60 | ⚠ **DURING** (owned by `fn-sizes-backend`) | Moved functions keep their bodies (`visibilities` moves to `item_move/visibility.rs`). No function grows |
 
@@ -42,7 +44,7 @@ touches: **no 🚧 claimed issue is in the path, no wait-or-proceed fork.**
 - **`tddy-code-restructuring`**: [README.md](../../../packages/tddy-code-restructuring/README.md)
   - edited: `src/runner/budget.rs` (`production_lines`), `src/crate_move/source_scan.rs` (new `test_only_spans`), `src/restructure_args.rs` +
     `src/runner/options.rs` + a new `src/runner/entry_points/lines_entry_point.rs` (the `lines` subcommand);
-  - moved by `tddy-tools restructure` (no hand-written moved code): `src/crate_move/test_binary.rs` → new `src/lexical.rs`,
+  - planned moves by `tddy-tools restructure` (no hand-written moved code), **deferred 2026-10-21, none applied** (see the [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md)): `src/crate_move/test_binary.rs` → new `src/lexical.rs`,
     new `src/crate_move/source_names.rs`, new `src/crate_move/test_binary/{facade_walk,dev_dependencies}.rs`;
     `src/runner/tidy.rs` → new `src/runner/tidy/rounds.rs`, `src/runner/tidy/fixes.rs`;
     `src/backends/rust/item_move/assemble.rs` → new `item_move/moving.rs`, `item_move/visibility.rs`;
@@ -272,6 +274,8 @@ inline paths of the named file):
 
 ### Delta (dependency order)
 
+**Deferred by developer 2026-10-21:** steps 3–5 (Plans A, B, C) and Plan D were not run in this node, and no `restructure` plan was applied. Steps 1–2 are committed. See the [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md).
+
 1. Counter: `test_only_spans` + `production_lines` (hand-written, new behaviour, tests first).
 2. `lines` subcommand + routing + `/pr-wrap` + docs.
 3. Plan A (`test_binary.rs`): `lexical` (its callers re-pointed first, since `source_names` and `source_scan` need it),
@@ -497,12 +501,14 @@ The existing 13 `runner::budget` tests still pass.
 - [ ] Counter and `lines` green — **partly** (2026-10-21): every acceptance test 1–10 passes except acceptance 2's
   existing pin `does_not_end_early_at_a_test_only_import_above_the_module` (budget.rs), which expects `#[cfg(test)] use`
   to count as production. Acceptance 2 says it is test-only. Left red for the developer; see Validation Results 2026-10-21
-- [ ] Plans A, B, C (and any F1 additions) applied, one commit each
-- [ ] Plan D: `verify/retarget.rs` (631) and `crate_move/test_modules.rs` (664, not in State B) — not started
-- [ ] Final gate; shape tests green
+- [ ] Plans A, B, C (and any F1 additions) applied, one commit each — **Deferred by developer 2026-10-21** → [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md)
+- [ ] Plan D: `verify/retarget.rs` (631) and `crate_move/test_modules.rs` (664, not in State B) — **Deferred by developer 2026-10-21** → [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md)
+- [ ] Final gate; shape tests green — the budget test is green with the five deferred files in `NOT_YET_SPLIT`; the six edge tests are `#[ignore]`d (**Deferred by developer 2026-10-21** → [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md))
 - [ ] Wrap: feature doc, package docs, code-issue record and todos closed
 
 ## Final Checklist
+
+> Items that depend on the five deferred splits are **Deferred by developer 2026-10-21** → [entry](../todo/2026-10-21-reshape-oversized-files-splits-deferred.md). They stay unchecked because they are not met in this node.
 
 - [ ] Every production file in `packages/tddy-code-restructuring/src` except `backends/rust.rs` ≤ 500 by `restructure lines` (acceptance 12)
 - [ ] `src/lexical.rs` reaches no `crate::crate_move` / `crate::backends` / `crate::runner` (acceptance 13)

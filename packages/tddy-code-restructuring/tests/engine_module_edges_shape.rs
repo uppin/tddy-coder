@@ -33,6 +33,7 @@ fn edges_from_each(files: &[&str], forbidden: &[&str]) -> Vec<String> {
 }
 
 #[test]
+#[ignore = "Plan A deferred by the developer 2026-10-21: docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md"]
 fn the_lexical_masker_depends_on_no_engine_module() {
     // Given the masker's own module
     // When its edges into the engine are listed
@@ -51,6 +52,7 @@ fn the_lexical_masker_depends_on_no_engine_module() {
 }
 
 #[test]
+#[ignore = "Plan A deferred by the developer 2026-10-21: docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md"]
 fn the_rust_backend_does_not_reach_crate_move_for_the_masker() {
     // Given the early-return check, which masks strings and comments
     // When its edges into `crate_move` are listed
@@ -61,6 +63,7 @@ fn the_rust_backend_does_not_reach_crate_move_for_the_masker() {
 }
 
 #[test]
+#[ignore = "Plan A deferred by the developer 2026-10-21: docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md"]
 fn nothing_but_crate_move_names_test_binary() {
     // Given the modules that used to borrow the test-binary move's scanner
     // When their edges into `test_binary` are listed
@@ -80,6 +83,7 @@ fn nothing_but_crate_move_names_test_binary() {
 }
 
 #[test]
+#[ignore = "Plan B deferred by the developer 2026-10-21: docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md"]
 fn item_move_siblings_do_not_import_from_assemble() {
     // Given the modules that took `Moving` and `users_of` from the assembly
     // When their edges into `assemble` are listed
@@ -98,6 +102,7 @@ fn item_move_siblings_do_not_import_from_assemble() {
 }
 
 #[test]
+#[ignore = "Plan B deferred by the developer 2026-10-21: docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md"]
 fn the_record_of_a_move_does_not_reach_the_modules_that_read_it() {
     // Given `Moving`, the record every pass of a move reads
     // When its edges into those passes are listed
@@ -116,6 +121,7 @@ fn the_record_of_a_move_does_not_reach_the_modules_that_read_it() {
 }
 
 #[test]
+#[ignore = "Plan C deferred by the developer 2026-10-21: docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md"]
 fn tidy_parts_do_not_import_the_rounds() {
     // Given the parts the tidy's import rounds are built from
     // When their edges into the rounds are listed
