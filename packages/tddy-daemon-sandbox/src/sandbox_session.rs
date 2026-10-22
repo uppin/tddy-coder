@@ -755,6 +755,10 @@ pub struct SandboxRunnerSpawn {
     /// QEMU backends ignore it). Defaults to an empty [`tddy_sandbox::CgroupConfig`], letting the
     /// backend derive the delegated base at runtime.
     pub cgroup: tddy_sandbox::CgroupConfig,
+    /// The provider route the jailed agent runs on, when the session runs on a provider account.
+    /// Its environment and secrets reach the agent child through [`build_sandbox_plan`]. `None` for
+    /// the harness's own vendor, and for a jail that hosts no agent.
+    pub route: Option<tddy_core::provider_route::HarnessRoute>,
 }
 
 /// Assemble the explicit [`SandboxPlan`] for a runner spawn via `tddy-sandbox-recipes`.
@@ -774,8 +778,7 @@ pub fn build_sandbox_plan(params: SandboxRunnerSpawn) -> Result<SandboxPlan, San
         mounts: params.mounts,
         recipe: None,
         host_home: params.host_home,
-        // TODO(sandboxed-routes): the session's route
-        route: None,
+        route: params.route,
     })?;
     plan.cgroup = params.cgroup;
     #[cfg(target_os = "macos")]

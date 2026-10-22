@@ -755,6 +755,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         // Standalone app path has no daemon config; empty config lets the cgroups backend derive
         // the delegated base at runtime (ignored by the macOS/QEMU backends).
         cgroup: tddy_sandbox::CgroupConfig::default(),
+        route: None,
     })
     .map_err(|e| {
         let logs = tddy_sandbox::format_egress_logs(&egress_dir);

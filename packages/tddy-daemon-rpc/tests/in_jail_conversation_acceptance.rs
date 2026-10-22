@@ -314,6 +314,7 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
         mounts: vec![],
         host_home: None,
         cgroup: Default::default(),
+        route: None,
     })
     .expect("spawn the Seatbelt-jailed sandbox-runner");
 

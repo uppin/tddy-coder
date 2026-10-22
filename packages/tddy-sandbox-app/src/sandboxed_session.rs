@@ -426,6 +426,7 @@ pub async fn provision_with_interrupt(
         // Standalone app path has no daemon config; empty config lets the cgroups backend derive
         // the delegated base at runtime (ignored by the macOS backend).
         cgroup: tddy_sandbox::CgroupConfig::default(),
+        route: None,
     })
     .map_err(|e| anyhow::anyhow!("build the jail's sandbox plan: {e}"))?;
 

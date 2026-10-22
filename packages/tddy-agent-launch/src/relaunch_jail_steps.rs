@@ -137,6 +137,7 @@ impl LaunchSessions {
             loopback_allow_ports,
             runner_argv,
             env,
+            route,
         } = launch;
         let mut handle = tddy_daemon_sandbox::sandbox_session::spawn_sandbox_runner(
             tddy_daemon_sandbox::sandbox_session::SandboxRunnerSpawn {
@@ -154,6 +155,7 @@ impl LaunchSessions {
                 // per-session credential copy so it can't overwrite a refreshed jail token.
                 host_home: None,
                 cgroup: self.config.sandbox_cgroup_config(),
+                route,
             },
         )
         .map_err(|e| {

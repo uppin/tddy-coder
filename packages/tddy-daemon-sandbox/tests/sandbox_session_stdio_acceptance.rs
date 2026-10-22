@@ -126,6 +126,7 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         mounts: vec![],
         host_home: None,
         cgroup: Default::default(),
+        route: None,
     })
     .expect("spawn sandbox-runner");
 

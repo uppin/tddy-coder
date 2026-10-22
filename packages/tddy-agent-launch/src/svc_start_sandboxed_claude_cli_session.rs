@@ -24,6 +24,8 @@ use std::path::{Path, PathBuf};
 
 use crate::launch_ports::LaunchSessions;
 
+use tddy_core::provider_route::HarnessRoute;
+
 /// The session a sandboxed start is building a jail for: who it is and where it lives on the host.
 pub struct JailSession<'a> {
     pub session_id: &'a str,
@@ -70,6 +72,8 @@ pub struct JailLaunch {
     pub loopback_allow_ports: Vec<u16>,
     pub runner_argv: Vec<String>,
     pub env: std::collections::BTreeMap<String, String>,
+    /// The provider route the agent runs on; `None` for the harness's own vendor.
+    pub route: Option<HarnessRoute>,
 }
 
 /// A managed-workflow session's controller, its orchestration prompt file and its host-side env.
@@ -141,6 +145,9 @@ impl LaunchSessions {
         semantic_index: bool,
         // When true (new_branch_from_base + registered project), push the new branch to origin.
         create_remote_branch: bool,
+        // The provider route the agent runs on, resolved by the caller before the session's
+        // directory was created. `None` runs the harness on its own vendor.
+        route: Option<HarnessRoute>,
     ) -> Result<Response<StartSessionResponse>, Status> {
         if model.trim().is_empty() {
             return Err(Status::invalid_argument(
@@ -409,6 +416,7 @@ impl LaunchSessions {
                     loopback_allow_ports,
                     runner_argv,
                     env,
+                    route,
                 },
             )
             .await?;

@@ -210,6 +210,20 @@ pub fn start_route(
     }))
 }
 
+/// The route a resumed session runs on: the account its start recorded, re-resolved against the
+/// owner's vault as it stands now. `None` for a session on its vendor.
+pub fn resume_route(
+    access: &SessionAccountAccess,
+    harness: Harness,
+    session_dir: &Path,
+) -> Result<Option<HarnessRoute>, Status> {
+    let (sources, model) = route_sources_on_resume(session_dir)?;
+    let Some(model) = model else {
+        return Ok(None);
+    };
+    resolve_session_route(access, harness, &sources, &model)
+}
+
 /// The environment a resumed PTY session is relaunched with: the route its start recorded,
 /// re-resolved against the owner's vault as it stands now. Empty for a session on its vendor.
 pub fn resume_route_env(
@@ -217,25 +231,36 @@ pub fn resume_route_env(
     harness: Harness,
     session_dir: &Path,
 ) -> Result<Vec<(String, String)>, Status> {
-    let (sources, model) = route_sources_on_resume(session_dir)?;
-    let Some(model) = model else {
-        return Ok(Vec::new());
-    };
-    Ok(resolve_session_route(access, harness, &sources, &model)?
+    Ok(resume_route(access, harness, session_dir)?
         .map(|route| pty_route_env(&route))
         .unwrap_or_default())
 }
 
-/// A sandboxed start cannot carry a route yet: the jail has no way to hand the harness its key.
-/// Refused rather than started on the vendor.
+/// The route a sandboxed start of `harness` on `model` runs on; `None` when no account was chosen.
 ///
-/// TODO(provider-route-jail): lifted by the jail node (#provider-route 9/9), which delivers the
-/// route through the jail's secret files.
-pub fn refuse_route_in_sandbox(sources: &RouteSources) -> Result<(), Status> {
-    match choose_route(sources) {
-        Some(_) => Err(Status::failed_precondition(
-            "running on a provider account is not yet supported in a sandbox",
-        )),
-        None => Ok(()),
-    }
+/// The route is resolved before `session_dir` is created, so a refusal leaves nothing on disk. The
+/// account and model it runs on are then recorded in `session_dir` (never the key), so a resume
+/// re-applies them. The jail receives the route through its secret files and environment.
+pub fn sandboxed_start_route(
+    access: &SessionAccountAccess,
+    harness: Harness,
+    sources: &RouteSources,
+    model: &str,
+    session_dir: &Path,
+) -> Result<Option<HarnessRoute>, Status> {
+    let Some(account_id) = choose_route(sources) else {
+        return Ok(None);
+    };
+    let route = route_on_account(access, harness, &account_id, model)?;
+    std::fs::create_dir_all(session_dir)
+        .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+    write_session_provider_account(
+        session_dir,
+        &SessionProviderAccount {
+            account_id,
+            model: model.to_string(),
+        },
+    )
+    .map_err(|e| Status::internal(format!("failed to record the provider account: {e}")))?;
+    Ok(Some(route))
 }

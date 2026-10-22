@@ -1,6 +1,8 @@
 use crate::launch_ports::LaunchSessions;
+use crate::session_provider_route::resume_route;
 use std::path::PathBuf;
 use std::time::Duration;
+use tddy_core::provider_route::Harness;
 use tddy_rpc::Response;
 use tddy_rpc::Status;
 use tddy_service::proto::session::ResumeSessionResponse;
@@ -42,6 +44,13 @@ impl LaunchSessions {
         let identity =
             self.host
                 .session_identity(os_user, session_id, &meta.project_id, session_token);
+        // The account the session's start recorded, re-resolved from the owner's vault as it stands
+        // now: a removed account refuses the resume rather than running it on the vendor.
+        let route = resume_route(
+            &self.host.session_account_access(session_token),
+            Harness::ClaudeCli,
+            &session_dir,
+        )?;
         let pid = self
             .relaunch_sandboxed_runner(
                 os_user,
@@ -56,6 +65,7 @@ impl LaunchSessions {
                 // HOME, so the runner must launch `claude --resume <id>`, not `--session-id <id>`.
                 true,
                 identity,
+                route,
             )
             .await?;
 

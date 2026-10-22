@@ -228,7 +228,7 @@ pub fn build_workspace_tool_plan(
             // subprocess and a PTY, and nothing an agent runtime would need.
             recipe: Some(tddy_sandbox_recipes::SandboxRecipe::Shell),
             host_home: None,
-            // TODO(sandboxed-routes): the session's route
+            // The jail hosts the session's tools and no agent, so it takes no provider route.
             route: None,
         })?;
     // Path lookup for the worktree itself. Resolving `/a/b/worktree` walks `/a`, then `/a/b`, and

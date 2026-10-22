@@ -18,8 +18,8 @@ use tddy_service::proto::session::StartSessionRequest;
 use crate::cli_route_launch::{resume_cli_route, start_cli_route};
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::session_provider_route::{
-    pty_route_env, refuse_route_in_sandbox, resolve_session_route, resume_route_env,
-    route_sources_on_resume, session_route_sources, start_route,
+    pty_route_env, resolve_session_route, resume_route, resume_route_env, route_sources_on_resume,
+    sandboxed_start_route, session_route_sources, start_route,
 };
 use std::os::unix::fs::PermissionsExt;
 use tddy_core::cli_harness::cli_harness;
@@ -315,19 +315,93 @@ fn a_start_on_an_account_with_no_model_is_refused() {
 }
 
 #[test]
-fn a_sandboxed_start_on_an_account_is_refused_rather_than_run_on_the_vendor() {
-    // When / Then
-    let refusal =
-        refuse_route_in_sandbox(&on_account("meta-hackathon")).expect_err("not in a sandbox yet");
-    assert_eq!(refusal.code(), Code::FailedPrecondition);
-    assert!(refusal.message().contains("sandbox"));
+fn a_sandboxed_start_on_an_account_runs_on_that_account() {
+    // Given Ada holds her Meta account in an unlocked vault and a session directory to start in
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let sessions = tempfile::tempdir().expect("a sessions directory");
+    let session_dir = sessions.path().join("session");
 
-    assert!(refuse_route_in_sandbox(&RouteSources::default()).is_ok());
-    assert!(refuse_route_in_sandbox(&RouteSources {
-        session: Some(RouteChoice::BuiltIn),
-        ..RouteSources::default()
-    })
-    .is_ok());
+    // When a sandboxed claude-cli start chooses that account
+    let route = sandboxed_start_route(
+        &access,
+        Harness::ClaudeCli,
+        &on_account("meta-hackathon"),
+        "muse-wonder-1.0",
+        &session_dir,
+    )
+    .expect("the route resolves")
+    .expect("a route, not the vendor");
+
+    // Then the jail carries Meta's endpoint and model, and the key only as a secret
+    assert_eq!(
+        value_of(&route.env, "ANTHROPIC_BASE_URL"),
+        Some("https://api.meta.ai")
+    );
+    assert_eq!(
+        value_of(&route.env, "ANTHROPIC_MODEL"),
+        Some("muse-wonder-1.0")
+    );
+    assert_eq!(
+        route
+            .secret_env
+            .iter()
+            .find(|(name, _)| name == "ANTHROPIC_AUTH_TOKEN")
+            .map(|(_, secret)| secret.expose()),
+        Some(META_KEY)
+    );
+    assert!(!route.env.iter().any(|(_, value)| value == META_KEY));
+}
+
+#[test]
+fn a_sandboxed_start_that_chooses_nothing_runs_on_the_vendor() {
+    // Given Ada holds an account but the session chooses none, and a session directory to start in
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let sessions = tempfile::tempdir().expect("a sessions directory");
+    let session_dir = sessions.path().join("session");
+
+    // When / Then
+    assert_eq!(
+        sandboxed_start_route(
+            &access,
+            Harness::ClaudeCli,
+            &RouteSources::default(),
+            "muse-wonder-1.0",
+            &session_dir,
+        )
+        .expect("a start that chooses nothing reads nothing from the vault"),
+        None
+    );
+    assert!(!session_dir.exists());
+}
+
+#[test]
+fn a_resumed_sandboxed_session_reapplies_its_account_as_a_route() {
+    // Given a sandboxed session started on Ada's Meta account, recorded in its directory
+    let (_dir, access) = a_daemon_where_ada_holds(&[adas_meta_account()], true);
+    let session_dir = tempfile::tempdir().expect("a session directory");
+    write_session_provider_account(
+        session_dir.path(),
+        &SessionProviderAccount {
+            account_id: "meta-hackathon".to_string(),
+            model: "muse-wonder-1.0".to_string(),
+        },
+    )
+    .expect("recorded at start");
+
+    // When it resumes
+    let route = resume_route(&access, Harness::ClaudeCli, session_dir.path())
+        .expect("the record reads and the account resolves")
+        .expect("a route, not the vendor");
+
+    // Then the relaunched jail runs on the same account and model
+    assert_eq!(
+        value_of(&route.env, "ANTHROPIC_BASE_URL"),
+        Some("https://api.meta.ai")
+    );
+    assert_eq!(
+        value_of(&route.env, "ANTHROPIC_MODEL"),
+        Some("muse-wonder-1.0")
+    );
 }
 
 #[test]

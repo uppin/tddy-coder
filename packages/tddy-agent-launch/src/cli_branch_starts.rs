@@ -17,8 +17,10 @@ use std::sync::Arc;
 use crate::svc_start_session_core::CliStart;
 
 use crate::launch_ports::LaunchSessions;
-use crate::session_provider_route::{refuse_route_in_sandbox, session_route_sources_with_default};
+use crate::session_provider_route::{sandboxed_start_route, session_route_sources_with_default};
 use tddy_core::cli_harness::CliHarness;
+use tddy_core::output::SESSIONS_SUBDIR;
+use tddy_core::provider_route::{Harness, HarnessRoute};
 use tddy_service::proto::session::StartSessionRequest;
 
 impl LaunchSessions {
@@ -30,13 +32,7 @@ impl LaunchSessions {
         stack_parent_for_claude_cli: Option<&str>,
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        // The person's default counts here too: a sandbox cannot run on an account yet, and
-        // silently starting on the vendor instead of the chosen default is a fallback.
-        refuse_route_in_sandbox(&session_route_sources_with_default(
-            req,
-            "claude-cli",
-            &self.host.session_account_access(&req.session_token),
-        )?)?;
+        let route = self.sandboxed_claude_route(req, &start)?;
         self.start_sandboxed_claude_cli_session(
             os_user,
             &start.session_id,
@@ -61,8 +57,33 @@ impl LaunchSessions {
             managed_recipe,
             req.semantic_index,
             req.create_remote_branch,
+            route,
         )
         .await
+    }
+
+    /// The provider route a sandboxed claude-cli start runs on: the account the request or the
+    /// person's default chooses, and `None` for the vendor. The person's default counts, so a
+    /// locked vault refuses rather than starting on the vendor. Resolved before the session's
+    /// directory is created, so a refused start leaves nothing on disk.
+    fn sandboxed_claude_route(
+        &self,
+        req: &StartSessionRequest,
+        start: &CliStart,
+    ) -> Result<Option<HarnessRoute>, Status> {
+        let access = self.host.session_account_access(&req.session_token);
+        let sources = session_route_sources_with_default(req, "claude-cli", &access)?;
+        let session_dir = start
+            .sessions_base
+            .join(SESSIONS_SUBDIR)
+            .join(&start.session_id);
+        sandboxed_start_route(
+            &access,
+            Harness::ClaudeCli,
+            &sources,
+            req.model.trim(),
+            &session_dir,
+        )
     }
 
     pub(super) async fn start_claude_cli_from_request(
