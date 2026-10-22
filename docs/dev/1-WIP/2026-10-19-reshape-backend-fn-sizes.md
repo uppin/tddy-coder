@@ -115,6 +115,29 @@ K18's own gate is also red at this base (9 functions outside `backends/`) — K1
 - [ ] Code-issue records updated with the final measurement
 - [ ] Code Quality
 
+## Green log (2026-10-22)
+
+Re-measured at green's base, `0e7121919` on `cde6980f7` (K11–K15 merged): the gate's list is 14 functions. `visibilities`
+(73 lines at the contract base) is 55 now and is no longer listed, and `survey` (`detach_method/survey.rs:91`, 79 lines) is
+listed for the first time. The gate's output is authoritative.
+
+Baseline, scoped (`./test -p tddy-code-restructuring`, before any cut): 1856 passed, 3 failed. The failing set:
+`no_production_function_in_the_backend_runs_past_sixty_lines` (this node's red gate), and
+`registry::tests::a_files_module_is_answered_by_the_backend_that_reads_its_own_files` and
+`registry::tests::a_files_module_through_a_backend_without_a_resolver_is_refused_by_name` (both `not yet implemented:
+BackendRegistry::module_of`, red before this node).
+
+Per function:
+
+- `choose_import` — deferred by developer 2026-10-22 (K18 standing rule): the `by_crate` tier cut failed the compile gate
+  (E0261, undeclared `'a`); rolled back. Engine todo `2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md`
+  § 7. Exempted in `DEFERRED_BY_BACKEND_FN_SIZES`.
+- `retarget_impl` — the field-check cut (lines 84–90 of the item, `refuse_moved_fields`) applied and compiled, but `verify`
+  reported `&text` → `text` in the moved `member_text(..)` call (a shared-reference parameter, not the `&mut` family) plus
+  the new function's `Ok(())` tail. Not in the accepted families. Rolled back; the node stopped here for a decision.
+
+Deferred by developer 2026-10-22 (K18 standing rule): `choose_import`.
+
 ## Testing plan
 
 The gate test plus the unchanged package suite.

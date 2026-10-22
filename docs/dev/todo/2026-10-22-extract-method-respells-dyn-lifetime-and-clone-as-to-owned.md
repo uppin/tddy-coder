@@ -96,3 +96,24 @@ Developer decision 2026-10-22 ("one more cut each, then defer"). Both partial cu
 
 Wanted: `extract_method` keeps `mut` on a binding it moves into a returned tuple or a returned value, or `verify` accounts
 for a `mut` dropped only where the new function returns the binding.
+
+## 7. `choose_import`: `extract_method` drops the enclosing function's lifetime parameter from the new function (E0261)
+
+Found in `#reshape` 21/24 (`backend-fn-sizes`), plan `n21-01-choose-import` (the `by_crate` tier, lines 76–81 of the item,
+name `by_crate_tier`). Rolled back cleanly under the standing rule (compile gate, `git checkout HEAD --` of the one file,
+journal removed); deferred by the developer's standing rule of 2026-10-22.
+
+The engine writes the new function with the parameter the range reads, and drops the `<'a>` the enclosing `choose_import<'a>`
+declares:
+
+```
+fn by_crate_tier(offered: &[&'a str], in_scope: Vec<String>) -> Option<&str> {
+packages/tddy-code-restructuring/src/backends/rust/import_text.rs:79:30: error[E0261]: use of undeclared lifetime name `'a`
+```
+
+The apply's compile gate caught it (`1 of 1 operation(s) were applied, and the tree no longer compiles`). Every tier of
+`choose_import` that narrows `offered` reads `&[&'a str]`, so every such range hits the same defect; the one range that
+avoids `offered` (the `modules` binding) saves three lines, not the five the function needs.
+
+Wanted: `extract_method` declares every lifetime parameter of the enclosing function that the new function's signature
+mentions (here `<'a>`), and spells the return type with it (`Option<&'a str>`, not an elided `Option<&str>`).

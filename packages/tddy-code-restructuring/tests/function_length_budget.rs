@@ -361,6 +361,18 @@ fn a_function_of(name: &str, lines: usize) -> String {
     a_function_with(name, lines - 2)
 }
 
+/// Backend functions past the cap that this node deferred on 2026-10-22 (standing rule: an engine refusal or a clean
+/// compile-gate rollback), as `(file under src/, name)`. Each is recorded in
+/// `docs/dev/todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md`, section 7.
+// TODO(reshape-21): `backend-fn-sizes` cuts the rest; a deferred function is cut when its engine defect is fixed.
+const DEFERRED_BY_BACKEND_FN_SIZES: [(&str, &str); 1] = [("backends/rust/import_text.rs", "choose_import")];
+
+fn is_deferred_by_backend_fn_sizes(function: &Measured) -> bool {
+    DEFERRED_BY_BACKEND_FN_SIZES
+        .iter()
+        .any(|(file, name)| function.file == *file && function.name == *name)
+}
+
 #[test]
 fn no_production_function_in_the_backend_runs_past_sixty_lines() {
     // Given the engine's own sources
@@ -369,6 +381,7 @@ fn no_production_function_in_the_backend_runs_past_sixty_lines() {
     // When the backend's functions past the cap are listed
     let past: Vec<String> = backend_functions_past_the_cap_under(&src)
         .iter()
+        .filter(|function| !is_deferred_by_backend_fn_sizes(function))
         .map(Measured::to_string)
         .collect();
 
@@ -378,6 +391,31 @@ fn no_production_function_in_the_backend_runs_past_sixty_lines() {
         "production functions past {CAP} lines in src/{LEFT_TO_THE_BACKEND_NODE}/ ({}):\n  src/{}",
         past.len(),
         past.join("\n  src/")
+    );
+}
+
+#[test]
+fn every_backend_function_deferred_by_this_node_still_runs_past_the_cap() {
+    // Given the engine's own sources and the backend functions this node deferred
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+
+    // When the backend's functions past the cap are listed
+    let past = backend_functions_past_the_cap_under(&src);
+
+    // Then each deferred function is among them: a cut one leaves the list, which only shrinks
+    let stale: Vec<String> = DEFERRED_BY_BACKEND_FN_SIZES
+        .iter()
+        .filter(|(file, name)| {
+            !past
+                .iter()
+                .any(|function| function.file == *file && function.name == *name)
+        })
+        .map(|(file, name)| format!("{file} {name}"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "deferred functions that no longer run past {CAP} lines; remove them from DEFERRED_BY_BACKEND_FN_SIZES:\n  {}",
+        stale.join("\n  ")
     );
 }
 
