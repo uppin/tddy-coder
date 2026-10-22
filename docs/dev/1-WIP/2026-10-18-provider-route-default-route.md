@@ -3,6 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
+**Complexity**: 4/5
 **Stack**: #provider-route 5/9. Base: `feature/provider-route/tool-route`. PR: [#666](https://github.com/uppin/tddy-coder/pull/666).
 
 ## Initial Discovery
@@ -83,10 +84,10 @@ The start path feeds `RouteSources.user_default` from `default_provider_account`
 
 ## Scope
 
-- [ ] RPC + store method + summary field
-- [ ] One default per harness per person (clear previous)
-- [ ] Refuse a harness the account cannot drive
-- [ ] Start feeds `user_default`
+- [x] RPC + store method + summary field
+- [x] One default per harness per person (clear previous)
+- [x] Refuse a harness the account cannot drive
+- [x] Start feeds `user_default`
 - [ ] Accounts screen control; pane pre-selection
 
 ## Technical Changes
@@ -130,6 +131,14 @@ Scoped: `tddy-accounts`, `tddy-agent-launch`, `tddy-daemon` — clippy `-D warni
 - `provider_account_defaults_acceptance` 4/4 and `default_route_tests` 3/3 fail first at node 1's `preset()` (their fixtures build real records) — green after #662; then at this node's `todo!()`.
 - `ProviderAccountDefaultsAcceptance.cy.tsx` 2/2 fail: no default-for control; no picker (node 2).
 
+## Green-phase record (2026-10-22)
+
+Scoped: `tddy-accounts` (all targets pass, incl. the 4 acceptance tests and a vault-store test), `tddy-agent-launch` (`default_route_tests` 3/3; 4 `tool_session_route_tests` still red — node 4's `todo!()`, not this node's), clippy `-D warnings` clean for `tddy-accounts`, `tddy-agent-launch`, `tddy-daemon`.
+
+- A locked vault refuses a start that names no account (`session_route_sources_with_default`); an absent or uninitialised vault has no default. Open question above is answered conservatively, pending the developer.
+- The default feeds the unsandboxed `claude-cli` and `opencode-cli` starts. Sandboxed starts, tool sessions and resume still read session-level choice only.
+- TODO(default-route): Accounts-screen control and pane pre-selection (Cypress) not yet implemented.
+
 ## Validation Results
 ### /validate-changes
 ### /validate-tests
@@ -146,7 +155,7 @@ Scoped: `tddy-accounts`, `tddy-agent-launch`, `tddy-daemon` — clippy `-D warni
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests (per-node gate waived by the developer on 2026-10-18 — "finish remaining waves without stopping"; review at stack hand-off)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)

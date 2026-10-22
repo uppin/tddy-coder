@@ -23,7 +23,7 @@ use crate::linking::{
     LinkedIdentity, META_SUBJECT,
 };
 use crate::provider_account::{
-    account_id_for, endpoints_for, preset, ProviderAccount, ProviderAccountDefaults,
+    account_id_for, defaults_of, endpoints_for, preset, ProviderAccount, ProviderAccountDefaults,
     ProviderAccountError, ProviderAccountStore, ProviderModelProbe, RouteSupport, WireProtocol,
 };
 use crate::store::{AccountStore, AccountsError};
@@ -242,9 +242,50 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         &self,
         request: Request<SetProviderAccountDefaultsRequest>,
     ) -> Result<Response<SetProviderAccountDefaultsResponse>, Status> {
-        let _ = (request, &self.defaults);
-        // TODO(default-route): implement
-        todo!()
+        let request = request.into_inner();
+        let defaults = self.defaults.as_deref().ok_or_else(|| {
+            Status::failed_precondition("this daemon keeps no per-harness provider defaults")
+        })?;
+        let matrix = self.route_support.as_deref().ok_or_else(|| {
+            Status::failed_precondition(
+                "this daemon cannot tell which harness runs on which provider account: \
+                 no route matrix is wired",
+            )
+        })?;
+        let wanted = AccountId::new(&request.account_id);
+        let account = self
+            .store
+            .list(&request.session_token)
+            .map_err(status_for)?
+            .iter()
+            .filter(|record| record.account == wanted)
+            .find_map(ProviderAccount::from_record)
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "no provider account {} is connected",
+                    request.account_id
+                ))
+            })?;
+        let protocols: Vec<&str> = account
+            .wire_protocols()
+            .into_iter()
+            .map(WireProtocol::as_str)
+            .collect();
+        for harness in &request.harnesses {
+            matrix
+                .harness_routable(harness)
+                .and_then(|()| matrix.supports(harness, account.preset.id, &protocols))
+                .map_err(Status::invalid_argument)?;
+        }
+        let changed = defaults
+            .set_provider_account_defaults(&request.session_token, &wanted, &request.harnesses)
+            .map_err(status_for)?;
+        Ok(Response::new(SetProviderAccountDefaultsResponse {
+            changed: changed
+                .iter()
+                .map(|record| summary_of(record, self.sync_status.as_deref()))
+                .collect(),
+        }))
     }
 
     async fn list_provider_account_models(
@@ -677,6 +718,7 @@ fn summary_of(
         preset: provider_account
             .as_ref()
             .map_or_else(String::new, |account| account.preset.id.to_string()),
+        default_for: defaults_of(record),
         wire_protocols: provider_account.map_or_else(Vec::new, |account| {
             account
                 .wire_protocols()

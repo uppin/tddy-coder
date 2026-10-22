@@ -176,9 +176,15 @@ impl SessionAccountAccess {
         &self,
         harness: &str,
     ) -> Result<Option<String>, SessionIdentityRefusal> {
-        let _ = harness;
-        // TODO(default-route): implement
-        todo!()
+        let held = match self.held_accounts() {
+            Ok(held) => held,
+            // Nothing to read a default from: no vault is wired, or the person has none yet.
+            Err(SessionIdentityRefusal::NoVaultsConfigured)
+            | Err(SessionIdentityRefusal::Vault(AccountsError::Uninitialized)) => return Ok(None),
+            Err(refusal) => return Err(refusal),
+        };
+        Ok(tddy_accounts::default_account_for(&held, harness)
+            .map(|account| account.as_str().to_string()))
     }
 
     /// The GitHub records the session's vault holds right now.

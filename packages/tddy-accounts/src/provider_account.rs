@@ -442,17 +442,29 @@ pub const META_DEFAULT_FOR: &str = "default_for";
 /// The provider account in `held` that is the default for `harness`, if one is.
 #[must_use]
 pub fn default_account_for(held: &[CredentialRecord], harness: &str) -> Option<AccountId> {
-    let _ = (held, harness);
-    // TODO(default-route): implement
-    todo!()
+    held.iter()
+        .find(|record| defaults_of(record).iter().any(|held| held == harness))
+        .map(|record| record.account.clone())
 }
 
 /// The harnesses `record` is the default for (empty for any other kind of account).
 #[must_use]
 pub fn defaults_of(record: &CredentialRecord) -> Vec<String> {
-    let _ = record;
-    // TODO(default-route): implement
-    todo!()
+    if ProviderAccount::from_record(record).is_none() {
+        return Vec::new();
+    }
+    record
+        .metadata
+        .get(META_DEFAULT_FOR)
+        .map(|listed| {
+            listed
+                .split(',')
+                .map(str::trim)
+                .filter(|harness| !harness.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Where a person's per-harness defaults are changed.
