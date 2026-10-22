@@ -40,6 +40,7 @@ lower layer knows about LiveKit.
 | **`wip_ref_name`** / **`publish_wip_ref`** / **`delete_wip_ref`** | `refs/tddy/session/{id}/wip`, the commit published under it, and its removal at close. |
 | **`ActivityDelta`** | One patch plus what a client needs to place it: `seq`, `prev_seq`, `base_commit`, `patch`, `scoped_paths`. |
 | **`SessionDeltaStore`** | The bounded ring of recent ticks and the `call_id → seq` index over it; `delta_for_call` narrows a tick to one call's files. |
+| **`RoomsHostedByThisDaemon`** (`session_delta_stores.rs`) | `tddy_session_activity::SessionDeltaStores` over the registry's rings: `NoRoomHere` for a session with no room here, else the ring's answer with the scope and lookup error translated (`UnknownCall`, `AgedOut { seq }`). The daemon installs it with `with_livekit_room_ports`. |
 | **`OpenedRoom`** | Room, url and server identity of a room that was opened: `tddy_daemon_extensions::OpenedRoom`, what `SessionReach::open_now` answers. |
 
 ## Measurement

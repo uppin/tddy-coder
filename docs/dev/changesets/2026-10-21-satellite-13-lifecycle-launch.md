@@ -20,9 +20,11 @@
   `tddy_daemon::livekit_host_ports::with_livekit_room_ports` wires the plugin's, for the runtime and for
   the `tddy-daemon` suites. `NoSessionDeltaStores` sits beside its port in `tddy-session-activity`.
   [Extension ports](../../packages/tddy-daemon-extensions/docs/extension-ports.md#wiring-the-session-host).
-- **Moves.** `RoomsHostedByThisDaemon` → `tddy-daemon/src/session_delta_stores.rs` (not the plugin:
-  that needs a `tddy-daemon-livekit` → `tddy-session-activity` edge, see
-  [the backlog entry](../todo/2026-10-21-session-delta-stores-adapter-lives-in-the-daemon.md)).
+- **Moves.** `RoomsHostedByThisDaemon` → `tddy_daemon_livekit::session_delta_stores`, beside the ring
+  it reads, over a new `tddy-daemon-livekit` → `tddy-session-activity` dependency (developer's
+  consent, 2026-10-21; acyclic: the activity service names no LiveKit crate). The lifecycle suite's
+  copy of it (`DeltaRingsOf`) is gone; it uses the plugin's. The backlog entry the first wrap wrote
+  for this, `2026-10-21-session-delta-stores-adapter-lives-in-the-daemon`, is resolved here and deleted.
   `session_type_is_facilitated_here` → `tddy_agent_launch::facilitation`; `snapshot_worktree*` and the
   deadline-bounded git helpers → `tddy_worktree_service::worktree_measurement`;
   `classify_start_session_peer_route` / `StartSessionPeerRoute` removed for the kernel's
@@ -31,7 +33,7 @@
   `test_util::daemon_rpc_roster`) rather than `tddy-livekit-testkit`, which cannot depend on the host.
 - **Tests.** `tddy-session-lifecycle/tests/host_without_integrations.rs` (nothing wired: start, local
   connect, resume, delete); `tddy-session-agents/tests/opened_room.rs`; the delta adapter's unit tests
-  (each scope, unknown call, aged out); `only_plugins_and_wiring_name_a_livekit_crate`. About 85
+  (`the_activity_service_reads_deltas_through_the_plugins_store` over each scope, an unknown call, an aged-out tick); `only_plugins_and_wiring_name_a_livekit_crate`. About 85
   fixtures moved to `PeerRouting::local_only`.
 
 ## Code issues

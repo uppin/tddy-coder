@@ -114,7 +114,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 37] = [
+    const ENDPOINT: [&str; 36] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -185,12 +185,6 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // method, no session state, built only by `account_linking::accounts_service_over` — and
         // it lives here because `tddy-accounts` deliberately does not depend on the harness crates.
         "provider_route_support.rs",
-        // The session room's delta ring as `tddy-session-activity`'s `SessionDeltaStores`. Wiring
-        // by the same criterion as `common_room_key_directory.rs` — no RPC method, no session
-        // state, built only by `runtime.rs` — and it can live nowhere else: the activity service
-        // names no LiveKit crate and the LiveKit crate names no activity service, so only the
-        // crate that depends on both can join them.
-        "session_delta_stores.rs",
         // The LiveKit plugin installed behind the session host's room ports: called by
         // `runtime.rs` and by the suites that stand a host up the way the daemon does, so the two
         // cannot wire the plugin differently.

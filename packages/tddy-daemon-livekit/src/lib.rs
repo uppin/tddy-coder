@@ -47,6 +47,7 @@ pub mod oauth_loopback_tunnel;
 pub mod peer_routing;
 pub mod room_tokens;
 pub mod session_admission_service;
+pub mod session_delta_stores;
 pub mod session_reach;
 pub mod session_room;
 pub mod session_rooms_port;

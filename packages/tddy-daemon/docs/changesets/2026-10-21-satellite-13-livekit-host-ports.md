@@ -5,8 +5,6 @@
 
 `livekit_host_ports::with_livekit_room_ports` installs the plugin's room ports on the host over the
 daemon's one `SessionRoomRegistry` and `SessionAdmissionRegistry`; `runtime::build` and the suites
-in `tests/` (`daemon_rpc_participant/mod.rs`) call it. `session_delta_stores::RoomsHostedByThisDaemon`
-is the activity service's delta port over the room rings (moved from lifecycle; its plugin move is
-`docs/dev/todo/2026-10-21-session-delta-stores-adapter-lives-in-the-daemon.md`). The routing is
+in `tests/` (`daemon_rpc_participant/mod.rs`) call it. The delta adapter it installs, `RoomsHostedByThisDaemon`, is the plugin's (`tddy_daemon_livekit::session_delta_stores`); it was moved out of lifecycle into the plugin. The routing is
 `tddy_daemon_livekit::peer_routing::peer_routing_over`. `tests/daemon_rpc_participant` holds
 `serve_daemon_rpc_participant`, moved from lifecycle's `test_util`.
