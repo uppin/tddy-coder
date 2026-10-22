@@ -22,11 +22,34 @@ through it. `symbol` and `range` anchors remain the vocabulary of v1 plans and p
 | Module | Responsibility |
 |---|---|
 | `plan.rs` | `Anchor::Item` / `Anchor::Items`, `ItemPath` (`crate::m::T::f`, `crate::m::<T as Trait>::f`), `Fingerprint`, the v1 and v2 headers, validation (a relative range must lie inside its item; `items` must be adjacent) |
-| `item_anchor.rs` | What every language shares: `module_path_of` (package name from the manifest with `-` read as `_`; `lib.rs`/`main.rs` are the crate root, `a.rs` and `a/mod.rs` are module `a`), relative to absolute ranges, the fingerprint check, `resolve_item_anchors`, `item_anchor_at`, `items_anchor`, `span_of`, and the `ItemResolver` trait |
+| `item_anchor.rs` | What every language shares: `module_path_of` (package name from the manifest with `-` read as `_`; `lib.rs`/`main.rs` are the crate root, `a.rs` and `a/mod.rs` are module `a`), relative to absolute ranges, the fingerprint check, `resolve_item_anchors`, `item_anchor_at`, `items_anchor`, `span_of`, and the `ItemResolver` trait. `ItemResolver::module_of(root, file)` is the prefix `items_anchor` gives a bare name; its default is `module_path_of`, and a language with no module system answers `[<file>]` |
 | `item_anchor/package_lookup.rs` | The nearest package that holds a path and the repo-root hint its refusal carries: `owning_package`, `repo_root_hint`, `collect_package_files` |
 | `backends/rust/item_path.rs` | The Rust resolver: walks rust-analyzer's `documentSymbol` outline segment by segment (modules, types, impl blocks keyed by self type and trait) |
-| `registry.rs` | Routes an item anchor to the backend that owns the file. A file no backend claims is `NoBackend`; a backend with no item resolver (`LanguageBackend::item_resolver` returns `None`) is `UnsupportedOp { op: "item anchors" }` |
-| `runner/entry_points.rs` | `open_run_resolving_anchors`, `item_anchors` (the `anchors` command), the static-check finding for item-anchored operations |
+| `registry.rs` | Routes an item anchor — and `module_of` — to the backend that owns the file. A file no backend claims is `NoBackend`; a backend with no item resolver (`LanguageBackend::item_resolver` returns `None`) is `UnsupportedOp { op: "item anchors" }`. `BackendRegistry::extend` appends another registry's backends after its own, so the first to claim a file keeps it |
+| `runner/entry_points.rs` | `open_run_resolving_anchors`, `item_anchors` (the `anchors` command), the static-check finding for item-anchored operations, `registry_with_installed` (the live registry, then `Options::installed`'s static backends) |
+
+## Languages beyond Rust
+
+`runner::Options::installed: Arc<SupportRegistry>` carries the supports a front end registered after
+the built-ins — an installed Zed extension's languages, which `tddy-zed-extensions` loads. This crate
+cannot load them itself: that crate implements `LanguageSupport`, so the dependency runs from it to
+here. `restructure_cli::run_with_installed(args, installed)` is `run` with that registry; `run` passes
+an empty one.
+
+`Options::is_served_without_a_server(file)` is true when no built-in claims `file` and the installed
+support that does launches no server. For such a file:
+
+- `item_anchors` (`anchors --items` / `--at`) builds its registry from `installed.backends_static(root)`
+  alone and needs no `LspClient`; `needs_lsp_client` is false for an `anchors` on it, so the cold CLI
+  starts no rust-analyzer.
+- A static `check` lowers, before `item_anchor_findings`, every operation whose item anchors all lie in
+  such files (`lower_server_less_item_anchors`): they are resolved through the installed backends, so a
+  stale fingerprint is `ItemChanged { item, file }` as in a deep check, and Cargo's prefix rule
+  (`refuse_a_foreign_prefix`) never sees them.
+- A deep `check` and an `anchors` over any other file route through `registry_with_installed`.
+
+`snapshot_resolving` and `apply` route through the built-ins only (`TODO(extension-language-server)`).
+
 
 ## Resolution
 

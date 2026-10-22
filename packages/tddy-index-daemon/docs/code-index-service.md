@@ -270,6 +270,17 @@ why this process owns its registry rather than sharing `tddy-daemon`'s. The tool
 loads a workspace with (`cargo`, `rustc`, `RUST_SRC_PATH`) is whatever this process's environment
 says; `tddy-daemon` sets it from `index_daemon.env`.
 
+**Installed extension languages.** `main.rs`'s `installed_languages()` loads every installed Zed
+extension's languages (`tddy_zed_extensions::InstalledExtensions::with_installed_extensions` over
+`ExtensionsDir::resolve()`), logs each grammar that does not load once, and hands the registry to
+`CodeIndexServiceImpl::with_supports`; an unreadable extension manifest stops the process at start.
+`WorkspaceIndex::with_supports` holds it and puts it in every run's `Options::installed`
+(`serve_check`, `anchor_covering`); `build_code_index_entry_with_supports(ports, supports)` is the
+same for a host that registers the service itself. An `Anchors` request on a file only a server-less
+installed language claims asks `client_for` nothing — no rust-analyzer is started for it. The
+allow-list is still Rust's alone (`TODO(extension-language-server)`): no installed language launches
+a server yet.
+
 A program that cannot be started reaches the caller as `LspError::ServerNotFound` (`NotFound`) or
 `LspError::Io` (any other spawn failure) — `FailedPrecondition` and `Internal` in [Refusals](#refusals) —
 not as `ServerExited`.
