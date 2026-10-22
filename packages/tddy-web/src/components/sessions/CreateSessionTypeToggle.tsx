@@ -67,6 +67,19 @@ export function CreateSessionTypeToggle({
       >
         OpenCode
       </button>
+      <button
+        type="button"
+        data-testid="create-session-type-muse-cli"
+        aria-pressed={sessionType === "muse-cli"}
+        onClick={() => setSessionType("muse-cli")}
+        className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
+          sessionType === "muse-cli"
+            ? "bg-primary text-primary-foreground border-primary"
+            : "bg-background text-foreground border-input hover:bg-muted"
+        }`}
+      >
+        Muse Code
+      </button>
     </div>
   );
 }

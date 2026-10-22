@@ -3,6 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
+**Complexity**: 4/5 — four crates (`tddy-agent-backend`, `tddy-agent-launch`, `tddy-session-files`, `tddy-daemon-kernel`) plus `tddy-web`; the Muse CLI argv and key variable are unconfirmed (no real `muse` installed)
 **Stack**: #provider-route 6/9. Base: `feature/provider-route/default-route`. PR: [#667](https://github.com/uppin/tddy-coder/pull/667).
 
 ## Initial Discovery
@@ -96,6 +97,9 @@ Launch acceptance with a fake `muse` binary recording argv/env; route unit tests
 - **Registry tripwire**: node 3's `the_registry_offers_claude_cursor_and_opencode_in_order` lists the registry exactly; registering `muse-cli` here must extend that expected list in the same commit (a shared registry, not node 3's behaviour changing).
 - **Muse CLI facts are unconfirmed** (`META_API_KEY`, `--model`, `--continue`): Muse Code is not installed here. `/green` begins by recording `muse --help` in discovery and adjusting these tests to what it says.
 - **TUI only**: `muse exec --json` / `muse serve` protocols are undocumented; a headless backend is a backlog entry.
+- **Start path not in scope (open, found at green)**: the registry gives a `muse-cli` descriptor its argv, route and models, but the daemon's start and resume dispatch only branches on the literal `claude-cli`, `cursor-cli` and `opencode-cli` (`svc_start_session_core.rs`, `svc_resume_session.rs`, `cli_branch_starts.rs`). A `muse-cli` start therefore has no terminal branch and would fall through to the LiveKit tool-session path. State B's "starts and resumes `muse`" needs either a registry-driven CLI start shared with `opencode_cli_spawn.rs` or a dedicated Muse start. The developer decides which; this node does not implement it.
+- **`MUSE_CLI` is `const`, not `static`**: the registry is an inline array of descriptor values, and a static's value cannot be copied into it.
+- **No `MuseCliConfig`**: `cli_harnesses.muse-cli.binary_path` (the generic per-session-type map in `daemon-kernel` config) already carries the binary path.
 
 ## Refactoring Needed
 ### From /validate-changes

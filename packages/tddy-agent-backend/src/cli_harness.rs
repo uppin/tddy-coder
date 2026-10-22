@@ -1,13 +1,15 @@
 //! CLI harnesses: the coding agents a session runs interactively in a terminal pane.
 //!
-//! One descriptor per session type — `claude-cli`, `cursor-cli`, `opencode-cli` — says everything
-//! the daemon needs that differs between them: which binary, the argument list for a start or a
-//! resume, which harness a provider route is resolved for, whose context files the session is
-//! served, where its model list comes from, and which environment variable names a generated
-//! configuration file. Code that used to match on `"claude-cli" | "cursor-cli"` asks the registry
-//! instead, so a further harness is one more descriptor rather than another arm in every match.
+//! One descriptor per session type — `claude-cli`, `cursor-cli`, `opencode-cli`, `muse-cli` — says
+//! everything the daemon needs that differs between them: which binary, the argument list for a
+//! start or a resume, which harness a provider route is resolved for, whose context files the
+//! session is served, where its model list comes from, and which environment variable names a
+//! generated configuration file. Code that used to match on `"claude-cli" | "cursor-cli"` asks the
+//! registry instead, so a further harness is one more descriptor rather than another arm in every
+//! match. A descriptor may live in a module of its own ([`crate::cli_harness_muse`]).
 
 use crate::backend::{claude_cli_models, cursor_cli_models, BackendModel, BackendModels};
+use crate::cli_harness_muse::MUSE_CLI;
 use crate::provider_route::Harness;
 
 /// What one start or resume of a CLI harness is launched with.
@@ -65,7 +67,7 @@ pub struct CliHarness {
 }
 
 /// The registry, in the order the session-type toggle offers the harnesses.
-static CLI_HARNESSES: [CliHarness; 3] = [
+static CLI_HARNESSES: [CliHarness; 4] = [
     CliHarness {
         session_type: "claude-cli",
         label: "Claude CLI",
@@ -99,6 +101,7 @@ static CLI_HARNESSES: [CliHarness; 3] = [
         argv: opencode_cli_argv,
         models: CliModelSource::ListedByBinary(&["models"]),
     },
+    MUSE_CLI,
 ];
 
 /// Every CLI harness, in the order the session-type toggle offers them.

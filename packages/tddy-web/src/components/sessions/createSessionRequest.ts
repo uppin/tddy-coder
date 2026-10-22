@@ -194,6 +194,31 @@ export function buildStartSessionRequest(
       codebaseDaemonInstanceId: "",
     };
   }
+  if (sessionType === "muse-cli") {
+    return {
+      ...commonParams,
+      toolPath: "",
+      agent: "",
+      recipe: "",
+      stackParent,
+      stackParentDaemonInstanceId,
+      stackNodeId,
+      sessionType: "muse-cli",
+      model,
+      // The account goes out as chosen; the daemon refuses one Muse Code cannot run on (not Meta).
+      providerAccountId,
+      providerBuiltIn,
+      permissionMode: "",
+      // The form offers Muse Code only its model, so the request clears what another session type
+      // left in the form: no first prompt, sandbox, managed codebase, specialized agents or index.
+      initialPrompt: "",
+      sandbox: false,
+      managedCodebase: false,
+      specializedAgents: [],
+      semanticIndex: false,
+      codebaseDaemonInstanceId: "",
+    };
+  }
   return {
     ...commonParams,
     toolPath: "",

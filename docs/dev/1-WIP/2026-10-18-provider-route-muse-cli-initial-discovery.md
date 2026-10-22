@@ -399,3 +399,8 @@ fn vault_for(&self, session_token: &str) -> Result<(String, Arc<SessionVault>), 
 - The accounts service's per-subject vault access (`vault_for`) is the place a `ConnectProviderAccount` write goes (`SessionVault::put` a `CredentialRecord` with `provider = "meta" | "fireworks" | …`, `secret = api key`, `metadata = base URLs per wire protocol + preset id`).
 - `.session.yaml` takes an additive optional field for the chosen account id.
 - The Accounts screen's add flow is device-link only; an API-key form is a new branch beside it.
+
+## Wave 2 record: Muse CLI facts (green, 2026-10-22)
+
+- `muse --help`, `muse exec --help`, the key variable and the resume flag could **not** be recorded here. The `muse` on `PATH` is a Superset shim (`/Users/mantasi/.superset/bin/muse`, about 1.4 KB) that prints `Superset: muse not found in PATH`. No Muse Code binary is installed on this machine.
+- Still unconfirmed, and pinned by tests or the draft contract as provisional: `META_API_KEY` (`MUSE_ROUTE_KEY_ENV`), `--model`, `--continue`, and the `.muse/**` context glob. Confirm each against a real `muse --help` before the Muse session is relied on.
