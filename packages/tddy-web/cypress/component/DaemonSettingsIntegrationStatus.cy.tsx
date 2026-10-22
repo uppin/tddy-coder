@@ -9,6 +9,7 @@ import {
   aDaemonFailingIntegrationStatus,
   aDaemonReportingAllOf,
   aDaemonReportingIntegrations,
+  aDaemonReportingOnceThenFailing,
   aDaemonSettingsScreen,
   aDaemonWithoutIntegrationStatus,
   aLiveKitIntegration,
@@ -98,7 +99,7 @@ describe("Daemon settings — LiveKit status", () => {
 });
 
 describe("Daemon settings — Telegram status", () => {
-  // PRD `docs/ft/daemon/1-WIP/PRD-2026-10-22-telegram-satellite-integration.md`, change 4.
+  // PRD `docs/ft/daemon/daemon-settings.md` § Integration status.
 
   it("shows Telegram's state beside LiveKit's", () => {
     aDaemonSettingsScreen(
@@ -139,6 +140,21 @@ describe("Daemon settings — Telegram status", () => {
     )
       .mount()
       .expectLiveKitStatus("Connected · 3m")
+      .expectNoTelegramStatus();
+  });
+
+  it("drops the Telegram line when a later status read fails", () => {
+    aDaemonSettingsScreen(
+      aDaemonReportingOnceThenFailing(
+        Code.Unavailable,
+        "daemon is restarting",
+        aTelegramIntegration({ state: IntegrationState.CONNECTED, secondsAgo: 12 }),
+      ),
+    )
+      .mount()
+      .expectTelegramStatus("Connected · 12s")
+      .typeLiveKitUrl("ws://10.0.0.5:7880")
+      .save()
       .expectNoTelegramStatus();
   });
 });

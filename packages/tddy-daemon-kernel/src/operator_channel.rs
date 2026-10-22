@@ -1,7 +1,7 @@
 //! The operator channel: the port a session's elicitations and attention notifications reach an
 //! operator's chat through, without the core learning which chat it is.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-22-telegram-satellite-integration.md`, changes 1 and 2.
+//! PRD `docs/ft/daemon/telegram-notifications.md`.
 //! Telegram is the one channel today; the daemon's wiring installs it, or [`NoOperatorChannel`] on
 //! a daemon with no `telegram:` block.
 //!
@@ -32,6 +32,13 @@ pub trait OperatorChannel: Send + Sync {
     /// The id the channel logs under and reports on the integration status board.
     fn id(&self) -> &'static str;
 
+    /// Whether the channel follows a session's presenter stream at all. A channel that does not is
+    /// never a reason to observe one: the observer runs for it only when the notification bus
+    /// wants the same events.
+    fn follows_presenter_events(&self) -> bool {
+        true
+    }
+
     /// Handle one presenter event of `session_id`, in stream order.
     ///
     /// An error ends that session's presenter observer, exactly as a failed stream read does: the
@@ -54,20 +61,19 @@ pub trait OperatorChannel: Send + Sync {
 /// The port as the session host and the notification bus hold it.
 pub type SharedOperatorChannel = Arc<dyn OperatorChannel>;
 
-/// The channel of a daemon with no chat surface: it wants no notification and accepts every
-/// presenter event, so a session's presenter observer goes on running for the notification bus.
+/// The channel of a daemon with no chat surface: it follows no presenter stream and wants no
+/// notification, yet accepts every presenter event it is handed, so a session's presenter observer
+/// goes on running for the notification bus.
 pub struct NoOperatorChannel;
-
-impl NoOperatorChannel {
-    /// [`NoOperatorChannel`]'s [`OperatorChannel::id`] — how a caller tells that no channel is
-    /// wired, and so that nothing but the notification bus would follow a presenter stream.
-    pub const ID: &'static str = "none";
-}
 
 #[async_trait]
 impl OperatorChannel for NoOperatorChannel {
     fn id(&self) -> &'static str {
-        Self::ID
+        "none"
+    }
+
+    fn follows_presenter_events(&self) -> bool {
+        false
     }
 
     async fn on_presenter_event(

@@ -10,7 +10,7 @@
 //!   implementations, and [`send_daemon_lifecycle_message`]. Split out of the daemon's
 //!   `telegram_notifier.rs`, whose *policy* half (`TelegramSessionWatcher`) stayed behind.
 //! - [`active_elicitation`] — the per-chat active-elicitation lease and its ordered queue.
-//! - [`elicitation`] — what counts as a presenter gate worth asking an operator about.
+//! - [`elicitation`] — the chat line a presenter gate asks its operator with.
 //! - [`telegram_tracked_session`] — the per-chat tracked-session gate and traffic logging.
 //! - [`telegram_github_link`] — the Telegram user ↔ GitHub login binding.
 //! - [`status`] — Telegram's entry on the daemon's integration status board, and the token

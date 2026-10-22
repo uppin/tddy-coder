@@ -1,7 +1,7 @@
 //! Telegram as the daemon's operator channel: the port the session host and the notification bus
 //! reach a chat through, with the interest and routing the separate bus subscriber used to keep.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-22-telegram-satellite-integration.md`, change 1. What a
+//! PRD `docs/ft/daemon/telegram-notifications.md`. What a
 //! chat receives does not change; only the seam it arrives through does. The exclusions are the
 //! ones PRD `docs/ft/daemon/session-notifications.md` FR7 set: `Activity` would turn every tool
 //! call into a message, and a presenter's elicitations already reach the chat through
@@ -60,6 +60,9 @@ fn a_presenter_attention_notification() -> SessionNotification {
     }
 }
 
+const SWITCHED_ON: bool = true;
+const SWITCHED_OFF: bool = false;
+
 fn a_telegram_block(enabled: bool) -> DaemonConfig {
     DaemonConfig {
         telegram: Some(TelegramConfig {
@@ -90,11 +93,11 @@ fn a_telegram_channel(
         Arc::new(StdMutex::new(ActiveElicitationCoordinator::new())),
         a_chat_tracking_the_session(),
     );
-    let hooks = Arc::new(TelegramDaemonHooks {
+    let hooks = Arc::new(TelegramDaemonHooks::new(
         config,
-        sender: Arc::clone(&sender) as Arc<dyn TelegramSender + Send + Sync>,
-        watcher: Arc::new(tokio::sync::Mutex::new(watcher)),
-    });
+        Arc::clone(&sender) as Arc<dyn TelegramSender + Send + Sync>,
+        Arc::new(tokio::sync::Mutex::new(watcher)),
+    ));
     (hooks, sender)
 }
 
@@ -105,7 +108,7 @@ fn a_telegram_channel(
 #[test]
 fn the_telegram_channel_wants_an_attention_alert_from_the_activity_status_path() {
     // Given
-    let (channel, _) = a_telegram_channel(a_telegram_block(true));
+    let (channel, _) = a_telegram_channel(a_telegram_block(SWITCHED_ON));
 
     // When
     let wants = channel.wants_notification(&an_attention_notification());
@@ -115,24 +118,33 @@ fn the_telegram_channel_wants_an_attention_alert_from_the_activity_status_path()
 }
 
 #[test]
-fn the_telegram_channel_declines_activity_and_presenter_notifications() {
+fn the_telegram_channel_declines_activity_notifications() {
     // Given
-    let (channel, _) = a_telegram_channel(a_telegram_block(true));
+    let (channel, _) = a_telegram_channel(a_telegram_block(SWITCHED_ON));
 
     // When
-    let wanted = (
-        channel.wants_notification(&an_activity_notification()),
-        channel.wants_notification(&a_presenter_attention_notification()),
-    );
+    let wants = channel.wants_notification(&an_activity_notification());
 
-    // Then
-    assert_eq!(wanted, (false, false));
+    // Then — every tool call would become a message
+    assert!(!wants);
+}
+
+#[test]
+fn the_telegram_channel_declines_presenter_notifications() {
+    // Given
+    let (channel, _) = a_telegram_channel(a_telegram_block(SWITCHED_ON));
+
+    // When
+    let wants = channel.wants_notification(&a_presenter_attention_notification());
+
+    // Then — the elicitation already reached the chat through `on_presenter_event`
+    assert!(!wants);
 }
 
 #[test]
 fn a_switched_off_telegram_channel_wants_nothing() {
     // Given
-    let (channel, _) = a_telegram_channel(a_telegram_block(false));
+    let (channel, _) = a_telegram_channel(a_telegram_block(SWITCHED_OFF));
 
     // When
     let wants = channel.wants_notification(&an_attention_notification());
@@ -144,7 +156,7 @@ fn a_switched_off_telegram_channel_wants_nothing() {
 #[test]
 fn the_telegram_channel_is_identified_as_telegram() {
     // Given
-    let (channel, _) = a_telegram_channel(a_telegram_block(true));
+    let (channel, _) = a_telegram_channel(a_telegram_block(SWITCHED_ON));
 
     // When / Then — the id it is logged under and reports on the status board
     assert_eq!(channel.id(), "telegram");
@@ -157,7 +169,7 @@ fn the_telegram_channel_is_identified_as_telegram() {
 #[tokio::test]
 async fn an_attention_alert_reaches_the_tracked_chat_through_the_channel() {
     // Given
-    let (channel, sender) = a_telegram_channel(a_telegram_block(true));
+    let (channel, sender) = a_telegram_channel(a_telegram_block(SWITCHED_ON));
 
     // When
     channel
@@ -175,7 +187,7 @@ async fn an_attention_alert_reaches_the_tracked_chat_through_the_channel() {
 #[tokio::test]
 async fn an_unchanged_alert_reaches_the_chat_once() {
     // Given
-    let (channel, sender) = a_telegram_channel(a_telegram_block(true));
+    let (channel, sender) = a_telegram_channel(a_telegram_block(SWITCHED_ON));
 
     // When — the status is re-reported without changing
     for _ in 0..2 {
@@ -186,5 +198,8 @@ async fn an_unchanged_alert_reaches_the_chat_once() {
     }
 
     // Then
-    assert_eq!(sender.recorded().len(), 1);
+    assert_eq!(
+        sender.recorded(),
+        vec![(TRACKING_CHAT, an_attention_notification().text)]
+    );
 }

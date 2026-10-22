@@ -12,7 +12,7 @@ When **`telegram.enabled`** is true, a non-empty **`bot_token`** is set, and the
 
 ## Telegram user ↔ GitHub identity
 
-The library module **`tddy_telegram::telegram_github_link`** (re-exported as **`tddy_session_lifecycle::telegram_github_link`**) binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves **`daemon.yaml`** **`users:`** the same way as web OAuth flows.
+The library module **`tddy_telegram::telegram_github_link`** binds a **Telegram user id** to a **GitHub login** (JSON store on disk, HMAC-signed OAuth **`state`**, stub OAuth exchange for tests). **`resolved_os_user_for_telegram_workflow`** resolves **`daemon.yaml`** **`users:`** the same way as web OAuth flows.
 
 **`TelegramSessionControlHarness::with_telegram_github_link`** accepts a mapping file path. When that path is set, **`handle_start_workflow`** requires a stored GitHub login for the Telegram **`user_id`** before it creates a session directory. If the user is not linked, the handler fails with a message that instructs the operator to complete GitHub linking (including reference to **`/link-github`** in the error text).
 

@@ -1,7 +1,7 @@
 //! The operator channel: the port a session's elicitations and attention notifications reach an
 //! operator's chat through, and the core's one rule for "this presenter mode waits on a human".
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-22-telegram-satellite-integration.md`, changes 1 and 2.
+//! PRD `docs/ft/daemon/telegram-notifications.md`.
 //! The rule is the core's because it must hold on a daemon with no channel at all: it is what turns
 //! a workflow session's drawer dot yellow.
 
@@ -141,6 +141,31 @@ fn no_operator_channel_wants_no_notification() {
 
     // Then
     assert!(!wants);
+}
+
+#[test]
+fn no_operator_channel_follows_no_presenter_stream() {
+    // Given
+    let channel: SharedOperatorChannel = Arc::new(NoOperatorChannel);
+
+    // When
+    let follows = channel.follows_presenter_events();
+
+    // Then — a session's presenter observer runs for it only when a notification bus wants the
+    // same events
+    assert!(!follows);
+}
+
+#[test]
+fn a_chat_channel_follows_presenter_streams_unless_it_says_otherwise() {
+    // Given
+    let channel: SharedOperatorChannel = Arc::new(ARecordingChannel::default());
+
+    // When
+    let follows = channel.follows_presenter_events();
+
+    // Then
+    assert!(follows);
 }
 
 #[tokio::test]

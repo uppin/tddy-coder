@@ -1,5 +1,5 @@
 //! Unit: `TelegramDaemonHooks` as the daemon's operator channel — Telegram's interest in the
-//! notification bus, and the dedupe and routing it keeps from today's `TelegramSessionWatcher`.
+//! notification bus, the dedupe it keeps, and the routing it reads off `TelegramSessionWatcher`.
 //!
 //! PRD: docs/ft/daemon/session-notifications.md (FR2, FR7).
 //!
@@ -11,6 +11,7 @@
 
 use std::sync::{Arc, Mutex as StdMutex};
 
+use async_trait::async_trait;
 use tddy_daemon_kernel::config::{DaemonConfig, TelegramConfig};
 use tddy_daemon_kernel::operator_channel::SharedOperatorChannel;
 use tddy_session_lifecycle::session_notifications::{
@@ -19,7 +20,9 @@ use tddy_session_lifecycle::session_notifications::{
 use tddy_telegram::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
-use tddy_telegram_control::telegram_notifier::{InMemoryTelegramSender, TelegramSessionWatcher};
+use tddy_telegram_control::telegram_notifier::{
+    InMemoryTelegramSender, InlineKeyboardRows, TelegramSender, TelegramSessionWatcher,
+};
 use tddy_telegram_control::telegram_session_subscriber::TelegramDaemonHooks;
 
 const SESSION_ID: &str = "01900000-0000-7000-8000-AABB00000001";
@@ -118,12 +121,58 @@ fn two_chats_tracking_different_sessions() -> SharedTelegramTrackedSessionCoordi
     tracked
 }
 
+/// The tracking map after a thread panicked holding it: [`TelegramSessionWatcher`] can no longer
+/// say who claimed a session.
+fn an_unreadable_tracking_map() -> SharedTelegramTrackedSessionCoordinator {
+    let tracked = a_chat_tracking_the_session();
+    let poisoner = Arc::clone(&tracked);
+    let _ = std::thread::spawn(move || {
+        let _held = poisoner.lock().unwrap();
+        panic!("a thread dies holding the tracking map");
+    })
+    .join();
+    tracked
+}
+
+/// A Bot API that refuses every message.
+struct AnUnreachableApi;
+
+#[async_trait]
+impl TelegramSender for AnUnreachableApi {
+    async fn send_message(&self, _chat_id: i64, _text: &str) -> anyhow::Result<()> {
+        anyhow::bail!("connection refused")
+    }
+
+    async fn send_message_with_keyboard(
+        &self,
+        _chat_id: i64,
+        _text: &str,
+        _inline_keyboard: InlineKeyboardRows,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("connection refused")
+    }
+}
+
 /// Telegram's channel over an in-memory sender, so a test reads what would have been sent.
 fn a_telegram_channel(
     config: DaemonConfig,
     tracked: SharedTelegramTrackedSessionCoordinator,
 ) -> (SharedOperatorChannel, Arc<InMemoryTelegramSender>) {
     let sender = Arc::new(InMemoryTelegramSender::new());
+    let channel = a_telegram_channel_over(
+        config,
+        tracked,
+        Arc::clone(&sender) as Arc<dyn TelegramSender + Send + Sync>,
+    );
+    (channel, sender)
+}
+
+/// Telegram's channel over `sender`.
+fn a_telegram_channel_over(
+    config: DaemonConfig,
+    tracked: SharedTelegramTrackedSessionCoordinator,
+    sender: Arc<dyn TelegramSender + Send + Sync>,
+) -> SharedOperatorChannel {
     let watcher = TelegramSessionWatcher::with_elicitation_select_options_coordinator_and_tracked(
         Arc::new(StdMutex::new(std::collections::HashMap::new())),
         Arc::new(StdMutex::new(
@@ -131,13 +180,11 @@ fn a_telegram_channel(
         )),
         tracked,
     );
-    let hooks = Arc::new(TelegramDaemonHooks {
+    Arc::new(TelegramDaemonHooks::new(
         config,
-        sender: Arc::clone(&sender)
-            as Arc<dyn tddy_telegram_control::telegram_notifier::TelegramSender + Send + Sync>,
-        watcher: Arc::new(tokio::sync::Mutex::new(watcher)),
-    });
-    (hooks, sender)
+        sender,
+        Arc::new(tokio::sync::Mutex::new(watcher)),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -393,4 +440,47 @@ async fn keeps_two_sessions_dedupe_state_apart() {
 
     // Then — one message each; a shared dedupe key would have swallowed the second
     assert_eq!(sender.recorded().len(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// When delivery cannot happen
+// ---------------------------------------------------------------------------
+
+/// "Nobody claimed it" and "cannot tell who claimed it" are different answers: broadcasting on the
+/// second would announce a session one operator claimed to every configured chat.
+#[tokio::test]
+async fn sends_nothing_when_the_tracking_map_cannot_be_read() {
+    // Given
+    let (channel, sender) = a_telegram_channel(
+        a_config_broadcasting_to_one_chat(),
+        an_unreadable_tracking_map(),
+    );
+
+    // When
+    channel
+        .on_notification(&an_attention_notification())
+        .await
+        .unwrap();
+
+    // Then
+    assert_eq!(sender.recorded(), Vec::<(i64, String)>::new());
+}
+
+#[tokio::test]
+async fn reports_how_many_chats_a_failed_delivery_missed() {
+    // Given
+    let channel = a_telegram_channel_over(
+        a_config_broadcasting_to_two_chats(),
+        no_chat_tracks_the_session(),
+        Arc::new(AnUnreachableApi),
+    );
+
+    // When
+    let outcome = channel.on_notification(&an_attention_notification()).await;
+
+    // Then — the count, and not the transport's error text, which is already logged
+    assert_eq!(
+        outcome.map_err(|e| e.to_string()),
+        Err("telegram send failed for 2 of 2 chat(s)".to_string())
+    );
 }

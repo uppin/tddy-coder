@@ -60,6 +60,7 @@ mod elicitation;
 mod pickers;
 mod session_start;
 mod types;
+mod workflow_launch;
 mod workflow_spawn;
 
 pub use callbacks::*;

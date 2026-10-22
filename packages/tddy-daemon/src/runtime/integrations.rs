@@ -142,18 +142,7 @@ impl Telegram {
         registries: &Registries,
         plugins: &Plugins,
     ) -> Self {
-        let tddy_data_dir = &keys.tddy_data_dir;
-        let shared_claude_cli_manager = &registries.shared_claude_cli_manager;
-        let shared_session_rooms = &registries.shared_session_rooms;
-        let telegram = build_telegram(
-            config,
-            tddy_data_dir,
-            options,
-            shared_claude_cli_manager,
-            shared_session_rooms,
-            &plugins.terminal_exposure,
-            &plugins.telegram_status,
-        );
+        let telegram = build_telegram(config, &keys.tddy_data_dir, options, registries, plugins);
         let telegram_hooks = telegram.hooks;
         let lifecycle_telegram = telegram_hooks.as_ref().map(|h| {
             (

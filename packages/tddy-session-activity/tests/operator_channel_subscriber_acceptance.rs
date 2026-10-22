@@ -1,7 +1,7 @@
 //! An operator channel on the session-notification bus, and the drawer indicator on a daemon that
 //! has no channel at all.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-22-telegram-satellite-integration.md`, change 1. The
+//! PRD `docs/ft/daemon/telegram-notifications.md`. The
 //! channel decides what it wants; the bus asks before it delivers, so a channel that sends over a
 //! network is never handed what it would only discard.
 

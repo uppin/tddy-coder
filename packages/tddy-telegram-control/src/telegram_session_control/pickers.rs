@@ -1,5 +1,5 @@
 //! The project, branch-intent, branch, branch-conflict and agent pickers, ending in the
-//! workflow spawn the agent pick triggers.
+//! workflow spawn the agent pick triggers (`workflow_launch`).
 
 use super::*;
 
@@ -613,94 +613,5 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             Some(agent.id.as_str()),
         )
         .await
-    }
-
-    async fn spawn_telegram_workflow(
-        &self,
-        chat_id: i64,
-        session_id: &str,
-        project_id: &str,
-        agent: Option<&str>,
-    ) -> anyhow::Result<()> {
-        let deps = self
-            .workflow_spawn
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("workflow spawn not configured"))?
-            .clone();
-        let presenter_hooks = deps.telegram_hooks.clone();
-        let child_grpc_registry = deps.child_grpc_by_session.clone();
-        let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
-        let recipe = read_recipe_from_changeset(&session_dir)?;
-        let projects_dir = projects_dir_for_telegram_workflow_spawn(&deps)?;
-        let project = project_storage::find_project(&projects_dir, project_id)?
-            .ok_or_else(|| anyhow::anyhow!("project not found"))?;
-        let repo_path = Path::new(&project.main_repo_path);
-
-        if let Ok(meta) = read_session_metadata(&session_dir) {
-            if let Some(ref parent_id) = meta.previous_session_id {
-                let stored_explicit = read_changeset(&session_dir)
-                    .ok()
-                    .and_then(|cs| cs.worktree_integration_base_ref);
-                let explicit_owned: Option<String> = stored_explicit
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty());
-                log::info!(
-                    target: "tddy_daemon::telegram_session_control",
-                    "spawn_telegram_workflow: chain child parent_session_id={} explicit_worktree_integration_base_ref={:?}",
-                    parent_id,
-                    explicit_owned.as_deref()
-                );
-                let sessions_base = self.sessions_base.clone();
-                let parent_id = parent_id.clone();
-                let session_dir = session_dir.clone();
-                let repo_path = repo_path.to_path_buf();
-                tokio::task::spawn_blocking(move || {
-                    merge_chain_integration_base_with_explicit_operator_overrides(
-                        &sessions_base,
-                        parent_id.as_str(),
-                        &session_dir,
-                        &repo_path,
-                        explicit_owned.as_deref(),
-                    )
-                })
-                .await
-                .map_err(|e| anyhow::anyhow!("chain merge spawn_blocking join: {e}"))??;
-            }
-        }
-
-        let result = deps
-            .spawn_session(project_id, agent, recipe.as_deref(), session_id)
-            .await?;
-        {
-            let mut g = child_grpc_registry
-                .lock()
-                .map_err(|e| anyhow::anyhow!("grpc registry lock: {e}"))?;
-            g.insert(result.session_id.clone(), result.grpc_port);
-        }
-        if let Some(ref hooks) = presenter_hooks {
-            // TODO(session-notifications): publish this session's presenter events onto the
-            // notification bus too, so a Telegram-started workflow session raises the same drawer
-            // indicator a web-started one does. It needs the bus (and the sessions base its label
-            // is read from) on `TelegramWorkflowSpawn`, which every inbound-control harness
-            // constructs by hand; adding it is a change of its own. The Telegram surface for these
-            // sessions is unaffected — it never went through the bus.
-            tddy_session_lifecycle::presenter_observer_task::spawn_presenter_observer_task(
-                Arc::clone(hooks) as SharedOperatorChannel,
-                None,
-                &result.session_id,
-                result.grpc_port,
-            );
-        }
-        let sid_short = {
-            let s = result.session_id.as_str();
-            &s[..8.min(s.len())]
-        };
-        let done = format!(
-            "Workflow started (session {sid_short}…). gRPC {} LiveKit room `{}`.",
-            result.grpc_port, result.livekit_room
-        );
-        self.sender.send_message(chat_id, &done).await?;
-        self.notify_account_identity_unavailable(chat_id, &result.session_id, &project)
-            .await
     }
 }

@@ -1,3 +1,8 @@
+//! One thing that happened in one session, as the session-notification bus carries it.
+//!
+//! The kernel's rather than the bus's (`tddy_session_activity::session_notifications`, which
+//! re-exports these types) so the operator-channel port can name it.
+
 /// Whether a notification asks the operator for something, or merely reports progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionNotificationKind {
@@ -9,9 +14,10 @@ pub enum SessionNotificationKind {
 
 /// Which of the daemon's inbound paths raised a notification.
 ///
-/// Subscribers filter on this: the Telegram subscriber takes the activity-status path only,
-/// because the presenter's elicitations already reach Telegram through `telegram_notifier` with
-/// their inline keyboards attached.
+/// Subscribers filter on this: Telegram's operator channel takes the activity-status path only,
+/// because the presenter's elicitations already reach it through
+/// [`OperatorChannel::on_presenter_event`](crate::operator_channel::OperatorChannel::on_presenter_event)
+/// with their inline keyboards attached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionNotificationSource {
     /// `ReportSessionStatus` — the per-worktree claude-cli / cursor-cli hooks.

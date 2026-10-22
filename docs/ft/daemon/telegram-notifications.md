@@ -48,6 +48,16 @@ The **`tddy_telegram_control::telegram_notifier`** module provides:
 
 Secrets: full bot tokens do not belong in log lines; helpers return **masked** representations suitable for diagnostics.
 
+## Integration status
+
+Telegram reports its live state on the daemon's integration status board, shown on the daemon
+settings screen beside LiveKit's: **Off** (no block, or switched off), **Missing: bot_token**
+(enabled with no token — the daemon starts no bot), **Connecting…**, **Connected** (the bot was
+recognised by Telegram, or a message was delivered) or **Unreachable** with the last error (the
+identity check or a send failed). A misconfigured or revoked bot is therefore visible to an operator
+rather than only in logs. No reported error contains the bot token. See
+[Daemon settings § Integration status](daemon-settings.md#integration-status).
+
 ## Integration surface
 
 When the daemon spawns a **`tddy-coder --daemon`** session, it connects to the child’s gRPC **`PresenterObserver.ObserveEvents`** stream (see **`tddy-service`** proto) and maps **`ServerMessage`** events to Telegram text (state transitions, workflow completion, goal started, backend selected, and presenter **`ModeChanged`** when the mode requires user input or approval—see **Presenter stream: elicitation** below). Daemon startup and graceful shutdown also send short lifecycle messages when Telegram is enabled.
@@ -102,13 +112,21 @@ No PTY/ANSI scraping is involved.
 
 ### Implementation surface
 
-**`TelegramNotificationSubscriber`** (`tddy_telegram_control::telegram_notification_subscriber::TelegramNotificationSubscriber`) — one
-subscriber on the daemon's **session-notification bus**, which
-**`tddy_session_activity`'s `report_session_status`** publishes to after `update_activity_status`
-succeeds. It takes only `AttentionRequired` notifications from the activity-status path (declining
-`Activity`, so no new Telegram traffic, and declining presenter-sourced events, which keep their own
-keyboard-bearing surface below). It holds a per-session record of the last line delivered to detect
-transitions, and resolves recipients tracked-first: `chats_tracking_session(session_id)` on the
+Telegram reaches the daemon's core as its **operator channel**: one port
+(`tddy_daemon_kernel::operator_channel::OperatorChannel`) through which a session's presenter events
+(elicitations, state lines) and its attention-worthy notifications reach a chat. Telegram's
+implementation is **`TelegramDaemonHooks`** (`tddy_telegram_control::telegram_session_subscriber`);
+the daemon installs it on the session host and registers it on the **session-notification bus**,
+which **`tddy_session_activity`'s `report_session_status`** publishes to after
+`update_activity_status` succeeds. A daemon without Telegram installs the port's null object, and
+nothing else changes for it: the drawer indicator still lights on every daemon, because the rule for
+"this presenter mode waits on a human" is the core's, not Telegram's.
+
+From the bus, the channel takes only `AttentionRequired` notifications from the activity-status path
+(declining `Activity`, so no new Telegram traffic, and declining presenter-sourced events, which reach
+the channel directly with their keyboard-bearing surface below — so nothing is sent twice). It holds a
+per-session record of the last line delivered so an unchanged status reaches a chat once, and
+resolves recipients tracked-first: `chats_tracking_session(session_id)` on the
 shared tracked coordinator when it reports chats, otherwise the enabled `telegram.chat_ids`
 broadcast list. When that lookup cannot be read at all it sends **nothing** rather than falling back
 to the broadcast, so an unreadable tracking map cannot turn a targeted alert into an announcement.
@@ -119,7 +137,7 @@ per-session indicators — are described in
 
 ## Presenter stream: elicitation (`ModeChanged`)
 
-With Telegram enabled, **`TelegramSessionWatcher::on_server_message`** classifies **`ServerMessage`** **`ModeChanged`** payloads from **`PresenterObserver.ObserveEvents`**. Modes that require a human gate—document review, markdown viewer, feature input, clarification (**`Select`** / **`MultiSelect`**), and free-text **`TextInput`**—produce Telegram traffic per qualifying event. Autonomous modes **`Running`** and **`Done`** do not produce elicitation Telegram lines. Identical **`ModeChanged`** signatures per session id dedupe repeat sends so stream replays do not flood configured chats. Module **`tddy_telegram::elicitation`** (re-exported as **`tddy_session_lifecycle::elicitation`**) centralizes classification, dedupe key material, and line templates; **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)** records the public hooks.
+With Telegram enabled, **`TelegramSessionWatcher::on_server_message`** classifies **`ServerMessage`** **`ModeChanged`** payloads from **`PresenterObserver.ObserveEvents`**. Modes that require a human gate—document review, markdown viewer, feature input, clarification (**`Select`** / **`MultiSelect`**), and free-text **`TextInput`**—produce Telegram traffic per qualifying event. Autonomous modes **`Running`** and **`Done`** do not produce elicitation Telegram lines. Identical **`ModeChanged`** signatures per session id dedupe repeat sends so stream replays do not flood configured chats. Which modes qualify is the core's rule (**`awaits_operator`**), the same one that turns a session's drawer dot yellow, so Telegram and the drawer never disagree about a gate. Module **`tddy_telegram::elicitation`** holds the dedupe key material and line templates; **[telegram-notifier.md](../../../packages/tddy-telegram/docs/telegram-notifier.md)** records the public hooks.
 
 ### Document review and markdown viewer
 
@@ -167,7 +185,7 @@ Callers that read **`.session.yaml`** (or equivalent) on an interval can still u
 
 ## Tests
 
-Automated coverage includes unit tests for labels, terminal-status classification, token masking, **telegram-tracked session** coordinator contracts, and integration tests with a mock sender (no live Telegram network in CI), including **`telegram_tracked_session_acceptance`** for gate, **Enter** replay, and log-shape assertions alongside existing concurrent-elicitation and multi-select suites.
+Automated coverage includes unit tests for labels, terminal-status classification, token masking, the integration states and token redaction, the operator channel's interest filter and one-send-per-alert dedupe, **telegram-tracked session** coordinator contracts, and integration tests with a mock sender (no live Telegram network in CI), including **`telegram_tracked_session_acceptance`** for gate, **Enter** replay, and log-shape assertions alongside existing concurrent-elicitation and multi-select suites.
 
 ## Telegram session control (library harness)
 

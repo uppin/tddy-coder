@@ -16,9 +16,11 @@ Extracted from `tddy-daemon` by `#unbundle` node 7; the catalog modules came fro
 cargo test -p tddy-session-activity
 ```
 
-That runs 45 tests across 2,541 production lines, and every one is the session catalog's (40 unit
-tests in its modules, and `tests/worktree_removal_eligibility.rs`). ⚠ **The activity service itself
-has no test of its own.** Every assertion about it is made from `packages/tddy-daemon/tests/` — the
+That runs 63 tests: the session catalog's (unit tests in its modules, and
+`tests/worktree_removal_eligibility.rs`), the presenter observer's run condition and per-event
+delivery (`presenter_observer_task.rs`), and the operator-channel bus adapter
+(`tests/operator_channel_subscriber_acceptance.rs`). ⚠ **The activity service itself has no test of
+its own.** Every assertion about it is made from `packages/tddy-daemon/tests/` — the
 notification, activity-delta and ACP-replay suites stayed there because each is pinned by
 `ConnectionServiceImpl` or `test_util::{test_service, TEST_TOKEN}`. That is a recorded gap, not a
 design:
@@ -34,6 +36,10 @@ carries resolvers rather than values.
 Peer routing on `daemon_instance_id` is the daemon's (`PeerRoutedActivity`), as is a session's
 display label, which is read from the enrichment that serves `ListSessions` — family C, which stays
 in the daemon.
+
+An operator's chat is reached only through the kernel's `OperatorChannel` port: the presenter observer
+hands it a workflow session's presenter events, and `OperatorChannelSubscriber` registers it on the
+notification bus. The crate names no Telegram crate.
 
 A session's first activity delta is tick **1**, not 0, so it is distinguishable from the wire's
 `NO_TICK`. The rule and its compile-time invariant live in `tddy_service::session_activity`, beside
@@ -51,7 +57,7 @@ LiveKit-routed sessions, at the same coordinate.
 - [inactive-session-activities.md](../../docs/ft/web/inactive-session-activities.md) — replay for a session that is not running
 - [acp-replay-lazy-tool-bodies.md](../../docs/ft/coder/acp-replay-lazy-tool-bodies.md) — why replay frames omit tool bodies
 - [session-worktree-sync.md](../../docs/ft/daemon/session-worktree-sync.md) — what the delta ticks feed
-- [telegram-notifications.md](../../docs/ft/daemon/telegram-notifications.md) — the other subscriber
+- [telegram-notifications.md](../../docs/ft/daemon/telegram-notifications.md) — the operator channel registered on the bus
 
 ### Technical Implementation (How)
 - [activity-service.md](./docs/activity-service.md) — the eight methods, the ports, the tick rule and the routing split
@@ -61,9 +67,8 @@ LiveKit-routed sessions, at the same coordinate.
 
 ## Related Packages
 - [tddy-service](../tddy-service/docs/) — owns `activity.proto`, `types.proto` and the tick constants
-- [tddy-daemon](../tddy-daemon/docs/connection-service.md) — the host: its ports, its peer routing, its Telegram subscriber and the session label
+- [tddy-daemon](../tddy-daemon/docs/connection-service.md) — the host: its ports, its peer routing, its operator channel and the session label
 - [tddy-daemon-livekit](../tddy-daemon-livekit/docs/session-room.md) — the session room whose poll loop fills the delta ring
 - [tddy-session-sync](../tddy-session-sync/docs/) — the delta consumer, and the reason the tick rule lives in `tddy-service`
 - [tddy-coder](../tddy-coder/docs/) — the second server of families M and N
-- [tddy-daemon-kernel](../tddy-daemon-kernel/docs/) — publishes `AgentActivityHub` and `now_unix_ms`
-- [tddy-telegram](../tddy-telegram/docs/telegram-notifier.md) — the elicitation classifier the bus reads
+- [tddy-daemon-kernel](../tddy-daemon-kernel/docs/daemon-kernel.md#ports) — publishes `AgentActivityHub`, `now_unix_ms`, the `OperatorChannel` port, the `awaits_operator` rule and the `SessionNotification` types

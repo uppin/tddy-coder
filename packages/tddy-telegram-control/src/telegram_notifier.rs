@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tddy_daemon_kernel::operator_channel::awaits_operator;
 use tddy_service::gen::server_message::Event;
 use tddy_service::gen::{ModeChanged, ServerMessage};
-use tddy_session_activity::session_notifications::LastDeliveredPerSession;
 
 use crate::telegram_session_control::{chunk_telegram_text, CB_ENTER};
 use tddy_session_lifecycle::config::DaemonConfig;
@@ -112,9 +111,6 @@ pub struct TelegramSessionWatcher {
     last_presenter_elicitation: HashMap<String, bool>,
     /// Latest user-elicitation [`ModeChanged`] per session — used to re-send the prompt with a primary keyboard when a queued session is promoted.
     last_elicitation_mc: HashMap<String, ModeChanged>,
-    /// Last bus-notification text sent per session: the bus re-publishes an unchanged status so an
-    /// indicator stays alive, and a chat must not receive the repeats.
-    last_alerted: LastDeliveredPerSession,
 }
 
 impl TelegramSessionWatcher {
@@ -195,7 +191,6 @@ impl TelegramSessionWatcher {
             telegram_tracked,
             last_presenter_elicitation: HashMap::new(),
             last_elicitation_mc: HashMap::new(),
-            last_alerted: LastDeliveredPerSession::default(),
         }
     }
 
@@ -213,12 +208,6 @@ impl TelegramSessionWatcher {
                 );
             }
         }
-    }
-
-    /// Records `text` as the last bus notification sent for `session_id`, and answers whether it
-    /// differs from the one before it — i.e. whether it is worth sending.
-    pub fn alert_is_new(&self, session_id: &str, text: &str) -> bool {
-        self.last_alerted.record_and_is_new(session_id, text)
     }
 
     /// The chats that have Enter-tracked `session_id`, or `None` when that cannot be determined.

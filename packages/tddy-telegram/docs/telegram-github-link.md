@@ -1,8 +1,7 @@
 # Telegram ↔ GitHub identity (`telegram_github_link`)
 
 Technical reference for **`tddy_telegram::telegram_github_link`**, moved out of `tddy-daemon` by
-`#unbundle` node 2. **`tddy-session-lifecycle`** re-exports it, so
-**`tddy_session_lifecycle::telegram_github_link`** also resolves. Its acceptance suite lives with the Telegram control plane that drives it, at
+`#unbundle` node 2. It is reached at that path only: no session crate re-exports it. Its acceptance suite lives with the Telegram control plane that drives it, at
 **`packages/tddy-telegram-control/tests/telegram_github_link.rs`**.
 
 ## Purpose

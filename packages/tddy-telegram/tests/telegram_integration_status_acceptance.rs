@@ -1,7 +1,7 @@
 //! Telegram on the integration status board: what the daemon's `telegram:` block and the bot's
 //! own traffic say about it, as `GetIntegrationStatus` reports it.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-22-telegram-satellite-integration.md`, change 4. Every
+//! PRD `docs/ft/daemon/daemon-settings.md` § Integration status. Every
 //! failure path is also checked for the bot token: Telegram's API URL embeds it, so an error text
 //! carried verbatim onto the board would hand it to anyone who can open the settings screen.
 
@@ -12,7 +12,8 @@ use pretty_assertions::assert_eq;
 use tddy_daemon_extensions::{IntegrationReporter, IntegrationState, IntegrationStatusBoard};
 use tddy_daemon_kernel::config::TelegramConfig;
 use tddy_telegram::status::{
-    configured_state, report_bot_identity, BotIdentity, ReportingSender, TELEGRAM_INTEGRATION_ID,
+    configured_state, redact_bot_token, report_bot_identity, BotIdentity, ReportingSender,
+    TELEGRAM_INTEGRATION_ID,
 };
 use tddy_telegram::{InMemoryTelegramSender, InlineKeyboardRows, TelegramSender};
 
@@ -190,19 +191,37 @@ async fn a_failed_send_reports_unreachable_with_the_error() {
     let sender = ReportingSender::new(AnUnreachableApi, reporter, BOT_TOKEN);
 
     // When
-    let outcome = sender
+    let _ = sender
         .send_message(CHAT_ID, "tddy-daemon started (test-instance)")
         .await;
 
-    // Then — the caller still sees the failure, and the board says why
-    assert!(
-        outcome.is_err(),
-        "a failed send is not reported as delivered"
-    );
+    // Then
     let error = unreachable_error_of(telegram_state_on(&board));
     assert!(
         error.contains("connection refused"),
         "the board names the cause: {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_failed_send_hands_the_caller_a_token_free_error() {
+    // Given
+    let (_board, reporter) = a_board_with_telegram();
+    let sender = ReportingSender::new(AnUnreachableApi, reporter, BOT_TOKEN);
+
+    // When
+    let outcome = sender
+        .send_message(CHAT_ID, "tddy-daemon started (test-instance)")
+        .await;
+
+    // Then — every caller logs what it gets back
+    let error = format!(
+        "{:#}",
+        outcome.expect_err("a failed send is not a delivery")
+    );
+    assert!(
+        !error.contains(BOT_TOKEN),
+        "the bot token leaked to the caller: {error:?}"
     );
 }
 
@@ -250,7 +269,57 @@ async fn a_bot_whose_identity_check_fails_reports_unreachable_without_the_token(
     // Then
     let error = unreachable_error_of(telegram_state_on(&board));
     assert!(
-        error.contains("Unauthorized") && !error.contains(BOT_TOKEN),
-        "the board names the cause and never the token: {error:?}"
+        !error.contains(BOT_TOKEN),
+        "the bot token leaked onto the board: {error:?}"
     );
+}
+
+#[tokio::test]
+async fn a_bot_whose_identity_check_fails_reports_the_cause() {
+    // Given
+    let (board, reporter) = a_board_with_telegram();
+    reporter.report(configured_state(Some(&a_telegram_block())));
+
+    // When
+    report_bot_identity(&ABotWithARevokedToken, &reporter, BOT_TOKEN).await;
+
+    // Then
+    let error = unreachable_error_of(telegram_state_on(&board));
+    assert!(
+        error.contains("Unauthorized"),
+        "the board names the cause: {error:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Token redaction
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_percent_encoded_bot_token_is_redacted_too() {
+    // Given — a URL path carries the token's `:` as `%3A`
+    let encoded = BOT_TOKEN.replace(':', "%3A");
+    let text =
+        format!("error sending request for url (https://api.telegram.org/bot{encoded}/getMe)");
+
+    // When
+    let redacted = redact_bot_token(&text, BOT_TOKEN);
+
+    // Then
+    assert_eq!(
+        redacted,
+        "error sending request for url (https://api.telegram.org/bot<bot-token>/getMe)"
+    );
+}
+
+#[test]
+fn an_empty_bot_token_redacts_nothing() {
+    // Given
+    let text = "error sending request: connection refused";
+
+    // When
+    let redacted = redact_bot_token(text, "");
+
+    // Then — an empty pattern would otherwise splice the placeholder between every character
+    assert_eq!(redacted, text);
 }

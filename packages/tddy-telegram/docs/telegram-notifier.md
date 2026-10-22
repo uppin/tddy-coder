@@ -6,13 +6,20 @@
 > | Surface | Crate | Path |
 > |---|---|---|
 > | `TelegramSender`, `TeloxideSender`, `InMemoryTelegramSender`, `InlineKeyboardRows`, `send_telegram_via_teloxide`, `send_telegram_with_inline_keyboard`, `send_daemon_lifecycle_message` | `tddy-telegram` | `packages/tddy-telegram/src/sender.rs` |
-> | `ActiveElicitationCoordinator`, `TelegramTrackedSessionCoordinator`, the presenter-gate classifier | `tddy-telegram` | `active_elicitation.rs`, `telegram_tracked_session.rs`, `elicitation.rs` |
+> | `ActiveElicitationCoordinator`, `TelegramTrackedSessionCoordinator`, the elicitation chat lines | `tddy-telegram` | `active_elicitation.rs`, `telegram_tracked_session.rs`, `elicitation.rs` |
+> | `TELEGRAM_INTEGRATION_ID`, `configured_state`, `ReportingSender`, `BotIdentity`, `TeloxideBotIdentity`, `report_bot_identity`, `redact_bot_token` | `tddy-telegram` | `status.rs` — see [Integration status](#integration-status) |
 > | **`TelegramSessionWatcher`** and its elicitation caches — everything in *Transition rules* and *Presenter elicitation* below | **`tddy-telegram-control`** | `packages/tddy-telegram-control/src/telegram_notifier.rs` |
-> | `telegram_multi_select_shortcuts`, `telegram_bot`, `telegram_session_control`, `telegram_session_subscriber`, `telegram_notification_subscriber` | **`tddy-telegram-control`** | `packages/tddy-telegram-control/src/` |
+> | `telegram_multi_select_shortcuts`, `telegram_bot`, `telegram_session_control`, `telegram_session_subscriber` (`TelegramDaemonHooks`, the operator channel) | **`tddy-telegram-control`** | `packages/tddy-telegram-control/src/` |
 >
 > The watcher reaches `telegram_session_control`, which drives the daemon's session lifecycle, so it
 > lives in [`tddy-telegram-control`](../../tddy-telegram-control/README.md), the crate above both
-> this one and `tddy-session-lifecycle`. `tddy_telegram_control::telegram_notifier` re-exports the
+> this one and `tddy-session-lifecycle`.
+>
+> **Telegram is a satellite.** Only `tddy-telegram-control` and `tddy-daemon` (the wiring) depend on
+> this crate; no session crate and not the kernel does
+> (`tddy-daemon-extensions/tests/telegram_is_a_satellite.rs`). The core reaches a chat through the
+> kernel's `OperatorChannel` port, which `TelegramDaemonHooks` implements —
+> [daemon-kernel.md § Ports](../../tddy-daemon-kernel/docs/daemon-kernel.md#ports). `tddy_telegram_control::telegram_notifier` re-exports the
 > transport, so every item named in this document resolves from that path.
 >
 > Log targets read `tddy_daemon::…` on purpose: an operator's `log:` filter in `daemon.yaml` is an
@@ -45,9 +52,9 @@ The **`telegram_notifier`** module implements session status notifications using
 | **`SharedActiveElicitationCoordinator`** / **`ActiveElicitationCoordinator`** | **`packages/tddy-telegram/src/active_elicitation.rs`**: per-chat **FIFO** of session ids awaiting elicitation; **`active_session_for_chat`**, **`elicitation_callback_permitted`**, **`register_elicitation_surface_request`**, **`advance_after_elicitation_completion`**. Helpers **`should_emit_primary_elicitation_keyboard`** decide whether the full **`eli:s:`** keyboard is attached for a given (**`chat_id`**, **`session_id`**) pair. |
 | **`SharedTelegramTrackedSessionCoordinator`** / **`TelegramTrackedSessionCoordinator`** | **`packages/tddy-telegram/src/telegram_tracked_session.rs`**: per-chat map Telegram **`chat_id`** → workflow **`session_id`** after **Enter session** or after **`handle_start_workflow`** from that chat; **`should_suppress_workflow_keyboards_for_session`** encodes **no tracking** and **wrong-session** suppression. **`TelegramSessionWatcher::bind_telegram_tracked_session_for_chat`** supports tests and harnesses that assert full keyboards without driving **Enter** in a scenario. |
 
-## Activity alerts moved to the notification bus
+## Activity alerts on the notification bus
 
-The **`WaitingForInput`** / **`Done`** alert path no longer lives in this module. **`ReportSessionStatus`** — served on **`activity.ActivityService`** by **`tddy-session-activity`** since `#unbundle` node 7, not on **`connection.ConnectionService`** — publishes onto **`SessionNotificationBus`** (**`tddy_session_activity::session_notifications`**), and **`TelegramNotificationSubscriber`** (**`tddy_telegram_control::telegram_notification_subscriber`**) is one subscriber on it; it delivers through the daemon's bot hooks and reads its **`telegram:`** config block, and **`tddy-daemon`**'s **`runtime.rs`** adds it to the daemon's bus — see **[session-notifications.md](../../tddy-session-activity/docs/session-notifications.md)**. This module keeps the metadata tick, the presenter **`ServerMessage`** surface, and everything keyboard-bearing.
+The **`WaitingForInput`** / **`Done`** alert path is not in this module. **`ReportSessionStatus`** — served on **`activity.ActivityService`** by **`tddy-session-activity`** — publishes onto **`SessionNotificationBus`** (**`tddy_session_activity::session_notifications`**). Telegram's operator channel, **`TelegramDaemonHooks`** (**`tddy_telegram_control::telegram_session_subscriber`**), is registered on it through **`OperatorChannelSubscriber`**; it takes attention alerts from the activity-status path, dedupes them per session, and delivers through the daemon's bot sender — see **[session-notifications.md](../../tddy-session-activity/docs/session-notifications.md)**. This module keeps the metadata tick, the presenter **`ServerMessage`** surface, and everything keyboard-bearing.
 
 ## Telegram-tracked session gate (`telegram_tracked_session`)
 
@@ -67,9 +74,38 @@ Inbound **`telegram_bot`** routes **`eli:mn:`** / **`eli:mr:`** through the same
 
 | Item | Role |
 |------|------|
-| **`pending_elicitation_for_session_dir(session_dir)`** | Reads **`SessionMetadata.pending_elicitation`** from **`.session.yaml`** for Connection **`ListSessions`** enrichment (boolean; missing file → **`false`**). |
 | **`elicitation_signature_for_mode_changed(mc)`** | Canonical string for deduplicating identical **`ModeChanged`** payloads per session. |
 | **`telegram_elicitation_line_for_mode_changed(label, mc)`** | **`Some(line)`** for user-gated presenter modes (document review, markdown viewer, feature input, select/multi-select, text input); **`None`** for **`Running`** / **`Done`**. |
+
+*Whether* a mode waits on the operator is not decided here: it is the core's rule,
+**`tddy_daemon_kernel::operator_channel::awaits_operator`**, which the drawer indicator uses on every
+daemon and the watcher's elicitation queue uses with Telegram. The chat line exists for exactly the
+modes that rule names — pinned over every mode by `elicitation.rs`'s
+`the_telegram_line_exists_exactly_for_the_modes_that_await_the_operator`. The session list's
+`pending_elicitation` flag is read by `tddy-session-activity`'s `pending_elicitation` module.
+
+## Integration status
+
+Telegram reports its state on the daemon's integration status board
+([extension-ports.md](../../tddy-daemon-extensions/docs/extension-ports.md#the-integration-status-board-integration_status))
+under the id **`TELEGRAM_INTEGRATION_ID`** (`telegram`), label `Telegram`. `tddy_telegram::status`
+holds what writes it; `tddy-daemon`'s `runtime` wires it.
+
+| Source | Item | State reported |
+|---|---|---|
+| the `telegram:` block, read once at wiring | **`configured_state(Option<&TelegramConfig>)`** | no block or `enabled: false` → `Disabled`; enabled with an empty `bot_token` → `Misconfigured { missing: ["bot_token"] }` (the daemon starts no bot for it); otherwise `Connecting` |
+| the bot's identity check, before the dispatcher starts | **`report_bot_identity(&dyn BotIdentity, &IntegrationReporter, bot_token)`** over **`TeloxideBotIdentity`** (the Bot API's `getMe`) | `Connected`, or `Unreachable { error }` — also logged at `warn` on `tddy_daemon::telegram` |
+| every send the operator channel makes afterwards | **`ReportingSender<S: TelegramSender>`** — `ReportingSender::new(inner, reporter, bot_token)` wraps the `TeloxideSender` the hooks hold | `Connected` on a delivered message, `Unreachable { error }` on a failed one; the caller still receives the failure |
+
+**No error written to the board carries the bot token.** Telegram's API URL embeds it
+(`https://api.telegram.org/bot<token>/…`), and an HTTP client's error text quotes that URL.
+**`redact_bot_token(text, bot_token)`** replaces every occurrence of the token, written as is and
+percent-encoded (`:` as `%3A`), with `<bot-token>`; an empty token redacts nothing. The identity check
+and `ReportingSender` pass every error's full chain through it, and `ReportingSender` hands its caller
+the redacted error too, since every caller logs what it gets back.
+
+`BotIdentity` (`async fn check_identity(&self) -> anyhow::Result<()>`) is the seam the tests use in
+place of a real Bot API.
 
 ## Logging
 
@@ -77,12 +113,14 @@ Log target **`tddy_daemon::telegram`** carries **`info`** and **`debug`** lines 
 
 ## Dependencies
 
-**`teloxide`** (with **rustls**, default features off where configured in **`Cargo.toml`**) aligns with the workspace **Tokio** stack.
+**`teloxide`** (with **rustls**, default features off where configured in **`Cargo.toml`**) aligns with the workspace **Tokio** stack. **`tddy-daemon-extensions`** supplies the integration status board `status` reports on.
 
 ## Tests
 
 - **Unit** (in-module): label extraction, terminal status, masking, inactive session behavior, **`telegram_tracked_session`** coordinator contracts.
 - **Integration** (**`tests/telegram_notifier.rs`**): disabled config (zero sends), single send on transition with label in body, no duplicate sends when terminal status repeats.
 - **Integration** (**`tests/telegram_tracked_session_acceptance.rs`**): tracked-session gate, **Enter** replay, structured log expectations.
+- **Unit** (**`packages/tddy-telegram/tests/telegram_integration_status_acceptance.rs`**): every configured state, send and identity-check outcomes against in-memory senders and identity fakes, and token redaction on both failure paths (as written, percent-encoded, empty token, the caller's error).
+- **Unit** (`elicitation.rs`, `mode_gate_tests`): the chat line agrees with `awaits_operator` on every mode.
 
-See **[changesets/](../../tddy-daemon/docs/changesets/)** for the wrapped changeset line.
+See **[changesets/](./changesets/)** and **[tddy-daemon's changesets/](../../tddy-daemon/docs/changesets/)** for the wrapped changeset lines.

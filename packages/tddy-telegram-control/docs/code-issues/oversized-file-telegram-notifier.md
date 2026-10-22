@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-22 | 1,239 | in `tddy-session-lifecycle`, before #494 |
 | 2026-09-22 | 1,246 | after #494 moved it — seven lines |
+| 2026-10-22 | 1,245 | `2026-10-22-telegram-satellite`: **−1**. Its green phase put the notification dedupe on `TelegramSessionWatcher` (+10, to 1,256); `/pr-wrap` moved it onto `TelegramDaemonHooks` instead. Net: +1 import (`awaits_operator`), −1 for the gate call becoming one line, −1 in the `chats_tracking_session` doc. Still over 500 |
 
 ## What the tool found
 

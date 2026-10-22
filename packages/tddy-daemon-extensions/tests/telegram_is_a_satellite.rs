@@ -1,6 +1,6 @@
 //! Telegram is a satellite: only its own crates and the daemon's wiring may depend on it.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-22-telegram-satellite-integration.md`. The core reaches an
+//! PRD `docs/ft/daemon/telegram-notifications.md`. The core reaches an
 //! operator's chat through `tddy_daemon_kernel::operator_channel::OperatorChannel`; the Telegram
 //! crates implement it; `tddy-daemon` brings the two together. The same rule `livekit_is_a_satellite`
 //! holds for LiveKit, and read the same way: "names" is a `[dependencies]` or

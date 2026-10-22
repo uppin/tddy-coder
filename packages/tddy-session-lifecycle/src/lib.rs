@@ -77,8 +77,7 @@ pub use tddy_host_service::{
     host_prompts, host_registry, host_session_service, host_stats, host_tooling, multi_host,
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
-/// The per-session presenter observer: one gRPC stream feeding the notification bus and, through the
-/// kernel's `OperatorChannel` port, whichever chat surface the daemon injected.
+/// The PTY runtime and the user's tddy config, which now live in `tddy-terminal-rpc`.
 pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};
 /// Where a clone's checkout is on this host, plus a re-export of the clone store and the mirror
 /// that moved to `tddy-session-agents` with `#unbundle` node 7. All are reached as

@@ -11,6 +11,10 @@ the delete paths of the daemon's other services. None of them holds session-host
 | `session_list_enrichment` | the display fields a `ListSessions` row carries beyond `.session.yaml` — goal, workflow state, elapsed time, agent, model, the stack plan and a pending elicitation — read from the session's `changeset.yaml` (parity with the TUI's status bar), and `apply_session_list_status_to_proto` |
 | `session_deletion` | filesystem-safe deletion: validating the session id, resolving the directory under the sessions tree, stopping a recorded live PID (SIGTERM, a wait, then SIGKILL; `signal_pid`), closing the session room, tearing down a workspace sandbox, and deciding which session types remove a daemon-managed worktree |
 
+`session_list_enrichment` reads a session's pending-elicitation flag through this crate's
+`pending_elicitation` module, which reads the `pending_elicitation` field of `.session.yaml` (`false` when the metadata cannot be read). It lives here rather than with Telegram
+because every daemon's session list shows it.
+
 `tddy-session-lifecycle` re-exports all four by name
 (`pub use tddy_session_activity::{session_deletion, session_list_enrichment, session_reader,
 user_sessions_path};`), so `tddy_session_lifecycle::session_reader::…` and the other paths resolve

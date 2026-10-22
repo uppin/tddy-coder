@@ -4,7 +4,7 @@
  */
 
 import React from "react";
-import { Code, createClient } from "@connectrpc/connect";
+import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { DaemonSettingsScreen } from "../../../src/components/settings/DaemonSettingsScreen";
 import { DaemonConfigService } from "../../../src/gen/daemon_config_pb";
@@ -118,14 +118,38 @@ export function aTelegramIntegration(fields: {
   return { ...aLiveKitIntegration(fields), id: "telegram", label: "Telegram" };
 }
 
-/** A daemon that reports every one of `integrations` on each status read. */
-export function aDaemonReportingAllOf(...integrations: ReturnType<typeof aLiveKitIntegration>[]) {
-  return aDaemonConfigBackend().onUnary(DaemonConfigService.method.getIntegrationStatus, () => ({
+/** The `GetIntegrationStatus` answer carrying `integrations`, timestamped at answer time. */
+function anIntegrationStatusAnswer(integrations: ReturnType<typeof aLiveKitIntegration>[]) {
+  return {
     integrations: integrations.map(({ secondsAgo, ...entry }) => ({
       ...entry,
       sinceUnixMs: BigInt(Date.now() - secondsAgo * 1000),
     })),
-  }));
+  };
+}
+
+/** A daemon that reports every one of `integrations` on each status read. */
+export function aDaemonReportingAllOf(...integrations: ReturnType<typeof aLiveKitIntegration>[]) {
+  return aDaemonConfigBackend().onUnary(DaemonConfigService.method.getIntegrationStatus, () =>
+    anIntegrationStatusAnswer(integrations),
+  );
+}
+
+/**
+ * A daemon that reports `integrations` on its first status read and fails every later one with
+ * `code` — the daemon restarting under an open settings screen.
+ */
+export function aDaemonReportingOnceThenFailing(
+  code: Code,
+  message: string,
+  ...integrations: ReturnType<typeof aLiveKitIntegration>[]
+) {
+  let read = 0;
+  return aDaemonConfigBackend().onUnary(DaemonConfigService.method.getIntegrationStatus, () => {
+    read += 1;
+    if (read > 1) throw new ConnectError(message, code);
+    return anIntegrationStatusAnswer(integrations);
+  });
 }
 
 /** A daemon too old to answer `GetIntegrationStatus`. */

@@ -363,7 +363,7 @@ pub fn notification_for_presenter_event(
 ///
 /// `pub` rather than the `pub(crate)` it carried inside `tddy-daemon`: what needs it is the
 /// Telegram operator channel, which lives in `tddy-telegram-control` and keeps one per daemon on
-/// its session watcher. A crate boundary runs between the two.
+/// its hooks. A crate boundary runs between the two.
 #[derive(Default)]
 pub struct LastDeliveredPerSession {
     last: StdMutex<HashMap<String, String>>,

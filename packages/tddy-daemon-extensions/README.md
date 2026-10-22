@@ -17,8 +17,9 @@ The crate holds two things and nothing that reaches an integration: the **sessio
 (`SessionReach`, `ReachableSessions`, and the null object `NoSessionReach`), through which a reached
 session is reported and an integration extends it beyond this host; and the **integration status
 board** (`IntegrationStatusBoard`, `IntegrationReporter`, `IntegrationState`), the one place an
-integration's live state is recorded. A workspace ratchet test holds the rule that no LiveKit crate
-is reachable from here.
+integration's live state is recorded. Workspace ratchet tests hold the rule that no LiveKit crate
+is reachable from here, and that only Telegram's own crates and the daemon's wiring reach a Telegram
+crate.
 
 ## Documentation
 

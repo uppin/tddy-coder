@@ -238,9 +238,11 @@ dependencies count and `[dev-dependencies]` do not. Pair every "does not reach X
 assertion that the same walk does reach something it must (a crate the subject certainly depends on),
 so a walk that found nothing cannot pass as a clean result. `names_directly` panics on a crate that
 is not a workspace member for the same reason. See
-[dependency-graph.md](../../../packages/tddy-testing-commons/docs/dependency-graph.md); the
-LiveKit-is-a-satellite ratchet is described in
-[extension-ports.md](../../../packages/tddy-daemon-extensions/docs/extension-ports.md#the-satellite-rule-and-its-ratchet).
+[dependency-graph.md](../../../packages/tddy-testing-commons/docs/dependency-graph.md). Two satellite
+ratchets use it, both in `tddy-daemon-extensions/tests/`: LiveKit's (`livekit_is_a_satellite.rs`,
+[extension-ports.md](../../../packages/tddy-daemon-extensions/docs/extension-ports.md#the-satellite-rule-and-its-ratchet))
+and Telegram's (`telegram_is_a_satellite.rs`,
+[extension-ports.md](../../../packages/tddy-daemon-extensions/docs/extension-ports.md#telegram-the-operator-channel-and-its-ratchet)).
 
 ## Test Composition
 

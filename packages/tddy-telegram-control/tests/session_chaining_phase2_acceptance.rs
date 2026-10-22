@@ -19,11 +19,12 @@ fn workflow_spawn_rs() -> &'static str {
     ))
 }
 
-/// `telegram_session_control/pickers.rs` — holds the Telegram spawn path that calls the merge.
-fn pickers_rs() -> &'static str {
+/// `telegram_session_control/workflow_launch.rs` — holds the Telegram spawn path that calls the
+/// merge (it left `pickers.rs` in `2026-10-22-telegram-satellite`).
+fn workflow_launch_rs() -> &'static str {
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../tddy-telegram-control/src/telegram_session_control/pickers.rs"
+        "/../tddy-telegram-control/src/telegram_session_control/workflow_launch.rs"
     ))
 }
 
@@ -76,7 +77,7 @@ fn telegram_chain_child_persists_parent_chain_base_on_default_flow() {
 #[test]
 fn telegram_chain_explicit_branch_choice_not_silently_dropped() {
     // Given
-    let src = pickers_rs();
+    let src = workflow_launch_rs();
 
     // When / Then
     assert!(

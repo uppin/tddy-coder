@@ -117,12 +117,11 @@ fn telegram_hooks(sender: Arc<InMemoryTelegramSender>) -> Arc<TelegramDaemonHook
         tracked_with_bound_chat(),
     );
 
-    Arc::new(TelegramDaemonHooks {
-        config: a_daemon_config(),
-        sender: sender
-            as Arc<dyn tddy_telegram_control::telegram_notifier::TelegramSender + Send + Sync>,
-        watcher: Arc::new(tokio::sync::Mutex::new(watcher)),
-    })
+    Arc::new(TelegramDaemonHooks::new(
+        a_daemon_config(),
+        sender as Arc<dyn tddy_telegram_control::telegram_notifier::TelegramSender + Send + Sync>,
+        Arc::new(tokio::sync::Mutex::new(watcher)),
+    ))
 }
 
 /// A `DaemonSessionHost` whose notification bus carries Telegram's operator channel and one

@@ -198,7 +198,7 @@ login from the window authorized at once and written as the only row; a second a
 not enrolled; logins over the common room and the agent tool socket not enrolled, and the window's
 login still enrolled after each; a server mapping nobody enrolling no one; and the refusal above.
 
-### Integration status and the LiveKit plugin
+### Integration status, the LiveKit plugin and the Telegram plugin
 
 `runtime::build` creates one `IntegrationStatusBoard` and, from it, one reporter for LiveKit
 (`LIVEKIT_INTEGRATION_ID`, labelled "LiveKit"). That reporter is held by the `LiveKitSessionReach`
@@ -206,6 +206,26 @@ the session host is built with (`with_session_reach`; the reach shares the host'
 the rooms it opens are the ones deletion closes) and, cloned, by the common-room discovery loop, so
 both report into one entry. The plugin's `session_room.SessionRoomService` entry is registered
 beside the daemon's other entries and resolves sessions through the host.
+
+From the same board, `Plugins::open` (`runtime/integrations.rs`) creates Telegram's reporter
+(`tddy_telegram::status::TELEGRAM_INTEGRATION_ID`, labelled "Telegram") and reports
+`tddy_telegram::status::configured_state` of the `telegram:` block at once — `Disabled`,
+`Misconfigured` (enabled with an empty `bot_token`, for which no bot is built) or `Connecting`.
+`build_telegram` (`runtime/telegram_wiring.rs`) wraps the bot's `TeloxideSender` in a
+`tddy_telegram::status::ReportingSender`, so every send the operator channel makes reports
+`Connected` or `Unreachable`, and builds a `TelegramIdentityCheck`. `RuntimeTasks::spawn`
+(`runtime/tasks.rs`, `spawn_telegram`) runs that check — `report_bot_identity` over `getMe` — before
+the inbound dispatcher starts, in the same task. Every error written to the entry has the bot token
+redacted.
+
+The Telegram plugin's `TelegramDaemonHooks` are the daemon's operator channel
+(`tddy_daemon_kernel::operator_channel::OperatorChannel`). `runtime/mount_host.rs` installs the same
+channel in both places that take it: `DaemonSessionHost::new` (presenter events) and the daemon's
+session-notification bus, through `OperatorChannelSubscriber`, beside the `StreamSessionNotifications`
+relay. With no bot it installs `NoOperatorChannel` in both. `tddy-daemon` is the one crate besides
+Telegram's own that names `tddy-telegram` and `tddy-telegram-control`
+(`tddy-daemon-extensions/tests/telegram_is_a_satellite.rs`); `telegram_wiring.rs` reaches the chat-side
+coordinators at `tddy_telegram::…` directly.
 
 `DaemonConfigServiceImpl::with_integration_status(board)` serves **`GetIntegrationStatus`**, gated on
 the session token exactly like `GetConfig` (`unauthenticated` without a valid one). It lists the

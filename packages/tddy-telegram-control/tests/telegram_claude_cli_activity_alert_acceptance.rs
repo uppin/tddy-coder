@@ -112,12 +112,12 @@ fn make_service(
     );
     let watcher_arc = Arc::new(tokio::sync::Mutex::new(watcher));
 
-    let telegram = Arc::new(TelegramDaemonHooks {
-        config: test_daemon_config(),
-        sender: Arc::clone(&sender)
+    let telegram = Arc::new(TelegramDaemonHooks::new(
+        test_daemon_config(),
+        Arc::clone(&sender)
             as Arc<dyn tddy_telegram_control::telegram_notifier::TelegramSender + Send + Sync>,
-        watcher: watcher_arc,
-    });
+        watcher_arc,
+    ));
 
     DaemonSessionHost::new(
         test_daemon_config(),

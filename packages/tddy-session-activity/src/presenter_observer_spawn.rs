@@ -17,8 +17,8 @@ impl PresenterObserverDeps {
     ///
     /// The two are independent. Gating the observer on Telegram would leave a workflow session's
     /// drawer dot permanently still on every daemon without a `telegram:` block, which is most of
-    /// them; `spawn_presenter_observer_task` declines only when there is *neither* a wired channel
-    /// nor a bus.
+    /// them; `spawn_presenter_observer_task` declines only when there is *neither* a channel that
+    /// follows presenter events nor a bus.
     pub fn maybe_spawn_presenter_observer(&self, os_user: &str, session_id: &str, grpc_port: u16) {
         let publishing = self.session_notification_bus.as_ref().and_then(|bus| {
                     match crate::user_sessions_path::sessions_base_for_user(

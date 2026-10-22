@@ -1,6 +1,6 @@
 //! Telegram on the daemon's integration status board.
 //!
-//! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-22-telegram-satellite-integration.md`, change 4. The entry
+//! PRD `docs/ft/daemon/daemon-settings.md` § Integration status. The entry
 //! is [`TELEGRAM_INTEGRATION_ID`]; what it says comes from three places:
 //!
 //! - the `telegram:` block, read once at wiring time — [`configured_state`];
