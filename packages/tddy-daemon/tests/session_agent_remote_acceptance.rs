@@ -625,6 +625,7 @@ fn write_project_registry(tddy_data_dir: &Path, repo_path: &Path) {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         }],
     )
     .expect("write projects registry");

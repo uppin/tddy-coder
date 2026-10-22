@@ -161,6 +161,7 @@ mod tests {
                 host_repo_paths: HashMap::new(),
                 accounts: Vec::new(),
                 local_gh: false,
+                home_agent: None,
             }],
         )
         .expect("projects");
@@ -210,6 +211,7 @@ mod tests {
                 host_repo_paths: HashMap::new(),
                 accounts: Vec::new(),
                 local_gh: false,
+                home_agent: None,
             }],
         )
         .expect("projects");

@@ -3,6 +3,7 @@
 mod clone_destination;
 mod coordinate_handlers;
 mod entries;
+mod home_agent_handler;
 mod ports;
 
 use std::path::PathBuf;

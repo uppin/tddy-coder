@@ -48,6 +48,10 @@ pub struct ProjectData {
     /// entry in `accounts`. Absent reads as `false`, and `false` is never written.
     #[serde(default, skip_serializing_if = "is_false")]
     pub local_gh: bool,
+    /// Agent id (a `CatalogService.ListAgents` row) the project's project-home session runs. Absent
+    /// means no home agent is configured; a row written by an older daemon reads that way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_agent: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -330,6 +334,20 @@ pub fn set_project_accounts(
     write_projects(projects_dir, &projects)
 }
 
+/// Sets (`Some`) or clears (`None`) the agent `project_id`'s project-home session runs.
+///
+/// Stores the id as given: whether the catalog lists it is the caller's check, made before this
+/// write so a refused id never mutates `projects.yaml`. Errors when `project_id` is unknown.
+pub fn set_project_home_agent(
+    projects_dir: &Path,
+    project_id: &str,
+    home_agent: Option<&str>,
+) -> anyhow::Result<()> {
+    // TODO(home-agent-setting): implement
+    let _ = (projects_dir, project_id, home_agent);
+    anyhow::bail!("set_project_home_agent is not implemented")
+}
+
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).
 ///
 /// Multi-host: returns [`ProjectData::host_repo_paths`]\[host_key] when non-empty, else
@@ -383,6 +401,7 @@ mod per_host_path_unit_tests {
             host_repo_paths,
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         };
         write_projects(&projects_dir, &[project]).unwrap();
         let px = main_repo_path_for_host(&projects_dir, "p1", "unit-host-x")
@@ -615,6 +634,7 @@ mod project_integration_base_acceptance_tests {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         };
         let r = add_project(&projects_dir, project);
         assert!(
@@ -645,6 +665,7 @@ mod project_integration_base_acceptance_tests {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         };
         add_project(&projects_dir, project).expect(
             "a safe <remote>/<path> must be accepted at the boundary regardless of the remote name",
@@ -683,6 +704,7 @@ mod set_project_default_branch_unit_tests {
                 host_repo_paths: HashMap::new(),
                 accounts: Vec::new(),
                 local_gh: false,
+                home_agent: None,
             },
         )
         .expect("seed project");

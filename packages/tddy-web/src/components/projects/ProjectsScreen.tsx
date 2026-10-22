@@ -64,6 +64,17 @@ export interface ProjectsScreenProps {
    * `githubHostname`). Asked for each host of a Local gh project.
    */
   loadHostGithubCli: LoadHostGithubCli;
+  /** Agents the catalog lists — the choices for each project's home agent (`#project-home` 1/7). */
+  agents?: { id: string; label: string }[];
+  /**
+   * Store (or, with `""`, clear) a project's home agent. Resolves once stored; rejects with the
+   * daemon's reason when refused.
+   */
+  onSetHomeAgent?: (input: {
+    projectId: string;
+    homeAgent: string;
+    daemonInstanceId: string;
+  }) => Promise<void>;
 }
 
 interface ProjectGroup {

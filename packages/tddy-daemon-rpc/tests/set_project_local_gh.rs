@@ -115,6 +115,7 @@ fn a_daemon_with_a_project_row(
             host_repo_paths: HashMap::new(),
             accounts,
             local_gh,
+            home_agent: None,
         },
     )
     .expect("seed project");
