@@ -9,15 +9,28 @@ starts, and into the sandboxed claude-cli start's refusal. A **tool session** st
 from the session-level choice alone, so a person whose default for `codex` is Meta gets the vendor
 on a tool session that names no account.
 
-**Why deferred:** the tool-session start is #665's (`#provider-route` 4/9, `tool-route`). When #666
-was wrapped, #665's `tool_session_route_json` was still a `todo!()` and no tool-session start called
-it, so #666 had no call site to feed.
+**Why deferred:** the tool-session start is #665's (`#provider-route` 4/9, `tool-route`). While #666
+was greened, #665's `tool_session_route_json` was a `todo!()` with no caller. After #666 was rebased
+onto #665's green tip the call site exists (`tool_session_spawn.rs`, `session_route_sources(&req)`),
+but wiring it is a product decision, not a one-liner:
 
-**Plan pointer:** once #665 is green and #666 is rebased onto it, change the tool-session start's
-`session_route_sources(req)` to `session_route_sources_with_default(req, <the agent's harness id>,
-&access)`. That is a one-line change plus a test in `tool_session_route_tests.rs`: a tool session
-that names no account is handed the default's route file. It belongs to whichever of #665 or #666
-lands second, or to the stack's sweep node.
+- **Which id keys a tool session's default.** Defaults are stored per harness id, and the Accounts
+  screen offers only `claude-cli` and `opencode-cli`. A tool session's harness is its agent id
+  (`claude`, `claude-acp`, `codex`, …), so reading `default_for` under the agent id finds nothing
+  the screen can set, and reading it under the session type would make a Claude CLI default silently
+  apply to Claude tool sessions too.
+- **Blast radius of the locked-vault refusal.** A start that names no account refuses while the
+  vault is locked (no fallback to the vendor). Applied to tool sessions — the common session kind —
+  every Claude/Codex tool session of a person with a locked vault would be refused.
+
+The web pane already pre-selects a default for a tool session's agent when one is stored under that
+agent id, and then sends it as an explicit choice, so nothing is silently run on the wrong account.
+
+**Plan pointer:** decide the key (agent id vs. a harness family shared with the CLI type) and whether
+tool sessions should refuse on a locked vault, then change `tool_session_spawn.rs` to
+`session_route_sources_with_default(&req, <key>, &access)` (read only when the agent maps to a
+`Harness`), add the matching options to `ProviderAccountDefaultsControl`, and pin it in
+`tool_session_route_tests.rs`. Owner: the stack's sweep node or a follow-up PR.
 
 ## What would close it
 

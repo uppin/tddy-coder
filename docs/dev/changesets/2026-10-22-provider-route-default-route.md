@@ -34,7 +34,7 @@ PR's second read-then-put site (`set_provider_account_defaults`, `TODO(keyring)`
 still a `todo!()`). `2026-10-21-tddy-accounts-service-rs-over-file-budget` updated: 703 → 761
 production lines, still deferred as stack-shared.
 
-File budget: `packages/tddy-web/src/components/sessions/CreateSessionPane.tsx` 822 → 830 (stack-shared
+File budget: `packages/tddy-web/src/components/sessions/CreateSessionPane.tsx` 824 → 832 (stack-shared
 with #663–#665; record `packages/tddy-web/docs/code-issues/oversized-file-create-session-pane.md`
 regressed, split deferred). `AccountsScreen.tsx` 486 → 503 was decomposed here (`ProviderModels.tsx`),
 ending at 455.
