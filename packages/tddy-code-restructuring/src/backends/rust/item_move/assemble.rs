@@ -487,19 +487,7 @@ fn into_destination(
 
     let mut edits: Vec<(String, Edit)> = widenings;
     let mut imports = None;
-    if !lines.is_empty() {
-        notes.push(format!(
-            "imports: {} `use` item(s) copied from the source module for the moved code; the ones \
-             it does not use are removed by the unused-import tidy at the end of a complete run",
-            lines.len()
-        ));
-        let (at, blank) = use_insertion(&text, scope.clone());
-        let mut block: String = lines.iter().map(|line| format!("{line}\n")).collect();
-        if blank {
-            block.push('\n');
-        }
-        imports = Some(Edit::insert(at, block));
-    }
+    imports_block(notes, &text, &scope, lines, &mut imports);
     let landed = placement::insertion(&text, &scope, moved)?;
     // Both land at one offset in a file with no items yet; as two edits their order would be the
     // order of their text, which writes the imports below the items.
@@ -518,4 +506,26 @@ fn into_destination(
         None => edits.push((file, landed)),
     }
     Ok(edits)
+}
+
+fn imports_block(
+    notes: &mut Vec<String>,
+    text: &str,
+    scope: &Range<usize>,
+    lines: Vec<String>,
+    imports: &mut Option<Edit>,
+) {
+    if !lines.is_empty() {
+        notes.push(format!(
+            "imports: {} `use` item(s) copied from the source module for the moved code; the ones \
+             it does not use are removed by the unused-import tidy at the end of a complete run",
+            lines.len()
+        ));
+        let (at, blank) = use_insertion(text, scope.clone());
+        let mut block: String = lines.iter().map(|line| format!("{line}\n")).collect();
+        if blank {
+            block.push('\n');
+        }
+        *imports = Some(Edit::insert(at, block));
+    }
 }
