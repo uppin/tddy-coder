@@ -23,6 +23,15 @@ an arm's body out, the arm's own lines (for example `X => Options {`, `X => {`, 
 (`X => f(x),`); `verify` reports them as lost and the call as gained. Accepted by hand review of the diff, listed in the
 cut's commit message. The `options_for` cut (`restructure_args.rs`) is the first use.
 
+Developer decision, 2026-10-22 (third): accept the whole `&mut` family. Every mechanical rewrite forced by a local becoming
+a `&mut` parameter in an `extract_method` cut is accepted by hand review of the diff, and listed in the cut's commit message:
+- `x = …` → `*x = …`;
+- `&mut x` → `x` (the moved call passes the `&mut` parameter, not a fresh borrow);
+- autoderef'd field or method access left unchanged;
+- `&x` → `&*x` or `x`.
+
+The `check_plan` rehearsal cut (`rehearse_op`, `check_entry_points.rs`) is the first use of the third rule.
+
 Any other unaccounted statement still stops the run.
 
 ## Wanted
