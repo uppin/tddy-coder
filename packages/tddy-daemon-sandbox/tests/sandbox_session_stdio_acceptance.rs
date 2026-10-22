@@ -141,6 +141,9 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         route: None,
     })
     .expect("spawn sandbox-runner");
+    // The jail's whole process group goes when the test ends, on a failed assertion or a timeout
+    // as much as on a pass: a runner left behind keeps its fake agent's ten-minute sleep alive.
+    let _jail = TerminateJailOnDrop(handle.pid());
 
     let deadline = Duration::from_secs(15);
     let start = std::time::Instant::now();
@@ -204,9 +207,15 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         Some("hello from the real worktree\n"),
         "expected the real worktree file content to round-trip through dial_and_bridge: {parsed}"
     );
+}
 
-    handle.child_mut().kill().ok();
-    handle.child_mut().wait().ok();
+/// Terminates a jail's process group — the runner and everything it started — when dropped.
+struct TerminateJailOnDrop(u32);
+
+impl Drop for TerminateJailOnDrop {
+    fn drop(&mut self) {
+        tddy_daemon_sandbox::sandbox_session::terminate_sandbox_process(self.0);
+    }
 }
 
 /// **sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags**: family-C spawn modules in
