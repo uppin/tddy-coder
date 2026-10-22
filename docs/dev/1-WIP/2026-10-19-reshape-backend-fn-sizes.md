@@ -132,11 +132,40 @@ Per function:
 - `choose_import` — deferred by developer 2026-10-22 (K18 standing rule): the `by_crate` tier cut failed the compile gate
   (E0261, undeclared `'a`); rolled back. Engine todo `2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md`
   § 7. Exempted in `DEFERRED_BY_BACKEND_FN_SIZES`.
-- `retarget_impl` — the field-check cut (lines 84–90 of the item, `refuse_moved_fields`) applied and compiled, but `verify`
-  reported `&text` → `text` in the moved `member_text(..)` call (a shared-reference parameter, not the `&mut` family) plus
-  the new function's `Ok(())` tail. Not in the accepted families. Rolled back; the node stopped here for a decision.
+- `retarget_impl` — cut (`f4643810d`, `refuse_moved_fields`). Its verify shape was the `&T` family and the `Ok(())` guard-lift
+  tail, both accepted by the developer's 2026-10-22 answers; listed in the commit.
+- `start` — cut twice: `spawn_command` (`27f380bc3`) and `initialize_server` (`870f0b0c3`).
+- `into_destination` — cut (`7ef339e00`, `imports_block`, the `&mut` and `&T` families).
+- `assemble` — cut three times: `changed_files` (`6f41e8f33`), `absorb_doc_links` (`3e2dc76f5`), `names_of_items`
+  (`f49023c7c`). Its `Ok(())` tail is the return shape of a `?`-only block, not a guard.
+- `move_items` — cut (`eca556a05`, `resolution_of`).
+- `assist_for` — three match-arm bodies cut (`3fa026218`, `2b9938947`, `c5aff3bdf`); category (b) each.
+- `offered_assist` — two cuts (`8960d2668` `settled_actions`, `b9a290293` `target_range`). The `b9a290293` message says the
+  function was 63 lines after the first cut; the gate measured 64, and 57 after the second.
+- `resolve_opening` — five tail peels (`e9c029440`, `ce4f11fbb`, `69ece56cb`, `739dee814`, `a398f216d`), each a range to the
+  end of the body that holds its early returns (the tail-range exception). Now 54 lines.
+- `assisted_edit` — `7f0a7a45f` (`finish_relocation`) cut; the `rename_and_check` cut (`n21-28`) failed its compile gate
+  (E0308, engine todo § 11) and was rolled back. Still 110 lines, and the rest of the body needs helpers with more than seven
+  parameters. Deferred by developer 2026-10-22 (K18 standing rule), exempted as a whole.
+- `survey` — deferred: the tail range was refused by `check --deep` (engine todo § 10). Exempted.
+- `next_import` — deferred: the tuple return of the `Lost` pair fails with E0106 (engine todo § 9). Exempted.
+- `request` — deferred: the `begin_wait` cut fails with E0502 (engine todo § 8). Exempted.
+- `edits_for_file` — **not cut, and not deferred**: its only cuts that the engine accepts are the loop after `let mut needed`
+  (lines 159–183), whose helper takes ten parameters, two of them closures (`in_region`, `in_destination`), and
+  `clippy::too_many_arguments` fires. Not applied; this is the node's open stop.
+- Clippy, scoped (`./dev cargo clippy -p tddy-code-restructuring --all-targets`, without deny): one warning, `let_and_return`
+  at `rust.rs:1177`, from `target_range` (`b9a290293`). Engine todo § 13. Not hand-fixed: a stop under the 2026-10-22 rules.
 
-Deferred by developer 2026-10-22 (K18 standing rule): `choose_import`.
+## Stop (2026-10-22)
+
+The node stops at this head with the gate red on one function, `edits_for_file`, and one clippy warning from a cut
+(`target_range`). Both need a decision: a helper for `edits_for_file` with closures and more than seven parameters
+(exempt, or a restructure), and a three-line expression-body fix for `target_range` (a hand edit, or a sweep-node cut).
+
+Deferred by developer 2026-10-22 (K18 standing rule): `choose_import`, `survey`, `next_import`, `request`, `assisted_edit`.
+
+Verify gap (developer answers 2026-10-22, the `&T` family and the guard-lift tail): accepted and listed per commit above,
+recorded in `docs/dev/todo/2026-10-22-verify-does-not-account-for-mut-param-writes-from-extract-method.md`.
 
 ## Testing plan
 
