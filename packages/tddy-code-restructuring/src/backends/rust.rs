@@ -299,18 +299,7 @@ impl Placeholder {
 fn assist_for(kind: RefactorKind) -> Option<Assist> {
     match kind {
         RefactorKind::ExtractMethod => extract_method_assist(),
-        RefactorKind::ExtractVariable => Some(Assist {
-            title: "extract into variable",
-            kinds: &["refactor.extract"],
-            at_caret: false,
-            placeholder: Some(Placeholder {
-                keyword: "let",
-                name: None,
-            }),
-            multi_file: false,
-            needs_inference: true,
-            relocates_items: false,
-        }),
+        RefactorKind::ExtractVariable => extract_variable_assist(),
         RefactorKind::ExtractModule => Some(Assist {
             title: "extract module",
             kinds: &["refactor.extract"],
@@ -377,6 +366,21 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
         }),
         _ => None,
     }
+}
+
+fn extract_variable_assist() -> Option<Assist> {
+    Some(Assist {
+        title: "extract into variable",
+        kinds: &["refactor.extract"],
+        at_caret: false,
+        placeholder: Some(Placeholder {
+            keyword: "let",
+            name: None,
+        }),
+        multi_file: false,
+        needs_inference: true,
+        relocates_items: false,
+    })
 }
 
 fn extract_method_assist() -> Option<Assist> {
