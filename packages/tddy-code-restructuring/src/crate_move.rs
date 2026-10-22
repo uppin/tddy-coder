@@ -316,28 +316,13 @@ pub(crate) fn surveyed_in(
         }
         reached.push(item.item.clone());
 
-        for reference in outside_the_set {
-            let text = workspace.read(&reference.path)?;
-            let written = header::written_path_at(&text, reference.at)?;
-
-            // A reference reached through a name the file bound earlier writes no path to rewrite:
-            // its own `use` declaration is a reference too, and re-pointing that one is what moves
-            // the binding. Rewriting the bare name here would rewrite an identifier, not a path.
-            let Some(to) = header::repointed(&written.text, moving) else {
-                continue;
-            };
-
-            callers.push(CallerRewrite {
-                path: reference.path.clone(),
-                from: written.text.clone(),
-                to: to.clone(),
-            });
-            rewrites.push(PlannedRewrite {
-                path: reference.path,
-                span: written.span,
-                to,
-            });
-        }
+        survey_reference(
+            workspace,
+            moving,
+            &mut callers,
+            &mut rewrites,
+            outside_the_set,
+        )?;
     }
 
     reached.sort();
@@ -353,6 +338,38 @@ pub(crate) fn surveyed_in(
     };
 
     Ok((survey, rewrites))
+}
+
+fn survey_reference(
+    workspace: &Workspace<'_>,
+    moving: &Move,
+    callers: &mut Vec<CallerRewrite>,
+    rewrites: &mut Vec<PlannedRewrite>,
+    outside_the_set: Vec<Reference>,
+) -> Result<()> {
+    for reference in outside_the_set {
+        let text = workspace.read(&reference.path)?;
+        let written = header::written_path_at(&text, reference.at)?;
+
+        // A reference reached through a name the file bound earlier writes no path to rewrite:
+        // its own `use` declaration is a reference too, and re-pointing that one is what moves
+        // the binding. Rewriting the bare name here would rewrite an identifier, not a path.
+        let Some(to) = header::repointed(&written.text, moving) else {
+            continue;
+        };
+
+        callers.push(CallerRewrite {
+            path: reference.path.clone(),
+            from: written.text.clone(),
+            to: to.clone(),
+        });
+        rewrites.push(PlannedRewrite {
+            path: reference.path,
+            span: written.span,
+            to,
+        });
+    }
+    Ok(())
 }
 
 /// Whether a declaration is one a module path names directly: a top-level item. Only those have
