@@ -1456,6 +1456,17 @@ impl RustBackend {
             return Ok(Resolution::of(self.rename_symbol(&uri, workspace, op)?));
         }
 
+        self.assisted_resolution(op, workspace, relative, uri, original)
+    }
+
+    fn assisted_resolution(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         let (final_text, report, notes) = self.assisted_edit(&uri, &original, op)?;
 
         Ok(Resolution {
