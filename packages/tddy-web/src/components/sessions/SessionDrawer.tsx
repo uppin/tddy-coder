@@ -66,6 +66,11 @@ interface SessionDrawerProps {
   onSelectAll?: () => void;
   /** Delete the currently selected sessions. */
   onBulkDelete?: () => void;
+  /**
+   * Projects the drawer knows by name — the headers of its per-project groups (`#project-home`
+   * 2/7). A session whose project is not here lands in the trailing **Other** group.
+   */
+  projects?: ReadonlyArray<{ projectId: string; name: string }>;
 }
 
 interface StackGroup {

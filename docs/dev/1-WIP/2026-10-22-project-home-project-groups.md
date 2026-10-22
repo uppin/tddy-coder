@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 2 — one package (tddy-web), a pure grouping util + one component; unit + Cypress component tests
 **Stack**: #project-home 2/7. Base: `feature/project-home/home-agent-setting`.
+**PR**: [#697](https://github.com/uppin/tddy-coder/pull/697)
 
 ## Initial Discovery
 
@@ -42,6 +43,10 @@ export function SessionProjectGroup(props: { group: ProjectSessionGroup; collaps
 // packages/tddy-web/src/components/sessions/projectGroupCollapse.ts (new)
 export function readCollapsedProjects(): Set<string>;
 export function writeCollapsedProjects(ids: ReadonlySet<string>): void;
+// SessionDrawerProps gains (optional):
+projects?: ReadonlyArray<{ projectId: string; name: string }>;
+// cypress/support/testIds.ts
+sessionsDrawerProjectGroup(projectKey), sessionsDrawerProjectGroupHeader(projectKey) // key = projectId | "other"
 ```
 Plus the failing tests below. Bodies `// TODO(project-groups): implement`.
 
@@ -119,6 +124,12 @@ existing drawer specs (`SessionsDrawerAcceptance`, `SessionsDrawerActiveSeparato
 - **Ordered by name**, not by recent activity: activity reorders groups under the cursor on every poll.
 - **Collapse persisted in browser storage** — a per-viewer convenience, wrapped so unreadable storage means "all expanded".
 
+## Red-phase notes
+
+- Verified failing (2026-10-23): 3/3 `sessionProjectGroups.test.ts` (`bun test`), 4/4 `SessionsDrawerProjectGroupsAcceptance.cy.tsx` (no group headers rendered).
+- Existing drawer specs (`SessionDrawer.cy.tsx`, `SessionsDrawer*Acceptance.cy.tsx`) mount without `projects`; once grouping lands their sessions fall into **Other**. Green re-runs them and adds `projects` where an assertion depends on position.
+- `SessionsDrawerScreen` must pass the `ListProjects` rows it already loads (`useSessionsDrawerProjects.ts`) into `projects`.
+
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
@@ -139,10 +150,10 @@ existing drawer specs (`SessionsDrawerAcceptance`, `SessionsDrawerActiveSeparato
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
