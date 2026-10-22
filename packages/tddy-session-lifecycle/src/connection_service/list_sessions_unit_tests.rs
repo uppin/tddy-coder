@@ -72,6 +72,7 @@ async fn list_sessions_unit_returns_new_metadata_fields() {
         agent_session_id: None,
         ssh_config_host: None,
         managed_codebase: false,
+        session_role: None,
     };
     write_session_metadata(&session_dir, &metadata).unwrap();
 

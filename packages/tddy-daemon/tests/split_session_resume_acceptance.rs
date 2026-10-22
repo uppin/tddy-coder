@@ -333,6 +333,7 @@ fn a_stopped_split_session() -> SessionMetadata {
         agent_session_id: None,
         ssh_config_host: None,
         managed_codebase: false,
+        session_role: None,
     }
 }
 

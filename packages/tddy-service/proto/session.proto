@@ -36,6 +36,11 @@ service SessionService {
   rpc StreamStartSession(StartSessionRequest) returns (stream StartSessionEvent);
   rpc ConnectSession(ConnectSessionRequest) returns (ConnectSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
+  // Start, resume, or return the project's project-home session: one managed, read-only session
+  // per project on a dedicated home worktree at the project's main branch ref, running the
+  // project's home agent. Refused (failed_precondition) when the project has no home agent or its
+  // harness cannot enforce managed-codebase mode. See `#project-home` 4/7.
+  rpc EnsureProjectHomeSession(EnsureProjectHomeSessionRequest) returns (EnsureProjectHomeSessionResponse);
   rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
   // One measurement of a session's checkout, for the daemon hosting that session's room.
@@ -346,6 +351,24 @@ message SessionEntry {
   // daemon tools). Recorded at start; `false` for sessions started before it was recorded. See
   // `#project-home` 3/7.
   bool managed_codebase = 34;
+  // The session's standing role, empty for an ordinary session. "project-home" is the one
+  // per-project, read-only managed session pinned at the top of its project's group. See
+  // `#project-home` 4/7.
+  string session_role = 35;
+}
+
+message EnsureProjectHomeSessionRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Host whose home session this is. Empty or matching the local instance = local.
+  string daemon_instance_id = 3;
+}
+
+message EnsureProjectHomeSessionResponse {
+  SessionEntry session = 1;
+  // "started" (created now), "resumed" (was stopped; worktree fast-forwarded, same
+  // conversation) or "running" (returned unchanged).
+  string outcome = 2;
 }
 
 enum Signal {

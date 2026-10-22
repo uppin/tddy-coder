@@ -999,6 +999,20 @@ export const sessionsDrawerProjectGroup = (projectKey: string) =>
 export const sessionsDrawerProjectGroupHeader = (projectKey: string) =>
   `sessions-drawer-project-group-header-${projectKey}`;
 
+/** `[data-testid="sessions-drawer-project-home-<projectId>"]` — the pinned **main** entry first in a
+ *  project group; clicking it ensures and selects the project-home session (`#project-home` 4/7). */
+export const sessionsDrawerProjectHome = (projectId: string) =>
+  `sessions-drawer-project-home-${projectId}`;
+
+/** `[data-testid="sessions-drawer-project-home-hint-<projectId>"]` — shown instead of starting when
+ *  the project has no home agent. */
+export const sessionsDrawerProjectHomeHint = (projectId: string) =>
+  `sessions-drawer-project-home-hint-${projectId}`;
+
+/** `[data-testid="sessions-drawer-project-home-error-<projectId>"]` — why the last ensure failed. */
+export const sessionsDrawerProjectHomeError = (projectId: string) =>
+  `sessions-drawer-project-home-error-${projectId}`;
+
 /** `[data-testid="sessions-drawer-stack-<parentSessionId>"]` — collapsible <details> group */
 export const sessionsDrawerStackGroup = (parentSessionId: string) =>
   `sessions-drawer-stack-${parentSessionId}`;

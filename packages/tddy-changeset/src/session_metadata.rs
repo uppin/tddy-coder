@@ -116,7 +116,14 @@ pub struct SessionMetadata {
     /// this field reads exactly as it did. See `#project-home` 3/7.
     #[serde(default, skip_serializing_if = "is_false")]
     pub managed_codebase: bool,
+    /// The session's standing role; absent for an ordinary session. [`PROJECT_HOME_ROLE`] marks
+    /// the project's read-only home session. See `#project-home` 4/7.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_role: Option<String>,
 }
+
+/// [`SessionMetadata::session_role`] of a project's project-home session.
+pub const PROJECT_HOME_ROLE: &str = "project-home";
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -235,6 +242,7 @@ pub fn write_initial_tool_session_metadata(
         agent_session_id: None,
         ssh_config_host: None,
         managed_codebase: false,
+        session_role: None,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -707,6 +715,7 @@ session_type: workspace
             agent_session_id: agent_session_id.map(str::to_string),
             ssh_config_host: None,
             managed_codebase: false,
+            session_role: None,
             ..a_workspace_session()
         }
     }

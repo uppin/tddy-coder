@@ -77,6 +77,21 @@ interface SessionDrawerProps {
    * 2/7). A session whose project is not here lands in the trailing **Other** group.
    */
   projects?: ReadonlyArray<{ projectId: string; name: string }>;
+  /**
+   * What each project group's pinned **main** entry shows (`#project-home` 4/7): the project's main
+   * branch ref and its home agent's label (`null` when no home agent is set — the entry then shows
+   * a hint instead of starting anything). A project absent here gets no pinned entry.
+   */
+  projectHomes?: ReadonlyArray<ProjectHomeInfo>;
+  /** Start, resume or reach the project's home session. Rejects with the daemon's reason. */
+  onEnsureProjectHome?: (projectId: string) => Promise<void>;
+}
+
+/** One project's pinned home entry, as the drawer renders it. */
+export interface ProjectHomeInfo {
+  projectId: string;
+  mainBranchRef: string;
+  homeAgentLabel: string | null;
 }
 
 interface StackGroup {

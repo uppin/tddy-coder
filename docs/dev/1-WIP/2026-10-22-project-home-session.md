@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 5 — proto field + RPC, session lifecycle orchestration (start/resume/running decision), a new worktree kind, server-side tool refusal, across tddy-service, tddy-changeset, tddy-session-activity, tddy-agent-launch, tddy-worktree-service, tddy-tool-engine, tddy-daemon-rpc, tddy-web
 **Stack**: #project-home 4/7. Base: `feature/project-home/activity-sidebar`.
+**PR**: [#699](https://github.com/uppin/tddy-coder/pull/699)
 
 ## Initial Discovery
 
@@ -71,14 +72,21 @@ pub fn fast_forward_home_worktree(home: &Path, main_branch_ref: &str) -> Result<
 // tddy-tool-engine::read_only (new)
 pub fn is_read_only_tool(name: &str) -> bool;
 pub fn read_only_catalog() -> Vec<ToolDef>;
+// tddy-worktree-service::home_worktree — also pub fn home_worktree_path(worktrees_root, project_id) -> PathBuf
 // tddy-agent-launch::svc_ensure_project_home (new)
-pub enum EnsureOutcome { Started, Resumed, Running }
+pub enum EnsureOutcome { Started, Resumed, Running }   // .as_wire() -> "started" | "resumed" | "running"
+impl LaunchSessions { pub async fn ensure_project_home_session_at_session_coordinate(&self, Request<EnsureProjectHomeSessionRequest>) -> Result<Response<EnsureProjectHomeSessionResponse>, Status> }
+// tddy-session-lifecycle: SessionHandler::ensure_project_home_session, wired through SessionServiceImpl,
+// DaemonSessionHost and TestDaemon; `EnsureProjectHomeSession` joins RESIDUAL_METHODS (unbundle_service_split)
 ```
 ```ts
 // packages/tddy-web/src/components/sessions/ProjectHomeEntry.tsx (new)
-export function ProjectHomeEntry(props: { project: ProjectEntry; homeSession: SessionEntry | null; agentLabel: string | null; selected: boolean; onEnsure(projectId: string): Promise<void> }): JSX.Element;
+export function ProjectHomeEntry(props: { home: ProjectHomeInfo; homeSession: SessionEntry | null; selected: boolean; onEnsure(projectId: string): Promise<void> }): ReactElement | null;
+// SessionDrawerProps gains (optional): projectHomes?: ReadonlyArray<ProjectHomeInfo>; onEnsureProjectHome?(projectId): Promise<void>
+export interface ProjectHomeInfo { projectId: string; mainBranchRef: string; homeAgentLabel: string | null }
 // packages/tddy-web/src/components/sessions/useEnsureProjectHome.ts (new)
-export function useEnsureProjectHome(client: Client<typeof SessionService>, sessionToken: string): { ensure(projectId: string, daemonInstanceId: string): Promise<string>; errorByProject: ReadonlyMap<string, string> };
+export function useEnsureProjectHome(client: Client<typeof SessionService> | null, sessionToken: string, onEnsured: (sessionId: string) => void): { ensure(projectId: string, daemonInstanceId: string): Promise<void>; errorByProject: ReadonlyMap<string, string> };
+// testIds: sessionsDrawerProjectHome(projectId), sessionsDrawerProjectHomeHint(projectId), sessionsDrawerProjectHomeError(projectId)
 ```
 Plus the failing tests below. Bodies `// TODO(home-session): implement`.
 
@@ -163,17 +171,18 @@ stub scripts) and a real git fixture repo for the home worktree; a unit test tab
 
 | Test | File | Validates |
 |---|---|---|
-| `ensuring_a_project_home_starts_a_managed_session_on_a_home_worktree_at_the_main_ref` | `packages/tddy-daemon-rpc/tests/ensure_project_home_session_acceptance.rs` (new) | started, role, managed, worktree HEAD = main ref |
+| `ensuring_a_project_home_starts_a_managed_session_on_a_home_worktree_at_the_main_ref` | `packages/tddy-session-lifecycle/tests/ensure_project_home_session_acceptance.rs` (new — the stub-claude harness lives there) | started, role, managed, worktree HEAD = main ref |
 | `ensuring_again_while_it_runs_returns_the_same_session` | same | running |
 | `ensuring_a_stopped_home_session_fast_forwards_and_resumes_the_same_conversation` | same | resumed, worktree advanced, resume argv carries the conversation |
 | `ensuring_without_a_home_agent_is_refused_and_starts_nothing` | same | failed_precondition |
 | `ensuring_with_an_agent_that_cannot_enforce_managed_mode_is_refused` | same | failed_precondition naming harness |
-| `a_project_home_session_cannot_write_or_run_a_shell_through_execute_tool` | same | role refusal |
-| `only_read_and_search_tools_are_read_only` | `packages/tddy-tool-engine/src/read_only.rs` (`#[cfg(test)]`) | filter table |
+| `a_project_home_session_is_listed_with_its_role` | same | ListSessions role |
+| `a_project_home_session_cannot_write_or_run_a_shell_through_execute_tool` | `packages/tddy-daemon-rpc/tests/project_home_read_only_exec_tools_acceptance.rs` (new) | `PermissionDenied` for Write/StrReplace/Delete/Shell, worktree untouched |
+| `a_project_home_session_still_reads_through_execute_tool` | same | Read allowed (passes already — guard) |
+| `only_read_and_search_tools_are_read_only` / `the_read_only_catalog_offers_the_read_only_tools_in_catalog_order` | `packages/tddy-tool-engine/src/read_only.rs` (`#[cfg(test)]`) | filter table: Read, Grep, Glob, ReadLints, SemanticSearch |
 | `each project group shows a pinned main entry first` | `packages/tddy-web/cypress/component/SessionsDrawerProjectHomeAcceptance.cy.tsx` (new) | pin + order |
 | `clicking the pinned entry ensures the home session and selects it` | same | ensure → select |
 | `the home session is not repeated in its group's rows` | same | de-dup |
-| `the home session opens with the activity sidebar` | same | node 3 default holds for the role |
 | `a project without a home agent shows a hint instead of starting` | same | hint |
 | `the Other group has no pinned entry` | same | Other |
 
@@ -182,6 +191,13 @@ stub scripts) and a real git fixture repo for the home worktree; a unit test tab
 - **Read-only enforced in `ExecuteTool`**, not only by allowlist: an allowlist is spawn-time and harness-specific.
 - **Refuse non-enforceable harnesses** rather than run them "guided": the session is advertised as read-only.
 - **Complexity 5** — the boundary was weighed: it could split by capability into "daemon ensure + role (RPC-tested)" and "pinned drawer entry". Kept as one node by the developer's approval of the 7-node plan; revisit at the red step if the failing tests show the slice is too large.
+
+## Red-phase notes
+
+- Verified failing (2026-10-23): 6/6 `ensure_project_home_session_acceptance` (RPC unimplemented), `a_project_home_session_cannot_write_or_run_a_shell_through_execute_tool`, 2/2 `read_only` unit tests, 5/5 `SessionsDrawerProjectHomeAcceptance.cy.tsx` (no groups — node 2 — and no pinned entry).
+- The home agent in the tests is a harness profile (`<data>/agents/home-claude.yaml`, `harness: claude-cli`); the cursor refusal uses a `harness: cursor-cli` profile. Green maps a `ListAgents` id to its harness the way `harness_profile_start` does.
+- "Opens with the activity sidebar" is not a separate spec here: the started session is asserted `managed_codebase = true`, and node 3's `defaultActivitySidebarOpen` turns that into an open sidebar.
+- `session_role` touched every `SessionMetadata` / reader / proto `SessionEntry` literal (50 sites); `cargo check --all-targets` clean on the 19 crates that build them; clippy `-D warnings` clean on tool-engine, worktree-service, agent-launch, session-lifecycle, daemon-rpc, changeset, session-activity.
 
 ## Technical Debt & Production Readiness
 
@@ -203,10 +219,10 @@ stub scripts) and a real git fixture repo for the home worktree; a unit test tab
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

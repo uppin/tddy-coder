@@ -31,6 +31,8 @@ pub struct SessionEntry {
     pub ssh_config_host: String,
     /// Whether the session was started in managed-codebase mode (`.session.yaml`).
     pub managed_codebase: bool,
+    /// The session's standing role (`.session.yaml`); empty for an ordinary session.
+    pub session_role: String,
 }
 
 /// Check if a process with the given PID is alive (same semantics as listing sessions).
@@ -93,6 +95,8 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             codebase_session_id: metadata.codebase_session_id.unwrap_or_default(),
             ssh_config_host: metadata.ssh_config_host.unwrap_or_default(),
             managed_codebase: metadata.managed_codebase,
+            // TODO(home-session): report the session role
+            session_role: String::new(),
         });
     }
 
@@ -166,6 +170,7 @@ mod tests {
             agent_session_id: None,
             ssh_config_host: None,
             managed_codebase: false,
+            session_role: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
