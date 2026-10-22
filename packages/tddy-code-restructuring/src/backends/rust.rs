@@ -1364,6 +1364,17 @@ impl RustBackend {
 
         // Rebinds the `self` a range reads to a local inserted before it, authored here and informed
         // by the server (field mode), and opens the document for itself.
+        self.fields_or_later(op, workspace, relative, uri, original)
+    }
+
+    fn fields_or_later(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         if op.op == RefactorKind::ReadFieldsThrough {
             return self.read_fields_through(op, workspace);
         }
