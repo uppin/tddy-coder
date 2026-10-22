@@ -1706,20 +1706,7 @@ impl RustBackend {
             &module_text::module_bounds(&relocated, &name)?,
             &impl_members,
         ));
-        facade::refuse_mangled_rewrite(&preserved, &name, &moved)?;
-        let facade = facade::facade_lines(&name, &moved, reexport)?;
-        let notes = facade::empty_facade_note(&name, &facade, reexport)
-            .into_iter()
-            .chain(inline_paths::note(rerooted))
-            .collect();
-
-        Ok((
-            server_process::without_hollow_imports(&module_text::with_facade(
-                &preserved, &name, &facade,
-            )?),
-            report,
-            notes,
-        ))
+        finish_relocation(reexport, moved, name, report, preserved, rerooted)
     }
 
     /// What the extraction needs to know about every path-reached item the range would relocate.
@@ -2384,6 +2371,30 @@ impl RustBackend {
             lsp_edits::edits_for(&renamed, uri)?,
         ))
     }
+}
+
+fn finish_relocation(
+    reexport: Reexport,
+    moved: Vec<MovedItem>,
+    name: String,
+    report: Vec<VisibilityChange>,
+    preserved: String,
+    rerooted: usize,
+) -> Result<(String, Vec<VisibilityChange>, Vec<String>)> {
+    facade::refuse_mangled_rewrite(&preserved, &name, &moved)?;
+    let facade = facade::facade_lines(&name, &moved, reexport)?;
+    let notes = facade::empty_facade_note(&name, &facade, reexport)
+        .into_iter()
+        .chain(inline_paths::note(rerooted))
+        .collect();
+
+    Ok((
+        server_process::without_hollow_imports(&module_text::with_facade(
+            &preserved, &name, &facade,
+        )?),
+        report,
+        notes,
+    ))
 }
 
 /// What the seam survey saw, as one line.
