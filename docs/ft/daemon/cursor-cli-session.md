@@ -1,6 +1,7 @@
 # Cursor Agent CLI Session
 
 > **Related:** [Claude Code CLI session](claude-cli-session.md) — sibling session type; shares `CliSessionManager`, `StreamSessionTerminalIO`, and web terminal mounting.
+> **Related:** [OpenCode CLI session](opencode-cli-session.md) — sibling session type; Cursor and OpenCode share the daemon-cut worktree provisioning (`cli_session_worktree.rs`).
 
 ## Summary
 

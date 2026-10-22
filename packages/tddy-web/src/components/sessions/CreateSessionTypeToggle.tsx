@@ -54,6 +54,19 @@ export function CreateSessionTypeToggle({
       >
         Cursor CLI
       </button>
+      <button
+        type="button"
+        data-testid="create-session-type-opencode-cli"
+        aria-pressed={sessionType === "opencode-cli"}
+        onClick={() => setSessionType("opencode-cli")}
+        className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
+          sessionType === "opencode-cli"
+            ? "bg-primary text-primary-foreground border-primary"
+            : "bg-background text-foreground border-input hover:bg-muted"
+        }`}
+      >
+        OpenCode
+      </button>
     </div>
   );
 }

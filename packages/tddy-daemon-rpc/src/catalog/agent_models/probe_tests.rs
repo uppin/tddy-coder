@@ -42,3 +42,63 @@ fn a_non_cursor_probe_omits_the_cursor_cli_path_flag() {
         ]
     );
 }
+
+/// The OpenCode model probe hands `tddy-tools` the binary the daemon resolved for the harness
+/// (`cli_harness_binary`: the environment, then `cli_harnesses.opencode-cli.binary_path`, then
+/// `opencode`), so the impersonated child execs it without a PATH lookup that lacks its install dir.
+#[test]
+fn an_opencode_cli_probe_carries_the_resolved_opencode_binary_path() {
+    // Given
+    let resolved = Path::new("/home/dev/.opencode/bin/opencode");
+
+    // When
+    let args = list_models_probe_args("opencode-cli", Some(resolved));
+
+    // Then
+    assert_eq!(
+        args,
+        vec![
+            "list-models".to_string(),
+            "--agent".to_string(),
+            "opencode-cli".to_string(),
+            "--opencode-cli-path".to_string(),
+            "/home/dev/.opencode/bin/opencode".to_string(),
+        ]
+    );
+}
+
+/// Each binary override is its own agent's: Cursor's path never reaches the OpenCode probe.
+#[test]
+fn a_cursor_probe_carries_no_opencode_flag_and_an_opencode_probe_no_cursor_flag() {
+    // When
+    let cursor = list_models_probe_args("cursor", Some(Path::new("/bin/agent")));
+    let opencode = list_models_probe_args("opencode-cli", Some(Path::new("/bin/opencode")));
+
+    // Then
+    assert!(
+        !cursor.contains(&"--opencode-cli-path".to_string()),
+        "{cursor:?}"
+    );
+    assert!(
+        !opencode.contains(&"--cursor-cli-path".to_string()),
+        "{opencode:?}"
+    );
+}
+
+/// A bare-name resolution (`opencode` on PATH) is not forwarded, as for Cursor: only an absolute
+/// path pins the child to a fully-qualified binary.
+#[test]
+fn an_opencode_cli_probe_without_a_resolved_path_omits_the_flag() {
+    // When
+    let args = list_models_probe_args("opencode-cli", None);
+
+    // Then
+    assert_eq!(
+        args,
+        vec![
+            "list-models".to_string(),
+            "--agent".to_string(),
+            "opencode-cli".to_string(),
+        ]
+    );
+}

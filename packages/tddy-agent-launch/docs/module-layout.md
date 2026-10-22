@@ -6,10 +6,9 @@ connect, signal and delete handlers; `tddy-session-lifecycle` wires it to the ho
 ([module-layout](../../tddy-session-lifecycle/docs/module-layout.md)) and re-exports it at the old
 `tddy_session_lifecycle::…` paths.
 
-About **9.4k production lines** in 54 modules, under the 10k receiver budget. Two files are over 500:
-`cursor_cli_spawn.rs` (563), moved whole, with its split deferred
-([`docs/dev/todo/2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines.md`](../../../docs/dev/todo/2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines.md)),
-and `session_coordinate_handlers.rs` (503, [`code-issues/`](code-issues/oversized-file-session-coordinate-handlers.md)).
+About **9.4k production lines** in 54 modules, under the 10k receiver budget. No production file is over 500 (the largest, by the count to the first `#[cfg(test)]`:
+`svc_start_session_core.rs` 496, `svc_start_sandboxed_claude_cli_session.rs` 493,
+`session_coordinate_handlers.rs` 485).
 Standing findings are in [`code-issues/`](code-issues/). A production line is any line of a `src/` file
 outside an inline `#[cfg(test)] mod x { … }` block, excluding `*_tests.rs`.
 
@@ -40,7 +39,9 @@ steps are in sibling modules:
 |---|---|
 | `start_request_checks.rs` | `forward_start_session` (a start owned by a peer, waiting `start_forward_deadline(config)` — the split-start budget, not the 30 s forward deadline), `provision_project_for_start` (keeps a streamed start alive while it waits), `validate_stack_seed_against_project` |
 | `workspace_branch_start.rs` | `seed_and_start_workspace_session` |
-| `cli_branch_starts.rs` | the claude-cli and cursor-cli branches: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`) |
+| `cli_branch_starts.rs` | the claude-cli, cursor-cli and opencode-cli branches: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`); `start_opencode_cli` (the sandbox and managed-codebase refusals, the prelude, the seeded roster, the spawn) |
+| `cli_session_worktree.rs` | what a daemon-cut CLI session's worktree needs, shared by cursor-cli and opencode-cli: `provision_cli_worktree(&CliWorktreeStart, …) -> CliWorktree { path, project }` (cut or adopt the worktree, push the new branch when asked) and `semantic_index_env` |
+| `opencode_cli_spawn.rs` | the [OpenCode CLI session](../../../docs/ft/daemon/opencode-cli-session.md): `start_opencode_cli_session(OpenCodeCliStart)` (route first, then worktree, seeded clones, commit identity, spawn, `.session.yaml`) and `LaunchSessions::resume_opencode_cli` (`opencode --continue`, route re-resolved; refused when the worktree is gone). The binary is `DaemonConfig::cli_harness_binary` for the registry's descriptor |
 | `tool_session_spawn.rs` | `spawn_tool_session` and `spawn_tddy_coder`: the one `tddy-coder` spawn, for both a start and a resume |
 | `tool_spawn_plan.rs` | `ToolSpawnPlan` (what the child is spawned with) and `ToolSpawnPurpose` (`Start` / `Resume`) |
 | `svc_ensure_project_available_for_start.rs`, `svc_index_workspace_worktree.rs` | project provisioning for a start; the semantic index over a workspace worktree |
@@ -151,6 +152,14 @@ to a claude-cli session (behaviour:
 - `refuse_route_in_sandbox(sources)` is the sandboxed claude-cli start's guard in
   `cli_branch_starts.rs`: a chosen account is `FAILED_PRECONDITION` "not yet supported in a sandbox"
   (`TODO(provider-route-jail)`, lifted by `#provider-route` 9/9).
+- `cli_route_launch.rs` applies a route to any [CLI harness](../../tddy-agent-backend/docs/architecture.md#cli-harnesses-cli_harness):
+  `cli_route_launch(harness, route, session_dir) -> CliRouteLaunch { env, args }` writes the route's
+  files `0600` (`write_atomic_with_mode`) into the session directory and points the harness's
+  `route_config_env` (`OPENCODE_CONFIG`) at the first; `None` adds and writes nothing.
+  `start_cli_route(access, harness, sources, model, session_dir)` resolves the chosen account
+  (`route_on_account`), writes the files and records `provider-account.yaml`; `resume_cli_route`
+  re-resolves the record and writes the files again. opencode-cli uses them; a routed start passes no
+  `--model` of its own, the route's `--model tddy-route/<model>` names it.
 - `StackChildSpawnHandler` and `GrillMeConversationSpawnHandler` pass `RouteSources::default()`:
   a spawned child or conversation runs on its vendor.
 
@@ -191,15 +200,16 @@ session and the transport the request arrived on (`request.metadata().transport(
 receiving host). The port decides what that costs the caller, and its error fails the request, so
 `ConnectSession` itself opens no room and awaits LiveKit for no caller: a host with nothing wired
 holds `NoSessionReach`, and with the LiveKit plugin wired only a caller that arrived over LiveKit
-waits. The reply is dial-in metadata: empty LiveKit coordinates for `claude-cli`, `cursor-cli` and
-`workspace` sessions (the room those coordinates would name is the session's *terminal* room, which
+waits. The reply is dial-in metadata: empty LiveKit coordinates for every CLI harness session
+(`claude-cli`, `cursor-cli`, `opencode-cli`) and `workspace` sessions (the room those coordinates would name is the session's *terminal* room, which
 those types do not have), the session's terminal room otherwise.
 
 "Facilitated here, over a checkout this daemon holds" is one rule, `facilitated_checkout(metadata)`,
 answering `NotFacilitated`, `NoCheckout` or `Checkout(path)`. `ConnectSession` and an integration's
 own RPC (through `ReachableSessions::resolve`) both apply it, so the two cannot disagree about which
-sessions get a room. Its type half is `session_type_is_facilitated_here(session_type)` — `claude-cli`
-and `cursor-cli` run an agent here, so they have a session room of their own; a `workspace` or `tool`
+sessions get a room. Its type half is `session_type_is_facilitated_here(session_type)` — every CLI
+harness session type the registry holds (`claude-cli`, `cursor-cli`, `opencode-cli`) runs an agent
+here, so it has a session room of its own; a `workspace` or `tool`
 session does not. It lives here rather than in the LiveKit plugin because it is a statement about
 session types, not about any transport.
 

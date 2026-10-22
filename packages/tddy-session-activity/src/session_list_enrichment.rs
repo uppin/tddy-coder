@@ -161,28 +161,18 @@ pub fn session_list_status_from_session_dir(
         }
     };
 
-    // Claude CLI sessions have no changeset — read agent/model/activity_status from metadata.
-    if meta.session_type.as_deref() == Some("claude-cli") {
+    // CLI harness sessions (claude-cli, cursor-cli, opencode-cli, ...) have no changeset — read
+    // agent/model/activity_status from metadata. The agent is the session type.
+    if let Some(harness) = meta
+        .session_type
+        .as_deref()
+        .and_then(tddy_core::cli_harness::cli_harness)
+    {
         return Ok(SessionListStatusDisplay {
             workflow_goal: String::new(),
             workflow_state: String::new(),
             elapsed_display: String::new(),
-            agent: "claude-cli".to_string(),
-            model: meta.model.clone().unwrap_or_default(),
-            activity_status: meta.activity_status.clone().unwrap_or_default(),
-            orchestrator_session_id: String::new(),
-            recipe: String::new(),
-            stack_plan_json: String::new(),
-            branch: String::new(),
-        });
-    }
-
-    if meta.session_type.as_deref() == Some("cursor-cli") {
-        return Ok(SessionListStatusDisplay {
-            workflow_goal: String::new(),
-            workflow_state: String::new(),
-            elapsed_display: String::new(),
-            agent: "cursor-cli".to_string(),
+            agent: harness.session_type.to_string(),
             model: meta.model.clone().unwrap_or_default(),
             activity_status: meta.activity_status.clone().unwrap_or_default(),
             orchestrator_session_id: String::new(),

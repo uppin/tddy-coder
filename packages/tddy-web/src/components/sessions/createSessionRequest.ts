@@ -4,7 +4,16 @@ import type {
   StartSessionRequestInit,
 } from "../../hooks/useSessionAttachments";
 
-export type SessionType = "tool" | "claude-cli" | "cursor-cli";
+export type SessionType = "tool" | "claude-cli" | "cursor-cli" | "opencode-cli";
+
+/**
+ * Whether the daemon cuts the session's worktree itself — and so can push the new branch to origin
+ * at start. Every CLI harness session does; a "tool" session spawns tddy-coder, which owns its own
+ * worktree.
+ */
+export function daemonCutsTheWorktree(sessionType: SessionType): boolean {
+  return sessionType !== "tool";
+}
 
 /**
  * Every form value `buildStartSessionRequest` reads. Named rather than passed one argument at a
@@ -152,6 +161,32 @@ export function buildStartSessionRequest(
       // cursor-agent has no tool allowlist, so a split codebase could only be suggested to it,
       // never enforced — the daemon refuses such a request. Both managed-codebase blocks share
       // state, so a host picked while the form was claude-cli must not survive the switch here.
+      codebaseDaemonInstanceId: "",
+    };
+  }
+  if (sessionType === "opencode-cli") {
+    return {
+      ...commonParams,
+      toolPath: "",
+      agent: "",
+      recipe: "",
+      stackParent,
+      stackParentDaemonInstanceId,
+      stackNodeId,
+      sessionType: "opencode-cli",
+      model,
+      // The provider field is offered to every CLI harness, so the account the operator chose
+      // goes out as chosen rather than being dropped in favour of the vendor.
+      providerAccountId,
+      providerBuiltIn,
+      permissionMode: "",
+      // OpenCode offers no first prompt, sandbox, managed codebase, specialized agents or semantic
+      // index, so the request says so rather than sending what another session type left in the form.
+      initialPrompt: "",
+      sandbox: false,
+      managedCodebase: false,
+      specializedAgents: [],
+      semanticIndex: false,
       codebaseDaemonInstanceId: "",
     };
   }

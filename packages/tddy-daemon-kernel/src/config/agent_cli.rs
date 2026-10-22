@@ -146,6 +146,44 @@ pub struct ClaudeCliConfig {
     pub claude_home_dir: Option<PathBuf>,
 }
 
+/// One further CLI harness's configuration, under `cli_harnesses.<session type>:`.
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CliHarnessConfig {
+    /// The binary to run; the harness's default (`opencode`, `muse`) when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binary_path: Option<String>,
+}
+
+impl DaemonConfig {
+    /// The binary a CLI harness runs: `binary_env` when set and non-empty, else
+    /// `cli_harnesses.<session_type>.binary_path`, else `default_binary`.
+    #[must_use]
+    pub fn cli_harness_binary(
+        &self,
+        session_type: &str,
+        default_binary: &str,
+        binary_env: &str,
+    ) -> String {
+        // Blank values count as unset, as they do for `TDDY_CLAUDE_BINARY` and `TDDY_CURSOR_AGENT`.
+        let from_env = std::env::var(binary_env).ok();
+        let from_env = from_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let from_config = self
+            .cli_harnesses
+            .get(session_type)
+            .and_then(|harness| harness.binary_path.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        from_env
+            .or(from_config)
+            .unwrap_or(default_binary)
+            .to_string()
+    }
+}
+
 /// Cursor Agent CLI session configuration. Loaded from daemon YAML under `cursor_cli:`.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]

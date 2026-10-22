@@ -65,7 +65,8 @@ applied by the caller (`tddy-agent-launch` for a PTY). Product view:
 | `HarnessRoute { env, secret_env, files: Vec<RouteFile>, args }` | what the harness is launched with; the key is only ever in `secret_env` |
 | `RouteRefusal` | `HarnessCannotBeRouted` (Cursor), `ProtocolNotServed { needs }`, `PresetNotAccepted` (Muse Code: Meta only), `NotYetRoutable(harness)`; `Display` is the sentence an operator reads |
 | `route_supported(harness, preset, protocols)` | the capability matrix, answered without building a route; `protocols` are the wire spellings `anthropic-messages`, `openai-responses`, `openai-chat` |
-| `resolve_route(harness, target)` | the route. Claude Code (all three harnesses): `ANTHROPIC_BASE_URL` = the Anthropic Messages root, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` = the model; secret `ANTHROPIC_AUTH_TOKEN`; args `--model <model>`. Cursor: `HarnessCannotBeRouted`. Codex, OpenCode and Muse Code: `NotYetRoutable` |
+| `resolve_route(harness, target)` | the route. Claude Code (all three harnesses): `ANTHROPIC_BASE_URL` = the Anthropic Messages root, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` = the model; secret `ANTHROPIC_AUTH_TOKEN`; args `--model <model>`. OpenCode (`OpenCode`, `OpenCodeCli`): files `[opencode.json]` (`opencode_config_for`), secret `TDDY_OPENCODE_PROVIDER_KEY` (`OPENCODE_ROUTE_KEY_ENV`), args `--model tddy-route/<model>`; an account serving neither OpenAI protocol is `ProtocolNotServed`. Cursor: `HarnessCannotBeRouted`. Codex and Muse Code: `NotYetRoutable` |
+| `opencode_config_for(target) -> Option<RouteFile>` | the `opencode.json` declaring the account as provider `OPENCODE_ROUTE_PROVIDER_ID` (`tddy-route`) and selecting `target.model` on it: `@ai-sdk/openai` over the Responses root with `include: ["reasoning.encrypted_content"]` when the account serves Responses, `@ai-sdk/openai-compatible` over the Chat root otherwise; `apiKey` is `{env:TDDY_OPENCODE_PROVIDER_KEY}`, never the key. `None` when the account serves neither — the wire is selected through a private `OpenAiWire`, so no input panics |
 | `RouteChoice { BuiltIn, Account(id) }`, `RouteSources { session, agent_definition, user_default }`, `choose_route` | precedence: session over agent definition over the person's default; `BuiltIn` at a level overrides everything below it; `None` is the vendor |
 
 The matrix covers every harness, once, here. A harness whose route body is added later replaces its
@@ -74,6 +75,42 @@ The matrix covers every harness, once, here. A harness whose route body is added
 Tests: `tests/provider_route_acceptance.rs` — env shape and key placement for the three Claude
 harnesses, the Baseten and Cursor refusals, `route_supported`, the id round-trip, precedence, and the
 redacted `Debug`.
+`tests/opencode_route_acceptance.rs` — the generated `opencode.json` on Meta (Responses, reasoning
+carried) and Baseten (Chat Completions), no key in the file, the OpenCode route's files / secret /
+`--model` argument, and the refusal and `None` for an Anthropic-only account.
+
+## CLI harnesses (`cli_harness`)
+
+The coding agents a session runs interactively in a terminal pane, one **descriptor** per session
+type, in the order the web's session-type toggle offers them: `claude-cli`, `cursor-cli`,
+`opencode-cli`. Code that needs a per-session-type answer asks the registry
+(`cli_harness(session_type) -> Option<&'static CliHarness>`, `cli_harnesses()`) instead of matching on
+the string, so a further harness is one more descriptor. `tddy_core::cli_harness` re-exports it.
+
+| `CliHarness` field | `claude-cli` | `cursor-cli` | `opencode-cli` |
+|---|---|---|---|
+| `label` | Claude CLI | Cursor CLI | OpenCode |
+| `route_harness` | `ClaudeCli` | `CursorCli` | `OpenCodeCli` |
+| `context_agent` | `claude` | `cursor` | `opencode` |
+| `default_binary` / `binary_env` | `claude` / `TDDY_CLAUDE_BINARY` | `agent` / `TDDY_CURSOR_AGENT` | `opencode` / `TDDY_OPENCODE_CLI` |
+| `route_config_env` | — | — | `OPENCODE_CONFIG` |
+| `models` | `Curated(claude_cli_models)` | `Curated(cursor_cli_models)` | `ListedByBinary(["models"])` |
+
+`argv: fn(&CliLaunch) -> Vec<String>` builds the argument list, binary first, from a `CliLaunch`
+(`binary`, `model`, `session_id`, `conversation_id`, `initial_prompt`, `permission_mode`,
+`dangerously_skip_permissions`, `resume`). Claude's goes through `claude_argv::build_claude_base_argv`
+plus a non-blank positional prompt; Cursor's is `[--resume <chat>] [--model <m>] [<prompt>]`;
+OpenCode's is `[--model <m>] [--prompt <p>]` on a start and `--continue` alone on a resume.
+`models_from_listing(stdout)` reads a `ListedByBinary` harness's catalogue, one `provider/model` per
+line, blank lines skipped, the first the default. `resolve_agent_models` answers a CLI harness from its
+descriptor: curated, or by running its binary (`BackendCliPaths.opencode_cli_path` overrides the
+`opencode` binary); a binary that fails is an error, never an empty list.
+
+The `opencode` row of `context_globs_for_agent` is `AGENTS.md`, `.agents/**`, `opencode.json`,
+`.opencode/**`.
+
+Tests: `tests/cli_harness_acceptance.rs` (the registry, OpenCode's argv and listing),
+`tests/opencode_model_catalog.rs` (`resolve_agent_models("opencode-cli")` against a stub binary).
 
 ## Token accounting (`token_accounting`)
 

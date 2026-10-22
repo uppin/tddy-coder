@@ -5,6 +5,7 @@
 > `terminal_id` → `task_id` and delegates control to `PtyRegistry`. Terminal RPCs unchanged.
 
 > **Related:** [Cursor Agent CLI session](cursor-cli-session.md) — same daemon PTY manager and web terminal path with Cursor-specific hooks and argv.
+> **Related:** [OpenCode CLI session](opencode-cli-session.md) — the third CLI session type; all three are registered through one CLI harness descriptor.
 
 ## Summary
 

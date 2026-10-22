@@ -422,6 +422,11 @@ impl LaunchSessions {
             return Ok(started);
         }
 
+        // --- opencode-cli branch: no LiveKit; spawns OpenCode in a PTY in a daemon-cut worktree ---
+        if req.session_type.trim() == "opencode-cli" {
+            return self.start_opencode_cli(&req, progress, os_user).await;
+        }
+
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| Status::failed_precondition("LiveKit not configured"))?;
 

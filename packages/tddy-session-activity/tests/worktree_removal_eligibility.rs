@@ -46,3 +46,12 @@ fn a_cursor_cli_session_is_deliberately_left_out_of_scope() {
     // Pinned so the omission stays a visible decision rather than an oversight rediscovered later.
     assert!(!worktree_removal_applies_to("cursor-cli"));
 }
+
+#[test]
+fn an_opencode_cli_session_is_eligible_for_worktree_removal() {
+    // Then — unlike cursor-cli, which predates the rule and is left alone so existing sessions keep
+    // their behaviour, an opencode-cli session is new: its worktree is cut for it alone, so deleting
+    // the session must not leak the only thing it left behind. A client-supplied checkout is still
+    // kept by `is_daemon_managed_worktree`.
+    assert!(worktree_removal_applies_to("opencode-cli"));
+}

@@ -208,3 +208,92 @@ impl LaunchSessions {
         .await
     }
 }
+
+impl LaunchSessions {
+    /// The `opencode-cli` start: refused in a sandbox or over a managed codebase, otherwise the
+    /// shared CLI prelude, the seeded roster resolved before the spawn, then OpenCode in a PTY.
+    pub(super) async fn start_opencode_cli(
+        &self,
+        req: &StartSessionRequest,
+        progress: &AttachmentProgressSink,
+        os_user: &str,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        // TODO(provider-route-jail): OpenCode is not sandboxed yet (#provider-route 9/9). Refused
+        // rather than run unsandboxed.
+        if req.sandbox {
+            return Err(Status::failed_precondition(
+                "opencode-cli sessions cannot run in a sandbox yet",
+            ));
+        }
+        // OpenCode has no workflow of its own for a managed codebase to drive.
+        if req.managed_codebase {
+            return Err(Status::invalid_argument(
+                "managed_codebase is not supported for opencode-cli sessions",
+            ));
+        }
+        let start = self.cli_start_prelude(req, progress, os_user).await?;
+        let started_agents = self
+            .agent_roster
+            .seeded_roster_records(&req.specialized_agents)
+            .await?;
+        let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
+            service: self.agent_roster.clone(),
+        };
+        let sessions_base = start.sessions_base.clone();
+        let session_id = start.session_id.clone();
+        let started = self
+            .start_opencode_cli_from_request(req, os_user, start, started_agents, clones, progress)
+            .await?;
+        self.announce_worktree_ready(&sessions_base, &session_id);
+        Ok(started)
+    }
+
+    async fn start_opencode_cli_from_request(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        start: CliStart,
+        mut started_agents: Vec<tddy_core::SessionAgentRecord>,
+        clones: tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant,
+        progress: &AttachmentProgressSink,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        crate::opencode_cli_spawn::start_opencode_cli_session(
+            crate::opencode_cli_spawn::OpenCodeCliStart {
+                config: &self.config,
+                tddy_data_dir: &self.tddy_data_dir,
+                cli_manager: &self.claude_cli_manager,
+                os_user,
+                session_id: &start.session_id,
+                session_token: &req.session_token,
+                sessions_base: start.sessions_base,
+                model: req.model.trim(),
+                project_id: req.project_id.trim(),
+                repo_path: req.repo_path.trim(),
+                branch_worktree_intent: req.branch_worktree_intent.trim(),
+                new_branch_name: req.new_branch_name.trim(),
+                selected_integration_base_ref: req.selected_integration_base_ref.trim(),
+                selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
+                stack_parent: match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
+                    Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
+                        session_id,
+                        daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
+                        stack_node_id: req.stack_node_id.trim(),
+                        session_token: &req.session_token,
+                        host: self,
+                    },
+                    None => stack_parent::SpawnStackParent::NoParent,
+                },
+                initial_prompt: &start.initial_prompt,
+                agents: &mut started_agents,
+                semantic_index: req.semantic_index,
+                create_remote_branch: req.create_remote_branch,
+                task_registry: &self.task_registry,
+                agent_clones: &clones,
+                account_access: &self.host.session_account_access(&req.session_token),
+                route_sources: &session_route_sources(req),
+                progress,
+            },
+        )
+        .await
+    }
+}

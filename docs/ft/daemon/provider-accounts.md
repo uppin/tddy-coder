@@ -70,8 +70,9 @@ which account is one **capability matrix**, held by the daemon for every harness
 | Cursor — `cursor`, `cursor-cli` | — never: Cursor's agent cannot be pointed at another provider |
 
 An unsupported pair is refused with the reason, never silently ignored. Of the harnesses the matrix
-admits, only **`claude-cli`** started unsandboxed is run on an account today
-([Claude Code CLI session § Running on a provider account](claude-cli-session.md#running-on-a-provider-account));
+admits, **`claude-cli`** and **`opencode-cli`** started unsandboxed are run on an account today
+([Claude Code CLI session § Running on a provider account](claude-cli-session.md#running-on-a-provider-account),
+[OpenCode CLI session § Running on a provider account](opencode-cli-session.md#running-on-a-provider-account));
 any other harness asked to run on an account is refused as not routable in this build.
 
 ### `ListProviderRoutes`

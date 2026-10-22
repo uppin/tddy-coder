@@ -115,15 +115,34 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         }
 
         let tools_path = resolve_tddy_tools_path(&self.config)?;
-        // Cursor's model probe must hand tddy-tools the resolved absolute `agent` path (as the PTY
-        // spawn does), so the impersonated child execs a fully-qualified binary instead of doing a
-        // PATH lookup that lacks the install dir. Only forward an absolute path — a bare-name
-        // resolution keeps the existing behavior (no `--cursor-cli-path`).
-        let cursor_cli_path = (agent == "cursor")
-            .then(|| tddy_daemon_kernel::config::resolve_cursor_binary_path(&self.config))
-            .filter(|p| std::path::Path::new(p).is_absolute())
-            .map(std::path::PathBuf::from);
-        let probe_args = list_models_probe_args(&agent, cursor_cli_path.as_deref());
+        // The binary the probe lists models with — Cursor's `agent`, or the CLI harness that asks
+        // its own binary (`opencode models`) — is handed to tddy-tools resolved, as the PTY spawn
+        // resolves it, so the impersonated child execs a fully-qualified binary instead of doing a
+        // PATH lookup that lacks the install dir. Only an absolute path is forwarded — a bare-name
+        // resolution keeps the existing behavior (no path flag).
+        let listing_binary = if agent == "cursor" {
+            Some(tddy_daemon_kernel::config::resolve_cursor_binary_path(
+                &self.config,
+            ))
+        } else {
+            tddy_core::cli_harness::cli_harness(&agent)
+                .filter(|harness| {
+                    matches!(
+                        harness.models,
+                        tddy_core::cli_harness::CliModelSource::ListedByBinary(_)
+                    )
+                })
+                .map(|harness| {
+                    self.config.cli_harness_binary(
+                        harness.session_type,
+                        harness.default_binary,
+                        harness.binary_env,
+                    )
+                })
+        }
+        .filter(|path| std::path::Path::new(path).is_absolute())
+        .map(std::path::PathBuf::from);
+        let probe_args = list_models_probe_args(&agent, listing_binary.as_deref());
         let probe = tokio::task::spawn_blocking(move || {
             spawner::run_capture_as_user(&os_user, &tools_path, &probe_args)
         })

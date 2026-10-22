@@ -312,7 +312,7 @@ About 440 production lines (production code excluding `#[cfg(test)]` items). Eig
 
 | Module | Holds |
 |---|---|
-| `agent_cli` | `ClaudeCliConfig`, `CursorCliConfig`, their defaults, every `resolve_claude_*` / `resolve_cursor_*`, the `CLAUDE_*` / `CURSOR_*` env consts, the shim and `PATH` search |
+| `agent_cli` | `ClaudeCliConfig`, `CursorCliConfig`, their defaults, every `resolve_claude_*` / `resolve_cursor_*`, the `CLAUDE_*` / `CURSOR_*` env consts, the shim and `PATH` search; `CliHarnessConfig { binary_path }`, the value type of `DaemonConfig.cli_harnesses` (`cli_harnesses: { opencode-cli: { binary_path } }`, keyed by session type), and `DaemonConfig::cli_harness_binary(session_type, default_binary, binary_env)` — the environment variable when non-blank, else the config entry when non-blank, else the default |
 | `daemon_methods` | the second `impl DaemonConfig`: `load`, the accessors, `apply_*_env_override(s)`, `validate_for_relay` |
 | `sections` | `RelayConfig`, `LocalConfig`, `KeyringConfig`, `GitConfig`, `SandboxCgroupConfig`, `IndexDaemonConfig` with their defaults |
 | `env_overrides` | `merge_timing_env`, `merge_telegram_env` and their parsers |

@@ -100,12 +100,16 @@ async fn list_models(&self) -> Result<BackendModels, BackendError>;
 ### tddy-tools subcommand
 
 ```
-tddy-tools list-models --agent <id> [--cursor-cli-path P] [--codex-acp-cli-path P] …
+tddy-tools list-models --agent <id> [--cursor-cli-path P] [--opencode-cli-path P] [--codex-acp-cli-path P] …
 ```
 
 Constructs the backend for `<agent>` (same binary-resolution rules as `tddy-coder`), calls
 `list_models()`, prints `{ "models": [{"id","label"}], "default_model": "<id>" }` JSON on stdout.
-`--agent claude-cli` returns the curated Claude full-id catalog.
+A CLI session type is answered from its harness descriptor: `--agent claude-cli` and
+`--agent cursor-cli` return their curated catalogs, `--agent opencode-cli` runs `opencode models`
+(the binary `--opencode-cli-path` names, else `opencode`) and returns one model per printed line. The
+daemon forwards the binary it resolved for the harness (`cli_harnesses.opencode-cli.binary_path`)
+when that is an absolute path, as it does Cursor's.
 
 ### Daemon
 

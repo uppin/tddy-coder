@@ -77,6 +77,15 @@ impl BranchIntentPolicy {
         }
     }
 
+    /// opencode-cli: as cursor-cli, a `new_branch_from_base` with no name generates one.
+    pub const fn opencode_cli() -> Self {
+        Self {
+            generated_branch_prefix: "opencode-cli",
+            blank_new_branch_name: BlankNewBranchName::Generate,
+            unrecognized_intent: UnrecognizedIntent::DefaultToGeneratedBranch,
+        }
+    }
+
     /// A `workspace` session — including the codebase half of a split session, where the intent was
     /// forwarded from another daemon and a silent reinterpretation of it would be invisible on both
     /// hosts.

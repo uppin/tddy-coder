@@ -266,11 +266,10 @@ fn route_body(harness: Harness) -> Result<RouteBody, RouteRefusal> {
         Harness::Cursor | Harness::CursorCli => {
             Err(RouteRefusal::HarnessCannotBeRouted { harness })
         }
-        Harness::Codex
-        | Harness::CodexAcp
-        | Harness::OpenCode
-        | Harness::OpenCodeCli
-        | Harness::MuseCli => Err(RouteRefusal::NotYetRoutable(harness)),
+        Harness::OpenCode | Harness::OpenCodeCli => Ok(opencode_route),
+        Harness::Codex | Harness::CodexAcp | Harness::MuseCli => {
+            Err(RouteRefusal::NotYetRoutable(harness))
+        }
     }
 }
 
@@ -284,6 +283,50 @@ pub fn harness_routable(harness: Harness) -> Result<(), RouteRefusal> {
 /// What `harness` needs to run on `target`.
 pub fn resolve_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
     route_body(harness)?(harness, target)
+}
+
+/// The wire spellings of the protocols `endpoints` serves, as [`route_supported`] takes them.
+fn served_protocols(endpoints: &RouteEndpoints) -> Vec<&'static str> {
+    [
+        endpoints
+            .anthropic_messages
+            .as_ref()
+            .map(|_| ANTHROPIC_MESSAGES),
+        endpoints
+            .openai_responses
+            .as_ref()
+            .map(|_| OPENAI_RESPONSES),
+        endpoints.openai_chat.as_ref().map(|_| OPENAI_CHAT),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// OpenCode reads its provider from the file `OPENCODE_CONFIG` names, and that file reads the key
+/// from the environment, so the key travels as a secret variable and never as an argument. The
+/// model is selected on the provider the file declares, by the `--model` argument.
+fn opencode_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
+    route_supported(
+        harness,
+        &target.preset,
+        &served_protocols(&target.endpoints),
+    )?;
+    let Some(wire) = openai_wire(&target.endpoints) else {
+        return Err(RouteRefusal::ProtocolNotServed {
+            harness,
+            needs: "OpenAI Responses or Chat Completions",
+        });
+    };
+    Ok(HarnessRoute {
+        env: Vec::new(),
+        secret_env: vec![(OPENCODE_ROUTE_KEY_ENV.to_string(), target.api_key.clone())],
+        files: vec![opencode_config(&target.model, wire)],
+        args: vec![
+            "--model".to_string(),
+            format!("{OPENCODE_ROUTE_PROVIDER_ID}/{}", target.model),
+        ],
+    })
 }
 
 /// Claude Code reads its endpoint, key and every model choice from the environment: the base URL is
@@ -347,5 +390,74 @@ pub fn choose_route(sources: &RouteSources) -> Option<String> {
         Some(RouteChoice::Account(id)) => Some(id.clone()),
         Some(RouteChoice::BuiltIn) => None,
         None => sources.user_default.clone(),
+    }
+}
+
+/// The provider id an OpenCode route's generated configuration declares the account under, so the
+/// person's own `opencode.json` providers are never shadowed.
+pub const OPENCODE_ROUTE_PROVIDER_ID: &str = "tddy-route";
+
+/// The variable an OpenCode route's key is delivered in; the generated configuration reads it with
+/// `{env:…}`, so the file itself holds no secret.
+pub const OPENCODE_ROUTE_KEY_ENV: &str = "TDDY_OPENCODE_PROVIDER_KEY";
+
+/// The OpenAI protocol an OpenCode route speaks, with the account's root for it.
+#[derive(Debug, Clone, Copy)]
+enum OpenAiWire<'a> {
+    /// Responses, preferred: reasoning is carried across turns.
+    Responses(&'a str),
+    /// Chat Completions, for an account that serves no Responses.
+    Chat(&'a str),
+}
+
+/// The wire an account's endpoints give OpenCode, Responses over Chat Completions; `None` when it
+/// serves neither.
+fn openai_wire(endpoints: &RouteEndpoints) -> Option<OpenAiWire<'_>> {
+    match (&endpoints.openai_responses, &endpoints.openai_chat) {
+        (Some(root), _) => Some(OpenAiWire::Responses(root)),
+        (None, Some(root)) => Some(OpenAiWire::Chat(root)),
+        (None, None) => None,
+    }
+}
+
+/// The `opencode.json` that declares `target`'s account as an OpenCode provider and selects
+/// `target.model` on it: `@ai-sdk/openai` over Responses (reasoning carried across turns) when the
+/// account serves Responses, `@ai-sdk/openai-compatible` over Chat Completions otherwise. The key is
+/// referenced as `{env:…}` and never written into the file.
+///
+/// `None` when the account serves neither OpenAI protocol — there is no configuration OpenCode
+/// could run on it; [`resolve_route`] refuses such an account as
+/// [`RouteRefusal::ProtocolNotServed`].
+#[must_use]
+pub fn opencode_config_for(target: &RouteTarget) -> Option<RouteFile> {
+    openai_wire(&target.endpoints).map(|wire| opencode_config(&target.model, wire))
+}
+
+fn opencode_config(model: &str, wire: OpenAiWire<'_>) -> RouteFile {
+    let (npm, root, model_entry) = match wire {
+        OpenAiWire::Responses(root) => (
+            "@ai-sdk/openai",
+            root,
+            serde_json::json!({ "options": { "include": ["reasoning.encrypted_content"] } }),
+        ),
+        OpenAiWire::Chat(root) => ("@ai-sdk/openai-compatible", root, serde_json::json!({})),
+    };
+    let config = serde_json::json!({
+        "model": format!("{OPENCODE_ROUTE_PROVIDER_ID}/{model}"),
+        "provider": {
+            (OPENCODE_ROUTE_PROVIDER_ID): {
+                "npm": npm,
+                "options": {
+                    "baseURL": root,
+                    "apiKey": format!("{{env:{OPENCODE_ROUTE_KEY_ENV}}}"),
+                },
+                "models": { (model): model_entry },
+            },
+        },
+    });
+    RouteFile {
+        name: "opencode.json".to_string(),
+        contents: serde_json::to_string_pretty(&config)
+            .expect("a serde_json::Value always serializes"),
     }
 }

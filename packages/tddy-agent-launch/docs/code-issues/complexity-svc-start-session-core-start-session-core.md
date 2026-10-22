@@ -56,3 +56,17 @@ finding is a lead, not an issue.
 
 **Regressed by one line:** 388 → 389 lines by brace matching (nesting 6, unchanged). The call to `provision_project_for_start` gained its
 `progress` argument and wraps to a second line; the keep-alive it enables lives in `start_keepalive.rs`. Not claimed by any PR.
+
+## Measurement update 2026-10-22 — opencode-cli start
+
+**Regressed by five lines:** 386 → 391 by brace matching against `origin/feature/provider-route/claude-route`
+(`#provider-route` 3/9, #664). One more session-type branch, `opencode-cli`, as a single call to
+`LaunchSessions::start_opencode_cli` in `cli_branch_starts.rs` — its refusals, prelude, roster and spawn
+live there, not in this function. Nesting unchanged. Not claimed by any PR.
+
+## Measurement update 2026-10-22 — opencode-cli start
+
+**Regressed by five lines:** 386 → 391 by brace matching against `origin/feature/provider-route/claude-route`
+(`#provider-route` 3/9, #664). One more session-type branch, `opencode-cli`, as a single call to
+`LaunchSessions::start_opencode_cli` in `cli_branch_starts.rs` — its refusals, prelude, roster and spawn
+live there, not in this function. Nesting unchanged. Not claimed by any PR.

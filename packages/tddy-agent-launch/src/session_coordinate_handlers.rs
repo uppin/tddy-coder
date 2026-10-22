@@ -182,11 +182,13 @@ impl LaunchSessions {
         self.tell_the_reach(&req.session_id, &metadata, session_dir, arrived_over)
             .await?;
 
-        // The *terminal* room, which is a different room with different participants. A claude-cli,
-        // cursor-cli or workspace session has none: its PTY is served over gRPC and bridged into
-        // the lobby, never into a room of its own, so these three answer with empty coordinates —
-        // as they did before the session room above existed.
-        if matches!(session_type, "claude-cli" | "cursor-cli" | "workspace") {
+        // The *terminal* room, which is a different room with different participants. A CLI harness
+        // (claude-cli, cursor-cli, opencode-cli) or workspace session has none: its PTY is served
+        // over gRPC and bridged into the lobby, never into a room of its own, so these answer with
+        // empty coordinates — as they did before the session room above existed.
+        if tddy_core::cli_harness::cli_harness(session_type).is_some()
+            || session_type == "workspace"
+        {
             return Ok(Response::new(ConnectSessionResponse {
                 livekit_room: String::new(),
                 livekit_url: String::new(),

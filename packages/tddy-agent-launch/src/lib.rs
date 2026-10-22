@@ -4,6 +4,8 @@ pub mod child_spawn_handler;
 pub mod claude_cli_spawn;
 pub mod claude_cli_spawn_steps;
 pub mod cli_branch_starts;
+pub mod cli_route_launch;
+mod cli_session_worktree;
 mod clone_backend;
 mod clone_planner;
 pub mod clone_ssh_env;
@@ -22,6 +24,7 @@ pub mod jail_session_files;
 pub mod jail_worktree;
 pub mod launch_ports;
 pub mod managed_launch;
+mod opencode_cli_spawn;
 pub mod placement;
 pub mod relaunch_jail_dirs;
 pub mod relaunch_jail_steps;
@@ -53,6 +56,8 @@ pub mod tool_spawn_plan;
 pub mod workspace_branch_start;
 pub mod worktree_source;
 
+#[cfg(test)]
+mod cli_route_launch_tests;
 #[cfg(test)]
 mod conversation_spawn_wiring_tests;
 mod facilitation;

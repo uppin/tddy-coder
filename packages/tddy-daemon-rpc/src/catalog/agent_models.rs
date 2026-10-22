@@ -25,22 +25,26 @@ pub(super) fn agent_models_cache() -> &'static std::sync::Mutex<
 }
 
 /// Build the `tddy-tools list-models` argv for an agent probe. Always `["list-models", "--agent",
-/// <agent>]`; appends `["--cursor-cli-path", <path>]` only when probing `cursor` with a resolved
-/// path, so the impersonated child execs the fully-qualified binary instead of a PATH lookup.
+/// <agent>]`; appends `["--cursor-cli-path", <path>]` when probing `cursor`, or
+/// `["--opencode-cli-path", <path>]` when probing `opencode-cli`, with a resolved `binary_path`, so
+/// the impersonated child execs the fully-qualified binary instead of a PATH lookup.
 pub(super) fn list_models_probe_args(
     agent: &str,
-    cursor_cli_path: Option<&std::path::Path>,
+    binary_path: Option<&std::path::Path>,
 ) -> Vec<String> {
     let mut args = vec![
         "list-models".to_string(),
         "--agent".to_string(),
         agent.to_string(),
     ];
-    if agent == "cursor" {
-        if let Some(path) = cursor_cli_path {
-            args.push("--cursor-cli-path".to_string());
-            args.push(path.to_string_lossy().into_owned());
-        }
+    let path_flag = match agent {
+        "cursor" => Some("--cursor-cli-path"),
+        "opencode-cli" => Some("--opencode-cli-path"),
+        _ => None,
+    };
+    if let (Some(flag), Some(path)) = (path_flag, binary_path) {
+        args.push(flag.to_string());
+        args.push(path.to_string_lossy().into_owned());
     }
     args
 }
