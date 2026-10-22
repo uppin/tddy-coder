@@ -16,7 +16,14 @@ lost and 3 it gained". `verify` has no option that declares this (its options ar
 ## Accepted for now
 
 Developer decision, 2026-10-22: accept the pair by hand review of the diff, and record it in each cut's commit message.
-Commit `2782c4b53` (`items_of_module`) is the first use. Any other unaccounted statement still stops the run.
+Commit `2782c4b53` (`items_of_module`) is the first use.
+
+Developer decision, 2026-10-22 (second): accept the arm lines of a match-arm body extraction. When `extract_method` moves
+an arm's body out, the arm's own lines (for example `X => Options {`, `X => {`, `},`) are replaced by the call site
+(`X => f(x),`); `verify` reports them as lost and the call as gained. Accepted by hand review of the diff, listed in the
+cut's commit message. The `options_for` cut (`restructure_args.rs`) is the first use.
+
+Any other unaccounted statement still stops the run.
 
 ## Wanted
 

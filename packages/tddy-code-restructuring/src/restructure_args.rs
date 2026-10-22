@@ -224,22 +224,7 @@ pub struct RestructureSnapshotArgs {
 /// by [`crate::restructure_cli`], because the library says nothing unless a caller asks it to.
 pub(crate) fn options_for(args: RestructureArgs) -> Options {
     match args.command {
-        RestructureCommand::Apply(plan) => Options {
-            command: Command::Apply,
-            target: Some(plan.plan),
-            dry_run: plan.dry_run,
-            resume: plan.resume,
-            from: match &plan.from {
-                Some(OpRef::Index(index)) => Some(*index),
-                _ => None,
-            },
-            from_id: match plan.from {
-                Some(OpRef::Id(id)) => Some(crate::plan::OpId(id)),
-                _ => None,
-            },
-            stop_after: plan.stop_after,
-            ..Options::default()
-        },
+        RestructureCommand::Apply(plan) => apply_options(plan),
         RestructureCommand::Status(plan) => Options {
             command: Command::Status,
             target: Some(plan.plan),
@@ -252,16 +237,7 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             budget: check.budget,
             ..Options::default()
         },
-        RestructureCommand::Anchors(anchors) => {
-            let items = anchors.item_names();
-            Options {
-                command: Command::Anchors,
-                target: Some(anchors.file),
-                items,
-                at: anchors.at,
-                ..Options::default()
-            }
-        }
+        RestructureCommand::Anchors(anchors) => anchors_options(anchors),
         RestructureCommand::Verify(verify) => Options {
             command: Command::Verify,
             against: Some(verify.against),
@@ -300,6 +276,36 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             files: lines.files,
             ..Options::default()
         },
+    }
+}
+
+fn apply_options(plan: RestructurePlanArgs) -> Options {
+    Options {
+        command: Command::Apply,
+        target: Some(plan.plan),
+        dry_run: plan.dry_run,
+        resume: plan.resume,
+        from: match &plan.from {
+            Some(OpRef::Index(index)) => Some(*index),
+            _ => None,
+        },
+        from_id: match plan.from {
+            Some(OpRef::Id(id)) => Some(crate::plan::OpId(id)),
+            _ => None,
+        },
+        stop_after: plan.stop_after,
+        ..Options::default()
+    }
+}
+
+fn anchors_options(anchors: RestructureAnchorsArgs) -> Options {
+    let items = anchors.item_names();
+    Options {
+        command: Command::Anchors,
+        target: Some(anchors.file),
+        items,
+        at: anchors.at,
+        ..Options::default()
     }
 }
 
