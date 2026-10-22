@@ -100,7 +100,7 @@ The two ACP backends start their worker thread, and so the agent, on the first c
 replaces a worker that already started. A spawn failure surfaces through the command channel.
 
 Tests: `tests/provider_route_file.rs` (round-trip, owner-only load, a group-readable file refused);
-`tddy-coder/tests/tool_session_provider_route.rs` drives each backend against stub binaries that record
+`tddy-integration-tests/tests/tool_session_provider_route.rs` drives each backend against stub binaries that record
 argv and env.
 
 ## CLI harnesses (`cli_harness`)
