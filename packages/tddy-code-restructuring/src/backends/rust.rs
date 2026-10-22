@@ -1102,14 +1102,7 @@ impl RustBackend {
         probe: Position,
     ) -> Result<Value> {
         let wanted = assist.title;
-        let target = if assist.at_caret {
-            Range {
-                start: range.start,
-                end: range.start,
-            }
-        } else {
-            range
-        };
+        let target = target_range(range, assist);
         let started = Instant::now();
         let file = relative_to(uri, &self.workspace_root()?)?;
         let mut waiting = Waiting::begin(
@@ -1170,6 +1163,18 @@ impl RustBackend {
         )?;
         Ok(actions)
     }
+}
+
+fn target_range(range: Range, assist: Assist) -> Range {
+    let target = if assist.at_caret {
+        Range {
+            start: range.start,
+            end: range.start,
+        }
+    } else {
+        range
+    };
+    target
 }
 
 impl Drop for RustBackend {
