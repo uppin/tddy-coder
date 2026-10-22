@@ -235,6 +235,31 @@ fn no_production_function_outside_the_backend_runs_past_sixty_lines() {
 }
 
 #[test]
+fn every_function_the_developer_deferred_still_runs_past_the_cap() {
+    // Given the engine's own sources and the list of functions exempted from the cap
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+
+    // When the functions past the cap are listed
+    let past = functions_past_the_cap_under(&src);
+
+    // Then each exempted function is among them: a cut or renamed one leaves the list, which only shrinks
+    let stale: Vec<String> = DEFERRED_BY_THE_DEVELOPER
+        .iter()
+        .filter(|(file, name)| {
+            !past
+                .iter()
+                .any(|function| function.file == *file && function.name == *name)
+        })
+        .map(|(file, name)| format!("{file} {name}"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "exempted functions that no longer run past {CAP} lines; remove them from DEFERRED_BY_THE_DEVELOPER:\n  {}",
+        stale.join("\n  ")
+    );
+}
+
+#[test]
 fn a_function_is_measured_from_its_fn_line_to_its_closing_brace() {
     // Given a function with a doc comment and an attribute above it and three statements in it
     let text = "/// Documented.\n#[inline]\npub fn sized() {\n    let a = 1;\n    let b = a;\n    let _c = b;\n}\n";

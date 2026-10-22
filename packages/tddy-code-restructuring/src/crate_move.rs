@@ -340,6 +340,7 @@ pub(crate) fn surveyed_in(
     Ok((survey, rewrites))
 }
 
+/// The caller and planned rewrites that re-point one reached item's outside references to the moving item.
 fn survey_reference(
     workspace: &Workspace<'_>,
     moving: &Move,

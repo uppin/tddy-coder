@@ -267,6 +267,8 @@ fn cluster_edits(
     ))
 }
 
+/// What follows the per-member loop: the callers' rewrites (unless the set is re-exported), what each member
+/// leaves behind, what the destination declares, and the follow edits.
 fn absorb_after_the_loop(
     workspace: &Workspace<'_>,
     cluster: &MovingCluster,
@@ -285,6 +287,8 @@ fn absorb_after_the_loop(
     Ok(())
 }
 
+/// The edits every member of the set shares: the destination's manifest, its dependents, and the workspace
+/// members list.
 fn absorb_across_the_set(
     workspace: &Workspace<'_>,
     members: Vec<super::Move>,

@@ -312,6 +312,7 @@ pub fn check_plan(
     Ok(findings)
 }
 
+/// Rehearse one operation, account for its lines, and record its refusal as a finding.
 fn rehearse_op(
     root: &Path,
     options: &Options,

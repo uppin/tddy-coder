@@ -279,6 +279,7 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
     }
 }
 
+/// The options of `apply`: the plan, its flags, and where to start and stop.
 fn apply_options(plan: RestructurePlanArgs) -> Options {
     Options {
         command: Command::Apply,
@@ -298,6 +299,7 @@ fn apply_options(plan: RestructurePlanArgs) -> Options {
     }
 }
 
+/// The options of `anchors`: the file, and the items or position to anchor.
 fn anchors_options(anchors: RestructureAnchorsArgs) -> Options {
     let items = anchors.item_names();
     Options {

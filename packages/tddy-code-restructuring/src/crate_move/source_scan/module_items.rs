@@ -77,6 +77,8 @@ pub(crate) fn items_of_module(text: &str) -> ModuleItems {
     items
 }
 
+/// Record the child module whose `mod` keyword is at token `at`, and note it as the open child when it has an
+/// inline body.
 fn record_child_module(
     scan: &Scan<'_>,
     items: &mut ModuleItems,
