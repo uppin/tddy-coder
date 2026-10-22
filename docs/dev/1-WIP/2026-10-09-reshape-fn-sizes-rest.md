@@ -127,6 +127,13 @@ file's layout, not a behaviour; not an edge).
 - **Deferred:** `backends/` (node 19); 41–60 (node 19's todo; first outside `backends/` is `verify.rs:166 compare_with`, 58);
   an operation that introduces a parameter struct (`todo/2026-10-09-restructure-has-no-operation-to-introduce-a-parameter-struct.md`);
   function lengths in `check --budget` (`todo/2026-10-09-restructure-check-budget-does-not-report-function-lengths.md`).
+- **Deferred by developer 2026-10-22:** `sorted` (`crate_move/test_modules.rs`), `follow_changes` (`crate_move/test_modules.rs`),
+  `member_changes` (`crate_move/cluster/gathering.rs`) and `compare_with` (`verify.rs`), which grew past 60 after the contract
+  commit. Exempted by name in `function_length_budget` (`DEFERRED_BY_THE_DEVELOPER`); sweep node owns them:
+  [todo/2026-10-22-reshape-fn-sizes-rest-four-functions-deferred.md](../todo/2026-10-22-reshape-fn-sizes-rest-four-functions-deferred.md).
+- **Verify gap, accepted 2026-10-22:** `extract_method` turns a written outer local into a `&mut` parameter, and the engine
+  rewrites `x = …` as `*x = …`; `verify` cannot account for that pair, so each cut's commit lists the pairs accepted by hand review.
+  Sweep node owns the tooling fix: [todo/2026-10-22-verify-does-not-account-for-mut-param-writes-from-extract-method.md](../todo/2026-10-22-verify-does-not-account-for-mut-param-writes-from-extract-method.md).
   The guard lift is node 4's.
 
 ## Technical changes

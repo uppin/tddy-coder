@@ -21,6 +21,16 @@ const CAP: usize = 60;
 // TODO(reshape-19): fn-sizes-backend removes this exclusion and `the_backend_is_left_to_its_own_node`
 const LEFT_TO_THE_BACKEND_NODE: &str = "backends";
 
+/// Functions over the cap that the developer deferred on 2026-10-22, as `(file under src/, name)`. Each is cut by the
+/// `#reshape` sweep node; see `docs/dev/todo/2026-10-22-reshape-fn-sizes-rest-four-functions-deferred.md`.
+// TODO(reshape-sweep): the sweep node cuts these four and removes this exemption
+const DEFERRED_BY_THE_DEVELOPER: [(&str, &str); 4] = [
+    ("crate_move/test_modules.rs", "sorted"),
+    ("crate_move/test_modules.rs", "follow_changes"),
+    ("crate_move/cluster/gathering.rs", "member_changes"),
+    ("verify.rs", "compare_with"),
+];
+
 /// One function and its length.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Measured {
@@ -190,6 +200,12 @@ fn names_of(functions: &[Measured]) -> Vec<&str> {
         .collect()
 }
 
+fn is_deferred_by_the_developer(function: &Measured) -> bool {
+    DEFERRED_BY_THE_DEVELOPER
+        .iter()
+        .any(|(file, name)| function.file == *file && function.name == *name)
+}
+
 #[test]
 fn no_production_function_outside_the_backend_runs_past_sixty_lines() {
     // Given the engine's own sources
@@ -198,6 +214,7 @@ fn no_production_function_outside_the_backend_runs_past_sixty_lines() {
     // When the functions past the cap are listed
     let past: Vec<String> = functions_past_the_cap_under(&src)
         .iter()
+        .filter(|function| !is_deferred_by_the_developer(function))
         .map(Measured::to_string)
         .collect();
 
