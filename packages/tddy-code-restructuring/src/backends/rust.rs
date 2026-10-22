@@ -834,6 +834,13 @@ impl RustBackend {
             stdout,
         });
 
+        let handshake = self.initialize_server(root)?;
+
+        self.unresolved_token = lsp_edits::token_type_index(&handshake, UNRESOLVED_TOKEN);
+        self.notify("initialized", json!({}))
+    }
+
+    fn initialize_server(&mut self, root: &Path) -> Result<Value> {
         let id = self.take_id();
         let handshake = self.request(
             id,
@@ -846,9 +853,7 @@ impl RustBackend {
             }),
         )?;
         refuse_foreign_encoding(negotiated_encoding(&handshake))?;
-
-        self.unresolved_token = lsp_edits::token_type_index(&handshake, UNRESOLVED_TOKEN);
-        self.notify("initialized", json!({}))
+        Ok(handshake)
     }
 
     fn spawn_command(
