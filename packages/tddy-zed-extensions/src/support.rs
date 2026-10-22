@@ -27,7 +27,6 @@ use crate::language::ExtensionLanguage;
 use crate::manifest::ExtensionManifest;
 use crate::outline::{Outline, OutlineEntry};
 use crate::server::ServerChoice;
-use crate::settings::ExtensionSettings;
 
 /// What loading the installed extensions found: a support per language whose grammar loaded, and
 /// one report per grammar that did not (R8).
@@ -62,16 +61,7 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
             failures: Vec::new(),
         });
     }
-    let settings = ExtensionSettings::load(dir)?;
-    let settings_file = ExtensionSettings::file(dir);
-    let languages = languages
-        .into_iter()
-        .map(|(manifest, language)| {
-            let server =
-                ServerChoice::for_language(&manifest, &language, &settings, &settings_file);
-            (language, server)
-        })
-        .collect();
+    let languages = crate::server::served(dir, languages)?;
     let store = GrammarStore::new().map_err(|error| ExtensionError::GrammarEngineUnavailable {
         message: error.message,
     })?;
@@ -246,6 +236,17 @@ impl ExtensionSupport {
         })
     }
 
+    /// This support, served as `server` says ([`load_installed`] gives every support its
+    /// [`ServerChoice::for_language`]).
+    pub fn with_server(self, server: ServerChoice) -> Self {
+        Self { server, ..self }
+    }
+
+    /// What serves this support's language.
+    pub fn server(&self) -> &ServerChoice {
+        &self.server
+    }
+
     /// The language this support was built from.
     pub fn language(&self) -> &ExtensionLanguage {
         &self.language
@@ -316,28 +317,6 @@ impl LanguageSupport for ExtensionSupport {
             }
             _ => outline,
         }
-    }
-}
-
-/// What serves an extension language (`#reshape` extension-language-server).
-///
-/// The support reads it: [`LanguageSupport::launch`] is the configured server's launch
-/// ([`ServerChoice::launch`]); [`LanguageSupport::backend`] over a live server is a
-/// [`ServerBackend`] composed with [`ExtensionSupport::outline_backend`], and with no server for an
-/// [`ServerChoice::Unconfigured`] or [`ServerChoice::Refused`] language one built
-/// `without_command`, carrying [`ServerChoice::refusal`] — the [`crate::server::NoServerCommand`]
-/// text (R3), or a code extension's refusal unchanged (K24, developer decision 2026-10-20); and
-/// [`load_installed`] reads [`crate::settings::ExtensionSettings::load`] once and gives every
-/// support its [`ServerChoice::for_language`].
-impl ExtensionSupport {
-    /// This support, served as `server` says.
-    pub fn with_server(self, server: ServerChoice) -> Self {
-        Self { server, ..self }
-    }
-
-    /// What serves this support's language.
-    pub fn server(&self) -> &ServerChoice {
-        &self.server
     }
 }
 

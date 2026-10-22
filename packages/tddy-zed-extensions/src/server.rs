@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use tddy_lsp::LaunchSpec;
 
+use crate::dir::ExtensionsDir;
+use crate::error::ExtensionError;
 use crate::language::ExtensionLanguage;
 use crate::manifest::{ExtensionManifest, LanguageServerEntry};
 use crate::settings::ExtensionSettings;
@@ -152,6 +154,24 @@ impl ServerChoice {
             ServerChoice::Undeclared | ServerChoice::Configured { .. } => None,
         }
     }
+}
+
+/// Each of `languages` — an installed extension's, beside its manifest — with what serves it, from
+/// the settings under `dir`, read once ([`ExtensionSettings::load`]).
+pub(crate) fn served(
+    dir: &ExtensionsDir,
+    languages: Vec<(ExtensionManifest, ExtensionLanguage)>,
+) -> Result<Vec<(ExtensionLanguage, ServerChoice)>, ExtensionError> {
+    let settings = ExtensionSettings::load(dir)?;
+    let settings_file = ExtensionSettings::file(dir);
+    Ok(languages
+        .into_iter()
+        .map(|(manifest, language)| {
+            let server =
+                ServerChoice::for_language(&manifest, &language, &settings, &settings_file);
+            (language, server)
+        })
+        .collect())
 }
 
 /// What tddy advertises to an extension language's server at `initialize`: byte (`utf-8`)
