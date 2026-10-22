@@ -463,6 +463,17 @@ impl SandboxSessionRelay {
         *self.outbound.lock().unwrap() = Some(tx);
     }
 
+    /// Drop the captured server-stream sender once the host's half of *that* channel has closed.
+    /// The relay keeps a clone so tunnel frames can bypass the poll cadence; left in place after
+    /// the host is gone it keeps the response stream open for good. Compared by channel so a
+    /// newer attach is never torn down by an older stream ending.
+    fn release_outbound(&self, closed: &OutboundSender) {
+        let mut outbound = self.outbound.lock().unwrap();
+        if outbound.as_ref().is_some_and(|tx| tx.same_channel(closed)) {
+            *outbound = None;
+        }
+    }
+
     /// Wait until the host attaches its `SessionChannel` (the outbound sender is set). A CONNECT
     /// tunnel opened before the host attaches must wait rather than hard-fail — the agent's PTY
     /// starts before the host dials in. Returns false if the host never attaches within `timeout`.
@@ -832,6 +843,9 @@ impl TonicSandboxService for SandboxRunnerService {
                     _ => {}
                 }
             }
+            // The host closed its half: stop holding this stream's sender, or the response stream
+            // — and with it the server's graceful shutdown — never ends.
+            relay.release_outbound(&out_tx);
         });
 
         Ok(Response::new(
@@ -960,6 +974,9 @@ impl tddy_service::proto::sandbox::SandboxService for SandboxRunnerService {
                     _ => {}
                 }
             }
+            // The host closed its half: stop holding this stream's sender, or the response stream
+            // — and with it the server's graceful shutdown — never ends.
+            relay.release_outbound(&out_tx);
         });
 
         // Bridge the relay's tonic::Status-typed channel to this trait's tddy_rpc::Status return

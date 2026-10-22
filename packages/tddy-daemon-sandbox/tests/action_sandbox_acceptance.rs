@@ -117,6 +117,9 @@ async fn call_tasks<Req: Message, Resp: Message + Default>(
     Resp::decode(&chunks[0][..]).expect("decode response")
 }
 
+/// How long a task may take to reach a terminal status before the test calls it hung.
+const TERMINAL_TASK_CEILING: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Await the task's actual completion event via `WatchTask`'s terminal-status frame — the
 /// stream only closes once the registry reports a terminal status, so this has no fixed
 /// timeout or polling interval to outrun under load (see `TaskServiceImpl::watch_task`).
@@ -124,17 +127,26 @@ async fn wait_for_terminal_task(
     bridge: &RpcBridge<TaskServiceServer<TaskServiceImpl>>,
     task_id: &str,
 ) -> GetTaskResponse {
-    let events: Vec<TaskOutputEvent> = call_streaming(
-        bridge,
-        "WatchTask",
-        WatchTaskRequest {
-            session_token: GOOD_TOKEN.to_string(),
-            task_id: task_id.to_string(),
-            channel_id: String::new(),
-            daemon_instance_id: String::new(),
-        },
+    // Bounded so a task that never reaches a terminal status (a jail that never exits) fails
+    // the test instead of hanging it. The wait itself is still event-driven; this is only the
+    // ceiling for a regression, far above any healthy run.
+    let events: Vec<TaskOutputEvent> = tokio::time::timeout(
+        TERMINAL_TASK_CEILING,
+        call_streaming(
+            bridge,
+            "WatchTask",
+            WatchTaskRequest {
+                session_token: GOOD_TOKEN.to_string(),
+                task_id: task_id.to_string(),
+                channel_id: String::new(),
+                daemon_instance_id: String::new(),
+            },
+        ),
     )
-    .await;
+    .await
+    .unwrap_or_else(|_| {
+        panic!("task {task_id} did not reach a terminal status within {TERMINAL_TASK_CEILING:?}")
+    });
     assert!(
         events
             .last()
