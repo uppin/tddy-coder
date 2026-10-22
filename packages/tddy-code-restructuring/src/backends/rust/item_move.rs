@@ -113,21 +113,7 @@ impl RustBackend {
             canonical_paths: op.canonical_paths,
         })?;
 
-        let mut changes = Vec::new();
-        for (path, (old, new)) in assembled.files {
-            if path == destination.module.file && destination.parent.is_some() {
-                changes.push(FileEdit::Create { path: path.clone() });
-            }
-            changes.push(FileEdit::Change {
-                path,
-                edits: seam_survey::minimal_edits(&old, &new),
-            });
-        }
-        Ok(Resolution {
-            edit: WorkspaceEdit { changes },
-            report: assembled.report,
-            notes: assembled.notes,
-        })
+        resolution_of(destination, assembled)
     }
 
     /// The lines the anchor covers: as written when a run lowered it already, otherwise resolved
@@ -337,6 +323,24 @@ impl RustBackend {
         }
         Ok(reached)
     }
+}
+
+fn resolution_of(destination: Destination, assembled: assemble::Assembled) -> Result<Resolution> {
+    let mut changes = Vec::new();
+    for (path, (old, new)) in assembled.files {
+        if path == destination.module.file && destination.parent.is_some() {
+            changes.push(FileEdit::Create { path: path.clone() });
+        }
+        changes.push(FileEdit::Change {
+            path,
+            edits: seam_survey::minimal_edits(&old, &new),
+        });
+    }
+    Ok(Resolution {
+        edit: WorkspaceEdit { changes },
+        report: assembled.report,
+        notes: assembled.notes,
+    })
 }
 
 /// Where a move's members are surveyed from.
