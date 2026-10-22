@@ -90,7 +90,9 @@ of them starts the index daemon):
   the host's `SessionWorktreeObserver`, and the daemon's observer runs `code_index.Warm` for it in the
   background. Starting a session never waits on it, and a failed warm is only logged.
 
-Only a worktree with a `Cargo.toml` at its root is warmed, because the index serves Rust. Nothing records
+Only a worktree the index serves is warmed: a `Cargo.toml` at its root, or a file an installed extension
+language with a configured server claims (`runtime.rs` builds the host's registry once,
+`code_navigation::host_supports()`, and hands it to the warm-up observer and the navigation service). Nothing records
 the progress per session: it is kept per worktree root by the index daemon and followed through
 `code_index.WatchRoot`, by `WatchCodeIndex` and `CodeSession` alike, whoever started the load — so a
 session the host no longer remembers (after a restart) or whose start announced no worktree (sandboxed,

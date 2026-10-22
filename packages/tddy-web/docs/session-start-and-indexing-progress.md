@@ -44,7 +44,7 @@ The stream can also carry `keepAlive` events while the host provisions the proje
 |---|---|
 | `waiting` | nothing heard yet |
 | `idle` | `state` `IDLE` — nothing holds the worktree's index; or the header's watch ended and the next has not reported |
-| `none` | `state` `NONE` — the worktree has no code index (not a Rust worktree); `error` says why |
+| `none` | `state` `NONE` — the worktree has no code index: it is no Rust worktree and holds no file of an installed extension language with a configured server; `error` says why |
 | `progress` | `state` `LOADING` — the message, naming the phase reported most recently, its percentage, and every running phase (`phases`) |
 | `ready` | `state` `READY` |
 | `failed` | `state` `FAILED` (its `error`, or *the code index failed* when empty), or the stream refused |
@@ -113,7 +113,7 @@ While loading with more than one running phase the strip adds `+<N> more`
 |---|---|
 | `cypress/component/SessionStartAndIndexingProgress.cy.tsx` (2) | the create pane shows the current start phase; the header shows indexing until ready |
 | `cypress/component/SessionIndexingIndicatorResubscribe.cy.tsx` (4) | the header shows a load that starts after its first watch ended empty; drops what it said once its watch ends mid-load; watches again after 1, 2 and 4 s; a refused watch is not repeated and names why |
-| `cypress/component/CodeIndexStatusStrip.cy.tsx` | the strip's own states: the failure's reason; an index let go while the pane is open reads as starting; reconnecting with why; a non-Rust worktree has no code index, and why. Live progress, phases and `+N more` are pinned by `WorktreeCodePaneCodeSession.cy.tsx` ([code navigation](code-navigation.md#testing)) |
+| `cypress/component/CodeIndexStatusStrip.cy.tsx` | the strip's own states: the failure's reason; an index let go while the pane is open reads as starting; reconnecting with why; a worktree the host serves no language of has no code index, and why. Live progress, phases and `+N more` are pinned by `WorktreeCodePaneCodeSession.cy.tsx` ([code navigation](code-navigation.md#testing)) |
 | `cypress/component/CreateSessionAttachmentProgress.cy.tsx` | per-attachment progress, and a start with nothing attached going through the stream |
 | `cypress/component/CreateSessionPane.cy.tsx` (29) | the form, started through the streamed start |
 | `cypress/component/ServerStreamFallback.cy.tsx` (7) | the testkit fallback below |

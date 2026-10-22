@@ -26,7 +26,9 @@ code path rather than a second one.
 | Module | Responsibility |
 |---|---|
 | `service.rs` | The generated trait's methods, each a one-line delegation. `CodeIndexPorts`, `build_code_index_entry`, `EventStream` |
-| `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache, and telling a warm server what changed on disk before a request reaches it (`client_for`), then handing the same changes to `plan_upkeep`. Holds the root `RootSignals` (`signals()`), fired from `client_for` when a root gains a server or its start fails |
+| `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache, and telling a warm server what changed on disk before a request reaches it (`client_for`), then handing the same changes to `plan_upkeep`. Holds the root `RootSignals` (`signals()`), fired from `client_for` when a root gains a server or its start fails. Routes a file to the server that answers it (`route_of` → `Route::{Rust, Extension}`, `client_for_route`) — see [Extension languages](#extension-languages) |
+| `readiness.rs` | `Readiness { ServerStatus, AfterInitialize }` (`of_launch`): how a server says it is ready, read from whether its launch asks for `experimental/serverStatus`; `index_state_of(client, readiness)` |
+| `lib.rs` | `serves_workspace(root, supports)`: whether a root gets an index — a Rust workspace, or a tree holding a file an installed language with a server claims; the `SupportRegistry` re-export and `host_supports` |
 | `plan_flush.rs` | The per-root plan stores (`SharedPlanStore`, `PlanStores`) and their debounced write-back: a changed plan waits `PLAN_FLUSH_DEBOUNCE` (1 s), checked every `PLAN_FLUSH_TICK` (250 ms), and `flush_eventually` writes it back without queueing behind a run that holds its store, stopping once the index is gone. Its log lines keep the target `tddy_index_daemon::index` so existing filters match |
 | `graph.rs` | `GraphLoad`: the root's progress publisher, a `watch<RootProgress>` folded by an unthrottled `ServerChatter` for the server's whole life — see [Root progress](#root-progress). `state_of_quiescence` |
 | `warm.rs` | `Warm`: start the root's server through `client_for`, then forward the root's progress until its graph is loaded |
@@ -35,7 +37,7 @@ code path rather than a second one.
 | `tree_changes.rs` | The per-root snapshot of the source tree (`*.rs`, `Cargo.toml`, `Cargo.lock`) and the `workspace/didChangeWatchedFiles` notification built from its difference |
 | `operations.rs` | `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink. `Check` and `Apply` run the root's loaded plan; `Apply` loads one that is not loaded. A run **queued** behind another on the same root says so on its own stream every heartbeat (`still waiting (Ns) — queued behind another operation on …`), and a send that fails means the caller hung up, which drops the request out of the queue without taking the gate |
 | `queries.rs` | `Anchors`, `Snapshot`, `PlanStatus`, `Verify`, and the plan store's `LoadPlans`, `UnloadPlans`, `ListPlans` — the unary half. `Snapshot` takes the root's queue (it writes the plan file and reads the tree), acquires a language server through `client_for` **only** when `item_anchor::plan_file_has_item_anchors` says the plan has item anchors, and runs `runner::snapshot_resolving` on a blocking task with a cancellation token that fires when the request is dropped; it answers `{paths, rewritten, stale}`, the stale list as `StaleOp`s in plan order. `PlanStatus` reads the loaded plan and, like `ListPlans`, lists its stale operations (`StaleOp { op, reason }`). `Verify` answers the three excused-statement counts (`repointed`, `visibility_normalised`, `cfg_test_gates`). `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
-| `apply.rs` | The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation (`runner::record_applied_op` also folds the operation into every other loaded plan), refusing a stale operation before anything is read or written (`runner::refuse_a_stale_pending_op`, `StaleOperation`, `FailedPrecondition`), refusing a move of a file git does not track right after each operation is resolved and before its dry-run branch, group entry and in-flight record (`runner::preflight_moves`, `UntrackedMoveSource`), bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event), and gating and rolling back transactional groups through `runner::group_gate` (`GroupRun`), so a group's `OperationApplied` events, each carrying `group`, are sent only once the group compiled |
+| `apply.rs` | `installed_clients_for`: the warm server of every installed language a file of the held plan belongs to, handed to the run as `Options::installed_clients`. The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation (`runner::record_applied_op` also folds the operation into every other loaded plan), refusing a stale operation before anything is read or written (`runner::refuse_a_stale_pending_op`, `StaleOperation`, `FailedPrecondition`), refusing a move of a file git does not track right after each operation is resolved and before its dry-run branch, group entry and in-flight record (`runner::preflight_moves`, `UntrackedMoveSource`), bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event), and gating and rolling back transactional groups through `runner::group_gate` (`GroupRun`), so a group's `OperationApplied` events, each carrying `group`, are sent only once the group compiled |
 | `navigation.rs` | `Definition`, `References`, `Hover` — one `LspClient` query each on the root's warm server, the translation either side of it, and the index state the answer was given in (`index_state_of`). Also the checks every file-taking query shares: `served_source` (the path is inside the root and a Rust source) and `synced_document` (the file's contents sent to the root's server, and its URI), plus the `wire_position` and `code_location` translations |
 | `symbols.rs` | `Symbols`, `Diagnostics` — the same shape as navigation, built on its shared checks and translations |
 | `analyze.rs` | `Coverage`, `Report`, `DuplicateTests`, `Complexity` |
@@ -136,7 +138,10 @@ answer — maps `quiescent` through `state_of_quiescence`: `READY` when the late
 `LOADING` otherwise, including before any status. A root no live server holds is `IDLE`; one whose server
 could not start, or exited without being let go, is `FAILED` with `error` saying why until the next
 attempt. rust-analyzer always sends the extension because the daemon advertises
-`serverStatusNotification`; a server that never sent one would read `LOADING` for ever.
+`serverStatusNotification`. A server whose launch does not ask for it — an extension language's — is read
+by `Readiness::AfterInitialize`: `READY` (and loaded) from the moment its handshake completed, whatever its
+notifications say. A root holding both kinds keeps one fold, Rust's
+([backlog](../../../docs/dev/todo/2026-10-22-mixed-root-index-progress-follows-rust-only.md)).
 
 **`IndexProgress` on the wire** (`reported`): `phase` / `percentage` are `current`'s — the phase the
 server reported on most recently, at 0% until it reports a number, never moving backwards on a sub-step
@@ -168,8 +173,8 @@ was never sent cannot ask again.
 ## Navigation
 
 `Definition`, `References` and `Hover` take `{workspace_root, file, position}` and answer from the
-warm server `WorkspaceIndex::client_for(root)` hands out, through `LspClient::{definition, references,
-hover}`.
+warm server of the file's language (`route_of`, then `client_for_route` — `client_for(root)` for a `.rs`
+file), through `LspClient::{definition, references, hover}`.
 
 **Index state.** Each answer carries `state` (`LOADING` or `READY`), read from the server's latest
 `serverStatus` through `ServerChatter` (`index_state_of`). `tddy-lsp`'s reader records a status before it
@@ -196,13 +201,36 @@ way back.
 | Request | Status |
 |---|---|
 | Empty `file`, an absolute `file`, or one containing `..` | `InvalidArgument` |
-| A file whose extension is not `.rs` — the one language server this host runs would otherwise be told a non-Rust file is Rust | `InvalidArgument` |
+| A file that is not `.rs` and that no installed language claims, or whose language has no configured server | `InvalidArgument` |
 | No position, or a line or column of 0 | `InvalidArgument` |
 | A file that cannot be read | `NotFound` |
 | A language-server failure | the class `status.rs` assigns it |
 
 **Freshness.** The file's current contents are sent to the server (`sync_document`) before each query,
 so the answer is about the text the caller read, not an older copy the server held.
+
+### Extension languages
+
+A host built with supports (`build_code_index_entry_with_supports`, `CodeIndexServiceImpl::with_supports`;
+`main.rs` registers the built-ins, then every installed Zed extension's languages) routes a file by
+`route_of`: a `.rs` file is Rust's, whatever an extension also claims; any other file goes to the support
+that claims it when that support has a launch (`Route::Extension { language, launch }`), and is refused
+otherwise. `client_for_route` spawns or reuses that language's server under `LspKey { root, language }`
+from the same allow-list (`SupportRegistry::allow_list`), records the language against the root so
+`warmth_of` sees it, and opens documents as the launch's `language_id`. It is told of no tree changes —
+only Rust sources are tracked
+([backlog](../../../docs/dev/todo/2026-10-22-extension-servers-are-not-told-of-tree-changes.md)); the
+document asked about is announced with its current text on every request.
+
+`serves_workspace(root, supports)` is the question every "does this root get an index" caller asks: a
+Rust workspace is served; with `supports` handed over, so is a tree holding a file an installed language
+with a launch claims. With `None` (no extension language registered) a non-Rust tree is not.
+
+`Apply` reaches the same servers: `installed_clients_for` spawns one per installed language a file of the
+plan belongs to (`runner::installed_launches_for`), the run's `Options` carry them, and the registry the
+loop resolves through builds each installed support's backend over its own server — so an extension
+language's `rename_symbol` goes to `textDocument/rename` on that server. A server that will not start
+refuses the run before anything is written.
 
 ## Symbols and diagnostics
 
@@ -263,9 +291,9 @@ it runs anything. `stop_after` is judged only where a group would begin.
 
 ## The language server
 
-`main.rs` builds the one `LspAllowList` entry this process serves — Rust — from
-`--rust-analyzer <PATH>`, or the bare `rust-analyzer` resolved on the process's own `PATH` when the
-flag is absent. The handshake (`client_capabilities`, `server_settings`) is fixed at spawn, which is
+`main.rs` builds the process's `LspAllowList` from its supports: Rust from `--rust-analyzer <PATH>`, or
+the bare `rust-analyzer` resolved on the process's own `PATH` when the flag is absent, then the launch of
+every installed extension language whose server is configured. The handshake (`client_capabilities`, `server_settings`) is fixed at spawn, which is
 why this process owns its registry rather than sharing `tddy-daemon`'s. The toolchain rust-analyzer
 loads a workspace with (`cargo`, `rustc`, `RUST_SRC_PATH`) is whatever this process's environment
 says; `tddy-daemon` sets it from `index_daemon.env`.
@@ -333,6 +361,8 @@ Every suite runs against `fake_lsp`, `tddy-lsp`'s deterministic fake, reached th
 | `root_progress_acceptance.rs` | `WatchRoot` and `Warm` over the per-root fold: a root no server holds reports `IDLE` and starts none; a watch reports the load a navigation request started; a server that cannot start reports `FAILED` with the reason; a watch joining mid-load names every phase already running; a warm reports `ready` only once loaded and carries the active phases; a definition asked while loading says `LOADING`, once loaded `READY`. Driven by `fake_lsp --loads-crate-graph-on-signal`, which begins two overlapping phases and holds until a file the test names appears, so "mid-load" is deterministic without sleeps |
 | `dual_transport_acceptance.rs` | The binary as a process: single-shot exit codes, both transports concurrently, stdout silence under `--stdio`, fail-fast with no transport |
 | `tree_changes_acceptance.rs` | A warm server told of a module written since its last request (created and changed), of one removed (deleted), of each change once, and of nothing when the tree has not changed — against `fake_lsp`, which replays the notifications it received as `tddy/watchedFileChanges` |
+| `extension_references.rs` | A host over `demo-toml` with `fake-ls` configured: `References` on a TOML file is answered by the extension's server; an extension-only worktree is served (`serves_workspace`); an `Apply` of an item-anchored `rename_symbol` renames the key through `fake_lsp --answers-rename` |
+| `extension_readiness.rs` | A server without `serverStatus` reads `READY` after `initialize`; Rust's rule still reads a silent server `LOADING` |
 | `live_plans_acceptance.rs` | The apply loop folding a test-binary move into another loaded plan's file hint and flushing it, and an unloaded plan staying byte-identical after another plan applies |
 | `activity_log_acceptance.rs` | The whole journal of one request, through a capturing logger — which caught a double-logged outcome that no test of the pure composer could see |
 | `warm_index_production.rs` | `#[ignore]`. Real rust-analyzer; the index-reuse claim, asserted as a ratio against the cold run the test creates itself |
