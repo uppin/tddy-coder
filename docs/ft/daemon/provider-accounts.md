@@ -112,8 +112,38 @@ guessing.
 
 A session's account is chosen at three levels, highest first: the **session** (the operator's choice
 on start), the **agent definition** it was started with, and the **person's default** for the harness.
-An explicit "built in" choice at a level overrides any account below it. Only the session level is
-fed today.
+An explicit "built in" choice at a level overrides any account below it. The session and default
+levels are fed; nothing fills the agent-definition level yet.
+
+### A person's default per harness
+
+A person marks a provider account as their **default** for one or more harnesses ("Claude CLI →
+Meta"). The default is **per person**, kept in the account's own vault record (metadata
+`default_for`, the harness ids comma-separated), so it survives a daemon restart and travels with the
+account under [credential sync](credential-sync.md). There is no daemon-wide default: the daemon holds
+no key of its own to run one on.
+
+`accounts.AccountsService/SetProviderAccountDefaults(session_token, account_id, harnesses[])` makes the
+account the default for exactly those harnesses:
+
+- A harness has at most one default per person. Naming it here clears it from whichever account held
+  it; the response's `changed` lists every account whose defaults moved (the one named and any that
+  lost a harness to it).
+- A harness the account cannot drive, per the matrix above, is refused `INVALID_ARGUMENT` with the
+  matrix's reason (a Baseten account as the Claude CLI default: "needs Anthropic Messages"); nothing is
+  changed.
+- An empty list clears every default the account holds. An id the vault holds no provider account
+  under is `NOT_FOUND`.
+- `AccountSummary.default_for` lists the harnesses an account is the default for.
+
+At start, a **claude-cli** or **opencode-cli** session that names neither an account nor "built in"
+runs on the owner's default for its harness. An explicit choice — an account, or "Anthropic (built
+in)" — wins and does not read the default at all. While the owner's vault is **locked**, a start that
+names nothing is refused (`FAILED_PRECONDITION`) rather than run on the vendor the default may have
+been chosen to avoid; an absent or uninitialized vault has no default. A sandboxed claude-cli start
+whose default is an account is refused like one that names the account, since a sandbox cannot run on
+an account yet. Tool sessions decide from the session-level choice only
+([backlog](../../dev/todo/2026-10-22-tool-session-starts-ignore-the-provider-default.md)).
 
 ## Out of scope
 

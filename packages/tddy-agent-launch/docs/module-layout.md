@@ -135,6 +135,12 @@ to a claude-cli session (behaviour:
   account under is `Vault(NotFound)`.
 - `session_route_sources(&StartSessionRequest)` maps `provider_account_id` / `provider_built_in` to
   `RouteSources.session` (the account wins when both are sent).
+- `session_route_sources_with_default(req, harness, access)` adds `RouteSources.user_default` from
+  `SessionAccountAccess::default_provider_account(harness)` — read only when the request names no
+  account and no "built in". `default_provider_account` is `Ok(None)` without vaults or with an
+  uninitialized vault, and any other vault refusal (locked, no such session) is returned and mapped
+  like `provider_account`'s. The unsandboxed claude-cli and opencode-cli starts in
+  `cli_branch_starts.rs` use it, and so does the sandboxed claude-cli start's `refuse_route_in_sandbox`.
 - `resolve_session_route(access, harness, sources, model)` applies `choose_route` and, for an
   account, refuses an empty model (`INVALID_ARGUMENT`), reads the account and resolves the route.
   Vault refusals map to `FAILED_PRECONDITION` (no vaults, locked, uninitialized), `UNAUTHENTICATED`
@@ -181,7 +187,10 @@ the vendor as above; the request mapping; and resume with a record, with none, a
 was removed. `src/tool_session_route_tests.rs` — a Codex tool session on Meta gets a route file with
 the Responses provider and the key; Cursor, a specialized definition and an empty agent are refused;
 choosing nothing gives no file; every Responses preset in `tddy_accounts::presets()` is declared to
-Codex under its own label.
+Codex under its own label. `src/default_route_tests.rs` — over a real vault whose Meta account is the
+claude-cli default: a start naming nothing reads it and runs on Meta; an explicit built-in choice
+overrides it and needs no unlocked vault; a locked vault refuses a start naming nothing; another
+harness has no default.
 
 ## Placement and the session's git environment
 

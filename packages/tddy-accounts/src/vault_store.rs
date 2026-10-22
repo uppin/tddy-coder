@@ -7,7 +7,10 @@ use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError, VaultState,
 };
 
-use crate::provider_account::{unclaimed_account_id, ProviderAccount, ProviderAccountStore};
+use crate::provider_account::{
+    defaults_of, unclaimed_account_id, ProviderAccount, ProviderAccountDefaults,
+    ProviderAccountStore, META_DEFAULT_FOR,
+};
 use crate::store::{AccountStore, AccountsError};
 
 /// Resolve a `session_token` to the subject whose vault it may open, or `None` when the token names
@@ -194,11 +197,75 @@ impl ProviderAccountStore for SessionVaultAccountStore {
     }
 }
 
+fn dedup_in_order(harnesses: &[String]) -> Vec<String> {
+    let mut kept: Vec<String> = Vec::new();
+    for harness in harnesses {
+        if !kept.contains(harness) {
+            kept.push(harness.clone());
+        }
+    }
+    kept
+}
+
 fn now_secs() -> Result<u64, AccountsError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .map_err(|error| AccountsError::Unavailable(error.to_string()))
+}
+
+impl ProviderAccountDefaults for SessionVaultAccountStore {
+    fn set_provider_account_defaults(
+        &self,
+        session_token: &str,
+        account: &AccountId,
+        harnesses: &[String],
+    ) -> Result<Vec<CredentialRecord>, AccountsError> {
+        let (subject, vault) = self.vault_for(session_token)?;
+        // Serialises this read-modify-write against a connect and against another default change.
+        let _changing_defaults = self
+            .new_provider_accounts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let held = vault
+            .list(None)
+            .map_err(|error| refusal_of(&subject, error))?;
+        let mut changed = Vec::new();
+        // Only a provider account can be a default; a GitHub record sharing the id is left alone.
+        for mut record in held
+            .into_iter()
+            .filter(|record| ProviderAccount::from_record(record).is_some())
+        {
+            let before = defaults_of(&record);
+            let after: Vec<String> = if &record.account == account {
+                dedup_in_order(harnesses)
+            } else {
+                before
+                    .iter()
+                    .filter(|harness| !harnesses.contains(harness))
+                    .cloned()
+                    .collect()
+            };
+            if after == before {
+                continue;
+            }
+            if after.is_empty() {
+                record.metadata.remove(META_DEFAULT_FOR);
+            } else {
+                record
+                    .metadata
+                    .insert(META_DEFAULT_FOR.to_string(), after.join(","));
+            }
+            // TODO(keyring): one vault operation per record, so a write landing between the list
+            // and this put is overwritten with the record read here. See
+            // docs/dev/todo/2026-10-04-keyring-accounts-rename-lost-update.md.
+            vault
+                .put(record.clone())
+                .map_err(|error| refusal_of(&subject, error))?;
+            changed.push(record);
+        }
+        Ok(changed)
+    }
 }
 
 #[cfg(test)]
@@ -277,6 +344,78 @@ mod tests {
                 .map(|record| record.account.as_str().to_string())
                 .collect()
         })
+    }
+
+    fn a_provider_account(preset_id: &str, account: &str) -> CredentialRecord {
+        let preset = crate::provider_account::preset(preset_id).expect("a known preset");
+        ProviderAccount {
+            account: AccountId::new(account),
+            preset,
+            label: account.to_string(),
+            endpoints: crate::provider_account::endpoints_for(preset, None, None)
+                .expect("the preset's endpoints"),
+            api_key: SecretString::new(format!("key-{account}")),
+        }
+        .to_record(1_760_000_000)
+    }
+
+    #[test]
+    fn a_default_moves_to_the_account_named_and_survives_in_the_vault() {
+        // Given Meta holds the Claude CLI default
+        let mut meta = a_provider_account("meta", "meta");
+        meta.metadata
+            .insert(META_DEFAULT_FOR.to_string(), "claude-cli".to_string());
+        let (_dir, _vault, store) =
+            ada_unlocked_her_vault_holding(vec![meta, a_provider_account("fireworks", "fw")]);
+
+        // When Fireworks is made the default for it
+        let changed = store
+            .set_provider_account_defaults(
+                ADAS_SESSION,
+                &AccountId::new("fw"),
+                &["claude-cli".to_string()],
+            )
+            .expect("applied");
+
+        // Then both rows changed, and a later read finds one holder
+        assert_eq!(changed.len(), 2);
+        let held = store.list(ADAS_SESSION).expect("listed");
+        assert_eq!(
+            crate::provider_account::default_account_for(&held, "claude-cli"),
+            Some(AccountId::new("fw"))
+        );
+        assert!(!held
+            .iter()
+            .find(|r| r.account.as_str() == "meta")
+            .expect("meta")
+            .metadata
+            .contains_key(META_DEFAULT_FOR));
+    }
+
+    #[test]
+    fn a_github_record_sharing_the_accounts_id_never_becomes_a_default() {
+        // Given Ada's GitHub login and her Meta account are both called "ada"
+        let (_dir, vault, store) = ada_unlocked_her_vault_holding(vec![
+            a_credential(ADA, "Ada on GitHub"),
+            a_provider_account("meta", ADA),
+        ]);
+
+        // When the Meta account is made the Claude CLI default
+        let changed = store
+            .set_provider_account_defaults(
+                ADAS_SESSION,
+                &AccountId::new(ADA),
+                &["claude-cli".to_string()],
+            )
+            .expect("applied");
+
+        // Then only the provider account changed
+        assert_eq!(changed.len(), 1);
+        let github = vault
+            .get(&ProviderId::new("github"), &AccountId::new(ADA))
+            .expect("readable")
+            .expect("held");
+        assert!(!github.metadata.contains_key(META_DEFAULT_FOR));
     }
 
     #[test]

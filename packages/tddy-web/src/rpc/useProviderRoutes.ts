@@ -115,3 +115,41 @@ export function useProviderAccountModels(
 
   return state;
 }
+
+/**
+ * The provider account the person made their default for `harness` (`ListAccounts`'s `defaultFor`),
+ * or `null` while unknown, when there is none, or when the listing failed — a failure here only
+ * means nothing is pre-selected; the choice stays the person's.
+ */
+export function useProviderDefault(
+  client: AccountsClient | undefined,
+  sessionToken: string,
+  harness: string | null,
+): string | null {
+  const [found, setFound] = useState<{ harness: string; accountId: string | null } | null>(null);
+
+  useEffect(() => {
+    if (!client || !harness) {
+      setFound(null);
+      return;
+    }
+    let cancelled = false;
+    client
+      .listAccounts({ sessionToken })
+      .then((resp) => {
+        if (cancelled) return;
+        const holder = resp.providers
+          .flatMap((group) => group.accounts)
+          .find((account) => account.defaultFor.includes(harness));
+        setFound({ harness, accountId: holder?.accountId ?? null });
+      })
+      .catch(() => {
+        if (!cancelled) setFound({ harness, accountId: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, sessionToken, harness]);
+
+  return found !== null && found.harness === harness ? found.accountId : null;
+}

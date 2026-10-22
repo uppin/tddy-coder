@@ -38,6 +38,10 @@ service AccountsService {
   // The caller's provider accounts, each marked with whether `harness` can run on it and why not.
   // The matrix lives in the daemon; a client never re-derives it.
   rpc ListProviderRoutes(ListProviderRoutesRequest) returns (ListProviderRoutesResponse);
+  // Make one provider account the caller's default for each named harness. A harness can have one
+  // default per person: naming it here clears it from whichever account held it. A harness the
+  // account cannot drive is refused. An empty list clears every default this account holds.
+  rpc SetProviderAccountDefaults(SetProviderAccountDefaultsRequest) returns (SetProviderAccountDefaultsResponse);
 }
 
 // One linked account, as a person sees it.
@@ -76,6 +80,9 @@ message AccountSummary {
   // "anthropic-messages", "openai-responses", "openai-chat". Which harness can run on it follows
   // from these. Empty for every other account.
   repeated string wire_protocols = 9;
+  // For a model-provider account: the harnesses ("claude-cli", "codex", …) it is the caller's
+  // default for. A session start that names no account uses it.
+  repeated string default_for = 10;
 }
 
 // One account's aggregate standing across every peer it has been offered to, worst first: a
@@ -282,4 +289,15 @@ message ListProviderRoutesResponse {
   // unsupported and `harness_reason` says why.
   bool harness_routable = 2;
   string harness_reason = 3;
+}
+
+message SetProviderAccountDefaultsRequest {
+  string session_token = 1;
+  string account_id = 2;
+  repeated string harnesses = 3;
+}
+
+message SetProviderAccountDefaultsResponse {
+  // Every account whose defaults changed — the one named, and any that lost a harness to it.
+  repeated AccountSummary changed = 1;
 }

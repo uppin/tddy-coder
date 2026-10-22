@@ -170,6 +170,23 @@ impl SessionAccountAccess {
             })
     }
 
+    /// The provider account the session owner made their default for `harness`, if any — the
+    /// `user_default` level of a session's route.
+    pub fn default_provider_account(
+        &self,
+        harness: &str,
+    ) -> Result<Option<String>, SessionIdentityRefusal> {
+        let held = match self.held_accounts() {
+            Ok(held) => held,
+            // Nothing to read a default from: no vault is wired, or the person has none yet.
+            Err(SessionIdentityRefusal::NoVaultsConfigured)
+            | Err(SessionIdentityRefusal::Vault(AccountsError::Uninitialized)) => return Ok(None),
+            Err(refusal) => return Err(refusal),
+        };
+        Ok(tddy_accounts::default_account_for(&held, harness)
+            .map(|account| account.as_str().to_string()))
+    }
+
     /// The GitHub records the session's vault holds right now.
     fn held_github_accounts(&self) -> Result<Vec<CredentialRecord>, SessionIdentityRefusal> {
         Ok(self

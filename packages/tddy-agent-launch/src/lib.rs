@@ -61,6 +61,8 @@ pub mod worktree_source;
 mod cli_route_launch_tests;
 #[cfg(test)]
 mod conversation_spawn_wiring_tests;
+#[cfg(test)]
+mod default_route_tests;
 mod facilitation;
 #[cfg(test)]
 mod host_session_socket_tests;

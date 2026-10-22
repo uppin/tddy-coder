@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::svc_start_session_core::CliStart;
 
 use crate::launch_ports::LaunchSessions;
-use crate::session_provider_route::{refuse_route_in_sandbox, session_route_sources};
+use crate::session_provider_route::{refuse_route_in_sandbox, session_route_sources_with_default};
 use tddy_service::proto::session::StartSessionRequest;
 
 impl LaunchSessions {
@@ -29,7 +29,13 @@ impl LaunchSessions {
         stack_parent_for_claude_cli: Option<&str>,
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        refuse_route_in_sandbox(&session_route_sources(req))?;
+        // The person's default counts here too: a sandbox cannot run on an account yet, and
+        // silently starting on the vendor instead of the chosen default is a fallback.
+        refuse_route_in_sandbox(&session_route_sources_with_default(
+            req,
+            "claude-cli",
+            &self.host.session_account_access(&req.session_token),
+        )?)?;
         self.start_sandboxed_claude_cli_session(
             os_user,
             &start.session_id,
@@ -67,6 +73,11 @@ impl LaunchSessions {
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
+        let route_sources = session_route_sources_with_default(
+            req,
+            "claude-cli",
+            &self.host.session_account_access(&req.session_token),
+        )?;
         self.start_claude_cli_session(
             os_user,
             &start.session_id,
@@ -88,7 +99,7 @@ impl LaunchSessions {
             req.semantic_index,
             req.create_remote_branch,
             req.ssh_config_host.trim(),
-            &session_route_sources(req),
+            &route_sources,
             progress,
         )
         .await
@@ -257,6 +268,11 @@ impl LaunchSessions {
         clones: tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
+        let route_sources = session_route_sources_with_default(
+            req,
+            "opencode-cli",
+            &self.host.session_account_access(&req.session_token),
+        )?;
         crate::opencode_cli_spawn::start_opencode_cli_session(
             crate::opencode_cli_spawn::OpenCodeCliStart {
                 config: &self.config,
@@ -290,7 +306,7 @@ impl LaunchSessions {
                 task_registry: &self.task_registry,
                 agent_clones: &clones,
                 account_access: &self.host.session_account_access(&req.session_token),
-                route_sources: &session_route_sources(req),
+                route_sources: &route_sources,
                 progress,
             },
         )

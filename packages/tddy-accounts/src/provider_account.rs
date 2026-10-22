@@ -435,6 +435,68 @@ pub trait RouteSupport: Send + Sync {
     fn supports(&self, harness: &str, preset: &str, protocols: &[&str]) -> Result<(), String>;
 }
 
+/// The record metadata key listing the harnesses a provider account is its owner's default for,
+/// comma-separated.
+pub const META_DEFAULT_FOR: &str = "default_for";
+
+/// The provider account in `held` that is the default for `harness`, if one is.
+#[must_use]
+pub fn default_account_for(held: &[CredentialRecord], harness: &str) -> Option<AccountId> {
+    held.iter()
+        .find(|record| defaults_of(record).iter().any(|held| held == harness))
+        .map(|record| record.account.clone())
+}
+
+/// The harnesses `record` is the default for (empty for any other kind of account).
+#[must_use]
+pub fn defaults_of(record: &CredentialRecord) -> Vec<String> {
+    if ProviderAccount::from_record(record).is_none() {
+        return Vec::new();
+    }
+    record
+        .metadata
+        .get(META_DEFAULT_FOR)
+        .map(|listed| {
+            listed
+                .split(',')
+                .map(str::trim)
+                .filter(|harness| !harness.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `Err(reason)` for the first of `harnesses` that `account` cannot drive, per `matrix`.
+pub(crate) fn refuse_undrivable(
+    matrix: &dyn RouteSupport,
+    account: &ProviderAccount,
+    harnesses: &[String],
+) -> Result<(), String> {
+    let protocols: Vec<&str> = account
+        .wire_protocols()
+        .into_iter()
+        .map(WireProtocol::as_str)
+        .collect();
+    harnesses.iter().try_for_each(|harness| {
+        matrix
+            .harness_routable(harness)
+            .and_then(|()| matrix.supports(harness, account.preset.id, &protocols))
+    })
+}
+
+/// Where a person's per-harness defaults are changed.
+pub trait ProviderAccountDefaults: Send + Sync {
+    /// Make `account` the default for each of `harnesses`, clearing those harnesses from any other
+    /// account; returns every record that changed.
+    fn set_provider_account_defaults(
+        &self,
+        session_token: &str,
+        account: &AccountId,
+        harnesses: &[String],
+    ) -> Result<Vec<CredentialRecord>, AccountsError>;
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;

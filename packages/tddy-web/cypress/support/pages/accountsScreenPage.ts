@@ -97,4 +97,10 @@ export const accountsScreenPage = {
     accountsScreenPage.connectApiKey().clear().type(apiKey, { log: false });
     accountsScreenPage.connectSubmit().click();
   },
+
+  /** The harnesses a provider account is the person's default for, as a multi-select. */
+  defaultForSelect: (provider: string, accountId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-default-for`),
+  defaultForSave: (provider: string, accountId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-default-for-save`),
 };

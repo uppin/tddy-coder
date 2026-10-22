@@ -13,6 +13,8 @@
 
 import { useState } from "react";
 import { Button } from "../ui/button";
+import { ProviderAccountDefaultsControl } from "./ProviderAccountDefaultsControl";
+import { ProviderModels } from "./ProviderModels";
 import {
   ConnectProviderAccountForm,
   PROVIDER_PRESET_OPTIONS,
@@ -43,6 +45,8 @@ export interface AccountRow {
   preset: string;
   /** For a model-provider account: the wire protocols its endpoint serves. */
   wireProtocols: string[];
+  /** For a model-provider account: the harnesses it is the person's default for. */
+  defaultFor: string[];
 }
 
 export interface ProviderGroup {
@@ -105,6 +109,8 @@ export interface AccountsScreenProps {
   connectError?: string | null;
   /** The models a provider account's endpoint serves, asked for when its row is expanded. */
   onListModels?: (accountId: string) => Promise<string[]>;
+  /** Make a provider account the default for these harnesses. When absent the row has no control. */
+  onSetDefaults?: (provider: string, accountId: string, harnesses: string[]) => void;
 }
 
 export function AccountsScreen({
@@ -116,13 +122,14 @@ export function AccountsScreen({
   onConnectProviderAccount,
   connectError = null,
   onListModels,
+  onSetDefaults,
 }: AccountsScreenProps) {
   return (
     <div data-testid="accounts-screen">
       {onConnectProviderAccount && outcome.kind === "listed" ? (
         <ConnectApiKey onConnect={onConnectProviderAccount} error={connectError} />
       ) : null}
-      {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels)}
+      {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels, onSetDefaults)}
       {linkAttempt ? <LinkAttemptView attempt={linkAttempt} /> : null}
     </div>
   );
@@ -184,6 +191,7 @@ function renderOutcome(
   onRemove: AccountsScreenProps["onRemove"],
   onAddAccount: AccountsScreenProps["onAddAccount"],
   onListModels: AccountsScreenProps["onListModels"],
+  onSetDefaults: AccountsScreenProps["onSetDefaults"],
 ) {
   switch (outcome.kind) {
     case "uninitialized":
@@ -241,6 +249,7 @@ function renderOutcome(
                     onRename={onRename}
                     onRemove={onRemove}
                     onListModels={onListModels}
+                    onSetDefaults={onSetDefaults}
                   />
                 ))}
               </ul>
@@ -281,6 +290,7 @@ interface AccountRowViewProps {
   onRename: AccountsScreenProps["onRename"];
   onRemove: AccountsScreenProps["onRemove"];
   onListModels: AccountsScreenProps["onListModels"];
+  onSetDefaults: AccountsScreenProps["onSetDefaults"];
 }
 
 function AccountRowView({
@@ -290,6 +300,7 @@ function AccountRowView({
   onRename,
   onRemove,
   onListModels,
+  onSetDefaults,
 }: AccountRowViewProps) {
   const rowId = `accounts-row-${provider}-${account.accountId}`;
   const [draftLabel, setDraftLabel] = useState(account.label);
@@ -336,6 +347,15 @@ function AccountRowView({
           Rename
         </Button>
       </form>
+      {account.preset && onSetDefaults ? (
+        <ProviderAccountDefaultsControl
+          // Re-seeded whenever the daemon reports new defaults — another row may have taken one.
+          key={account.defaultFor.join(",")}
+          rowId={rowId}
+          current={account.defaultFor}
+          onSave={(harnesses) => onSetDefaults(provider, account.accountId, harnesses)}
+        />
+      ) : null}
       {account.preset && onListModels ? (
         <ProviderModels rowId={rowId} accountId={account.accountId} onListModels={onListModels} />
       ) : null}
@@ -408,57 +428,6 @@ function ConnectApiKey({
         />
       ) : null}
     </div>
-  );
-}
-
-type ModelsState =
-  | { kind: "closed" }
-  | { kind: "loading" }
-  | { kind: "listed"; modelIds: string[] }
-  | { kind: "error"; reason: string };
-
-/** A provider account's models, asked of its endpoint only when a person expands the row. */
-function ProviderModels({
-  rowId,
-  accountId,
-  onListModels,
-}: {
-  rowId: string;
-  accountId: string;
-  onListModels: (accountId: string) => Promise<string[]>;
-}) {
-  const [state, setState] = useState<ModelsState>({ kind: "closed" });
-  const toggle = () => {
-    if (state.kind !== "closed") {
-      setState({ kind: "closed" });
-      return;
-    }
-    setState({ kind: "loading" });
-    onListModels(accountId)
-      .then((modelIds) => setState({ kind: "listed", modelIds }))
-      .catch((e: unknown) =>
-        setState({ kind: "error", reason: e instanceof Error ? e.message : String(e) }),
-      );
-  };
-  return (
-    <span className="flex flex-col gap-1">
-      <Button size="sm" variant="ghost" data-testid={`${rowId}-models-toggle`} onClick={toggle}>
-        {state.kind === "closed" ? "Models" : "Hide models"}
-      </Button>
-      {state.kind === "loading" ? <span className="text-xs">Asking the provider…</span> : null}
-      {state.kind === "error" ? (
-        <span data-testid={`${rowId}-models-error`} className="text-xs text-destructive">
-          {state.reason}
-        </span>
-      ) : null}
-      {state.kind === "listed" ? (
-        <ul data-testid={`${rowId}-models`} className="text-xs font-mono">
-          {state.modelIds.map((id) => (
-            <li key={id}>{id}</li>
-          ))}
-        </ul>
-      ) : null}
-    </span>
   );
 }
 

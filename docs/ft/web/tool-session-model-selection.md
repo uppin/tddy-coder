@@ -168,7 +168,11 @@ the daemon's reason).
 - Choosing an account switches the model list from `ListAgentModels` to
   `ListProviderAccountModels(account_id)` — the account's own models — and preselects the first.
   Choosing the vendor again switches back to the vendor's catalog.
-- Changing the session type, or a tool session's agent, resets the field to its untouched state.
+- When the person has a default account for the field's harness (`AccountSummary.default_for`, from
+  `ListAccounts`) and `ListProviderRoutes` lists it as supported, the field starts on that account
+  instead of the vendor. The operator can still choose the vendor or another account.
+- Changing the session type, or a tool session's agent, resets the field to its untouched state, then
+  to that harness's default.
 - On submit, a claude-cli or tool-session start carries `provider_account_id` (the chosen account, else empty) and
   `provider_built_in` (true only when the operator explicitly chose the vendor). An untouched field
   sends neither, so a lower-level default may still decide; the daemon applies the precedence. See

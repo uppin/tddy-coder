@@ -14,7 +14,7 @@ use tddy_service::proto::accounts::{
     ListProviderRoutesRequest, ListProviderRoutesResponse, PollLinkAccountRequest,
     PollLinkAccountResponse, ProviderAccounts, ProviderRouteOption, RemoveAccountRequest,
     RemoveAccountResponse, SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse,
-    SyncStatus,
+    SetProviderAccountDefaultsRequest, SetProviderAccountDefaultsResponse, SyncStatus,
 };
 
 use crate::attempts::{Attempts, PollAdmission};
@@ -23,8 +23,9 @@ use crate::linking::{
     LinkedIdentity, META_SUBJECT,
 };
 use crate::provider_account::{
-    account_id_for, endpoints_for, preset, ProviderAccount, ProviderAccountError,
-    ProviderAccountStore, ProviderModelProbe, RouteSupport, WireProtocol,
+    account_id_for, defaults_of, endpoints_for, preset, refuse_undrivable, ProviderAccount,
+    ProviderAccountDefaults, ProviderAccountError, ProviderAccountStore, ProviderModelProbe,
+    RouteSupport, WireProtocol,
 };
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
@@ -65,6 +66,7 @@ pub struct AccountsServiceImpl<S> {
     linking: Option<Linking>,
     provider_accounts: Option<ProviderAccountPorts>,
     route_support: Option<Arc<dyn RouteSupport>>,
+    defaults: Option<Arc<dyn ProviderAccountDefaults>>,
 }
 
 impl<S> AccountsServiceImpl<S> {
@@ -77,6 +79,7 @@ impl<S> AccountsServiceImpl<S> {
             linking: None,
             provider_accounts: None,
             route_support: None,
+            defaults: None,
         }
     }
 
@@ -132,6 +135,17 @@ impl<S> AccountsServiceImpl<S> {
         self
     }
 
+    /// Wire where per-harness defaults are kept. Unwired, `SetProviderAccountDefaults` answers
+    /// `FAILED_PRECONDITION`. Validation uses the route matrix (`with_route_support`).
+    #[must_use]
+    pub fn with_provider_account_defaults(
+        mut self,
+        defaults: Arc<dyn ProviderAccountDefaults>,
+    ) -> Self {
+        self.defaults = Some(defaults);
+        self
+    }
+
     /// Replace the clock attempt deadlines and poll pacing are read from. For tests, which would
     /// otherwise sleep to cross a window or an interval.
     #[must_use]
@@ -157,6 +171,18 @@ impl<S> AccountsServiceImpl<S> {
     fn require_linking(&self) -> Result<&Linking, Status> {
         self.linking.as_ref().ok_or_else(|| {
             Status::failed_precondition("this daemon cannot link accounts: no store is wired")
+        })
+    }
+}
+
+impl<S> AccountsServiceImpl<S> {
+    /// The harness × account matrix, or the refusal a route RPC answers without one.
+    fn route_matrix(&self) -> Result<&dyn RouteSupport, Status> {
+        self.route_support.as_deref().ok_or_else(|| {
+            Status::failed_precondition(
+                "this daemon cannot tell which harness runs on which provider account: \
+                 no route matrix is wired",
+            )
         })
     }
 }
@@ -200,12 +226,7 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         request: Request<ListProviderRoutesRequest>,
     ) -> Result<Response<ListProviderRoutesResponse>, Status> {
         let request = request.into_inner();
-        let matrix = self.route_support.as_deref().ok_or_else(|| {
-            Status::failed_precondition(
-                "this daemon cannot tell which harness runs on which provider account: \
-                 no route matrix is wired",
-            )
-        })?;
+        let matrix = self.route_matrix()?;
         let records = self
             .store
             .list(&request.session_token)
@@ -222,6 +243,42 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             options,
             harness_routable: harness_reason.is_none(),
             harness_reason: harness_reason.unwrap_or_default(),
+        }))
+    }
+
+    async fn set_provider_account_defaults(
+        &self,
+        request: Request<SetProviderAccountDefaultsRequest>,
+    ) -> Result<Response<SetProviderAccountDefaultsResponse>, Status> {
+        let request = request.into_inner();
+        let defaults = self.defaults.as_deref().ok_or_else(|| {
+            Status::failed_precondition("this daemon keeps no per-harness provider defaults")
+        })?;
+        let matrix = self.route_matrix()?;
+        let wanted = AccountId::new(&request.account_id);
+        let account = self
+            .store
+            .list(&request.session_token)
+            .map_err(status_for)?
+            .iter()
+            .filter(|record| record.account == wanted)
+            .find_map(ProviderAccount::from_record)
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "no provider account {} is connected",
+                    request.account_id
+                ))
+            })?;
+        refuse_undrivable(matrix, &account, &request.harnesses)
+            .map_err(Status::invalid_argument)?;
+        let changed = defaults
+            .set_provider_account_defaults(&request.session_token, &wanted, &request.harnesses)
+            .map_err(status_for)?;
+        Ok(Response::new(SetProviderAccountDefaultsResponse {
+            changed: changed
+                .iter()
+                .map(|record| summary_of(record, self.sync_status.as_deref()))
+                .collect(),
         }))
     }
 
@@ -655,6 +712,7 @@ fn summary_of(
         preset: provider_account
             .as_ref()
             .map_or_else(String::new, |account| account.preset.id.to_string()),
+        default_for: defaults_of(record),
         wire_protocols: provider_account.map_or_else(Vec::new, |account| {
             account
                 .wire_protocols()

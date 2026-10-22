@@ -19,8 +19,8 @@ use std::time::Instant;
 use crate::provider_model_probe::HttpProviderModelProbe;
 use tddy_accounts::{
     deadline_after, forget_expired, AccountLinker, AccountsServiceImpl, LinkChallenge, LinkError,
-    LinkProgress, LinkedAccountStore, LinkedIdentity, SessionSubjectResolver,
-    SessionVaultAccountStore, META_SUBJECT_ID,
+    LinkProgress, LinkedAccountStore, LinkedIdentity, ProviderAccountDefaults,
+    SessionSubjectResolver, SessionVaultAccountStore, META_SUBJECT_ID,
 };
 use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError, VaultState,
@@ -269,6 +269,7 @@ pub fn accounts_service_over(
         subject_of.clone(),
     ));
     let service = AccountsServiceImpl::new(Arc::clone(&store))
+        .with_provider_account_defaults(Arc::clone(&store) as Arc<dyn ProviderAccountDefaults>)
         .with_provider_accounts(
             store,
             Arc::new(HttpProviderModelProbe::new(reqwest::Client::new())),
