@@ -7,7 +7,7 @@ use super::*;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 impl BuildContext {
-    pub(super) async fn open_shared(&self, _mount: &Mount) -> anyhow::Result<Shared> {
+    pub(super) async fn open_shared(&self) -> anyhow::Result<Shared> {
         let config = &self.config;
         let tddy_data_dir = &self.identity.keys.tddy_data_dir;
         let telegram_hooks = &self.telegram_hooks;

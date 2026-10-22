@@ -75,7 +75,7 @@ impl BuildContext {
         let livekit_discovery = self.join_peer_discovery(&config_arc, advertised_signing_key);
         let mut mount = self.open_mount(config_arc, user_resolver, session_tokens);
         mount.livekit_discovery = livekit_discovery;
-        let shared = self.open_shared(&mount).await?;
+        let shared = self.open_shared().await?;
         let served = self.open_served(&mount, &shared);
         self.manage_index_daemon(&mount.config_arc);
         let askpass_endpoint = self.bind_askpass(&shared, &served).await?;
@@ -125,9 +125,7 @@ impl BuildContext {
     ) -> Option<LiveKitDiscoveryHandles> {
         // Peer discovery over the common room. The registry and the room slot are the handles the
         // roster is built from; the task that fills them is the host's to start.
-        let livekit_discovery: Option<
-            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles,
-        > = match self.identity.keys.common_room_peers.take() {
+        match self.identity.keys.common_room_peers.take() {
             Some((target, registry)) => {
                 let room_slot = Arc::new(tokio::sync::RwLock::new(None));
                 log::info!(
@@ -160,8 +158,7 @@ impl BuildContext {
                 })
             }
             None => None,
-        };
-        livekit_discovery
+        }
     }
 
     pub(super) fn open_mount(
@@ -208,15 +205,12 @@ impl BuildContext {
 }
 
 fn livekit_service(mount: &Mount) -> Arc<tddy_daemon_livekit::livekit_service::LiveKitServiceImpl> {
-    let config_arc = &mount.config_arc;
-    let vm_user_resolver = mount.user_resolver.clone();
-    let livekit_service = tddy_daemon_livekit::build_livekit_service(
+    tddy_daemon_livekit::build_livekit_service(
         tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
-            config_arc.livekit.as_ref(),
+            mount.config_arc.livekit.as_ref(),
         ),
-        vm_user_resolver.clone(),
-    );
-    livekit_service
+        mount.user_resolver.clone(),
+    )
 }
 
 fn bsp_session_resolver(
