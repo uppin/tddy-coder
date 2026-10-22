@@ -1440,6 +1440,17 @@ impl RustBackend {
             }));
         }
 
+        self.assisted_edit_resolution(op, workspace, relative, uri, original)
+    }
+
+    fn assisted_edit_resolution(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         self.start(workspace.root)?;
         self.did_open(&uri, &original)?;
         self.ensure_indexed(&uri)?;
