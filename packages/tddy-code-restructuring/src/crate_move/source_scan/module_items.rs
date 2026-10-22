@@ -52,22 +52,7 @@ pub(crate) fn items_of_module(text: &str) -> ModuleItems {
             }
             Kind::Ident if depth == 0 => match scan.text(token) {
                 "mod" => {
-                    if let Some(name) = scan.ident(at + 1) {
-                        let body = scan
-                            .tokens
-                            .get(at + 2)
-                            .filter(|_| scan.is_punct(at + 2, b'{'))
-                            .map(|opens| opens.end..opens.end);
-                        if body.is_some() {
-                            open_child = Some(items.children.len());
-                        }
-                        items.children.push(ChildModule {
-                            name: name.to_string(),
-                            body,
-                            // Plain `pub`: a `pub(…)` writes `)` right before the keyword.
-                            is_public: at > 0 && scan.ident(at - 1) == Some("pub"),
-                        });
-                    }
+                    record_child_module(&scan, &mut items, &mut open_child, at);
                 }
                 "use" => {
                     at = read_use(&scan, at, &mut items);
@@ -90,6 +75,30 @@ pub(crate) fn items_of_module(text: &str) -> ModuleItems {
         at += 1;
     }
     items
+}
+
+fn record_child_module(
+    scan: &Scan<'_>,
+    items: &mut ModuleItems,
+    open_child: &mut Option<usize>,
+    at: usize,
+) {
+    if let Some(name) = scan.ident(at + 1) {
+        let body = scan
+            .tokens
+            .get(at + 2)
+            .filter(|_| scan.is_punct(at + 2, b'{'))
+            .map(|opens| opens.end..opens.end);
+        if body.is_some() {
+            *open_child = Some(items.children.len());
+        }
+        items.children.push(ChildModule {
+            name: name.to_string(),
+            body,
+            // Plain `pub`: a `pub(…)` writes `)` right before the keyword.
+            is_public: at > 0 && scan.ident(at - 1) == Some("pub"),
+        });
+    }
 }
 
 /// Read the top-level `use` item whose keyword is at token `at` into `items`, each leaf stamped with
