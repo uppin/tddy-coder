@@ -135,6 +135,11 @@ file's layout, not a behaviour; not an edge).
   rewrites `x = …` as `*x = …`; `verify` cannot account for that pair, so each cut's commit lists the pairs accepted by hand review.
   Sweep node owns the tooling fix: [todo/2026-10-22-verify-does-not-account-for-mut-param-writes-from-extract-method.md](../todo/2026-10-22-verify-does-not-account-for-mut-param-writes-from-extract-method.md).
   The guard lift is node 4's.
+- **Deferred by developer 2026-10-22:** `refreshed` (`plan_store/refresh.rs`), the `Items` and `Item` arms. Plan 03's apply failed
+  its compile gate (E0521: `extract_method` spells `&mut dyn ItemResolver` as `&mut (dyn ItemResolver + 'static)`), and its
+  verify showed `.clone()` rewritten as `.to_owned()`, which the developer did not accept. Rolled back; exempted in
+  `function_length_budget`; engine todo owned by the sweep node:
+  [todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md](../todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md).
 
 ## Technical changes
 
