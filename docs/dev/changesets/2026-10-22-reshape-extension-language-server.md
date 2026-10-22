@@ -23,12 +23,14 @@ Feature docs: [Zed extensions § Language servers](../../ft/coder/zed-extensions
   and `rename`.
 - `support.rs`: `ExtensionSupport` carries its `ServerChoice` (`with_server`, `server`); `launch()` is the configured
   server's; `backend()` composes a `ServerBackend` over the live server, one `without_command` for an unconfigured or
-  refused server, and the outline backend alone on the static tier. `load_installed` reads the settings once.
+  refused server, and the outline backend alone on the static tier. `load_installed` reads the settings once
+  (`server::served`), and `supports_of` gives each support its choice.
 
 ## `tddy-lsp`
 
 `LaunchSpec::workspace_configuration` (`with_workspace_configuration`); `configuration_answer` answers
-`workspace/configuration` item by item from it by `section` path (`null` where absent). `fake_lsp` gains
+`workspace/configuration` item by item from it by `section` path (`null` where absent). `LspClient::initialize`
+takes the `LaunchSpec`, and `read_loop` its `Routes`. `fake_lsp` gains
 `--requests-configuration <section>` (+ `tddy/configurationAnswers`) and `--answers-rename`.
 
 ## `tddy-code-restructuring`
@@ -40,12 +42,17 @@ Feature docs: [Zed extensions § Language servers](../../ft/coder/zed-extensions
   `Options::installed_clients` / `installed_servers()`; `registry_for_waiting` takes the installed servers and
   `registry_for_apply` builds an apply's registry from `Options`; `SupportRegistry::backends_over`. A cold
   `restructure apply` starts one server per installed language its plan's files belong to (`start_servers`).
+- `snapshot_resolving` routes through `registry_with_installed`, and asks no server when every item anchor lies in a
+  file a server-less installed language claims (`Options::plan_item_anchors_need_a_server`, also asked by the cold
+  CLI and the daemon's `Snapshot`). This resolves `extension-outline`'s (#679) `TODO(extension-language-server)`
+  markers at `snapshot_resolving`, `store_run::apply_held_plan` and the daemon's `apply_held_plan`, and its
+  "allow-list is Rust's alone" note.
 
 ## `tddy-index-daemon`
 
 `route_of` / `client_for_route` route definition, references and hover by the file's support; `serves_workspace(root,
 supports)`; `readiness.rs` (`Readiness::{ServerStatus, AfterInitialize}`, `index_state_of`), applied by the root's
-progress fold too; `Apply` starts the servers its plan needs (`installed_clients_for`) and sets `Options::installed`.
+progress fold too; `Apply` starts the servers its plan needs (`servers_for_a_run`) and sets `Options::installed`.
 `ServerNotConfigured` maps to `FailedPrecondition`.
 
 ## `tddy-daemon-rpc`, `tddy-lsp-executor`, `tddy-daemon`
@@ -59,7 +66,7 @@ session-level "does this worktree have an index" asks `serves_workspace` over th
 
 Acceptance: `tddy-zed-extensions/tests/language_server_acceptance.rs` (5: rename through the server, cold apply of
 a rename through the server started for it, initialization options, `workspace/configuration`, the unconfigured
-refusal before anything starts); `tddy-index-daemon/tests/extension_references.rs` (3: references, an
+refusal before anything starts); `outline_acceptance.rs`'s server-less snapshot; `tddy-index-daemon/tests/extension_references.rs` (3: references, an
 extension-only worktree's index state, an `Apply` rename through the daemon); `extension_readiness.rs` (2);
 `tddy-lsp/tests/workspace_configuration_test.rs` (2). Unit: `settings::tests`, `server::tests`,
 `client::dispatch::tests`, `backends::server::tests`, `runner::installed_servers::tests`, `readiness::tests`,
@@ -70,7 +77,8 @@ extension-only worktree's index state, an `Apply` rename through the daemon); `e
 - `tddy-index-daemon/src/index.rs` 480 → 605 production lines: stack-shared with `extension-outline` (#679),
   `extension-code-actions` and `extension-wasm-command`, so not split here — recorded as
   `packages/tddy-index-daemon/docs/code-issues/oversized-file-index.md` for after the stack.
-- `tddy-daemon/src/runtime.rs` 1,867 → 1,867 (`build` 1,080 → 1,078); `runner/entry_points/store_run.rs` 507 → 501
+- `tddy-zed-extensions/src/support.rs` 457 → 491 (512 before the settings read moved to `server::served`).
+- `tddy-daemon/src/runtime.rs` 1,867 → 1,867 (`build` 1,080 → 1,078); `runner/entry_points/store_run.rs` 509 → 501
   (pre-existing, recorded as `oversized-file-runner-store-run.md`).
 
 ## Left open (backlog)
