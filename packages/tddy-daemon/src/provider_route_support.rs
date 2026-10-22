@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn a_harness_whose_route_is_not_built_yet_is_not_offered_any_account() {
-        for harness in ["codex", "codex-acp", "opencode", "opencode-cli", "muse-cli"] {
+        for harness in ["codex", "codex-acp", "muse-cli"] {
             let reason = HarnessRouteSupport
                 .harness_routable(harness)
                 .expect_err("not routable in this build");
@@ -60,6 +60,17 @@ mod tests {
             assert!(HarnessRouteSupport
                 .supports(harness, "meta", &["openai-responses", "openai-chat"])
                 .is_err());
+        }
+    }
+
+    #[test]
+    fn opencode_runs_on_an_account_serving_an_openai_protocol() {
+        for harness in ["opencode", "opencode-cli"] {
+            assert_eq!(HarnessRouteSupport.harness_routable(harness), Ok(()));
+            assert_eq!(
+                HarnessRouteSupport.supports(harness, "meta", &["openai-responses", "openai-chat"]),
+                Ok(())
+            );
         }
     }
 
