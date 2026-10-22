@@ -52,13 +52,27 @@ mod tests {
 
     #[test]
     fn a_harness_whose_route_is_not_built_yet_is_not_offered_any_account() {
-        for harness in ["codex", "codex-acp", "muse-cli"] {
+        for harness in ["muse-cli"] {
             let reason = HarnessRouteSupport
                 .harness_routable(harness)
                 .expect_err("not routable in this build");
             assert!(reason.contains("in this build yet"), "{harness}: {reason}");
             assert!(HarnessRouteSupport
                 .supports(harness, "meta", &["openai-responses", "openai-chat"])
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn codex_runs_only_on_an_account_serving_openai_responses() {
+        for harness in ["codex", "codex-acp"] {
+            assert_eq!(HarnessRouteSupport.harness_routable(harness), Ok(()));
+            assert_eq!(
+                HarnessRouteSupport.supports(harness, "meta", &["openai-responses"]),
+                Ok(())
+            );
+            assert!(HarnessRouteSupport
+                .supports(harness, "baseten", &["openai-chat"])
                 .is_err());
         }
     }
