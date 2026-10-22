@@ -16,13 +16,18 @@ const BUDGET: usize = 500;
 // owns this exemption (rust-backend-split #614 was closed in the 2026-10-19 replan).
 // The five below are deferred by the developer (2026-10-21): docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md
 // owns them, with the planned seams. Remove a line when its split lands.
-const NOT_YET_SPLIT: [&str; 6] = [
+// `store_run.rs` and `crate_move.rs` went over with #reshape 18/24 (the held-plan state struct; the surveyed_in
+// extraction): deferred by the developer (2026-10-22), owned by the sweep node. See
+// docs/dev/todo/2026-10-22-reshape-fn-sizes-rest-over-budget-files-deferred.md.
+const NOT_YET_SPLIT: [&str; 8] = [
     "src/backends/rust.rs",
     "src/crate_move/test_binary.rs",
     "src/crate_move/test_modules.rs",
     "src/backends/rust/item_move/assemble.rs",
     "src/runner/tidy.rs",
     "src/verify/retarget.rs",
+    "src/runner/entry_points/store_run.rs",
+    "src/crate_move.rs",
 ];
 
 fn package_root() -> PathBuf {

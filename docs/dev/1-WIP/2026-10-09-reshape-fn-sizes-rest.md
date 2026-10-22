@@ -152,6 +152,9 @@ file's layout, not a behaviour; not an edge).
   (E0425), and wrote `&mut usize` for `usize` (E0308). Both rolled back; exempted in `function_length_budget`; engine todo
   section 3, owned by the sweep node:
   [todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md](../todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md).
+- **Deferred by developer 2026-10-22:** the two files over the 500-production-line budget after this PR, `runner/entry_points/store_run.rs`
+  (507) and `crate_move.rs` (513), listed in `engine_file_budget_shape`'s `NOT_YET_SPLIT`. Owned by the sweep node:
+  [todo/2026-10-22-reshape-fn-sizes-rest-over-budget-files-deferred.md](../todo/2026-10-22-reshape-fn-sizes-rest-over-budget-files-deferred.md).
 
 ## Technical changes
 
