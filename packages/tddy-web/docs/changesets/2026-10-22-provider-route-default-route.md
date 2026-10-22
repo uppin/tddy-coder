@@ -6,6 +6,6 @@
 `ProviderAccountDefaultsControl` on a provider-account row (keyed on the current defaults, so it
 re-seeds when another row takes one), `AccountsAppPage` sending `SetProviderAccountDefaults` and
 merging `changed`, `AccountRow.defaultFor`, and `useProviderDefault` pre-selecting the default in
-`CreateSessionPane`. `ProviderModels` moved out of `AccountsScreen.tsx` into its own file
+`useCreateSessionModel`. `ProviderModels` moved out of `AccountsScreen.tsx` into its own file
 (486 → 455 lines). See [accounts screen](../accounts-screen.md) and
 [create-session provider](../create-session-provider.md).
