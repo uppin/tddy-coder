@@ -37,6 +37,9 @@ steps are in sibling modules:
 
 | Module | Holds |
 |---|---|
+| `harness_profile_request.rs` | `LaunchSessions::start_session_core` is a wrapper: it applies the [harness profile](../../../docs/ft/daemon/harness-profiles.md) named by `req.agent` (looked up in `<tddy_data_dir>/agents`) before the allowed-agents check and peer forwarding, then calls the former body, `start_session_on_request` (`pub(crate)`, in `svc_start_session_core.rs`). `request_on_profile` puts the profile's account at the `agent_definition` level beside the request's own session-level choice, runs `choose_route` once, resolves the winner in the starter's vault and writes its **id** into `provider_account_id`; the profile's model is used only when the request gives none. Refusals name the profile and the account |
+| `harness_profile_start.rs` | `profile_start(&HarnessProfile) -> ProfileStart { session_type, agent, choice: RouteChoice::Account, model }`: a CLI harness (`claude-cli`, `opencode-cli`, `muse-cli`, `cursor-cli`) becomes the session type, a tool-session harness (`claude`, `claude-acp`, `codex`, `codex-acp`, `opencode`, `cursor`) the agent; any other is `INVALID_ARGUMENT` |
+| `provider_account_lookup.rs` | `find_provider_account`, behind `SessionAccountAccess::provider_account`: an id first, then a unique label; none is `NOT_FOUND`, a label on two accounts `SessionIdentityRefusal::AmbiguousLabel` (`INVALID_ARGUMENT`), never a guess |
 | `start_request_checks.rs` | `forward_start_session` (a start owned by a peer, waiting `start_forward_deadline(config)` — the split-start budget, not the 30 s forward deadline), `provision_project_for_start` (keeps a streamed start alive while it waits), `validate_stack_seed_against_project` |
 | `workspace_branch_start.rs` | `seed_and_start_workspace_session` |
 | `cli_branch_starts.rs` | the claude-cli and cursor-cli branches and the start of every other registered CLI harness: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`); `start_cli_harness(harness, …)` (the sandbox and managed-codebase refusals, the prelude, the seeded roster, the person's default as a route source, the spawn) |
@@ -131,8 +134,9 @@ to a claude-cli session (behaviour:
 
 - `SessionAccountAccess::provider_account(account_id)` (in `session_acting_identity.rs`) reads the
   model-provider account from the session owner's vault through the same `held_accounts` read the
-  GitHub identity uses, with the same `SessionIdentityRefusal`s; an id the vault holds no provider
-  account under is `Vault(NotFound)`.
+  GitHub identity uses, with the same `SessionIdentityRefusal`s. The account is matched by id, then by a
+  unique label (`provider_account_lookup.rs`); nothing matching is `Vault(NotFound)`, a shared label
+  `AmbiguousLabel`.
 - `session_route_sources(&StartSessionRequest)` maps `provider_account_id` / `provider_built_in` to
   `RouteSources.session` (the account wins when both are sent).
 - `session_route_sources_with_default(req, harness, access)` adds `RouteSources.user_default` from

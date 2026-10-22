@@ -7,8 +7,9 @@
 
 use tddy_core::provider_route::{choose_route, RouteSources};
 use tddy_discovery::harness_profile::{load_harness_profiles, HarnessProfile};
-use tddy_rpc::Status;
-use tddy_service::proto::session::StartSessionRequest;
+use tddy_rpc::{Response, Status};
+use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use crate::harness_profile_start::profile_start;
 use crate::launch_ports::LaunchSessions;
@@ -16,9 +17,20 @@ use crate::session_acting_identity::SessionAccountAccess;
 use crate::session_provider_route::{session_route_sources, status_of_refusal};
 
 impl LaunchSessions {
+    /// Start the session `req` asks for — through the harness profile its `agent` names, if any:
+    /// a profile is not a def, it stands for a session type or agent on an account.
+    pub async fn start_session_core(
+        &self,
+        req: StartSessionRequest,
+        progress: &AttachmentProgressSink,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        let req = self.apply_harness_profile(req)?;
+        self.start_session_on_request(req, progress).await
+    }
+
     /// `req` as the profile its `agent` names in `<tddyhome>/agents/` would start it; `req`
     /// unchanged when its `agent` names no profile.
-    pub(crate) fn apply_harness_profile(
+    fn apply_harness_profile(
         &self,
         req: StartSessionRequest,
     ) -> Result<StartSessionRequest, Status> {
@@ -57,9 +69,10 @@ pub fn request_on_profile(
             .to_string(),
         None => String::new(),
     };
-    let model = match req.model.trim().is_empty() {
-        true => start.model,
-        false => req.model.clone(),
+    let model = if req.model.trim().is_empty() {
+        start.model
+    } else {
+        req.model.clone()
     };
     Ok(StartSessionRequest {
         session_type: start.session_type.unwrap_or_default(),

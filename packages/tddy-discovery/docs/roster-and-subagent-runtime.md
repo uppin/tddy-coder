@@ -18,6 +18,14 @@ traits, `agent_def::SpecializedAgentDef`, `openai::TokenUsage` — plus the two 
 `tddy-service` is *below*, so it cannot hold `registry`) and `tddy-session-tool-client` (how a jail
 reaches its facilitating daemon).
 
+`agent_def::load_agent_defs` classifies each `<tddyhome>/agents/*.yaml` through
+`read_agent_def_document` → `AgentDefDocument` (a definition, a harness profile, or malformed); a
+profile — any document with a top-level `harness:` key, `harness_profile::names_a_harness` — is
+skipped with a debug log, never a parse warning, and loaded by `harness_profile::load_harness_profiles`
+instead (`HarnessProfile { name, label, harness, provider_account, model }`, `deny_unknown_fields`, so a
+`base_url` or `api_key` beside it is refused; `parse_harness_profile`, `harness_profile_rows`). See
+[Harness profiles](../../../docs/ft/daemon/harness-profiles.md).
+
 ## What is here and what is not
 
 | Here | In `tddy-tools` |

@@ -58,7 +58,7 @@ impl LaunchSessions {
     /// TODO(indexing-indicators): the sandboxed claude-cli / cursor-cli, tool and split starts do
     /// not report phases or announce their worktree yet; claude-cli, cursor-cli and workspace starts
     /// do — see `docs/dev/todo/2026-10-03-start-phases-and-code-index-warm-skip-sandboxed-tool-and-split-starts.md`.
-    pub async fn start_session_core(
+    pub(crate) async fn start_session_on_request(
         &self,
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
@@ -69,8 +69,6 @@ impl LaunchSessions {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        // A harness profile is not a def: it stands for a session type or agent on an account.
-        let req = self.apply_harness_profile(req)?;
 
         // An agent id names either a coding backend from the config allowlist or an assistant in
         // this daemon's registry — the registry is a def source on equal footing with the YAML
