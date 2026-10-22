@@ -41,8 +41,6 @@ tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 # crate only puts them in MCP shape.
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
-# `extensions`: the args and the dispatch live in the crate that installs them.
-tddy-zed-extensions = { path = "../tddy-zed-extensions" }
 log = "0.4"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

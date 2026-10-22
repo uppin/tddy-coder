@@ -29,6 +29,8 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-room-client = { path = "../tddy-room-client" }
 tddy-tools = { path = "../tddy-tools" }
+# `extensions`: the args and the dispatch live in the crate that installs them.
+tddy-zed-extensions = { path = "../tddy-zed-extensions" }
 
 [dev-dependencies]
 assert_cmd = "2"
