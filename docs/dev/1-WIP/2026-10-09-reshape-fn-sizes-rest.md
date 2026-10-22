@@ -140,6 +140,11 @@ file's layout, not a behaviour; not an edge).
   verify showed `.clone()` rewritten as `.to_owned()`, which the developer did not accept. Rolled back; exempted in
   `function_length_budget`; engine todo owned by the sweep node:
   [todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md](../todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md).
+- **Deferred by developer 2026-10-22:** `sightings` (`crate_move/source_scan/sighting_walk.rs`). Its path arm (`at = last + 1`)
+  and its brace arm both failed their compile gates: the engine did not pass the outer cursor `at` to the new function
+  (E0425), and wrote `&mut usize` for `usize` (E0308). Both rolled back; exempted in `function_length_budget`; engine todo
+  section 3, owned by the sweep node:
+  [todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md](../todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md).
 
 ## Technical changes
 
