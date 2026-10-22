@@ -17,9 +17,6 @@ pub(super) async fn run_livekit_session(
     config: PtyRelayConfig,
     connector: &dyn RoomConnector,
 ) -> Result<()> {
-    use prost::Message as _;
-    use tddy_service::proto::session::StartSessionResponse;
-
     // Connect-only path: no StartSession, just connect to the given LiveKit identity.
     if let Some(server_identity) = config.server_identity.clone() {
         let livekit_url = config
@@ -41,26 +38,7 @@ pub(super) async fn run_livekit_session(
         }
     };
 
-    let req = build_start_session_request(&config, &session_token);
-
-    log::info!(target: "tddy_terminal_rpc::pty_relay", "calling StartSession via HTTP {}…", config.daemon_url);
-    let resp_bytes = connectrpc_post(
-        &reqwest::Client::new(),
-        &config.daemon_url,
-        "session.SessionService",
-        "StartSession",
-        req.encode_to_vec(),
-    )
-    .await?;
-
-    let resp = StartSessionResponse::decode(resp_bytes.as_slice())
-        .map_err(|e| anyhow::anyhow!("decode StartSessionResponse: {}", e))?;
-
-    log::info!(
-        target: "tddy_terminal_rpc::pty_relay",
-        "session started: id={} server_identity={}",
-        resp.session_id, resp.livekit_server_identity
-    );
+    let resp = start_session_over_http(&config, &session_token).await?;
 
     if !resp.livekit_server_identity.is_empty() {
         if let Some(livekit_url) = config.livekit_url.as_deref() {
@@ -84,6 +62,38 @@ pub(super) async fn run_livekit_session(
 
     log::info!(target: "tddy_terminal_rpc::pty_relay", "connecting via gRPC");
     run_grpc_terminal(&config.daemon_url, &resp.session_id, &session_token).await
+}
+
+/// `StartSession` over the daemon's Connect-RPC HTTP endpoint, as the start-and-connect path's
+/// first step.
+async fn start_session_over_http(
+    config: &PtyRelayConfig,
+    session_token: &str,
+) -> Result<tddy_service::proto::session::StartSessionResponse> {
+    use prost::Message as _;
+    use tddy_service::proto::session::StartSessionResponse;
+
+    let req = build_start_session_request(config, session_token);
+
+    log::info!(target: "tddy_terminal_rpc::pty_relay", "calling StartSession via HTTP {}…", config.daemon_url);
+    let resp_bytes = connectrpc_post(
+        &reqwest::Client::new(),
+        &config.daemon_url,
+        "session.SessionService",
+        "StartSession",
+        req.encode_to_vec(),
+    )
+    .await?;
+
+    let resp = StartSessionResponse::decode(resp_bytes.as_slice())
+        .map_err(|e| anyhow::anyhow!("decode StartSessionResponse: {}", e))?;
+
+    log::info!(
+        target: "tddy_terminal_rpc::pty_relay",
+        "session started: id={} server_identity={}",
+        resp.session_id, resp.livekit_server_identity
+    );
+    Ok(resp)
 }
 
 /// Connect to a running session's terminal over a room duplex.

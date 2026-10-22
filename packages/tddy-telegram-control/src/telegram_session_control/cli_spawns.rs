@@ -185,66 +185,52 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         // reporting the coordinates only once someone had asked over LiveKit is a contradiction
         // when the asking *is* the message. What is deferred elsewhere is LiveKit work on a local
         // operation; a Telegram start's last act is a LiveKit announcement.
-        let (lk_room, _lk_url, lk_server_identity) = if let Some(lk) =
-            tddy_spawn::spawner::livekit_creds_from_config(&deps.config)
-        {
-            let room_name = tddy_spawn::spawner::resolve_livekit_room_name(
-                lk.common_room.as_deref(),
-                session_id,
-            );
-            let server_identity = tddy_spawn::spawner::livekit_server_identity_for_session(
-                lk.daemon_instance_id.as_deref(),
-                session_id,
-            );
-            let at = tddy_daemon_extensions::TerminalAddress {
-                room: room_name,
-                identity: server_identity,
-            };
-            match self
-                .terminal_exposure
-                .expose(
-                    &at,
-                    tddy_session_lifecycle::cli_session_manager::pty_terminal_service(Arc::clone(
-                        &handle,
-                    )),
-                    // A Telegram-started session is part of no stack, so its block carries the
-                    // identity and static fields only — published all the same, so the drawer
-                    // names it the same way it names every other session (D37).
-                    Some(
-                        tddy_core::session_participant_metadata::session_metadata_json(
-                            &tddy_core::session_participant_metadata::SessionParticipantMetadata {
-                                agent: "claude".to_string(),
-                                model: model.clone(),
-                                repo_path: worktree_path.to_string_lossy().to_string(),
-                                session_id: session_id.to_string(),
-                                ..Default::default()
-                            },
+        let (lk_room, _lk_url, lk_server_identity) =
+            if let Some(lk) = tddy_spawn::spawner::livekit_creds_from_config(&deps.config) {
+                let room_name = tddy_spawn::spawner::resolve_livekit_room_name(
+                    lk.common_room.as_deref(),
+                    session_id,
+                );
+                let server_identity = tddy_spawn::spawner::livekit_server_identity_for_session(
+                    lk.daemon_instance_id.as_deref(),
+                    session_id,
+                );
+                let at = tddy_daemon_extensions::TerminalAddress {
+                    room: room_name,
+                    identity: server_identity,
+                };
+                // A Telegram-started session is part of no stack, so its block carries the
+                // identity and static fields only — published all the same, so the drawer
+                // names it the same way it names every other session (D37).
+                let metadata = tddy_core::session_participant_metadata::session_metadata_json(
+                    &tddy_core::session_participant_metadata::SessionParticipantMetadata {
+                        agent: "claude".to_string(),
+                        model: model.clone(),
+                        repo_path: worktree_path.to_string_lossy().to_string(),
+                        session_id: session_id.to_string(),
+                        ..Default::default()
+                    },
+                );
+                match self
+                    .terminal_exposure
+                    .expose(
+                        &at,
+                        tddy_session_lifecycle::cli_session_manager::pty_terminal_service(
+                            Arc::clone(&handle),
                         ),
-                    ),
-                )
-                .await
-            {
-                // The running exposure is dropped rather than kept: a Telegram-started session's
-                // terminal is announced to a human in the reply below and never asked about again
-                // from here.
-                Ok(_serving) => (at.room, lk.url.clone(), at.identity),
-                // Nothing wired to expose through is the port's "not exposed", not a failure: a
-                // daemon without LiveKit credentials reaches here with its null object, and a
-                // warning on every start would cry wolf.
-                Err(refused) if exposure_is_unwired(&refused) => {
-                    (String::new(), String::new(), String::new())
+                        Some(metadata),
+                    )
+                    .await
+                {
+                    // The running exposure is dropped rather than kept: a Telegram-started
+                    // session's terminal is announced to a human in the reply below and never
+                    // asked about again from here.
+                    Ok(_serving) => (at.room, lk.url.clone(), at.identity),
+                    Err(refused) => not_exposed(&refused),
                 }
-                Err(e) => {
-                    log::warn!(
-                        target: "tddy_daemon::telegram_session_control",
-                        "spawn_telegram_claude_cli: terminal exposure failed ({e}); gRPC path still works"
-                    );
-                    (String::new(), String::new(), String::new())
-                }
-            }
-        } else {
-            (String::new(), String::new(), String::new())
-        };
+            } else {
+                (String::new(), String::new(), String::new())
+            };
 
         log::info!(
             target: "tddy_daemon::telegram_session_control",
@@ -436,6 +422,22 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 /// what [`tddy_daemon_extensions::NoTerminalExposure`] returns — as opposed to a real failure.
 fn exposure_is_unwired(refused: &tddy_rpc::Status) -> bool {
     refused.code == tddy_rpc::Code::FailedPrecondition
+}
+
+/// The empty room, URL and identity a refused terminal exposure leaves the reply with — logged as
+/// a failure unless it is the port's "nothing is wired".
+///
+/// Nothing wired to expose through is the port's "not exposed", not a failure: a daemon without
+/// LiveKit credentials reaches here with its null object, and a warning on every start would cry
+/// wolf.
+fn not_exposed(refused: &tddy_rpc::Status) -> (String, String, String) {
+    if !exposure_is_unwired(refused) {
+        log::warn!(
+            target: "tddy_daemon::telegram_session_control",
+            "spawn_telegram_claude_cli: terminal exposure failed ({refused}); gRPC path still works"
+        );
+    }
+    (String::new(), String::new(), String::new())
 }
 
 #[cfg(test)]
