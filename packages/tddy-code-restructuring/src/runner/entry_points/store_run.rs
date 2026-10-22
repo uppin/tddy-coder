@@ -365,7 +365,15 @@ fn apply_held_plan(
             (options.progress)(&format!(
                 "op {index} of {total}: applying {files} file(s) to disk"
             ));
-            GroupRun::enter(&mut held.group, &plan, index, id, &resolved, &gate, &mut journal)?;
+            GroupRun::enter(
+                &mut held.group,
+                &plan,
+                index,
+                id,
+                &resolved,
+                &gate,
+                &mut journal,
+            )?;
             commit_operation(
                 index,
                 id,
