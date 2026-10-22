@@ -1165,16 +1165,17 @@ impl RustBackend {
     }
 }
 
+// TODO(reshape-sweep): consented hand edit (developer 2026-10-22): `extract_method` wrote this body as
+// `let target = ..; target`, which clippy's `let_and_return` rejects; engine todo section 13.
 fn target_range(range: Range, assist: Assist) -> Range {
-    let target = if assist.at_caret {
+    if assist.at_caret {
         Range {
             start: range.start,
             end: range.start,
         }
     } else {
         range
-    };
-    target
+    }
 }
 
 impl Drop for RustBackend {

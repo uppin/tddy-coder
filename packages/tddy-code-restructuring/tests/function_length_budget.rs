@@ -364,14 +364,17 @@ fn a_function_of(name: &str, lines: usize) -> String {
 /// Backend functions past the cap that this node deferred on 2026-10-22 (standing rule: an engine refusal or a clean
 /// compile-gate rollback), as `(file under src/, name)`. Each is recorded in
 /// `docs/dev/todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md`: `choose_import` in
-/// section 7, `survey` in 10, `next_import` in 9, `request` in 8, `assisted_edit` in 11.
+/// section 7, `survey` in 10, `next_import` in 9, `request` in 8, `assisted_edit` in 11. `edits_for_file` is deferred by the
+/// developer (`Deferred by developer 2026-10-22`): ten parameters including two closures, recorded in
+/// `docs/dev/todo/2026-10-09-restructure-has-no-operation-to-introduce-a-parameter-struct.md`, owned by the sweep node.
 // TODO(reshape-21): `backend-fn-sizes` cuts the rest; a deferred function is cut when its engine defect is fixed.
-const DEFERRED_BY_BACKEND_FN_SIZES: [(&str, &str); 5] = [
+const DEFERRED_BY_BACKEND_FN_SIZES: [(&str, &str); 6] = [
     ("backends/rust/import_text.rs", "choose_import"),
     ("backends/rust/detach_method/survey.rs", "survey"),
     ("backends/rust/imports.rs", "next_import"),
     ("backends/rust.rs", "request"),
     ("backends/rust.rs", "assisted_edit"),
+    ("backends/rust/item_move/sites.rs", "edits_for_file"),
 ];
 
 fn is_deferred_by_backend_fn_sizes(function: &Measured) -> bool {

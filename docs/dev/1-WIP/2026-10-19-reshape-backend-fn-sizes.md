@@ -150,19 +150,21 @@ Per function:
 - `survey` — deferred: the tail range was refused by `check --deep` (engine todo § 10). Exempted.
 - `next_import` — deferred: the tuple return of the `Lost` pair fails with E0106 (engine todo § 9). Exempted.
 - `request` — deferred: the `begin_wait` cut fails with E0502 (engine todo § 8). Exempted.
-- `edits_for_file` — **not cut, and not deferred**: its only cuts that the engine accepts are the loop after `let mut needed`
-  (lines 159–183), whose helper takes ten parameters, two of them closures (`in_region`, `in_destination`), and
-  `clippy::too_many_arguments` fires. Not applied; this is the node's open stop.
+- `edits_for_file` — deferred by developer 2026-10-22 (`Deferred by developer 2026-10-22`): its only cuts that the engine
+  accepts are the loop after `let mut needed` (lines 159–183), whose helper takes ten parameters, two of them closures
+  (`in_region`, `in_destination`), and `clippy::too_many_arguments` fires. Exempted; recorded in
+  `docs/dev/todo/2026-10-09-restructure-has-no-operation-to-introduce-a-parameter-struct.md`, owned by the sweep node.
 - Clippy, scoped (`./dev cargo clippy -p tddy-code-restructuring --all-targets`, without deny): one warning, `let_and_return`
-  at `rust.rs:1177`, from `target_range` (`b9a290293`). Engine todo § 13. Not hand-fixed: a stop under the 2026-10-22 rules.
+  at `rust.rs:1177`, from `target_range` (`b9a290293`). Engine todo § 13. Fixed by a consented hand edit (developer
+  2026-10-22): the body is now the `if` expression, with a `TODO(reshape-sweep)` comment.
 
-## Stop (2026-10-22)
+## Stop lifted (2026-10-22)
 
-The node stops at this head with the gate red on one function, `edits_for_file`, and one clippy warning from a cut
-(`target_range`). Both need a decision: a helper for `edits_for_file` with closures and more than seven parameters
-(exempt, or a restructure), and a three-line expression-body fix for `target_range` (a hand edit, or a sweep-node cut).
+The developer decided both open questions: `edits_for_file` is deferred and exempted, and the `target_range` fix is
+approved as a hand edit. No function is left over the cap outside the exemption list.
 
-Deferred by developer 2026-10-22 (K18 standing rule): `choose_import`, `survey`, `next_import`, `request`, `assisted_edit`.
+Deferred by developer 2026-10-22 (K18 standing rule): `choose_import`, `survey`, `next_import`, `request`, `assisted_edit`,
+`edits_for_file`.
 
 Verify gap (developer answers 2026-10-22, the `&T` family and the guard-lift tail): accepted and listed per commit above,
 recorded in `docs/dev/todo/2026-10-22-verify-does-not-account-for-mut-param-writes-from-extract-method.md`.
