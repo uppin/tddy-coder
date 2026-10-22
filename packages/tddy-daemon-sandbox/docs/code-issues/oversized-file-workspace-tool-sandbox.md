@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-daemon-sandbox/src/workspace_tool_sandbox.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/pr-wrap` step 3.5 file-length gate
-**Metrics:** **737 production lines** · budget 500
-**Thresholds breached:** length 737 > 500
+**Metrics:** **741 production lines** (2026-10-22) · budget 500
+**Thresholds breached:** length 741 > 500
 **Restructure:** `extract_module --to_file` — single seam, designed, **passes a plain `check`**, not applied
 **Status:** Open — **unclaimed**
 
@@ -17,6 +17,7 @@
 | 2026-09-26 | 660 | +46 for `host_ripgrep_dir` and the two grants that make `Grep` reachable inside a jail. Marked `FIXME(grep-in-jail)`; the real fix removes it again — see `docs/dev/todo/2026-09-26-grep-is-unreachable-inside-every-jail.md` |
 | 2026-09-27 | 737 | +73 fixing the ripgrep grants: `which` reports a symlink into `Cellar`, `rg` links a Homebrew `libpcre2`, and the loader traverses a symlink farm the renderer canonicalizes away. Still `FIXME(grep-in-jail)`; PR #548 deletes all of it |
 | 2026-10-01 | 739 | **worse** by 2 in PR #560 (`#agent-worktree` 1/4): the `conversation_id` parameter and its doc on the jail route's `execute_tool` request. Inside the standing deferral (PR #548 deletes the ripgrep block this file is over budget for) |
+| 2026-10-22 | 741 | **worse** by 2 in PR #670 (`#provider-route` 9/9): `route: None` and its comment on the workspace tool jail's plan — the jail hosts no agent, so it takes no route. Inside the standing deferral |
 
 ## What would close it — designed seam
 
