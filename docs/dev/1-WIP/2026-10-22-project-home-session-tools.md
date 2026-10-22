@@ -1,0 +1,183 @@
+# Changeset: Project-home session tools
+
+**Date**: 2026-10-22
+**Status**: 🚧 In Progress
+**Type**: Feature
+**Complexity**: 4 — more than one crate (tddy-tool-engine, tddy-worktree-service, tddy-daemon-rpc, tddy-tools); daemon RPC seam (`ExecuteTool` → session listing / start); integration tests
+**Stack**: #project-home 5/7. Base: `feature/project-home/home-session`.
+
+## Initial Discovery
+
+Full codebase exploration that grounded this plan: [initial-discovery.md](./2026-10-22-project-home-session-tools-initial-discovery.md).
+
+State A below is distilled from that file. Do not duplicate grep traces or file dumps here.
+
+## Prerequisites
+
+| Item | Verdict | Note |
+|---|---|---|
+| [`packages/tddy-tool-engine/docs/code-issues/oversized-file-lib.md`](../../../packages/tddy-tool-engine/docs/code-issues/oversized-file-lib.md) | ⚠ DURING | New tools in `project_home_tools.rs`; `lib.rs` gains dispatch arms only. |
+| [`packages/tddy-tools/docs/code-issues/oversized-file-server.md`](../../../packages/tddy-tools/docs/code-issues/oversized-file-server.md) | ⚠ DURING | No new static `#[tool]`s in `server.rs` — the tools arrive through the dynamic exec catalog. |
+| [`packages/tddy-daemon-rpc/docs/code-issues/complexity-exec-tool-ports-stream-execute-tool.md`](../../../packages/tddy-daemon-rpc/docs/code-issues/complexity-exec-tool-ports-stream-execute-tool.md) | ⚠ DURING | Route the new tools through a port method; no new branches in `stream_execute_tool`. |
+
+## Responsibility
+
+- `ListProjectSessions`, `StartProjectSession`, `ReadSessionWorktree`, `DiffSessionWorktree`: tool
+  defs, schemas, role gate, execution.
+- `tddy_worktree_service::session_target` — **the** resolver from a target session id to its worktree,
+  branch, project and activity, with the "same project, not the home itself" rule. Node 7 consumes it.
+- The `ExecuteTool` wiring that gives these tools the session listing and the start path.
+
+## Boundaries
+
+- No git write operations of any kind (node 7).
+- No change to the read-only filter's existing contents (node 4) beyond adding these four names.
+- No idle-stop behaviour (node 6).
+- No web UI.
+
+## Dependencies
+
+| Parent node | What it delivers | How this PR consumes it | This PR does NOT |
+|---|---|---|---|
+| `feature/project-home/home-session` (4/7) | `session_role`, `PROJECT_HOME_ROLE`, `EnsureProjectHomeSession`, `read_only.rs` | role gate reads the caller's role; tests start a home session via ensure; the four names join the read-only catalog | change ensure, the role field, or what node 4 lists as read-only |
+| `feature/project-home/activity-sidebar` (3/7) | `managed_codebase` listed | `ListProjectSessions` reports it | change how it is recorded |
+
+## Draft PR contract
+
+```rust
+// tddy-worktree-service::session_target (new)
+pub struct SessionTarget { pub session_id: String, pub project_id: String, pub worktree: PathBuf, pub branch: String, pub base_ref: String, pub is_active: bool }
+pub enum SessionTargetError { NotFound, OtherProject, IsHome, NoWorktree }
+pub fn resolve_session_target(listing: &dyn SessionListing, home: &HomeCaller, target_session_id: &str) -> Result<SessionTarget, SessionTargetError>;
+// tddy-tool-engine::project_home_tools (new)
+pub const LIST_PROJECT_SESSIONS: &str = "ListProjectSessions";
+pub const START_PROJECT_SESSION: &str = "StartProjectSession";
+pub const READ_SESSION_WORKTREE: &str = "ReadSessionWorktree";
+pub const DIFF_SESSION_WORKTREE: &str = "DiffSessionWorktree";
+pub fn project_home_tool_defs() -> Vec<ToolDef>;
+pub trait ProjectHomePort { fn list_sessions(&self, project_id: &str) -> Vec<ListedSession>; fn start_session(&self, req: StartProjectSessionArgs) -> Result<String, String>; }
+```
+Plus the failing tests below. Bodies `// TODO(home-session-tools): implement`.
+
+## Green wave
+
+**Wave:** 3 of 4
+**Greenable independently:** no — the acceptance tests call the tools from a real project-home session, which needs node 4's ensure to work.
+**Concurrent with:** `feature/project-home/home-auto-stop` (6/7)
+**Blocks:** `feature/project-home/home-git-tools` (7/7) — it resolves targets with `resolve_session_target`.
+
+Real dependency edges, as opposed to the branch line:
+
+    n1 home-agent-setting → n4      n2 project-groups → n4      n3 activity-sidebar → n4      n4 home-session → n5, n6      n5 home-session-tools → n7
+
+Waves: 1: n1, n2, n3 · 2: n4 · 3: n5, n6 · 4: n7 — line `1 1 1 2 3 3 4`.
+
+## Affected Packages
+
+- **tddy-tool-engine**: [README.md](../../../packages/tddy-tool-engine/README.md) — tools
+- **tddy-worktree-service**: [README.md](../../../packages/tddy-worktree-service/README.md) — target resolver
+- **tddy-daemon-rpc**: [README.md](../../../packages/tddy-daemon-rpc/README.md) — `ExecuteTool` port wiring
+- **tddy-tools**: [README.md](../../../packages/tddy-tools/README.md) — advertisement via the dynamic catalog (no new static tools)
+
+## Related Feature Documentation
+
+- PRD: [PRD-2026-10-22-project-home-session-tools.md](../../ft/daemon/1-WIP/PRD-2026-10-22-project-home-session-tools.md)
+
+## Summary
+
+Four role-gated exec tools that let the project-home agent list, start and read its project's sessions.
+
+## Background
+
+Read-only by design; these tools are its reach. No tool lists sessions or reads another session's
+worktree today (`subagent_*` cover only a session's own roster).
+
+## Scope
+
+- [ ] `session_target` resolver
+- [ ] Four tools + role gate
+- [ ] `ExecuteTool` port wiring
+- [ ] Tests
+
+## Technical Changes
+
+### State A
+Exec tools resolve the worktree from the **calling** session (`ExecuteTool` with `session_id`).
+`spawn_conversation`/`pr_spawn_child` start sessions via the `TDDY_SOCKET` relay (not available to a
+daemon-hosted managed session). `branch_owner.rs` has the `SessionListing` port and `SessionClaim`.
+
+### State B
+A project-home session's `ExecuteTool` can name another session as a target; the daemon resolves it
+through `session_target` and serves list / start / read / diff.
+
+### Delta
+- **tddy-worktree-service**: `session_target.rs` (new), reusing `SessionListing`.
+- **tddy-tool-engine**: `project_home_tools.rs` (new); dispatch arms; names added to the read-only catalog.
+- **tddy-daemon-rpc**: implement `ProjectHomePort` over the session reader and the start service.
+- **tddy-tools**: none beyond what the dynamic catalog already advertises — verify in tests.
+
+## Testing Plan
+
+RPC acceptance over the in-process daemon: ensure a home session (stub harness), start ordinary
+sessions in the same and another project, then drive the four tools through `ExecuteTool` as the home
+session; unit tests for the resolver's rules.
+
+## Acceptance Tests
+
+| Test | File | Validates |
+|---|---|---|
+| `a_project_home_session_lists_its_projects_sessions_with_status` | `packages/tddy-daemon-rpc/tests/project_home_session_tools_acceptance.rs` (new) | list |
+| `a_project_home_session_starts_a_session_tagged_with_itself_as_orchestrator` | same | start |
+| `a_project_home_session_reads_a_file_and_lists_a_directory_in_another_worktree` | same | read |
+| `a_project_home_session_gets_a_target_worktrees_diff_against_its_base` | same | diff |
+| `a_target_in_another_project_is_refused` | same | scope |
+| `a_path_escaping_the_target_worktree_is_refused` | same | containment |
+| `a_session_without_the_project_home_role_cannot_call_the_tools` | same | role gate |
+| `resolving_the_home_session_itself_is_refused` | `packages/tddy-worktree-service/src/session_target.rs` (`#[cfg(test)]`) | IsHome |
+| `resolving_an_unknown_session_is_not_found` | same | NotFound |
+
+## Decisions & Trade-offs
+- **Exec tools over `ExecuteTool`**, not new static MCP tools in `tddy-tools`: a managed agent already reaches the daemon only through that path, and `server.rs` is over budget.
+- **Role-gated**: these tools reach across sessions; only the read-only home agent gets them.
+
+## Technical Debt & Production Readiness
+
+## Refactoring Needed
+### From /validate-changes
+### From /validate-tests
+### From /validate-prod-ready
+### From /analyze-clean-code
+
+## Validation Results
+### /validate-changes
+### /validate-tests
+### /validate-prod-ready
+### /analyze-clean-code
+
+## TODO
+
+- [x] Record initial discovery (`2026-10-22-project-home-session-tools-initial-discovery.md`)
+- [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
+- [x] Create/update PRD documentation
+- [x] Create changeset (this document)
+- [ ] Create failing acceptance tests
+- [ ] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests
+- [ ] TDD Red — write failing unit/integration tests
+- [ ] TDD Green — implement with quality code
+- [ ] Update documentation with progress
+- [ ] Repeat Red→Green→Update cycle until feature complete
+- [ ] Run scoped tests for touched packages; full-workspace result from CI
+- [ ] Validate changes (/validate-changes)
+- [ ] Refactor issues from change validation
+- [ ] USER REVIEW — development complete
+- [ ] Validate tests (/validate-tests)
+- [ ] Refactor test issues
+- [ ] Validate production readiness (/validate-prod-ready)
+- [ ] Refactor production readiness issues
+- [ ] Analyze code quality (/analyze-clean-code)
+- [ ] Refactor code quality issues
+- [ ] Final validation (/validate-changes)
+- [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-22-project-home-session-tools-initial-discovery.md`
+- [ ] USER REVIEW — work complete, decide next steps
