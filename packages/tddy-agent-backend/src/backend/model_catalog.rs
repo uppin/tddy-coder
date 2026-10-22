@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use super::{
     AnyBackend, BackendModels, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend,
-    CodingBackend, CursorBackend, StubBackend,
+    CodingBackend, CursorBackend, OpenCodeAcpBackend, StubBackend,
 };
 use crate::cli_harness::{cli_harness, models_from_listing, CliHarness, CliModelSource};
 
@@ -28,7 +28,8 @@ pub const CURSOR_CLI_AGENT: &str = "cursor-cli";
 pub struct BackendCliPaths {
     /// Override the cursor (`agent`) binary path.
     pub cursor_cli_path: Option<PathBuf>,
-    /// Override the `opencode` binary path.
+    /// Override the `opencode` binary path. Names both the `opencode-cli` harness's binary (listed
+    /// with `opencode models`) and the binary the `opencode` ACP agent runs (as `opencode acp`).
     pub opencode_cli_path: Option<PathBuf>,
     /// Override the `claude-agent-acp` binary path.
     pub claude_acp_cli_path: Option<PathBuf>,
@@ -155,6 +156,10 @@ fn build_backend(agent: &str, paths: &BackendCliPaths) -> anyhow::Result<AnyBack
         "codex-acp" => AnyBackend::CodexAcp(match &paths.codex_acp_cli_path {
             Some(p) => CodexAcpBackend::with_agent_path(p.clone()),
             None => CodexAcpBackend::new(),
+        }),
+        "opencode" => AnyBackend::OpenCode(match &paths.opencode_cli_path {
+            Some(p) => OpenCodeAcpBackend::with_agent_path(p.clone()),
+            None => OpenCodeAcpBackend::new(),
         }),
         "stub" => AnyBackend::Stub(StubBackend::new()),
         other => anyhow::bail!("unknown agent {:?}", other),

@@ -2,13 +2,17 @@
 //!
 //! Kept beside the backends rather than inside them: each backend applies the route where it builds
 //! its child process, and this module is the one entry point `tddy-coder` calls. A route reaches a
-//! child as three things only — its environment (plain and secret), its arguments, and nothing else:
-//! the files a route names are for harnesses that read a configuration file, and none of the
-//! harnesses routed here does.
+//! child as its environment (plain and secret), its arguments, and the files it names. The files
+//! are for harnesses that read a configuration file named by a variable: OpenCode's ACP agent reads
+//! the file `OPENCODE_CONFIG` names. The other routed harnesses take everything from the environment
+//! and the arguments, and write no file.
 
 use crate::provider_route::{Harness, HarnessRoute, RouteRefusal};
 
-use super::{AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend};
+use super::{
+    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend,
+    OpenCodeAcpBackend,
+};
 
 impl AnyBackend {
     /// Run this backend on `route`. Refused, with the reason, for a backend that cannot be routed —
@@ -19,6 +23,7 @@ impl AnyBackend {
             AnyBackend::ClaudeAcp(b) => Ok(AnyBackend::ClaudeAcp(b.with_provider_route(route))),
             AnyBackend::Codex(b) => Ok(AnyBackend::Codex(b.with_provider_route(route))),
             AnyBackend::CodexAcp(b) => Ok(AnyBackend::CodexAcp(b.with_provider_route(route))),
+            AnyBackend::OpenCode(b) => Ok(AnyBackend::OpenCode(b.with_provider_route(route))),
             AnyBackend::Cursor(_) => Err(RouteRefusal::HarnessCannotBeRouted {
                 harness: Harness::Cursor,
             }
@@ -61,6 +66,17 @@ impl CodexBackend {
 
 impl CodexAcpBackend {
     /// `codex-acp` on a provider account: the route's overrides and key on the agent child.
+    #[must_use]
+    pub fn with_provider_route(mut self, route: HarnessRoute) -> Self {
+        self.set_provider_route(route);
+        self
+    }
+}
+
+impl OpenCodeAcpBackend {
+    /// `opencode acp` on a provider account: the route's key and its generated configuration on the
+    /// agent child, the configuration reached through `OPENCODE_CONFIG`. The route's `--model` is
+    /// not passed: the generated configuration already selects the model.
     #[must_use]
     pub fn with_provider_route(mut self, route: HarnessRoute) -> Self {
         self.set_provider_route(route);

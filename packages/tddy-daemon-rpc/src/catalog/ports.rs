@@ -125,7 +125,7 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
                 &self.config,
             ))
         } else {
-            tddy_core::cli_harness::cli_harness(&agent)
+            tddy_core::cli_harness::cli_harness(listing_harness_session(&agent))
                 .filter(|harness| {
                     matches!(
                         harness.models,
@@ -212,5 +212,15 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
             subagents.iter().map(|s| &s.agent_id).collect::<Vec<_>>()
         );
         Ok(Response::new(ListSubagentsResponse { subagents }))
+    }
+}
+
+/// The CLI harness whose binary an agent's model probe runs. The `opencode` ACP agent runs the binary
+/// the `opencode-cli` harness lists with (`opencode acp` and `opencode models`), so it resolves that
+/// harness's binary; every other agent or session type is its own harness, or none.
+fn listing_harness_session(agent: &str) -> &str {
+    match agent {
+        "opencode" => "opencode-cli",
+        other => other,
     }
 }

@@ -20,8 +20,8 @@ use tddy_core::{
     backend_from_label, backend_selection_question, default_model_for_agent, get_session_for_tag,
     output::SESSIONS_SUBDIR, preselected_index_for_agent, read_changeset, read_session_metadata,
     AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend, CodingBackend,
-    CursorBackend, GoalId, PendingWorkflowStart, ProgressEvent, SharedBackend, StubBackend,
-    WorkflowEngine, WorkflowRecipe,
+    CursorBackend, GoalId, OpenCodeAcpBackend, PendingWorkflowStart, ProgressEvent, SharedBackend,
+    StubBackend, WorkflowEngine, WorkflowRecipe,
 };
 use tddy_discovery;
 use tddy_workflow_recipes::{parse_evaluate_response, parse_refactor_response};
@@ -292,6 +292,7 @@ fn create_backend_for_args(args: &Args, agent: &str) -> anyhow::Result<SharedBac
         args.cursor_agent_path.as_deref(),
         args.codex_cli_path.as_deref(),
         args.codex_acp_cli_path.as_deref(),
+        args.opencode_cli_path.as_deref(),
         None,
         None,
         &resolve_specialized_agent_defs(args)?,
@@ -574,6 +575,8 @@ pub struct Args {
     pub codex_cli_path: Option<PathBuf>,
     /// Path to the Codex ACP stdio agent (`codex-acp`). When set, overrides `TDDY_CODEX_ACP_CLI` and sibling/`PATH` discovery.
     pub codex_acp_cli_path: Option<PathBuf>,
+    /// Path to the OpenCode binary, run as `opencode acp` for the `opencode` agent. When set, overrides `TDDY_OPENCODE_CLI` and the default `opencode` on `PATH`.
+    pub opencode_cli_path: Option<PathBuf>,
     /// Run `codex login` browser OAuth (not `--device-auth`), capture authorize URL, wait for completion. Requires session directory.
     pub codex_oauth_login: bool,
     /// Workflow recipe name (`tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`, `review`, `merge-pr`). `None` means default `free-prompting` or recipe from changeset on resume.
@@ -801,6 +804,11 @@ pub struct CoderArgs {
     /// resolved `codex` binary when present, else `codex-acp` on `PATH`, or `TDDY_CODEX_ACP_CLI`.
     #[arg(long, value_name = "PATH", env = "TDDY_CODEX_ACP_CLI")]
     pub codex_acp_cli_path: Option<PathBuf>,
+
+    /// Path to the OpenCode binary, run as `opencode acp` for the `opencode` agent. Defaults to
+    /// `opencode` on `PATH`, or `TDDY_OPENCODE_CLI` if set.
+    #[arg(long, value_name = "PATH", env = "TDDY_OPENCODE_CLI")]
+    pub opencode_cli_path: Option<PathBuf>,
 
     /// Run OpenAI Codex `login` with browser OAuth (default flow, not `--device-auth`). Writes the
     /// authorize URL to `{session_dir}/codex_oauth_authorize.url` (same as Codex `exec` + `BROWSER`
@@ -1077,6 +1085,7 @@ impl From<CoderArgs> for Args {
             cursor_agent_path: a.cursor_agent_path,
             codex_cli_path: a.codex_cli_path,
             codex_acp_cli_path: a.codex_acp_cli_path,
+            opencode_cli_path: a.opencode_cli_path,
             codex_oauth_login: a.codex_oauth_login,
             recipe: a.recipe,
             remote: a.remote,
@@ -1135,6 +1144,7 @@ impl From<DemoArgs> for Args {
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: a.recipe,
             remote: false,
@@ -2508,6 +2518,7 @@ fn create_backend(
     cursor_agent_path: Option<&Path>,
     codex_cli_path: Option<&Path>,
     codex_acp_cli_path: Option<&Path>,
+    opencode_cli_path: Option<&Path>,
     _socket_path: Option<&Path>,
     _working_dir: Option<&Path>,
     // Resolved specialized-agent defs (<tddyhome>/agents/*.yaml, `--agent-def-path` — see
@@ -2563,6 +2574,16 @@ fn create_backend(
                 acp_bin, codex_bin,
             ))
         }
+        "opencode" => {
+            let path = opencode_cli_path
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from(OpenCodeAcpBackend::DEFAULT_CLI_BINARY));
+            log::info!(
+                "[tddy-coder] OpenCode ACP backend: agent `{}`",
+                path.display()
+            );
+            AnyBackend::OpenCode(OpenCodeAcpBackend::with_agent_path(path))
+        }
         "stub" => AnyBackend::Stub(StubBackend::new()),
         "claude" => AnyBackend::Claude(ClaudeCodeBackend::new().with_progress(on_progress)),
         unknown => {
@@ -2594,6 +2615,7 @@ pub const BUILTIN_BACKEND_AGENT_IDS: &[&str] = &[
     "codex",
     "codex-acp",
     "stub",
+    "opencode",
 ];
 
 #[cfg(test)]
@@ -2686,6 +2708,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             None,
+            None,
             std::slice::from_ref(&def),
             None,
         )
@@ -2736,6 +2759,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             None,
+            None,
             std::slice::from_ref(&def),
             None,
         )
@@ -2780,6 +2804,7 @@ mod create_backend_specialized_agent_tests {
         // When
         let backend = create_backend(
             "my-explorer",
+            None,
             None,
             None,
             None,
@@ -2962,15 +2987,25 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let error = create_backend("repo-explorer", None, None, None, None, None, &defs, None)
-            .expect_err("an unresolvable agent must not silently become Claude");
+        let error = create_backend(
+            "repo-explorer",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &defs,
+            None,
+        )
+        .expect_err("an unresolvable agent must not silently become Claude");
 
         // Then
         assert_eq!(
             error.to_string(),
             "unknown agent \"repo-explorer\": it is neither a coding backend nor a resolved \
              specialized agent def. Known agents: claude, claude-acp, cursor, codex, codex-acp, \
-             stub"
+             stub, opencode"
         );
     }
 
@@ -2980,7 +3015,7 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let backend = create_backend("claude", None, None, None, None, None, &defs, None)
+        let backend = create_backend("claude", None, None, None, None, None, None, &defs, None)
             .expect("'claude' names a coding backend");
 
         // Then
@@ -3312,6 +3347,7 @@ fn run_full_workflow_tui(
         let cursor_path_for_factory = args.cursor_agent_path.clone();
         let codex_path_for_factory = args.codex_cli_path.clone();
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
+        let opencode_path_for_factory = args.opencode_cli_path.clone();
         let specialized_agent_defs_for_factory = resolve_specialized_agent_defs(args)?;
         let provider_route_for_factory = load_provider_route(args.provider_route_path.as_deref())?;
         let mut p = presenter.lock().unwrap();
@@ -3323,6 +3359,7 @@ fn run_full_workflow_tui(
                     cursor_path_for_factory.as_deref(),
                     codex_path_for_factory.as_deref(),
                     codex_acp_path_for_factory.as_deref(),
+                    opencode_path_for_factory.as_deref(),
                     socket_path_for_factory.as_deref(),
                     None,
                     &specialized_agent_defs_for_factory,
@@ -4279,6 +4316,7 @@ mod resume_session_config_tests {
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
             remote: false,
@@ -4353,6 +4391,7 @@ mod resume_session_identity_tests {
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
             remote: false,
@@ -4428,6 +4467,7 @@ mod session_dir_sync_tests {
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
             remote: false,
@@ -4519,6 +4559,7 @@ mod changeset_agent_resume_tests {
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
             remote: false,
@@ -4627,6 +4668,7 @@ mod post_tui_workflow_exit_tests {
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
             remote: false,

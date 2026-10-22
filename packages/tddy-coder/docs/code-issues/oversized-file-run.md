@@ -51,3 +51,7 @@ This file has **three** `#[cfg(test)]` modules (L2683, L2880, L4359). Seam A in 
 ## Measurement update 2026-10-22 — #provider-route 4/9 (#665)
 
 **Narrowed, still over:** 2,655 → 2,595 production lines. `--provider-route-path` added 34 (to 2,689); the wrap moved route loading and application to `provider_route_arg.rs` and the Codex binary resolution (`resolve_codex_binary`, `resolve_codex_acp_binary`, `codex_acp_beside_resolved_codex`, `resolve_executable_on_path` — part of seam D) to `codex_binaries.rs`. Still unclaimed.
+
+## Measurement update 2026-10-22 — #provider-route 7/9 (#668)
+
+**Regressed, split deferred:** 2,598 → 2,620 production lines (2,598 is this count on the rebased base). `--opencode-cli-path` / `TDDY_OPENCODE_CLI` (`CoderArgs`, `Args`, the `From` impls), the `opencode` arm of `create_backend` and its path parameter, the factory's path clone, and `"opencode"` in `BUILTIN_BACKEND_AGENT_IDS`. The file is stack-shared — `#provider-route` 8/9 (#669) and 9/9 (#670) sit on this branch — so no decomposition here. Still unclaimed.

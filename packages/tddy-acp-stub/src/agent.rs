@@ -7,6 +7,10 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::scenario::Scenario;
 
+/// The one model the stub advertises in a new session.
+const STUB_MODEL_ID: &str = "stub-model";
+const STUB_MODEL_NAME: &str = "Stub model";
+
 /// Message from agent to background task (session notifications or permission requests).
 pub enum AgentMessage {
     SessionNotification(acp::SessionNotification, oneshot::Sender<()>),
@@ -89,9 +93,17 @@ impl acp::Agent for StubAgent {
     ) -> Result<acp::NewSessionResponse, acp::Error> {
         let session_id = self.next_session_id.get();
         self.next_session_id.set(session_id + 1);
-        Ok(acp::NewSessionResponse::new(acp::SessionId::new(
-            session_id.to_string(),
-        )))
+        // A real agent advertises the models it can run; the stub advertises one, so a backend that
+        // enumerates models through a session has a non-empty list to read.
+        let model_id = acp::ModelId::new(STUB_MODEL_ID.to_string());
+        Ok(
+            acp::NewSessionResponse::new(acp::SessionId::new(session_id.to_string())).models(
+                acp::SessionModelState::new(
+                    model_id.clone(),
+                    vec![acp::ModelInfo::new(model_id, STUB_MODEL_NAME.to_string())],
+                ),
+            ),
+        )
     }
 
     async fn load_session(
