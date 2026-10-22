@@ -91,7 +91,7 @@ cold CLI (`tddy-tools restructure`) and the index daemon, so the two answer the 
 - **Item paths.** `<file relative to the workspace root>::<context…>::<name>` — no module system is
   known, so the file is the prefix: `config/app.toml::server::port`.
 - **Anchors.** `restructure anchors --items` / `--at` on such a file, an `item` / `items` anchor in a
-  plan, and a static `check`'s fingerprint test work as they do for Rust, with Rust's refusals
+  plan, a static `check`'s fingerprint test and a `snapshot`'s re-resolution work as they do for Rust, with Rust's refusals
   (non-adjacent items, a stale fingerprint, an absent or ambiguous name). None of them starts
   rust-analyzer for a file only an extension language claims.
 - **No server.** A language no `[language_servers.<id>]` serves refuses every operation on its files —
@@ -164,4 +164,3 @@ settings; one that does not parse fails the load, naming the file.
 - No code action is run for an extension language, and its server is not told of files changed on disk
   ([backlog](../../dev/todo/2026-10-22-extension-servers-are-not-told-of-tree-changes.md)).
 - No `extension.wasm` is run; no grammar or extension is built.
-- A plan's `snapshot` re-resolves only the built-ins' item anchors.

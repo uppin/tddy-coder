@@ -187,11 +187,12 @@ async fn snapshotted(
         target: Some(plan.clone()),
         progress: logged_progress(),
         trace: logged_trace,
+        installed: index.supports(),
         ..Options::default()
     };
 
     let _queued = index.hold(&root).await;
-    let client = if item_anchor::plan_file_has_item_anchors(&plan) {
+    let client = if options.plan_item_anchors_need_a_server() {
         Some(index.client_for(&root).await?)
     } else {
         None

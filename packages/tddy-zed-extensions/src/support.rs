@@ -67,7 +67,8 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
     let languages = languages
         .into_iter()
         .map(|(manifest, language)| {
-            let server = ServerChoice::for_language(&manifest, &language, &settings, &settings_file);
+            let server =
+                ServerChoice::for_language(&manifest, &language, &settings, &settings_file);
             (language, server)
         })
         .collect();

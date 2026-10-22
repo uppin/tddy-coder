@@ -331,7 +331,7 @@ fn needs_lsp_client(options: &Options) -> bool {
         // is no seam to resolve and nothing to ask a server about, so starting one would cost
         // minutes of indexing to produce an answer `sha256` already has — unless the plan has item
         // anchors, which only a server can re-resolve.
-        Command::Snapshot => names_item_anchors(options),
+        Command::Snapshot => options.plan_item_anchors_need_a_server(),
         // The store's commands are answered by the index daemon; without one they are refused
         // before any server would be needed.
         Command::Status | Command::Verify | Command::Load | Command::Unload | Command::Plans => {
@@ -342,14 +342,6 @@ fn needs_lsp_client(options: &Options) -> bool {
         // A count of lines in files on disk: nothing to resolve.
         Command::Lines => false,
     }
-}
-
-/// Whether the plan `options` names holds item anchors.
-fn names_item_anchors(options: &Options) -> bool {
-    options
-        .plan()
-        .ok()
-        .is_some_and(|path| crate::item_anchor::plan_file_has_item_anchors(&path))
 }
 
 #[cfg(test)]

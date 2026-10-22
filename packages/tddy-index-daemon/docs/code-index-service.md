@@ -305,9 +305,10 @@ extension's languages (`tddy_zed_extensions::InstalledExtensions::with_installed
 `WorkspaceIndex::with_supports` holds it and puts it in every run's `Options::installed`
 (`serve_check`, `anchor_covering`); `build_code_index_entry_with_supports(ports, supports)` is the
 same for a host that registers the service itself. An `Anchors` request on a file only a server-less
-installed language claims asks `client_for` nothing — no rust-analyzer is started for it. The
-allow-list is still Rust's alone (`TODO(extension-language-server)`): no installed language launches
-a server yet.
+installed language claims asks `client_for` nothing — no rust-analyzer is started for it — and nor does
+a `Snapshot` whose item anchors all lie in such files (`Options::plan_item_anchors_need_a_server`). The
+allow-list is the registry's (`SupportRegistry::allow_list`): Rust's launch, then every installed
+language whose server is configured.
 
 A program that cannot be started reaches the caller as `LspError::ServerNotFound` (`NotFound`) or
 `LspError::Io` (any other spawn failure) — `FailedPrecondition` and `Internal` in [Refusals](#refusals) —

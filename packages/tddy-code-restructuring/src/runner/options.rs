@@ -297,6 +297,24 @@ impl Options {
                 .is_some_and(|support| support.launch().is_none())
     }
 
+    /// Whether the plan's item anchors need a language server to resolve: one lies in a file that is
+    /// not [served without a server](Self::is_served_without_a_server). A plan that cannot be read or
+    /// parsed has none to resolve, and says why when the command that named it reads it.
+    pub fn plan_item_anchors_need_a_server(&self) -> bool {
+        self.plan()
+            .ok()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| crate::Plan::parse(&text).ok())
+            .is_some_and(|plan| {
+                plan.ops.iter().flat_map(|op| op.anchors()).any(|anchor| {
+                    matches!(
+                        anchor,
+                        crate::Anchor::Item { .. } | crate::Anchor::Items { .. }
+                    ) && !self.is_served_without_a_server(Path::new(anchor.file()))
+                })
+            })
+    }
+
     /// The source file a command was given.
     pub fn source(&self) -> Result<PathBuf> {
         self.target

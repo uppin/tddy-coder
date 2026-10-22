@@ -81,8 +81,8 @@ pub fn installed_launches_for(
 ) -> Vec<(LanguageId, LaunchSpec)> {
     let built_ins = SupportRegistry::with_builtins();
     let mut launches: Vec<(LanguageId, LaunchSpec)> = Vec::new();
-    for op in &plan.ops {
-        let file = Path::new(op.anchor.file());
+    for anchor in plan.ops.iter().flat_map(|op| op.anchors()) {
+        let file = Path::new(anchor.file());
         if built_ins.support_of(file).is_some() {
             continue;
         }

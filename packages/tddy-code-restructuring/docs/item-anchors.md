@@ -48,7 +48,11 @@ support that does launches no server. For such a file:
   (`refuse_a_foreign_prefix`) never sees them.
 - A deep `check` and an `anchors` over any other file route through `registry_with_installed`.
 
-`snapshot_resolving` and `apply` route through the built-ins only (`TODO(extension-language-server)`).
+`snapshot_resolving` routes through `registry_with_installed` too, and needs no `LspClient` when every item
+anchor lies in such a file (`Options::plan_item_anchors_need_a_server`, which is also what the cold CLI and the
+daemon ask before starting a server for a snapshot). An `apply` routes through `registry_for_apply`: the
+built-ins, then each installed language over the server the front end started for it
+(`Options::installed_clients`), or over none.
 
 
 ## Resolution
