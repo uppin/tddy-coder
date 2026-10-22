@@ -28,6 +28,7 @@ pub mod launch_ports;
 pub mod managed_launch;
 mod opencode_cli_spawn;
 pub mod placement;
+pub mod project_home_idle;
 mod provider_account_lookup;
 pub mod relaunch_jail_dirs;
 pub mod relaunch_jail_steps;

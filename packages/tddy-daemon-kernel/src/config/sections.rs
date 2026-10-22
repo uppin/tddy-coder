@@ -191,3 +191,27 @@ impl IndexDaemonConfig {
         runtime_dir.join("tddy-index-daemon.sock")
     }
 }
+
+/// Project-home sessions (`#project-home` 6/7): how long one may sit idle — its last turn ended
+/// and no input arrived — before the daemon stops it. It resumes, same conversation, on next open.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectHomeConfig {
+    /// Idle seconds before a project-home session is stopped; `0` disables auto-stop.
+    #[serde(default = "default_project_home_idle_stop_secs")]
+    pub idle_stop_secs: u64,
+}
+
+/// 10 minutes: long enough to read a reply and answer it, short enough not to hold an agent
+/// process per project all day.
+fn default_project_home_idle_stop_secs() -> u64 {
+    10 * 60
+}
+
+impl Default for ProjectHomeConfig {
+    fn default() -> Self {
+        Self {
+            idle_stop_secs: default_project_home_idle_stop_secs(),
+        }
+    }
+}

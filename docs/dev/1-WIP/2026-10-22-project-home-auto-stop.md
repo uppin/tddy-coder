@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — concurrency / timing semantics (periodic task vs turns), daemon config, across tddy-daemon-kernel, tddy-agent-launch, tddy-daemon; integration tests with a stub harness
 **Stack**: #project-home 6/7. Base: `feature/project-home/home-session-tools`.
+**PR**: [#701](https://github.com/uppin/tddy-coder/pull/701)
 
 ## Initial Discovery
 
@@ -38,9 +39,12 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 // tddy-daemon-kernel::config::sections
 #[derive(Deserialize)] pub struct ProjectHomeConfig { #[serde(default = "default_project_home_idle_stop_secs")] pub idle_stop_secs: u64 }
 // tddy-agent-launch::project_home_idle (new)
-pub struct IdleObservation { pub agent_status: SessionAgentStatus, pub last_turn_end: Option<SystemTime>, pub last_input: Option<SystemTime> }
+pub struct IdleObservation { pub busy: bool, pub idle_since: SystemTime }
+impl IdleObservation { pub fn from_metadata(activity_status: Option<&str>, updated_at: &str) -> Option<Self> }  // busy = "Running"; idle_since = updated_at
 pub fn should_stop(obs: &IdleObservation, now: SystemTime, idle_stop: Duration) -> bool;
-pub async fn reap_idle_project_home_sessions(ctx: &ProjectHomeIdleContext) -> Vec<String>; // stopped ids
+impl LaunchSessions { pub async fn reap_idle_project_home_sessions(&self, now: SystemTime) -> Vec<String> }  // stopped ids
+// tddy-session-lifecycle: DaemonSessionHost::reap_idle_project_home_sessions(now) — what the runtime task and the tests call
+// DaemonConfig gains `project_home: Option<ProjectHomeConfig>`
 ```
 Plus the failing tests below. Bodies `// TODO(home-auto-stop): implement`.
 
@@ -99,23 +103,30 @@ A periodic task stops idle project-home sessions per policy; ensure resumes them
 
 ## Testing Plan
 
-Pure-function table for `should_stop`; daemon acceptance with `idle_stop_secs` set to 1 and the stub
-harness reporting turn end, polling `ListSessions` until stopped (bounded wait, no sleeps-as-asserts).
+Pure-function table for `should_stop` and `from_metadata`; daemon acceptance on the stub-claude
+harness that records a hook status report (`update_activity_status`, which bumps `updated_at`) and
+then runs the reaper with an advanced clock (`now + 11 min`) — deterministic, no sleeps.
 
 ## Acceptance Tests
 
 | Test | File | Validates |
 |---|---|---|
-| `an_idle_project_home_session_is_stopped_after_the_configured_time` | `packages/tddy-daemon-rpc/tests/project_home_idle_stop_acceptance.rs` (new) | stop |
+| `an_idle_project_home_session_is_stopped_after_the_configured_time` | `packages/tddy-session-lifecycle/tests/project_home_idle_stop_acceptance.rs` (new) | stop |
 | `a_project_home_session_mid_turn_is_not_stopped` | same | running guard |
 | `ensuring_an_auto_stopped_home_session_resumes_the_same_conversation` | same | conversation kept |
 | `an_ordinary_session_is_never_auto_stopped` | same | role scope |
 | `idle_stop_secs_zero_disables_auto_stop` | same | off switch |
-| `stops_only_when_idle_since_the_later_of_turn_end_and_input` | `packages/tddy-agent-launch/src/project_home_idle.rs` (`#[cfg(test)]`) | policy table |
+| `stops_only_when_idle_since_the_later_of_turn_end_and_input` / `a_zero_limit_never_stops` / `a_running_status_is_busy_and_any_other_is_idle_since_the_last_report` | `packages/tddy-agent-launch/src/project_home_idle.rs` (`#[cfg(test)]`) | policy table, observation mapping |
 
 ## Decisions & Trade-offs
 - **Idle = after turn, no input** (developer's choice, 2026-10-22), not "on leaving the view": the daemon cannot see the view, and a background turn should finish.
 - **Periodic task**, not a per-session timer: survives daemon restarts by re-reading state; granularity is the period (≤ 30 s).
+
+## Red-phase notes
+
+- Verified failing (2026-10-23): 4/5 `project_home_idle_stop_acceptance` (reaper and ensure unimplemented), 2/3 `project_home_idle` unit tests. Passing already, kept as guards: `an_ordinary_session_is_never_auto_stopped`, `a_zero_limit_never_stops`.
+- Idleness is read from the hook-reported `activity_status` (`Running` = busy) and `updated_at`, which `update_activity_status` bumps on every report — not from the inferred `SessionAgentStatus`, which is `UNSPECIFIED` ("nothing to say") for sessions with no observed conversation.
+- The periodic task in `tddy-daemon/src/runtime/tasks.rs` is green's (period ≤ 30 s), calling `DaemonSessionHost::reap_idle_project_home_sessions(SystemTime::now())`.
 
 ## Technical Debt & Production Readiness
 
@@ -137,10 +148,10 @@ harness reporting turn end, polling `ListSessions` until stopped (bounded wait, 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

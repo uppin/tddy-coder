@@ -220,3 +220,13 @@ impl DaemonSessionHost {
         }
     }
 }
+
+impl DaemonSessionHost {
+    /// Stop every running project-home session idle for at least `project_home.idle_stop_secs`
+    /// at `now`; the ids stopped. The daemon runtime calls this periodically (`#project-home` 6/7).
+    pub async fn reap_idle_project_home_sessions(&self, now: std::time::SystemTime) -> Vec<String> {
+        self.launch_sessions()
+            .reap_idle_project_home_sessions(now)
+            .await
+    }
+}
