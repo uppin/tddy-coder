@@ -6,12 +6,14 @@
 //! **`BROWSER`** / **`TDDY_CODEX_OAUTH_OUT`** path as [`super::CodexBackend`] so tddy-web can poll
 //! [`super::CODEX_OAUTH_AUTHORIZE_URL_FILENAME`].
 
+use super::routed::route_child_env;
 use super::{InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
 use crate::error::BackendError;
+use crate::provider_route::HarnessRoute;
 use crate::stream::ProgressEvent;
 use agent_client_protocol::{self as acp, Agent as _, Client};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -178,6 +180,7 @@ fn run_codex_acp_worker(
     agent_path: PathBuf,
     agent_args: Vec<String>,
     codex_cli_path: PathBuf,
+    route: Option<HarnessRoute>,
     mut cmd_rx: mpsc::Receiver<CodexAcpCommand>,
 ) {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -186,7 +189,8 @@ fn run_codex_acp_worker(
         .expect("codex acp worker runtime");
     let local_set = tokio::task::LocalSet::new();
     rt.block_on(local_set.run_until(async move {
-        let mut child = match spawn_codex_acp_agent(&agent_path, &agent_args).await {
+        let mut child = match spawn_codex_acp_agent(&agent_path, &agent_args, route.as_ref()).await
+        {
             Ok(c) => c,
             Err(e) => {
                 while let Some(cmd) = cmd_rx.recv().await {
@@ -422,10 +426,16 @@ fn run_codex_acp_worker(
 async fn spawn_codex_acp_agent(
     agent_path: &PathBuf,
     agent_args: &[String],
+    route: Option<&HarnessRoute>,
 ) -> Result<tokio::process::Child, BackendError> {
     let mut cmd = tokio::process::Command::new(agent_path);
     for arg in agent_args {
         cmd.arg(arg);
+    }
+    if let Some(route) = route {
+        for (key, value) in route_child_env(route) {
+            cmd.env(key, value);
+        }
     }
     cmd.stdin(std::process::Stdio::piped());
     cmd.stdout(std::process::Stdio::piped());
@@ -446,10 +456,17 @@ async fn spawn_codex_acp_agent(
 pub const DEFAULT_CODEX_ACP_BINARY: &str = "codex-acp";
 
 /// Backend that invokes **`codex-acp`** over ACP (stdio JSON-RPC).
+///
+/// The worker thread spawns the agent once, when it starts, so it starts on the first command
+/// rather than at construction: a route set by [`CodexAcpBackend::with_provider_route`] has to be
+/// known before the agent exists.
 pub struct CodexAcpBackend {
     agent_path: PathBuf,
     agent_args: Vec<String>,
-    cmd_tx: mpsc::Sender<CodexAcpCommand>,
+    codex_cli_path: PathBuf,
+    /// The provider route the agent runs on (`with_provider_route`); `None` for the vendor.
+    pub(super) provider_route: Option<HarnessRoute>,
+    worker: OnceLock<mpsc::Sender<CodexAcpCommand>>,
 }
 
 impl std::fmt::Debug for CodexAcpBackend {
@@ -472,17 +489,7 @@ impl Default for CodexAcpBackend {
         let agent = std::env::var_os("TDDY_CODEX_ACP_CLI")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_CODEX_ACP_BINARY));
-        let agent_path = agent.clone();
-        let (cmd_tx, cmd_rx) = mpsc::channel(16);
-        let codex_cli = resolve_codex_cli_for_oauth();
-        std::thread::spawn(move || {
-            run_codex_acp_worker(agent, Vec::new(), codex_cli, cmd_rx);
-        });
-        Self {
-            agent_path,
-            agent_args: Vec::new(),
-            cmd_tx,
-        }
+        Self::unstarted(agent, Vec::new(), resolve_codex_cli_for_oauth())
     }
 }
 
@@ -495,40 +502,75 @@ impl CodexAcpBackend {
     /// Spawn the given ACP agent binary (e.g. **`tddy-acp-stub`** in integration tests).
     #[must_use]
     pub fn with_agent_path(path: PathBuf) -> Self {
-        let agent_path = path.clone();
-        let (cmd_tx, cmd_rx) = mpsc::channel(16);
-        let codex_cli = resolve_codex_cli_for_oauth();
-        std::thread::spawn(move || {
-            run_codex_acp_worker(path, Vec::new(), codex_cli, cmd_rx);
-        });
-        Self {
-            agent_path,
-            agent_args: Vec::new(),
-            cmd_tx,
-        }
+        Self::unstarted(path, Vec::new(), resolve_codex_cli_for_oauth())
     }
 
     /// Like [`Self::with_agent_path`] but uses a specific **`codex`** binary for `codex login` OAuth relay.
     #[must_use]
     pub fn with_agent_and_codex_paths(agent_path: PathBuf, codex_cli_path: PathBuf) -> Self {
-        let display_path = agent_path.clone();
-        let (cmd_tx, cmd_rx) = mpsc::channel(16);
-        std::thread::spawn(move || {
-            run_codex_acp_worker(agent_path, Vec::new(), codex_cli_path, cmd_rx);
-        });
+        Self::unstarted(agent_path, Vec::new(), codex_cli_path)
+    }
+
+    fn unstarted(agent_path: PathBuf, agent_args: Vec<String>, codex_cli_path: PathBuf) -> Self {
         Self {
-            agent_path: display_path,
-            agent_args: Vec::new(),
-            cmd_tx,
+            agent_path,
+            agent_args,
+            codex_cli_path,
+            provider_route: None,
+            worker: OnceLock::new(),
         }
     }
+
+    /// The worker's command channel, starting the worker on first use. On a route the agent is
+    /// given the route's `-c` overrides, and its environment when it is spawned.
+    fn commands(&self) -> &mpsc::Sender<CodexAcpCommand> {
+        self.worker.get_or_init(|| {
+            let (cmd_tx, cmd_rx) = mpsc::channel(16);
+            let agent_path = self.agent_path.clone();
+            let codex_cli_path = self.codex_cli_path.clone();
+            let route = self.provider_route.clone();
+            let mut agent_args = self.agent_args.clone();
+            if let Some(route) = &route {
+                agent_args.extend(codex_acp_route_args(route));
+            }
+            std::thread::spawn(move || {
+                run_codex_acp_worker(agent_path, agent_args, codex_cli_path, route, cmd_rx)
+            });
+            cmd_tx
+        })
+    }
+}
+
+/// The route's arguments as `codex-acp` takes them. It accepts `-c key=value` overrides, as `codex`
+/// does, but has no `-m`: its model is the `model` override, so `-m <model>` becomes
+/// `-c model="<model>"`. Any other argument passes through unchanged.
+fn codex_acp_route_args(route: &HarnessRoute) -> Vec<String> {
+    let mut out = Vec::with_capacity(route.args.len());
+    let mut args = route.args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "-m" {
+            match args.next() {
+                Some(model) => {
+                    out.push("-c".to_string());
+                    out.push(format!(
+                        "model={}",
+                        serde_json::to_string(model).expect("a string always serializes as JSON")
+                    ));
+                }
+                None => out.push(arg.clone()),
+            }
+        } else {
+            out.push(arg.clone());
+        }
+    }
+    out
 }
 
 #[async_trait::async_trait]
 impl super::CodingBackend for CodexAcpBackend {
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         let (response_tx, response_rx) = oneshot::channel();
-        self.cmd_tx
+        self.commands()
             .send(CodexAcpCommand::Prompt {
                 request,
                 response_tx,
@@ -548,7 +590,7 @@ impl super::CodingBackend for CodexAcpBackend {
 
     async fn list_models(&self) -> Result<super::BackendModels, BackendError> {
         let (response_tx, response_rx) = oneshot::channel();
-        self.cmd_tx
+        self.commands()
             .send(CodexAcpCommand::ListModels { response_tx })
             .await
             .map_err(|_| {
@@ -571,6 +613,34 @@ mod tests {
         assert!(acp_error_suggests_retry_oauth("authentication required"));
         assert!(acp_error_suggests_retry_oauth("HTTP 401"));
         assert!(!acp_error_suggests_retry_oauth("syntax error"));
+    }
+
+    #[test]
+    fn a_route_model_flag_reaches_codex_acp_as_its_model_override() {
+        // Given a route's arguments, which name the model with `-m` as `codex` does
+        let route = HarnessRoute {
+            args: vec![
+                "-c".to_string(),
+                "model_provider=\"tddy-route\"".to_string(),
+                "-m".to_string(),
+                "muse-wonder-1.0".to_string(),
+            ],
+            ..HarnessRoute::default()
+        };
+
+        // When
+        let args = codex_acp_route_args(&route);
+
+        // Then codex-acp, which has no `-m`, is given the same model as a `-c` override
+        assert_eq!(
+            args,
+            vec![
+                "-c".to_string(),
+                "model_provider=\"tddy-route\"".to_string(),
+                "-c".to_string(),
+                "model=\"muse-wonder-1.0\"".to_string(),
+            ]
+        );
     }
 
     #[test]

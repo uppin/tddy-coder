@@ -3,6 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
+**Complexity**: 4 — more than one crate (tddy-agent-backend, tddy-agent-launch, tddy-spawn, tddy-coder, tddy-web), a spawned-process seam (stub binaries record argv/env), and an owner-only file contract chowned to the session user
 **Stack**: #provider-route 4/9. Base: `feature/provider-route/opencode-cli`. PR: [#665](https://github.com/uppin/tddy-coder/pull/665).
 
 ## Initial Discovery
@@ -141,6 +142,10 @@ loads a route file and drives the stub-recorded command; spawner test for file m
 - **Telegram-started tool sessions pass no route yet** (`TODO(tool-route)` at its `SpawnOptions`): the Telegram start has no account picker; out of scope.
 - **File, not env**: keeps the daemon→coder env allowlist and the supervisor policy closed.
 - **One synthetic Codex provider id** (`tddy-route`), so a person's own `~/.codex/config.toml` providers are untouched.
+- **Codex display names are a closed table** (`CODEX_ROUTE_PRESET_NAMES`): `meta` → "Meta" and `openai-compatible` → "OpenAI-compatible", the only presets that serve Responses. A preset outside the table is refused, not named by a guess. The labels duplicate `tddy_accounts::presets()`, and no test links the two.
+- **codex-acp takes `-c` overrides** (checked with `codex-acp --help`), so its route is the same overrides with `-m` rewritten to `-c model=`. Claude ACP takes its model from its environment, so its route arguments are not passed.
+- **ACP workers start on first use**, not at construction, so a route set after construction reaches the agent child. The spawn error surfaces through the command channel.
+- **Route file mode is owner-only** (no group or other bit), stricter than "not readable by others": a group-writable file could swap the endpoint and key.
 
 ## Refactoring Needed
 ### From /validate-changes
@@ -177,7 +182,7 @@ Scoped: `tddy-agent-backend`, `tddy-agent-launch`, `tddy-spawn`, `tddy-coder`, `
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests (per-node gate waived by the developer on 2026-10-18 — "finish remaining waves without stopping"; review at stack hand-off)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)

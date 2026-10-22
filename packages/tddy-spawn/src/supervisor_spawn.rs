@@ -197,7 +197,7 @@ pub async fn spawn_session_via_supervisor(
             project_id: req.project_id.as_deref(),
             agent: req.agent.as_deref(),
             agent_def_json: req.agent_def_json.as_deref(),
-            provider_route_json: None,
+            provider_route_json: req.provider_route_json.as_deref(),
             mouse: req.mouse,
             recipe: req.recipe.as_deref(),
             stack_parent: req.stack_parent.as_deref(),

@@ -46,6 +46,10 @@ pub struct SpawnRequest {
     /// child cannot read. Omit in JSON for legacy clients.
     #[serde(default)]
     pub agent_def_json: Option<String>,
+    /// The session's provider route as route-file JSON (`tddy_core::provider_route_file`), handed
+    /// to the spawned `tddy-coder` as `--provider-route-path`. Omit in JSON for legacy clients.
+    #[serde(default)]
+    pub provider_route_json: Option<String>,
     /// Passed as `--mouse` when true (default). Omit in JSON for legacy clients.
     #[serde(default = "default_spawn_mouse")]
     pub mouse: bool,
@@ -374,7 +378,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         project_id: req.project_id.as_deref(),
                         agent: req.agent.as_deref(),
                         agent_def_json: req.agent_def_json.as_deref(),
-                        provider_route_json: None,
+                        provider_route_json: req.provider_route_json.as_deref(),
                         mouse: req.mouse,
                         recipe: req.recipe.as_deref(),
                         stack_parent: req.stack_parent.as_deref(),
@@ -482,6 +486,7 @@ pub fn build_spawn_request(
         project_id: opts.project_id.map(String::from),
         agent: opts.agent.map(String::from),
         agent_def_json: opts.agent_def_json.map(String::from),
+        provider_route_json: opts.provider_route_json.map(String::from),
         mouse: opts.mouse,
         common_room: livekit.common_room.clone(),
         daemon_instance_id: livekit.daemon_instance_id.clone(),

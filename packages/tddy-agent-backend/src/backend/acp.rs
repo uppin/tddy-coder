@@ -3,13 +3,15 @@
 //! Spawns a subprocess (e.g. tddy-acp-stub for tests, or bunx claude-agent-acp for production)
 //! and speaks JSON-RPC 2.0 over stdin/stdout using the agent-client-protocol SDK.
 
+use super::routed::route_child_env;
 use super::{InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
 use crate::error::BackendError;
+use crate::provider_route::HarnessRoute;
 use crate::stream::ProgressEvent;
 use agent_client_protocol::{self as acp, Agent as _, Client};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
@@ -139,6 +141,7 @@ impl Client for TddyAcpClient {
 fn run_acp_worker(
     agent_path: PathBuf,
     agent_args: Vec<String>,
+    route: Option<HarnessRoute>,
     mut cmd_rx: mpsc::Receiver<AcpCommand>,
 ) {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -147,7 +150,7 @@ fn run_acp_worker(
         .expect("acp worker runtime");
     let local_set = tokio::task::LocalSet::new();
     rt.block_on(local_set.run_until(async move {
-        let mut child = match spawn_agent(&agent_path, &agent_args).await {
+        let mut child = match spawn_agent(&agent_path, &agent_args, route.as_ref()).await {
             Ok(c) => c,
             Err(e) => {
                 while let Some(cmd) = cmd_rx.recv().await {
@@ -324,10 +327,16 @@ fn run_acp_worker(
 async fn spawn_agent(
     agent_path: &PathBuf,
     agent_args: &[String],
+    route: Option<&HarnessRoute>,
 ) -> Result<tokio::process::Child, BackendError> {
     let mut cmd = tokio::process::Command::new(agent_path);
     for arg in agent_args {
         cmd.arg(arg);
+    }
+    if let Some(route) = route {
+        for (key, value) in route_child_env(route) {
+            cmd.env(key, value);
+        }
     }
     cmd.stdin(std::process::Stdio::piped());
     cmd.stdout(std::process::Stdio::piped());
@@ -342,10 +351,16 @@ async fn spawn_agent(
 }
 
 /// Backend that invokes an ACP agent subprocess via the Agent Client Protocol.
+///
+/// The worker thread spawns the agent once, when it starts, so it starts on the first command
+/// rather than at construction: a route set by [`ClaudeAcpBackend::with_provider_route`] has to be
+/// known before the agent exists.
 pub struct ClaudeAcpBackend {
     agent_path: PathBuf,
     agent_args: Vec<String>,
-    cmd_tx: mpsc::Sender<AcpCommand>,
+    /// The provider route the agent runs on (`with_provider_route`); `None` for the vendor.
+    pub(super) provider_route: Option<HarnessRoute>,
+    worker: OnceLock<mpsc::Sender<AcpCommand>>,
 }
 
 impl std::fmt::Debug for ClaudeAcpBackend {
@@ -359,19 +374,7 @@ impl std::fmt::Debug for ClaudeAcpBackend {
 
 impl Default for ClaudeAcpBackend {
     fn default() -> Self {
-        let (cmd_tx, cmd_rx) = mpsc::channel(16);
-        std::thread::spawn(move || {
-            run_acp_worker(
-                PathBuf::from("bunx"),
-                vec!["claude-agent-acp".to_string()],
-                cmd_rx,
-            );
-        });
-        Self {
-            agent_path: PathBuf::from("bunx"),
-            agent_args: vec!["claude-agent-acp".to_string()],
-            cmd_tx,
-        }
+        Self::unstarted(PathBuf::from("bunx"), vec!["claude-agent-acp".to_string()])
     }
 }
 
@@ -384,15 +387,28 @@ impl ClaudeAcpBackend {
     /// Create a backend that spawns the given binary (for tests with tddy-acp-stub).
     #[must_use]
     pub fn with_agent_path(path: PathBuf) -> Self {
-        let (cmd_tx, cmd_rx) = mpsc::channel(16);
-        std::thread::spawn(move || {
-            run_acp_worker(path, Vec::new(), cmd_rx);
-        });
+        Self::unstarted(path, Vec::new())
+    }
+
+    fn unstarted(agent_path: PathBuf, agent_args: Vec<String>) -> Self {
         Self {
-            agent_path: PathBuf::from(""),
-            agent_args: Vec::new(),
-            cmd_tx,
+            agent_path,
+            agent_args,
+            provider_route: None,
+            worker: OnceLock::new(),
         }
+    }
+
+    /// The worker's command channel, starting the worker on first use.
+    fn commands(&self) -> &mpsc::Sender<AcpCommand> {
+        self.worker.get_or_init(|| {
+            let (cmd_tx, cmd_rx) = mpsc::channel(16);
+            let agent_path = self.agent_path.clone();
+            let agent_args = self.agent_args.clone();
+            let route = self.provider_route.clone();
+            std::thread::spawn(move || run_acp_worker(agent_path, agent_args, route, cmd_rx));
+            cmd_tx
+        })
     }
 }
 
@@ -400,7 +416,7 @@ impl ClaudeAcpBackend {
 impl super::CodingBackend for ClaudeAcpBackend {
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         let (response_tx, response_rx) = oneshot::channel();
-        self.cmd_tx
+        self.commands()
             .send(AcpCommand::Prompt {
                 request,
                 response_tx,
@@ -418,7 +434,7 @@ impl super::CodingBackend for ClaudeAcpBackend {
 
     async fn list_models(&self) -> Result<super::BackendModels, BackendError> {
         let (response_tx, response_rx) = oneshot::channel();
-        self.cmd_tx
+        self.commands()
             .send(AcpCommand::ListModels { response_tx })
             .await
             .map_err(|_| BackendError::InvocationFailed("ACP worker channel closed".to_string()))?;

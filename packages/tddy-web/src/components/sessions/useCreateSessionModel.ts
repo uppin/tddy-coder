@@ -43,13 +43,18 @@ export function useCreateSessionModel({
   const modelAgentKey = sessionType === "tool" ? selectedAgentId : sessionType;
   const vendorModels = useAgentModels(catalogClient, sessionToken, modelAgentKey, daemonInstanceId);
 
-  // The provider field is offered for the CLI session types; the daemon says which accounts the
-  // harness can run on and why not, the form keeps no matrix of its own.
-  const providerHarness = sessionType === "tool" ? null : sessionType;
+  // The provider field is offered for the harness the session runs: a CLI session type names its
+  // harness, and a tool session runs the agent it picked. The daemon says which accounts that
+  // harness can run on and why not; the form keeps no matrix of its own.
+  // TODO(tool-route): the catalog does not say which agents are specialized definitions, which are
+  // not harnesses; for one of those the daemon's reason ("unknown harness") shows in this field.
+  const providerHarness = sessionType === "tool" ? selectedAgentId || null : sessionType;
   const providerRoutes = useProviderRoutes(accountsClient, sessionToken, providerHarness);
+  // A provider choice belongs to the harness it was made for: switching session type or agent
+  // clears it.
   useEffect(() => {
     setProviderChoice(null);
-  }, [sessionType]);
+  }, [providerHarness]);
   const providerAccountId =
     providerChoice !== null && providerChoice !== BUILT_IN_PROVIDER ? providerChoice : "";
   // An account serves its own models; the vendor's catalog does not apply to it.

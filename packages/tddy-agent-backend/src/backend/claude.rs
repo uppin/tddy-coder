@@ -1,7 +1,9 @@
 //! Claude Code CLI backend implementation.
 
+use super::routed::{route_child_env, splice_route_args};
 use super::{InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
+use crate::provider_route::HarnessRoute;
 use crate::stream;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -356,6 +358,8 @@ fn goal_to_claude_config(request: &InvokeRequest) -> ClaudeInvokeConfig {
 pub struct ClaudeCodeBackend {
     binary_path: PathBuf,
     progress_callback: ProgressCallback,
+    /// The provider route the child runs on (`with_provider_route`); `None` for the vendor.
+    pub(super) provider_route: Option<HarnessRoute>,
 }
 
 impl std::fmt::Debug for ClaudeCodeBackend {
@@ -370,6 +374,7 @@ impl std::fmt::Debug for ClaudeCodeBackend {
                     "None"
                 },
             )
+            .field("provider_route", &self.provider_route)
             .finish()
     }
 }
@@ -379,6 +384,7 @@ impl Clone for ClaudeCodeBackend {
         Self {
             binary_path: self.binary_path.clone(),
             progress_callback: self.progress_callback.clone(),
+            provider_route: self.provider_route.clone(),
         }
     }
 }
@@ -395,6 +401,7 @@ impl ClaudeCodeBackend {
         Self {
             binary_path: PathBuf::from("claude"),
             progress_callback: None,
+            provider_route: None,
         }
     }
 
@@ -404,6 +411,7 @@ impl ClaudeCodeBackend {
         Self {
             binary_path: path,
             progress_callback: None,
+            provider_route: None,
         }
     }
 
@@ -481,7 +489,10 @@ impl ClaudeCodeBackend {
             None
         };
 
-        let args = build_claude_args(&request, &config, system_prompt_path.as_deref());
+        let mut args = build_claude_args(&request, &config, system_prompt_path.as_deref());
+        if let Some(ref route) = self.provider_route {
+            splice_route_args(&mut args, route, "--model");
+        }
         let mut cmd = Command::new(&self.binary_path);
         if let Some(ref wd) = request.working_dir {
             cmd.current_dir(wd);
@@ -531,6 +542,13 @@ impl ClaudeCodeBackend {
         }
 
         cmd.env("PATH", super::path_with_exe_dir());
+        // The route's variables come before the backend's own, so a route can never shadow a
+        // `TDDY_*` variable the session depends on.
+        if let Some(ref route) = self.provider_route {
+            for (key, value) in route_child_env(route) {
+                cmd.env(key, value);
+            }
+        }
         if let Some(ref p) = request.socket_path {
             cmd.env("TDDY_SOCKET", p);
         }

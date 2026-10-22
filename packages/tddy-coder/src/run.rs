@@ -9,6 +9,7 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tddy_core::provider_route::HarnessRoute;
 use tddy_core::usage_watcher::{spawn_session_usage_watcher, SessionUsageWatchConfig};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
@@ -277,6 +278,35 @@ fn resolve_specialized_agent_defs(
         }
     }
     Ok(defs)
+}
+
+/// The provider route `--provider-route-path` names, loaded. A file another account can read, or one
+/// that is not a route, stops the run: a session asked to run on an account never runs on the
+/// vendor instead. The message names the path and never the contents, which hold a key.
+fn load_provider_route(args: &Args) -> anyhow::Result<Option<HarnessRoute>> {
+    args.provider_route_path
+        .as_deref()
+        .map(|path| {
+            tddy_core::provider_route_file::load_route_file(path).map_err(|reason| {
+                anyhow::anyhow!("--provider-route-path could not be used: {reason}")
+            })
+        })
+        .transpose()
+}
+
+/// The backend `args` runs for `agent`, with the specialized defs and the provider route `args`
+/// names applied by [`create_backend`].
+fn create_backend_for_args(args: &Args, agent: &str) -> anyhow::Result<SharedBackend> {
+    create_backend(
+        agent,
+        args.cursor_agent_path.as_deref(),
+        args.codex_cli_path.as_deref(),
+        args.codex_acp_cli_path.as_deref(),
+        None,
+        None,
+        &resolve_specialized_agent_defs(args)?,
+        load_provider_route(args)?,
+    )
 }
 
 /// CLI `--output-dir` when set, else `"."` (derive repo root from cwd / default sessions base).
@@ -1359,15 +1389,7 @@ pub fn run_with_args(
         args.model.as_deref().unwrap_or("(default)")
     );
 
-    let backend = create_backend(
-        &resolved_agent,
-        args.cursor_agent_path.as_deref(),
-        args.codex_cli_path.as_deref(),
-        args.codex_acp_cli_path.as_deref(),
-        None,
-        None,
-        &resolve_specialized_agent_defs(args)?,
-    )?;
+    let backend = create_backend_for_args(args, &resolved_agent)?;
 
     if args.goal.as_deref() == Some("acceptance-tests") {
         let session_dir = args.session_dir.as_ref().context("session directory")?;
@@ -1583,15 +1605,7 @@ fn resolve_agent_home_dir() -> PathBuf {
 /// No TUI is rendered: physical fd 1 is the JSON-RPC channel.
 fn run_acp_agent(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     let agent_str = args.agent.as_deref().unwrap_or("claude").to_string();
-    let backend = create_backend(
-        &agent_str,
-        args.cursor_agent_path.as_deref(),
-        args.codex_cli_path.as_deref(),
-        args.codex_acp_cli_path.as_deref(),
-        None,
-        None,
-        &resolve_specialized_agent_defs(args)?,
-    )?;
+    let backend = create_backend_for_args(args, &agent_str)?;
     let recipe = recipe_arc_for_args(args)?;
     let data_dir = resolve_tddy_data_dir(args);
     crate::acp_agent::run_acp(backend, recipe, data_dir, shutdown)
@@ -1780,15 +1794,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
     if args.agent.is_none() {
         verify_tddy_tools_available(agent_str)?;
     }
-    let backend = create_backend(
-        agent_str,
-        args.cursor_agent_path.as_deref(),
-        args.codex_cli_path.as_deref(),
-        args.codex_acp_cli_path.as_deref(),
-        None,
-        None,
-        &resolve_specialized_agent_defs(args)?,
-    )?;
+    let backend = create_backend_for_args(args, agent_str)?;
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
     let livekit_enabled = args.livekit_url.is_some()
@@ -2588,9 +2594,19 @@ fn create_backend(
     // Resolved specialized-agent defs (<tddyhome>/agents/*.yaml, `--agent-def-path` — see
     // docs/ft/coder/specialized-subagents.md).
     specialized_agent_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+    // The provider route the session runs on (`--provider-route-path`), applied to the backend.
+    provider_route: Option<HarnessRoute>,
 ) -> anyhow::Result<SharedBackend> {
     log::info!("[tddy-coder] using agent: {}", agent);
     if let Some(def) = specialized_agent_defs.iter().find(|d| d.name == agent) {
+        // A definition is its own endpoint: a route cannot be applied to it, so it is refused
+        // rather than the session running on the definition's endpoint instead of the account.
+        if provider_route.is_some() {
+            anyhow::bail!(
+                "agent {agent:?} is a specialized agent definition, which cannot run on a provider \
+                 account: its definition is its own endpoint"
+            );
+        }
         // The def is the whole configuration — endpoint, model, turn budget and credential. No
         // flag can override it: one that could would run the session against a model the operator
         // never configured while still reporting the def's name
@@ -2649,6 +2665,12 @@ fn create_backend(
                  specialized agent def. Known agents: {known}"
             );
         }
+    };
+    let backend = match provider_route {
+        Some(route) => backend
+            .with_provider_route(route)
+            .map_err(anyhow::Error::msg)?,
+        None => backend,
     };
     Ok(SharedBackend::from_any(backend))
 }
@@ -2756,6 +2778,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             std::slice::from_ref(&def),
+            None,
         )
         .expect("the resolved def must build a backend");
         let result = backend
@@ -2805,6 +2828,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             std::slice::from_ref(&def),
+            None,
         )
         .expect("the resolved def must build a backend")
         .invoke(InvokeRequest {
@@ -2853,6 +2877,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             std::slice::from_ref(&def),
+            None,
         )
         .expect("a resolved def name must build a backend");
 
@@ -3028,7 +3053,7 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let error = create_backend("repo-explorer", None, None, None, None, None, &defs)
+        let error = create_backend("repo-explorer", None, None, None, None, None, &defs, None)
             .expect_err("an unresolvable agent must not silently become Claude");
 
         // Then
@@ -3046,7 +3071,7 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let backend = create_backend("claude", None, None, None, None, None, &defs)
+        let backend = create_backend("claude", None, None, None, None, None, &defs, None)
             .expect("'claude' names a coding backend");
 
         // Then
@@ -3379,6 +3404,7 @@ fn run_full_workflow_tui(
         let codex_path_for_factory = args.codex_cli_path.clone();
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
         let specialized_agent_defs_for_factory = resolve_specialized_agent_defs(args)?;
+        let provider_route_for_factory = load_provider_route(args)?;
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
@@ -3391,6 +3417,7 @@ fn run_full_workflow_tui(
                     socket_path_for_factory.as_deref(),
                     None,
                     &specialized_agent_defs_for_factory,
+                    provider_route_for_factory.clone(),
                 )
                 .map_err(|e| e.to_string())
             }),
@@ -3410,15 +3437,7 @@ fn run_full_workflow_tui(
         p.show_backend_selection(q, idx);
     } else {
         let agent = args.agent.as_deref().unwrap();
-        let backend = create_backend(
-            agent,
-            args.cursor_agent_path.as_deref(),
-            args.codex_cli_path.as_deref(),
-            args.codex_acp_cli_path.as_deref(),
-            socket_path.as_deref(),
-            None,
-            &resolve_specialized_agent_defs(args)?,
-        )?;
+        let backend = create_backend_for_args(args, agent)?;
         presenter.lock().unwrap().start_workflow(
             backend,
             cli_output_dir_param(args),
@@ -3792,15 +3811,7 @@ fn waiting_for_input_has_pending_questions(
 
 fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     let agent_str = resolve_agent_for_full_workflow_plain(args)?;
-    let backend = create_backend(
-        &agent_str,
-        args.cursor_agent_path.as_deref(),
-        args.codex_cli_path.as_deref(),
-        args.codex_acp_cli_path.as_deref(),
-        None,
-        None,
-        &resolve_specialized_agent_defs(args)?,
-    )?;
+    let backend = create_backend_for_args(args, &agent_str)?;
 
     let recipe = recipe_arc_for_args(args)?;
     let mut session_dir = args.session_dir.clone().context("session directory")?;

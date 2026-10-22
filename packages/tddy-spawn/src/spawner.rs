@@ -859,14 +859,20 @@ pub const AGENT_DEF_FILENAME: &str = "agent-def.json";
 /// Write a tool session's provider route (`tddy_core::provider_route_file`) to
 /// `<session_dir>/provider-route.json`, owner-only and owned by `os_user`, and return its path —
 /// the same treatment the agent definition's file gets, because it carries a credential too.
+#[cfg(unix)]
 pub fn write_provider_route_file(
     session_dir: &Path,
     route_json: &str,
     os_user: &str,
 ) -> anyhow::Result<PathBuf> {
-    let _ = (session_dir, route_json, os_user);
-    // TODO(tool-route): implement
-    todo!()
+    let target = resolve_target_account(os_user)?;
+    write_owner_only_session_file(
+        session_dir,
+        tddy_core::provider_route_file::PROVIDER_ROUTE_FILENAME,
+        route_json,
+        &target,
+        "provider route",
+    )
 }
 
 /// Write the resolved agent def where the child can read it, and nobody else can.
@@ -888,6 +894,26 @@ fn write_agent_def_file(
     def_json: &str,
     target: &TargetAccount,
 ) -> anyhow::Result<PathBuf> {
+    write_owner_only_session_file(
+        session_dir,
+        AGENT_DEF_FILENAME,
+        def_json,
+        target,
+        "agent def",
+    )
+}
+
+/// Write `contents` to `file_name` in `session_dir`, owner-only, and chown it to `target` when the
+/// child runs as somebody else. `what` names the file in errors. The agent def and the provider
+/// route both carry a credential, so both go through here.
+#[cfg(unix)]
+fn write_owner_only_session_file(
+    session_dir: &Path,
+    file_name: &str,
+    contents: &str,
+    target: &TargetAccount,
+    what: &str,
+) -> anyhow::Result<PathBuf> {
     use std::io::Write as _;
     use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 
@@ -898,7 +924,7 @@ fn write_agent_def_file(
             e
         )
     })?;
-    let path = session_dir.join(AGENT_DEF_FILENAME);
+    let path = session_dir.join(file_name);
     // `mode` applies only when the file is created, so an existing file (a resumed session) is
     // re-permissioned explicitly below rather than trusted to be what a previous run left.
     let mut file = std::fs::OpenOptions::new()
@@ -907,15 +933,15 @@ fn write_agent_def_file(
         .truncate(true)
         .mode(0o600)
         .open(&path)
-        .map_err(|e| anyhow::anyhow!("failed to write agent def {}: {}", path.display(), e))?;
-    file.write_all(def_json.as_bytes())
-        .map_err(|e| anyhow::anyhow!("failed to write agent def {}: {}", path.display(), e))?;
+        .map_err(|e| anyhow::anyhow!("failed to write {what} {}: {}", path.display(), e))?;
+    file.write_all(contents.as_bytes())
+        .map_err(|e| anyhow::anyhow!("failed to write {what} {}: {}", path.display(), e))?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-        .map_err(|e| anyhow::anyhow!("failed to secure agent def {}: {}", path.display(), e))?;
+        .map_err(|e| anyhow::anyhow!("failed to secure {what} {}: {}", path.display(), e))?;
 
     if !target.is_this_process() {
         let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
-            .map_err(|e| anyhow::anyhow!("agent def path is not a C string: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{what} path is not a C string: {}", e))?;
         if unsafe { libc::chown(c_path.as_ptr(), target.uid, target.gid) } != 0 {
             return Err(anyhow::anyhow!(
                 "failed to give {} to uid {}: {}",
@@ -1049,6 +1075,21 @@ pub fn plan_session_child(
             let path = write_agent_def_file(&session_dir, def, &target)?;
             push_flag(&mut args, "--agent-def-path", &path.display().to_string());
         }
+    }
+
+    // A route is never dropped when it is present: an empty or unwritable one fails the spawn
+    // rather than starting the session on the harness's vendor.
+    if let Some(route_json) = opts.provider_route_json {
+        let session_dir = tddy_core::session_lifecycle::unified_session_dir_path(
+            &resolved_tddy_data_dir,
+            &session_id,
+        );
+        let path = write_provider_route_file(&session_dir, route_json, os_user)?;
+        push_flag(
+            &mut args,
+            "--provider-route-path",
+            &path.display().to_string(),
+        );
     }
 
     if opts.mouse {

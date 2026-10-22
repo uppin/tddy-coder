@@ -23,6 +23,8 @@ use tddy_rpc::Status;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use crate::launch_ports::LaunchSessions;
+use crate::session_provider_route::session_route_sources;
+use crate::tool_session_route::tool_session_route_json;
 use tddy_service::proto::session::StartSessionRequest;
 
 impl LaunchSessions {
@@ -63,6 +65,14 @@ impl LaunchSessions {
         // the session that owns a `changeset.yaml` is the process that writes it.
         let stack_seed_base_session_for_spawn = trim_to_option(&req.pr_stack_base_session_id);
         let model_for_spawn = trim_to_option(&req.model);
+        // The route the session runs on, resolved before anything is created: a refusal (a locked
+        // vault, an agent that cannot run on an account) starts nothing.
+        let provider_route_json = tool_session_route_json(
+            &self.host.session_account_access(&req.session_token),
+            agent_for_spawn.as_deref().unwrap_or_default(),
+            &session_route_sources(&req),
+            model_for_spawn.as_deref().unwrap_or_default(),
+        )?;
         // Every tool session reaches the daemon over its OS user's host-session socket, whatever its
         // recipe — that is how its agent's PR tools get the project account's token. The coder
         // names itself to the socket by its `--session-id`, which is therefore fixed before the
@@ -136,8 +146,7 @@ impl LaunchSessions {
                 project_id: Some(pid_for_spawn),
                 agent: agent_for_spawn,
                 agent_def_json: agent_def_for_spawn,
-                // TODO(tool-route): carry the route through this path
-                provider_route_json: None,
+                provider_route_json,
                 recipe: recipe_for_spawn,
                 stack_parent: stack_parent_for_spawn,
                 stack_node_id: stack_node_id_for_spawn,
