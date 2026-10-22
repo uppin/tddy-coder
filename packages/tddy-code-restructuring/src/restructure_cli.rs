@@ -95,8 +95,12 @@ async fn start_servers(
 ) -> Result<Arc<tddy_lsp::client::LspClient>> {
     let launches = installed_launches_of_an_apply(options);
     let mut allow = SupportRegistry::with_builtins().allow_list();
+    // First registration wins, as `SupportRegistry::allow_list` has it: no installed language
+    // replaces a built-in's launch.
     for (language, launch) in &launches {
-        allow.allow(language.clone(), launch.clone());
+        if !allow.is_allowed(language) {
+            allow.allow(language.clone(), launch.clone());
+        }
     }
     let lsp_registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(600))
         .with_spawn_observer(observer);
