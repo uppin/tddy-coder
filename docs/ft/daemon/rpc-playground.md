@@ -50,7 +50,7 @@ Because `LiveKitTransport` derives `service`, `method`, and `methodKind` at runt
 
 `reflection_entry_from(service_names) -> ServiceEntry` is a helper (name `"grpc.reflection.v1.ServerReflection"`) that any participant assembling a `MultiRpcService` can push. Registered in:
 
-- `packages/tddy-daemon/src/runtime.rs` — after `rpc_entries` is assembled.
+- `packages/tddy-daemon/src/runtime/build_context.rs` (`BuildContext::mount_daemon_settings`) — after `rpc_entries` is assembled.
 - `packages/tddy-coder/src/run.rs` — at every `MultiRpcService` assembly site.
 
 ## Transport note

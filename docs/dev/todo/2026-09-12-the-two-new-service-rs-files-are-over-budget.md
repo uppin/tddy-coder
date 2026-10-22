@@ -1,6 +1,9 @@
 # 2026-09-12 — Both crates node 7 created open with an over-budget `service.rs`
 
 **Category:** Future enhancement
+**Narrowed:** 2026-10-22 by `#satellite` 16/16 ([#695](https://github.com/uppin/tddy-coder/pull/695)):
+`tddy-session-activity/src/service.rs` is split (835 → 202, with `service/{ports,rpc,hook_reports}.rs`,
+the two hook reports against the streams). What remains is `tddy-session-agents`.
 **Source:** `#unbundle` node 7, [#476](https://github.com/uppin/tddy-coder/pull/476), changeset
 [`2026-09-09-unbundle-session-agent-services`](../changesets/2026-09-09-unbundle-session-agent-services.md)
 
@@ -10,7 +13,6 @@ Measured on **production** lines (everything before the first `#[cfg(test)]`):
 |---|---:|---:|
 | `tddy-session-agents/src/session_agent_clone.rs` | **1,157** | 98 |
 | `tddy-session-agents/src/service.rs` | **876** | 0 |
-| `tddy-session-activity/src/service.rs` | **819** | 0 |
 | `tddy-session-agents/src/session_agent_roster.rs` | 394 | 270 |
 | `tddy-session-agents/src/session_agent_status.rs` | 304 | 477 |
 
@@ -35,6 +37,7 @@ same crates' wiring. That reason expires when the stack lands.
 
 ## What closing it would take
 
-Split each `service.rs` along the seam its own module header already names, after node 9. The
+Split `tddy-session-agents/src/service.rs` along the seam its own module header already names (the four
+roster methods against the five conversation ones). The
 per-handler `Status` shapes and the shared helpers (`sessions_base_for_token`, the session-directory
 resolution both crates repeat at the top of every method) are what has to stay in one place.

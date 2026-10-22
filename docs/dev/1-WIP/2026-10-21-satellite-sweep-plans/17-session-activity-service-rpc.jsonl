@@ -1,2 +1,0 @@
-{"v":2,"files":{"packages/tddy-session-activity/src/service.rs":{"sha256":"sha256:8448e0ace871c5767f59285580acd4d33241d0090c71482848e485449d5f8928","modified":"2026-10-21T13:57:53Z"}}}
-{"id":"op-1","op":"move_item","anchor":{"kind":"items","file":"packages/tddy-session-activity/src/service.rs","items":["tddy_session_activity::service::<ActivityServiceImpl as tddy_service::proto::activity::ActivityService>"],"fingerprints":["sha256:711af853b1253b3f0cbe39bf54ab102180a2b14cd38a0694856906f9baebdc4b"]},"name":"rpc","to":"tddy_session_activity::service","reexport":"outside"}

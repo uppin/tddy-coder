@@ -1,5 +1,6 @@
 # 2026-10-21 — `restructure` cannot re-parent a module declared in a binary root
 
+**Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Future enhancement
 **Source:** `#satellite` 15/15 (PR #690), the six binary-only modules of `tddy-tools` re-parented
 from `src/main.rs` into the package's own `src/lib.rs`

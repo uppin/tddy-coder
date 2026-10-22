@@ -40,7 +40,7 @@ tooltip read the same sentence. `os_user` is what scopes the stream — see **Au
 The label is resolved on the daemon's side of the boundary (`tddy-session-lifecycle`'s
 `session_notifications` module, which keeps `SessionNotificationPublishing`), because `workflow_goal` comes from the
 session-list enrichment that serves `ListSessions`. This crate receives the resolved label through
-[`SessionLabels`](../src/service.rs), which is the seam.
+[`SessionLabels`](../src/service/ports.rs), which is the seam.
 
 `tddy_core::session_label::session_display_label(repo_path, workflow_goal, session_id)` is the one
 rule: the basename of `repo_path`, else `workflow_goal`, else the first eight characters of the id.
@@ -110,7 +110,7 @@ daemon without a `telegram:` block.
 
 The bus is **host-wide**, so the relay is the only thing between one operator and another's
 sessions. `stream_session_notifications` resolves `os_user_for_github` — through
-[`OsUserResolver`](../src/service.rs), a port, because only the daemon holds the `users[]` mapping —
+[`OsUserResolver`](../src/service/ports.rs), a port, because only the daemon holds the `users[]` mapping —
 exactly as `stream_session_activity` does (`permission_denied` when unmapped), and
 `relay_session_notifications` delivers only on a **positive** owner match — a notification whose
 owner is empty reaches nobody.

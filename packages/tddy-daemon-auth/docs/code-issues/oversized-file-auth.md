@@ -6,7 +6,7 @@
 **Metrics:** **622 production lines** (2026-09-24, #510 after its idle-vault follow-up, unchanged from its wrap; 576 on `origin/master` `35cf2913`), counted to the first `#[cfg(test)]` · budget 500 · ~1.24× over · 1,403 lines in all
 **Thresholds breached:** length 622 > 500
 **Restructure:** required — module seams (see below); `build_auth_entries_admitting` was cut to 58 lines and 5 parameters by `#satellite` 16/16, which also moved the provider and vault helpers it calls into `auth/entry_parts.rs`
-**Status:** Open. Split deferred with the developer's consent during #510's wrap, to a follow-up after the `#keyring` stack lands — `docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`
+**Status:** Open — partially fixed 2026-10-22 by `#satellite` 16/16 (616 → 569, still 69 over). Left there on purpose: the file was 622 when the `#satellite` stack started and the stack only shrank it, so it is outside the sweep's "what the stack added or grew" scope; the next seam is the `mint_live_kit_token` / `build_token_service_entry` group. Split deferred with the developer's consent during #510's wrap, to a follow-up after the `#keyring` stack lands — `docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`
 
 ## Measurement history
 

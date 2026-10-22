@@ -14,8 +14,7 @@ over budget on `master` before the stack and are smaller now.
 | `packages/tddy-daemon-livekit/src/livekit_peer_discovery.rs` | 1,658 → 1,390 | −268 | `packages/tddy-daemon-livekit/docs/code-issues/oversized-file-livekit-peer-discovery.md` |
 | `packages/tddy-session-lifecycle/src/connection_service.rs` | 527 → 516 | −15 | `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-connection-service.md` |
 
-`packages/tddy-host-service/src/service.rs` is recorded in
-`packages/tddy-host-service/docs/code-issues/oversized-file-service.md` and is split by #693.
+`packages/tddy-host-service/src/service.rs` was split by #693.
 `packages/tddy-screen-sharing/src/screen_sharing_service.rs` (the +16 from #626) was split by #653.
 
 **What would close it:** the splits named in each record, applied with `code-restructuring`.

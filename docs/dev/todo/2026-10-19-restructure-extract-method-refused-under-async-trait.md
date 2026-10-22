@@ -1,5 +1,6 @@
 # 2026-10-19 — `extract_method` is refused inside an `#[async_trait]` impl
 
+**Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Future enhancement (engine gap)
 **Source:** `#host-desktops` 1/8, [#653](https://github.com/uppin/tddy-coder/pull/653) — seam C of the
 screen-sharing service split

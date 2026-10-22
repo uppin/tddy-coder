@@ -1,8 +1,11 @@
 # 2026-10-22 — `restructure` cannot anchor a function that has a `cfg` twin of the same name
 
+**Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Future enhancement (engine gap)
-**Source:** `#satellite` 16/16 (the sweep), `packages/tddy-tools/src/cli.rs`, probe-a in
-`docs/dev/1-WIP/2026-10-21-satellite-sweep-plans/probe-a-tools-cli-cfg-pairs.jsonl`
+**Source:** `#satellite` 16/16 (the sweep, [#695](https://github.com/uppin/tddy-coder/pull/695)),
+`packages/tddy-tools/src/cli.rs`: a probe plan (`extract_module` over the relay families' line range),
+recorded in the sweep's change-history entry
+[`2026-10-22-satellite-16-sweep.md`](../changesets/2026-10-22-satellite-16-sweep.md)
 
 `cli.rs` holds five families of `relay_*` functions, each a `#[cfg(unix)]` / `#[cfg(not(unix))]` pair of
 **same-named** functions. rust-analyzer analyses one `cfg` arm, so the engine cannot name the pair:

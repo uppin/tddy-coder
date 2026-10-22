@@ -1,5 +1,6 @@
 # 2026-10-21 — The `tddy-daemon` binary cannot be built without the LiveKit plugin
 
+**Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Future enhancement
 **Source:** `#satellite` 13/13 (PR #635), PRD `livekit-satellite-lifecycle-launch` § Out of Scope
 

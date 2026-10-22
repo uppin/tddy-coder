@@ -8,7 +8,9 @@ right model for routing — an RPC cannot be forwarded to a peer that is not the
 for an operator asking why the machine they used this morning is silent.
 
 `host_registry.rs` is the durable half. It records a host on sight, stamps `last_seen` when the host
-stops being visible, and **never removes an entry**. It backs the web's Hosts screen
+stops being visible, and **never removes an entry**. What one sighting or one departure does to a
+stored row — `apply_sighting`, `apply_departure`, and the validation and bounding of the instance id, label and repos path they apply — is in
+`host_registry/sightings.rs`; `FileHostRegistry` in `host_registry.rs` reads, applies and writes. It backs the web's Hosts screen
 ([hosts-screen.md](../../tddy-web/docs/hosts-screen.md), feature
 [docs/ft/web/hosts-screen.md](../../../docs/ft/web/hosts-screen.md)).
 

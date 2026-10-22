@@ -111,6 +111,17 @@ handlers. Both read `tddy-service`'s shared `acp_replay` helpers, but the framin
 written twice. See
 [`docs/dev/todo/2026-09-12-the-acp-replay-framing-is-written-twice.md`](../../../docs/dev/todo/2026-09-12-the-acp-replay-framing-is-written-twice.md).
 
+## Module layout
+
+| Module | Production lines | Holds |
+|---|---:|---|
+| `service.rs` | 202 | `ActivityServiceImpl`, the session-directory and hook-session resolution every method shares, `publish_for_session`, `activity_delta_frames` and the two stream adapters (`streamed`, `relayed`) |
+| `service/ports.rs` | 146 | the ports the daemon injects: `ActivityPorts`, `SessionLabels`, `SessionDeltaStores` and `NoSessionDeltaStores`, `DeltaLookup`, `DeltaScope`, `MeasuredDelta` — re-exported from `service` |
+| `service/rpc.rs` | 323 | the `activity.ActivityService` trait impl: the four streams, the two ACP replay reads, and the two hook reports as one-line delegations |
+| `service/hook_reports.rs` | 215 | the two hook reports' bodies, `report_session_status_impl` and `report_agent_activity_impl`, as inherent methods: a trait impl cannot be split across files and `restructure`'s `extract_method` is refused inside an `#[async_trait]` impl, so the trait methods delegate here |
+
+Production lines are counted to the first `#[cfg(test)]`; the budget is 500.
+
 ## Known gaps
 
 - ⚠ **This crate has no tests at all** — no `tests/` directory, no `#[cfg(test)]` module, across
@@ -118,8 +129,9 @@ written twice. See
   See [`docs/dev/todo/2026-09-12-tddy-session-activity-has-no-tests-of-its-own.md`](../../../docs/dev/todo/2026-09-12-tddy-session-activity-has-no-tests-of-its-own.md).
 - ⚠ **Nothing checks that the moved ACP replay output matches what the old coordinate produced.**
   For a move-only change that is the key check, and it is absent. Same entry as above.
-- **`service.rs` is 819 production lines**, over budget, and was not split. See
-  [`docs/dev/todo/2026-09-12-the-two-new-service-rs-files-are-over-budget.md`](../../../docs/dev/todo/2026-09-12-the-two-new-service-rs-files-are-over-budget.md).
+- `report_agent_activity_impl` (`service/hook_reports.rs`) is 129 lines, over the 60-line function
+  threshold, with no code-issue record yet: the `PreToolUse` and `PostToolUse` record builders are its
+  seam.
 
 ## Related
 

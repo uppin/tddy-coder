@@ -162,6 +162,15 @@ They are why this crate depends on `tddy-daemon-kernel`.
 `#[cfg(unix)]` kernel items (`resolve_pty_os_user`, `ResolvedPtyUser`), so the crate does not build
 on a non-unix target.
 
+## `pty_relay`'s modules
+
+`pty_relay.rs` holds `PtyRelayConfig`, `run_pty_relay` and the request builders. Its three paths each
+have a module: `pty_relay/room.rs` (the room-backed start-and-connect and connect-only paths,
+`run_livekit_session`), `pty_relay/daemon_http.rs` (the daemon's Connect-HTTP calls:
+`open_session_room_over_http`, `join_terminal_room`, the stub-token exchange and `connectrpc_post`) and
+`pty_relay/grpc_terminal.rs` (the gRPC terminal fallback). `open_session_room_over_http` and
+`join_terminal_room` are re-exported from `pty_relay`.
+
 ## Opening the session's room for the LiveKit relay
 
 `pty_relay`'s LiveKit path (`tddy-tools pty-relay --livekit-url`) waits for the session's

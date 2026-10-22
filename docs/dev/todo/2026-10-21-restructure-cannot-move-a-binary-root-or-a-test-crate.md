@@ -1,5 +1,6 @@
 # 2026-10-21 — `restructure` cannot move a binary root or a test crate file
 
+**Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Future enhancement
 **Source:** `#satellite` 14/15 (PR #689), `tddy-remote-git-repo` and `tddy-session-sync` split into a library and a `-cli` wiring package
 

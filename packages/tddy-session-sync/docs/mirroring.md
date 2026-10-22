@@ -16,8 +16,8 @@ a room, or a clock. Only `sync::run` and the `Mirror` methods touch the world.
 | Module | Role |
 |--------|------|
 | `credentials` | Flags with per-parameter environment fallback, and the repo-root `.env` beneath both. An already-set variable always wins — the rule `./web-dev` and `tddy_vm_testkit::env_file` implement. |
-| `attach` | Resolve the session over HTTP, ask the daemon to open its room, mint a room token, join `session-{id}`, subscribe to both topics. |
-| `sync` | The loop: what each broadcast provokes, and the git that keeps the mirror equal. |
+| `attach` | Resolve the session over HTTP, ask the daemon to open its room, mint a room token, join `session-{id}`, subscribe to both topics. The daemon's Connect-HTTP calls (`refresh_session`, `list_sessions`, `open_session_room`) and `DaemonHttpError` are `attach::daemon_http`. |
+| `sync` | The loop: what each broadcast provokes, and the git that keeps the mirror equal. The git it issues — `GitInvocation`, `GitTransport`, the remote URL and WIP ref, the first-attach and reconcile commands — is `sync::git`; what a record or worktree event decides, the delta request and the reassembly of its chunks are `sync::delta`. Both are re-exported from `sync`. |
 | `mirror` | The managed destination: marker, ownership refusal, sequence de-duplication, apply. |
 | `apply` | What a delta is (`Delta`), and what offering one can conclude (`ApplyOutcome`, `ReconcileReason`). |
 

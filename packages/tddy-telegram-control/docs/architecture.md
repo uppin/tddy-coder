@@ -11,11 +11,12 @@ presenter events and metadata ticks into chat messages and keyboards.
 It sits above both `tddy-telegram` and `tddy-session-lifecycle` and is reached by
 `tddy-daemon` alone — see [README.md](../README.md) for why it is a crate of its own.
 
-## `telegram_session_control/` — seven files, one harness
+## `telegram_session_control/` — nine files, one harness
 
-`mod.rs` holds `TelegramSessionControlHarness`, its DTOs and the inherent methods more than one flow
-calls. Four child modules (`session_start`, `pickers`, `chaining_and_listing`, `elicitation`) each
-add one `impl TelegramSessionControlHarness` block for one family of flows. A private method is
+`mod.rs` holds `TelegramSessionControlHarness` and the inherent methods more than one flow calls; its
+DTOs live in `types.rs`, glob-re-exported from `mod.rs` so every child sees them under the same names.
+Five child modules (`session_start`, `cli_spawns`, `pickers`, `chaining_and_listing`, `elicitation`)
+each add one `impl TelegramSessionControlHarness` block for one family of flows. A private method is
 visible only inside the module that declares it and its children, so a helper two families share
 lives in `mod.rs`, where every child can see it; a free helper they share is `pub(super)` in
 `callbacks` or `workflow_spawn`. Those two hold no harness methods: `callbacks` is pure functions,
@@ -24,20 +25,21 @@ and `workflow_spawn` is `TelegramWorkflowSpawn` and its helpers.
 | Module | Prod lines | Holds |
 |---|---:|---|
 | `callbacks.rs` | 736 | the command and `callback_data` vocabulary: the slash commands, the prefixes, and the pure parsers, formatters and chunkers (`parse_*`, `chunk_telegram_text`) with their unit tests |
-| `session_start.rs` | 711 | `/start-workflow`, `/start-claude`, `/start-cursor`: session creation, the model-pick callbacks, and the Claude and Cursor CLI spawns |
-| `pickers.rs` | 705 | the project, branch-intent, branch, branch-conflict, model and agent keyboards, ending in `spawn_telegram_workflow` |
-| `mod.rs` | 539 | the harness, its DTOs, the shared helpers |
+| `pickers.rs` | 706 | the project, branch-intent, branch, branch-conflict, model and agent keyboards, ending in `spawn_telegram_workflow` |
 | `chaining_and_listing.rs` | 518 | `/chain-workflow` and its parent picker, recipe and plan-review callbacks, the session list with Enter and Delete |
+| `workflow_spawn.rs` | 477 | `TelegramWorkflowSpawn`: the chain integration-base merge, the spawn configuration and inputs, and the branch-name helpers the start paths share |
 | `elicitation.rs` | 456 | presenter input from Telegram: feature submission, document review, elicitation answers, the changeset writes and recipe keyboard around them |
-| `workflow_spawn.rs` | 375 | `TelegramWorkflowSpawn`: the chain integration-base merge, the spawn configuration and inputs, and the branch-name helpers the start paths share |
+| `cli_spawns.rs` | 444 | the Claude and Cursor model-pick callbacks and the two CLI spawns they end in, `spawn_telegram_claude_cli` and `spawn_telegram_cursor_cli` — including the terminal exposure a Claude start announces, where the exposure port's `FailedPrecondition` ("nothing is wired") is not logged as a failure |
+| `mod.rs` | 412 | the harness and the shared helpers |
+| `session_start.rs` | 295 | `/start-workflow`, `/start-claude`, `/start-cursor`: session creation up to the model pick |
+| `types.rs` | 151 | the harness's DTOs |
 
 Production lines are counted to the first `#[cfg(test)]`. No module may exceed **800**, which
 `telegram_extraction_shape`'s `no_control_module_exceeds_eight_hundred_production_lines` enforces.
-The repo's file budget is 500. The five modules over it each have a record in
-[code-issues/](code-issues/) naming its seams. Three of them (`session_start.rs`, `pickers.rs` and
-the production half of `callbacks.rs`) cannot reach 500 by moving items alone, because their size
-is in long functions: two CLI spawns of 217 and 137 lines, and the 177-line
-`handle_telegram_branch_callback`.
+The repo's file budget is 500. The three modules over it each have a record in
+[code-issues/](code-issues/) naming its seams. Two of them (`pickers.rs` and the production half of
+`callbacks.rs`) cannot reach 500 by moving items alone, because their size is in long functions such
+as the 177-line `handle_telegram_branch_callback`.
 
 ## GitHub account of a Telegram-started session
 

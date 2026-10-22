@@ -2,7 +2,8 @@
 //! socket, and each has a `cfg(unix)` and a `cfg(not(unix))` arm of the same name.
 //!
 //! TODO(restructure-engine): moved by hand (byte-identical bodies, consent D6) — the engine cannot
-//! anchor a `cfg`-paired same-named function (`docs/dev/1-WIP/2026-10-21-satellite-sweep.md` § D6, probe-a).
+//! anchor a `cfg`-paired same-named function —
+//! `docs/dev/todo/2026-10-22-restructure-cannot-anchor-cfg-twin-functions.md`.
 
 use super::*;
 

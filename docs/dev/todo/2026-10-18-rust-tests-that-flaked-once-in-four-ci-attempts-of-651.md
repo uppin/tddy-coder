@@ -1,5 +1,6 @@
 # 2026-10-18 — Five Rust tests flaked once each in CI and have not been looked at
 
+**Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Flaky tests (watch list)
 **Source:** four CI attempts of [#651](https://github.com/uppin/tddy-coder/pull/651), plus the CI run of
 [#645](https://github.com/uppin/tddy-coder/pull/645)
