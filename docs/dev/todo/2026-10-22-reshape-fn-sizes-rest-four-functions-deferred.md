@@ -1,7 +1,7 @@
 # 2026-10-22 — Four production functions over 60 lines are deferred, not cut
 
 **Category:** Deferred from `reshape-fn-sizes-rest` (`#reshape` 18/24, PR #613)
-**Source:** [2026-10-09-reshape-fn-sizes-rest.md](../1-WIP/2026-10-09-reshape-fn-sizes-rest.md), Scope
+**Source:** [2026-10-22-reshape-fn-sizes-rest.md](../changesets/2026-10-22-reshape-fn-sizes-rest.md)
 **Owner:** the `#reshape` sweep node
 
 ## Why deferred

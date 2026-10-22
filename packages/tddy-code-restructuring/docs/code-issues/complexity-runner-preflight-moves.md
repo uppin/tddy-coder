@@ -17,6 +17,7 @@ the parameters of each `fn` signature (`grep -n -A10 'pub fn preflight_moves\|pu
 | Run | `preflight_moves` | `commit_operation` | `GroupRun::settle` | Note |
 |---|---|---|---|---|
 | 2026-10-17 | 6 | 8 | 7 | first detection. #607 added `preflight_moves` (`index, id, resolved, root, overlay, spawns`); the other two are pre-existing and #607 did not change their arity |
+| 2026-10-22 | 6 | 8 | 7 | unchanged. #613 (`#reshape` 18/24) edited the call sites in `store_run.rs` (the loop state is `held.…`), not the signatures |
 
 ## What the tool found
 

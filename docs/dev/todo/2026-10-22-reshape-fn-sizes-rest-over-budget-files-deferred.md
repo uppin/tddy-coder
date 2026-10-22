@@ -11,7 +11,7 @@ Production lines by the items rule (`production_lines_of_file`, measured on this
 | File | Production lines | Grew by |
 |---|---:|---|
 | `packages/tddy-code-restructuring/src/runner/entry_points/store_run.rs` | 507 | The F2 hand edit: `struct HeldLoop` with its doc and TODO (about 12 lines), and the `held.` field accesses, which rustfmt wrapped. The file passed the budget at K17's head (`020e22fd2`). |
-| `packages/tddy-code-restructuring/src/crate_move.rs` | 513 | The `surveyed_in` extraction (plan 14): the new `survey_reference` signature, its call site (rustfmt wraps it over seven lines), and the function's return shape. The moved loop body is unchanged. The file passed the budget at K17's head. |
+| `packages/tddy-code-restructuring/src/crate_move.rs` | 514 | The `surveyed_in` extraction (plan 14): the new `survey_reference` signature, its call site (rustfmt wraps it over seven lines), and the function's return shape. The moved loop body is unchanged, and the new function's doc line is one more. The file passed the budget at K17's head. |
 
 Both files are shared with the stack's other nodes, so neither is split in this PR.
 
