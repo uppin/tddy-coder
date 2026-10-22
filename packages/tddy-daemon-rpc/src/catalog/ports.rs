@@ -16,6 +16,7 @@ use super::agent_models::{
 use super::subagent_row::subagent_info;
 use super::CatalogRpcHandler;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_discovery::harness_profile::{harness_profile_rows, load_harness_profiles};
 use tddy_session_lifecycle::agent_list_mapping::agent_allowlist_rows;
 use tddy_session_lifecycle::connection_service::{
     resolvable_agent_defs, resolve_tddy_tools_path, wire_same,
@@ -62,12 +63,12 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
                 .map_err(tddy_rpc::Status::from)?,
             None => Vec::new(),
         };
+        let profiles = load_harness_profiles(&self.tddy_data_dir.join("agents"));
         let agents: Vec<CatalogAgentInfo> = agent_allowlist_rows(&self.config, &assistants)
             .into_iter()
-            .map(|row| CatalogAgentInfo {
-                id: row.id,
-                label: row.display_label,
-            })
+            .map(|row| (row.id, row.display_label))
+            .chain(harness_profile_rows(&profiles))
+            .map(|(id, label)| CatalogAgentInfo { id, label })
             .collect();
         log::info!("list_agents RPC: returning {} agent(s)", agents.len());
         Ok(Response::new(ListAgentsResponse { agents }))

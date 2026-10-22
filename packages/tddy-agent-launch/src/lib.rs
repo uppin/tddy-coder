@@ -14,6 +14,7 @@ pub mod conversation_spawn_handler;
 pub mod conversation_worktree_op;
 pub mod cursor_cli_spawn;
 pub mod family_proto_bridge;
+pub mod harness_profile_request;
 pub mod harness_profile_start;
 pub mod hooks_and_urls;
 pub mod host_session_socket;
@@ -27,6 +28,7 @@ pub mod launch_ports;
 pub mod managed_launch;
 mod opencode_cli_spawn;
 pub mod placement;
+mod provider_account_lookup;
 pub mod relaunch_jail_dirs;
 pub mod relaunch_jail_steps;
 pub mod resume;
@@ -66,9 +68,13 @@ mod conversation_spawn_wiring_tests;
 mod default_route_tests;
 mod facilitation;
 #[cfg(test)]
+mod harness_profile_request_tests;
+#[cfg(test)]
 mod harness_profile_start_tests;
 #[cfg(test)]
 mod host_session_socket_tests;
+#[cfg(test)]
+mod provider_account_lookup_tests;
 #[cfg(test)]
 mod session_acting_identity_tests;
 #[cfg(test)]

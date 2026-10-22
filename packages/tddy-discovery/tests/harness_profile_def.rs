@@ -3,7 +3,7 @@
 //!
 //! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-agent-def-route.md
 
-use tddy_discovery::agent_def::load_agent_defs;
+use tddy_discovery::agent_def::{load_agent_defs, read_agent_def_document, AgentDefDocument};
 use tddy_discovery::harness_profile::{
     harness_profile_rows, load_harness_profiles, parse_harness_profile, HarnessProfile,
 };
@@ -65,5 +65,29 @@ fn profiles_appear_in_the_agent_list() {
             "claude-on-meta".to_string(),
             "Claude Code · Meta Wonder".to_string()
         )]
+    );
+}
+
+#[test]
+fn a_profile_is_a_deliberate_skip_for_the_def_loader_not_a_parse_failure() {
+    // When
+    let document = read_agent_def_document(A_PROFILE);
+
+    // Then
+    assert!(
+        matches!(document, AgentDefDocument::HarnessProfile),
+        "{document:?}"
+    );
+}
+
+#[test]
+fn an_openai_definition_still_reads_as_a_def() {
+    // When
+    let document = read_agent_def_document(AN_OPENAI_DEF);
+
+    // Then
+    assert!(
+        matches!(&document, AgentDefDocument::Def(def) if def.name == "repo-explorer"),
+        "{document:?}"
     );
 }

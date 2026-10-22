@@ -85,7 +85,7 @@ pub fn parse_harness_profile(yaml: &str) -> Result<HarnessProfile, String> {
 
 /// Whether `yaml` carries a `harness:` key. A document that is not YAML at all is an error, not a
 /// `false`: a profile with a syntax error must not be taken for an OpenAI-loop definition.
-fn names_a_harness(yaml: &str) -> Result<bool, String> {
+pub fn names_a_harness(yaml: &str) -> Result<bool, String> {
     let document: serde_yaml::Value = serde_yaml::from_str(yaml).map_err(|e| e.to_string())?;
     Ok(document.get("harness").is_some())
 }

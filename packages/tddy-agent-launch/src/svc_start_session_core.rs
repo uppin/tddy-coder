@@ -19,11 +19,9 @@ use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 use crate::placement::classify_placement;
 use crate::placement::PlacementRequest;
 
-use tddy_rpc::Status;
-
-use tddy_service::proto::session::StartSessionResponse;
-
 use tddy_rpc::Response;
+use tddy_rpc::Status;
+use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
@@ -71,6 +69,8 @@ impl LaunchSessions {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        // A harness profile is not a def: it stands for a session type or agent on an account.
+        let req = self.apply_harness_profile(req)?;
 
         // An agent id names either a coding backend from the config allowlist or an assistant in
         // this daemon's registry — the registry is a def source on equal footing with the YAML
