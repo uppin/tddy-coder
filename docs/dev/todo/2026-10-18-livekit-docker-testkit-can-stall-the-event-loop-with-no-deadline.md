@@ -1,5 +1,6 @@
 # 2026-10-18 — `livekitDockerTestkit.ts` can stall its Cypress plugin process with no deadline
 
+**Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Defect (test infrastructure)
 **Source:** investigating [the `startEchoServer` timeout](2026-10-18-livekit-web-start-echo-server-intermittently-exceeds-its-task-timeout.md)
 

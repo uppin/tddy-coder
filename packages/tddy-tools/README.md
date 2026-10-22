@@ -31,7 +31,10 @@ cargo test -p tddy-tools-cli   # the suites that run the binary
 
 `tddy-tools-cli`'s `main.rs` parses arguments, installs the room connector and dispatches into this
 crate's public command modules (`cli`, `index_client`, `index_console`, `pty_relay`, `remote_cli`,
-`session_hook`); `server.rs` is the MCP server. Almost nothing else is implemented here. Each subcommand's logic lives in the crate that
+`session_hook`); `server.rs` is the MCP server. `cli.rs` dispatches the subcommands; its session-tool
+listing and call (`cli/session_tools.rs`), the schema listing and changeset-context subcommands (`cli/changeset_commands.rs`) and
+the relay legs, each a `#[cfg(unix)]` / `#[cfg(not(unix))]` pair (`cli/relay.rs`), are its child
+modules. Almost nothing else is implemented here. Each subcommand's logic lives in the crate that
 owns its domain —
 `tddy_bsp::build_cli`, `tddy_code_analysis::analyze_cli`,
 `tddy_code_restructuring::restructure_cli`, `tddy_workflow_recipes::schema`,

@@ -1,6 +1,7 @@
 # complexity: run
 
-**Location:** `packages/tddy-livekit/src/participant.rs:530` — `run`
+**Location:** `packages/tddy-livekit/src/participant/serve.rs:20` — `run`
+**Moved:** 2026-10-22 — by `#satellite` 16/16 (the sweep), unchanged in length and shape, into its own module.
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **198 lines** · **nesting depth 7** · 1 parameters · 13 branch/match lines · 0 early exits

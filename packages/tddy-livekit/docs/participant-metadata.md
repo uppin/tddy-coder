@@ -42,6 +42,11 @@ A daemon-published block carries the identity, the association and the static fi
 
 ## `LiveKitParticipant` wiring
 
+`participant.rs` holds the participant, `connect` / `connect_for_reconnect` and the metadata helpers.
+Its serve loop — `run`, the OAuth metadata publish, request reassembly and `handle_incoming` — is a
+second `impl LiveKitParticipant` block in `participant/serve.rs`; `SharedPublisher` and the response
+drains (`spawn_response_drain`, `spawn_response_drain_reconnectable`) are `participant/publisher.rs`.
+
 - **`connect`** / **`connect_for_reconnect`**: last options include **`codex_oauth_watch`** and **`projects_registry_dir`**. A fresh **`metadata_publish_lock`** is created per connected participant instance.
 - **OAuth poller** (when **`codex_oauth_watch`** is **`Some`**): reads the hook file, builds a **`codex_oauth`** fragment, merges with current wire metadata, **`set_metadata`**.
 - **Registry poller** (when **`projects_registry_dir`** is **`Some`**): applies **`owned_project_count`** immediately, then every **30 seconds** (bounded polling; file notify is a possible future replacement).

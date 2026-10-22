@@ -59,6 +59,15 @@ itself`, and marking it `optional` behind a feature does not exempt it. Sitting 
 `tddy-service` also keeps its dependency on `tddy-tui` out of the picture: a client hosted there would
 have pulled the TUI into every in-jail binary that dispatches a tool call.
 
+## Modules
+
+`lib.rs` holds the session-tool dispatch (`dispatch_session_tool` and the transport choice). The room
+arm — `LiveKitRoomKey`, `LiveKitRoomCache`, `LiveKitSession`, `room_session_via`,
+`install_room_connector` and `dispatch_via_livekit` — is `room_transport.rs`; the sandbox IPC, daemon
+UDS, daemon HTTP, plain and streaming RPC arms, and the roster's `livekit_session`, are
+`rpc_transports.rs`. Both are re-exported from the crate root, so every path a caller names is
+`tddy_session_tool_client::…`. The conversation calls are `conversation.rs`.
+
 ## The room transport is installed, not linked
 
 The crate names no LiveKit crate. The remote-room arm joins through

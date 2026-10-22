@@ -1,5 +1,6 @@
 # 2026-10-18 — `tddy-livekit-web`'s `startEchoServer` task intermittently exceeds its 60 s timeout
 
+**Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Flaky test (CI), cause not yet found
 **Source:** CI of [#645](https://github.com/uppin/tddy-coder/pull/645), then the investigation draft
 [#651](https://github.com/uppin/tddy-coder/pull/651)

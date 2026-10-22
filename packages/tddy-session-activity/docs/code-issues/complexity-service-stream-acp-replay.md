@@ -1,6 +1,7 @@
 # complexity: stream_acp_replay
 
-**Location:** `packages/tddy-session-activity/src/service.rs:682` — `stream_acp_replay`
+**Location:** `packages/tddy-session-activity/src/service/rpc.rs:186` — `stream_acp_replay`
+**Moved:** 2026-10-22 — by `#satellite` 16/16 (the sweep), unchanged in length and shape, into its own module.
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **80 lines** · **nesting depth 3** · 1 parameters · 5 branch/match lines · 4 early exits

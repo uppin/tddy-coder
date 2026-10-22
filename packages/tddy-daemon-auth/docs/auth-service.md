@@ -13,6 +13,7 @@ boundary in fact and not only in name.
 | Module | What is in it |
 |---|---|
 | `auth` | `build_auth_entries_with` (a daemon with a signing identity), `build_auth_entries_admitting` (the same, with a `LoginAdmission`) and `build_auth_entries` (one without); `GitHubAuthFlow` and `github_auth_flow`; the `auth.AuthService` and `auth.LiveKitTokenService` handlers, `session_token_authenticator`, `build_token_service_entry` |
+| `auth::entry_parts` | the pieces `build_auth_entries_admitting` assembles: `provider_auth_entry` (the `auth.AuthService` entry for the provider `github_provider_kind` chose), `probed_credential_vaults` (the `auth_storage` probe, the looser-than-`0700` warning and the vaults), `session_user_resolver` and `livekit_token_service_entry`. `build_auth_entries_admitting` takes the web address as one `(host, port)` value, the redirect fallback both providers derive their callback from |
 | `first_login_admission` | `FirstLoginEnrolment` — a desktop's first-login enrolment, the `LoginAdmission` an embedded host is built with |
 | `signing_key` | `DaemonSigningKey`, `load_signing_key` / `signing_key_path`, the `KeyDirectory` port and `StandaloneKeyDirectory`, `DirectorySessionTokenVerifier`, `SessionTokens`, `auth_storage_looser_than_owner_only` |
 | `vault_lifetimes` | `credential_vaults_in` — the credential vaults over `auth_storage`, holding a pending sign-in for `github.pending_login_ttl_seconds` and an unused open vault for `github.open_vault_idle_ttl_seconds`; `spawn_credential_sweep` and `sweep_period` |

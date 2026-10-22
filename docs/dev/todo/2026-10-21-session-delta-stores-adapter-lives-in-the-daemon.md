@@ -1,5 +1,6 @@
 # 2026-10-21 — The session-delta adapter lives in the daemon, not the LiveKit plugin
 
+**Deferred (consent):** 2026-10-22 — user: "defer the remaining", given during `#satellite` 16/16, the sweep ([#695](https://github.com/uppin/tddy-coder/pull/695)). Not taken by the stack; stays open.
 **Category:** Future enhancement
 **Source:** `#satellite` 13/13 (PR #635), changeset `livekit-satellite-lifecycle-launch`
 

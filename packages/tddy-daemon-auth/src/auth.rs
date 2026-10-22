@@ -1,15 +1,14 @@
 //! Build AuthService from daemon config.
 
+mod entry_parts;
+
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_credentials::SessionVaults;
 use tddy_daemon_extensions::RoomTokenMinter;
-use tddy_github::{
-    AuthServiceImpl, GitHubOAuthProvider, LoginAdmission, RealGitHubProvider, StubGitHubProvider,
-    TokenKind,
-};
+use tddy_github::{AuthServiceImpl, GitHubOAuthProvider, LoginAdmission};
 use tddy_rpc::{Request, Response, ServiceEntry, Status};
 use tddy_service::proto::auth::{
     LiveKitTokenService as LiveKitTokenServiceTrait, MintLiveKitTokenRequest,
@@ -19,14 +18,16 @@ use tddy_service::proto::token::{
     GenerateTokenRequest, GenerateTokenResponse, RefreshTokenRequest, RefreshTokenResponse,
     TokenService as TokenServiceTrait,
 };
-use tddy_service::{AuthServiceServer, LiveKitTokenServiceServer};
+use tddy_service::AuthServiceServer;
 
 use tddy_daemon_kernel::config::{DaemonConfig, GitHubConfig, LiveKitConfig};
 use tddy_daemon_kernel::SessionUserResolver;
 
-use crate::signing_key::{
-    auth_storage_looser_than_owner_only, load_signing_key, SessionTokens, StandaloneKeyDirectory,
-};
+use crate::auth::entry_parts::livekit_token_service_entry;
+use crate::auth::entry_parts::probed_credential_vaults;
+use crate::auth::entry_parts::provider_auth_entry;
+use crate::auth::entry_parts::session_user_resolver;
+use crate::signing_key::{load_signing_key, SessionTokens, StandaloneKeyDirectory};
 
 /// Result of building auth: RPC entries, a resolver for session token -> GitHub login, and the
 /// credential vaults logins open (where `ConnectionService` reads each operator's GitHub token).
@@ -160,24 +161,24 @@ pub fn build_auth_entries_with(
     tokens: &SessionTokens,
     minter: Arc<dyn RoomTokenMinter>,
 ) -> anyhow::Result<AuthBuildResult> {
-    build_auth_entries_admitting(config, web_host, web_port, tokens, None, minter)
+    build_auth_entries_admitting(config, (web_host, web_port), tokens, None, minter)
 }
 
 /// [`build_auth_entries_with`], with `admission` asked about every completed login before a
 /// session is minted for it — how an embedded desktop enrols its first login (see
 /// [`crate::first_login_admission`]). `None` admits every login GitHub vouches for, exactly as
 /// [`build_auth_entries_with`] does.
+// TODO(restructure-engine): `web` folds `web_host` and `web_port` into one parameter by hand to reach
+// the five-parameter limit; the engine has no operation that changes a signature.
 pub fn build_auth_entries_admitting(
     config: &DaemonConfig,
-    web_host: &str,
-    web_port: u16,
+    web: (&str, u16),
     tokens: &SessionTokens,
     admission: Option<Arc<dyn LoginAdmission>>,
     minter: Arc<dyn RoomTokenMinter>,
 ) -> anyhow::Result<AuthBuildResult> {
-    let github = match &config.github {
-        Some(g) => g,
-        None => return Ok(AuthBuildResult::unauthenticated()),
+    let Some(github) = &config.github else {
+        return Ok(AuthBuildResult::unauthenticated());
     };
     let lifetimes = crate::vault_lifetimes::VaultLifetimes::of(github)?; // refused past its ceiling
 
@@ -193,83 +194,32 @@ pub fn build_auth_entries_admitting(
     // boot. The probe runs for a stub provider too: a stub retains nothing, but the path the
     // operator configured is unusable either way, and skipping the check for one provider kind is
     // exactly the sort of quiet degradation this replaces.
-    let credential_vaults = match config.auth_storage.as_ref() {
-        Some(dir) => {
-            probe_writable(dir).map_err(|e| {
-                anyhow::anyhow!(
-                    "config.auth_storage ({}) cannot hold credential vaults: {e}. \
-                     Every GitHub login fails until it is writable by the daemon user.",
-                    dir.display()
-                )
-            })?;
-            // Said once, here, at startup — and not repaired: see
-            // `auth_storage_looser_than_owner_only`.
-            if let Some(warning) = auth_storage_looser_than_owner_only(dir) {
-                log::warn!(target: crate::AUTH_LOG_TARGET, "{warning}");
-            }
-            Some(Arc::new(crate::vault_lifetimes::credential_vaults_in(
-                dir, &lifetimes,
-            )))
-        }
-        None => None,
-    };
+    let credential_vaults = probed_credential_vaults(config, lifetimes)?;
 
-    let redirect_uri = || {
-        github
-            .redirect_uri
-            .clone()
-            .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port))
-    };
-    let auth_entry = match github_provider_kind(github) {
-        Some(GitHubProviderKind::Stub) => {
-            let client_id = github.client_id.as_deref().unwrap_or("stub-client-id");
-            let stub = StubGitHubProvider::new_with_callback(&redirect_uri(), client_id);
-            if let Some(ref codes) = github.stub_codes {
-                stub.register_code_mappings(codes);
-            }
-            auth_service_entry(stub, tokens, credential_vaults.clone(), admission)
-        }
-        // Two configurations, neither a fallback for the other. With a secret this is a
-        // confidential client and serves the redirect flow exactly as it always has. Without one
-        // it is a public client — the shape a desktop install ships in, since a secret inside a
-        // downloadable application is public the day it ships — and signs in by the device flow,
-        // which authenticates with the client id alone.
-        Some(GitHubProviderKind::Confidential { client_id, secret }) => auth_service_entry(
-            RealGitHubProvider::new(client_id, secret, &redirect_uri()),
-            tokens,
-            credential_vaults.clone(),
-            admission,
-        ),
-        Some(GitHubProviderKind::Public { client_id }) => auth_service_entry(
-            RealGitHubProvider::new_public(client_id),
-            tokens,
-            credential_vaults.clone(),
-            admission,
-        ),
-        None => return Ok(AuthBuildResult::unauthenticated()),
+    let (web_host, web_port) = web;
+    let redirect_uri = github
+        .redirect_uri
+        .clone()
+        .unwrap_or_else(|| format!("http://{}:{}/auth/callback", web_host, web_port));
+    let Some(auth_entry) = provider_auth_entry(
+        github,
+        &redirect_uri,
+        tokens,
+        credential_vaults.clone(),
+        admission,
+    ) else {
+        return Ok(AuthBuildResult::unauthenticated());
     };
 
     // Verify the token's signature/expiry under the key it names and extract the login. Only
     // access-kind tokens authenticate an RPC — a long-lived refresh token is rejected here so it
     // cannot be used as an RPC credential.
-    let verifier = Arc::clone(tokens.verifier());
-    let user_resolver: SessionUserResolver = Arc::new(move |token: &str| {
-        verifier
-            .verify_now(token)
-            .ok()
-            .filter(|c| c.kind == TokenKind::Access)
-            .map(|c| c.login)
-    });
+    let user_resolver = session_user_resolver(tokens);
 
     // The room-JWT mint. It is an entry of its own rather than a method on `auth.AuthService`
     // because it needs the daemon's own config (LiveKit endpoint, common room, `users:` map),
     // which `AuthServiceImpl` — a tddy-github type that knows only about OAuth — does not have.
-    let livekit_token_entry = ServiceEntry {
-        name: "auth.LiveKitTokenService",
-        service: Arc::new(LiveKitTokenServiceServer::new(
-            LiveKitTokenServiceImpl::new(user_resolver.clone(), Arc::new(config.clone()), minter),
-        )) as Arc<dyn tddy_rpc::RpcService>,
-    };
+    let livekit_token_entry = livekit_token_service_entry(config, minter, &user_resolver);
 
     Ok(AuthBuildResult {
         entries: vec![auth_entry, livekit_token_entry],

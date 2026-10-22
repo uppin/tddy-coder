@@ -298,8 +298,9 @@ fn the_lifecycle_crate_has_no_edge_to_the_crate_above_it() {
 
 #[test]
 fn the_binary_runtime_serves_the_four_families_through_their_own_handlers() {
-    // Given the bundle of services the binary mounts on its local socket
-    let runtime = source_of(&package("tddy-daemon").join("src/runtime.rs"));
+    // Given the bundle of services the binary mounts on its local socket (declared with the
+    // runtime's tasks, `runtime/tasks.rs`, beside the `LocalSocketTransport` that serves it)
+    let runtime = source_of(&package("tddy-daemon").join("src/runtime/tasks.rs"));
     let bundle: String = runtime
         .lines()
         .skip_while(|line| !line.contains("type BinaryLocalSocketServices"))
@@ -308,7 +309,7 @@ fn the_binary_runtime_serves_the_four_families_through_their_own_handlers() {
         .join("\n");
     assert!(
         !bundle.is_empty(),
-        "`runtime.rs` has no `BinaryLocalSocketServices`"
+        "`runtime/tasks.rs` has no `BinaryLocalSocketServices`"
     );
 
     // Then each of the four families is served by its own handler type

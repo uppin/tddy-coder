@@ -16,6 +16,21 @@ this crate loads.
 `runtime.rs` derives each `ServiceEntry` from configuration and returns handles; nothing that listens,
 dials, or runs forever is started there.
 
+`runtime` is a module directory. `runtime::build` is five calls over a `BuildContext`
+(`runtime/build_context.rs`, the state its stages share): resolve the `Identity`
+(`runtime/identity.rs` — data directory, host registry, signing identity, room-token minter, auth
+entries), open the context's registries and integrations (`runtime/integrations.rs` — common room,
+shared session managers, LiveKit's ports, Telegram, relay mode), mount the session-bound services
+(`runtime/mount.rs`, with `mount_host.rs` for the session host and its code-intelligence executors,
+`mount_entries.rs` for the RPC families above it, `mount_accounts.rs` for screen sharing, accounts and
+credential sync, and `mount_socket.rs` for the binary host's tonic local socket), mount the daemon's own
+settings service, and serve the common room. The rest of the directory is what `build` hands back or
+reads: `runtime/tasks.rs` (`RuntimeTasks` and the children they start, unstarted until the host calls
+`spawn`), `runtime/env.rs` (`apply_env_overrides` and the data-directory rule) and
+`runtime/telegram_wiring.rs` (`build_telegram`, `split_room_hosting`). Every path a caller outside the
+module names — `tddy_daemon::runtime::{build, split_room_hosting, spawn_common_room_discovery_task,
+DaemonRuntime, RuntimeOptions, RuntimeHost, RuntimeTasks, …}` — resolves through `runtime.rs`.
+
 It also chooses the executor that answers a session's `Lsp*` tools. With an `index_daemon:` section, it
 registers `tddy_lsp_executor::index_backed`'s index-backed executor, whose channel is the
 `IndexDaemonRegistry` (`index_daemon/lsp_channel.rs`: `connect`, the same call the code pane's
