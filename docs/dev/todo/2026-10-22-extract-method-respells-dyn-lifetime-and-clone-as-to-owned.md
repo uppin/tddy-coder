@@ -50,3 +50,18 @@ alone, and the path arm (`at = last + 1; continue;`) is deferred with it.
 
 Wanted: `extract_method` passes every outer local the moved code reads or writes as a parameter, as the `&mut` or value
 it needs, and a function body that writes an outer cursor it also `continue`s past is refused, not written.
+
+## 4. `parse_op`: the guard lifts re-type the operation's borrowed fields
+
+Plan `parse_op` (`plan/codec.rs`), nine `extract_method` ops bottom-up (type/expr syntax; missing name; `also`/`to_file`;
+cross-crate and `outside`; reparent arm; move_item arm; facade; test binary; code text). `check --deep` no findings, and
+dry-run resolved 9 of 9. The apply's compile gate failed with 12 errors, none in a new function's own logic:
+
+- `365:13` and `419:13`: `error[E0614]: type 'bool' cannot be dereferenced` (the lifted `to_file`/`reexport` checks read a
+  `bool` through the wrong reference).
+- `371:30`, `421:30`, `446:30`, `456:30`, `464:30`: `error[E0277]: the trait bound 'str: Into<String>' is not satisfied`
+  and `the size for values of type 'str' cannot be known`, where the lifted `malformed(format!(..))` or
+  `malformed("..")` call takes a `&str` the engine spelled as `str`.
+
+Rolled back (`git checkout HEAD -- codec.rs`), journal removed. Deferred under the standing rule (engine defect, clean
+rollback). The fix is in the engine's signature and call-site typing for lifted guards.
