@@ -248,6 +248,17 @@ fn resolving_line(index: usize, total: usize, op: &crate::plan::RefactorOp, file
     )
 }
 
+/// The loop state of a held-plan run: the dry-run overlay, the count of applied operations, the open
+/// transactional group, and whether `--stop-after` ended the run early.
+// TODO(reshape-16): hand edit, consented (F2, 2026-10-09). Gathered by hand so the loop's phases can be
+// extracted; an engine operation that groups parameters would replace it.
+struct HeldLoop {
+    overlay: Overlay,
+    done: usize,
+    stopped_early: bool,
+    group: Option<GroupRun>,
+}
+
 fn apply_held_plan(
     root: &Path,
     store: &mut PlanStore,
@@ -287,10 +298,12 @@ fn apply_held_plan(
     )?;
     let total = plan.ops.len();
     announce_run(options, total, start);
-    let mut overlay = Overlay::new();
-    let mut done = 0usize;
-    let mut stopped_early = false;
-    let mut group: Option<GroupRun> = None;
+    let mut held = HeldLoop {
+        overlay: Overlay::new(),
+        done: 0,
+        stopped_early: false,
+        group: None,
+    };
 
     let gate = GroupGate {
         root,
@@ -306,8 +319,8 @@ fn apply_held_plan(
             // successful partial run as a defective one. Never inside a group, though: a group stands
             // or falls whole, so the limit is judged where a group would begin and its members all
             // count toward it.
-            if group.is_none() && stop_limit_reached(options, start, index) {
-                stopped_early = true;
+            if held.group.is_none() && stop_limit_reached(options, start, index) {
+                held.stopped_early = true;
                 break;
             }
 
@@ -319,13 +332,13 @@ fn apply_held_plan(
                     &at,
                     &Workspace {
                         root,
-                        overlay: &overlay,
+                        overlay: &held.overlay,
                     },
                 )?;
             // Refused before anything of the operation is written or journalled; a dry run's
             // overlay holds what its earlier operations created and moved.
             let id = op.id.as_ref().filter(|_| !legacy);
-            preflight_moves(index, id, &resolved, root, &overlay, &options.spawns)?;
+            preflight_moves(index, id, &resolved, root, &held.overlay, &options.spawns)?;
 
             // A group member's account waits for its group to be kept: see below.
             if op.group.is_none() || options.dry_run {
@@ -337,22 +350,22 @@ fn apply_held_plan(
             if options.dry_run {
                 (options.account)(&progress_line(
                     index,
-                    done,
+                    held.done,
                     plan.ops.len(),
                     op.op,
                     files,
                     false,
                 ));
                 ledger.record(&resolved.edit);
-                overlay.record(root, &resolved.edit)?;
-                done += 1;
+                held.overlay.record(root, &resolved.edit)?;
+                held.done += 1;
                 continue;
             }
 
             (options.progress)(&format!(
                 "op {index} of {total}: applying {files} file(s) to disk"
             ));
-            GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
+            GroupRun::enter(&mut held.group, &plan, index, id, &resolved, &gate, &mut journal)?;
             commit_operation(
                 index,
                 id,
@@ -370,7 +383,7 @@ fn apply_held_plan(
                 ));
             };
             let settled = GroupRun::settle(
-                &mut group,
+                &mut held.group,
                 index,
                 resolved,
                 &gate,
@@ -378,7 +391,7 @@ fn apply_held_plan(
                 &mut journal,
                 on_check,
             )?;
-            done += 1;
+            held.done += 1;
             let Settled::Ready(ready) = settled else {
                 continue;
             };
@@ -388,23 +401,23 @@ fn apply_held_plan(
             // Reported *after* the commit, so a line in the account means the edit is on disk and in
             // the journal — and, for a group member, that its group compiled: a member's line waits
             // for the group's end, so an edit a failed gate rolls back is never reported as applied.
-            report_settled(&options.account, &plan, &ready, done);
+            report_settled(&options.account, &plan, &ready, held.done);
         }
         Ok(())
     })();
-    GroupRun::roll_back_on_failure(&mut group, ran, &gate, &mut journal)?;
+    GroupRun::roll_back_on_failure(&mut held.group, ran, &gate, &mut journal)?;
 
     let run = AppliedRun {
         journal: &journal,
         paths: &paths,
-        applied: done,
+        applied: held.done,
         total,
     };
     refuse_a_broken_result(root, options, run, cancel)?;
     Ok(RunSummary {
-        applied: done,
+        applied: held.done,
         total: plan.ops.len(),
-        stopped_early,
+        stopped_early: held.stopped_early,
     })
 }
 
