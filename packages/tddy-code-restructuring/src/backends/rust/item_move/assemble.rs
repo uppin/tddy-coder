@@ -117,15 +117,7 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         edits.entry(path).or_default().push(edit);
     }
     let pairs = moved_paths(moving);
-    for (path, list) in doc_links::across_the_crate(
-        moving.workspace,
-        moving.package,
-        &pairs,
-        &mut texts,
-        Some((moving.source_file, region.clone())),
-    )? {
-        edits.entry(path).or_default().extend(list);
-    }
+    absorb_doc_links(moving, &mut texts, &region, &mut edits, pairs)?;
     edits
         .entry(moving.source_file.to_string())
         .or_default()
@@ -140,6 +132,25 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         report: landing.report,
         notes,
     })
+}
+
+fn absorb_doc_links(
+    moving: &Moving<'_>,
+    texts: &mut BTreeMap<String, String>,
+    region: &Range<usize>,
+    edits: &mut BTreeMap<String, Vec<Edit>>,
+    pairs: Vec<(String, String)>,
+) -> Result<()> {
+    for (path, list) in doc_links::across_the_crate(
+        moving.workspace,
+        moving.package,
+        &pairs,
+        texts,
+        Some((moving.source_file, region.clone())),
+    )? {
+        edits.entry(path).or_default().extend(list);
+    }
+    Ok(())
 }
 
 fn changed_files(
