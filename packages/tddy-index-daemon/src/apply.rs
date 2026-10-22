@@ -26,7 +26,11 @@ use tddy_code_restructuring::runner::group_gate::{self, GroupGate, GroupRun, Set
 use tddy_code_restructuring::runner::{self, Options, PlanRun};
 use tddy_code_restructuring::{Overlay, Resolution, Result};
 use tddy_lsp::client::LspClient;
+use tddy_lsp::LanguageId;
+use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
+
+use crate::index::{Route, WorkspaceIndex};
 
 use crate::operations::{note_event, EventSender};
 use crate::plan_flush::SharedPlanStore;
@@ -39,6 +43,11 @@ pub(crate) struct HeldPlan {
 }
 
 impl HeldPlan {
+    /// The store's copy of the plan, if it still holds one under this key.
+    pub(crate) fn plan(&self) -> Option<tddy_code_restructuring::Plan> {
+        self.with_store(|store| store.get(&self.key).map(|loaded| loaded.plan.clone()))
+    }
+
     fn with_store<T>(
         &self,
         use_store: impl FnOnce(&mut tddy_code_restructuring::plan_store::PlanStore) -> T,
@@ -68,6 +77,30 @@ pub(crate) fn apply_plan(
     events: &EventSender<RestructureEvent>,
 ) -> Result<()> {
     apply_held_plan(root, held, options, client, &cancel, progress, events)
+}
+
+/// The warm server of every installed language a file of `held`'s plan belongs to, spawned if this
+/// process holds none yet — the clients an apply routes those languages' operations to
+/// (`#reshape` extension-language-server, R6–R7). A server that will not start refuses the run
+/// before anything is written.
+pub(crate) async fn installed_clients_for(
+    index: &WorkspaceIndex,
+    root: &Path,
+    held: &HeldPlan,
+) -> std::result::Result<Vec<(LanguageId, Arc<LspClient>)>, Status> {
+    let Some(plan) = held.plan() else {
+        return Ok(Vec::new());
+    };
+    let mut clients = Vec::new();
+    for (language, launch) in runner::installed_launches_for(&plan, &index.supports()) {
+        let route = Route::Extension {
+            language: language.clone(),
+            launch: Box::new(launch),
+        };
+        let served = index.client_for_route(root, &route).await?;
+        clients.push((language, served.client));
+    }
+    Ok(clients)
 }
 
 /// The plan `held` names, copied out of the store with the path it is held at.
@@ -120,8 +153,6 @@ fn apply_held_plan(
 
     // The gates run on a copy of the plan, outside the store's lock: the baseline compile check
     // takes minutes.
-    // TODO(extension-language-server): route through `options.installed`, once an installed
-    // language has a server and so an operation to apply — until then (R7) it supports none.
     let mut registry = runner::registry_for_waiting(
         root,
         client,
@@ -129,6 +160,7 @@ fn apply_held_plan(
         progress,
         logged_trace,
         options.wait_heartbeat,
+        &options.installed_servers(),
     );
     let PlanRun {
         mut journal,

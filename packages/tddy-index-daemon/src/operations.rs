@@ -28,7 +28,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::activity::Activity;
-use crate::apply::{apply_plan, HeldPlan};
+use crate::apply::{apply_plan, installed_clients_for, HeldPlan};
 use crate::index::WorkspaceIndex;
 use crate::proto::code_index::{
     restructure_event, ApplyRequest, CheckRequest, Finding, IndexProgress, RestructureEvent,
@@ -191,6 +191,7 @@ pub(crate) async fn serve_apply(
         // join them in the one record the host named with `--spawn-record`.
         spawns: index.spawn_recorder(),
         wait_heartbeat: index.wait_heartbeat(),
+        installed: index.supports(),
         ..Options::default()
     };
     let (events, stream) = event_stream();
@@ -211,13 +212,23 @@ pub(crate) async fn serve_apply(
                 return;
             }
         };
-        let client = match index.client_for(&root).await {
-            Ok(client) => client,
+        let servers = match index.client_for(&root).await {
+            Ok(client) => installed_clients_for(&index, &root, &held)
+                .await
+                .map(|installed| (client, installed)),
+            Err(refusal) => Err(refusal),
+        };
+        let (client, installed_clients) = match servers {
+            Ok(servers) => servers,
             Err(refusal) => {
                 activity.refused(&refusal);
                 let _ = events.send(Err(refusal)).await;
                 return;
             }
+        };
+        let options = Options {
+            installed_clients,
+            ..options
         };
 
         let cancel = CancellationToken::new();

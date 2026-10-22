@@ -106,18 +106,15 @@ fn anchor_and_span(
     );
     let anchor = runner::item_anchors(root, options, client.clone(), cancel.clone())?;
     let mut registry = match client {
-        Some(client) => {
-            let mut registry = runner::registry_for_waiting(
-                root,
-                client,
-                cancel,
-                progress,
-                logged_trace,
-                heartbeat,
-            );
-            registry.extend(installed.backends_static(root));
-            registry
-        }
+        Some(client) => runner::registry_for_waiting(
+            root,
+            client,
+            cancel,
+            progress,
+            logged_trace,
+            heartbeat,
+            &runner::InstalledServers::over(std::sync::Arc::clone(&installed)),
+        ),
         None => installed.backends_static(root),
     };
     let range = item_anchor::span_of(&anchor, root, &mut registry)?;

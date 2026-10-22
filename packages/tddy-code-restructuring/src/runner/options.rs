@@ -12,6 +12,10 @@ use crate::{RestructureError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_lsp::client::LspClient;
+use tddy_lsp::LanguageId;
+
+use super::installed_servers::InstalledServers;
 
 const USAGE: &str = "\
 usage:
@@ -139,6 +143,13 @@ pub struct Options {
     /// `check` whose files are all claimed by a support with no server starts no language server
     /// (`#reshape` extension-outline, R5–R7).
     pub installed: Arc<SupportRegistry>,
+    /// The clients of the servers the front end started for languages of [`Self::installed`],
+    /// by language — one per language [`super::installed_launches_for`] names for the plan.
+    ///
+    /// A collaborator like [`Self::installed`]: an apply routes an installed language's operations
+    /// to its server only when one is here, and builds its backend without one otherwise
+    /// (`#reshape` extension-language-server, R6). Empty by default.
+    pub installed_clients: Vec<(LanguageId, Arc<LspClient>)>,
 }
 
 impl Default for Options {
@@ -169,6 +180,7 @@ impl Default for Options {
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
             installed: Arc::new(SupportRegistry::new()),
+            installed_clients: Vec::new(),
         }
     }
 }
@@ -263,6 +275,15 @@ impl Options {
         self.target
             .clone()
             .ok_or_else(|| usage("a plan file is required"))
+    }
+
+    /// [`Self::installed`] with [`Self::installed_clients`] as their running servers: what an
+    /// apply's registry routes installed languages through.
+    pub fn installed_servers(&self) -> InstalledServers {
+        self.installed_clients.iter().fold(
+            InstalledServers::over(Arc::clone(&self.installed)),
+            |servers, (language, client)| servers.with_client(language.clone(), Arc::clone(client)),
+        )
     }
 
     /// Whether `file` is claimed by a language of [`Self::installed`] that runs no server, and by

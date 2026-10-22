@@ -139,3 +139,87 @@ pub async fn resolved_and_applied(
     .await
     .expect("the blocking half of the run joins")
 }
+
+/// The Rust server a cold run starts beside an extension's — the same fake server, which a plan of
+/// extension-language operations asks nothing.
+pub async fn a_rust_server_for(root: &Path) -> Arc<LspService> {
+    let mut allow = LspAllowList::new();
+    allow.allow(
+        tddy_lsp::LanguageId::RUST,
+        tddy_lsp::LaunchSpec::new(the_fake_server()),
+    );
+    LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60))
+        .get_or_spawn(LspKey {
+            root: root.to_path_buf(),
+            language: tddy_lsp::LanguageId::RUST,
+        })
+        .await
+        .expect("the fake Rust server starts")
+}
+
+/// Commit everything under `root` as the baseline an apply starts from.
+pub fn committed_as_the_baseline(root: &Path) {
+    for args in [
+        vec!["init", "--quiet"],
+        vec!["add", "--all"],
+        vec![
+            "-c",
+            "user.name=tddy tests",
+            "-c",
+            "user.email=tests@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--message",
+            "baseline",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(root)
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {args:?} failed");
+    }
+}
+
+/// Write `op` as a plan under `root` and apply it as a cold `restructure apply` does: `support`
+/// installed, `server` started for its language and handed to the run beside the Rust client.
+pub async fn applied_cold(
+    support: ExtensionSupport,
+    server: Arc<LspService>,
+    root: &Path,
+    op: &RefactorOp,
+) -> Result<tddy_code_restructuring::runner::RunSummary, RestructureError> {
+    let plan = root.join("rename.jsonl");
+    fs::write(
+        &plan,
+        format!(
+            "{{\"v\":1,\"snapshot\":{{}}}}\n{}\n",
+            serde_json::to_string(op).expect("the operation serializes")
+        ),
+    )
+    .expect("write the plan");
+    let rust = a_rust_server_for(root).await;
+    let language = support.id().clone();
+    let mut installed = tddy_code_restructuring::SupportRegistry::new();
+    installed.register(Box::new(support));
+    let options = tddy_code_restructuring::runner::Options {
+        target: Some(plan),
+        installed: Arc::new(installed),
+        installed_clients: vec![(language, Arc::clone(&server.client))],
+        ..Default::default()
+    };
+    let root = root.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        tddy_code_restructuring::runner::apply(
+            &root,
+            options,
+            Some(Arc::clone(&rust.client)),
+            CancellationToken::new(),
+        )
+    })
+    .await
+    .expect("the blocking half of the run joins")
+}

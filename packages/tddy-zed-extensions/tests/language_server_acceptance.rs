@@ -19,7 +19,9 @@ use outline_support::{
 };
 use pretty_assertions::assert_eq;
 use serde_json::{json, Value};
-use server_support::{resolved_and_applied, the_fake_server, the_server_of};
+use server_support::{
+    applied_cold, committed_as_the_baseline, resolved_and_applied, the_fake_server, the_server_of,
+};
 use tddy_code_restructuring::{LanguageSupport, RefactorOp, RestructureError};
 
 /// `rename_symbol` of `config/app.toml::server::port` — line 3 of [`APP_TOML`] — to `new_name`,
@@ -76,6 +78,42 @@ async fn a_configured_server_renames_an_extension_symbol() {
     // Then the server's edit is on disk: the key renamed where the outline names it, nothing else
     // touched (R6)
     assert!(renamed.is_ok(), "the rename was refused: {renamed:?}");
+    assert_eq!(
+        fs::read_to_string(workspace.root().join(APP)).expect("read the app config"),
+        APP_TOML.replace("port = 8080", "listen_port = 8080")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cold_apply_renames_an_extension_symbol_through_the_server_started_for_it() {
+    // Given demo-toml's configured server answering renames, started for a committed workspace
+    let installed = an_extensions_dir_with(&[AFixtureExtension::DemoToml]);
+    installed.declare_fake_ls_for_demo_toml();
+    installed.write_settings(settings_running_the_fake_server_with(
+        &["--answers-rename"],
+        json!({}),
+    ));
+    let workspace = a_workspace_holding_the_app_config();
+    committed_as_the_baseline(workspace.root());
+    let support = installed.the_demo_toml_support();
+    let server = the_server_of(&support, workspace.root()).await;
+
+    // When a plan renaming `port` is applied as `restructure apply` runs it, the server's client
+    // handed to the run
+    let run = applied_cold(
+        support,
+        server,
+        workspace.root(),
+        &a_rename_of_the_port_key_to("listen_port"),
+    )
+    .await;
+
+    // Then the run applied the one operation, through the extension's server (R6)
+    assert_eq!(
+        run.map(|summary| summary.applied)
+            .map_err(|e| e.to_string()),
+        Ok(1)
+    );
     assert_eq!(
         fs::read_to_string(workspace.root().join(APP)).expect("read the app config"),
         APP_TOML.replace("port = 8080", "listen_port = 8080")
