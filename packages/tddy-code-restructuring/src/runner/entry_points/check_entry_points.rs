@@ -290,16 +290,15 @@ pub fn check_plan(
             op.op,
             op.anchor.file()
         ));
-        let rehearsed = rehearsal.rehearse(root, &mut registry, index, op, &options.spawns)?;
-        for line in rehearsed_lines(index, &rehearsed) {
-            (options.account)(&line);
-        }
-        if let Some(refusal) = rehearsed.refusal {
-            findings.push(Finding {
-                operation: index,
-                detail: refusal,
-            });
-        }
+        rehearse_op(
+            root,
+            &options,
+            &mut registry,
+            &mut findings,
+            &mut rehearsal,
+            index,
+            op,
+        )?;
     }
 
     let findings = one_finding_per_refused_group(&plan, findings);
@@ -311,6 +310,29 @@ pub fn check_plan(
     }
 
     Ok(findings)
+}
+
+/// Rehearse one operation, account for its lines, and record its refusal as a finding.
+fn rehearse_op(
+    root: &Path,
+    options: &Options,
+    registry: &mut crate::BackendRegistry,
+    findings: &mut Vec<Finding>,
+    rehearsal: &mut Rehearsal,
+    index: usize,
+    op: &crate::RefactorOp,
+) -> Result<()> {
+    let rehearsed = rehearsal.rehearse(root, registry, index, op, &options.spawns)?;
+    for line in rehearsed_lines(index, &rehearsed) {
+        (options.account)(&line);
+    }
+    if let Some(refusal) = rehearsed.refusal {
+        findings.push(Finding {
+            operation: index,
+            detail: refusal,
+        });
+    }
+    Ok(())
 }
 
 /// What the static pass finds wrong with the plan's moves before any server is asked, in the order

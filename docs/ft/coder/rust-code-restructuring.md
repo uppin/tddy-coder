@@ -1348,6 +1348,20 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   only `apply`'s compile gate catches them.
 - **A guard run is lifted only when it declares nothing the code after it reads.** Such a run is
   refused, naming the binding; end the range before the `let`.
+- **`extract_method` can write a function that does not compile or change a statement `verify` cannot account for.**
+  The compile gate refuses the first and rolls the run back; a cut that shows one is not applied by hand.
+  - A parameter read from a `&mut dyn Trait` is written `&mut (dyn Trait + 'static)`, which the caller's elided
+    lifetime does not satisfy (E0521), and `.clone()` on a borrowed slice or `Vec` is rewritten `.to_owned()`.
+  - An outer local the range reads or writes, such as a loop cursor the range also `continue`s past, is not always
+    passed as a parameter (E0425), and a `usize` is sometimes passed as `&mut usize` (E0308).
+  - A lifted guard run that reads fields of a borrowed value can re-type them (a `bool` dereferenced, a `&str`
+    spelled `str`).
+  - A binding moved into a returned tuple or value loses its `mut`.
+  - A range between two statements with comments between them is refused for comment carry, and a loop phase that
+    needs several outputs read afterwards has no single seam.
+  - When a range writes an outer local, the new function takes it as `&mut` and the assignment becomes `*x = …`;
+    `verify` reports that pair, and the lines of an extracted match arm, as a lost and a gained statement, which a
+    reviewer accepts by reading the diff.
 - **An extraction does not hang on how its range opens.** The type probe asks at the first position of
   the range that can carry a hover, skipping a leading `{`, `&`, `&mut`, `*`, `!`, `-` or `(`, comments
   and whitespace, and a hover that stays silent for 30 seconds once the index is ready ends the

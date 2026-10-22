@@ -237,16 +237,66 @@ fn cluster_edits(
 
     // Every member's callers are written together: two members named in one `use` group of a
     // caller are one edit of that statement, not two over spans of the same group.
-    if cluster.reexport == Reexport::None {
-        merged.absorb_all(callers::caller_changes(workspace, callers)?);
-    }
-    merged.absorb_all(moving::left_behind(workspace, &members, &surveys)?);
-    merged.absorb_all(moving::declared_in_destination(workspace, &members)?);
-    merged.absorb_all(follow_edits);
+    absorb_after_the_loop(
+        workspace,
+        cluster,
+        &members,
+        follow_edits,
+        &mut merged,
+        &surveys,
+        callers,
+    )?;
     dev_crates_named.extend(follow_dev_crates);
 
     // Read off the first member because every member shares them: `read_members` refuses a set
     // whose members leave different crates, and the destination is the set's own field.
+    absorb_across_the_set(
+        workspace,
+        members,
+        &mut merged,
+        crates_named,
+        dev_crates_named,
+        keeps_naming_it,
+    )?;
+
+    Ok((
+        WorkspaceEdit {
+            changes: merged.changes(),
+        },
+        surveys.into_iter().chain(children).collect(),
+    ))
+}
+
+/// What follows the per-member loop: the callers' rewrites (unless the set is re-exported), what each member
+/// leaves behind, what the destination declares, and the follow edits.
+fn absorb_after_the_loop(
+    workspace: &Workspace<'_>,
+    cluster: &MovingCluster,
+    members: &[super::Move],
+    follow_edits: Vec<FileEdit>,
+    merged: &mut MergedChanges,
+    surveys: &[super::Survey],
+    callers: Vec<super::PlannedRewrite>,
+) -> Result<()> {
+    if cluster.reexport == Reexport::None {
+        merged.absorb_all(callers::caller_changes(workspace, callers)?);
+    }
+    merged.absorb_all(moving::left_behind(workspace, members, surveys)?);
+    merged.absorb_all(moving::declared_in_destination(workspace, members)?);
+    merged.absorb_all(follow_edits);
+    Ok(())
+}
+
+/// The edits every member of the set shares: the destination's manifest, its dependents, and the workspace
+/// members list.
+fn absorb_across_the_set(
+    workspace: &Workspace<'_>,
+    members: Vec<super::Move>,
+    merged: &mut MergedChanges,
+    crates_named: BTreeSet<String>,
+    mut dev_crates_named: BTreeSet<String>,
+    keeps_naming_it: BTreeSet<String>,
+) -> Result<()> {
     let across_the_set = &members[0];
     dev_crates_named.retain(|named| !crates_named.contains(named));
     merged.absorb(across_the_set.destination_manifest(
@@ -256,13 +306,7 @@ fn cluster_edits(
     )?);
     merged.absorb_all(across_the_set.dependents_on_the_destination(workspace, &keeps_naming_it)?);
     merged.absorb_all(across_the_set.workspace_members(workspace)?);
-
-    Ok((
-        WorkspaceEdit {
-            changes: merged.changes(),
-        },
-        surveys.into_iter().chain(children).collect(),
-    ))
+    Ok(())
 }
 
 /// Every member as the move it is, refusing a set that cannot be resolved as one.
