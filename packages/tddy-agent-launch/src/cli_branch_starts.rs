@@ -248,41 +248,31 @@ impl LaunchSessions {
             )));
         }
         let start = self.cli_start_prelude(req, progress, os_user).await?;
-        let started_agents = self
-            .agent_roster
-            .seeded_roster_records(&req.specialized_agents)
-            .await?;
-        let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
-            service: self.agent_roster.clone(),
-        };
         let sessions_base = start.sessions_base.clone();
         let session_id = start.session_id.clone();
         let started = self
-            .start_cli_harness_from_request(
-                harness,
-                req,
-                os_user,
-                start,
-                started_agents,
-                clones,
-                progress,
-            )
+            .start_cli_harness_from_request(harness, req, os_user, start, progress)
             .await?;
         self.announce_worktree_ready(&sessions_base, &session_id);
         Ok(started)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// The seeded roster, resolved before the spawn, then the harness's route and its start.
     async fn start_cli_harness_from_request(
         &self,
         harness: &'static CliHarness,
         req: &StartSessionRequest,
         os_user: &str,
         start: CliStart,
-        mut started_agents: Vec<tddy_core::SessionAgentRecord>,
-        clones: tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
+        let mut started_agents = self
+            .agent_roster
+            .seeded_roster_records(&req.specialized_agents)
+            .await?;
+        let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
+            service: self.agent_roster.clone(),
+        };
         let route_sources = session_route_sources_with_default(
             req,
             harness.session_type,

@@ -1,7 +1,7 @@
 //! Muse Code as a CLI harness: registered, launched with its model, resumed, and routed only on a
 //! Meta account with the key in the variable Muse Code reads.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-muse-cli.md
+//! Feature: docs/ft/daemon/muse-cli-session.md
 
 use tddy_agent_backend::cli_harness::{cli_harness, CliLaunch};
 use tddy_agent_backend::cli_harness_muse::{muse_cli_models, MUSE_ROUTE_KEY_ENV};

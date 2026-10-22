@@ -2,7 +2,7 @@
 //! keeps the session's model unless its route names the model itself.
 //!
 //! Feature: docs/ft/daemon/opencode-cli-session.md
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-muse-cli.md
+//! Feature: docs/ft/daemon/muse-cli-session.md
 
 use std::os::unix::fs::PermissionsExt;
 

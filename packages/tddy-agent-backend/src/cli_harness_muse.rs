@@ -8,8 +8,10 @@ use crate::backend::{BackendModel, BackendModels};
 use crate::cli_harness::{CliHarness, CliLaunch, CliModelSource};
 use crate::provider_route::Harness;
 
-/// The variable Muse Code reads a Model API key from for non-interactive use. Secondary sources
-/// (2026-10) name `META_API_KEY`; `/green` confirms it against `muse --help` before relying on it.
+/// The variable Muse Code reads a Model API key from for non-interactive use, as secondary sources
+/// (2026-10) name it.
+// TODO(muse-cli-facts): unconfirmed against a real `muse`, as are `--model`, `--continue` and the
+// `.muse/` tree — see docs/dev/todo/2026-10-22-muse-code-cli-facts-unconfirmed.md.
 pub const MUSE_ROUTE_KEY_ENV: &str = "META_API_KEY";
 
 /// The Muse models offered when no Meta account lists its own.

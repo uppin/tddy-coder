@@ -1,7 +1,7 @@
 /**
  * Acceptance tests: starting a Muse Code terminal session from the New-session form.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-muse-cli.md
+ * Feature: docs/ft/daemon/muse-cli-session.md
  */
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";

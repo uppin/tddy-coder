@@ -38,6 +38,44 @@ function meta(defaultFor: string[]): AccountSummary {
   return { ...aProviderAccount("meta", "meta-hackathon", defaultFor), label: "Meta hackathon" };
 }
 
+/** Mounts the New-session form for a person whose Meta account is the default for `defaultFor`. */
+function mountCreateSessionPaneWithTheDefault(defaultFor: string[]) {
+  const transport = anInMemoryRpcBackend()
+    .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
+    .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(ProjectService.method.listProjects, () => ({ projects: [] }))
+    .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
+    .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
+    .onUnary(CatalogService.method.listAgentModels, () => ({ models: [], defaultModel: "" }))
+    .onUnary(AccountsService.method.listAccounts, () => ({
+      providers: [{ provider: "meta", accounts: [meta(defaultFor)] }],
+      vaultLocked: false,
+      vaultUninitialized: false,
+    }))
+    .onUnary(AccountsService.method.listProviderRoutes, () => ({
+      harnessRoutable: true,
+      harnessReason: "",
+      options: [
+        { accountId: "meta-hackathon", label: "Meta hackathon", preset: "meta", supported: true, reason: "" },
+      ],
+    }))
+    .onUnary(AccountsService.method.listProviderAccountModels, () => ({ modelIds: ["muse-spark-1.3"] }))
+    .transport();
+  cy.mount(
+    <CreateSessionPane
+      client={createClient(SessionService, transport)}
+      projectClient={createClient(ProjectService, transport)}
+      catalogClient={createClient(CatalogService, transport)}
+      accountsClient={createClient(AccountsService, transport)}
+      sessionFilesClient={createClient(SessionFilesService, transport)}
+      worktreeClient={createClient(WorktreeService, transport)}
+      sessionToken="tok"
+      onCancel={cy.stub()}
+      onCreated={cy.stub()}
+    />,
+  );
+}
+
 describe("Default provider account per harness", () => {
   it("marks an account as the Claude CLI default from its row", () => {
     const sets: { accountId: string; harnesses: string[] }[] = [];
@@ -58,6 +96,27 @@ describe("Default provider account per harness", () => {
     accountsScreenPage.defaultForSave("meta", "meta-hackathon").click();
 
     cy.wrap(sets).should("deep.equal", [{ accountId: "meta-hackathon", harnesses: ["claude-cli"] }]);
+  });
+
+  it("marks a Meta account as the Muse Code default from its row", () => {
+    const sets: { accountId: string; harnesses: string[] }[] = [];
+    const backend = anInMemoryRpcBackend().implement(AccountsService, {
+      listAccounts: () => ({
+        providers: [{ provider: "meta", accounts: [meta([])] }],
+        vaultLocked: false,
+        vaultUninitialized: false,
+      }),
+      setProviderAccountDefaults: (req) => {
+        sets.push({ accountId: req.accountId, harnesses: [...req.harnesses] });
+        return { changed: [meta(req.harnesses)] };
+      },
+    });
+    mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), backend);
+
+    accountsScreenPage.defaultForSelect("meta", "meta-hackathon").select(["Muse Code"]);
+    accountsScreenPage.defaultForSave("meta", "meta-hackathon").click();
+
+    cy.wrap(sets).should("deep.equal", [{ accountId: "meta-hackathon", harnesses: ["muse-cli"] }]);
   });
 
   it("clears a default from the row that held it when another account takes it", () => {
@@ -84,42 +143,17 @@ describe("Default provider account per harness", () => {
   });
 
   it("pre-selects the person's default when a claude-cli session is created", () => {
-    const transport = anInMemoryRpcBackend()
-      .onUnary(SessionService.method.listSessions, () => ({ sessions: [] }))
-      .onUnary(CatalogService.method.listSubagents, () => ({ subagents: [] }))
-      .onUnary(ProjectService.method.listProjects, () => ({ projects: [] }))
-      .onUnary(CatalogService.method.listAgents, () => ({ agents: [] }))
-      .onUnary(CatalogService.method.listTools, () => ({ tools: [] }))
-      .onUnary(CatalogService.method.listAgentModels, () => ({ models: [], defaultModel: "" }))
-      .onUnary(AccountsService.method.listAccounts, () => ({
-        providers: [{ provider: "meta", accounts: [meta(["claude-cli"])] }],
-        vaultLocked: false,
-        vaultUninitialized: false,
-      }))
-      .onUnary(AccountsService.method.listProviderRoutes, () => ({
-        harnessRoutable: true,
-        harnessReason: "",
-        options: [
-          { accountId: "meta-hackathon", label: "Meta hackathon", preset: "meta", supported: true, reason: "" },
-        ],
-      }))
-      .onUnary(AccountsService.method.listProviderAccountModels, () => ({ modelIds: ["muse-spark-1.3"] }))
-      .transport();
-    cy.mount(
-      <CreateSessionPane
-        client={createClient(SessionService, transport)}
-        projectClient={createClient(ProjectService, transport)}
-        catalogClient={createClient(CatalogService, transport)}
-        accountsClient={createClient(AccountsService, transport)}
-        sessionFilesClient={createClient(SessionFilesService, transport)}
-        worktreeClient={createClient(WorktreeService, transport)}
-        sessionToken="tok"
-        onCancel={cy.stub()}
-        onCreated={cy.stub()}
-      />,
-    );
+    mountCreateSessionPaneWithTheDefault(["claude-cli"]);
 
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+
+    byTestId(TEST_IDS.createSessionProviderSelect).should("have.value", "meta-hackathon");
+  });
+
+  it("pre-selects the person's default when a muse-cli session is created", () => {
+    mountCreateSessionPaneWithTheDefault(["muse-cli"]);
+
+    byTestId(TEST_IDS.createSessionTypeMuseCliBtn).click();
 
     byTestId(TEST_IDS.createSessionProviderSelect).should("have.value", "meta-hackathon");
   });

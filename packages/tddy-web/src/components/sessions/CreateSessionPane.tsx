@@ -383,8 +383,7 @@ export function CreateSessionPane({
         />
       )}
 
-      {/* OpenCode and Muse Code session fields: the model alone, chosen from the daemon's list like
-          every other model */}
+      {/* OpenCode and Muse Code session fields: the model alone, from the daemon's list */}
       {(sessionType === "opencode-cli" || sessionType === "muse-cli") && modelField}
 
       {/* Claude CLI session fields */}

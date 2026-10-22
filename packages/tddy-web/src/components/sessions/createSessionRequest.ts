@@ -168,7 +168,7 @@ export function buildStartSessionRequest(
       codebaseDaemonInstanceId: "",
     };
   }
-  if (sessionType === "opencode-cli") {
+  if (sessionType === "opencode-cli" || sessionType === "muse-cli") {
     return {
       ...commonParams,
       toolPath: "",
@@ -177,40 +177,17 @@ export function buildStartSessionRequest(
       stackParent,
       stackParentDaemonInstanceId,
       stackNodeId,
-      sessionType: "opencode-cli",
+      sessionType,
       model,
       // The provider field is offered to every CLI harness, so the account the operator chose
-      // goes out as chosen rather than being dropped in favour of the vendor.
+      // goes out as chosen rather than being dropped in favour of the vendor; the daemon refuses
+      // one the harness cannot run on (Muse Code runs only on Meta).
       providerAccountId,
       providerBuiltIn,
       permissionMode: "",
-      // OpenCode offers no first prompt, sandbox, managed codebase, specialized agents or semantic
-      // index, so the request says so rather than sending what another session type left in the form.
-      initialPrompt: "",
-      sandbox: false,
-      managedCodebase: false,
-      specializedAgents: [],
-      semanticIndex: false,
-      codebaseDaemonInstanceId: "",
-    };
-  }
-  if (sessionType === "muse-cli") {
-    return {
-      ...commonParams,
-      toolPath: "",
-      agent: "",
-      recipe: "",
-      stackParent,
-      stackParentDaemonInstanceId,
-      stackNodeId,
-      sessionType: "muse-cli",
-      model,
-      // The account goes out as chosen; the daemon refuses one Muse Code cannot run on (not Meta).
-      providerAccountId,
-      providerBuiltIn,
-      permissionMode: "",
-      // The form offers Muse Code only its model, so the request clears what another session type
-      // left in the form: no first prompt, sandbox, managed codebase, specialized agents or index.
+      // The form offers OpenCode and Muse Code only a model, so the request clears what another
+      // session type left in the form: no first prompt, sandbox, managed codebase, specialized
+      // agents or semantic index.
       initialPrompt: "",
       sandbox: false,
       managedCodebase: false,

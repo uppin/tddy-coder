@@ -278,31 +278,43 @@ impl crate::launch_ports::LaunchSessions {
             &self.claude_cli_manager,
             &self.config,
             &self.host.session_account_access(&req.session_token),
-            &req.session_id,
-            session_dir,
-            metadata,
-            identity.git_environment,
+            ResumedSession {
+                session_id: &req.session_id,
+                session_dir,
+                meta: metadata,
+                git_environment: identity.git_environment,
+            },
         )
         .await
     }
 }
 
+/// The stopped session a resume relaunches.
+struct ResumedSession<'a> {
+    session_id: &'a str,
+    session_dir: &'a Path,
+    meta: SessionMetadata,
+    /// The project's account identity pairs the resumed agent's commits carry (empty keeps the
+    /// checkout's own).
+    git_environment: Vec<(String, String)>,
+}
+
 /// Resume a CLI harness session: the harness's resume argv (`--continue`) in its worktree, with its
 /// provider route re-resolved from the vault as it stands now. Refused when the worktree is gone —
 /// there is nothing for `--continue` to continue.
-#[allow(clippy::too_many_arguments)]
 async fn resume_cli_harness_session(
     harness: &CliHarness,
     cli_manager: &Arc<CliSessionManager>,
     config: &DaemonConfig,
     account_access: &SessionAccountAccess,
-    session_id: &str,
-    session_dir: &Path,
-    meta: SessionMetadata,
-    // The project's account identity pairs the resumed agent's commits carry (empty keeps the
-    // checkout's own).
-    git_environment: Vec<(String, String)>,
+    session: ResumedSession<'_>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
+    let ResumedSession {
+        session_id,
+        session_dir,
+        meta,
+        git_environment,
+    } = session;
     let worktree_path = meta
         .repo_path
         .as_ref()
