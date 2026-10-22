@@ -26,7 +26,6 @@ use tddy_code_restructuring::runner::group_gate::{self, GroupGate, GroupRun, Set
 use tddy_code_restructuring::runner::{self, Options, PlanRun};
 use tddy_code_restructuring::{Overlay, Resolution, Result};
 use tddy_lsp::client::LspClient;
-use tddy_lsp::LanguageId;
 use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
 
@@ -84,17 +83,23 @@ pub(crate) fn apply_plan(
 /// those languages' operations to (`#reshape` extension-language-server, R6–R7). Each is spawned if
 /// this process holds none yet; a server that will not start refuses the run before anything is
 /// written.
+///
+/// Answers the client of the built-in server, and `options` routing the root's installed languages
+/// ([`Options::installed`]) to the servers started for them ([`Options::installed_clients`]).
 pub(crate) async fn servers_for_a_run(
     index: &WorkspaceIndex,
     root: &Path,
     held: &HeldPlan,
-) -> std::result::Result<(Arc<LspClient>, InstalledClients), Status> {
+    options: Options,
+) -> std::result::Result<(Arc<LspClient>, Options), Status> {
     let rust = index.client_for(root).await?;
-    let Some(plan) = held.plan() else {
-        return Ok((rust, Vec::new()));
-    };
+    let installed = index.supports();
     let mut clients = Vec::new();
-    for (language, launch) in runner::installed_launches_for(&plan, &index.supports()) {
+    let launches = held
+        .plan()
+        .map(|plan| runner::installed_launches_for(&plan, &installed))
+        .unwrap_or_default();
+    for (language, launch) in launches {
         let route = Route::Extension {
             language: language.clone(),
             launch: Box::new(launch),
@@ -102,11 +107,13 @@ pub(crate) async fn servers_for_a_run(
         let served = index.client_for_route(root, &route).await?;
         clients.push((language, served.client));
     }
-    Ok((rust, clients))
+    let options = Options {
+        installed,
+        installed_clients: clients,
+        ..options
+    };
+    Ok((rust, options))
 }
-
-/// The clients of the servers started for installed languages, by language.
-type InstalledClients = Vec<(LanguageId, Arc<LspClient>)>;
 
 /// The plan `held` names, copied out of the store with the path it is held at.
 ///

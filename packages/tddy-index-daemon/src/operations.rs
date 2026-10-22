@@ -180,7 +180,7 @@ pub(crate) async fn serve_apply(
 ) -> Result<EventStream<RestructureEvent>, Status> {
     let (activity, root) = Activity::arrived("apply", index, &request.workspace_root).await?;
     let plan = activity.refusing(plan_path(&root, &request.plan))?;
-    let mut options = Options {
+    let options = Options {
         command: Command::Apply,
         target: Some(plan.clone()),
         dry_run: request.dry_run,
@@ -191,7 +191,6 @@ pub(crate) async fn serve_apply(
         // join them in the one record the host named with `--spawn-record`.
         spawns: index.spawn_recorder(),
         wait_heartbeat: index.wait_heartbeat(),
-        installed: index.supports(),
         ..Options::default()
     };
     let (events, stream) = event_stream();
@@ -212,15 +211,14 @@ pub(crate) async fn serve_apply(
                 return;
             }
         };
-        let (client, installed_clients) = match servers_for_a_run(&index, &root, &held).await {
-            Ok(servers) => servers,
+        let (client, options) = match servers_for_a_run(&index, &root, &held, options).await {
+            Ok(served) => served,
             Err(refusal) => {
                 activity.refused(&refusal);
                 let _ = events.send(Err(refusal)).await;
                 return;
             }
         };
-        options.installed_clients = installed_clients;
 
         let cancel = CancellationToken::new();
         let progress = progress_into(events.clone(), cancel.clone());

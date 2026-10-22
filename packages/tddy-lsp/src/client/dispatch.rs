@@ -10,31 +10,41 @@ use super::parse::parse_diagnostics;
 use super::{DiagnosticsCache, Notifications, Pending, Response, ResponseError};
 use crate::protocol::{encode_message, FrameReader};
 
+/// Where [`read_loop`] routes what the server sends: the client's pending requests, its
+/// diagnostics cache and notification sink, the channel replies go back on, and the settings a
+/// `workspace/configuration` request is answered from.
+pub(super) struct Routes {
+    pub(super) pending: Pending,
+    pub(super) diagnostics: DiagnosticsCache,
+    pub(super) notifications: Notifications,
+    pub(super) stdin: mpsc::UnboundedSender<Bytes>,
+    pub(super) workspace_configuration: Value,
+}
+
 /// Drain the server's stdout: correlate responses to pending requests and cache
 /// `publishDiagnostics` notifications.
-pub(super) async fn read_loop(
-    mut stdout: broadcast::Receiver<Bytes>,
-    pending: Pending,
-    diagnostics: DiagnosticsCache,
-    notifications: Notifications,
-    stdin: mpsc::UnboundedSender<Bytes>,
-    workspace_configuration: Value,
-) {
+pub(super) async fn read_loop(mut stdout: broadcast::Receiver<Bytes>, routes: Routes) {
     let mut frames = FrameReader::new();
     loop {
-        match stdout.recv().await {
-            Ok(bytes) => {
-                frames.push(&bytes);
-                while let Some(message) = frames.next_message() {
-                    if let Some(reply) = configuration_reply(&message, &workspace_configuration) {
-                        let _ = stdin.send(Bytes::from(encode_message(&reply)));
-                        continue;
-                    }
-                    dispatch(&message, &pending, &diagnostics, &notifications, &stdin);
-                }
-            }
+        let bytes = match stdout.recv().await {
+            Ok(bytes) => bytes,
             Err(broadcast::error::RecvError::Lagged(_)) => continue,
             Err(broadcast::error::RecvError::Closed) => break,
+        };
+        frames.push(&bytes);
+        while let Some(message) = frames.next_message() {
+            if let Some(reply) = configuration_reply(&message, &routes.workspace_configuration) {
+                let _ = routes.stdin.send(Bytes::from(encode_message(&reply)));
+                continue;
+            }
+            let Routes {
+                pending,
+                diagnostics,
+                notifications,
+                stdin,
+                ..
+            } = &routes;
+            dispatch(&message, pending, diagnostics, notifications, stdin);
         }
     }
 }
