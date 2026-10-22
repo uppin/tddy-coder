@@ -3,7 +3,7 @@
 //! `documentSymbol`.
 
 use tddy_code_restructuring::{Position, Range};
-use tree_sitter::{Query, QueryCursor, StreamingIterator, Tree};
+use tree_sitter::{Query, QueryCursor, QueryMatch, StreamingIterator, Tree};
 
 /// One `@item` match of `outline.scm`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,46 +39,12 @@ pub struct Outline {
 impl Outline {
     /// The matches of `query` over `tree`, the parse of `text` (R3).
     pub fn of(tree: &Tree, text: &str, query: &Query) -> Outline {
-        let capture = |name: &str| query.capture_index_for_name(name);
-        let (item, name, annotation) = (capture("item"), capture("name"), capture("annotation"));
-
+        let captures = Captures::of(query);
         let mut found: Vec<Found> = Vec::new();
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
         while let Some(matched) = matches.next() {
-            let node_of = |wanted: Option<u32>| {
-                matched
-                    .captures
-                    .iter()
-                    .find(|capture| Some(capture.index) == wanted)
-                    .map(|capture| capture.node)
-            };
-            let (Some(item), Some(name)) = (node_of(item), node_of(name)) else {
-                continue;
-            };
-            let leading_annotations = matched
-                .captures
-                .iter()
-                .filter(|capture| Some(capture.index) == annotation)
-                .map(|capture| capture.node.start_byte())
-                .filter(|start| *start < item.start_byte());
-            let from = leading_annotations
-                .chain(std::iter::once(item.start_byte()))
-                .min()
-                .unwrap_or_else(|| item.start_byte());
-            // A node can run on over the blank lines before the next item: the span ends where its
-            // text does.
-            let until =
-                item.start_byte() + text[item.start_byte()..item.end_byte()].trim_end().len();
-            found.push(Found {
-                item: (item.start_byte(), item.end_byte()),
-                name: text[name.start_byte()..name.end_byte()].to_string(),
-                span: Range {
-                    start: position_at(text, from),
-                    end: position_at(text, until),
-                },
-                name_at: position_at(text, name.start_byte()),
-            });
+            found.extend(Found::of_match(matched, &captures, text));
         }
         // Enclosing items first: by where the node starts, the longer node before the shorter.
         found.sort_by_key(|entry| (entry.item.0, std::cmp::Reverse(entry.item.1)));
@@ -127,7 +93,59 @@ struct Found {
     name_at: Position,
 }
 
+/// The capture indices of the names R3 reads; `None` for one the query does not use.
+struct Captures {
+    item: Option<u32>,
+    name: Option<u32>,
+    annotation: Option<u32>,
+}
+
+impl Captures {
+    fn of(query: &Query) -> Self {
+        let capture = |name: &str| query.capture_index_for_name(name);
+        Self {
+            item: capture("item"),
+            name: capture("name"),
+            annotation: capture("annotation"),
+        }
+    }
+}
+
 impl Found {
+    /// The entry one match makes, or `None` for a match with no `@item` or no `@name`.
+    fn of_match(matched: &QueryMatch<'_, '_>, captures: &Captures, text: &str) -> Option<Found> {
+        let node_of = |wanted: Option<u32>| {
+            matched
+                .captures
+                .iter()
+                .find(|capture| Some(capture.index) == wanted)
+                .map(|capture| capture.node)
+        };
+        let (item, name) = (node_of(captures.item)?, node_of(captures.name)?);
+        let leading_annotations = matched
+            .captures
+            .iter()
+            .filter(|capture| Some(capture.index) == captures.annotation)
+            .map(|capture| capture.node.start_byte())
+            .filter(|start| *start < item.start_byte());
+        let from = leading_annotations
+            .chain(std::iter::once(item.start_byte()))
+            .min()
+            .unwrap_or_else(|| item.start_byte());
+        // A node can run on over the blank lines before the next item: the span ends where its
+        // text does.
+        let until = item.start_byte() + text[item.start_byte()..item.end_byte()].trim_end().len();
+        Some(Found {
+            item: (item.start_byte(), item.end_byte()),
+            name: text[name.start_byte()..name.end_byte()].to_string(),
+            span: Range {
+                start: position_at(text, from),
+                end: position_at(text, until),
+            },
+            name_at: position_at(text, name.start_byte()),
+        })
+    }
+
     fn encloses(&self, inner: &Found) -> bool {
         self.item != inner.item && self.item.0 <= inner.item.0 && inner.item.1 <= self.item.1
     }

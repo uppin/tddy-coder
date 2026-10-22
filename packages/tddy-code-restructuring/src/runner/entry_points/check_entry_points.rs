@@ -18,7 +18,7 @@ use crate::item_anchor::{has_item_anchors, plan_file_has_item_anchors};
 
 use super::registry_for_static;
 
-use super::registry_for;
+use super::{registry_for, registry_with_installed};
 
 use crate::RestructureError;
 
@@ -146,6 +146,9 @@ pub fn snapshot_resolving(
             "snapshot of a plan with item anchors requires a rust-analyzer LSP session".into(),
         )
     })?;
+    // TODO(extension-language-server): route through `options.installed` too, and ask no client
+    // when every item anchor lies in a file a server-less installed language claims — today a
+    // snapshot re-resolves only the built-ins' item anchors.
     let mut registry = registry_for(
         root,
         client,
@@ -228,15 +231,7 @@ pub fn check_plan(
                 "deep check requires a rust-analyzer LSP session".into(),
             )
         })?;
-        let mut registry = registry_for(
-            root,
-            client,
-            cancel,
-            Arc::clone(&options.progress),
-            options.trace,
-        );
-        registry.extend(options.installed.backends_static(root));
-        registry
+        registry_with_installed(root, client, cancel, &options)
     } else {
         registry_for_static(root, &options.installed)
     };

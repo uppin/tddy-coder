@@ -120,12 +120,10 @@ async fn main() -> ExitCode {
         Lifetime::SingleShot(requested) => {
             // The task registry is the serving path's; a single-shot run holds the servers only
             // long enough to shut them down again.
-            let (_tasks, servers, service) = match wired(&rust_analyzer, spawn_observer) {
-                Ok(wired) => wired,
-                Err(failure) => {
-                    log::error!(target: MAIN, "installed extensions: {failure:#}");
-                    return ExitCode::FAILURE;
-                }
+            let Ok((_tasks, servers, service)) =
+                wired(&rust_analyzer, spawn_observer).inspect_err(report_wiring_failure)
+            else {
+                return ExitCode::FAILURE;
             };
             let verdict = single_shot::run_once(service.as_ref(), requested).await;
             // A plan this run loaded or changed is written back before the process goes, as a
@@ -143,12 +141,10 @@ async fn main() -> ExitCode {
             }
         }
         Lifetime::Serve(transports) => {
-            let (tasks, servers, service) = match wired(&rust_analyzer, spawn_observer) {
-                Ok(wired) => wired,
-                Err(failure) => {
-                    log::error!(target: MAIN, "installed extensions: {failure:#}");
-                    return ExitCode::FAILURE;
-                }
+            let Ok((tasks, servers, service)) =
+                wired(&rust_analyzer, spawn_observer).inspect_err(report_wiring_failure)
+            else {
+                return ExitCode::FAILURE;
             };
             match serve::serve(transports, service, servers, tasks).await {
                 Ok(()) => ExitCode::SUCCESS,
@@ -170,8 +166,9 @@ async fn main() -> ExitCode {
 ///
 /// The allow-list is the one the built-in Rust support launches, with the configured program.
 /// TODO(extension-language-server): an installed language that launches a server is allowed here
-/// too; today none does, so the built-in's is the whole list. This
-/// process cannot share `tddy-daemon`'s registry: the handshake is fixed at spawn, and the handshake
+/// too; today none does, so the built-in's is the whole list.
+///
+/// This process cannot share `tddy-daemon`'s registry: the handshake is fixed at spawn, and the handshake
 /// is what this process's server needs to answer code actions and count columns the way it does.
 fn wired(
     rust_analyzer: &str,
@@ -196,6 +193,12 @@ fn wired(
         Arc::new(installed),
     ));
     Ok((tasks, servers, service))
+}
+
+/// Why [`wired`] could not stand the service up — the installed extensions did not load — said once
+/// before the process exits.
+fn report_wiring_failure(failure: &anyhow::Error) {
+    log::error!(target: MAIN, "installed extensions: {failure:#}");
 }
 
 /// Point this process's stderr at `path`.

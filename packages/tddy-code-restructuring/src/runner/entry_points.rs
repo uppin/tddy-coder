@@ -116,6 +116,26 @@ pub fn registry_for(
     registry_for_waiting(root, client, cancel, progress, trace, WAIT_HEARTBEAT)
 }
 
+/// [`registry_for`], then the server-less backends of `options.installed` after the built-ins': the
+/// registry an `anchors` or a deep `check` routes by, so a file an installed language claims
+/// reaches that language's outline backend (`#reshape` extension-outline, R5–R6).
+fn registry_with_installed(
+    root: &Path,
+    client: Arc<LspClient>,
+    cancel: CancellationToken,
+    options: &Options,
+) -> BackendRegistry {
+    let mut registry = registry_for(
+        root,
+        client,
+        cancel,
+        Arc::clone(&options.progress),
+        options.trace,
+    );
+    registry.extend(options.installed.backends_static(root));
+    registry
+}
+
 /// [`registry_for`] for a caller that owns the cadence at which a wait says what it is waiting for.
 ///
 /// The cadence is not a budget: nothing ends a wait at it, and a run still waits until the server

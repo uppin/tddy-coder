@@ -46,25 +46,7 @@ pub struct InstalledLanguages {
 pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, ExtensionError> {
     let mut languages = Vec::new();
     for extension_dir in installed_extension_dirs(dir)? {
-        let manifest_file = extension_dir.join("extension.toml");
-        let id = extension_dir
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let text = std::fs::read_to_string(&manifest_file).map_err(|error| match error.kind() {
-            std::io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
-                extension: id.clone(),
-                file: PathBuf::from("extension.toml"),
-            },
-            _ => ExtensionError::io(&manifest_file, error),
-        })?;
-        let manifest = ExtensionManifest::parse(&text).map_err(|error| {
-            ExtensionError::ManifestUnparsable {
-                extension: id.clone(),
-                file: PathBuf::from("extension.toml"),
-                message: error.to_string(),
-            }
-        })?;
+        let manifest = read_installed_manifest(&extension_dir)?;
         languages.extend(ExtensionLanguage::load_all(&extension_dir, &manifest)?);
     }
 
@@ -75,12 +57,44 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
             failures: Vec::new(),
         });
     }
-    let store = GrammarStore::new().map_err(|error| ExtensionError::Io {
-        path: dir.installed(),
-        message: format!("the WASM engine did not start: {}", error.message),
+    let store = GrammarStore::new().map_err(|error| ExtensionError::GrammarEngineUnavailable {
+        message: error.message,
     })?;
-    let store = Arc::new(Mutex::new(store));
+    Ok(supports_of(languages, Arc::new(Mutex::new(store))))
+}
 
+/// The `extension.toml` of the extension installed at `extension_dir`, named in every refusal by
+/// its directory — the id it was installed under.
+fn read_installed_manifest(extension_dir: &Path) -> Result<ExtensionManifest, ExtensionError> {
+    let manifest_file = extension_dir.join("extension.toml");
+    let id = extension_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let text = std::fs::read_to_string(&manifest_file).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
+            extension: id.clone(),
+            file: PathBuf::from("extension.toml"),
+        },
+        _ => ExtensionError::io(&manifest_file, error),
+    })?;
+    ExtensionManifest::parse(&text).map_err(|error| ExtensionError::ManifestUnparsable {
+        extension: id,
+        file: PathBuf::from("extension.toml"),
+        message: error.to_string(),
+    })
+}
+
+/// A support per language whose grammar loads into `store` and whose `outline.scm` compiles, and
+/// one report per failure (R8).
+///
+/// A grammar that does not load fails every language on it, and is reported once however many
+/// share it. A language's own failure — an `outline.scm` that does not compile — fails that
+/// language alone: a sibling on the same grammar still loads.
+fn supports_of(
+    languages: Vec<ExtensionLanguage>,
+    store: Arc<Mutex<GrammarStore>>,
+) -> InstalledLanguages {
     let mut supports = Vec::new();
     let mut failures: Vec<GrammarLoadError> = Vec::new();
     let mut failed_grammars: BTreeSet<(String, String)> = BTreeSet::new();
@@ -97,19 +111,21 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
                 &language.extension_dir,
                 &language.grammar,
             );
-        let support = loaded.and_then(|_| ExtensionSupport::new(language, Arc::clone(&store)));
+        let support = match loaded {
+            Ok(_) => ExtensionSupport::new(language, Arc::clone(&store)),
+            Err(failure) => {
+                failed_grammars.insert(grammar);
+                Err(failure)
+            }
+        };
         match support {
             Ok(support) => supports.push(support),
-            Err(failure) => {
-                // However many languages share a grammar, it is reported once.
-                failed_grammars.insert(grammar);
-                if !failures.contains(&failure) {
-                    failures.push(failure);
-                }
-            }
+            // The same failure from a sibling (a grammar no parser can use) is reported once.
+            Err(failure) if !failures.contains(&failure) => failures.push(failure),
+            Err(_) => {}
         }
     }
-    Ok(InstalledLanguages { supports, failures })
+    InstalledLanguages { supports, failures }
 }
 
 /// `installed/<id>/` for every extension, sorted by id, without the dot-directories a failed
@@ -289,9 +305,9 @@ impl LanguageBackend for OutlineBackend {
     }
 
     fn handles_extension(&self, extension: &str) -> bool {
-        // TODO(reshape-extension-outline): a whole-file-name suffix (`Cargo.lock`) is claimed by
-        // `ExtensionSupport::claims` but the registry routes by extension alone, so only the
-        // extension form reaches this backend.
+        // TODO: a whole-file-name suffix (`Cargo.lock`) is claimed by `ExtensionSupport::claims`
+        // but the registry routes by extension alone, so only the extension form reaches this
+        // backend — docs/dev/todo/2026-10-22-extension-whole-file-name-suffix-is-not-routed.md
         self.path_suffixes.iter().any(|suffix| suffix == extension)
     }
 
@@ -436,5 +452,86 @@ fn resolved_from(text: &str, entry: &OutlineEntry) -> ResolvedItem {
         range: entry.span,
         name: entry.name_at,
         fingerprint: Fingerprint::of(&lines.join("\n")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    /// `installed/two-tomls/` with two languages on the vendored TOML grammar: `Good TOML`, whose
+    /// `outline.scm` compiles, and `Bad TOML`, whose `outline.scm` names a node TOML has not.
+    fn an_extension_whose_two_languages_share_a_grammar() -> (tempfile::TempDir, ExtensionsDir) {
+        let data = tempfile::TempDir::new().expect("temp data dir");
+        let dir = ExtensionsDir::under_data_dir(data.path());
+        let root = dir.extension("two-tomls");
+        std::fs::create_dir_all(root.join("grammars")).expect("grammars dir");
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/grammars/tree-sitter-toml/toml.wasm"),
+            root.join("grammars/toml.wasm"),
+        )
+        .expect("copy the vendored grammar");
+        std::fs::write(
+            root.join("extension.toml"),
+            "id = \"two-tomls\"\nname = \"Two TOMLs\"\nversion = \"0.1.0\"\nschema_version = 1\n",
+        )
+        .expect("write the manifest");
+        for (language, query) in [
+            ("good-toml", "(pair (_) @name \"=\") @item"),
+            ("bad-toml", "(no_such_node) @item"),
+        ] {
+            let language_dir = root.join("languages").join(language);
+            std::fs::create_dir_all(&language_dir).expect("language dir");
+            let name = if language == "good-toml" {
+                "Good TOML"
+            } else {
+                "Bad TOML"
+            };
+            std::fs::write(
+                language_dir.join("config.toml"),
+                format!("name = \"{name}\"\ngrammar = \"toml\"\npath_suffixes = [\"toml\"]\n"),
+            )
+            .expect("write the language config");
+            std::fs::write(language_dir.join("outline.scm"), query).expect("write the query");
+        }
+        (data, dir)
+    }
+
+    #[test]
+    fn an_outline_that_does_not_compile_fails_its_language_and_spares_a_sibling_on_its_grammar() {
+        // Given an extension whose two languages share a grammar, one with a broken outline.scm
+        let (_data, dir) = an_extension_whose_two_languages_share_a_grammar();
+
+        // When its languages are loaded
+        let languages = load_installed(&dir).expect("one broken outline fails no run");
+
+        // Then the broken one is reported, and the other still loads on the same grammar
+        let loaded: Vec<String> = languages
+            .supports
+            .iter()
+            .map(|support| support.id().to_string())
+            .collect();
+        let reported: Vec<(String, String, bool)> = languages
+            .failures
+            .iter()
+            .map(|failure| {
+                (
+                    failure.extension.clone(),
+                    failure.grammar.clone(),
+                    failure
+                        .reason
+                        .starts_with("its outline.scm does not compile"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            (loaded, reported),
+            (
+                vec!["good-toml".to_string()],
+                vec![("two-tomls".to_string(), "toml".to_string(), true)]
+            )
+        );
     }
 }

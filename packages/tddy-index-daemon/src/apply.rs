@@ -120,6 +120,8 @@ fn apply_held_plan(
 
     // The gates run on a copy of the plan, outside the store's lock: the baseline compile check
     // takes minutes.
+    // TODO(extension-language-server): route through `options.installed`, once an installed
+    // language has a server and so an operation to apply — until then (R7) it supports none.
     let mut registry = runner::registry_for_waiting(
         root,
         client,
