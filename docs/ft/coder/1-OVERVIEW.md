@@ -6,7 +6,7 @@
 
 ## Summary
 
-tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backend (Claude Code CLI, Claude ACP, Cursor agent, OpenAI Codex CLI, OpenAI Codex via ACP (`codex-acp`), or Stub) through a strict workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs. It produces structured artifacts (PRD.md, TODO.md, acceptance-tests.md, progress.md, etc.) in a plan directory and maintains workflow state in changeset.yaml. The **`workflow`** subsection of **`changeset.yaml`** persists post-green routing, branch/worktree intent, and (**when present**) optional post-workflow GitHub PR and session-worktree elicitation fields validated by **`changeset-workflow`**; see **[post-workflow-github-pr-elicitation.md](post-workflow-github-pr-elicitation.md)**. The tool supports both TUI mode (interactive ratatui interface) and plain mode (linear output for piping and scripting).
+tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backend (Claude Code CLI, Claude ACP, Cursor agent, OpenAI Codex CLI, OpenAI Codex via ACP (`codex-acp`), OpenCode via ACP (`opencode`), or Stub) through a strict workflow: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor → update-docs. It produces structured artifacts (PRD.md, TODO.md, acceptance-tests.md, progress.md, etc.) in a plan directory and maintains workflow state in changeset.yaml. The **`workflow`** subsection of **`changeset.yaml`** persists post-green routing, branch/worktree intent, and (**when present**) optional post-workflow GitHub PR and session-worktree elicitation fields validated by **`changeset-workflow`**; see **[post-workflow-github-pr-elicitation.md](post-workflow-github-pr-elicitation.md)**. The tool supports both TUI mode (interactive ratatui interface) and plain mode (linear output for piping and scripting).
 
 ## Target Users
 
@@ -43,9 +43,10 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 - **TUI**: Synthetic clarification `Select` over backend options; `AppMode::Select` includes `initial_selected` for highlight consistency.
 - **Plain**: Numbered menu on stderr; stdin line picks the backend when `--agent` is omitted.
 - **Daemon / web**: `StartSession` includes `agent`; the daemon passes `--agent` into the spawned `tddy-coder`. The web Connection Screen offers backend per **new session** only (`StartSessionRequest.agent`). The choice is **per session**, not stored on the project record.
-- **Models**: Defaults per backend (e.g. Cursor `composer-2.5`, Codex / Codex ACP `gpt-5`); global `--model` overrides when provided.
+- **Models**: Defaults per backend (e.g. Cursor `composer-2.5`, Codex / Codex ACP `gpt-5`, OpenCode `fireworks/kimi-k2`); global `--model` overrides when provided.
 - **Codex binary**: `--codex-cli-path` or environment variable `TDDY_CODEX_CLI` selects the `codex` executable; otherwise the `codex` name on `PATH` is used.
 - **Codex ACP binary**: `--codex-acp-cli-path`, `TDDY_CODEX_ACP_CLI`, optional YAML `codex_acp_cli_path`, or `codex-acp` on `PATH` when using `--agent codex-acp`. See [codex-acp-backend.md](codex-acp-backend.md).
+- **OpenCode binary**: `--opencode-cli-path`, `TDDY_OPENCODE_CLI`, optional YAML `opencode_cli_path`, or `opencode` on `PATH` when using `--agent opencode` (run as `opencode acp`). See [opencode-acp-backend.md](opencode-acp-backend.md).
 
 ## Feature Documents
 
@@ -66,6 +67,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) | **`tddy-index-daemon`** — one binary, two lifetimes: run one operation in process, or hold a warm rust-analyzer index per worktree and serve `code_index.CodeIndexService` over **gRPC** and **stdio**; holds loaded plans per root |
 | [Activity log streaming](activity-log-streaming.md) | User **`User:`** / **`Queued:`** lines in the activity log; incremental agent tail; **`AgentOutput`** as the streaming channel for workflow chunks |
 | [Codex ACP backend](codex-acp-backend.md) | **`--agent codex-acp`**: ACP to **`codex-acp`** subprocess; resume via **`load_session`**; **`codex_thread_id`** parity with **`codex`**; OAuth retry via **`codex login`** and **`codex_oauth_authorize.url`** |
+| [OpenCode ACP backend](opencode-acp-backend.md) | **`--agent opencode`**: ACP to **`opencode acp`**; models from a new session; on a provider account the generated **`opencode.json`** through **`OPENCODE_CONFIG`** and the key in the child's environment |
 | [Session participant RPC & metadata](session-participant-rpc.md) | The coder's LiveKit participant serves session-scoped **`ConnectionService`** (tools, control, VNC, screen-sharing) and publishes **`session`** metadata for the web sessions list; **`DeleteSession`/`SignalSession` are daemon-direct** (not served by the coder) |
 | [Managed-codebase subagents](managed-codebase-subagents.md) | Discovery and specialized subagents over MCP; a subagent that edits works in its own per-conversation worktree, one commit per mutating call, handed back by **`subagent_end`**; a rewind takes the worktree back with the transcript; **`subagent_diff`** reads the diff between any two points of the conversation; **`subagent_pull`** hands a range of its commits to the caller mid-conversation, and **`subagent_end`** takes a range, skipping what was pulled; every prompt and resume first merges the caller's current files into the conversation's worktree (**`syncWorktree`**, **`worktreeSync`**), and a caller's merged changes are never counted as the subagent's work |
 

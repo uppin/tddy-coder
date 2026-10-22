@@ -74,7 +74,7 @@ admits, **`claude-cli`**, **`opencode-cli`** and **`muse-cli`** started unsandbo
 ([Claude Code CLI session § Running on a provider account](claude-cli-session.md#running-on-a-provider-account),
 [OpenCode CLI session § Running on a provider account](opencode-cli-session.md#running-on-a-provider-account),
 [Muse Code CLI session § Running on a Meta account](muse-cli-session.md#running-on-a-meta-account));
-so is a **tool session** whose agent is `claude`, `claude-acp`, `codex` or `codex-acp` (below). Any
+so is a **tool session** whose agent is `claude`, `claude-acp`, `codex`, `codex-acp` or `opencode` (below). Any
 other harness asked to run on an account is refused as not routable in this build.
 
 ### Tool sessions
@@ -91,6 +91,10 @@ because the spawned process's environment carries no credential:
 - Claude agents get the same Anthropic route as a claude-cli session. Codex agents get the account
   declared as a Responses provider (`tddy-route`) through `-c` overrides and the model through `-m`
   (`codex exec`) or `-c model=` (`codex-acp`); the key is in the child's `TDDY_ROUTE_API_KEY`.
+- The OpenCode agent (`opencode acp`) gets the same generated `opencode.json` as an opencode-cli
+  session, written owner-only into a directory the agent's worker removes when it ends and named by
+  `OPENCODE_CONFIG`, with the key in `TDDY_OPENCODE_PROVIDER_KEY`. The route's `--model` is not passed:
+  the configuration selects the model ([OpenCode ACP backend](../coder/opencode-acp-backend.md)).
 - An account with no agent, a `cursor` agent, the `stub` or a specialized agent definition is
   refused with the reason. A tool session started from Telegram cannot choose an account
   (`docs/dev/todo/2026-10-22-telegram-tool-sessions-choose-no-provider-account.md`).
@@ -101,8 +105,8 @@ because the spawned process's environment carries no credential:
 
 `accounts.AccountsService/ListProviderRoutes(session_token, harness)` answers, for one harness, the
 caller's provider accounts in vault order, each with `supported` and — when not — the `reason`, in the
-matrix's words. `harness_routable` is false for a harness no account can run — Cursor, and every
-harness whose route this build does not have yet (Codex, OpenCode, Muse Code); every account is then
+matrix's words. `harness_routable` is false for a harness no account can run — Cursor, the one
+harness this build has no route for; every account is then
 unsupported and `harness_reason` says why, once. `harness` is a tool-session agent id or a CLI
 session type; an id that names no harness is answered the same way, `harness_routable` false with
 "unknown harness". The web

@@ -113,11 +113,11 @@ runs on OpenCode's own setup instead.
 ## Out of scope
 
 - Sandboxed OpenCode (`#provider-route` 9/9).
-- OpenCode as a headless tool-session agent (`opencode` over ACP, `#provider-route` 7/9).
 - Activity-status hooks and transcript tailing.
 
 ## References
 
 - [OpenCode CLI](https://opencode.ai/docs/cli/), [OpenCode config](https://opencode.ai/docs/config/)
 - [Provider accounts](provider-accounts.md)
+- [OpenCode ACP backend](../coder/opencode-acp-backend.md) — OpenCode as a headless tool-session agent (`--agent opencode`)
 - [Terminal sessions](terminal-sessions.md)

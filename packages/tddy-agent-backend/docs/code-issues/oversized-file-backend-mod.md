@@ -6,7 +6,7 @@
 **Metrics:** **877 production lines** of 1,366 total (first `#[cfg(test)]` at line 878; two test modules, L878–1160 and L1162–1366, with no production code after the first) · budget 500 · **1.8× over**
 **Thresholds breached:** length 877 > 500
 **Restructure:** not designed
-**Status:** Open — regressed 2026-10-22 (877 → 881 across `#provider-route` 3/9, 4/9 and 6/9, stack-shared, split deferred) — **unclaimed**
+**Status:** Open — regressed 2026-10-22 (877 → 906 across `#provider-route` 3/9, 4/9, 6/9 and 7/9, stack-shared, split deferred) — **unclaimed**
 **Moved:** 2026-09-23 — from `packages/tddy-core/src/backend/mod.rs` by `#carve` 12/14 (PR #522), with `git mv`
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
@@ -18,6 +18,7 @@
 | 2026-10-22 | 879 | `#provider-route` 3/9 (#664): 877 → 879 — the `opencode` row of `context_globs_for_agent` (one comment, one arm). **Regressed, split deferred**: the file is stack-shared (`#provider-route` 4/9 #665 and 7/9 #668 also change it), and a split mid-stack would conflict in both; the follow-up is after the stack lands |
 | 2026-10-22 | 880 | `#provider-route` 4/9 (#665): 879 → 880 — `mod routed;`. **Regressed, split deferred**: still stack-shared with `#provider-route` 7/9 (#668) |
 | 2026-10-22 | 881 | `#provider-route` 6/9 (#667): 880 → 881 — the `muse` row of `context_globs_for_agent` (one arm; its comment replaced, not added). **Regressed, split deferred**: still stack-shared with `#provider-route` 7/9 (#668) |
+| 2026-10-22 | 906 | `#provider-route` 7/9 (#668): 882 → 906 (882 is this count on the rebased base) — `AnyBackend::OpenCode` and its five dispatch arms, the `OpenCode` selection option, `OPENCODE_DEFAULT_MODEL` and its rows in `backend_from_label`, `default_model_for_agent`, `curated_models_for_agent` and `preselected_index_for_agent`, `mod opencode_acp;` / `mod acp_updates;` and the re-export. **Regressed, split deferred**: stack-shared — `#provider-route` 8/9 (#669) and 9/9 (#670) sit on this branch, and the split is the follow-up after the stack lands (seams B and C above take most of what this PR added) |
 
 ## What would close it — candidate seams (not proven)
 

@@ -8,7 +8,7 @@
 ## Problem
 
 Today tddy-coder is only ever an ACP **client** — it drives external coding agents
-(`claude-agent-acp`, `codex-acp`) as one of six interchangeable `CodingBackend`s. Its own TDD
+(`claude-agent-acp`, `codex-acp`, `opencode acp`) as one of seven interchangeable `CodingBackend`s. Its own TDD
 workflow is not itself addressable over any standard protocol: the daemon spawns
 `tddy-coder --daemon --grpc` and speaks the bespoke `TddyRemote` protocol to it over LiveKit.
 
@@ -31,7 +31,7 @@ web AgentChat  --TddyRemote / LiveKit-->  session-host (ACP host + bridge)  --AC
                         (web wire protocol unchanged)          (translates both directions)      (WorkflowEngine)
 ```
 
-Coding backends stay **additive** — all six remain selectable via `--agent`; ACP is the default
+Coding backends stay **additive** — all seven remain selectable via `--agent`; ACP is the default
 path used inside the workflow agent. Nothing is removed.
 
 ## What a caller sees over ACP
