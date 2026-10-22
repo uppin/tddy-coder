@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — more than one crate (tddy-worktree-service, tddy-tool-engine, tddy-daemon-rpc); git process seam; ordering semantics (gate vs session activity); integration tests on real git fixtures
 **Stack**: #project-home 7/7. Base: `feature/project-home/home-auto-stop`.
+**PR**: [#702](https://github.com/uppin/tddy-coder/pull/702)
 
 ## Initial Discovery
 
@@ -51,6 +52,12 @@ pub enum GitOpError { TargetActive { session_id: String }, Git(String) }
 pub fn run_git_op(target: &SessionTarget, op: GitOp, push_identity: &PushIdentity) -> Result<GitOpOutcome, GitOpError>;
 // tddy-tool-engine::project_home_git_tools (new)
 pub fn project_home_git_tool_defs() -> Vec<ToolDef>;
+// names: CommitSessionWorktree, PushSessionBranch, RebaseSessionBranch, StashSessionWorktree,
+//        ResetSessionWorktree, CheckoutSessionWorktree, CleanSessionWorktree (args in the module doc)
+// PushIdentity { env: Vec<(String, String)> }
+// Wire contract the tests pin: a gate refusal is an `is_error` result naming the session and
+// "is active"; a rebase conflict's result_json carries {"conflict_paths": [...]}; a home-worktree
+// target is refused naming "project-home".
 ```
 Plus the failing tests below. Bodies `// TODO(home-git-tools): implement`.
 
@@ -132,6 +139,12 @@ ensured home session against an active and a stopped target; a unit table for `r
 - **Force-with-lease push gated** too: it rewrites the remote branch the active agent is building on.
 - **Commit allowed while active** (as requested): it changes no files; it can race the agent's next edit, which then lands in a later commit.
 
+## Red-phase notes
+
+- Verified failing (2026-10-23): 8/8 `project_home_git_tools_acceptance` (every failure is `unknown tool: …` — the tools are not in the catalog), 1/1 `session_git_ops` gate table.
+- Active / stopped targets in the tests are workspace sessions whose metadata `pid` is the test process (alive → `is_active`) or none; the project-home caller is a workspace session marked with the role, as in node 5.
+- Push identity: green derives it from the target's project the way a session push does (vault account askpass env, or local gh).
+
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
@@ -152,10 +165,10 @@ ensured home session against an active and a stopped target; a unit table for `r
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
