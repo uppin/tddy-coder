@@ -679,6 +679,23 @@ impl SandboxSessionRelay {
         *self.session_ended.lock().unwrap() = Some(exit_code);
     }
 
+    /// Answer a host's `SubscribeTerminal` with one empty `TerminalOutput` frame, so the host knows
+    /// the channel is attached in both directions. Without it a jail that has nothing to say (a
+    /// `--workspace-tools` jail spawns no pty) is indistinguishable from a channel that never
+    /// attached, and the host's attach wait times out. The host ignores empty chunks.
+    fn acknowledge_attach(
+        &self,
+        out_tx: &tokio::sync::mpsc::UnboundedSender<Result<SessionFrame, Status>>,
+    ) {
+        let _ = out_tx.send(Ok(SessionFrame {
+            payload: Some(SessionPayload::TerminalOutput(SandboxTerminalOutput {
+                data: Vec::new(),
+                session_id: session_id_from_env(),
+                terminal_id: MAIN_TERMINAL_ID.to_string(),
+            })),
+        }));
+    }
+
     fn handle_host_poll(
         &self,
         out_tx: &tokio::sync::mpsc::UnboundedSender<Result<SessionFrame, Status>>,
@@ -786,6 +803,7 @@ impl TonicSandboxService for SandboxRunnerService {
                     Some(SessionPayload::SubscribeTerminal(sub)) => {
                         if sub.session_id == session_id {
                             *relay.terminal_subscribed.lock().unwrap() = true;
+                            relay.acknowledge_attach(&out_tx);
                         }
                     }
                     Some(SessionPayload::TerminalInput(input)) => {
@@ -913,6 +931,7 @@ impl tddy_service::proto::sandbox::SandboxService for SandboxRunnerService {
                     Some(SessionPayload::SubscribeTerminal(sub)) => {
                         if sub.session_id == session_id {
                             *relay.terminal_subscribed.lock().unwrap() = true;
+                            relay.acknowledge_attach(&out_tx);
                         }
                     }
                     Some(SessionPayload::TerminalInput(input)) => {
