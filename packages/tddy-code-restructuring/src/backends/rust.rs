@@ -818,24 +818,7 @@ impl RustBackend {
             .join(&toolchain)
             .join("bin");
 
-        let mut command = self.spawns.command(&self.binary);
-        command
-            .current_dir(root)
-            .env("CARGO_HOME", &self.cargo_home)
-            .env("RUSTUP_HOME", &self.rustup_home)
-            .env("RUSTUP_TOOLCHAIN", &toolchain)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-
-        // Point rust-analyzer straight at the real binaries so sysroot discovery and
-        // `cargo metadata` never go through a proxy at all.
-        for (key, name) in [("CARGO", "cargo"), ("RUSTC", "rustc")] {
-            let real = toolchain_bin.join(name);
-            if real.exists() {
-                command.env(key, real);
-            }
-        }
+        let mut command = self.spawn_command(root, &toolchain, &toolchain_bin);
         self.environment =
             server_process::describe_server_environment(&self.binary, &toolchain, &toolchain_bin);
         let mut process = self
@@ -866,6 +849,33 @@ impl RustBackend {
 
         self.unresolved_token = lsp_edits::token_type_index(&handshake, UNRESOLVED_TOKEN);
         self.notify("initialized", json!({}))
+    }
+
+    fn spawn_command(
+        &mut self,
+        root: &Path,
+        toolchain: &str,
+        toolchain_bin: &Path,
+    ) -> std::process::Command {
+        let mut command = self.spawns.command(&self.binary);
+        command
+            .current_dir(root)
+            .env("CARGO_HOME", &self.cargo_home)
+            .env("RUSTUP_HOME", &self.rustup_home)
+            .env("RUSTUP_TOOLCHAIN", toolchain)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+
+        // Point rust-analyzer straight at the real binaries so sysroot discovery and
+        // `cargo metadata` never go through a proxy at all.
+        for (key, name) in [("CARGO", "cargo"), ("RUSTC", "rustc")] {
+            let real = toolchain_bin.join(name);
+            if real.exists() {
+                command.env(key, real);
+            }
+        }
+        command
     }
 
     fn request(&mut self, id: u64, method: &str, params: Value) -> Result<Value> {
