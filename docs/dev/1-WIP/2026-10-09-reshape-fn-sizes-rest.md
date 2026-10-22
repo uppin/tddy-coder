@@ -140,6 +140,13 @@ file's layout, not a behaviour; not an edge).
   verify showed `.clone()` rewritten as `.to_owned()`, which the developer did not accept. Rolled back; exempted in
   `function_length_budget`; engine todo owned by the sweep node:
   [todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md](../todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md).
+- **Deferred by developer 2026-10-22:** `parse_op` (`plan/codec.rs`). Its nine-op guard-lift plan passed `check --deep` and the dry run, but
+  the apply's compile gate failed with 12 errors (E0614 `bool` dereference, E0277 `str`/`String`): the engine re-types the lifted guards'
+  borrowed fields. Rolled back; exempted in `function_length_budget`; engine todo section 4:
+  [todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md](../todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md).
+- **Deferred by developer 2026-10-22:** `apply_held_plan` (`runner/entry_points/store_run.rs`). The consented F2 `HeldLoop` hand edit stays
+  (`TODO(reshape-16)`). Its refresh-and-report tail is refused by `check --deep` for comment carry, and the loop's phases need outputs the engine
+  cannot return; exempted in `function_length_budget`; engine todo section 5, same file.
 - **Deferred by developer 2026-10-22:** `sightings` (`crate_move/source_scan/sighting_walk.rs`). Its path arm (`at = last + 1`)
   and its brace arm both failed their compile gates: the engine did not pass the outer cursor `at` to the new function
   (E0425), and wrote `&mut usize` for `usize` (E0308). Both rolled back; exempted in `function_length_budget`; engine todo

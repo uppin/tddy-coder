@@ -65,3 +65,18 @@ dry-run resolved 9 of 9. The apply's compile gate failed with 12 errors, none in
 
 Rolled back (`git checkout HEAD -- codec.rs`), journal removed. Deferred under the standing rule (engine defect, clean
 rollback). The fix is in the engine's signature and call-site typing for lifted guards.
+
+## 5. `apply_held_plan`: comment carry refuses the report tail; the loop's phases need outputs the engine cannot return
+
+Function `apply_held_plan` (`runner/entry_points/store_run.rs`), 161 lines after the F2 hand edit (`HeldLoop`, consented,
+`TODO(reshape-16)`). Developer decision 2026-10-22: defer.
+
+- Refresh-and-report tail (lines 398–404 of the item, `if !legacy { refresh_plan(..)?; }` then `report_settled(..)`):
+  `check --deep` refused with "rust-analyzer dropped 3 comment(s) from the extracted function ... cannot be paired with the
+  range's to put them back" (the comments at 401–403, between the two statements). An engine refusal, not a compile failure.
+- The resolve phase (lines 314–335), dry-run phase, and apply-and-settle phase need several outputs (`at`, `resolved`, `id`,
+  `files`) read after the range, or contain an outer `continue` (`let Settled::Ready(ready) = settled else { continue; }`),
+  so no single clean seam takes the function under 60 lines.
+
+Wanted: comment carry for an extraction whose range sits between two statements that have comments in between, and
+`extract_method` returning several locals a later part of the loop reads (or a loop-phase seam the engine accepts).
