@@ -23,6 +23,7 @@ function anAccount(accountId: string, label: string, subject: string): AccountRo
     syncStatus: null,
     preset: "",
     wireProtocols: [],
+    defaultFor: [],
   };
 }
 

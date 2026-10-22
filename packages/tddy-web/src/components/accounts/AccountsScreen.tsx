@@ -13,6 +13,7 @@
 
 import { useState } from "react";
 import { Button } from "../ui/button";
+import { ProviderAccountDefaultsControl } from "./ProviderAccountDefaultsControl";
 import {
   ConnectProviderAccountForm,
   PROVIDER_PRESET_OPTIONS,
@@ -43,6 +44,8 @@ export interface AccountRow {
   preset: string;
   /** For a model-provider account: the wire protocols its endpoint serves. */
   wireProtocols: string[];
+  /** For a model-provider account: the harnesses it is the person's default for. */
+  defaultFor: string[];
 }
 
 export interface ProviderGroup {
@@ -105,6 +108,8 @@ export interface AccountsScreenProps {
   connectError?: string | null;
   /** The models a provider account's endpoint serves, asked for when its row is expanded. */
   onListModels?: (accountId: string) => Promise<string[]>;
+  /** Make a provider account the default for these harnesses. When absent the row has no control. */
+  onSetDefaults?: (provider: string, accountId: string, harnesses: string[]) => void;
 }
 
 export function AccountsScreen({
@@ -116,13 +121,14 @@ export function AccountsScreen({
   onConnectProviderAccount,
   connectError = null,
   onListModels,
+  onSetDefaults,
 }: AccountsScreenProps) {
   return (
     <div data-testid="accounts-screen">
       {onConnectProviderAccount && outcome.kind === "listed" ? (
         <ConnectApiKey onConnect={onConnectProviderAccount} error={connectError} />
       ) : null}
-      {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels)}
+      {renderOutcome(outcome, onRename, onRemove, onAddAccount, onListModels, onSetDefaults)}
       {linkAttempt ? <LinkAttemptView attempt={linkAttempt} /> : null}
     </div>
   );
@@ -184,6 +190,7 @@ function renderOutcome(
   onRemove: AccountsScreenProps["onRemove"],
   onAddAccount: AccountsScreenProps["onAddAccount"],
   onListModels: AccountsScreenProps["onListModels"],
+  onSetDefaults: AccountsScreenProps["onSetDefaults"],
 ) {
   switch (outcome.kind) {
     case "uninitialized":
@@ -241,6 +248,7 @@ function renderOutcome(
                     onRename={onRename}
                     onRemove={onRemove}
                     onListModels={onListModels}
+                    onSetDefaults={onSetDefaults}
                   />
                 ))}
               </ul>
@@ -281,6 +289,7 @@ interface AccountRowViewProps {
   onRename: AccountsScreenProps["onRename"];
   onRemove: AccountsScreenProps["onRemove"];
   onListModels: AccountsScreenProps["onListModels"];
+  onSetDefaults: AccountsScreenProps["onSetDefaults"];
 }
 
 function AccountRowView({
@@ -290,6 +299,7 @@ function AccountRowView({
   onRename,
   onRemove,
   onListModels,
+  onSetDefaults,
 }: AccountRowViewProps) {
   const rowId = `accounts-row-${provider}-${account.accountId}`;
   const [draftLabel, setDraftLabel] = useState(account.label);
@@ -336,6 +346,13 @@ function AccountRowView({
           Rename
         </Button>
       </form>
+      {account.preset && onSetDefaults ? (
+        <ProviderAccountDefaultsControl
+          rowId={rowId}
+          current={account.defaultFor}
+          onSave={(harnesses) => onSetDefaults(provider, account.accountId, harnesses)}
+        />
+      ) : null}
       {account.preset && onListModels ? (
         <ProviderModels rowId={rowId} accountId={account.accountId} onListModels={onListModels} />
       ) : null}

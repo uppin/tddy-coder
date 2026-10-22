@@ -60,6 +60,7 @@ function rowFromRpc(account: AccountSummary): AccountRow {
     syncStatus: syncStatusFromRpc(account.syncStatus),
     preset: account.preset,
     wireProtocols: account.wireProtocols,
+    defaultFor: account.defaultFor,
   };
 }
 
@@ -96,6 +97,19 @@ function withRenamed(providers: ProviderGroup[], provider: string, renamed: Acco
           ),
         },
   );
+}
+
+/** `providers` with every account in `changed` replaced by its new row, wherever it is listed. */
+function withChanged(providers: ProviderGroup[], changed: AccountSummary[]) {
+  return providers.map((group) => ({
+    ...group,
+    accounts: group.accounts.map((account) => {
+      const row = changed.find(
+        (c) => c.provider === group.provider && c.accountId === account.accountId,
+      );
+      return row ? rowFromRpc(row) : account;
+    }),
+  }));
 }
 
 export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
@@ -197,6 +211,21 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       .catch((e: unknown) => setActionError(reasonOf(e)));
   };
 
+  const setDefaults = (_provider: string, accountId: string, harnesses: string[]) => {
+    if (!client) return;
+    client
+      .setProviderAccountDefaults({ sessionToken: sessionToken ?? "", accountId, harnesses })
+      .then((res) => {
+        setActionError(null);
+        setOutcome((previous) =>
+          previous?.kind === "listed"
+            ? { ...previous, providers: withChanged(previous.providers, res.changed) }
+            : previous,
+        );
+      })
+      .catch((e: unknown) => setActionError(reasonOf(e)));
+  };
+
   const remove = (provider: string, accountId: string) => {
     if (!client) return;
     client
@@ -230,6 +259,7 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
           onConnectProviderAccount={connectProviderAccount}
           connectError={connectError}
           onListModels={listModels}
+          onSetDefaults={setDefaults}
         />
       ) : null}
     </AppShell>

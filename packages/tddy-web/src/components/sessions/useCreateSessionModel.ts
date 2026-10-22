@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { useAgentModels } from "../../rpc/useAgentModels";
-import { useProviderAccountModels, useProviderRoutes } from "../../rpc/useProviderRoutes";
+import {
+  useProviderAccountModels,
+  useProviderDefault,
+  useProviderRoutes,
+} from "../../rpc/useProviderRoutes";
 import { BUILT_IN_PROVIDER } from "./CreateSessionProviderField";
 import type { CreateSessionPaneProps } from "./createSessionPaneProps";
 import type { SessionType } from "./createSessionRequest";
@@ -56,6 +60,16 @@ export function useCreateSessionModel({
   useEffect(() => {
     setProviderChoice(null);
   }, [providerHarness]);
+  // The person's own default for this harness is where the form starts; they can still change it.
+  const providerDefault = useProviderDefault(accountsClient, sessionToken, providerHarness);
+  useEffect(() => {
+    const usable = providerRoutes.choices.some(
+      (choice) => choice.accountId === providerDefault && choice.supported,
+    );
+    if (providerDefault !== null && usable) {
+      setProviderChoice((chosen) => chosen ?? providerDefault);
+    }
+  }, [providerDefault, providerRoutes.choices]);
   const providerAccountId =
     providerChoice !== null && providerChoice !== BUILT_IN_PROVIDER ? providerChoice : "";
   // An account serves its own models; the vendor's catalog does not apply to it.

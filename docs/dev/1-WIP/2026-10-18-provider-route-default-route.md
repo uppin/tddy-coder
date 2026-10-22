@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Complexity**: 4/5
+**Complexity**: 5/5
 **Stack**: #provider-route 5/9. Base: `feature/provider-route/tool-route`. PR: [#666](https://github.com/uppin/tddy-coder/pull/666).
 
 ## Initial Discovery
@@ -88,7 +88,7 @@ The start path feeds `RouteSources.user_default` from `default_provider_account`
 - [x] One default per harness per person (clear previous)
 - [x] Refuse a harness the account cannot drive
 - [x] Start feeds `user_default`
-- [ ] Accounts screen control; pane pre-selection
+- [x] Accounts screen control; pane pre-selection
 
 ## Technical Changes
 
@@ -137,7 +137,7 @@ Scoped: `tddy-accounts` (all targets pass, incl. the 4 acceptance tests and a va
 
 - A locked vault refuses a start that names no account (`session_route_sources_with_default`); an absent or uninitialised vault has no default. Open question above is answered conservatively, pending the developer.
 - The default feeds the unsandboxed `claude-cli` and `opencode-cli` starts. Sandboxed starts, tool sessions and resume still read session-level choice only.
-- TODO(default-route): Accounts-screen control and pane pre-selection (Cypress) not yet implemented.
+- Web: `ProviderAccountDefaultsControl` on the account row (`AccountsAppPage` merges `changed` rows) and `useProviderDefault` pre-selecting in `CreateSessionPane`. Cypress: `ProviderAccountDefaultsAcceptance` 2/2; neighbours `AccountsScreenAcceptance` 14/14, `CreateSessionProviderAcceptance` 5/5, `ProviderAccountConnectAcceptance` 4/4.
 
 ## Validation Results
 ### /validate-changes
@@ -156,7 +156,7 @@ Scoped: `tddy-accounts` (all targets pass, incl. the 4 acceptance tests and a va
 - [ ] USER REVIEW — acceptance tests (per-node gate waived by the developer on 2026-10-18 — "finish remaining waves without stopping"; review at stack hand-off)
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
