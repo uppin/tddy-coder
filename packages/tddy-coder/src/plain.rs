@@ -134,10 +134,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_backend_selection_index_out_of_bounds_defaults_to_first() {
+    fn resolve_backend_selection_index_out_of_bounds_clamps_to_the_last_option() {
         // Given
         let q = backend_selection_question();
+        let last = &q.options.last().expect("backends are listed").label;
         // When / Then
-        assert_eq!(resolve_backend_selection_index(99, &q), "OpenCode");
+        assert_eq!(&resolve_backend_selection_index(99, &q), last);
     }
 }

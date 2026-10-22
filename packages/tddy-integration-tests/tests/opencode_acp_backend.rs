@@ -1,6 +1,6 @@
 //! OpenCode as a tool-session agent over ACP, against `tddy-acp-stub` standing in for `opencode acp`.
 //!
-//! Feature: docs/ft/coder/1-WIP/PRD-2026-10-18-provider-route-opencode-acp.md
+//! Feature: docs/ft/coder/opencode-acp-backend.md
 
 mod common;
 
@@ -19,7 +19,7 @@ fn stub_agent_path() -> PathBuf {
 
 fn with_an_empty_turn_scenario() {
     let dir = std::env::temp_dir().join("tddy-opencode-acp-test");
-    let _ = std::fs::create_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("scenario dir");
     let scenario = dir.join("empty.json");
     std::fs::write(
         &scenario,
@@ -92,12 +92,16 @@ async fn list_models_asks_the_opencode_binary_it_is_given() {
 #[tokio::test(flavor = "current_thread")]
 #[serial]
 async fn a_routed_opencode_agent_gets_the_generated_config_and_key() {
-    // Given an "agent" that records its environment and exits
+    // Given an "agent" that records its arguments, its environment and the configuration file it
+    // was pointed at, then exits
     let dir = tempfile::tempdir().expect("dir");
     let agent = dir.path().join("opencode");
     std::fs::write(
         &agent,
-        format!("#!/bin/sh\nenv > \"{}/env.txt\"\n", dir.path().display()),
+        format!(
+            "#!/bin/sh\ncd \"{0}\"\necho \"$@\" > args.txt\nenv > env.txt\ncat \"$OPENCODE_CONFIG\" > config.txt\n",
+            dir.path().display()
+        ),
     )
     .unwrap();
     std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -108,8 +112,9 @@ async fn a_routed_opencode_agent_gets_the_generated_config_and_key() {
         )],
         files: vec![RouteFile {
             name: "opencode.json".to_string(),
-            contents: "{}".to_string(),
+            contents: r#"{"model":"tddy-route/kimi"}"#.to_string(),
         }],
+        args: vec!["--model".to_string(), "tddy-route/kimi".to_string()],
         ..HarnessRoute::default()
     };
     let mut request = common::stub_invoke_request("hello", "plan");
@@ -121,8 +126,12 @@ async fn a_routed_opencode_agent_gets_the_generated_config_and_key() {
         .invoke(request)
         .await;
 
-    // Then
-    let env = std::fs::read_to_string(dir.path().join("env.txt")).unwrap_or_default();
+    // Then the key is in the environment, the generated configuration is the file OPENCODE_CONFIG
+    // names, and the agent is run as `opencode acp` with nothing else on its command line
+    let recorded = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap_or_default();
+    let env = recorded("env.txt");
     assert!(env.contains("TDDY_OPENCODE_PROVIDER_KEY=fw-key"), "{env}");
     assert!(env.contains("OPENCODE_CONFIG="), "{env}");
+    assert_eq!(recorded("config.txt"), r#"{"model":"tddy-route/kimi"}"#);
+    assert_eq!(recorded("args.txt").trim(), "acp");
 }

@@ -1,6 +1,6 @@
 //! `opencode` is registered wherever a tool-session backend is listed, after every existing entry.
 //!
-//! Feature: docs/ft/coder/1-WIP/PRD-2026-10-18-provider-route-opencode-acp.md
+//! Feature: docs/ft/coder/opencode-acp-backend.md
 
 use tddy_agent_backend::backend::{
     backend_from_label, backend_selection_question, curated_models_for_agent,

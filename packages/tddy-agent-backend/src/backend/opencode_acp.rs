@@ -15,15 +15,15 @@
 //! a wrapper that exits with status 127 when no OpenCode is on `PATH`, so `opencode acp --help` never
 //! ran. Passing an argument the agent may not take would fail the whole launch.
 
+use super::acp_updates::{allow_once, record_session_update};
 use super::routed::route_child_env;
 use super::{BackendModels, InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
 use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
-use crate::stream::ProgressEvent;
 use agent_client_protocol::{self as acp, Agent as _, Client};
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use tokio::sync::{mpsc, oneshot};
@@ -43,11 +43,11 @@ struct OpenCodeAcpAccumulator {
     progress_sink: Option<ProgressSink>,
 }
 
-/// A command from the backend to the worker thread.
-#[allow(clippy::large_enum_variant)]
+/// A command from the backend to the worker thread. The request is boxed: it is far larger than the
+/// other variant, and every command passes through the channel by value.
 enum OpenCodeAcpCommand {
     Prompt {
-        request: InvokeRequest,
+        request: Box<InvokeRequest>,
         response_tx: oneshot::Sender<Result<InvokeResponse, BackendError>>,
     },
     ListModels {
@@ -69,8 +69,10 @@ impl OpenCodeAcpCommand {
     }
 }
 
-// TODO(opencode-acp): this client and the worker below mirror codex_acp.rs. Share them when the ACP
-// backends are consolidated, rather than keeping three copies.
+// TODO(opencode-acp): the worker below (spawn, `initialize` once, `new_session` / `load_session`,
+// `prompt`) still mirrors the workers of acp.rs and codex_acp.rs; only the notification and
+// permission handling is shared (`acp_updates`). Sharing the worker is recorded in
+// docs/dev/todo/2026-10-22-acp-backends-share-one-worker.md.
 /// Client that accumulates the agent's session notifications and answers its permission requests.
 struct TddyOpenCodeAcpClient {
     accumulator: Arc<Mutex<OpenCodeAcpAccumulator>>,
@@ -83,70 +85,11 @@ impl Client for TddyOpenCodeAcpClient {
             .accumulator
             .lock()
             .map_err(|_| acp::Error::internal_error())?;
-        match args.update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                let text = match chunk.content {
-                    acp::ContentBlock::Text(t) => t.text,
-                    acp::ContentBlock::Image(_) => "<image>".to_string(),
-                    acp::ContentBlock::Audio(_) => "<audio>".to_string(),
-                    acp::ContentBlock::ResourceLink(r) => r.uri,
-                    acp::ContentBlock::Resource(_) => "<resource>".to_string(),
-                    _ => String::new(),
-                };
-                if !text.is_empty() {
-                    acc.output.push_str(&text);
-                    if let Some(ref sink) = acc.progress_sink {
-                        sink.emit(&ProgressEvent::TaskProgress {
-                            description: text,
-                            last_tool: None,
-                        });
-                    }
-                }
-            }
-            acp::SessionUpdate::ToolCall(tc) => {
-                if let Some(ref sink) = acc.progress_sink {
-                    sink.emit(&ProgressEvent::ToolUse {
-                        name: tc.title,
-                        detail: None,
-                        input_json: tc
-                            .raw_input
-                            .as_ref()
-                            .and_then(|v| serde_json::to_string(v).ok()),
-                        call_id: Some(tc.tool_call_id.0.to_string()),
-                    });
-                }
-            }
-            acp::SessionUpdate::ToolCallUpdate(upd) => {
-                // ACP reports a tool's result as a status change to Completed or Failed on the same
-                // tool_call_id, so a ToolResult is emitted only on those states.
-                if let (Some(ref sink), Some(status)) = (&acc.progress_sink, upd.fields.status) {
-                    let is_error = matches!(status, acp::ToolCallStatus::Failed);
-                    if is_error || matches!(status, acp::ToolCallStatus::Completed) {
-                        let result_json = upd
-                            .fields
-                            .raw_output
-                            .as_ref()
-                            .and_then(|v| serde_json::to_string(v).ok())
-                            .unwrap_or_default();
-                        sink.emit(&ProgressEvent::ToolResult {
-                            call_id: upd.tool_call_id.0.to_string(),
-                            result_json,
-                            is_error,
-                        });
-                    }
-                }
-            }
-            acp::SessionUpdate::Plan(plan) => {
-                if let Some(ref sink) = acc.progress_sink {
-                    for entry in &plan.entries {
-                        sink.emit(&ProgressEvent::TaskStarted {
-                            description: entry.content.clone(),
-                        });
-                    }
-                }
-            }
-            _ => {}
-        }
+        let OpenCodeAcpAccumulator {
+            output,
+            progress_sink,
+        } = &mut *acc;
+        record_session_update(output, progress_sink.as_ref(), args.update);
         Ok(())
     }
 
@@ -155,10 +98,7 @@ impl Client for TddyOpenCodeAcpClient {
         _args: acp::RequestPermissionRequest,
     ) -> acp::Result<acp::RequestPermissionResponse> {
         // A headless run approves each tool call once, as the other ACP backends do.
-        let allow_id = acp::PermissionOptionId::new("allow-once");
-        Ok(acp::RequestPermissionResponse::new(
-            acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(allow_id)),
-        ))
+        Ok(allow_once())
     }
 }
 
@@ -186,7 +126,7 @@ impl RouteFiles {
         // Built before any file is written, so a failed write still removes the directory.
         let mut files = RouteFiles { dir, config: None };
         for file in &route.files {
-            let path = files.dir.join(&file.name);
+            let path = files.dir.join(bare_file_name(&file.name)?);
             let mut out = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -196,6 +136,20 @@ impl RouteFiles {
         }
         files.config = route.files.first().map(|first| files.dir.join(&first.name));
         Ok(files)
+    }
+}
+
+/// `name` when it is a bare file name, so joining it to the route's directory stays inside it. A
+/// route names its files, and a name with a separator, `..` or a root would write elsewhere.
+fn bare_file_name(name: &str) -> io::Result<&Path> {
+    let path = Path::new(name);
+    let mut components = path.components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(path),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("route file name {name:?} is not a bare file name"),
+        )),
     }
 }
 
@@ -224,46 +178,50 @@ fn run_opencode_acp_worker(
     rt.block_on(local_set.run_until(async move {
         // The route's files are held here until the worker ends, which is when the agent child
         // is no longer reachable through its command channel.
-        let (mut child, _route_files) =
-            match spawn_opencode_agent(&agent_path, route.as_ref()).await {
-                Ok(started) => started,
-                Err(e) => {
-                    while let Some(cmd) = cmd_rx.recv().await {
-                        cmd.fail(e.clone());
-                    }
-                    return;
-                }
-            };
-
-        let stdout = child.stdout.take().expect("stdout");
-        let stdin = child.stdin.take().expect("stdin");
-        let accumulator = Arc::new(Mutex::new(OpenCodeAcpAccumulator::default()));
-        let client = TddyOpenCodeAcpClient {
-            accumulator: accumulator.clone(),
-        };
-        let (conn, handle_io) =
-            acp::ClientSideConnection::new(client, stdin.compat_write(), stdout.compat(), |fut| {
-                tokio::task::spawn_local(fut);
-            });
-        tokio::task::spawn_local(handle_io);
-
-        let mut initialized = false;
-        while let Some(cmd) = cmd_rx.recv().await {
-            match cmd {
-                OpenCodeAcpCommand::Prompt {
-                    request,
-                    response_tx,
-                } => {
-                    let result = run_prompt(&conn, &accumulator, &mut initialized, request).await;
-                    let _ = response_tx.send(result);
-                }
-                OpenCodeAcpCommand::ListModels { response_tx } => {
-                    let result = list_session_models(&conn, &mut initialized).await;
-                    let _ = response_tx.send(result);
+        match spawn_opencode_agent(&agent_path, route.as_ref()).await {
+            Ok((child, _route_files)) => serve_commands(child, &mut cmd_rx).await,
+            Err(e) => {
+                while let Some(cmd) = cmd_rx.recv().await {
+                    cmd.fail(e.clone());
                 }
             }
         }
     }));
+}
+
+/// Connect to the started agent over its stdio and answer each command until the channel closes.
+async fn serve_commands(
+    mut child: tokio::process::Child,
+    cmd_rx: &mut mpsc::Receiver<OpenCodeAcpCommand>,
+) {
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let stdin = child.stdin.take().expect("stdin is piped");
+    let accumulator = Arc::new(Mutex::new(OpenCodeAcpAccumulator::default()));
+    let client = TddyOpenCodeAcpClient {
+        accumulator: accumulator.clone(),
+    };
+    let (conn, handle_io) =
+        acp::ClientSideConnection::new(client, stdin.compat_write(), stdout.compat(), |fut| {
+            tokio::task::spawn_local(fut);
+        });
+    tokio::task::spawn_local(handle_io);
+
+    let mut initialized = false;
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            OpenCodeAcpCommand::Prompt {
+                request,
+                response_tx,
+            } => {
+                let result = run_prompt(&conn, &accumulator, &mut initialized, *request).await;
+                let _ = response_tx.send(result);
+            }
+            OpenCodeAcpCommand::ListModels { response_tx } => {
+                let result = list_session_models(&conn, &mut initialized).await;
+                let _ = response_tx.send(result);
+            }
+        }
+    }
 }
 
 /// Start `opencode acp`. On a route the child gets the route's environment and `OPENCODE_CONFIG`
@@ -461,7 +419,7 @@ impl super::CodingBackend for OpenCodeAcpBackend {
         let (response_tx, response_rx) = oneshot::channel();
         self.commands()
             .send(OpenCodeAcpCommand::Prompt {
-                request,
+                request: Box::new(request),
                 response_tx,
             })
             .await
@@ -488,5 +446,75 @@ impl super::CodingBackend for OpenCodeAcpBackend {
         response_rx.await.map_err(|_| {
             BackendError::InvocationFailed("OpenCode ACP worker dropped response".to_string())
         })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider_route::RouteFile;
+
+    fn route_with_file(name: &str) -> HarnessRoute {
+        HarnessRoute {
+            files: vec![RouteFile {
+                name: name.to_string(),
+                contents: "{}".to_string(),
+            }],
+            ..HarnessRoute::default()
+        }
+    }
+
+    #[test]
+    fn a_route_file_is_written_owner_only_and_named_for_opencode_config() {
+        // When
+        let files = RouteFiles::write(&route_with_file("opencode.json")).expect("written");
+
+        // Then
+        let config = files.config.clone().expect("the first file is the config");
+        assert_eq!(config, files.dir.join("opencode.json"));
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), "{}");
+        let mode = |p: &Path| {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+        };
+        assert_eq!(mode(&files.dir), OWNER_ONLY_DIR);
+        assert_eq!(mode(&config), OWNER_ONLY_FILE);
+    }
+
+    #[test]
+    fn the_route_directory_is_removed_with_its_files() {
+        // Given
+        let files = RouteFiles::write(&route_with_file("opencode.json")).expect("written");
+        let dir = files.dir.clone();
+
+        // When
+        drop(files);
+
+        // Then
+        assert!(!dir.exists(), "{}", dir.display());
+    }
+
+    #[test]
+    fn a_route_file_name_that_leaves_its_directory_is_refused() {
+        for name in [
+            "../escape.json",
+            "nested/opencode.json",
+            "/tmp/opencode.json",
+            "..",
+            "",
+        ] {
+            // When
+            let refused = RouteFiles::write(&route_with_file(name));
+
+            // Then
+            let error = refused
+                .err()
+                .unwrap_or_else(|| panic!("{name:?} was accepted"));
+            assert_eq!(
+                error.kind(),
+                io::ErrorKind::InvalidInput,
+                "{name:?}: {error}"
+            );
+        }
     }
 }

@@ -1,6 +1,7 @@
 //! Coding backend abstraction for LLM-based coders.
 
 mod acp;
+mod acp_updates;
 mod claude;
 mod codex;
 pub mod codex_acp;
@@ -550,7 +551,7 @@ pub fn backend_selection_question() -> ClarificationQuestion {
             },
             QuestionOption {
                 label: "OpenCode".to_string(),
-                description: "OpenCode over ACP (default model: fireworks/kimi-k2)".to_string(),
+                description: format!("OpenCode over ACP (default model: {OPENCODE_DEFAULT_MODEL})"),
             },
         ],
         multi_select: false,

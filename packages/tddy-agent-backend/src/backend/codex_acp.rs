@@ -6,11 +6,11 @@
 //! **`BROWSER`** / **`TDDY_CODEX_OAUTH_OUT`** path as [`super::CodexBackend`] so tddy-web can poll
 //! [`super::CODEX_OAUTH_AUTHORIZE_URL_FILENAME`].
 
+use super::acp_updates::{allow_once, record_session_update};
 use super::routed::{codex_acp_route_args, route_child_env};
 use super::{InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
 use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
-use crate::stream::ProgressEvent;
 use agent_client_protocol::{self as acp, Agent as _, Client};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -52,71 +52,8 @@ impl Client for TddyCodexAcpClient {
         if let Ok(mut acc) = self.accumulator.lock() {
             acc.session_id
                 .get_or_insert_with(|| args.session_id.0.to_string());
-            match args.update {
-                acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                    let text = match chunk.content {
-                        acp::ContentBlock::Text(t) => t.text,
-                        acp::ContentBlock::Image(_) => "<image>".to_string(),
-                        acp::ContentBlock::Audio(_) => "<audio>".to_string(),
-                        acp::ContentBlock::ResourceLink(r) => r.uri,
-                        acp::ContentBlock::Resource(_) => "<resource>".to_string(),
-                        _ => String::new(),
-                    };
-                    if !text.is_empty() {
-                        acc.output.push_str(&text);
-                        if let Some(ref sink) = acc.progress_sink {
-                            sink.emit(&ProgressEvent::TaskProgress {
-                                description: text,
-                                last_tool: None,
-                            });
-                        }
-                    }
-                }
-                acp::SessionUpdate::ToolCall(tc) => {
-                    if let Some(ref sink) = acc.progress_sink {
-                        sink.emit(&ProgressEvent::ToolUse {
-                            name: tc.title,
-                            detail: None,
-                            input_json: tc
-                                .raw_input
-                                .as_ref()
-                                .and_then(|v| serde_json::to_string(v).ok()),
-                            call_id: Some(tc.tool_call_id.0.to_string()),
-                        });
-                    }
-                }
-                acp::SessionUpdate::ToolCallUpdate(upd) => {
-                    // ACP surfaces tool results as a status transition to Completed/Failed on the
-                    // same tool_call_id. Emit a ToolResult only on those terminal states.
-                    if let (Some(ref sink), Some(status)) = (&acc.progress_sink, upd.fields.status)
-                    {
-                        let is_error = matches!(status, acp::ToolCallStatus::Failed);
-                        if is_error || matches!(status, acp::ToolCallStatus::Completed) {
-                            let result_json = upd
-                                .fields
-                                .raw_output
-                                .as_ref()
-                                .and_then(|v| serde_json::to_string(v).ok())
-                                .unwrap_or_default();
-                            sink.emit(&ProgressEvent::ToolResult {
-                                call_id: upd.tool_call_id.0.to_string(),
-                                result_json,
-                                is_error,
-                            });
-                        }
-                    }
-                }
-                acp::SessionUpdate::Plan(plan) => {
-                    if let Some(ref sink) = acc.progress_sink {
-                        for entry in &plan.entries {
-                            sink.emit(&ProgressEvent::TaskStarted {
-                                description: entry.content.clone(),
-                            });
-                        }
-                    }
-                }
-                _ => {}
-            }
+            let acc = &mut *acc;
+            record_session_update(&mut acc.output, acc.progress_sink.as_ref(), args.update);
         }
         Ok(())
     }
@@ -127,12 +64,7 @@ impl Client for TddyCodexAcpClient {
     ) -> acp::Result<acp::RequestPermissionResponse> {
         let approve = self.auto_approve.lock().map(|g| *g).unwrap_or(true);
         if approve {
-            let allow_id = acp::PermissionOptionId::new("allow-once");
-            Ok(acp::RequestPermissionResponse::new(
-                acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
-                    allow_id,
-                )),
-            ))
+            Ok(allow_once())
         } else {
             Err(acp::Error::method_not_found())
         }
