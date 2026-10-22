@@ -365,7 +365,8 @@ fn a_function_of(name: &str, lines: usize) -> String {
 /// compile-gate rollback), as `(file under src/, name)`. Each is recorded in
 /// `docs/dev/todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md`, section 7.
 // TODO(reshape-21): `backend-fn-sizes` cuts the rest; a deferred function is cut when its engine defect is fixed.
-const DEFERRED_BY_BACKEND_FN_SIZES: [(&str, &str); 1] = [("backends/rust/import_text.rs", "choose_import")];
+const DEFERRED_BY_BACKEND_FN_SIZES: [(&str, &str); 1] =
+    [("backends/rust/import_text.rs", "choose_import")];
 
 fn is_deferred_by_backend_fn_sizes(function: &Measured) -> bool {
     DEFERRED_BY_BACKEND_FN_SIZES
