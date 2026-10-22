@@ -10,7 +10,7 @@ use tddy_core::cli_harness::cli_harness;
 use tddy_core::provider_route::{HarnessRoute, RouteFile, RouteSecret};
 use tddy_rpc::Code;
 
-use crate::svc_start_sandboxed_cli_harness_session::{
+use crate::cli_harness_jail::{
     cli_harness_runner_argv, refuse_first_prompt, require_provider_route,
     resolve_jail_agent_binary, sandboxed_agent_kind, sandboxed_runner_model, CliRunnerArgv,
 };

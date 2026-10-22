@@ -13,15 +13,15 @@ use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{ResumeSessionRequest, ResumeSessionResponse};
 use tddy_session_agents::agent_roster;
 
+use crate::cli_harness_jail::{
+    cli_harness_runner_argv, require_provider_route, resolve_cli_jail_binaries,
+    sandboxed_runner_model, CliRunnerArgv,
+};
 use crate::launch_ports::LaunchSessions;
 use crate::relaunch_jail_dirs::{prepare_relaunch_dirs, refresh_relaunch_context_dir};
 use crate::session_provider_route::resume_route;
 use crate::svc_relaunch_sandboxed_runner::{
     RelaunchJailEnv, RelaunchedJailBridge, RelaunchedRunnerSpawn,
-};
-use crate::svc_start_sandboxed_cli_harness_session::{
-    cli_harness_runner_argv, require_provider_route, resolve_cli_jail_binaries,
-    sandboxed_runner_model, CliRunnerArgv,
 };
 
 /// What relaunching a sandboxed CLI harness session's jail is built from: the session, and the

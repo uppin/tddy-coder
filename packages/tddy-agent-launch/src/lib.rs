@@ -62,6 +62,7 @@ pub mod tool_spawn_plan;
 pub mod workspace_branch_start;
 pub mod worktree_source;
 
+mod cli_harness_jail;
 #[cfg(test)]
 mod cli_route_launch_tests;
 #[cfg(test)]

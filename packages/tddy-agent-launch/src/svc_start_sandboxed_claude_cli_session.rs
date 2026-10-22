@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use std::path::{Path, PathBuf};
 
+use crate::cli_harness_jail::canonical_exec_path;
 use crate::launch_ports::LaunchSessions;
 
 use tddy_core::provider_route::HarnessRoute;
@@ -483,19 +484,10 @@ impl LaunchSessions {
 }
 
 fn canonical_jail_exec_paths(tddy_tools_path: String) -> (String, String) {
-    let canonicalize_exec = |p: &str| -> String {
-        if p.contains('/') {
-            std::fs::canonicalize(p)
-                .map(|c| c.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| p.to_string())
-        } else {
-            p.to_string()
-        }
-    };
-    let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
-    let sandbox_runner_path =
-        canonicalize_exec(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path());
-    (tddy_tools_path, sandbox_runner_path)
+    (
+        canonical_exec_path(&tddy_tools_path),
+        canonical_exec_path(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path()),
+    )
 }
 
 pub use crate::{jail_env_builders, jail_launch_steps, jail_session_files, jail_worktree};
