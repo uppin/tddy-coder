@@ -1,0 +1,4 @@
+name = "Demo"
+grammar = "demo"
+path_suffixes = ["demo"]
+line_comments = ["# "]

@@ -93,6 +93,9 @@ enum Subcommand {
 
     /// Plan-driven Rust refactoring via rust-analyzer (through tddy-lsp).
     Restructure(tddy_code_restructuring::restructure_cli::RestructureArgs),
+
+    /// Install, list and remove Zed extensions under `<tddy data dir>/extensions`.
+    Extensions(tddy_zed_extensions::cli::ExtensionsArgs),
 }
 
 /// Initialise logging. When `TDDY_TOOLS_LOG_FILE` is set (e.g. by the sandbox runner, which points
@@ -164,6 +167,7 @@ async fn main() -> Result<()> {
         Some(Subcommand::ListModels(s)) => tddy_tools::list_models::run_list_models(&s).await?,
         Some(Subcommand::Analyze(s)) => tddy_code_analysis::analyze_cli::run(s)?,
         Some(Subcommand::Restructure(s)) => index_client::run_restructure(s).await?,
+        Some(Subcommand::Extensions(s)) => tddy_zed_extensions::cli::run(s).await?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);
