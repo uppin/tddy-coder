@@ -46,6 +46,7 @@ fn a_session_metadata() -> SessionMetadata {
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
     }
 }
 

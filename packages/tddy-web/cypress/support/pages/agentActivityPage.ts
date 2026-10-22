@@ -21,6 +21,10 @@ export const agentActivityPage = {
   overlay: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.agentActivityOverlay, { timeout: 5000, ...options }),
 
+  /** The transcript docked as the session view's right sidebar. */
+  sidebar: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.agentActivitySidebar, { timeout: 5000, ...options }),
+
   /** A single record row, addressed by its `call_id` (legacy row list — used to assert absence). */
   row: (callId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(agentActivityRow(callId), { timeout: 5000, ...options }),

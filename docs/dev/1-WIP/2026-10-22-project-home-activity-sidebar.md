@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — proto field + `.session.yaml` field across tddy-service, tddy-changeset, tddy-session-activity, tddy-agent-launch, plus a tddy-web layout change; RPC acceptance + Cypress
 **Stack**: #project-home 3/7. Base: `feature/project-home/project-groups`.
+**PR**: [#698](https://github.com/uppin/tddy-coder/pull/698)
 
 ## Initial Discovery
 
@@ -56,8 +57,10 @@ pub struct SessionEntry { /* … */ pub managed_codebase: bool }
 ```ts
 // packages/tddy-web/src/components/sessions/activitySidebarState.ts (new)
 export function defaultActivitySidebarOpen(session: SessionEntry): boolean;
-// packages/tddy-web/src/components/sessions/SessionActivitySidebar.tsx (new)
-export function SessionActivitySidebar(props: { sessionId: string; sessionToken: string; client?: Client<typeof ActivityService>; onClose(): void }): JSX.Element;
+// packages/tddy-web/src/components/sessions/SessionWithActivitySidebar.tsx (new) — the pane wraps its
+// base view in this; it renders the toggle into `toolbar` and docks the transcript to the right
+export function SessionWithActivitySidebar(props: { session: SessionEntry; sessionToken: string; client?: Client<typeof ActivityService>; suppressed: boolean; isMobile?: boolean; toolbar(toggle: ReactNode): ReactNode; children: ReactNode }): ReactElement;
+// testIds: TEST_IDS.agentActivitySidebar = "agent-activity-sidebar"; agentActivityPage.sidebar()
 ```
 Plus the failing tests below. Bodies `// TODO(activity-sidebar): implement`.
 
@@ -132,10 +135,10 @@ sidebar; existing `AgentActivity*.cy.tsx` specs re-pointed from popover to sideb
 
 | Test | File | Validates |
 |---|---|---|
-| `a_managed_session_is_listed_as_managed` | `packages/tddy-daemon-rpc/tests/list_sessions_managed_codebase_acceptance.rs` (new) | persisted + listed |
+| `a_managed_session_is_listed_as_managed` | `packages/tddy-session-lifecycle/tests/list_sessions_managed_codebase_acceptance.rs` (new — the stub-claude start harness lives in this crate) | persisted + listed |
 | `an_unmanaged_session_is_listed_as_not_managed` | same | default false |
-| `a_session_yaml_without_the_key_reads_as_not_managed` | `packages/tddy-changeset/src/session_metadata.rs` (`#[cfg(test)]`) | legacy files |
-| `defaults the sidebar open for a managed session and closed otherwise` | `packages/tddy-web/src/components/sessions/activitySidebarState.test.ts` (new) | rule |
+| `a_session_yaml_without_the_key_reads_as_not_managed` | `packages/tddy-changeset/src/session_metadata.rs` (`#[cfg(test)]`) | legacy files (passes already — serde default; regression guard) |
+| `defaults the sidebar open for a managed session` / `… closed for an unmanaged session` | `packages/tddy-web/src/components/sessions/activitySidebarState.test.ts` (new) | rule |
 | `selecting a managed session shows the activity sidebar on the right` | `packages/tddy-web/cypress/component/SessionActivitySidebarAcceptance.cy.tsx` (new) | default open |
 | `selecting an unmanaged session leaves the sidebar closed until toggled` | same | default closed + toggle |
 | `no activity sidebar while the Activities view is the main pane` | same | one transcript per pane |
@@ -143,6 +146,12 @@ sidebar; existing `AgentActivity*.cy.tsx` specs re-pointed from popover to sideb
 ## Decisions & Trade-offs
 - **Default from a listed field**, not from client-side guesses (e.g. tool names in the transcript): the placement is a daemon fact.
 - **Per-selection override, not persisted**: the default is the point; remembering every toggle would hide it.
+
+## Red-phase notes
+
+- Verified failing (2026-10-23): `a_managed_session_is_listed_as_managed` (reader/ListSessions report `false`), `defaults the sidebar open for a managed session`, Cypress `selecting a managed session…` and `selecting an unmanaged session…` (no sidebar, no toggle). Passing already and kept as guards: the unmanaged/legacy/closed-default cases and `no activity sidebar while the Activities view is the main pane`.
+- Adding the field touched every `SessionMetadata` / reader `SessionEntry` / proto `SessionEntry` literal (`managed_codebase: false`); `cargo check --all-targets` clean on tddy-changeset, -session-activity, -agent-launch, -session-lifecycle, -daemon-rpc, -daemon, -coder, -core, -session-agents, -session-files, -session-split, -telegram, -telegram-control, -testing-commons, -integration-tests, -coder-cli.
+- The record point is the initial metadata write of every managed start path (claude-cli co-located, sandboxed, split agent half, cursor-cli where accepted); the two read-side TODOs are `session_reader.rs` and `session_coordinate_handlers.rs`.
 
 ## Technical Debt & Production Readiness
 
@@ -164,10 +173,10 @@ sidebar; existing `AgentActivity*.cy.tsx` specs re-pointed from popover to sideb
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

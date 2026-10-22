@@ -136,6 +136,7 @@ mod tests {
                 agent_daemon_instance_id: None,
                 agent_session_id: None,
                 ssh_config_host: Some(ssh_host.to_string()),
+                managed_codebase: false,
             },
         )
         .expect("write session metadata");
