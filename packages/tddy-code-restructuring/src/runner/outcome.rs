@@ -72,4 +72,13 @@ pub enum Outcome {
     ItemAnchored(crate::plan::Anchor),
     Verified(crate::verify::Comparison),
     Snapshotted(SnapshotRewrite),
+    /// The production lines of each file `lines` named, in the order it named them.
+    Measured(Vec<FileLines>),
+}
+
+/// One file `lines` measured: its path as named, and its production lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileLines {
+    pub path: String,
+    pub lines: usize,
 }

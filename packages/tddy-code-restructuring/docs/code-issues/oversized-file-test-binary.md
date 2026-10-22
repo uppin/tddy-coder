@@ -6,6 +6,7 @@
 **Metrics:** **967 production lines** (966 before #539) (0 before this PR) · budget 500
 **Restructure:** required — `extract_module --to_file` along the three seams below
 **Status:** Open — deferred from #498 with explicit developer consent
+**Claimed by:** none — #612 (`#reshape 17/24`) withdrew its claim; the split is deferred by the developer (2026-10-21) to the `#reshape` sweep node, see `docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md`
 **Deferred by:** #498 — `#carve` 4/10 `test-homes`, see `docs/dev/todo/2026-09-19-test-binary-rs-is-950-production-lines.md`
 
 ## Measurement history
@@ -18,6 +19,7 @@
 | 2026-10-02 | 966 | unchanged by #540 (`move-paths`), which widened `is_a_built_in_root`, `names_bound_in` and `segment_length` to `pub(crate)` for the new `source_scan.rs`. A second scanner now sits beside this file's line-based one, which strengthens the case for extracting it below |
 
 | 2026-10-03 | 967 | 966 to 967, touched by #539 (`#live-plan` 7/15): a two-line non-ASCII fix in `readable_spans` (a whole character, not a byte, per step). Unchanged in kind; the decomposition below still stands |
+| 2026-10-22 | 967 | unchanged by #612 (`#reshape` 17/24), which did not touch the file; measured by `tddy-tools restructure lines` (the items count #612 introduced). #612's Plan A split was deferred by the developer on 2026-10-21 to the `#reshape` sweep node; seams in `docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md` |
 
 ## What the gate found
 

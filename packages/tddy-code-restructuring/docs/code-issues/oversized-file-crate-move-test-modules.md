@@ -12,6 +12,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-21 | 664 | first detection. The file is new in #611 (`#reshape` 13/24 `tests-follow`), so this PR created the overrun. No other node of the stack edits it, so the split is not blocked by stack overlap |
+| 2026-10-22 | 664 | unchanged by #612 (`#reshape` 17/24), which did not touch the file; measured by `tddy-tools restructure lines`. Listed as a deferred split, seams not yet decided, in `docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md` |
 
 ## What the gate found
 
