@@ -7,6 +7,7 @@ use tddy_session_files::attachment_progress::AttachmentMaterialization;
 
 use uuid::Uuid;
 
+use tddy_core::cli_harness::cli_harness;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
 use crate::placement::CodebasePlacement;
@@ -422,9 +423,11 @@ impl LaunchSessions {
             return Ok(started);
         }
 
-        // --- opencode-cli branch: no LiveKit; spawns OpenCode in a PTY in a daemon-cut worktree ---
-        if req.session_type.trim() == "opencode-cli" {
-            return self.start_opencode_cli(&req, progress, os_user).await;
+        // --- any other registered CLI harness (opencode-cli, muse-cli): a PTY, no LiveKit ---
+        if let Some(harness) = cli_harness(req.session_type.trim()) {
+            return self
+                .start_cli_harness(harness, &req, progress, os_user)
+                .await;
         }
 
         let livekit = spawner::livekit_creds_from_config(&self.config)

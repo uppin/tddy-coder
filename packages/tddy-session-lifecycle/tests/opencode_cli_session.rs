@@ -1,7 +1,9 @@
-//! Integration tests: the `opencode-cli` session type through the daemon's session host — start,
-//! resume, listing and the terminal relay — against a stub `opencode` binary that records its argv.
+//! Integration tests: the `opencode-cli` and `muse-cli` session types through the daemon's session
+//! host — start, resume, listing and the terminal relay — against a stub binary that records its
+//! argv.
 //!
 //! Feature: docs/ft/daemon/opencode-cli-session.md
+//! Feature: docs/ft/daemon/muse-cli-session.md
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,14 +26,16 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "fireworks/kimi-k2";
+const MUSE_MODEL: &str = "muse-wonder-1.0";
 const TEST_PROJECT_ID: &str = "opencode-project";
 const STOPPED_SESSION_ID: &str = "019fb0c1-5a2e-7d11-9c3b-6f0a1e2d3c4b";
 
 /// A safety net for a spawned stub to record its argv, not a prediction of how long it takes.
 const SPAWN_OBSERVE: Duration = Duration::from_secs(10);
 
-/// A daemon with one registered project whose `opencode` is a stub that records every invocation.
-struct OpenCodeDaemon {
+/// A daemon with one registered project whose CLI harness binary is a stub that records every
+/// invocation.
+struct CliHarnessDaemon {
     service: DaemonSessionHost,
     manager: Arc<CliSessionManager>,
     argv_log: PathBuf,
@@ -41,23 +45,32 @@ struct OpenCodeDaemon {
     _stub_dir: tempfile::TempDir,
 }
 
-fn an_opencode_daemon() -> OpenCodeDaemon {
+fn an_opencode_daemon() -> CliHarnessDaemon {
+    a_daemon_with_a_stub_for("opencode-cli", "stub_opencode.sh")
+}
+
+fn a_muse_daemon() -> CliHarnessDaemon {
+    a_daemon_with_a_stub_for("muse-cli", "stub_muse.sh")
+}
+
+/// A daemon whose config names a stub, `stub_name`, as the binary of the `session_type` harness.
+fn a_daemon_with_a_stub_for(session_type: &str, stub_name: &str) -> CliHarnessDaemon {
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let sessions_dir = tempfile::tempdir().unwrap();
     register_project(&sessions_dir.path().join("projects"), repo_dir.path());
     let stub_dir = tempfile::tempdir().unwrap();
     let argv_log = stub_dir.path().join("argv.log");
-    let binary = a_stub_agent_script(stub_dir.path(), "stub_opencode.sh")
+    let binary = a_stub_agent_script(stub_dir.path(), stub_name)
         .appending_argv_to(&argv_log)
         .then_reading_stdin()
         .build();
 
-    let config = daemon_config_with_opencode_binary(&binary);
+    let config = daemon_config_with_cli_harness_binary(session_type, &binary);
     let sessions_base = sessions_dir.path().to_path_buf();
     let manager = Arc::new(CliSessionManager::new());
     let service = session_host(config, sessions_base.clone(), Arc::clone(&manager));
-    OpenCodeDaemon {
+    CliHarnessDaemon {
         service,
         manager,
         argv_log,
@@ -68,7 +81,7 @@ fn an_opencode_daemon() -> OpenCodeDaemon {
     }
 }
 
-impl OpenCodeDaemon {
+impl CliHarnessDaemon {
     async fn start(&self, req: StartSessionRequest) -> Result<String, tddy_rpc::Status> {
         self.service
             .start_session(Request::direct(req))
@@ -76,9 +89,9 @@ impl OpenCodeDaemon {
             .map(|resp| resp.into_inner().session_id)
     }
 
-    /// The args of the most recent `opencode` spawn, waiting for the stub to record them.
+    /// The args of the most recent harness spawn, waiting for the stub to record them.
     async fn last_spawn_args(&self) -> Vec<String> {
-        eventually("the stub opencode to record a spawn", SPAWN_OBSERVE, || {
+        eventually("the stub harness to record a spawn", SPAWN_OBSERVE, || {
             read_last_appended_argv(&self.argv_log)
         })
         .await
@@ -103,9 +116,15 @@ impl OpenCodeDaemon {
         self.sessions_base.join("sessions").join(session_id)
     }
 
-    /// A stopped `opencode-cli` session as an earlier daemon run left it: its worktree on disk
-    /// (when `worktree_exists`) and a `.session.yaml` naming it.
-    fn a_stopped_session(&self, session_id: &str, worktree_exists: bool) -> PathBuf {
+    /// A stopped `session_type` session on `model` as an earlier daemon run left it: its worktree
+    /// on disk (when `worktree_exists`) and a `.session.yaml` naming it.
+    fn a_stopped_session(
+        &self,
+        session_type: &str,
+        model: &str,
+        session_id: &str,
+        worktree_exists: bool,
+    ) -> PathBuf {
         let session_dir = self.session_dir(session_id);
         std::fs::create_dir_all(&session_dir).unwrap();
         let worktree = self.sessions_base.join("worktrees").join(session_id);
@@ -119,8 +138,8 @@ impl OpenCodeDaemon {
              updated_at: 2026-10-20T05:03:46Z\n\
              status: stopped\n\
              repo_path: {worktree}\n\
-             session_type: opencode-cli\n\
-             model: {TEST_MODEL}\n",
+             session_type: {session_type}\n\
+             model: {model}\n",
             worktree = worktree.display(),
         );
         std::fs::write(session_dir.join(".session.yaml"), yaml).unwrap();
@@ -144,6 +163,17 @@ fn an_opencode_start_request() -> StartSessionRequest {
         project_id: TEST_PROJECT_ID.to_string(),
         session_type: "opencode-cli".to_string(),
         model: TEST_MODEL.to_string(),
+        branch_worktree_intent: "new_branch_from_base".to_string(),
+        ..Default::default()
+    }
+}
+
+fn a_muse_start_request() -> StartSessionRequest {
+    StartSessionRequest {
+        session_token: VALID_TOKEN.to_string(),
+        project_id: TEST_PROJECT_ID.to_string(),
+        session_type: "muse-cli".to_string(),
+        model: MUSE_MODEL.to_string(),
         branch_worktree_intent: "new_branch_from_base".to_string(),
         ..Default::default()
     }
@@ -312,7 +342,7 @@ async fn an_opencode_session_over_a_managed_codebase_is_refused() {
 async fn resuming_an_opencode_session_continues_the_worktrees_last_session() {
     // Given
     let daemon = an_opencode_daemon();
-    daemon.a_stopped_session(STOPPED_SESSION_ID, true);
+    daemon.a_stopped_session("opencode-cli", TEST_MODEL, STOPPED_SESSION_ID, true);
 
     // When
     daemon.resume(STOPPED_SESSION_ID).await.unwrap();
@@ -329,7 +359,8 @@ async fn resuming_an_opencode_session_continues_the_worktrees_last_session() {
 async fn resuming_an_opencode_session_marks_it_active_again() {
     // Given
     let daemon = an_opencode_daemon();
-    let session_dir = daemon.a_stopped_session(STOPPED_SESSION_ID, true);
+    let session_dir =
+        daemon.a_stopped_session("opencode-cli", TEST_MODEL, STOPPED_SESSION_ID, true);
 
     // When
     daemon.resume(STOPPED_SESSION_ID).await.unwrap();
@@ -345,7 +376,7 @@ async fn resuming_an_opencode_session_marks_it_active_again() {
 async fn resuming_an_opencode_session_whose_worktree_is_gone_is_refused() {
     // Given
     let daemon = an_opencode_daemon();
-    daemon.a_stopped_session(STOPPED_SESSION_ID, false);
+    daemon.a_stopped_session("opencode-cli", TEST_MODEL, STOPPED_SESSION_ID, false);
 
     // When
     let refusal = daemon
@@ -413,10 +444,214 @@ async fn connecting_to_an_opencode_session_names_no_terminal_room() {
 }
 
 // ---------------------------------------------------------------------------
+// Muse Code: the same CLI harness start and resume as OpenCode
+//
+// No daemon here has LiveKit configured, so a start that fell through to the tool-session path
+// would fail. A start that succeeds and leaves an argv on the stub's log went through the CLI harness.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn starting_a_muse_session_launches_muse_with_the_chosen_model() {
+    // Given
+    let daemon = a_muse_daemon();
+
+    // When
+    let session_id = daemon.start(a_muse_start_request()).await.unwrap();
+
+    // Then the binary the daemon config names is run with the model
+    daemon.assert_agent_is_running(&session_id).await;
+    let argv = daemon.last_spawn_args().await;
+    assert_eq!(
+        the_value_after(&argv, "--model"),
+        Some(MUSE_MODEL),
+        "{argv:?}"
+    );
+}
+
+#[tokio::test]
+async fn starting_a_muse_session_opens_with_its_first_prompt() {
+    // Given
+    let daemon = a_muse_daemon();
+    let mut req = a_muse_start_request();
+    req.initial_prompt = "fix the flaky test".to_string();
+
+    // When
+    let session_id = daemon.start(req).await.unwrap();
+
+    // Then the prompt is Muse Code's positional argument, last, with no `--prompt` before it
+    daemon.assert_agent_is_running(&session_id).await;
+    assert_eq!(
+        daemon.last_spawn_args().await,
+        vec![
+            "--model".to_string(),
+            MUSE_MODEL.to_string(),
+            "fix the flaky test".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_muse_session_started_without_a_model_leaves_the_choice_to_muse() {
+    // Given — without an account, Muse Code uses the person's own setup and its own default model
+    let daemon = a_muse_daemon();
+    let mut req = a_muse_start_request();
+    req.model = String::new();
+
+    // When
+    let session_id = daemon.start(req).await.unwrap();
+
+    // Then
+    daemon.assert_agent_is_running(&session_id).await;
+    let argv = daemon.last_spawn_args().await;
+    assert_eq!(the_value_after(&argv, "--model"), None, "{argv:?}");
+}
+
+#[tokio::test]
+async fn a_muse_session_records_its_type_model_and_worktree() {
+    // Given
+    let daemon = a_muse_daemon();
+
+    // When
+    let session_id = daemon.start(a_muse_start_request()).await.unwrap();
+
+    // Then
+    let meta = read_session_metadata(&daemon.session_dir(&session_id)).expect(".session.yaml");
+    assert_eq!(meta.session_type.as_deref(), Some("muse-cli"));
+    assert_eq!(meta.model.as_deref(), Some(MUSE_MODEL));
+    assert!(meta.pid.is_some());
+    let worktree = PathBuf::from(meta.repo_path.expect("a worktree"));
+    assert!(
+        worktree.join(".git").exists(),
+        "{} is no checkout",
+        worktree.display()
+    );
+}
+
+#[tokio::test]
+async fn a_sandboxed_muse_session_is_refused() {
+    // Given
+    let daemon = a_muse_daemon();
+    let mut req = a_muse_start_request();
+    req.sandbox = true;
+
+    // When
+    let refusal = daemon
+        .start(req)
+        .await
+        .expect_err("no jailed Muse Code yet");
+
+    // Then it is refused, not run unsandboxed
+    assert_eq!(refusal.code, Code::FailedPrecondition);
+    assert!(refusal.message.contains("sandbox"), "{}", refusal.message);
+    assert!(!daemon.argv_log.exists(), "muse was spawned");
+}
+
+#[tokio::test]
+async fn a_muse_session_over_a_managed_codebase_is_refused() {
+    // Given — Muse Code has no workflow of its own for a managed codebase to drive
+    let daemon = a_muse_daemon();
+    let mut req = a_muse_start_request();
+    req.managed_codebase = true;
+
+    // When
+    let refusal = daemon
+        .start(req)
+        .await
+        .expect_err("no managed Muse Code codebase");
+
+    // Then it is refused, and nothing is spawned
+    assert_eq!(refusal.code, Code::InvalidArgument);
+    assert!(
+        refusal.message.contains("managed_codebase"),
+        "{}",
+        refusal.message
+    );
+    assert!(!daemon.argv_log.exists(), "muse was spawned");
+}
+
+#[tokio::test]
+async fn resuming_a_muse_session_continues_its_session() {
+    // Given
+    let daemon = a_muse_daemon();
+    daemon.a_stopped_session("muse-cli", MUSE_MODEL, STOPPED_SESSION_ID, true);
+
+    // When
+    daemon.resume(STOPPED_SESSION_ID).await.unwrap();
+
+    // Then muse is relaunched with --continue and neither a model nor a prompt
+    daemon.assert_agent_is_running(STOPPED_SESSION_ID).await;
+    assert_eq!(
+        daemon.last_spawn_args().await,
+        vec!["--continue".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn resuming_a_muse_session_marks_it_active_again() {
+    // Given
+    let daemon = a_muse_daemon();
+    let session_dir = daemon.a_stopped_session("muse-cli", MUSE_MODEL, STOPPED_SESSION_ID, true);
+
+    // When
+    daemon.resume(STOPPED_SESSION_ID).await.unwrap();
+
+    // Then
+    let meta = read_session_metadata(&session_dir).unwrap();
+    assert_eq!(meta.status, "active");
+    assert!(meta.pid.is_some());
+    assert_eq!(meta.session_type.as_deref(), Some("muse-cli"));
+}
+
+#[tokio::test]
+async fn resuming_a_muse_session_whose_worktree_is_gone_is_refused() {
+    // Given
+    let daemon = a_muse_daemon();
+    daemon.a_stopped_session("muse-cli", MUSE_MODEL, STOPPED_SESSION_ID, false);
+
+    // When
+    let refusal = daemon
+        .resume(STOPPED_SESSION_ID)
+        .await
+        .expect_err("nothing to continue");
+
+    // Then
+    assert_eq!(refusal.code, Code::FailedPrecondition);
+    assert!(refusal.message.contains("worktree"), "{}", refusal.message);
+    assert!(!daemon.argv_log.exists(), "muse was spawned");
+}
+
+#[tokio::test]
+async fn a_muse_session_is_listed_with_its_agent_and_model() {
+    // Given
+    let daemon = a_muse_daemon();
+    let session_id = daemon.start(a_muse_start_request()).await.unwrap();
+
+    // When
+    let listed = daemon
+        .service
+        .list_sessions(Request::direct(ListSessionsRequest {
+            session_token: VALID_TOKEN.to_string(),
+        }))
+        .await
+        .expect("ListSessions")
+        .into_inner();
+
+    // Then
+    let entry = listed
+        .sessions
+        .iter()
+        .find(|s| s.session_id == session_id)
+        .expect("the session is listed");
+    assert_eq!(entry.session_type, "muse-cli");
+    assert_eq!(entry.agent, "muse-cli");
+    assert_eq!(entry.model, MUSE_MODEL);
+}
+
+// ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-fn daemon_config_with_opencode_binary(binary: &Path) -> DaemonConfig {
+fn daemon_config_with_cli_harness_binary(session_type: &str, binary: &Path) -> DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
     let yaml = format!(
         r#"
@@ -427,7 +662,7 @@ allowed_tools:
   - path: /bin/true
     label: true
 cli_harnesses:
-  opencode-cli:
+  {session_type}:
     binary_path: {binary}
 "#,
         binary = binary.display()

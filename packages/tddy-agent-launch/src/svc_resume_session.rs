@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use crate::session_coordinate_handlers::bridge_conn_resume_response;
 
+use tddy_core::cli_harness::cli_harness;
 use tddy_core::read_session_metadata;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
@@ -87,10 +88,10 @@ impl LaunchSessions {
             );
         }
 
-        // --- opencode-cli branch: resume without LiveKit ---
-        if metadata.session_type.as_deref() == Some("opencode-cli") {
+        // --- any other registered CLI harness (opencode-cli, muse-cli): resume without LiveKit ---
+        if let Some(harness) = metadata.session_type.as_deref().and_then(cli_harness) {
             return bridge_conn_resume_response(
-                self.resume_opencode_cli(os_user, &req, &session_dir, metadata)
+                self.resume_cli_harness(harness, os_user, &req, &session_dir, metadata)
                     .await,
             );
         }

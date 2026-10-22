@@ -51,17 +51,20 @@ mod tests {
     }
 
     #[test]
-    fn a_harness_whose_route_is_not_built_yet_is_not_offered_any_account() {
-        {
-            let harness = "muse-cli";
-            let reason = HarnessRouteSupport
-                .harness_routable(harness)
-                .expect_err("not routable in this build");
-            assert!(reason.contains("in this build yet"), "{harness}: {reason}");
-            assert!(HarnessRouteSupport
-                .supports(harness, "meta", &["openai-responses", "openai-chat"])
-                .is_err());
-        }
+    fn muse_code_runs_only_on_a_meta_account() {
+        assert_eq!(HarnessRouteSupport.harness_routable("muse-cli"), Ok(()));
+        assert_eq!(
+            HarnessRouteSupport.supports("muse-cli", "meta", &["openai-responses", "openai-chat"]),
+            Ok(())
+        );
+        let reason = HarnessRouteSupport
+            .supports(
+                "muse-cli",
+                "fireworks",
+                &["openai-responses", "openai-chat"],
+            )
+            .expect_err("Muse Code runs on Meta only");
+        assert!(reason.contains("Meta only"), "{reason}");
     }
 
     #[test]

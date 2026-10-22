@@ -12,8 +12,8 @@ Product view: [tool-session model selection § Provider](../../../docs/ft/web/to
 | `useProviderDefault(client, sessionToken, harness)` (in `rpc/useProviderRoutes.ts`) | the account whose `defaultFor` lists `harness`, from `ListAccounts`; `null` while unknown, when none is, or when the listing failed (the daemon still applies the default at start). `useCreateSessionModel` sets an untouched `providerChoice` to it once `ListProviderRoutes` lists it as supported |
 | `createSessionPaneProps.ts` | `CreateSessionPaneProps.accountsClient?: Client<typeof AccountsService>`. Absent: no Provider field |
 | `CreateSessionPane.tsx` | holds `providerChoice: string \| null` (`null` = untouched, reset on a session-type change); `providerHarness` is the session type for a CLI session, `null` for a tool session; the model list is `useProviderAccountModels` while an account is chosen, else `useAgentModels` |
-| `createSessionRequest.ts` | `CreateSessionFormValues.providerAccountId?` / `providerBuiltIn?`, sent on the claude-cli and opencode-cli `StartSessionRequest`s only. `SessionType` is `"tool" \| "claude-cli" \| "cursor-cli" \| "opencode-cli"`; `daemonCutsTheWorktree(sessionType)` (every CLI session type) gates the **Create remote branch** toggle. The opencode-cli request sends the model and the provider choice and clears the first prompt, sandbox, managed codebase, specialized agents and semantic index |
-| `CreateSessionTypeToggle.tsx` | the session-type buttons; **OpenCode** is `create-session-type-opencode-cli`. A CLI session type's model list is `ListAgentModels(<session type>)` — `modelAgentKey` is the session type for a CLI session, the chosen agent for a tool session |
+| `createSessionRequest.ts` | `CreateSessionFormValues.providerAccountId?` / `providerBuiltIn?`, sent on the claude-cli, opencode-cli and muse-cli `StartSessionRequest`s only. `SessionType` is `"tool" \| "claude-cli" \| "cursor-cli" \| "opencode-cli" \| "muse-cli"`; `daemonCutsTheWorktree(sessionType)` (every CLI session type) gates the **Create remote branch** toggle. The opencode-cli and muse-cli requests (one branch) send the model and the provider choice and clear the first prompt, sandbox, managed codebase, specialized agents and semantic index |
+| `CreateSessionTypeToggle.tsx` | the session-type buttons, one per entry of `SESSION_TYPE_OPTIONS` (`create-session-type-<session type>`): Tool, Claude CLI, Cursor CLI, **OpenCode**, **Muse Code**. The model field alone is mounted for opencode-cli and muse-cli. A CLI session type's model list is `ListAgentModels(<session type>)` — `modelAgentKey` is the session type for a CLI session, the chosen agent for a tool session |
 | `SessionsDrawerScreen.tsx` → `SessionMainPane.tsx` | build `accountsClient` with `useDaemonClient(AccountsService)` and pass it to the create pane |
 
 Test ids (`cypress/support/testIds.ts`): `create-session-provider-select`,
@@ -24,10 +24,13 @@ Test ids (`cypress/support/testIds.ts`): `create-session-provider-select`,
 `cypress/component/CreateSessionProviderAcceptance.cy.tsx` — defaults to built in; choosing an
 account lists that account's models; Create sends the account and model; Cursor shows why; a
 `ListProviderRoutes` failure is shown under the select.
-`cypress/component/ProviderAccountDefaultsAcceptance.cy.tsx` — the person's claude-cli default is
-pre-selected.
+`cypress/component/ProviderAccountDefaultsAcceptance.cy.tsx` — the person's claude-cli and muse-cli
+defaults are pre-selected.
 
 `cypress/component/CreateSessionOpenCodeAcceptance.cy.tsx` — the toggle offers OpenCode; its model
 list is the daemon's `ListAgentModels("opencode-cli")`; Create sends an `opencode-cli` start with the
 model; the Create remote branch toggle is offered unchecked, and when checked the start sends
 `createRemoteBranch = true`.
+
+`cypress/component/CreateSessionMuseAcceptance.cy.tsx` — the toggle offers Muse Code; Create sends a
+`muse-cli` start with the chosen Muse model.

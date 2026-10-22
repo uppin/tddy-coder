@@ -11,6 +11,7 @@ import { Button } from "../ui/button";
 const HARNESS_OPTIONS: { id: string; label: string }[] = [
   { id: "claude-cli", label: "Claude CLI" },
   { id: "opencode-cli", label: "OpenCode CLI" },
+  { id: "muse-cli", label: "Muse Code" },
 ];
 
 export function ProviderAccountDefaultsControl({

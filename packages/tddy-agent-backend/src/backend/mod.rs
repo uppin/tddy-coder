@@ -750,6 +750,8 @@ pub fn context_globs_for_agent(agent: &str) -> &'static [&'static str] {
         "codex" | "codex-acp" => &["AGENTS.md", ".agents/**", ".codex/**"],
         // OpenCode's project configuration lives in `opencode.json` and the `.opencode/` tree.
         "opencode" => &["AGENTS.md", ".agents/**", "opencode.json", ".opencode/**"],
+        // Muse Code's `.muse/` tree is unconfirmed: TODO(muse-cli-facts) in `cli_harness_muse`.
+        "muse" => &["AGENTS.md", ".agents/**", ".muse/**"],
         _ => SHARED_CONTEXT_GLOBS,
     }
 }

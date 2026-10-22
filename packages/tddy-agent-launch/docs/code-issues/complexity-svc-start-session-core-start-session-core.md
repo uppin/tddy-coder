@@ -64,9 +64,10 @@ finding is a lead, not an issue.
 `LaunchSessions::start_opencode_cli` in `cli_branch_starts.rs` — its refusals, prelude, roster and spawn
 live there, not in this function. Nesting unchanged. Not claimed by any PR.
 
-## Measurement update 2026-10-22 — opencode-cli start
+## Measurement update 2026-10-22 — CLI harness registry dispatch
 
-**Regressed by five lines:** 386 → 391 by brace matching against `origin/feature/provider-route/claude-route`
-(`#provider-route` 3/9, #664). One more session-type branch, `opencode-cli`, as a single call to
-`LaunchSessions::start_opencode_cli` in `cli_branch_starts.rs` — its refusals, prelude, roster and spawn
-live there, not in this function. Nesting unchanged. Not claimed by any PR.
+**Unchanged** by `#provider-route` 6/9 (#667), by brace matching against
+`origin/feature/provider-route/default-route`: the `opencode-cli` branch became a lookup in the CLI
+harness registry (`cli_harness(session_type)` → `LaunchSessions::start_cli_harness`), so `muse-cli` and
+any later harness start through it without another branch. Same line count (one comment line, three
+lines of `if`), same nesting. Not claimed by any PR.

@@ -70,9 +70,10 @@ which account is one **capability matrix**, held by the daemon for every harness
 | Cursor — `cursor`, `cursor-cli` | — never: Cursor's agent cannot be pointed at another provider |
 
 An unsupported pair is refused with the reason, never silently ignored. Of the harnesses the matrix
-admits, **`claude-cli`** and **`opencode-cli`** started unsandboxed are run on an account today
+admits, **`claude-cli`**, **`opencode-cli`** and **`muse-cli`** started unsandboxed are run on an account today
 ([Claude Code CLI session § Running on a provider account](claude-cli-session.md#running-on-a-provider-account),
-[OpenCode CLI session § Running on a provider account](opencode-cli-session.md#running-on-a-provider-account));
+[OpenCode CLI session § Running on a provider account](opencode-cli-session.md#running-on-a-provider-account),
+[Muse Code CLI session § Running on a Meta account](muse-cli-session.md#running-on-a-meta-account));
 so is a **tool session** whose agent is `claude`, `claude-acp`, `codex` or `codex-acp` (below). Any
 other harness asked to run on an account is refused as not routable in this build.
 
@@ -136,7 +137,7 @@ account the default for exactly those harnesses:
   under is `NOT_FOUND`.
 - `AccountSummary.default_for` lists the harnesses an account is the default for.
 
-At start, a **claude-cli** or **opencode-cli** session that names neither an account nor "built in"
+At start, a **claude-cli**, **opencode-cli** or **muse-cli** session that names neither an account nor "built in"
 runs on the owner's default for its harness. An explicit choice — an account, or "Anthropic (built
 in)" — wins and does not read the default at all. While the owner's vault is **locked**, a start that
 names nothing is refused (`FAILED_PRECONDITION`) rather than run on the vendor the default may have

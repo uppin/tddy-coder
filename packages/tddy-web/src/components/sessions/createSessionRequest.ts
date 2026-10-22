@@ -4,7 +4,7 @@ import type {
   StartSessionRequestInit,
 } from "../../hooks/useSessionAttachments";
 
-export type SessionType = "tool" | "claude-cli" | "cursor-cli" | "opencode-cli";
+export type SessionType = "tool" | "claude-cli" | "cursor-cli" | "opencode-cli" | "muse-cli";
 
 /**
  * Whether the daemon cuts the session's worktree itself — and so can push the new branch to origin
@@ -168,7 +168,7 @@ export function buildStartSessionRequest(
       codebaseDaemonInstanceId: "",
     };
   }
-  if (sessionType === "opencode-cli") {
+  if (sessionType === "opencode-cli" || sessionType === "muse-cli") {
     return {
       ...commonParams,
       toolPath: "",
@@ -177,15 +177,17 @@ export function buildStartSessionRequest(
       stackParent,
       stackParentDaemonInstanceId,
       stackNodeId,
-      sessionType: "opencode-cli",
+      sessionType,
       model,
       // The provider field is offered to every CLI harness, so the account the operator chose
-      // goes out as chosen rather than being dropped in favour of the vendor.
+      // goes out as chosen rather than being dropped in favour of the vendor; the daemon refuses
+      // one the harness cannot run on (Muse Code runs only on Meta).
       providerAccountId,
       providerBuiltIn,
       permissionMode: "",
-      // OpenCode offers no first prompt, sandbox, managed codebase, specialized agents or semantic
-      // index, so the request says so rather than sending what another session type left in the form.
+      // The form offers OpenCode and Muse Code only a model, so the request clears what another
+      // session type left in the form: no first prompt, sandbox, managed codebase, specialized
+      // agents or semantic index.
       initialPrompt: "",
       sandbox: false,
       managedCodebase: false,

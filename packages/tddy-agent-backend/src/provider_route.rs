@@ -15,6 +15,8 @@ mod codex;
 use codex::codex_route;
 pub use codex::{CODEX_ROUTE_KEY_ENV, CODEX_ROUTE_PROVIDER_ID};
 
+use crate::cli_harness_muse::MUSE_ROUTE_KEY_ENV;
+
 /// Every harness a session can run, by the id a session type or tool-session agent names it with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Harness {
@@ -272,7 +274,7 @@ fn route_body(harness: Harness) -> Result<RouteBody, RouteRefusal> {
         }
         Harness::OpenCode | Harness::OpenCodeCli => Ok(opencode_route),
         Harness::Codex | Harness::CodexAcp => Ok(codex_route),
-        Harness::MuseCli => Err(RouteRefusal::NotYetRoutable(harness)),
+        Harness::MuseCli => Ok(muse_route),
     }
 }
 
@@ -329,6 +331,24 @@ fn opencode_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute
             "--model".to_string(),
             format!("{OPENCODE_ROUTE_PROVIDER_ID}/{}", target.model),
         ],
+    })
+}
+
+/// Muse Code talks only to Meta, so a route on a Meta account needs no endpoint, file or argument:
+/// the account's key alone, as a secret variable in the one Muse Code reads
+/// ([`MUSE_ROUTE_KEY_ENV`]). The route names no model — Meta's model ids need no provider prefix —
+/// so a routed launch keeps the session's own model in its `--model`, unlike OpenCode's.
+fn muse_route(harness: Harness, target: &RouteTarget) -> Result<HarnessRoute, RouteRefusal> {
+    route_supported(
+        harness,
+        &target.preset,
+        &served_protocols(&target.endpoints),
+    )?;
+    Ok(HarnessRoute {
+        env: Vec::new(),
+        secret_env: vec![(MUSE_ROUTE_KEY_ENV.to_string(), target.api_key.clone())],
+        files: Vec::new(),
+        args: Vec::new(),
     })
 }
 

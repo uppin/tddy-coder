@@ -77,10 +77,11 @@ impl BranchIntentPolicy {
         }
     }
 
-    /// opencode-cli: as cursor-cli, a `new_branch_from_base` with no name generates one.
-    pub const fn opencode_cli() -> Self {
+    /// A CLI harness that is cut a worktree of its own (`opencode-cli`, `muse-cli`): as cursor-cli,
+    /// a `new_branch_from_base` with no name generates one, under the harness's session type.
+    pub const fn cli_harness(session_type: &'static str) -> Self {
         Self {
-            generated_branch_prefix: "opencode-cli",
+            generated_branch_prefix: session_type,
             blank_new_branch_name: BlankNewBranchName::Generate,
             unrecognized_intent: UnrecognizedIntent::DefaultToGeneratedBranch,
         }

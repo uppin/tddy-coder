@@ -18,6 +18,7 @@ use crate::svc_start_session_core::CliStart;
 
 use crate::launch_ports::LaunchSessions;
 use crate::session_provider_route::{refuse_route_in_sandbox, session_route_sources_with_default};
+use tddy_core::cli_harness::CliHarness;
 use tddy_service::proto::session::StartSessionRequest;
 
 impl LaunchSessions {
@@ -221,60 +222,65 @@ impl LaunchSessions {
 }
 
 impl LaunchSessions {
-    /// The `opencode-cli` start: refused in a sandbox or over a managed codebase, otherwise the
-    /// shared CLI prelude, the seeded roster resolved before the spawn, then OpenCode in a PTY.
-    pub(super) async fn start_opencode_cli(
+    /// The start of a registered CLI harness that is cut a worktree of its own (`opencode-cli`,
+    /// `muse-cli`): refused in a sandbox or over a managed codebase, otherwise the shared CLI
+    /// prelude, the seeded roster resolved before the spawn, then the harness in a PTY.
+    pub(super) async fn start_cli_harness(
         &self,
+        harness: &'static CliHarness,
         req: &StartSessionRequest,
         progress: &AttachmentProgressSink,
         os_user: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        // TODO(provider-route-jail): OpenCode is not sandboxed yet (#provider-route 9/9). Refused
-        // rather than run unsandboxed.
+        // TODO(provider-route-jail): these harnesses are not sandboxed yet (#provider-route 9/9).
+        // Refused rather than run unsandboxed.
         if req.sandbox {
-            return Err(Status::failed_precondition(
-                "opencode-cli sessions cannot run in a sandbox yet",
-            ));
+            return Err(Status::failed_precondition(format!(
+                "{} sessions cannot run in a sandbox yet",
+                harness.session_type
+            )));
         }
-        // OpenCode has no workflow of its own for a managed codebase to drive.
+        // None of them has a workflow of its own for a managed codebase to drive.
         if req.managed_codebase {
-            return Err(Status::invalid_argument(
-                "managed_codebase is not supported for opencode-cli sessions",
-            ));
+            return Err(Status::invalid_argument(format!(
+                "managed_codebase is not supported for {} sessions",
+                harness.session_type
+            )));
         }
         let start = self.cli_start_prelude(req, progress, os_user).await?;
-        let started_agents = self
+        let sessions_base = start.sessions_base.clone();
+        let session_id = start.session_id.clone();
+        let started = self
+            .start_cli_harness_from_request(harness, req, os_user, start, progress)
+            .await?;
+        self.announce_worktree_ready(&sessions_base, &session_id);
+        Ok(started)
+    }
+
+    /// The seeded roster, resolved before the spawn, then the harness's route and its start.
+    async fn start_cli_harness_from_request(
+        &self,
+        harness: &'static CliHarness,
+        req: &StartSessionRequest,
+        os_user: &str,
+        start: CliStart,
+        progress: &AttachmentProgressSink,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        let mut started_agents = self
             .agent_roster
             .seeded_roster_records(&req.specialized_agents)
             .await?;
         let clones = tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant {
             service: self.agent_roster.clone(),
         };
-        let sessions_base = start.sessions_base.clone();
-        let session_id = start.session_id.clone();
-        let started = self
-            .start_opencode_cli_from_request(req, os_user, start, started_agents, clones, progress)
-            .await?;
-        self.announce_worktree_ready(&sessions_base, &session_id);
-        Ok(started)
-    }
-
-    async fn start_opencode_cli_from_request(
-        &self,
-        req: &StartSessionRequest,
-        os_user: &str,
-        start: CliStart,
-        mut started_agents: Vec<tddy_core::SessionAgentRecord>,
-        clones: tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant,
-        progress: &AttachmentProgressSink,
-    ) -> Result<Response<StartSessionResponse>, Status> {
         let route_sources = session_route_sources_with_default(
             req,
-            "opencode-cli",
+            harness.session_type,
             &self.host.session_account_access(&req.session_token),
         )?;
-        crate::opencode_cli_spawn::start_opencode_cli_session(
-            crate::opencode_cli_spawn::OpenCodeCliStart {
+        crate::opencode_cli_spawn::start_cli_harness_session(
+            crate::opencode_cli_spawn::CliHarnessStart {
+                harness,
                 config: &self.config,
                 tddy_data_dir: &self.tddy_data_dir,
                 cli_manager: &self.claude_cli_manager,

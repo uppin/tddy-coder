@@ -11,7 +11,7 @@ fn opencode() -> &'static tddy_agent_backend::cli_harness::CliHarness {
 }
 
 #[test]
-fn the_registry_offers_claude_cursor_and_opencode_in_order() {
+fn the_registry_offers_claude_cursor_opencode_and_muse_in_order() {
     // When
     let offered: Vec<(&str, &str)> = cli_harnesses()
         .iter()
@@ -25,6 +25,7 @@ fn the_registry_offers_claude_cursor_and_opencode_in_order() {
             ("claude-cli", "Claude CLI"),
             ("cursor-cli", "Cursor CLI"),
             ("opencode-cli", "OpenCode"),
+            ("muse-cli", "Muse Code"),
         ]
     );
 }

@@ -30,6 +30,18 @@ pub struct CliRouteLaunch {
     pub args: Vec<String>,
 }
 
+/// The model a launch of `harness` names on its own command line. A config-file route (OpenCode's)
+/// names the model itself, on the provider it generates, so a `routed` launch leaves it blank; an
+/// environment-only route (Muse Code's) hands over the key and nothing else, so the session keeps
+/// its own model. An unrouted launch always keeps it.
+pub(crate) fn launch_model_for<'a>(harness: &CliHarness, routed: bool, model: &'a str) -> &'a str {
+    if routed && harness.route_config_env.is_some() {
+        ""
+    } else {
+        model
+    }
+}
+
 /// Write `route`'s files into `session_dir` (mode 0600) and collect what the launch needs. An
 /// unrouted launch (`None`) adds nothing and writes nothing.
 pub fn cli_route_launch(

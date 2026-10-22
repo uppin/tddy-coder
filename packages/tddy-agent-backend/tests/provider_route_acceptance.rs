@@ -227,9 +227,8 @@ fn a_route_can_be_logged_without_its_key() {
 }
 
 #[test]
-fn only_the_harnesses_with_a_built_route_answer_routable() {
-    // Then Claude Code, Codex and OpenCode are routable today, Cursor never is, and Muse Code waits
-    // for its route
+fn every_harness_but_cursor_answers_routable() {
+    // Then Claude Code, Codex, OpenCode and Muse Code are routable, and Cursor never is
     for harness in [
         Harness::Claude,
         Harness::ClaudeAcp,
@@ -238,6 +237,7 @@ fn only_the_harnesses_with_a_built_route_answer_routable() {
         Harness::CodexAcp,
         Harness::OpenCode,
         Harness::OpenCodeCli,
+        Harness::MuseCli,
     ] {
         assert_eq!(harness_routable(harness), Ok(()));
     }
@@ -245,17 +245,6 @@ fn only_the_harnesses_with_a_built_route_answer_routable() {
         assert_eq!(
             harness_routable(harness),
             Err(RouteRefusal::HarnessCannotBeRouted { harness })
-        );
-    }
-    {
-        let harness = Harness::MuseCli;
-        assert_eq!(
-            harness_routable(harness),
-            Err(RouteRefusal::NotYetRoutable(harness))
-        );
-        assert_eq!(
-            resolve_route(harness, &a_meta_account_running("muse-spark-1.3")),
-            Err(RouteRefusal::NotYetRoutable(harness))
         );
     }
 }
