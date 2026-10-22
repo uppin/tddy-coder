@@ -11,8 +11,8 @@ use tddy_core::provider_route::{HarnessRoute, RouteFile, RouteSecret};
 use tddy_rpc::Code;
 
 use crate::svc_start_sandboxed_cli_harness_session::{
-    cli_harness_runner_argv, refuse_first_prompt, resolve_jail_agent_binary, sandboxed_agent_kind,
-    sandboxed_runner_model, CliRunnerArgv,
+    cli_harness_runner_argv, refuse_first_prompt, require_provider_route,
+    resolve_jail_agent_binary, sandboxed_agent_kind, sandboxed_runner_model, CliRunnerArgv,
 };
 
 /// An OpenCode route on `model`: a provider configuration file that names the model, and the
@@ -102,7 +102,7 @@ fn a_routed_opencode_session_runs_the_model_its_route_names() {
     let route = an_opencode_route_on("kimi-k2");
 
     // When
-    let model = sandboxed_runner_model(opencode, Some(&route), "kimi-k2").expect("a model");
+    let model = sandboxed_runner_model(opencode, &route, "kimi-k2").expect("a model");
 
     // Then
     assert_eq!(model, "tddy-route/kimi-k2");
@@ -115,35 +115,52 @@ fn a_routed_muse_session_keeps_its_own_model() {
     let route = a_muse_route();
 
     // When
-    let model = sandboxed_runner_model(muse, Some(&route), "muse-wonder-1.0").expect("a model");
+    let model = sandboxed_runner_model(muse, &route, "muse-wonder-1.0").expect("a model");
 
     // Then
     assert_eq!(model, "muse-wonder-1.0");
 }
 
 #[test]
-fn an_unrouted_opencode_session_keeps_its_own_model() {
+fn a_routed_muse_session_without_a_model_is_refused() {
     // Given
-    let opencode = cli_harness("opencode-cli").expect("registered");
+    let muse = cli_harness("muse-cli").expect("registered");
 
     // When
-    let model = sandboxed_runner_model(opencode, None, "fireworks/kimi-k2").expect("a model");
-
-    // Then
-    assert_eq!(model, "fireworks/kimi-k2");
-}
-
-#[test]
-fn an_unrouted_opencode_session_without_a_model_is_refused() {
-    // Given
-    let opencode = cli_harness("opencode-cli").expect("registered");
-
-    // When
-    let refusal = sandboxed_runner_model(opencode, None, "").expect_err("a model is required");
+    let refusal =
+        sandboxed_runner_model(muse, &a_muse_route(), "").expect_err("a model is required");
 
     // Then
     assert_eq!(refusal.code(), Code::InvalidArgument);
     assert!(refusal.message().contains("needs a model"));
+}
+
+#[test]
+fn a_sandboxed_opencode_session_without_a_provider_account_is_refused() {
+    // Given
+    let opencode = cli_harness("opencode-cli").expect("registered");
+
+    // When
+    let refusal = require_provider_route(opencode, None)
+        .expect_err("the jail holds no credentials of its own");
+
+    // Then
+    assert_eq!(refusal.code(), Code::FailedPrecondition);
+    assert!(refusal
+        .message()
+        .contains("a sandboxed opencode-cli session needs a provider account"));
+}
+
+#[test]
+fn a_sandboxed_muse_session_on_a_provider_account_runs_on_its_route() {
+    // Given
+    let muse = cli_harness("muse-cli").expect("registered");
+
+    // When
+    let route = require_provider_route(muse, Some(a_muse_route())).expect("an account was chosen");
+
+    // Then
+    assert_eq!(route, a_muse_route());
 }
 
 #[test]
@@ -156,7 +173,7 @@ fn a_routed_opencode_session_whose_route_names_no_model_is_refused() {
     };
 
     // When
-    let refusal = sandboxed_runner_model(opencode, Some(&route), "kimi-k2")
+    let refusal = sandboxed_runner_model(opencode, &route, "kimi-k2")
         .expect_err("the runner refuses a blank model, so the route must name one");
 
     // Then

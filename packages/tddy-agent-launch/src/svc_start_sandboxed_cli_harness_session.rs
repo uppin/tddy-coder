@@ -54,15 +54,14 @@ pub(crate) fn sandboxed_agent_kind(session_type: &str) -> Option<&'static str> {
 /// is kept, and a session with none is refused.
 pub(crate) fn sandboxed_runner_model(
     harness: &CliHarness,
-    route: Option<&HarnessRoute>,
+    route: &HarnessRoute,
     model: &str,
 ) -> Result<String, Status> {
-    let launched = launch_model_for(harness, route.is_some(), model);
+    let launched = launch_model_for(harness, true, model);
     if !launched.is_empty() {
         return Ok(launched.to_string());
     }
-    route
-        .and_then(|route| model_argument(&route.args))
+    model_argument(&route.args)
         .map(str::to_string)
         .ok_or_else(|| {
             Status::invalid_argument(format!(
@@ -93,6 +92,24 @@ pub(crate) fn refuse_first_prompt(
         "a first prompt cannot reach a sandboxed {} session: its jail hosts the harness without one",
         harness.session_type
     )))
+}
+
+/// The provider route a sandboxed CLI harness runs on, or a refusal when there is none.
+///
+/// A jail's `$HOME` is the session's own scratch, so the person's own OpenCode or Muse Code setup is
+/// not inside it: without a provider account the harness would start with no credentials and could
+/// not authenticate. Refused up front rather than started to fail.
+pub(crate) fn require_provider_route(
+    harness: &CliHarness,
+    route: Option<HarnessRoute>,
+) -> Result<HarnessRoute, Status> {
+    route.ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "a sandboxed {} session needs a provider account: its jail holds no credentials of \
+             its own",
+            harness.session_type
+        ))
+    })
 }
 
 /// The absolute path of the harness binary a jail runs. The sandbox profile grants reads to the
@@ -217,8 +234,8 @@ pub(crate) struct SandboxedCliHarnessStart<'a> {
     pub req: &'a StartSessionRequest,
     pub os_user: &'a str,
     pub start: CliStart,
-    /// The route the jail runs the harness on; `None` for the harness's own setup.
-    pub route: Option<HarnessRoute>,
+    /// The provider route the jail runs the harness on.
+    pub route: HarnessRoute,
     pub progress: &'a AttachmentProgressSink,
 }
 
@@ -240,12 +257,15 @@ impl LaunchSessions {
             .sessions_base
             .join(SESSIONS_SUBDIR)
             .join(&start.session_id);
-        let route = sandboxed_start_route(
-            &access,
-            harness.route_harness,
-            &sources,
-            req.model.trim(),
-            &session_dir,
+        let route = require_provider_route(
+            harness,
+            sandboxed_start_route(
+                &access,
+                harness.route_harness,
+                &sources,
+                req.model.trim(),
+                &session_dir,
+            )?,
         )?;
         self.start_sandboxed_cli_harness_session(SandboxedCliHarnessStart {
             harness,
@@ -378,7 +398,7 @@ impl LaunchSessions {
         )?;
 
         let binaries = resolve_cli_jail_binaries(&self.config, harness)?;
-        let runner_model = sandboxed_runner_model(harness, route.as_ref(), req.model.trim())?;
+        let runner_model = sandboxed_runner_model(harness, &route, req.model.trim())?;
 
         let tool_ipc_socket = tddy_sandbox::SandboxSpec::short_ipc_socket_path(session_id);
         let ready_marker = sandbox_root.join("sandbox.ready");
@@ -445,7 +465,7 @@ impl LaunchSessions {
                 mounts: vec![MountSpec::read_write(scratch_home.clone())],
                 host_home: None,
                 cgroup: self.config.sandbox_cgroup_config(),
-                route,
+                route: Some(route),
             },
         )
         .map_err(|e| {

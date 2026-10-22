@@ -20,7 +20,8 @@ use crate::svc_relaunch_sandboxed_runner::{
     RelaunchJailEnv, RelaunchedJailBridge, RelaunchedRunnerSpawn,
 };
 use crate::svc_start_sandboxed_cli_harness_session::{
-    cli_harness_runner_argv, resolve_cli_jail_binaries, sandboxed_runner_model, CliRunnerArgv,
+    cli_harness_runner_argv, require_provider_route, resolve_cli_jail_binaries,
+    sandboxed_runner_model, CliRunnerArgv,
 };
 
 /// What relaunching a sandboxed CLI harness session's jail is built from: the session, and the
@@ -33,7 +34,7 @@ struct CliHarnessRelaunch<'a> {
     agents: &'a [SessionAgentRecord],
     /// The model the runner starts the harness on (see `sandboxed_runner_model`).
     runner_model: &'a str,
-    route: Option<HarnessRoute>,
+    route: HarnessRoute,
     session_env: Vec<(String, String)>,
 }
 
@@ -61,14 +62,17 @@ impl LaunchSessions {
             .ok_or_else(|| Status::internal("sandbox session missing repo_path in metadata"))?;
         // The account the start recorded, re-resolved from the owner's vault as it stands now: a
         // removed account refuses the resume rather than running it on the vendor.
-        let route = resume_route(
-            &self.host.session_account_access(&req.session_token),
-            harness.route_harness,
-            session_dir,
+        let route = require_provider_route(
+            harness,
+            resume_route(
+                &self.host.session_account_access(&req.session_token),
+                harness.route_harness,
+                session_dir,
+            )?,
         )?;
         let runner_model = sandboxed_runner_model(
             harness,
-            route.as_ref(),
+            &route,
             metadata.model.as_deref().unwrap_or_default(),
         )?;
         let identity = self.host.session_identity(
@@ -191,7 +195,7 @@ impl LaunchSessions {
                 loopback_allow_ports: vec![egress_shim_port],
                 runner_argv,
                 env,
-                route,
+                route: Some(route),
             })
             .await?;
 
