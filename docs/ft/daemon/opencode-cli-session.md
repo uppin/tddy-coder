@@ -1,6 +1,6 @@
 # OpenCode CLI Session
 
-> **Related:** [Claude Code CLI session](claude-cli-session.md) and [Cursor Agent CLI session](cursor-cli-session.md) — sibling session types; all three share `CliSessionManager`, `StreamSessionTerminalIO` and the web terminal mount, and all three are registered through one **CLI harness descriptor**.
+> **Related:** [Claude Code CLI session](claude-cli-session.md), [Cursor Agent CLI session](cursor-cli-session.md) and [Muse Code CLI session](muse-cli-session.md) — sibling session types; all four share `CliSessionManager`, `StreamSessionTerminalIO` and the web terminal mount, and all four are registered through one **CLI harness descriptor**. OpenCode and Muse Code share one start and resume path.
 
 ## Summary
 
@@ -26,7 +26,7 @@ that serves OpenAI Responses or OpenAI Chat Completions.
 3. A chosen account is resolved **before anything is cut or spawned** (see
    [Running on a provider account](#running-on-a-provider-account)).
 4. The daemon cuts a worktree for the session on `opencode-cli/<short id>` when `new_branch_name` is
-   empty (`BranchIntentPolicy::opencode_cli`), pushing it when **Create remote branch** is set.
+   empty (`BranchIntentPolicy::cli_harness("opencode-cli")`), pushing it when **Create remote branch** is set.
 5. The daemon spawns `opencode [--model <provider/model>] [--prompt <first prompt>]` in the worktree.
    `--model` is passed only when a model was chosen — an empty model leaves the choice to OpenCode.
 6. `StartSessionResponse` returns `session_id`; LiveKit fields are empty.

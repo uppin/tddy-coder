@@ -28,3 +28,9 @@ Deferred in `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring
 ## Measurement update 2026-10-22 — #provider-route 4/9 (#665)
 
 **Regressed, split deferred:** 822 → 824 lines. The Provider field is keyed by a tool session's agent as well as the CLI session type (one expression and its reset dependency). The file is stack-shared with `#provider-route` 5/9 (#666), so no split mid-stack. Not claimed.
+
+## Measurement update 2026-10-22 — #provider-route 6/9 (#667)
+
+**Unchanged:** 832 → 832 lines against `origin/feature/provider-route/default-route`. The OpenCode model-field
+mount also covers `muse-cli` (one condition widened, its comment kept to one line). Still over budget;
+stack-shared, so no split mid-stack. Not claimed.

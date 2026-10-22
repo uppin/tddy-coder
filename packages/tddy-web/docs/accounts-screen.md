@@ -70,7 +70,7 @@ A provider-account row (`AccountRow.preset` non-empty) also shows its preset and
 (`…-preset`) and a **Models** toggle (`…-models-toggle`) that sends `ListProviderAccountModels` only
 when expanded, rendering `…-models` or the reason as `…-models-error` (`ProviderModels.tsx`).
 `AccountRow.defaultFor` carries `AccountSummary.default_for`; when the page passes `onSetDefaults`,
-the row shows `ProviderAccountDefaultsControl` — a multi-select of `claude-cli` / `opencode-cli`
+the row shows `ProviderAccountDefaultsControl` — a multi-select of `claude-cli` / `opencode-cli` / `muse-cli` (Muse Code)
 (`…-default-for`) and **Save default** (`…-default-for-save`). The control is keyed on the current
 defaults, so a row re-seeds when the daemon reports a change. `AccountsAppPage` sends
 `SetProviderAccountDefaults` and replaces every row in `changed`; a refusal is shown beside the list.

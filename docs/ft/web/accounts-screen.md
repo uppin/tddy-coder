@@ -74,7 +74,7 @@ checks the key by listing the endpoint's models before storing anything: a key i
 with the provider's reason and nothing is added; a working one joins its provider's group. The key
 is never shown again. A provider account's row shows its provider and the protocols it serves, and
 **Models** lists what its endpoint serves. **Default for** marks the account as the person's default
-for Claude CLI and/or OpenCode CLI sessions: a session of that type that names no account runs on it,
+for Claude CLI, OpenCode CLI and/or Muse Code sessions: a session of that type that names no account runs on it,
 and the New-session form starts with it selected. Saving a harness another account held moves it, and
 both rows update; a harness the account cannot drive is refused with the daemon's reason. See
 [Provider accounts § A person's default per harness](../daemon/provider-accounts.md#a-persons-default-per-harness).

@@ -39,9 +39,9 @@ steps are in sibling modules:
 |---|---|
 | `start_request_checks.rs` | `forward_start_session` (a start owned by a peer, waiting `start_forward_deadline(config)` — the split-start budget, not the 30 s forward deadline), `provision_project_for_start` (keeps a streamed start alive while it waits), `validate_stack_seed_against_project` |
 | `workspace_branch_start.rs` | `seed_and_start_workspace_session` |
-| `cli_branch_starts.rs` | the claude-cli, cursor-cli and opencode-cli branches: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`); `start_opencode_cli` (the sandbox and managed-codebase refusals, the prelude, the seeded roster, the spawn) |
+| `cli_branch_starts.rs` | the claude-cli and cursor-cli branches and the start of every other registered CLI harness: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`); `start_cli_harness(harness, …)` (the sandbox and managed-codebase refusals, the prelude, the seeded roster, the person's default as a route source, the spawn) |
 | `cli_session_worktree.rs` | what a daemon-cut CLI session's worktree needs, shared by cursor-cli and opencode-cli: `provision_cli_worktree(&CliWorktreeStart, …) -> CliWorktree { path, project }` (cut or adopt the worktree, push the new branch when asked) and `semantic_index_env` |
-| `opencode_cli_spawn.rs` | the [OpenCode CLI session](../../../docs/ft/daemon/opencode-cli-session.md): `start_opencode_cli_session(OpenCodeCliStart)` (route first, then worktree, seeded clones, commit identity, spawn, `.session.yaml`) and `LaunchSessions::resume_opencode_cli` (`opencode --continue`, route re-resolved; refused when the worktree is gone). The binary is `DaemonConfig::cli_harness_binary` for the registry's descriptor |
+| `opencode_cli_spawn.rs` | a registered CLI harness cut a worktree of its own — the [OpenCode](../../../docs/ft/daemon/opencode-cli-session.md) and [Muse Code](../../../docs/ft/daemon/muse-cli-session.md) sessions: `start_cli_harness_session(CliHarnessStart)` (route first, then worktree on `BranchIntentPolicy::cli_harness(session_type)`, seeded clones, commit identity, spawn, `.session.yaml`) and `LaunchSessions::resume_cli_harness` (the descriptor's resume argv, route re-resolved; refused when the worktree is gone). The binary is `DaemonConfig::cli_harness_binary` for the descriptor. `start_session_core` and `resume_session_at_session_coordinate` reach it through a registry lookup (`cli_harness(session_type)`) after their claude-cli and cursor-cli branches, so a further harness needs no dispatch arm |
 | `tool_session_spawn.rs` | `spawn_tool_session` and `spawn_tddy_coder`: the one `tddy-coder` spawn, for both a start and a resume |
 | `tool_session_route.rs` | a tool session's provider route as route-file JSON: `tool_session_route_json`, `resumed_tool_session_route_json`; see [Provider route of a session](#provider-route-of-a-session) |
 | `tool_spawn_plan.rs` | `ToolSpawnPlan` (what the child is spawned with, including `provider_route_json`) and `ToolSpawnPurpose` (`Start` / `Resume`) |
@@ -165,8 +165,10 @@ to a claude-cli session (behaviour:
   `route_config_env` (`OPENCODE_CONFIG`) at the first; `None` adds and writes nothing.
   `start_cli_route(access, harness, sources, model, session_dir)` resolves the chosen account
   (`route_on_account`), writes the files and records `provider-account.yaml`; `resume_cli_route`
-  re-resolves the record and writes the files again. opencode-cli uses them; a routed start passes no
-  `--model` of its own, the route's `--model tddy-route/<model>` names it.
+  re-resolves the record and writes the files again. opencode-cli and muse-cli use them.
+  `launch_model_for(harness, routed, model)` is the model the launch names itself: blank for a routed
+  harness with a `route_config_env` (OpenCode — the route's `--model tddy-route/<model>` names it), the
+  session's own otherwise (Muse Code's route is the key alone).
 - `tool_session_route.rs` routes a **tool session** (headless `tddy-coder`):
   `tool_session_route_json(access, agent, sources, model) -> Result<Option<String>, Status>` returns
   `None` when nothing is chosen (the vault is never read), refuses `INVALID_ARGUMENT` for an empty

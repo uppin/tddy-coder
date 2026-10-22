@@ -154,7 +154,7 @@ For a LiveKit-backed session the coder's participant (`daemon-{instanceId}-{sess
 `ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`, VNC and screen-sharing on
 `connection.ConnectionService`, and the terminal family on
 `terminal_session.TerminalSessionService`. The daemon serves all of it for **non-LiveKit**
-(claude-cli / cursor-cli / opencode-cli / workspace) sessions, where no coder participant exists.
+(claude-cli / cursor-cli / opencode-cli / muse-cli / workspace) sessions, where no coder participant exists.
 
 The coder answers **seven** of the nine terminal methods and refuses `StreamSessionTerminalIO` and
 `WatchTerminalControl` with `Unimplemented` — its control lease is a permanent self-grant, so a
@@ -177,7 +177,7 @@ unresponsive, and lets the sessions list delete/signal an unattached row without
 
 `SessionEntry` carries `bytes_in` / `bytes_out` / `last_data_received_at` fields. The daemon
 populates these in `ListSessions` from the `GrpcSessionTerminal` traffic meter for
-claude-cli / cursor-cli / opencode-cli / workspace sessions it owns (live counters), and reports zero / empty
+claude-cli / cursor-cli / opencode-cli / muse-cli / workspace sessions it owns (live counters), and reports zero / empty
 for tddy-coder sessions that have no LiveKit participant (stopped). The web inspector renders
 these when no per-session live runtime exists (see
 [Session Drawer Screen § Inspector I/O bytes + last-data-received](../web/session-drawer.md#inspector-io-bytes--last-data-received)).
@@ -190,7 +190,7 @@ these when no per-session live runtime exists (see
   from disk for inactive and directory-listed sessions.
 - Auth model is unchanged: `session_token` → GitHub user → OS user → session ownership,
   validated at the daemon for every `DeleteSession` / `SignalSession` (always daemon-direct).
-- claude-cli / cursor-cli / opencode-cli / workspace sessions are served by the daemon on every coordinate.
+- claude-cli / cursor-cli / opencode-cli / muse-cli / workspace sessions are served by the daemon on every coordinate.
 
 ---
 
