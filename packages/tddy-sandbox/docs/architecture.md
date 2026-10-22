@@ -85,7 +85,10 @@ this call site were deleted outright (no dual-path fallback, per this repo's con
 jail. Its fake agent is a script that ignores its argv and runs `exec /bin/sleep 600`. Plain
 `/bin/sleep` handed claude's argv rejected it and exited at once, and the host stops collecting frames
 after `SessionEnded`, so the tool call the test makes never came back. The jail's process group is
-terminated when the test ends, on a failure as much as on a pass, so no runner outlives it.
+terminated when the test ends, on a failure as much as on a pass, so no runner outlives it. `tddy-daemon-rpc`'s
+`in_jail_conversation_acceptance` had the same fixture (`--claude-binary /bin/sleep`), failed the same
+way and left a runner behind; it now uses the same script and arms the same guard right after the
+spawn.
 
 The sandbox-runner's own tonic gRPC server is retained as an independent transport (unaffected by
 the above) for `tddy-sandbox-app`'s standalone demo path and `sandbox_action.rs`'s separate

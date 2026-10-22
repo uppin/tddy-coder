@@ -165,7 +165,11 @@ async fn an_in_jail_agent_holds_a_conversation_on_the_new_coordinate() {
 /// A live Seatbelt jail whose runner is bridged to a daemon, plus the tool-IPC socket an in-jail
 /// caller reaches that daemon through.
 struct BridgedJail {
-    handle: tddy_sandbox::SandboxHandle,
+    /// Held so the jailed child and its piped stdio live as long as the jail is in use.
+    _handle: tddy_sandbox::SandboxHandle,
+    /// What terminates the jail. It exists from the moment the jail does, so a panic before the
+    /// bridge is up tears the jail down too.
+    _jail: TerminateJailOnDrop,
     /// The transport an in-jail agent's RPCs ride. One connection, as `tddy-tools` holds one.
     transport: Arc<dyn tddy_rpc::RpcClientTransport>,
     _project: tempfile::TempDir,
@@ -228,13 +232,15 @@ impl BridgedJail {
     }
 }
 
-/// Tear the jail down on every exit from the test, a failed assertion included: a panic that
-/// skipped an explicit teardown would leave a jailed process running for as long as the machine is
-/// up, and the next run would start beside it.
-impl Drop for BridgedJail {
+/// Tears the jail's whole process group down — the runner and its fake agent — on every exit from
+/// the test, a failed assertion included: a panic that skipped an explicit teardown would leave a
+/// jailed process running for as long as the machine is up, and the next run would start beside
+/// it. Armed right after the spawn, so a failure while bridging is covered as well.
+struct TerminateJailOnDrop(u32);
+
+impl Drop for TerminateJailOnDrop {
     fn drop(&mut self) {
-        self.handle.child_mut().kill().ok();
-        self.handle.child_mut().wait().ok();
+        tddy_daemon_sandbox::sandbox_session::terminate_sandbox_process(self.0);
     }
 }
 
@@ -262,6 +268,18 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
     let runner = a_built_binary("tddy-sandbox-runner");
     let tools = a_built_binary("tddy-tools");
 
+    // The agent must outlive the relayed calls: the host stops collecting the jail's frames once
+    // the PTY command has exited (`SessionEnded`). `/bin/sleep` handed claude's argv rejects it and
+    // exits at once, so the fake agent is a script that ignores its arguments and stays alive until
+    // the jail is torn down — the same leader `sandbox_session_stdio_acceptance` uses.
+    let fake_agent = project.join("fake-agent.sh");
+    std::fs::write(&fake_agent, "#!/bin/sh\nexec /bin/sleep 600\n").expect("write the fake agent");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake_agent, std::fs::Permissions::from_mode(0o755))
+            .expect("make the fake agent executable");
+    }
+
     let ready_marker = project.join("sandbox.ready");
     let tool_ipc_socket = project.join("tool_ipc.sock");
     let session_id = daemon.session_id.as_str();
@@ -281,7 +299,7 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
         // The same PTY leader `sandbox_session_stdio_acceptance` uses, so the two real-jail
         // fixtures differ in exactly one thing: the host RPC handler behind the relay.
         "--claude-binary".into(),
-        "/bin/sleep".into(),
+        fake_agent.to_string_lossy().to_string(),
         "--model".into(),
         "claude-opus-4-8".into(),
         "--permission-mode".into(),
@@ -317,6 +335,7 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
         route: None,
     })
     .expect("spawn the Seatbelt-jailed sandbox-runner");
+    let jail = TerminateJailOnDrop(handle.pid());
 
     await_the_ready_marker(&mut handle, &ready_marker).await;
 
@@ -354,7 +373,8 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
         .expect("an in-jail caller connects to the tool-IPC socket");
 
     BridgedJail {
-        handle,
+        _handle: handle,
+        _jail: jail,
         transport,
         _project: tmp,
     }

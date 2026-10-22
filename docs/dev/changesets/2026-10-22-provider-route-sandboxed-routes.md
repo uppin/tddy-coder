@@ -21,7 +21,7 @@ Pre-existing sandbox-relay defects from #481, fixed here at the developer's requ
 acknowledges a terminal subscription (a PTY-less jail never attached); both halves of a finished
 `SessionChannel` let go of it (`WeakSender` on the host reader, `release_outbound` in the jail), so a
 runner exits after its command; and the stdio acceptance fixture keeps its fake agent alive and
-terminates its jail on drop.
+terminates its jail on drop (as does `tddy-daemon-rpc`'s `in_jail_conversation_acceptance`, which had the same `/bin/sleep` fixture and orphaned a runner when it failed).
 
 Restructuring at wrap: `svc_start_sandboxed_cli_harness_session.rs` 560 → 390 (the pure helpers to
 `cli_harness_jail.rs`, and `bridge_and_register_cli_harness_jail` extracted by the engine);
