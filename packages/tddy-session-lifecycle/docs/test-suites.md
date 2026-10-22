@@ -57,5 +57,7 @@ On a macOS developer host this gives 59 targets (58 test binaries plus doctests)
 | `session_sync_livekit_acceptance` | 6 of 6 | `tddy-remote-git-repo is not built`: `./test`'s prebuild does not build it |
 
 So **the sandboxed Claude start, the sandboxed Cursor start and the sandboxed relaunch have no
-passing test on a developer host.** Changing those paths needs that coverage first:
+passing test on a developer host.** `sandboxed_cli_harness_acceptance` (OpenCode and Muse Code, #670)
+is the exception: it installs the bridge with `install_sandbox_rpc_bridge` and passes against a real
+Seatbelt jail, so it is the pattern for fixing the others. Changing those paths needs that coverage first:
 [`docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md`](../../../docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md).

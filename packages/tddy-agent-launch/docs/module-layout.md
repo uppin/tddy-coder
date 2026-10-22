@@ -89,9 +89,12 @@ build, whose SSH clones are given no helper). Behaviour:
 | `svc_relaunch_sandboxed_runner.rs` | `relaunch_sandboxed_runner`, with `RelaunchJailEnv`, `RelaunchedRunnerSpawn`, `RelaunchedJailBridge`, `type RelaunchManagedEnv` |
 | `relaunch_jail_dirs.rs`, `relaunch_jail_steps.rs`, `jail_relaunch.rs` | `prepare_relaunch_dirs`, `refresh_relaunch_context_dir`; `relaunch_managed_workflow`, `resolve_relaunch_binaries`, `relaunch_jail_env`, `spawn_relaunched_runner`, `bridge_relaunched_jail` |
 | `svc_start_sandboxed_cursor_cli_session.rs` | `start_sandboxed_cursor_cli_session`, in one function |
+| `svc_start_sandboxed_cli_harness_session.rs` | `start_sandboxed_cli_harness_from_request` (first prompt and provider account refused first, then the route) and `start_sandboxed_cli_harness_session` for `opencode-cli` / `muse-cli`, with `bridge_and_register_cli_harness_jail` |
+| `svc_resume_sandboxed_cli_harness_session.rs` | `resume_sandboxed_cli_harness`, `relaunch_sandboxed_cli_harness` — the jail relaunched with `--resume` on the re-resolved route |
+| `cli_harness_jail.rs` | the pure parts both use: `sandboxed_agent_kind`, `sandboxed_runner_model`, `refuse_first_prompt`, `require_provider_route`, `resolve_jail_agent_binary`, `resolve_cli_jail_binaries`, `cli_harness_runner_argv`, `canonical_exec_path` (also used by the claude start and the relaunch) |
 | `jail_env_builders.rs` | `specialized_subagent_env`, `jail_daemon_identity_env`, `lsp_tools_env`, which all three paths use |
 
-The Claude and relaunch paths are cut into matching steps; the three paths remain separate copies of one
+The Claude and relaunch paths are cut into matching steps; the four start paths remain separate copies of one
 launch sequence, and merging them waits on test coverage
 ([`docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md`](../../../docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md)).
 
