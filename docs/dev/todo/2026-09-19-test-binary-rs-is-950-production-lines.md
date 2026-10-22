@@ -2,8 +2,7 @@
 
 **Category:** Deferred decomposition
 **Source:** the `/pr-wrap` file-length gate on #498 (`#carve` 4/10 `test-homes`)
-**Claimed by:** #612 — `#reshape 17/24`
-**Lands after:** #609
+**Claimed by:** none — #612 (`#reshape 17/24`) withdrew its claim; the split is deferred by the developer (2026-10-21) to the `#reshape` sweep node, see `docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md`
 **Deferred with explicit developer consent on 2026-09-19.**
 
 #498 created `packages/tddy-code-restructuring/src/crate_move/test_binary.rs` at **966 production

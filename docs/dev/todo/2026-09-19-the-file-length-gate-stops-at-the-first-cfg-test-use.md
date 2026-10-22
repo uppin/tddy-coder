@@ -2,8 +2,7 @@
 
 **Category:** Defect
 **Source:** `/pr-wrap` step 3.5 on PR #518, cross-checked against `/analyze-clean-code`
-**Claimed by:** #612 — `#reshape 17/24`
-**Lands after:** #609
+**Claimed by:** none — #612 (`#reshape 17/24`) delivered the count, not the gate change (see below)
 
 `/pr-wrap` step 3.5 and every `packages/*/docs/code-issues/oversized-file-*.md` record measure Rust
 files as **production lines counted to the first `#[cfg(test)]`**:
@@ -69,3 +68,18 @@ where the absolute numbers undercount.
 
 2026-09-19: `count_prod` returns 43; `grep -n` shows production items at `:62`, `:67`, `:130`, `:233`,
 `:242`; the last `#[cfg(test)]` is at `:1948` and `wc -l` is 1,949.
+
+## Answered in part — 2026-10-22 (#612, `#reshape` 17/24)
+
+The robust count exists: `tddy-tools restructure lines <file>...` (library: `tddy_code_restructuring::production_lines_of_file`)
+leaves out each `#[cfg(test)]` / `#[cfg(all(test, …))]` item wherever it sits, strings and comments masked, and
+`check --budget` uses it.
+
+**What is still open:** `/pr-wrap` step 3.5 (`.agents/commands/pr-wrap.md`) still defines `count_prod` with the `awk`
+cut above, and two references still describe the old rule — `.agents/skills/code-restructuring/SKILL.md:17` (the
+`--budget LINES` comment) and `.agents/skills/deferred-work/references/code-issue-record.md:27` (the `oversized-file`
+row). #612 planned that edit (F3) but the agent's write to `.agents/` was refused by the harness permission
+classifier, so it needs a human. **What would close it:** `count_prod` writes its stdin to a temp file with the same
+basename and prints the first field of `tddy-tools restructure lines <that file>`; a missing `tddy-tools` or a
+non-zero exit prints `GATE ERROR` and aborts; `was` is 0 only when `git cat-file -e "$mb:$old"` fails. Then delete
+this entry.

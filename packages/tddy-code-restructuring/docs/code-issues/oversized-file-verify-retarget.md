@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-10-14 | 555 | #603 (`#reshape` 6/19): R3 (delegator signatures and forwarding calls) added about 214 lines, counted to the first `#[cfg(test)]`. 341 at the merge base |
 | 2026-10-21 | 631 | #677 (`#reshape` 15/24, `detach-method`): +30 over the 601 at its base `feature/reshape/move-widen` (counted to the first `#[cfg(test)]`). The `detaches` field and the `with_detaches` builder, which adds the rebind a detach implies; R-detach itself is `verify/detach.rs`. Split not done here: stack-shared, and `#reshape` 17 owns the split of this file |
+| 2026-10-22 | 631 | unchanged by #612 (`#reshape` 17/24), which did not touch the file; measured by `tddy-tools restructure lines`. The split (Plan D) is deferred by the developer to the `#reshape` sweep node; seams in `docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md` |
 
 ## What the gate found
 

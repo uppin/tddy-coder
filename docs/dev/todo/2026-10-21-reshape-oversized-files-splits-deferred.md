@@ -1,7 +1,7 @@
 # 2026-10-21 — Five engine files over the 500-production-line budget: the splits are deferred
 
 **Category:** Deferred from `reshape-oversized-files` (`#reshape` 17/24, PR #612)
-**Source:** [2026-10-09-reshape-oversized-files.md](../1-WIP/2026-10-09-reshape-oversized-files.md) — Plans A–D and the `test_modules.rs` split
+**Source:** the wrapped `#reshape` 17/24 changeset, history in [2026-10-22-reshape-oversized-files.md](../changesets/2026-10-22-reshape-oversized-files.md) — Plans A–D and the `test_modules.rs` split
 **Owner:** the `#reshape` sweep node
 
 ## Why deferred
@@ -41,7 +41,7 @@ Order that the plans need: Plan A's `lexical` before its `source_names` (both re
     Plan B.
   - `tidy_parts_do_not_import_the_rounds`: Plan C.
 - The code-issue records `packages/tddy-code-restructuring/docs/code-issues/oversized-file-test-binary.md` and
-  `oversized-file-verify-retarget.md` are still open. The record for `test_modules.rs` does not exist.
+  `oversized-file-verify-retarget.md` are still open, and so is `oversized-file-crate-move-test-modules.md` (filed on master by #611); each points here.
 - `docs/dev/todo/2026-10-06-restructure-item-move-assemble-past-500.md` had `Claimed by: #612`. That claim is withdrawn
   because #612 no longer splits `assemble.rs`, and this entry now owns it.
 - `docs/dev/todo/2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md` item 3 (`test_binary.rs`

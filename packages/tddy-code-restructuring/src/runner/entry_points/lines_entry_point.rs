@@ -51,7 +51,7 @@ mod tests {
 
     fn measuring(files: &[&str]) -> Options {
         Options {
-            command: super::super::super::Command::Lines,
+            command: crate::runner::Command::Lines,
             files: files.iter().map(PathBuf::from).collect(),
             ..Options::default()
         }
