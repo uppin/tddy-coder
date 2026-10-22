@@ -155,9 +155,18 @@ reads its key.
 | An account was chosen with an empty model | `INVALID_ARGUMENT` — choose a model the account serves |
 | The harness cannot be routed in this build | `UNIMPLEMENTED` |
 
-A **sandboxed** claude-cli start (`sandbox = true`) that chooses an account is refused with
-`FAILED_PRECONDITION` "running on a provider account is not yet supported in a sandbox": the jail
-has no way yet to hand the harness its key. A sandboxed start that chooses nothing is unaffected.
+A **sandboxed** claude-cli start (`sandbox = true`) that chooses an account runs on it inside the
+jail. The account is resolved before the session directory is created, with the same refusals as
+above. The jail receives the route in two parts:
+
+- the non-secret variables (`ANTHROPIC_BASE_URL`, the model variables) in its explicit environment;
+- the key (`ANTHROPIC_AUTH_TOKEN`) through the jail's secret-file channel (`TDDY_SECRET_<NAME>`). The
+  runner sets it on the agent child only and unlinks the file, so the key never appears in the jail's
+  environment map or on argv.
+
+The host's `CLAUDE_CODE_OAUTH_TOKEN` is not injected beside a route, and the jail's OAuth inbound port
+is not opened. A resume relaunches the jail on the account the start recorded, re-resolved as below.
+A sandboxed start that chooses nothing is unchanged.
 
 A **child** session a pr-stack orchestrator spawns, and a **conversation** a grill-me orchestrator
 spawns, run on the vendor: the orchestrator's account is not inherited.
