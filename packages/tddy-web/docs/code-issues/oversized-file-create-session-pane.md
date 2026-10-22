@@ -31,6 +31,7 @@ Deferred in `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring
 
 ## Measurement update 2026-10-22 — #provider-route 6/9 (#667)
 
-**Unchanged:** 832 → 832 lines against `origin/feature/provider-route/default-route`. The OpenCode model-field
-mount also covers `muse-cli` (one condition widened, its comment kept to one line). Still over budget;
-stack-shared, so no split mid-stack. Not claimed.
+**Unchanged by #667:** 499 → 499 lines against `origin/feature/provider-route/default-route` (8f91e98d3),
+which already carries the pane split. The OpenCode model-field mount also covers `muse-cli` (one
+condition widened, its comment kept to one line). At 499 the file reads **under** the 500 budget; the
+split that closed it is not this PR's, so the record is left for the node that owns it to delete.

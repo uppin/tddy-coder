@@ -70,7 +70,7 @@ applied by the caller (`tddy-agent-launch` for a PTY, the backends in [Routed ba
 | `RouteChoice { BuiltIn, Account(id) }`, `RouteSources { session, agent_definition, user_default }`, `choose_route` | precedence: session over agent definition over the person's default; `BuiltIn` at a level overrides everything below it; `None` is the vendor |
 
 The matrix covers every harness, once, here. A harness whose route body is added later replaces its
-`NotYetRoutable` arm in `resolve_route`; nothing else declares a second matrix.
+`NotYetRoutable` arm in `route_body`; every harness but Cursor has its body. Nothing else declares a second matrix.
 
 Tests: `tests/provider_route_acceptance.rs` — env shape and key placement for the three Claude
 harnesses, the Baseten and Cursor refusals, `route_supported`, the id round-trip, precedence, and the
