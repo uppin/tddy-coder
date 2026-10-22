@@ -33,6 +33,8 @@ use tddy_sandbox_recipes::{append_claude_mcp_args, claude_scratch_mcp_dir};
 // The in-jail PTY decodes the resize escape the same way every other PTY host does.
 use tddy_pty::strip_resize as strip_resize_escape;
 
+use crate::harness_pty::{spawn_harness_pty, SpawnHarnessPtyParams};
+
 /// The terminal id a sandbox session's single PTY is exposed under: the reserved main terminal (the
 /// daemon serves no other `terminal_id` for a sandbox session). Duplicated from
 /// `tddy_terminal_rpc::MAIN_TERMINAL_ID`, which this in-jail crate does not depend on.
@@ -169,11 +171,11 @@ fn boot_log(level: &str, message: &str) {
     }
 }
 
-fn boot_log_error(step: &str, err: impl std::fmt::Display) {
+pub(crate) fn boot_log_error(step: &str, err: impl std::fmt::Display) {
     boot_log("ERROR", &format!("step={step} error={err}"));
 }
 
-fn write_failure_marker(message: &str) {
+pub(crate) fn write_failure_marker(message: &str) {
     if let Some(egress) = egress_dir_from_env() {
         let path = egress_log_path(&egress, SANDBOX_RUNNER_FAILURE);
         let _ = std::fs::write(&path, message);
@@ -283,10 +285,11 @@ pub struct SandboxRunnerArgs {
     pub tddy_tools_path: Option<PathBuf>,
     #[arg(long, default_value = "claude")]
     pub claude_binary: String,
-    /// Agent kind for in-jail PTY: `claude` (default) or `cursor`.
+    /// Agent kind for in-jail PTY: `claude` (default), `cursor`, `opencode` or `muse`.
     #[arg(long, default_value = "claude")]
     pub agent_kind: String,
-    /// Binary path for the in-jail agent when `agent_kind` is `cursor` (default: `agent`).
+    /// Binary path for the in-jail agent when `agent_kind` is `cursor`, `opencode` or `muse`
+    /// (default: `agent`, `opencode` and `muse` respectively).
     #[arg(long)]
     pub agent_binary: Option<String>,
     /// Model for the in-jail agent. Empty only in a mode that hosts no agent
@@ -376,7 +379,7 @@ type RpcStreamSender = tokio::sync::mpsc::UnboundedSender<Result<Vec<u8>, tddy_r
 
 /// Host-poll session relay: MCP tool calls and egress requests queue until the host sends `HostPoll`.
 #[derive(Default)]
-struct SandboxSessionRelay {
+pub(crate) struct SandboxSessionRelay {
     queued_tools: Mutex<VecDeque<PendingToolCall>>,
     awaiting_tool: Mutex<Option<PendingToolCall>>,
     queued_egress: Mutex<VecDeque<PendingEgressCall>>,
@@ -1017,8 +1020,8 @@ pub fn resolve_secret_envs(
     resolved
 }
 
-struct PtyState {
-    stdin_tx: std::sync::mpsc::Sender<Bytes>,
+pub(crate) struct PtyState {
+    pub(crate) stdin_tx: std::sync::mpsc::Sender<Bytes>,
 }
 
 fn run_generic_pty_thread(
@@ -1165,7 +1168,7 @@ fn spawn_generic_pty(
     Ok((PtyState { stdin_tx }, done_rx))
 }
 
-fn run_claude_pty_thread(
+pub(crate) fn run_claude_pty_thread(
     argv: Vec<String>,
     cwd: PathBuf,
     egress_shim: String,
@@ -2380,6 +2383,26 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
                 notify.notify_one();
             });
             boot_log("INFO", "boot: generic pty thread spawned");
+            pty_state
+        } else if matches!(args.agent_kind.as_str(), "opencode" | "muse") {
+            boot_log(
+                "INFO",
+                &format!("boot: spawn_harness_pty agent_kind={}", args.agent_kind),
+            );
+            require_model(&args.model, &args.agent_kind)?;
+            let pty_state = spawn_harness_pty(SpawnHarnessPtyParams {
+                agent_kind: &args.agent_kind,
+                agent_binary: args.agent_binary.as_deref(),
+                model: &args.model,
+                resume: args.resume,
+                cwd: &cwd,
+                egress_shim: &egress_shim,
+                relay: Arc::clone(&relay),
+                initial_cols: args.initial_cols,
+                initial_rows: args.initial_rows,
+            })
+            .inspect_err(|e| boot_log_error("spawn_harness_pty", format!("{e:#}")))?;
+            boot_log("INFO", "boot: harness pty thread spawned");
             pty_state
         } else if args.agent_kind == "cursor" {
             boot_log(

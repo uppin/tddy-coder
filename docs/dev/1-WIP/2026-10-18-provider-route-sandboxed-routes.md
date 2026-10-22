@@ -3,6 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
+**Complexity**: 4/5
 **Stack**: #provider-route 9/9. Base: `feature/provider-route/agent-def-route`. PR: [#670](https://github.com/uppin/tddy-coder/pull/670).
 
 ## Initial Discovery

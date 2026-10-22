@@ -13546,6 +13546,7 @@ dependencies = [
  "prost 0.13.5",
  "reqwest 0.12.28",
  "serde_json",
+ "tddy-agent-backend",
  "tddy-core",
  "tddy-discovery",
  "tddy-pty",
