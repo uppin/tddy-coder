@@ -58,6 +58,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `#[tokio::test]` in `tests/operator_channel_subscriber_acceptance.rs` — the bus publishes async.
+tokio = { version = "1", features = ["macros", "rt"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-workflow = { path = "../tddy-workflow" }

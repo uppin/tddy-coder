@@ -7,10 +7,12 @@ import { Code } from "@connectrpc/connect";
 import { IntegrationState } from "../../src/gen/daemon_config_pb";
 import {
   aDaemonFailingIntegrationStatus,
+  aDaemonReportingAllOf,
   aDaemonReportingIntegrations,
   aDaemonSettingsScreen,
   aDaemonWithoutIntegrationStatus,
   aLiveKitIntegration,
+  aTelegramIntegration,
 } from "../support/drivers/daemonSettingsDriver";
 
 describe("Daemon settings — LiveKit status", () => {
@@ -92,5 +94,51 @@ describe("Daemon settings — LiveKit status", () => {
       .mount()
       .expectLiveKitStatus("Status unavailable: daemon is restarting")
       .expectNoError();
+  });
+});
+
+describe("Daemon settings — Telegram status", () => {
+  // PRD `docs/ft/daemon/1-WIP/PRD-2026-10-22-telegram-satellite-integration.md`, change 4.
+
+  it("shows Telegram's state beside LiveKit's", () => {
+    aDaemonSettingsScreen(
+      aDaemonReportingAllOf(
+        aLiveKitIntegration({ state: IntegrationState.CONNECTED, secondsAgo: 180 }),
+        aTelegramIntegration({
+          state: IntegrationState.UNREACHABLE,
+          secondsAgo: 12,
+          error: "Unauthorized",
+        }),
+      ),
+    )
+      .mount()
+      .expectLiveKitStatus("Connected · 3m")
+      .expectTelegramStatus("Unreachable · 12s: Unauthorized");
+  });
+
+  it("shows a misconfigured Telegram's missing token", () => {
+    aDaemonSettingsScreen(
+      aDaemonReportingAllOf(
+        aLiveKitIntegration({ state: IntegrationState.DISABLED, secondsAgo: 60 }),
+        aTelegramIntegration({
+          state: IntegrationState.MISCONFIGURED,
+          secondsAgo: 30,
+          missingFields: ["bot_token"],
+        }),
+      ),
+    )
+      .mount()
+      .expectTelegramStatus("Missing: bot_token");
+  });
+
+  it("shows no Telegram line when the daemon reports no Telegram entry", () => {
+    aDaemonSettingsScreen(
+      aDaemonReportingAllOf(
+        aLiveKitIntegration({ state: IntegrationState.CONNECTED, secondsAgo: 180 }),
+      ),
+    )
+      .mount()
+      .expectLiveKitStatus("Connected · 3m")
+      .expectNoTelegramStatus();
   });
 });

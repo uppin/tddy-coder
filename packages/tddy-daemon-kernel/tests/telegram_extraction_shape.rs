@@ -14,11 +14,6 @@
 //! not be read would pass for the wrong reason, so a moved or renamed file fails loudly instead.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-
-use async_trait::async_trait;
-use tddy_daemon_kernel::presenter_observer::{PresenterEventSink, SharedPresenterEventSink};
-use tddy_service::gen::ServerMessage;
 
 /// AC5's ceiling on a split control module, in production lines.
 const PRODUCTION_LINE_BUDGET: usize = 800;
@@ -118,56 +113,8 @@ fn production_lines_of(path: &Path) -> usize {
         .unwrap_or(lines.len())
 }
 
-/// A sink that remembers which session each event it was handed belonged to.
-#[derive(Default)]
-struct RecordingSink {
-    sessions: Mutex<Vec<String>>,
-}
-
-impl RecordingSink {
-    fn sessions_seen(&self) -> Vec<String> {
-        self.sessions.lock().expect("the recording lock").clone()
-    }
-}
-
-#[async_trait]
-impl PresenterEventSink for RecordingSink {
-    async fn on_presenter_event(
-        &self,
-        session_id: &str,
-        _event: &ServerMessage,
-    ) -> anyhow::Result<()> {
-        self.sessions
-            .lock()
-            .expect("the recording lock")
-            .push(session_id.to_string());
-        Ok(())
-    }
-}
-
-/// The port is a trait object: an event handed to the `SharedPresenterEventSink` the connection
-/// service holds reaches the implementation behind it, which the service never names.
-#[tokio::test]
-async fn an_event_handed_to_the_shared_port_reaches_the_sink_behind_it() {
-    // Given a sink, held the way the connection service holds any sink
-    let recorder = Arc::new(RecordingSink::default());
-    let sink: SharedPresenterEventSink = recorder.clone();
-
-    // When a presenter event of a workflow session is handed to the port
-    let delivered = sink
-        .on_presenter_event("a-workflow-session", &ServerMessage::default())
-        .await;
-
-    // Then the sink behind it received that session's event
-    assert!(
-        delivered.is_ok(),
-        "the port refused an event: {delivered:?}"
-    );
-    assert_eq!(
-        recorder.sessions_seen(),
-        vec!["a-workflow-session".to_string()]
-    );
-}
+// The port's own contract — an event handed to the shared trait object reaches the channel behind
+// it — is `operator_channel_acceptance.rs`'s, since the port became `OperatorChannel`.
 
 /// AC1 — `connection_service` names no Telegram symbol.
 ///
@@ -184,16 +131,17 @@ fn the_connection_service_names_nothing_telegram() {
     );
 }
 
-/// AC1 — the field is a `tddy-daemon-kernel` port.
+/// AC1 — the field is a `tddy-daemon-kernel` port: the operator channel, since
+/// `2026-10-22-telegram-satellite` folded the presenter sink into it.
 #[test]
-fn the_connection_service_holds_the_presenter_event_sink_port() {
+fn the_connection_service_holds_the_operator_channel_port() {
     // Given the service's own module root
     let text = source_of("tddy-session-lifecycle", "connection_service.rs");
 
     // Then it holds the kernel's port
     assert!(
-        text.contains("SharedPresenterEventSink"),
-        "`connection_service` does not hold a `SharedPresenterEventSink`"
+        text.contains("SharedOperatorChannel"),
+        "`connection_service` does not hold a `SharedOperatorChannel`"
     );
 }
 

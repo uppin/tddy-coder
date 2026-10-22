@@ -108,6 +108,26 @@ export function aDaemonReportingIntegrations(
   });
 }
 
+/** Telegram's entry, as `GetIntegrationStatus` reports it. */
+export function aTelegramIntegration(fields: {
+  state: number;
+  secondsAgo: number;
+  error?: string;
+  missingFields?: string[];
+}) {
+  return { ...aLiveKitIntegration(fields), id: "telegram", label: "Telegram" };
+}
+
+/** A daemon that reports every one of `integrations` on each status read. */
+export function aDaemonReportingAllOf(...integrations: ReturnType<typeof aLiveKitIntegration>[]) {
+  return aDaemonConfigBackend().onUnary(DaemonConfigService.method.getIntegrationStatus, () => ({
+    integrations: integrations.map(({ secondsAgo, ...entry }) => ({
+      ...entry,
+      sinceUnixMs: BigInt(Date.now() - secondsAgo * 1000),
+    })),
+  }));
+}
+
 /** A daemon too old to answer `GetIntegrationStatus`. */
 export function aDaemonWithoutIntegrationStatus() {
   return aDaemonConfigBackend().failWith(
@@ -183,6 +203,14 @@ export function aDaemonSettingsScreen(backend: Backend) {
     },
     expectNoLiveKitStatus() {
       byTestId(TEST_IDS.daemonSettingsLivekitStatus).should("not.exist");
+      return driver;
+    },
+    expectTelegramStatus(text: string) {
+      byTestId(TEST_IDS.daemonSettingsTelegramStatus).should("have.text", text);
+      return driver;
+    },
+    expectNoTelegramStatus() {
+      byTestId(TEST_IDS.daemonSettingsTelegramStatus).should("not.exist");
       return driver;
     },
     expectNoError() {

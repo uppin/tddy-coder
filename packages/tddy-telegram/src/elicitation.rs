@@ -181,28 +181,46 @@ pub fn pending_elicitation_for_session_dir(session_dir: &Path) -> bool {
 #[cfg(test)]
 mod mode_gate_tests {
     use super::*;
-    use tddy_service::gen::app_mode_proto;
-    use tddy_service::gen::{AppModeProto, AppModeRunning, AppModeSelect, ModeChanged};
+    use rstest::rstest;
+    use tddy_daemon_kernel::operator_channel::awaits_operator;
+    use tddy_service::gen::app_mode_proto::Variant;
+    use tddy_service::gen::{
+        AppModeDocumentReview, AppModeDone, AppModeFeatureInput, AppModeMarkdownViewer,
+        AppModeMultiSelect, AppModeProto, AppModeRunning, AppModeSelect, AppModeTextInput,
+    };
 
-    #[test]
-    fn mode_changed_requires_telegram_elicitation_select_true_running_false() {
-        let select = ModeChanged {
+    fn a_mode_change_to(variant: Variant) -> ModeChanged {
+        ModeChanged {
             mode: Some(AppModeProto {
-                variant: Some(app_mode_proto::Variant::Select(AppModeSelect {
-                    question: None,
-                    question_index: 0,
-                    total_questions: 1,
-                    initial_selected: 0,
-                })),
+                variant: Some(variant),
             }),
-        };
-        assert!(mode_changed_requires_telegram_elicitation(&select));
+        }
+    }
 
-        let running = ModeChanged {
-            mode: Some(AppModeProto {
-                variant: Some(app_mode_proto::Variant::Running(AppModeRunning {})),
-            }),
-        };
-        assert!(!mode_changed_requires_telegram_elicitation(&running));
+    /// Telegram asks in a chat exactly when the core says the session waits on its operator: a
+    /// line for a mode the core calls autonomous would ping a chat for nothing, and a missing line
+    /// for a gate would leave the chat's elicitation queue waiting on a prompt it never showed.
+    #[rstest]
+    #[case::document_review(a_mode_change_to(Variant::DocumentReview(AppModeDocumentReview::default())))]
+    #[case::markdown_viewer(a_mode_change_to(Variant::MarkdownViewer(AppModeMarkdownViewer::default())))]
+    #[case::feature_input(a_mode_change_to(Variant::FeatureInput(AppModeFeatureInput::default())))]
+    #[case::select(a_mode_change_to(Variant::Select(AppModeSelect::default())))]
+    #[case::multi_select(a_mode_change_to(Variant::MultiSelect(AppModeMultiSelect::default())))]
+    #[case::text_input(a_mode_change_to(Variant::TextInput(AppModeTextInput::default())))]
+    #[case::running(a_mode_change_to(Variant::Running(AppModeRunning::default())))]
+    #[case::done(a_mode_change_to(Variant::Done(AppModeDone::default())))]
+    #[case::no_mode(ModeChanged { mode: None })]
+    fn the_telegram_line_exists_exactly_for_the_modes_that_await_the_operator(
+        #[case] mode_changed: ModeChanged,
+    ) {
+        // When
+        let line = telegram_elicitation_line_for_mode_changed("my-feature-branch", &mode_changed);
+
+        // Then
+        assert_eq!(
+            line.is_some(),
+            awaits_operator(&mode_changed),
+            "Telegram and the core disagree on {mode_changed:?}: line {line:?}"
+        );
     }
 }
