@@ -32,17 +32,23 @@ impl CliSessionManager {
     /// Calling this is what makes a session drivable from another host at all. A session type that
     /// is served over the daemon's own connection and never over LiveKit — `cursor-cli`,
     /// `workspace` — records nothing here and is bridged nowhere.
+    ///
+    /// Recording a session again (a relaunch under the same id) waits for a reach already in
+    /// flight and keeps its gate, so the replaced record is not written to by that reach afterwards
+    /// and a reach to the new one still queues behind it.
     pub async fn expose_terminal_to_livekit(
         &self,
         session_id: &str,
         metadata: tddy_core::session_participant_metadata::SessionParticipantMetadata,
     ) {
+        let flight = self.exposure_gate(session_id).await.unwrap_or_default();
+        let _in_flight = flight.lock().await;
         self.exposed_terminals.write().await.insert(
             session_id.to_string(),
             ExposedTerminalRecord {
                 metadata,
                 exposure: None,
-                flight: Default::default(),
+                flight: Arc::clone(&flight),
             },
         );
     }
@@ -101,7 +107,16 @@ impl CliSessionManager {
             Err(refused) if refused.code == tddy_rpc::Code::FailedPrecondition => return Ok(false),
             Err(refused) => return Err(refused),
         };
-        if let Some(terminal) = self.exposed_terminals.write().await.get_mut(session_id) {
+        // Written back only to the record this reach was gated by: a record removed while the join
+        // ran and recorded again since belongs to another PTY, and an exposure of the old one would
+        // stand in for it as "still running".
+        if let Some(terminal) = self
+            .exposed_terminals
+            .write()
+            .await
+            .get_mut(session_id)
+            .filter(|terminal| Arc::ptr_eq(&terminal.flight, &flight))
+        {
             terminal.exposure = Some(exposed);
         }
         Ok(true)

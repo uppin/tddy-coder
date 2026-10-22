@@ -303,3 +303,91 @@ async fn an_exposure_that_fails_for_any_other_reason_reports_the_failure() {
     assert_eq!(refused.message, "server unreachable");
     manager.kill_all().await;
 }
+
+/// An exposure whose first request is held until the test releases it; every later one completes
+/// at once. Each exposure runs until the test ends.
+struct HeldFirstExposure {
+    entered: Mutex<Option<oneshot::Sender<()>>>,
+    release: tokio::sync::Mutex<Option<oneshot::Receiver<()>>>,
+    exposures: std::sync::atomic::AtomicUsize,
+}
+
+impl HeldFirstExposure {
+    fn new(entered: oneshot::Sender<()>, release: oneshot::Receiver<()>) -> Self {
+        Self {
+            entered: Mutex::new(Some(entered)),
+            release: tokio::sync::Mutex::new(Some(release)),
+            exposures: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn exposures(&self) -> usize {
+        self.exposures.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl TerminalExposure for HeldFirstExposure {
+    async fn expose(
+        &self,
+        _at: &TerminalAddress,
+        _terminal: Arc<dyn tddy_rpc::RpcService>,
+        _metadata_json: Option<String>,
+    ) -> Result<ExposedTerminal, Status> {
+        self.exposures
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let entered = self.entered.lock().unwrap().take();
+        if let Some(entered) = entered {
+            let _ = entered.send(());
+            if let Some(release) = self.release.lock().await.take() {
+                let _ = release.await;
+            }
+        }
+        Ok(ExposedTerminal::new(tokio::spawn(
+            std::future::pending::<()>(),
+        )))
+    }
+}
+
+#[tokio::test]
+async fn a_terminal_recorded_again_while_a_reach_is_in_flight_is_exposed_afresh() {
+    // Given a reach to a recorded terminal whose exposure is still joining
+    let dir = tempfile::tempdir().unwrap();
+    let manager = a_manager_with_a_recorded_terminal(dir.path()).await;
+    let (entered, joining) = oneshot::channel();
+    let (release, held) = oneshot::channel();
+    let exposure = Arc::new(HeldFirstExposure::new(entered, held));
+    let first_reach = tokio::spawn({
+        let (manager, exposure) = (Arc::clone(&manager), Arc::clone(&exposure));
+        async move {
+            manager
+                .ensure_exposed_terminal(SESSION, &the_address(), &*exposure)
+                .await
+        }
+    });
+    joining.await.expect("the first reach starts its exposure");
+
+    // When the session records its terminal again (a relaunch under the same id) before that
+    // join completes, and the record is reached once the join has
+    let recorded_again = tokio::spawn({
+        let manager = Arc::clone(&manager);
+        async move {
+            manager
+                .expose_terminal_to_livekit(SESSION, the_metadata_block())
+                .await
+        }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let _ = release.send(());
+    assert!(first_reach.await.unwrap().unwrap());
+    recorded_again.await.unwrap();
+    let again = manager
+        .ensure_exposed_terminal(SESSION, &the_address(), &*exposure)
+        .await
+        .unwrap();
+
+    // Then the new record is exposed itself, not answered by the old record's exposure
+    assert!(again);
+    assert_eq!(exposure.exposures(), 2);
+    manager.kill_all().await;
+}
