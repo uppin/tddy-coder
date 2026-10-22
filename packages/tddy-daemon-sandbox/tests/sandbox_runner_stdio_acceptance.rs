@@ -190,7 +190,11 @@ async fn streams_pty_output_over_session_channel_served_over_stdio() {
             let Ok(Some(frame)) = next else { break };
             let bytes = frame.expect("stream item error");
             let message = SessionFrame::decode(bytes.as_slice()).expect("decode SessionFrame");
+            // An empty frame is the jail's acknowledgement of the subscription, not output.
             if let Some(session_frame::Payload::TerminalOutput(output)) = message.payload {
+                if output.data.is_empty() {
+                    continue;
+                }
                 received_output.extend(output.data);
                 break 'polling;
             }
