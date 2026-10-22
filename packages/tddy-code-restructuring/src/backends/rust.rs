@@ -1389,6 +1389,17 @@ impl RustBackend {
         // The same operation over a set, and one edit rather than one per member: a
         // mutually-referencing set has no order in which the tree compiles between moves, so every
         // member's callers are surveyed against where the whole set is going.
+        self.cluster_or_later(op, workspace, relative, uri, original)
+    }
+
+    fn cluster_or_later(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         if op.op == RefactorKind::MoveClusterToCrate {
             let cluster = crate_move::named_by(workspace, op)?;
             (self.progress)(&format!(
