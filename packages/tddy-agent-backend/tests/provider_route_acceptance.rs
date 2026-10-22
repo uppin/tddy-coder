@@ -247,7 +247,8 @@ fn only_the_harnesses_with_a_built_route_answer_routable() {
             Err(RouteRefusal::HarnessCannotBeRouted { harness })
         );
     }
-    for harness in [Harness::MuseCli] {
+    {
+        let harness = Harness::MuseCli;
         assert_eq!(
             harness_routable(harness),
             Err(RouteRefusal::NotYetRoutable(harness))

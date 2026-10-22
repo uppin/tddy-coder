@@ -52,7 +52,8 @@ mod tests {
 
     #[test]
     fn a_harness_whose_route_is_not_built_yet_is_not_offered_any_account() {
-        for harness in ["muse-cli"] {
+        {
+            let harness = "muse-cli";
             let reason = HarnessRouteSupport
                 .harness_routable(harness)
                 .expect_err("not routable in this build");
