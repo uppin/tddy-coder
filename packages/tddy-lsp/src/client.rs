@@ -109,12 +109,16 @@ impl LspClient {
     /// tailors its answers to it — rust-analyzer returns no code actions whatsoever to a client
     /// that advertised no `codeAction` support, and that is indistinguishable from a range which
     /// supports no refactoring.
+    ///
+    /// `workspace_configuration` is what the server's `workspace/configuration` requests are
+    /// answered from (see `LaunchSpec::workspace_configuration`).
     pub async fn initialize(
         stdin: mpsc::UnboundedSender<Bytes>,
         stdout: broadcast::Receiver<Bytes>,
         root_uri: &str,
         capabilities: Value,
         initialization_options: Value,
+        workspace_configuration: Value,
     ) -> Result<Self, LspError> {
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let diagnostics: DiagnosticsCache = Arc::new(Mutex::new(HashMap::new()));
@@ -126,6 +130,7 @@ impl LspClient {
             Arc::clone(&diagnostics),
             Arc::clone(&notifications),
             stdin.clone(),
+            workspace_configuration,
         ));
 
         let client = Self {

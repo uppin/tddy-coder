@@ -137,7 +137,7 @@ const INTERNAL_ERROR: i64 = -32603;
 /// Only [`RestructureError::ServerCatchingUp`] is retried by the backend's assist and settle
 /// loops, so anything retryable that lands anywhere else skips those loops entirely — which is
 /// how a slow index came to be reported as a malformed plan.
-fn map_lsp_error(error: LspError) -> RestructureError {
+pub(super) fn map_lsp_error(error: LspError) -> RestructureError {
     match error {
         // The server asking to be asked again. The self-spawned transport has always mapped
         // this; the bridge dropped it, leaving the settle loop dead on this path.

@@ -7,6 +7,7 @@
 //! tddy does not ask it for one: it counts as ready once `initialize` has completed, which every
 //! [`LspClient`] has — a client exists only after its handshake.
 
+use serde_json::Value;
 use tddy_code_restructuring::backends::rust::ServerChatter;
 use tddy_lsp::{LaunchSpec, LspClient};
 
@@ -30,9 +31,16 @@ impl Readiness {
     /// `tddy_zed_extensions::client_capabilities` does not.
     #[must_use]
     pub fn of_launch(launch: &LaunchSpec) -> Self {
-        let _ = launch;
-        // TODO(reshape-extension-language-server): implement
-        todo!("Readiness::of_launch")
+        let asks_for_status = launch
+            .capabilities
+            .pointer("/experimental/serverStatusNotification")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if asks_for_status {
+            Readiness::ServerStatus
+        } else {
+            Readiness::AfterInitialize
+        }
     }
 }
 
@@ -56,8 +64,7 @@ pub fn index_state_of(client: &LspClient, readiness: Readiness) -> IndexState {
             }
             state_of_quiescence(chatter.quiescent())
         }
-        // TODO(reshape-extension-language-server): implement
-        Readiness::AfterInitialize => todo!("index_state_of after initialize"),
+        Readiness::AfterInitialize => IndexState::Ready,
     }
 }
 

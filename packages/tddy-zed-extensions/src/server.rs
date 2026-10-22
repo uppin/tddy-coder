@@ -8,11 +8,11 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tddy_lsp::LaunchSpec;
 
 use crate::language::ExtensionLanguage;
-use crate::manifest::ExtensionManifest;
+use crate::manifest::{ExtensionManifest, LanguageServerEntry};
 use crate::settings::ExtensionSettings;
 
 /// A declared server whose command is not configured (R3), in the words the PRD gives.
@@ -88,9 +88,46 @@ impl ServerChoice {
         settings: &ExtensionSettings,
         settings_file: &Path,
     ) -> Self {
-        let _ = (manifest, language, settings, settings_file);
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerChoice::for_language")
+        // The multi-server tie-break is open: the first qualifying server, by id, serves it.
+        let Some((id, entry)) = manifest
+            .language_servers
+            .iter()
+            .find(|(id, entry)| serves(entry, id, language, settings))
+        else {
+            return ServerChoice::Undeclared;
+        };
+        let configured = settings.server(id).and_then(|server| {
+            let binary = server.binary.as_ref()?;
+            Some((server, binary, binary.path.as_ref()?))
+        });
+        let Some((server, binary, path)) = configured else {
+            return ServerChoice::Unconfigured(NoServerCommand {
+                server: id.clone(),
+                extension: manifest.id.clone(),
+                settings_file: settings_file.to_path_buf(),
+            });
+        };
+        let mut launch = LaunchSpec::new(path)
+            .with_capabilities(client_capabilities())
+            .with_initialization_options(server.initialization_options.clone())
+            .with_workspace_configuration(server.settings.clone())
+            .with_language_id(
+                entry
+                    .language_ids
+                    .get(&language.name)
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+        launch.args = binary.arguments.clone();
+        launch.env = binary
+            .env
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        ServerChoice::Configured {
+            server: id.clone(),
+            launch,
+        }
     }
 
     /// The launch of a configured server.
@@ -109,16 +146,36 @@ impl ServerChoice {
     /// [`ServerRefusal::reason`] for [`ServerChoice::Refused`]; `None` when there is nothing to
     /// refuse ([`ServerChoice::Undeclared`], [`ServerChoice::Configured`]).
     pub fn refusal(&self) -> Option<String> {
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerChoice::refusal")
+        match self {
+            ServerChoice::Unconfigured(no_command) => Some(no_command.to_string()),
+            ServerChoice::Refused(refusal) => Some(refusal.reason.clone()),
+            ServerChoice::Undeclared | ServerChoice::Configured { .. } => None,
+        }
     }
 }
 
 /// What tddy advertises to an extension language's server at `initialize`: byte (`utf-8`)
 /// positions, which every coordinate here is counted in, and `rename` support.
 pub fn client_capabilities() -> Value {
-    // TODO(reshape-extension-language-server): implement
-    todo!("client_capabilities")
+    json!({
+        "general": { "positionEncodings": ["utf-8"] },
+        "textDocument": { "rename": { "prepareSupport": false } },
+    })
+}
+
+/// Whether the manifest entry `id` serves `language`: it names the language in `language` or
+/// `languages`, and, when it lists the language as opt-in, `settings` names it there (R1).
+fn serves(
+    entry: &LanguageServerEntry,
+    id: &str,
+    language: &ExtensionLanguage,
+    settings: &ExtensionSettings,
+) -> bool {
+    let declared = entry.language.as_deref() == Some(language.name.as_str())
+        || entry.languages.contains(&language.name);
+    declared
+        && (!entry.opt_in_languages.contains(&language.name)
+            || settings.names_server(&language.name, id))
 }
 
 #[cfg(test)]

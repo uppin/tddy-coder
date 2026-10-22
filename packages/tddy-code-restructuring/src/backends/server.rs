@@ -10,37 +10,32 @@
 
 use std::sync::Arc;
 
+use serde_json::{json, Value};
 use tddy_lsp::client::LspClient;
+use tddy_lsp::LanguageId;
 use tokio_util::sync::CancellationToken;
 
-use crate::item_anchor::{ItemAtResolver, ItemResolver};
+use super::lsp_bridge::{map_lsp_error, LspClientBridge};
+use crate::edit::{FileEdit, Position, Range, TextEdit, WorkspaceEdit};
+use crate::item_anchor::{span_of, ItemAtResolver, ItemResolver};
 use crate::language::LiveServer;
-use crate::plan::{RefactorKind, RefactorOp};
+use crate::plan::{Anchor, RefactorKind, RefactorOp};
 use crate::registry::{LanguageBackend, Workspace};
-use crate::{Resolution, Result};
-use tddy_lsp::LanguageId;
+use crate::{Resolution, RestructureError, Result};
+
+/// The position encoding [`Range`] columns are counted in: bytes, which is what the client asks
+/// the server for (`utf-8`) and the only unit this backend converts without a text in hand.
+const BYTE_ENCODING: &str = "utf-8";
 
 /// A language's backend over a generic language server, composed with its outline backend.
 pub struct ServerBackend {
     /// Answers the item anchors — the language's id, the extensions it claims, `item` / `items` /
     /// `--at` — exactly as it does with no server.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-extension-language-server): delegated to once implemented"
-    )]
     outline: Box<dyn LanguageBackend>,
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-extension-language-server): read by resolve once implemented"
-    )]
     server: Server,
 }
 
 /// What a rename is put to.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-extension-language-server): read by resolve once implemented"
-)]
 enum Server {
     /// The language's running server.
     Live {
@@ -63,9 +58,14 @@ impl ServerBackend {
         server: &LiveServer<'_>,
         language_id: impl Into<String>,
     ) -> Self {
-        let _ = (outline, server, language_id.into());
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerBackend::over")
+        Self {
+            outline,
+            server: Server::Live {
+                client: Arc::clone(server.client),
+                cancel: server.cancel.clone(),
+                language_id: language_id.into(),
+            },
+        }
     }
 
     /// The backend of a language whose server cannot be started — no configured command (R3), or
@@ -73,31 +73,29 @@ impl ServerBackend {
     /// and every server operation is [`crate::RestructureError::ServerNotConfigured`] carrying
     /// exactly `reason`, whatever it says.
     pub fn without_command(outline: Box<dyn LanguageBackend>, reason: impl Into<String>) -> Self {
-        let _ = (outline, reason.into());
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerBackend::without_command")
+        Self {
+            outline,
+            server: Server::NoCommand {
+                reason: reason.into(),
+            },
+        }
     }
 }
 
 impl LanguageBackend for ServerBackend {
     /// The outline backend's.
     fn language(&self) -> &LanguageId {
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerBackend::language")
+        self.outline.language()
     }
 
     /// The outline backend's.
     fn handles_extension(&self, extension: &str) -> bool {
-        let _ = extension;
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerBackend::handles_extension")
+        self.outline.handles_extension(extension)
     }
 
     /// `rename_symbol` only; code actions are `extension-code-actions`' (K23).
     fn supports(&self, kind: RefactorKind) -> bool {
-        let _ = kind;
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerBackend::supports")
+        kind == RefactorKind::RenameSymbol
     }
 
     /// R6: the anchor resolves to an item through the outline backend; the document is opened as
@@ -105,22 +103,199 @@ impl LanguageBackend for ServerBackend {
     /// `op.name`, and the returned `WorkspaceEdit` — paths relative to the root — is the
     /// resolution. Without a command: [`crate::RestructureError::ServerNotConfigured`].
     fn resolve(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Resolution> {
-        let _ = (op, workspace);
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerBackend::resolve")
+        let (client, cancel, language_id) = match &self.server {
+            Server::NoCommand { reason } => {
+                return Err(RestructureError::ServerNotConfigured {
+                    language: self.outline.language().to_string(),
+                    reason: reason.clone(),
+                })
+            }
+            Server::Live {
+                client,
+                cancel,
+                language_id,
+            } => (client, cancel, language_id),
+        };
+        if !self.supports(op.op) {
+            return Err(RestructureError::UnsupportedOp {
+                backend: self.outline.language().to_string(),
+                op: format!("{:?}", op.op),
+            });
+        }
+        let new_name = op.name.clone().ok_or_else(|| {
+            RestructureError::MalformedPlan("rename_symbol needs a name".to_string())
+        })?;
+        let at = name_position(self.outline.as_mut(), &op.anchor, workspace)?;
+        refuse_unless_bytes(client)?;
+
+        let uri = file_uri(workspace, op.anchor.file());
+        let text = workspace.read(op.anchor.file())?;
+        tokio::runtime::Handle::current()
+            .block_on(client.sync_document(&uri, language_id, &text))
+            .map_err(map_lsp_error)?;
+        let answer = LspClientBridge::new(Arc::clone(client), cancel.clone()).request(
+            "textDocument/rename",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": at.line - 1, "character": at.col - 1 },
+                "newName": new_name,
+            }),
+        )?;
+        Ok(Resolution::of(workspace_edit_of(
+            &answer, workspace, op, at,
+        )?))
     }
 
     /// The outline backend's.
     fn item_resolver(&mut self) -> Option<&mut dyn ItemResolver> {
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerBackend::item_resolver")
+        self.outline.item_resolver()
     }
 
     /// The outline backend's.
     fn item_locator(&mut self) -> Option<&mut dyn ItemAtResolver> {
-        // TODO(reshape-extension-language-server): implement
-        todo!("ServerBackend::item_locator")
+        self.outline.item_locator()
     }
+}
+
+/// Where the rename is asked: a range anchor's start, an item anchor's name as the outline backend
+/// locates it. A symbol anchor names no position this backend can find, and is refused.
+fn name_position(
+    outline: &mut dyn LanguageBackend,
+    anchor: &Anchor,
+    workspace: &Workspace<'_>,
+) -> Result<Position> {
+    if let Anchor::Range { start, .. } = anchor {
+        return Ok(*start);
+    }
+    let backend = outline.language().to_string();
+    let resolver = outline
+        .item_resolver()
+        .ok_or(RestructureError::UnsupportedOp {
+            backend,
+            op: "item anchors".to_string(),
+        })?;
+    Ok(span_of(anchor, workspace.root, resolver)?.start)
+}
+
+/// Refuses a server that settled on anything but byte positions: [`Range`] columns are bytes, and
+/// counting them against UTF-16 code units mis-addresses every line holding a wider character.
+fn refuse_unless_bytes(client: &LspClient) -> Result<()> {
+    let handshake = client.handshake();
+    let encoding = handshake
+        .pointer("/capabilities/positionEncoding")
+        .and_then(Value::as_str)
+        .unwrap_or("utf-16");
+    if encoding == BYTE_ENCODING {
+        return Ok(());
+    }
+    Err(RestructureError::ServerDefect(format!(
+        "the language server counts positions in {encoding}, and this client asked for \
+         {BYTE_ENCODING}: its rename would be mis-addressed"
+    )))
+}
+
+/// The `file://` uri of `file` under the workspace root — spelled as the server's root uri is.
+fn file_uri(workspace: &Workspace<'_>, file: &str) -> String {
+    format!("file://{}", workspace.root.join(file).display())
+}
+
+/// The server's rename answer as an edit: every document it names, paths relative to the root.
+/// An answer of null (nothing renameable at `at`), a resource operation, or a document outside the
+/// root is refused rather than half-applied.
+fn workspace_edit_of(
+    answer: &Value,
+    workspace: &Workspace<'_>,
+    op: &RefactorOp,
+    at: Position,
+) -> Result<WorkspaceEdit> {
+    let documents: Vec<(&str, &Vec<Value>)> = if let Some(changes) = answer.get("documentChanges") {
+        let entries = changes.as_array().map(Vec::as_slice).unwrap_or_default();
+        let mut documents = Vec::new();
+        for entry in entries {
+            let named = entry
+                .pointer("/textDocument/uri")
+                .and_then(Value::as_str)
+                .zip(entry.get("edits").and_then(Value::as_array));
+            documents.push(named.ok_or_else(|| {
+                RestructureError::ServerDefect(
+                    "the rename answer holds a change that is not a text edit".to_string(),
+                )
+            })?);
+        }
+        documents
+    } else {
+        answer
+            .get("changes")
+            .and_then(Value::as_object)
+            .map(|changes| {
+                changes
+                    .iter()
+                    .filter_map(|(uri, edits)| Some((uri.as_str(), edits.as_array()?)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let documents: Vec<_> = documents
+        .into_iter()
+        .filter(|(_, edits)| !edits.is_empty())
+        .collect();
+    if documents.is_empty() {
+        return Err(RestructureError::MalformedPlan(format!(
+            "the language server renamed nothing at {}:{}:{}",
+            op.anchor.file(),
+            at.line,
+            at.col
+        )));
+    }
+    let changes = documents
+        .into_iter()
+        .map(|(uri, edits)| {
+            Ok(FileEdit::Change {
+                path: relative_path(uri, workspace)?,
+                edits: edits.iter().map(text_edit_of).collect::<Result<_>>()?,
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok(WorkspaceEdit { changes })
+}
+
+/// The root-relative path a `file://` uri names; one outside the root is refused.
+fn relative_path(uri: &str, workspace: &Workspace<'_>) -> Result<String> {
+    uri.strip_prefix("file://")
+        .and_then(|path| std::path::Path::new(path).strip_prefix(workspace.root).ok())
+        .map(|relative| relative.display().to_string())
+        .ok_or_else(|| {
+            RestructureError::ServerDefect(format!("`{uri}` is not a file inside the workspace"))
+        })
+}
+
+/// One LSP text edit in one-based coordinates, refusing a malformed one.
+fn text_edit_of(edit: &Value) -> Result<TextEdit> {
+    let point = |at: &str| -> Result<Position> {
+        let read = |field: &str| {
+            edit.pointer(&format!("/range/{at}/{field}"))
+                .and_then(Value::as_u64)
+                .map(|value| value as u32 + 1)
+                .ok_or_else(|| {
+                    RestructureError::ServerDefect(format!("a text edit has no range {at} {field}"))
+                })
+        };
+        Ok(Position {
+            line: read("line")?,
+            col: read("character")?,
+        })
+    };
+    Ok(TextEdit {
+        range: Range {
+            start: point("start")?,
+            end: point("end")?,
+        },
+        new_text: edit
+            .get("newText")
+            .and_then(Value::as_str)
+            .ok_or_else(|| RestructureError::ServerDefect("a text edit has no newText".into()))?
+            .to_string(),
+    })
 }
 
 #[cfg(test)]

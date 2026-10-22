@@ -13,7 +13,7 @@ use tddy_lsp::{Location, LspClient, Position};
 use tddy_rpc::Status;
 
 use crate::activity::Activity;
-use crate::index::WorkspaceIndex;
+use crate::index::{Route, ServedFile, WorkspaceIndex};
 use crate::proto::code_index::{
     CodeLocation, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, IndexState,
     ReferencesRequest, ReferencesResponse, SourcePosition, SourceRange,
@@ -104,12 +104,7 @@ async fn locations_at(
         .iter()
         .map(|location| code_location(root, location))
         .collect::<Result<_, _>>()?;
-    // Rust's rule: only `.rs` files are routed here today. TODO(reshape-extension-language-server):
-    // an extension file's answer is read by its support's launch (`Readiness::of_launch`).
-    Ok((
-        locations,
-        index_state_of(&asked.client, Readiness::ServerStatus),
-    ))
+    Ok((locations, index_state_of(&asked.client, asked.readiness)))
 }
 
 async fn hover_at(
@@ -126,15 +121,16 @@ async fn hover_at(
         .map_err(|failure| status_of_lsp(&failure))?;
     Ok(HoverResponse {
         markdown,
-        // Rust's rule, as above. TODO(reshape-extension-language-server): the support's launch.
-        state: index_state_of(&asked.client, Readiness::ServerStatus) as i32,
+        state: index_state_of(&asked.client, asked.readiness) as i32,
     })
 }
 
-/// What a navigation query is put to: the root's warm server, which has been told the file's
-/// current contents, the file's URI and the position in the server's coordinates.
+/// What a navigation query is put to: the warm server of the file's language, which has been told
+/// the file's current contents, the file's URI and the position in the server's coordinates.
 struct AskedDocument {
     client: Arc<LspClient>,
+    /// How this server's answers are read into an index state.
+    readiness: Readiness,
     uri: String,
     at: Position,
 }
@@ -147,12 +143,18 @@ async fn asked_document(
     file: &str,
     position: Option<SourcePosition>,
 ) -> Result<AskedDocument, Status> {
-    let path = served_source(root, file)?;
+    let path = file_within(root, file)?;
+    let route = index.route_of(&path, file)?;
     let position =
         position.ok_or_else(|| Status::invalid_argument("the request names no position"))?;
     let at = server_position(position)?;
-    let (client, uri) = synced_document(index, root, &path, file).await?;
-    Ok(AskedDocument { client, uri, at })
+    let (served, uri) = synced_in(index, root, &path, file, &route).await?;
+    Ok(AskedDocument {
+        client: served.client,
+        readiness: served.readiness,
+        uri,
+        at,
+    })
 }
 
 /// `file` resolved inside `root`, refused unless this host's language server can answer for it.
@@ -174,15 +176,28 @@ pub(crate) async fn synced_document(
     path: &Path,
     file: &str,
 ) -> Result<(Arc<LspClient>, String), Status> {
+    let (served, uri) = synced_in(index, root, path, file, &Route::Rust).await?;
+    Ok((served.client, uri))
+}
+
+/// [`synced_document`] for the server `route` names.
+async fn synced_in(
+    index: &WorkspaceIndex,
+    root: &Path,
+    path: &Path,
+    file: &str,
+    route: &Route,
+) -> Result<(ServedFile, String), Status> {
     let text = std::fs::read_to_string(path)
         .map_err(|err| Status::not_found(format!("`{file}` cannot be read: {err}")))?;
     let uri = uri_of_path(path)?;
-    let client = index.client_for(root).await?;
-    client
-        .sync_document(&uri, LANGUAGE_ID, &text)
+    let served = index.client_for_route(root, route).await?;
+    served
+        .client
+        .sync_document(&uri, &served.language_id, &text)
         .await
         .map_err(|failure| status_of_lsp(&failure))?;
-    Ok((client, uri))
+    Ok((served, uri))
 }
 
 fn is_served_source(path: &Path) -> bool {

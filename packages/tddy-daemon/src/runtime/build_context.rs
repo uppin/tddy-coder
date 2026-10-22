@@ -37,6 +37,10 @@ pub(super) struct BuildContext {
     /// The index daemon this runtime manages, so the host can stop it. Assembled below, inside the
     /// branch that has the task registry to run it on.
     pub(super) index_daemon_registry: Option<crate::index_daemon::IndexDaemonRegistry>,
+    /// The languages the index daemon routes — the registry it builds for itself — which the
+    /// session level asks whether a worktree has an index (`#reshape` extension-language-server,
+    /// R7): an extension-only worktree whose language has a configured server has one.
+    pub(super) index_supports: Arc<tddy_daemon_rpc::code_navigation::SupportRegistry>,
     /// The session host, so the runtime's own host can reach the children it holds at shutdown —
     /// notably the workspace jails, each a `tddy-sandbox-runner` process nothing else would stop
     /// (`docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md`). `None`
@@ -47,7 +51,12 @@ pub(super) struct BuildContext {
 }
 
 impl BuildContext {
-    pub(super) fn new(config: DaemonConfig, options: RuntimeOptions, identity: Identity) -> Self {
+    pub(super) fn new(
+        config: DaemonConfig,
+        options: RuntimeOptions,
+        identity: Identity,
+        index_supports: Arc<tddy_daemon_rpc::code_navigation::SupportRegistry>,
+    ) -> Self {
         let registries = Registries::open(&config, identity.user_resolver.as_ref());
         let plugins = Plugins::open(
             &config,
@@ -86,6 +95,7 @@ impl BuildContext {
             peer_discovery: None,
             credential_sync_room: None,
             index_daemon_registry: None,
+            index_supports,
             session_host: None,
             tasks,
         }

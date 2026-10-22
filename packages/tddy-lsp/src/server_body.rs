@@ -237,6 +237,7 @@ impl LspServerBody {
                 &root_uri,
                 spec.capabilities.clone(),
                 spec.initialization_options.clone(),
+                spec.workspace_configuration.clone(),
             ) => Handshake::Answered(Box::new(initialized)),
             exit = child.wait() => Handshake::Exited(exit),
         };

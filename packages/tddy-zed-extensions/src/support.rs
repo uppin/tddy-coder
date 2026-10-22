@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use tddy_code_restructuring::backends::ServerBackend;
 use tddy_code_restructuring::item_anchor::{ItemAtResolver, ItemResolver, ResolvedItem};
 use tddy_code_restructuring::registry::Workspace;
 use tddy_code_restructuring::{
@@ -26,6 +27,7 @@ use crate::language::ExtensionLanguage;
 use crate::manifest::ExtensionManifest;
 use crate::outline::{Outline, OutlineEntry};
 use crate::server::ServerChoice;
+use crate::settings::ExtensionSettings;
 
 /// What loading the installed extensions found: a support per language whose grammar loaded, and
 /// one report per grammar that did not (R8).
@@ -48,7 +50,9 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
     let mut languages = Vec::new();
     for extension_dir in installed_extension_dirs(dir)? {
         let manifest = read_installed_manifest(&extension_dir)?;
-        languages.extend(ExtensionLanguage::load_all(&extension_dir, &manifest)?);
+        for language in ExtensionLanguage::load_all(&extension_dir, &manifest)? {
+            languages.push((manifest.clone(), language));
+        }
     }
 
     // No language, no engine: a run with no extension installed never starts wasmtime.
@@ -58,6 +62,15 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
             failures: Vec::new(),
         });
     }
+    let settings = ExtensionSettings::load(dir)?;
+    let settings_file = ExtensionSettings::file(dir);
+    let languages = languages
+        .into_iter()
+        .map(|(manifest, language)| {
+            let server = ServerChoice::for_language(&manifest, &language, &settings, &settings_file);
+            (language, server)
+        })
+        .collect();
     let store = GrammarStore::new().map_err(|error| ExtensionError::GrammarEngineUnavailable {
         message: error.message,
     })?;
@@ -86,20 +99,20 @@ fn read_installed_manifest(extension_dir: &Path) -> Result<ExtensionManifest, Ex
     })
 }
 
-/// A support per language whose grammar loads into `store` and whose `outline.scm` compiles, and
-/// one report per failure (R8).
+/// A support per language whose grammar loads into `store` and whose `outline.scm` compiles, each
+/// served as its [`ServerChoice`] says, and one report per failure (R8).
 ///
 /// A grammar that does not load fails every language on it, and is reported once however many
 /// share it. A language's own failure — an `outline.scm` that does not compile — fails that
 /// language alone: a sibling on the same grammar still loads.
 fn supports_of(
-    languages: Vec<ExtensionLanguage>,
+    languages: Vec<(ExtensionLanguage, ServerChoice)>,
     store: Arc<Mutex<GrammarStore>>,
 ) -> InstalledLanguages {
     let mut supports = Vec::new();
     let mut failures: Vec<GrammarLoadError> = Vec::new();
     let mut failed_grammars: BTreeSet<(String, String)> = BTreeSet::new();
-    for language in languages {
+    for (language, server) in languages {
         let grammar = (language.extension.clone(), language.grammar.clone());
         if failed_grammars.contains(&grammar) {
             continue;
@@ -113,7 +126,8 @@ fn supports_of(
                 &language.grammar,
             );
         let support = match loaded {
-            Ok(_) => ExtensionSupport::new(language, Arc::clone(&store)),
+            Ok(_) => ExtensionSupport::new(language, Arc::clone(&store))
+                .map(|support| support.with_server(server)),
             Err(failure) => {
                 failed_grammars.insert(grammar);
                 Err(failure)
@@ -272,9 +286,10 @@ impl LanguageSupport for ExtensionSupport {
             .any(|suffix| Some(suffix.as_str()) == extension || Some(suffix.as_str()) == name)
     }
 
-    /// R7: no server.
+    /// The configured server's launch ([`ServerChoice::launch`]); `None` for a language with no
+    /// server, or one whose server is unconfigured or refused.
     fn launch(&self) -> Option<LaunchSpec> {
-        None
+        self.server.launch().cloned()
     }
 
     /// No server is started, so there is no narrower root to find: `root` itself.
@@ -283,20 +298,31 @@ impl LanguageSupport for ExtensionSupport {
         Ok(root.to_path_buf())
     }
 
-    /// [`ExtensionSupport::outline_backend`] over `root`, whatever `server` is: this tier never
-    /// has one.
+    /// [`ExtensionSupport::outline_backend`] over `root`, composed with a [`ServerBackend`] when the
+    /// language has a server: over the live one handed in, or — for an unconfigured or refused one —
+    /// without a command, so a server operation is refused in its words before anything starts. A
+    /// configured server with none live (the static tier) answers item anchors alone.
     fn backend(&self, server: ServerHandle<'_>, root: &Path) -> Box<dyn LanguageBackend> {
-        let _ = server;
-        Box::new(self.outline_backend(root))
+        let outline = Box::new(self.outline_backend(root));
+        match (&self.server, self.server.refusal(), server.server()) {
+            (_, Some(reason), _) => Box::new(ServerBackend::without_command(outline, reason)),
+            (ServerChoice::Configured { launch, .. }, None, Some(live)) => {
+                let language_id = match launch.language_id.as_str() {
+                    "" => self.id.as_str(),
+                    declared => declared,
+                };
+                Box::new(ServerBackend::over(outline, live, language_id))
+            }
+            _ => outline,
+        }
     }
 }
 
 /// What serves an extension language (`#reshape` extension-language-server).
 ///
-/// Green makes the support read it: [`LanguageSupport::launch`] is the configured server's launch
+/// The support reads it: [`LanguageSupport::launch`] is the configured server's launch
 /// ([`ServerChoice::launch`]); [`LanguageSupport::backend`] over a live server is a
-/// [`tddy_code_restructuring::backends::ServerBackend`] composed with
-/// [`ExtensionSupport::outline_backend`], and with no server for an
+/// [`ServerBackend`] composed with [`ExtensionSupport::outline_backend`], and with no server for an
 /// [`ServerChoice::Unconfigured`] or [`ServerChoice::Refused`] language one built
 /// `without_command`, carrying [`ServerChoice::refusal`] — the [`crate::server::NoServerCommand`]
 /// text (R3), or a code extension's refusal unchanged (K24, developer decision 2026-10-20); and

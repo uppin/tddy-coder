@@ -26,7 +26,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use tddy_code_restructuring::SupportRegistry;
+/// The registry [`host_supports`] builds, named for a host that holds it without depending on the
+/// restructuring crate.
+pub use tddy_code_restructuring::SupportRegistry;
 use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_rpc::{Request, Response, Status};
@@ -89,6 +91,14 @@ pub struct CodeNavigationServiceImpl {
     /// over. `None` — Rust only — unless [`CodeNavigationServiceImpl::with_supports`] says
     /// otherwise.
     supports: Option<Arc<SupportRegistry>>,
+}
+
+/// The registry the host's session level asks ([`has_an_index`]): the one the index daemon builds
+/// for itself ([`tddy_index_daemon::host_supports`] — the built-ins, then every installed
+/// extension's language), so the two cannot disagree on which worktrees have an index. For
+/// [`CodeNavigationServiceImpl::with_supports`], and the warm-up observer's.
+pub fn host_supports() -> anyhow::Result<Arc<SupportRegistry>> {
+    Ok(Arc::new(tddy_index_daemon::host_supports()?))
 }
 
 /// An authorised request, ready to be asked of the index: a client on the index daemon's channel

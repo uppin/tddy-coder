@@ -88,18 +88,25 @@ impl ExtensionSettings {
     /// Parses the text of a settings file; keys other than `lsp` and its documented fields are
     /// ignored.
     pub fn parse(text: &str) -> Result<Self, serde_json::Error> {
-        let _ = text;
-        // TODO(reshape-extension-language-server): implement
-        todo!("ExtensionSettings::parse")
+        serde_json::from_str(text)
     }
 
     /// The settings at [`ExtensionSettings::file`]. No file is no settings — every server
     /// unconfigured; a file that cannot be read or does not parse is [`ExtensionError::Io`] naming
     /// it, never silently empty.
     pub fn load(dir: &ExtensionsDir) -> Result<Self, ExtensionError> {
-        let _ = dir;
-        // TODO(reshape-extension-language-server): implement
-        todo!("ExtensionSettings::load")
+        let file = Self::file(dir);
+        let text = match std::fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default())
+            }
+            Err(error) => return Err(ExtensionError::io(&file, error)),
+        };
+        Self::parse(&text).map_err(|error| ExtensionError::Io {
+            path: file,
+            message: format!("does not parse: {error}"),
+        })
     }
 
     /// Whether `languages.<language>.language_servers` names `server` — the only way a server that
@@ -109,16 +116,14 @@ impl ExtensionSettings {
     /// of a language's servers are its default ones, and an opt-in server is not among them — as in
     /// Zed. No `languages.<language>` entry names nothing.
     pub fn names_server(&self, language: &str, server: &str) -> bool {
-        let _ = (language, server);
-        // TODO(reshape-extension-language-server): implement
-        todo!("ExtensionSettings::names_server")
+        self.languages
+            .get(language)
+            .is_some_and(|settings| settings.language_servers.iter().any(|id| id == server))
     }
 
     /// `lsp.<server>`, if the file has one.
     pub fn server(&self, server: &str) -> Option<&ServerSettings> {
-        let _ = server;
-        // TODO(reshape-extension-language-server): implement
-        todo!("ExtensionSettings::server")
+        self.lsp.get(server)
     }
 }
 

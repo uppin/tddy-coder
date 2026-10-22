@@ -101,9 +101,71 @@ pub fn serves_workspace(
     let Some(supports) = supports else {
         return false;
     };
-    let _ = supports;
-    // TODO(reshape-extension-language-server): implement
-    todo!("serves_workspace")
+    holds_a_file_a_server_serves(root, supports)
+}
+
+/// Directories the walk of [`serves_workspace`] does not enter.
+const NOT_WALKED: [&str; 2] = [".git", "target"];
+
+/// Whether a file under `root` is claimed by a support other than Rust's that launches a server.
+/// Rust is served by its manifest alone, so a stray `.rs` file does not make a tree servable.
+fn holds_a_file_a_server_serves(
+    root: &std::path::Path,
+    supports: &tddy_code_restructuring::SupportRegistry,
+) -> bool {
+    let served = |path: &std::path::Path| {
+        supports.support_of(path).is_some_and(|support| {
+            support.id() != &tddy_lsp::LanguageId::RUST && support.launch().is_some()
+        })
+    };
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        // A directory that cannot be read holds nothing this walk can see.
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_dir() {
+                if !NOT_WALKED.iter().any(|name| entry.file_name() == *name) {
+                    pending.push(path);
+                }
+            } else if kind.is_file() && served(&path) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// [`host_supports_launching`] with the built-in Rust support launching `rust-analyzer` from `PATH`.
+pub fn host_supports() -> anyhow::Result<SupportRegistry> {
+    host_supports_launching(tddy_code_restructuring::backends::rust::RustSupport::new())
+}
+
+/// The languages a host routes: `rust` as the built-in, then every Zed extension installed under
+/// `<tddy data dir>/extensions` (`TDDY_DATA_DIR`, else `$HOME/.tddy`), each grammar that does not
+/// load logged once, by name, and leaving the other languages working (`#reshape`
+/// extension-outline, R8; extension-language-server, R7).
+///
+/// The one place both this crate's binary and `tddy-daemon` build their registry, so the index
+/// daemon and the session level — `serves_workspace`, the warm-up, the executor's availability —
+/// agree on which worktrees have an index. Its [`SupportRegistry::allow_list`] is what the
+/// language-server registry is built from.
+pub fn host_supports_launching(
+    rust: tddy_code_restructuring::backends::rust::RustSupport,
+) -> anyhow::Result<SupportRegistry> {
+    let dir = tddy_zed_extensions::ExtensionsDir::resolve()?;
+    let mut supports = SupportRegistry::with_builtin_rust(rust);
+    for failure in
+        tddy_zed_extensions::InstalledExtensions::with_installed_extensions(&mut supports, &dir)?
+    {
+        log::error!(target: "tddy_index_daemon::supports", "{failure}");
+    }
+    Ok(supports)
 }
 
 /// The proto's file-descriptor set, so a host can merge this service into gRPC reflection without

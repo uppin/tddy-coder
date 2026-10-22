@@ -18,6 +18,7 @@ pub(super) async fn read_loop(
     diagnostics: DiagnosticsCache,
     notifications: Notifications,
     stdin: mpsc::UnboundedSender<Bytes>,
+    workspace_configuration: Value,
 ) {
     let mut frames = FrameReader::new();
     loop {
@@ -25,6 +26,10 @@ pub(super) async fn read_loop(
             Ok(bytes) => {
                 frames.push(&bytes);
                 while let Some(message) = frames.next_message() {
+                    if let Some(reply) = configuration_reply(&message, &workspace_configuration) {
+                        let _ = stdin.send(Bytes::from(encode_message(&reply)));
+                        continue;
+                    }
                     dispatch(&message, &pending, &diagnostics, &notifications, &stdin);
                 }
             }
@@ -85,6 +90,17 @@ fn dispatch(
     }
 }
 
+/// The reply to a `workspace/configuration` request, answered from the launch's settings; `None` for
+/// any other message, which [`dispatch`] handles.
+fn configuration_reply(message: &Value, settings: &Value) -> Option<Value> {
+    let method = message.get("method").and_then(Value::as_str)?;
+    let id = message.get("id").cloned()?;
+    (method == "workspace/configuration").then(|| {
+        let result = configuration_answer(settings, message.get("params"));
+        json!({ "jsonrpc": "2.0", "id": id, "result": result })
+    })
+}
+
 /// Split a response into its `result` or its `error`.
 fn response_payload(message: &Value) -> Response {
     if let Some(error) = message.get("error") {
@@ -101,18 +117,12 @@ fn response_payload(message: &Value) -> Response {
 }
 
 /// Build the response to a server→client request. `workspace/configuration` expects an
-/// array with one entry per requested item; every other request is acknowledged with a
+/// array with one entry per requested item (null each here; [`read_loop`] answers it from the
+/// launch's settings before it reaches this); every other request is acknowledged with a
 /// `null` result (sufficient for `registerCapability` / `workDoneProgress/create`).
 fn server_request_reply(method: &str, params: Option<&Value>, id: Value) -> Value {
     let result = match method {
-        "workspace/configuration" => {
-            let count = params
-                .and_then(|p| p.get("items"))
-                .and_then(Value::as_array)
-                .map(|items| items.len())
-                .unwrap_or(0);
-            Value::Array(vec![Value::Null; count])
-        }
+        "workspace/configuration" => configuration_answer(&Value::Null, params),
         _ => Value::Null,
     };
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
@@ -125,17 +135,25 @@ fn server_request_reply(method: &str, params: Option<&Value>, id: Value) -> Valu
 ///
 /// With `settings` null this is one null per item — what [`server_request_reply`] answers today,
 /// and what Rust's launch keeps getting.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "TODO(reshape-extension-language-server): server_request_reply answers from it once implemented"
-    )
-)]
 pub(super) fn configuration_answer(settings: &Value, params: Option<&Value>) -> Value {
-    let _ = (settings, params);
-    // TODO(reshape-extension-language-server): implement
-    todo!("configuration_answer")
+    let items = params
+        .and_then(|params| params.get("items"))
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    Value::Array(
+        items
+            .iter()
+            .map(|item| match item.get("section").and_then(Value::as_str) {
+                Some(section) => section
+                    .split('.')
+                    .try_fold(settings, |value, key| value.get(key))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                None => settings.clone(),
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
