@@ -72,6 +72,9 @@ modules by path. The whitelist names the eleven `runtime/` modules; the cap move
 splitting the composition root adds about 630 non-blank lines of plumbing (5,707 → about 6,340 on top of
 `#provider-route` 1/9). The whitelist is what keeps session logic out of the crate, and it is exact.
 
+`tddy-daemon-rpc/tests/rpc_handlers_shape.rs` reads `BinaryLocalSocketServices` from
+`tddy-daemon/src/runtime/tasks.rs`, where the move put it, instead of `runtime.rs`.
+
 ## Backlog
 
 - **Deleted:** `2026-10-19-satellite-7-client-transports-left-files-over-the-500-line-budget` (all three
