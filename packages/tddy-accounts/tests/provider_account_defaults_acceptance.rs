@@ -1,7 +1,7 @@
 //! What `SetProviderAccountDefaults` does to a person's provider accounts, and how a default is
 //! found again.
 //!
-//! Feature: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-default-route.md
+//! Feature: docs/ft/daemon/provider-accounts.md (A person's default per harness)
 
 use std::sync::{Arc, Mutex};
 
@@ -80,9 +80,13 @@ impl ProviderAccountDefaults for AdasVault {
                 held.retain(|h| !harnesses.contains(h));
             }
             if held != before {
-                record
-                    .metadata
-                    .insert(META_DEFAULT_FOR.to_string(), held.join(","));
+                if held.is_empty() {
+                    record.metadata.remove(META_DEFAULT_FOR);
+                } else {
+                    record
+                        .metadata
+                        .insert(META_DEFAULT_FOR.to_string(), held.join(","));
+                }
                 changed.push(record.clone());
             }
         }

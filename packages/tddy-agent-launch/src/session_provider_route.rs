@@ -46,12 +46,19 @@ pub fn session_route_sources(req: &StartSessionRequest) -> RouteSources {
 /// [`session_route_sources`] plus the owner's default for `harness` — what a start that may run on
 /// a provider account is decided from. A locked vault refuses rather than starting on the vendor
 /// the person's default may have been chosen to avoid.
+///
+/// The default is read only when it can matter: a start that already names an account or
+/// "built in" never consults the vault for it, so an explicit choice is never refused for a vault
+/// it does not need.
 pub fn session_route_sources_with_default(
     req: &StartSessionRequest,
     harness: &str,
     access: &SessionAccountAccess,
 ) -> Result<RouteSources, Status> {
     let sources = session_route_sources(req);
+    if sources.session.is_some() || sources.agent_definition.is_some() {
+        return Ok(sources);
+    }
     let user_default = access
         .default_provider_account(harness)
         .map_err(status_of_refusal)?;

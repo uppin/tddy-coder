@@ -467,6 +467,24 @@ pub fn defaults_of(record: &CredentialRecord) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// `Err(reason)` for the first of `harnesses` that `account` cannot drive, per `matrix`.
+pub(crate) fn refuse_undrivable(
+    matrix: &dyn RouteSupport,
+    account: &ProviderAccount,
+    harnesses: &[String],
+) -> Result<(), String> {
+    let protocols: Vec<&str> = account
+        .wire_protocols()
+        .into_iter()
+        .map(WireProtocol::as_str)
+        .collect();
+    harnesses.iter().try_for_each(|harness| {
+        matrix
+            .harness_routable(harness)
+            .and_then(|()| matrix.supports(harness, account.preset.id, &protocols))
+    })
+}
+
 /// Where a person's per-harness defaults are changed.
 pub trait ProviderAccountDefaults: Send + Sync {
     /// Make `account` the default for each of `harnesses`, clearing those harnesses from any other

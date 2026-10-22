@@ -6,9 +6,9 @@ It is the surface the `/accounts` screen in `tddy-web` reads
 ([accounts screen](../../tddy-web/docs/accounts-screen.md)); the product view is
 [docs/ft/web/accounts-screen.md](../../../docs/ft/web/accounts-screen.md).
 
-Three methods that read and curate, two that link ([Linking](#linking)) and three for
+Three methods that read and curate, two that link ([Linking](#linking)) and four for
 model-provider accounts ([Provider accounts](#provider-accounts)): connect one by API key, list its
-models, and list which accounts a harness can run on. Linking and connecting
+models, list which accounts a harness can run on, and set the person's default account per harness. Linking and connecting
 are the only ways a credential enters the vault through this service, and neither produces a session.
 
 | RPC | Does |
@@ -24,7 +24,7 @@ was opened on, and nothing addresses it over the daemon's local Unix socket.
 ## No secret on the wire
 
 `AccountSummary { provider, account_id, label, subject, updated_at, has_secret, sync_status, preset,
-wire_protocols }` has
+wire_protocols, default_for }` has
 **no secret field**, and no method returns a credential. The rule is enforced by message shape
 rather than by discipline: there is nothing to fill. `has_secret` is the one bit a screen needs to
 tell a linked account from a stale row. `subject` is the record's `metadata["subject"]` — the
@@ -152,7 +152,10 @@ inbound only. They are served only when `AccountsServiceImpl::with_provider_acco
 otherwise both answer `FAILED_PRECONDITION`. `ListProviderRoutes(session_token, harness)` marks each
 of the caller's provider accounts with whether `harness` can run on it and why not, from the matrix
 `AccountsServiceImpl::with_route_support` wires through the `RouteSupport` port; unwired, it answers
-`FAILED_PRECONDITION`. Detail: [provider-accounts.md](./provider-accounts.md).
+`FAILED_PRECONDITION`. `SetProviderAccountDefaults(session_token, account_id, harnesses)` makes one
+provider account the caller's default for each named harness, clearing it from the previous holder,
+and answers with every changed account; it needs both `with_provider_account_defaults` and
+`with_route_support`. Detail: [provider-accounts.md](./provider-accounts.md).
 
 ## Registration
 

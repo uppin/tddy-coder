@@ -5,7 +5,7 @@
 **Detected:** 2026-10-04 by the `/pr-wrap` step 3.5 file-length gate on PR #571 (`#live-plan` 12/15)
 **Metrics:** **785 lines** (whole file, TS) · budget 500 · **1.6× over** — `wc -l packages/tddy-web/src/components/sessions/CreateSessionPane.tsx`
 **Thresholds breached:** length 785 > 500
-**Status:** Open — unclaimed
+**Status:** Open — regressed 2026-10-22 (#666, +8), unclaimed
 
 ## Measurement history
 
@@ -14,6 +14,7 @@
 | 2026-10-04 | 785 | first detection — already over before #571 (783 at base `c3567fde`); +2 in #571. Deferred because dependent #572 touches this file (the stack rule: no split lands mid-stack) |
 | 2026-10-18 | 795 | unchanged — #652 touched one line (the Create Remote Branch default) |
 | 2026-10-22 | 822 | `#provider-route` 3/9 (#664): 828 → 822 against `origin/feature/provider-route/claude-route`. The OpenCode model field adds one mount; the per-session-type pseudo-agent constants and their nested ternary became `sessionType === "tool" ? selectedAgentId : sessionType`. Still over, not grown |
+| 2026-10-22 | 830 | `#provider-route` 5/9 (#666): 822 → 830 against `origin/feature/provider-route/tool-route`. +8: the `useProviderDefault` import and one pre-selection effect; the hook itself lives in `rpc/useProviderRoutes.ts`. **Regressed, split deferred**: parents #663–#665 modify this file in the same stack, so a split here would cascade as conflicts (`/pr-wrap` step 3.5 stack-branch rule) |
 
 ## What would close it
 

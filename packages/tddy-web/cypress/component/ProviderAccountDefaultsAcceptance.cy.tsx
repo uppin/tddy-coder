@@ -2,7 +2,7 @@
  * Acceptance tests: making a provider account the default for a harness, and the New-session form
  * pre-selecting it.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-18-provider-route-default-route.md
+ * Feature: docs/ft/daemon/provider-accounts.md (A person's default per harness)
  */
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -19,19 +19,23 @@ import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { accountsScreenPage } from "../support/pages/accountsScreenPage";
 import { TEST_IDS, byTestId } from "../support/testIds";
 
-function meta(defaultFor: string[]): AccountSummary {
+function aProviderAccount(preset: string, accountId: string, defaultFor: string[]): AccountSummary {
   return {
-    provider: "meta",
-    accountId: "meta-hackathon",
-    label: "Meta hackathon",
+    provider: preset,
+    accountId,
+    label: accountId,
     subject: "",
     updatedAt: 1_760_000_000n,
     hasSecret: true,
     syncStatus: SyncStatus.UNSPECIFIED,
-    preset: "meta",
+    preset,
     wireProtocols: ["anthropic-messages", "openai-responses", "openai-chat"],
     defaultFor,
   } as AccountSummary;
+}
+
+function meta(defaultFor: string[]): AccountSummary {
+  return { ...aProviderAccount("meta", "meta-hackathon", defaultFor), label: "Meta hackathon" };
 }
 
 describe("Default provider account per harness", () => {
@@ -54,6 +58,29 @@ describe("Default provider account per harness", () => {
     accountsScreenPage.defaultForSave("meta", "meta-hackathon").click();
 
     cy.wrap(sets).should("deep.equal", [{ accountId: "meta-hackathon", harnesses: ["claude-cli"] }]);
+  });
+
+  it("clears a default from the row that held it when another account takes it", () => {
+    const backend = anInMemoryRpcBackend().implement(AccountsService, {
+      listAccounts: () => ({
+        providers: [
+          { provider: "meta", accounts: [meta(["claude-cli"])] },
+          { provider: "fireworks", accounts: [aProviderAccount("fireworks", "fw", [])] },
+        ],
+        vaultLocked: false,
+        vaultUninitialized: false,
+      }),
+      setProviderAccountDefaults: (req) => ({
+        changed: [aProviderAccount("fireworks", "fw", [...req.harnesses]), meta([])],
+      }),
+    });
+    mountWithRpc(withSelectedDaemon(<AccountsAppPage onNavigate={() => {}} />), backend);
+    accountsScreenPage.defaultForSelect("meta", "meta-hackathon").invoke("val").should("deep.equal", ["claude-cli"]);
+
+    accountsScreenPage.defaultForSelect("fireworks", "fw").select(["claude-cli"]);
+    accountsScreenPage.defaultForSave("fireworks", "fw").click();
+
+    accountsScreenPage.defaultForSelect("meta", "meta-hackathon").invoke("val").should("deep.equal", []);
   });
 
   it("pre-selects the person's default when a claude-cli session is created", () => {

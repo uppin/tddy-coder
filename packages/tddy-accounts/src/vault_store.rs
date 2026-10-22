@@ -231,7 +231,11 @@ impl ProviderAccountDefaults for SessionVaultAccountStore {
             .list(None)
             .map_err(|error| refusal_of(&subject, error))?;
         let mut changed = Vec::new();
-        for mut record in held {
+        // Only a provider account can be a default; a GitHub record sharing the id is left alone.
+        for mut record in held
+            .into_iter()
+            .filter(|record| ProviderAccount::from_record(record).is_some())
+        {
             let before = defaults_of(&record);
             let after: Vec<String> = if &record.account == account {
                 dedup_in_order(harnesses)
@@ -386,6 +390,32 @@ mod tests {
             .expect("meta")
             .metadata
             .contains_key(META_DEFAULT_FOR));
+    }
+
+    #[test]
+    fn a_github_record_sharing_the_accounts_id_never_becomes_a_default() {
+        // Given Ada's GitHub login and her Meta account are both called "ada"
+        let (_dir, vault, store) = ada_unlocked_her_vault_holding(vec![
+            a_credential(ADA, "Ada on GitHub"),
+            a_provider_account("meta", ADA),
+        ]);
+
+        // When the Meta account is made the Claude CLI default
+        let changed = store
+            .set_provider_account_defaults(
+                ADAS_SESSION,
+                &AccountId::new(ADA),
+                &["claude-cli".to_string()],
+            )
+            .expect("applied");
+
+        // Then only the provider account changed
+        assert_eq!(changed.len(), 1);
+        let github = vault
+            .get(&ProviderId::new("github"), &AccountId::new(ADA))
+            .expect("readable")
+            .expect("held");
+        assert!(!github.metadata.contains_key(META_DEFAULT_FOR));
     }
 
     #[test]

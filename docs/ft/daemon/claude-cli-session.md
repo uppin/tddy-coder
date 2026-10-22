@@ -118,9 +118,12 @@ is pinned to the session's model, so no request reaches Anthropic.
 The two are exclusive; a request that sends both runs on the named account, never on the vendor the
 operator did not ask for. The account a session runs on is chosen by precedence — **session over
 agent definition over the person's default** — and an explicit built-in choice at a higher level
-overrides an account at a lower one. Only the session level is fed from a start request; nothing
-fills the agent-definition or default level yet. A start that chooses nothing runs exactly as a
-session on Anthropic always has (host `.credentials.json`, OAuth token).
+overrides an account at a lower one. The session level comes from the start request and the
+default level from the owner's vault ([a person's default per harness](provider-accounts.md#a-persons-default-per-harness));
+nothing fills the agent-definition level yet. A start that names nothing reads the owner's default
+for `claude-cli` and refuses while the vault is locked; an explicit choice never reads it. A start
+with no choice and no default runs exactly as a session on Anthropic always has (host
+`.credentials.json`, OAuth token).
 
 The web's New-session form offers the choice as **Provider** — see
 [tool-session model selection § Provider](../web/tool-session-model-selection.md#provider).

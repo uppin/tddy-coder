@@ -68,7 +68,12 @@ a refusal, never as an account pointed at the wrong endpoint.
 
 A provider-account row (`AccountRow.preset` non-empty) also shows its preset and wire protocols
 (`…-preset`) and a **Models** toggle (`…-models-toggle`) that sends `ListProviderAccountModels` only
-when expanded, rendering `…-models` or the reason as `…-models-error`.
+when expanded, rendering `…-models` or the reason as `…-models-error` (`ProviderModels.tsx`).
+`AccountRow.defaultFor` carries `AccountSummary.default_for`; when the page passes `onSetDefaults`,
+the row shows `ProviderAccountDefaultsControl` — a multi-select of `claude-cli` / `opencode-cli`
+(`…-default-for`) and **Save default** (`…-default-for-save`). The control is keyed on the current
+defaults, so a row re-seeds when the daemon reports a change. `AccountsAppPage` sends
+`SetProviderAccountDefaults` and replaces every row in `changed`; a refusal is shown beside the list.
 
 ### The sync-status badge
 
@@ -87,6 +92,7 @@ it.
 | Spec | Pins |
 |---|---|
 | `cypress/component/AccountsScreenAcceptance.cy.tsx` (page object `cypress/support/pages/accountsScreenPage.ts`) | grouping by provider; the subject beside the label; empty, uninitialized, locked and errored as four distinct notices; rename through `SetAccountLabel` with the identity unchanged; a failed rename reported beside the list; removal only after confirmation; no sync badge for `UNSPECIFIED`, a `Refused` badge, a `Synced` badge |
+| `cypress/component/ProviderAccountDefaultsAcceptance.cy.tsx` | marking an account the Claude CLI default sends `SetProviderAccountDefaults`; a default taken by another account leaves the row that held it; the New-session form pre-selects the default |
 | `cypress/component/ProviderAccountConnectAcceptance.cy.tsx` | connecting a Meta account adds it to its provider group with its preset; a rejected key shows the daemon's reason and adds nothing; the URL field appears only for presets whose endpoint the operator supplies; the key is never shown once sent |
 | `src/routing/appRoutes.test.ts` § accounts route | `/accounts` matches; `/accounts-archive` and `/accounts/github` do not |
 | `ModelsNavAcceptance.cy.tsx`, `PresenceCapabilityGatingAcceptance.cy.tsx` | the menu's order, with **Accounts** after **Hosts** |

@@ -23,8 +23,9 @@ use crate::linking::{
     LinkedIdentity, META_SUBJECT,
 };
 use crate::provider_account::{
-    account_id_for, defaults_of, endpoints_for, preset, ProviderAccount, ProviderAccountDefaults,
-    ProviderAccountError, ProviderAccountStore, ProviderModelProbe, RouteSupport, WireProtocol,
+    account_id_for, defaults_of, endpoints_for, preset, refuse_undrivable, ProviderAccount,
+    ProviderAccountDefaults, ProviderAccountError, ProviderAccountStore, ProviderModelProbe,
+    RouteSupport, WireProtocol,
 };
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
@@ -174,6 +175,18 @@ impl<S> AccountsServiceImpl<S> {
     }
 }
 
+impl<S> AccountsServiceImpl<S> {
+    /// The harness × account matrix, or the refusal a route RPC answers without one.
+    fn route_matrix(&self) -> Result<&dyn RouteSupport, Status> {
+        self.route_support.as_deref().ok_or_else(|| {
+            Status::failed_precondition(
+                "this daemon cannot tell which harness runs on which provider account: \
+                 no route matrix is wired",
+            )
+        })
+    }
+}
+
 #[async_trait]
 impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
     async fn connect_provider_account(
@@ -213,12 +226,7 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         request: Request<ListProviderRoutesRequest>,
     ) -> Result<Response<ListProviderRoutesResponse>, Status> {
         let request = request.into_inner();
-        let matrix = self.route_support.as_deref().ok_or_else(|| {
-            Status::failed_precondition(
-                "this daemon cannot tell which harness runs on which provider account: \
-                 no route matrix is wired",
-            )
-        })?;
+        let matrix = self.route_matrix()?;
         let records = self
             .store
             .list(&request.session_token)
@@ -246,12 +254,7 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         let defaults = self.defaults.as_deref().ok_or_else(|| {
             Status::failed_precondition("this daemon keeps no per-harness provider defaults")
         })?;
-        let matrix = self.route_support.as_deref().ok_or_else(|| {
-            Status::failed_precondition(
-                "this daemon cannot tell which harness runs on which provider account: \
-                 no route matrix is wired",
-            )
-        })?;
+        let matrix = self.route_matrix()?;
         let wanted = AccountId::new(&request.account_id);
         let account = self
             .store
@@ -266,17 +269,8 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
                     request.account_id
                 ))
             })?;
-        let protocols: Vec<&str> = account
-            .wire_protocols()
-            .into_iter()
-            .map(WireProtocol::as_str)
-            .collect();
-        for harness in &request.harnesses {
-            matrix
-                .harness_routable(harness)
-                .and_then(|()| matrix.supports(harness, account.preset.id, &protocols))
-                .map_err(Status::invalid_argument)?;
-        }
+        refuse_undrivable(matrix, &account, &request.harnesses)
+            .map_err(Status::invalid_argument)?;
         let changed = defaults
             .set_provider_account_defaults(&request.session_token, &wanted, &request.harnesses)
             .map_err(status_for)?;
