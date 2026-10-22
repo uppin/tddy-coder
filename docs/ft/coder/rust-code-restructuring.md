@@ -1371,9 +1371,20 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   - A binding moved into a returned tuple or value loses its `mut`.
   - A range between two statements with comments between them is refused for comment carry, and a loop phase that
     needs several outputs read afterwards has no single seam.
+  - The new function does not declare a lifetime parameter of the enclosing function that its signature names
+    (E0261), and a returned value borrowing one of two reference inputs gets an elided lifetime (E0106).
+  - A range that only reads `self` becomes a `&mut self` method, which a live borrow of a field refuses (E0502).
+  - A call site can lose the `&` its argument needs (`&format!(..)`, `&name`), so a `&str` parameter receives a
+    `String` (E0308).
+  - A tail that builds a struct literal inside `Ok(..)` is refused (rust-analyzer offers no assist for it).
+  - A range that is a `let` whose binding the function returns is written as `let x = ..; x`, which clippy rejects
+    (`let_and_return`).
+  - A range whose locals are many, including closures, needs a helper past seven parameters, which clippy rejects
+    (`too_many_arguments`); there is no operation that introduces a parameter struct.
   - When a range writes an outer local, the new function takes it as `&mut` and the assignment becomes `*x = …`;
-    `verify` reports that pair, and the lines of an extracted match arm, as a lost and a gained statement, which a
-    reviewer accepts by reading the diff.
+    when it reads one, it takes it as `&T` and a `&x` at a moved call becomes `x`; a lifted guard block becomes a
+    function ending in `Ok(())`, called with `?`. `verify` reports each of these, and the lines of an extracted match
+    arm, as a lost and a gained statement, which a reviewer accepts by reading the diff.
 - **An extraction does not hang on how its range opens.** The type probe asks at the first position of
   the range that can carry a hover, skipping a leading `{`, `&`, `&mut`, `*`, `!`, `-` or `(`, comments
   and whitespace, and a hover that stays silent for 30 seconds once the index is ready ends the

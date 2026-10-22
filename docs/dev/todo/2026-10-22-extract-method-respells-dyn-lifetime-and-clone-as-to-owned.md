@@ -203,8 +203,10 @@ error: returning the result of a `let` binding from a block
     --> packages/tddy-code-restructuring/src/backends/rust.rs:1177:5
 ```
 
-Not fixed by hand, because a hand edit beyond a post-move build fix is a stop under the 2026-10-22 rules: the node is stopped
-at this point for a decision. The fix is an expression body (`if assist.at_caret { .. } else { range }`), a three-line edit.
+Stopped for a decision, because a hand edit beyond a post-move build fix is a stop under the 2026-10-22 rules. The developer
+consented to the hand edit on 2026-10-22: `target_range` in `backends/rust.rs` now has the expression body
+(`if assist.at_caret { .. } else { range }`), marked `TODO(reshape-sweep)`. Remove that marker when the engine writes the
+tail expression itself.
 
 Wanted: when the range is a `let` whose binding is the function's returned value, `extract_method` writes the initialiser as the
 new function's tail expression, and not a binding followed by its name.

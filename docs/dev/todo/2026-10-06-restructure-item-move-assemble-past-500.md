@@ -15,6 +15,7 @@ and at the tip of the change:
 | File | Before | After | What grew it |
 |---|---:|---:|---|
 | `src/backends/rust/item_move/assemble.rs` | 429 | 507 | the B1/B2/B3 plumbing: the `notes` sink on `Context`, `moved_paths` / `moved_module_paths`, and the B3 doc-link pass wiring |
+| `src/backends/rust/item_move/assemble.rs` | 521 | 556 | `#reshape` 21/24 (#680, `backend-fn-sizes`), 2026-10-22: `extract_method` cuts of `assemble` and `into_destination` (`changed_files`, `absorb_doc_links`, `names_of_items`, `imports_block`) — signatures and calls only, no new logic. Not split: successor `#reshape` nodes edit this file (yolo rule: stack-shared files are not split here); listed in `NOT_YET_SPLIT` |
 
 ## Why it is deferred
 

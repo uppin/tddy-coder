@@ -367,7 +367,7 @@ fn a_function_of(name: &str, lines: usize) -> String {
 /// section 7, `survey` in 10, `next_import` in 9, `request` in 8, `assisted_edit` in 11. `edits_for_file` is deferred by the
 /// developer (`Deferred by developer 2026-10-22`): ten parameters including two closures, recorded in
 /// `docs/dev/todo/2026-10-09-restructure-has-no-operation-to-introduce-a-parameter-struct.md`, owned by the sweep node.
-// TODO(reshape-21): `backend-fn-sizes` cuts the rest; a deferred function is cut when its engine defect is fixed.
+// TODO(reshape-sweep): each entry is cut, and removed here, when the engine defect its todo names is fixed.
 const DEFERRED_BY_BACKEND_FN_SIZES: [(&str, &str); 6] = [
     ("backends/rust/import_text.rs", "choose_import"),
     ("backends/rust/detach_method/survey.rs", "survey"),
