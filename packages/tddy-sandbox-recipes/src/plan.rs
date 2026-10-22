@@ -109,7 +109,9 @@ fn primary_binary_from_command(command: &[String]) -> Option<PathBuf> {
     command.first().map(PathBuf::from)
 }
 
-fn claude_binary_from_runner_argv(argv: &[String]) -> Option<PathBuf> {
+/// The in-jail agent's binary the runner argv names: `--claude-binary`, or `--agent-binary` for the
+/// kinds that take one (`cursor`, `opencode`, `muse`).
+fn agent_binary_from_runner_argv(argv: &[String]) -> Option<PathBuf> {
     if let Some(idx) = argv.iter().position(|a| a == "--claude-binary") {
         return argv.get(idx + 1).map(PathBuf::from);
     }
@@ -137,12 +139,12 @@ fn canonical_binary_path(path: &str) -> Option<PathBuf> {
 fn collect_reads(
     recipe: SandboxRecipe,
     runner_binary: Option<&Path>,
-    claude_binary: Option<&Path>,
+    agent_binary: Option<&Path>,
 ) -> Vec<tddy_sandbox::ReadSpec> {
     let mut reads = Vec::new();
     match recipe {
         SandboxRecipe::OpenCodeCli => {
-            if let Some(opencode) = claude_binary {
+            if let Some(opencode) = agent_binary {
                 let canon = canonical_binary_path(&opencode.to_string_lossy())
                     .unwrap_or_else(|| opencode.to_path_buf());
                 reads.extend(process_opencode_exec_reads(&canon));
@@ -153,14 +155,14 @@ fn collect_reads(
         // A native binary: the OS baseline and the binary's own dependencies, nothing toolchain.
         SandboxRecipe::MuseCli => {
             reads.extend(system_baseline_reads());
-            if let Some(muse) = claude_binary {
+            if let Some(muse) = agent_binary {
                 let canon = canonical_binary_path(&muse.to_string_lossy())
                     .unwrap_or_else(|| muse.to_path_buf());
                 reads.extend(binary_exec_reads(&canon));
             }
         }
         SandboxRecipe::ClaudeCli => {
-            if let Some(claude) = claude_binary {
+            if let Some(claude) = agent_binary {
                 let canon = canonical_binary_path(&claude.to_string_lossy())
                     .unwrap_or_else(|| claude.to_path_buf());
                 reads.extend(process_claude_exec_reads(&canon));
@@ -169,7 +171,7 @@ fn collect_reads(
             }
         }
         SandboxRecipe::CursorCli => {
-            if let Some(cursor) = claude_binary {
+            if let Some(cursor) = agent_binary {
                 let canon = canonical_binary_path(&cursor.to_string_lossy())
                     .unwrap_or_else(|| cursor.to_path_buf());
                 reads.extend(process_cursor_exec_reads(&canon));
@@ -313,9 +315,9 @@ pub fn build_runner_plan(params: RunnerPlanRequest) -> Result<SandboxPlan, Sandb
     let recipe = params
         .recipe
         .unwrap_or_else(|| detect_recipe_from_argv(&params.runner_argv));
-    let claude_bin = claude_binary_from_runner_argv(&params.runner_argv);
+    let agent_bin = agent_binary_from_runner_argv(&params.runner_argv);
     let runner = params.runner_argv.first().map(Path::new);
-    let reads = collect_reads(recipe, runner, claude_bin.as_deref());
+    let reads = collect_reads(recipe, runner, agent_bin.as_deref());
     let scratch_dir = params.scratch_dir.clone();
 
     // A routed session's non-secret environment joins the jail's, and the route's value wins a
@@ -419,7 +421,7 @@ mod tests {
             "/tmp/stub_agent.sh".into(),
         ];
         assert_eq!(detect_recipe_from_argv(&argv), SandboxRecipe::CursorCli);
-        let bin = claude_binary_from_runner_argv(&argv).expect("agent binary");
+        let bin = agent_binary_from_runner_argv(&argv).expect("agent binary");
         assert_eq!(bin, PathBuf::from("/tmp/stub_agent.sh"));
         let reads = collect_reads(
             SandboxRecipe::CursorCli,
