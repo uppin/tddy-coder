@@ -79,17 +79,19 @@ pub(crate) fn apply_plan(
     apply_held_plan(root, held, options, client, &cancel, progress, events)
 }
 
-/// The warm server of every installed language a file of `held`'s plan belongs to, spawned if this
-/// process holds none yet — the clients an apply routes those languages' operations to
-/// (`#reshape` extension-language-server, R6–R7). A server that will not start refuses the run
-/// before anything is written.
-pub(crate) async fn installed_clients_for(
+/// The servers a run of `held` under `root` reaches: the root's warm rust-analyzer, and the warm
+/// server of every installed language a file of the plan belongs to — the clients an apply routes
+/// those languages' operations to (`#reshape` extension-language-server, R6–R7). Each is spawned if
+/// this process holds none yet; a server that will not start refuses the run before anything is
+/// written.
+pub(crate) async fn servers_for_a_run(
     index: &WorkspaceIndex,
     root: &Path,
     held: &HeldPlan,
-) -> std::result::Result<Vec<(LanguageId, Arc<LspClient>)>, Status> {
+) -> std::result::Result<(Arc<LspClient>, InstalledClients), Status> {
+    let rust = index.client_for(root).await?;
     let Some(plan) = held.plan() else {
-        return Ok(Vec::new());
+        return Ok((rust, Vec::new()));
     };
     let mut clients = Vec::new();
     for (language, launch) in runner::installed_launches_for(&plan, &index.supports()) {
@@ -100,8 +102,11 @@ pub(crate) async fn installed_clients_for(
         let served = index.client_for_route(root, &route).await?;
         clients.push((language, served.client));
     }
-    Ok(clients)
+    Ok((rust, clients))
 }
+
+/// The clients of the servers started for installed languages, by language.
+type InstalledClients = Vec<(LanguageId, Arc<LspClient>)>;
 
 /// The plan `held` names, copied out of the store with the path it is held at.
 ///

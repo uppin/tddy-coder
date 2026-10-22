@@ -93,18 +93,7 @@ async fn start_servers(
     options: &mut Options,
     observer: Arc<dyn SpawnObserver>,
 ) -> Result<Arc<tddy_lsp::client::LspClient>> {
-    // A plan that cannot be read or parsed starts no installed server: the run reads the same file
-    // next and refuses it in its own words, before any operation would reach a server.
-    let launches = match options.command {
-        Command::Apply => options
-            .plan()
-            .ok()
-            .and_then(|plan| std::fs::read_to_string(plan).ok())
-            .and_then(|text| crate::Plan::parse(&text).ok())
-            .map(|plan| crate::runner::installed_launches_for(&plan, &options.installed))
-            .unwrap_or_default(),
-        _ => Vec::new(),
-    };
+    let launches = installed_launches_of_an_apply(options);
     let mut allow = SupportRegistry::with_builtins().allow_list();
     for (language, launch) in &launches {
         allow.allow(language.clone(), launch.clone());
@@ -135,6 +124,22 @@ async fn start_servers(
             .push((language, Arc::clone(&started.client)));
     }
     Ok(Arc::clone(&service.client))
+}
+
+/// The installed languages an `apply`'s plan reaches, each with its launch; none for any other
+/// command. A plan that cannot be read or parsed starts no installed server: the run reads the same
+/// file next and refuses it in its own words, before any operation would reach a server.
+fn installed_launches_of_an_apply(options: &Options) -> Vec<(LanguageId, tddy_lsp::LaunchSpec)> {
+    if options.command != Command::Apply {
+        return Vec::new();
+    }
+    options
+        .plan()
+        .ok()
+        .and_then(|plan| std::fs::read_to_string(plan).ok())
+        .and_then(|text| crate::Plan::parse(&text).ok())
+        .map(|plan| crate::runner::installed_launches_for(&plan, &options.installed))
+        .unwrap_or_default()
 }
 
 /// Write a run's result to the console this front end owns, and say whether the run succeeded.

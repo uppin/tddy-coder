@@ -28,7 +28,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::activity::Activity;
-use crate::apply::{apply_plan, installed_clients_for, HeldPlan};
+use crate::apply::{apply_plan, servers_for_a_run, HeldPlan};
 use crate::index::WorkspaceIndex;
 use crate::proto::code_index::{
     restructure_event, ApplyRequest, CheckRequest, Finding, IndexProgress, RestructureEvent,
@@ -180,7 +180,7 @@ pub(crate) async fn serve_apply(
 ) -> Result<EventStream<RestructureEvent>, Status> {
     let (activity, root) = Activity::arrived("apply", index, &request.workspace_root).await?;
     let plan = activity.refusing(plan_path(&root, &request.plan))?;
-    let options = Options {
+    let mut options = Options {
         command: Command::Apply,
         target: Some(plan.clone()),
         dry_run: request.dry_run,
@@ -212,13 +212,7 @@ pub(crate) async fn serve_apply(
                 return;
             }
         };
-        let servers = match index.client_for(&root).await {
-            Ok(client) => installed_clients_for(&index, &root, &held)
-                .await
-                .map(|installed| (client, installed)),
-            Err(refusal) => Err(refusal),
-        };
-        let (client, installed_clients) = match servers {
+        let (client, installed_clients) = match servers_for_a_run(&index, &root, &held).await {
             Ok(servers) => servers,
             Err(refusal) => {
                 activity.refused(&refusal);
@@ -226,10 +220,7 @@ pub(crate) async fn serve_apply(
                 return;
             }
         };
-        let options = Options {
-            installed_clients,
-            ..options
-        };
+        options.installed_clients = installed_clients;
 
         let cancel = CancellationToken::new();
         let progress = progress_into(events.clone(), cancel.clone());
