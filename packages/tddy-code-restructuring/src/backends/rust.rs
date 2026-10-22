@@ -1416,6 +1416,17 @@ impl RustBackend {
         // The signature and call-site operations are edits this backend writes to the one
         // declaration or call the anchor names, so they are answered by reading the text — before a
         // server exists, like the refusals above.
+        self.signature_or_assisted(op, workspace, relative, uri, original)
+    }
+
+    fn signature_or_assisted(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         if let Some(edits) = Self::rewrite_signature(op, &original)? {
             return Ok(Resolution::of(WorkspaceEdit {
                 changes: vec![FileEdit::Change {
