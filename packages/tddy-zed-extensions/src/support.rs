@@ -15,7 +15,7 @@ use tddy_code_restructuring::{
     ItemPath, LanguageBackend, LanguageSupport, Range, RefactorKind, RefactorOp, Resolution,
     ServerHandle, SupportRegistry,
 };
-use tddy_lsp::{LanguageId, LaunchSpec};
+use tddy_lsp::{LanguageId, LaunchSpec, LspError};
 use tree_sitter::{Language, Query};
 
 use crate::dir::ExtensionsDir;
@@ -138,7 +138,7 @@ impl LanguageSupport for ExtensionSupport {
     }
 
     /// No server is started, so there is no narrower root to find: `root` itself.
-    fn workspace_root(&self, file: &Path, root: &Path) -> PathBuf {
+    fn workspace_root(&self, file: &Path, root: &Path) -> Result<PathBuf, LspError> {
         let _ = (file, root);
         // TODO(reshape-extension-outline): implement
         todo!("ExtensionSupport::workspace_root")
