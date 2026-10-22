@@ -14,6 +14,7 @@ mod index_daemon_body;
 pub mod livekit_host_ports;
 pub mod local_socket_server;
 pub mod provider_model_probe;
+pub mod provider_route_support;
 pub mod runtime;
 pub mod server;
 pub mod session_delta_stores;

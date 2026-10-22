@@ -16,6 +16,7 @@ pub mod session_label;
 pub mod session_lifecycle;
 pub mod session_metadata;
 pub mod session_participant_metadata;
+pub mod session_provider_account;
 pub mod source_path;
 
 // The storage layer these modules are built on, named at the `crate::` paths they used inside
@@ -52,5 +53,9 @@ pub use session_metadata::{
     paired_agent, read_session_metadata, repo_root_for_session, update_activity_status,
     write_initial_tool_session_metadata, write_session_metadata, InitialToolSessionMetadataOpts,
     SessionMetadata, SESSION_METADATA_FILENAME,
+};
+pub use session_provider_account::{
+    read_session_provider_account, write_session_provider_account, SessionProviderAccount,
+    SESSION_PROVIDER_ACCOUNT_FILENAME,
 };
 pub use source_path::{classify_rust_source_path, RustSourcePathKind};

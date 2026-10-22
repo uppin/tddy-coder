@@ -30,6 +30,7 @@ budget.
 | `branch_worktree_intent` | `BranchWorktreeIntent`: whether a session works on a new branch cut from a base or on a selected existing one |
 | `session_lifecycle` | the unified session directory and its id rules |
 | `session_github_source` | the session's recorded GitHub source: `SessionGithubSource { Vault, LocalGh }`, `write_session_github_source`, `read_session_github_source` (`Ok(None)` when none was recorded) |
+| `session_provider_account` | the provider account a session runs on: `SessionProviderAccount { account_id, model }`, `write_session_provider_account`, `read_session_provider_account` (`Ok(None)` when the session runs on its vendor) |
 | `session_metadata`, `session_agent`, `session_activity`, `session_label`, `session_participant_metadata`, `session_context` | the per-session files beside the changeset |
 | `agent_activity` | the agent tool-call activity log |
 | `elapsed_format`, `source_path` | small formatting and path helpers |
@@ -42,6 +43,16 @@ the child, owns it. The daemon writes it only when a start *carried* a source
 (`StartSessionRequest.github_source`); a start that named none records nothing, so a resume re-reads the
 host's project row, as an account assignment is re-read. See
 [session identity](../../tddy-session-lifecycle/docs/session-identity.md#which-source-a-session-uses).
+
+## Session provider account (`session_provider_account`)
+
+The file is `provider-account.yaml` (`SESSION_PROVIDER_ACCOUNT_FILENAME`) in the session directory,
+outside `.session.yaml` for the same two reasons as `github-source.yaml`. Only a session started on a
+provider account writes it, before its harness is spawned. It holds the account **id** and the model,
+never a key — a resume re-reads the key from the owner's vault, so a key rotated or removed since the
+start is what the resume sees. A missing file is `Ok(None)`; an unreadable or malformed one is
+`WorkflowError::ChangesetInvalid`. See
+[Claude Code CLI session § Persistence and resume](../../../docs/ft/daemon/claude-cli-session.md#persistence-and-resume).
 
 ## Changeset (`changeset`)
 

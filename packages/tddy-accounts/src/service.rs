@@ -11,7 +11,8 @@ use tddy_service::proto::accounts::{
     AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse,
     ConnectProviderAccountRequest, ConnectProviderAccountResponse, LinkState, ListAccountsRequest,
     ListAccountsResponse, ListProviderAccountModelsRequest, ListProviderAccountModelsResponse,
-    PollLinkAccountRequest, PollLinkAccountResponse, ProviderAccounts, RemoveAccountRequest,
+    ListProviderRoutesRequest, ListProviderRoutesResponse, PollLinkAccountRequest,
+    PollLinkAccountResponse, ProviderAccounts, ProviderRouteOption, RemoveAccountRequest,
     RemoveAccountResponse, SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse,
     SyncStatus,
 };
@@ -23,7 +24,7 @@ use crate::linking::{
 };
 use crate::provider_account::{
     account_id_for, endpoints_for, preset, ProviderAccount, ProviderAccountError,
-    ProviderAccountStore, ProviderModelProbe,
+    ProviderAccountStore, ProviderModelProbe, RouteSupport, WireProtocol,
 };
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
@@ -63,6 +64,7 @@ pub struct AccountsServiceImpl<S> {
     sync_status: Option<Arc<dyn SyncStatusSource>>,
     linking: Option<Linking>,
     provider_accounts: Option<ProviderAccountPorts>,
+    route_support: Option<Arc<dyn RouteSupport>>,
 }
 
 impl<S> AccountsServiceImpl<S> {
@@ -74,6 +76,7 @@ impl<S> AccountsServiceImpl<S> {
             sync_status: None,
             linking: None,
             provider_accounts: None,
+            route_support: None,
         }
     }
 
@@ -118,6 +121,14 @@ impl<S> AccountsServiceImpl<S> {
         probe: Arc<dyn ProviderModelProbe>,
     ) -> Self {
         self.provider_accounts = Some(ProviderAccountPorts { store, probe });
+        self
+    }
+
+    /// Wire the route matrix `ListProviderRoutes` marks each account with. Unwired, that method
+    /// answers `FAILED_PRECONDITION`.
+    #[must_use]
+    pub fn with_route_support(mut self, support: Arc<dyn RouteSupport>) -> Self {
+        self.route_support = Some(support);
         self
     }
 
@@ -181,6 +192,36 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             .map_err(status_for)?;
         Ok(Response::new(ConnectProviderAccountResponse {
             account: Some(summary_of(&record, self.sync_status.as_deref())),
+        }))
+    }
+
+    async fn list_provider_routes(
+        &self,
+        request: Request<ListProviderRoutesRequest>,
+    ) -> Result<Response<ListProviderRoutesResponse>, Status> {
+        let request = request.into_inner();
+        let matrix = self.route_support.as_deref().ok_or_else(|| {
+            Status::failed_precondition(
+                "this daemon cannot tell which harness runs on which provider account: \
+                 no route matrix is wired",
+            )
+        })?;
+        let records = self
+            .store
+            .list(&request.session_token)
+            .map_err(status_for)?;
+        let harness_reason = matrix.harness_routable(&request.harness).err();
+        let options = records
+            .iter()
+            .filter_map(ProviderAccount::from_record)
+            .map(|account| {
+                route_option(matrix, &request.harness, harness_reason.as_deref(), account)
+            })
+            .collect();
+        Ok(Response::new(ListProviderRoutesResponse {
+            options,
+            harness_routable: harness_reason.is_none(),
+            harness_reason: harness_reason.unwrap_or_default(),
         }))
     }
 
@@ -348,6 +389,32 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             .map_err(link_status_for)?;
         let response = self.answer_for(linking, &request, &provider, progress)?;
         Ok(Response::new(response))
+    }
+}
+
+/// One account as `ListProviderRoutes` offers it for `harness`: the matrix's verdict verbatim, or the
+/// harness's own refusal when no account can run it.
+fn route_option(
+    matrix: &dyn RouteSupport,
+    harness: &str,
+    harness_reason: Option<&str>,
+    account: ProviderAccount,
+) -> ProviderRouteOption {
+    let protocols: Vec<&str> = account
+        .wire_protocols()
+        .into_iter()
+        .map(WireProtocol::as_str)
+        .collect();
+    let verdict = match harness_reason {
+        Some(reason) => Err(reason.to_string()),
+        None => matrix.supports(harness, account.preset.id, &protocols),
+    };
+    ProviderRouteOption {
+        account_id: account.account.as_str().to_string(),
+        label: account.label,
+        preset: account.preset.id.to_string(),
+        supported: verdict.is_ok(),
+        reason: verdict.err().unwrap_or_default(),
     }
 }
 

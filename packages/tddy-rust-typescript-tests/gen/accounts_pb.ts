@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file accounts.proto.
  */
 export const file_accounts: GenFile = /*@__PURE__*/
-  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMi0QEKDkFjY291bnRTdW1tYXJ5EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkSDQoFbGFiZWwYAyABKAkSDwoHc3ViamVjdBgEIAEoCRISCgp1cGRhdGVkX2F0GAUgASgDEhIKCmhhc19zZWNyZXQYBiABKAgSKQoLc3luY19zdGF0dXMYByABKA4yFC5hY2NvdW50cy5TeW5jU3RhdHVzEg4KBnByZXNldBgIIAEoCRIWCg53aXJlX3Byb3RvY29scxgJIAMoCSJQChBQcm92aWRlckFjY291bnRzEhAKCHByb3ZpZGVyGAEgASgJEioKCGFjY291bnRzGAIgAygLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiLAoTTGlzdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIsQBChRMaXN0QWNjb3VudHNSZXNwb25zZRItCglwcm92aWRlcnMYASADKAsyGi5hY2NvdW50cy5Qcm92aWRlckFjY291bnRzEhQKDHZhdWx0X2xvY2tlZBgCIAEoCBIbChN2YXVsdF91bmluaXRpYWxpemVkGAMgASgIEjYKD3Nlc3Npb25fYWNjb3VudBgEIAEoCzIYLmFjY291bnRzLlNlc3Npb25BY2NvdW50SACIAQFCEgoQX3Nlc3Npb25fYWNjb3VudCJkChZTZXRBY2NvdW50TGFiZWxSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEgoKYWNjb3VudF9pZBgDIAEoCRINCgVsYWJlbBgEIAEoCSJEChdTZXRBY2NvdW50TGFiZWxSZXNwb25zZRIpCgdhY2NvdW50GAEgASgLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiUwoUUmVtb3ZlQWNjb3VudFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCRISCgphY2NvdW50X2lkGAMgASgJIkYKFVJlbW92ZUFjY291bnRSZXNwb25zZRItCglwcm92aWRlcnMYASADKAsyGi5hY2NvdW50cy5Qcm92aWRlckFjY291bnRzIjYKDlNlc3Npb25BY2NvdW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkiQgoXQmVnaW5MaW5rQWNjb3VudFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCSKOAQoYQmVnaW5MaW5rQWNjb3VudFJlc3BvbnNlEg8KB2xpbmtfaWQYASABKAkSEQoJdXNlcl9jb2RlGAIgASgJEhgKEHZlcmlmaWNhdGlvbl91cmkYAyABKAkSGgoSZXhwaXJlc19pbl9zZWNvbmRzGAQgASgDEhgKEGludGVydmFsX3NlY29uZHMYBSABKAMiQAoWUG9sbExpbmtBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg8KB2xpbmtfaWQYAiABKAkiggEKF1BvbGxMaW5rQWNjb3VudFJlc3BvbnNlEiIKBXN0YXRlGAEgASgOMhMuYWNjb3VudHMuTGlua1N0YXRlEikKB2FjY291bnQYAiABKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeRIYChBpbnRlcnZhbF9zZWNvbmRzGAMgASgDIpsBCh1Db25uZWN0UHJvdmlkZXJBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg4KBnByZXNldBgCIAEoCRINCgVsYWJlbBgDIAEoCRIPCgdhcGlfa2V5GAQgASgJEhoKEmFudGhyb3BpY19iYXNlX3VybBgFIAEoCRIXCg9vcGVuYWlfYmFzZV91cmwYBiABKAkiSwoeQ29ubmVjdFByb3ZpZGVyQWNjb3VudFJlc3BvbnNlEikKB2FjY291bnQYASABKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeSJNCiBMaXN0UHJvdmlkZXJBY2NvdW50TW9kZWxzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkiNgohTGlzdFByb3ZpZGVyQWNjb3VudE1vZGVsc1Jlc3BvbnNlEhEKCW1vZGVsX2lkcxgBIAMoCSqsAQoKU3luY1N0YXR1cxIbChdTWU5DX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKElNZTkNfU1RBVFVTX1NZTkNFRBABEhcKE1NZTkNfU1RBVFVTX1BFTkRJTkcQAhIdChlTWU5DX1NUQVRVU19VTkRFTElWRVJBQkxFEAMSGAoUU1lOQ19TVEFUVVNfQ09ORkxJQ1QQBBIXChNTWU5DX1NUQVRVU19SRUZVU0VEEAUqhAEKCUxpbmtTdGF0ZRIaChZMSU5LX1NUQVRFX1VOU1BFQ0lGSUVEEAASEAoMTElOS19QRU5ESU5HEAESDwoLTElOS19MSU5LRUQQAhIPCgtMSU5LX0RFTklFRBADEhAKDExJTktfRVhQSVJFRBAEEhUKEUxJTktfVkFVTFRfTE9DS0VEEAUyoAUKD0FjY291bnRzU2VydmljZRJNCgxMaXN0QWNjb3VudHMSHS5hY2NvdW50cy5MaXN0QWNjb3VudHNSZXF1ZXN0Gh4uYWNjb3VudHMuTGlzdEFjY291bnRzUmVzcG9uc2USVgoPU2V0QWNjb3VudExhYmVsEiAuYWNjb3VudHMuU2V0QWNjb3VudExhYmVsUmVxdWVzdBohLmFjY291bnRzLlNldEFjY291bnRMYWJlbFJlc3BvbnNlElAKDVJlbW92ZUFjY291bnQSHi5hY2NvdW50cy5SZW1vdmVBY2NvdW50UmVxdWVzdBofLmFjY291bnRzLlJlbW92ZUFjY291bnRSZXNwb25zZRJZChBCZWdpbkxpbmtBY2NvdW50EiEuYWNjb3VudHMuQmVnaW5MaW5rQWNjb3VudFJlcXVlc3QaIi5hY2NvdW50cy5CZWdpbkxpbmtBY2NvdW50UmVzcG9uc2USVgoPUG9sbExpbmtBY2NvdW50EiAuYWNjb3VudHMuUG9sbExpbmtBY2NvdW50UmVxdWVzdBohLmFjY291bnRzLlBvbGxMaW5rQWNjb3VudFJlc3BvbnNlEmsKFkNvbm5lY3RQcm92aWRlckFjY291bnQSJy5hY2NvdW50cy5Db25uZWN0UHJvdmlkZXJBY2NvdW50UmVxdWVzdBooLmFjY291bnRzLkNvbm5lY3RQcm92aWRlckFjY291bnRSZXNwb25zZRJ0ChlMaXN0UHJvdmlkZXJBY2NvdW50TW9kZWxzEiouYWNjb3VudHMuTGlzdFByb3ZpZGVyQWNjb3VudE1vZGVsc1JlcXVlc3QaKy5hY2NvdW50cy5MaXN0UHJvdmlkZXJBY2NvdW50TW9kZWxzUmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMi0QEKDkFjY291bnRTdW1tYXJ5EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkSDQoFbGFiZWwYAyABKAkSDwoHc3ViamVjdBgEIAEoCRISCgp1cGRhdGVkX2F0GAUgASgDEhIKCmhhc19zZWNyZXQYBiABKAgSKQoLc3luY19zdGF0dXMYByABKA4yFC5hY2NvdW50cy5TeW5jU3RhdHVzEg4KBnByZXNldBgIIAEoCRIWCg53aXJlX3Byb3RvY29scxgJIAMoCSJQChBQcm92aWRlckFjY291bnRzEhAKCHByb3ZpZGVyGAEgASgJEioKCGFjY291bnRzGAIgAygLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiLAoTTGlzdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIsQBChRMaXN0QWNjb3VudHNSZXNwb25zZRItCglwcm92aWRlcnMYASADKAsyGi5hY2NvdW50cy5Qcm92aWRlckFjY291bnRzEhQKDHZhdWx0X2xvY2tlZBgCIAEoCBIbChN2YXVsdF91bmluaXRpYWxpemVkGAMgASgIEjYKD3Nlc3Npb25fYWNjb3VudBgEIAEoCzIYLmFjY291bnRzLlNlc3Npb25BY2NvdW50SACIAQFCEgoQX3Nlc3Npb25fYWNjb3VudCJkChZTZXRBY2NvdW50TGFiZWxSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEgoKYWNjb3VudF9pZBgDIAEoCRINCgVsYWJlbBgEIAEoCSJEChdTZXRBY2NvdW50TGFiZWxSZXNwb25zZRIpCgdhY2NvdW50GAEgASgLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiUwoUUmVtb3ZlQWNjb3VudFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCRISCgphY2NvdW50X2lkGAMgASgJIkYKFVJlbW92ZUFjY291bnRSZXNwb25zZRItCglwcm92aWRlcnMYASADKAsyGi5hY2NvdW50cy5Qcm92aWRlckFjY291bnRzIjYKDlNlc3Npb25BY2NvdW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkiQgoXQmVnaW5MaW5rQWNjb3VudFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCSKOAQoYQmVnaW5MaW5rQWNjb3VudFJlc3BvbnNlEg8KB2xpbmtfaWQYASABKAkSEQoJdXNlcl9jb2RlGAIgASgJEhgKEHZlcmlmaWNhdGlvbl91cmkYAyABKAkSGgoSZXhwaXJlc19pbl9zZWNvbmRzGAQgASgDEhgKEGludGVydmFsX3NlY29uZHMYBSABKAMiQAoWUG9sbExpbmtBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg8KB2xpbmtfaWQYAiABKAkiggEKF1BvbGxMaW5rQWNjb3VudFJlc3BvbnNlEiIKBXN0YXRlGAEgASgOMhMuYWNjb3VudHMuTGlua1N0YXRlEikKB2FjY291bnQYAiABKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeRIYChBpbnRlcnZhbF9zZWNvbmRzGAMgASgDIpsBCh1Db25uZWN0UHJvdmlkZXJBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEg4KBnByZXNldBgCIAEoCRINCgVsYWJlbBgDIAEoCRIPCgdhcGlfa2V5GAQgASgJEhoKEmFudGhyb3BpY19iYXNlX3VybBgFIAEoCRIXCg9vcGVuYWlfYmFzZV91cmwYBiABKAkiSwoeQ29ubmVjdFByb3ZpZGVyQWNjb3VudFJlc3BvbnNlEikKB2FjY291bnQYASABKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeSJNCiBMaXN0UHJvdmlkZXJBY2NvdW50TW9kZWxzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkiNgohTGlzdFByb3ZpZGVyQWNjb3VudE1vZGVsc1Jlc3BvbnNlEhEKCW1vZGVsX2lkcxgBIAMoCSJDChlMaXN0UHJvdmlkZXJSb3V0ZXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDwoHaGFybmVzcxgCIAEoCSJrChNQcm92aWRlclJvdXRlT3B0aW9uEhIKCmFjY291bnRfaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDgoGcHJlc2V0GAMgASgJEhEKCXN1cHBvcnRlZBgEIAEoCBIOCgZyZWFzb24YBSABKAkifgoaTGlzdFByb3ZpZGVyUm91dGVzUmVzcG9uc2USLgoHb3B0aW9ucxgBIAMoCzIdLmFjY291bnRzLlByb3ZpZGVyUm91dGVPcHRpb24SGAoQaGFybmVzc19yb3V0YWJsZRgCIAEoCBIWCg5oYXJuZXNzX3JlYXNvbhgDIAEoCSqsAQoKU3luY1N0YXR1cxIbChdTWU5DX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKElNZTkNfU1RBVFVTX1NZTkNFRBABEhcKE1NZTkNfU1RBVFVTX1BFTkRJTkcQAhIdChlTWU5DX1NUQVRVU19VTkRFTElWRVJBQkxFEAMSGAoUU1lOQ19TVEFUVVNfQ09ORkxJQ1QQBBIXChNTWU5DX1NUQVRVU19SRUZVU0VEEAUqhAEKCUxpbmtTdGF0ZRIaChZMSU5LX1NUQVRFX1VOU1BFQ0lGSUVEEAASEAoMTElOS19QRU5ESU5HEAESDwoLTElOS19MSU5LRUQQAhIPCgtMSU5LX0RFTklFRBADEhAKDExJTktfRVhQSVJFRBAEEhUKEUxJTktfVkFVTFRfTE9DS0VEEAUygQYKD0FjY291bnRzU2VydmljZRJNCgxMaXN0QWNjb3VudHMSHS5hY2NvdW50cy5MaXN0QWNjb3VudHNSZXF1ZXN0Gh4uYWNjb3VudHMuTGlzdEFjY291bnRzUmVzcG9uc2USVgoPU2V0QWNjb3VudExhYmVsEiAuYWNjb3VudHMuU2V0QWNjb3VudExhYmVsUmVxdWVzdBohLmFjY291bnRzLlNldEFjY291bnRMYWJlbFJlc3BvbnNlElAKDVJlbW92ZUFjY291bnQSHi5hY2NvdW50cy5SZW1vdmVBY2NvdW50UmVxdWVzdBofLmFjY291bnRzLlJlbW92ZUFjY291bnRSZXNwb25zZRJZChBCZWdpbkxpbmtBY2NvdW50EiEuYWNjb3VudHMuQmVnaW5MaW5rQWNjb3VudFJlcXVlc3QaIi5hY2NvdW50cy5CZWdpbkxpbmtBY2NvdW50UmVzcG9uc2USVgoPUG9sbExpbmtBY2NvdW50EiAuYWNjb3VudHMuUG9sbExpbmtBY2NvdW50UmVxdWVzdBohLmFjY291bnRzLlBvbGxMaW5rQWNjb3VudFJlc3BvbnNlEmsKFkNvbm5lY3RQcm92aWRlckFjY291bnQSJy5hY2NvdW50cy5Db25uZWN0UHJvdmlkZXJBY2NvdW50UmVxdWVzdBooLmFjY291bnRzLkNvbm5lY3RQcm92aWRlckFjY291bnRSZXNwb25zZRJ0ChlMaXN0UHJvdmlkZXJBY2NvdW50TW9kZWxzEiouYWNjb3VudHMuTGlzdFByb3ZpZGVyQWNjb3VudE1vZGVsc1JlcXVlc3QaKy5hY2NvdW50cy5MaXN0UHJvdmlkZXJBY2NvdW50TW9kZWxzUmVzcG9uc2USXwoSTGlzdFByb3ZpZGVyUm91dGVzEiMuYWNjb3VudHMuTGlzdFByb3ZpZGVyUm91dGVzUmVxdWVzdBokLmFjY291bnRzLkxpc3RQcm92aWRlclJvdXRlc1Jlc3BvbnNlYgZwcm90bzM");
 
 /**
  * One linked account, as a person sees it.
@@ -577,6 +577,99 @@ export const ListProviderAccountModelsResponseSchema: GenMessage<ListProviderAcc
   messageDesc(file_accounts, 16);
 
 /**
+ * @generated from message accounts.ListProviderRoutesRequest
+ */
+export type ListProviderRoutesRequest = Message<"accounts.ListProviderRoutesRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * A tool-session agent id ("claude", "codex-acp", …) or a CLI session type ("claude-cli", …).
+   *
+   * @generated from field: string harness = 2;
+   */
+  harness: string;
+};
+
+/**
+ * Describes the message accounts.ListProviderRoutesRequest.
+ * Use `create(ListProviderRoutesRequestSchema)` to create a new message.
+ */
+export const ListProviderRoutesRequestSchema: GenMessage<ListProviderRoutesRequest> = /*@__PURE__*/
+  messageDesc(file_accounts, 17);
+
+/**
+ * @generated from message accounts.ProviderRouteOption
+ */
+export type ProviderRouteOption = Message<"accounts.ProviderRouteOption"> & {
+  /**
+   * @generated from field: string account_id = 1;
+   */
+  accountId: string;
+
+  /**
+   * @generated from field: string label = 2;
+   */
+  label: string;
+
+  /**
+   * @generated from field: string preset = 3;
+   */
+  preset: string;
+
+  /**
+   * @generated from field: bool supported = 4;
+   */
+  supported: boolean;
+
+  /**
+   * Why `harness` cannot run on this account; empty when supported.
+   *
+   * @generated from field: string reason = 5;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message accounts.ProviderRouteOption.
+ * Use `create(ProviderRouteOptionSchema)` to create a new message.
+ */
+export const ProviderRouteOptionSchema: GenMessage<ProviderRouteOption> = /*@__PURE__*/
+  messageDesc(file_accounts, 18);
+
+/**
+ * @generated from message accounts.ListProviderRoutesResponse
+ */
+export type ListProviderRoutesResponse = Message<"accounts.ListProviderRoutesResponse"> & {
+  /**
+   * @generated from field: repeated accounts.ProviderRouteOption options = 1;
+   */
+  options: ProviderRouteOption[];
+
+  /**
+   * False when the harness cannot run on any provider account (Cursor); `options` are then all
+   * unsupported and `harness_reason` says why.
+   *
+   * @generated from field: bool harness_routable = 2;
+   */
+  harnessRoutable: boolean;
+
+  /**
+   * @generated from field: string harness_reason = 3;
+   */
+  harnessReason: string;
+};
+
+/**
+ * Describes the message accounts.ListProviderRoutesResponse.
+ * Use `create(ListProviderRoutesResponseSchema)` to create a new message.
+ */
+export const ListProviderRoutesResponseSchema: GenMessage<ListProviderRoutesResponse> = /*@__PURE__*/
+  messageDesc(file_accounts, 19);
+
+/**
  * One account's aggregate standing across every peer it has been offered to, worst first: a
  * refusal means this deployment is misconfigured and nobody will fix it without being told; a
  * conflict means two edits raced; undeliverable is the network, and often clears on its own;
@@ -757,6 +850,17 @@ export const AccountsService: GenService<{
     methodKind: "unary";
     input: typeof ListProviderAccountModelsRequestSchema;
     output: typeof ListProviderAccountModelsResponseSchema;
+  },
+  /**
+   * The caller's provider accounts, each marked with whether `harness` can run on it and why not.
+   * The matrix lives in the daemon; a client never re-derives it.
+   *
+   * @generated from rpc accounts.AccountsService.ListProviderRoutes
+   */
+  listProviderRoutes: {
+    methodKind: "unary";
+    input: typeof ListProviderRoutesRequestSchema;
+    output: typeof ListProviderRoutesResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_accounts, 0);

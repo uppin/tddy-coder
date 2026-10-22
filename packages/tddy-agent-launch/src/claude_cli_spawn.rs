@@ -29,6 +29,9 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use crate::session_acting_identity::SessionAccountAccess;
 
+use crate::session_provider_route::{start_route, StartRoute};
+use tddy_core::provider_route::{Harness, RouteSources};
+
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
 #[allow(clippy::too_many_arguments)]
@@ -62,6 +65,8 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // What the session's vault says about the project's GitHub account — read once, here, for the
     // commit identity the agent is launched with.
     account_access: &SessionAccountAccess,
+    // The levels the session's provider account is chosen at; default for a child spawn.
+    route_sources: &RouteSources,
     task_registry: &TaskRegistry,
     // Where the start's phases (worktree, semantic index, agent) are announced; discarding for a
     // caller with nobody watching.
@@ -87,10 +92,13 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // start: the agent then commits under the checkout's own identity, and the reason is logged.
     // The token half of the same assignments goes to the agent's tools over the session's toolcall
     // socket, per call — never into the commit pairs or any file.
-    // Create session directory under sessions_base/sessions/<id>/.
-    let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-    std::fs::create_dir_all(&session_dir)
-        .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+    let (session_dir, provider_route) = create_routed_session_dir(
+        &sessions_base,
+        session_id,
+        account_access,
+        route_sources,
+        model,
+    )?;
     let identity =
         account_access.session_identity_in(session_id, os_user, &session_dir, Some(&project));
     let git_environment = identity.git_environment;
@@ -195,7 +203,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // recipe's orchestration prompt to a file `claude` appends to its system prompt, and inject
     // a per-session TDDY_SOCKET (+ a PATH that resolves tddy-tools) so the agent's host-side
     // `tddy-tools transition` reaches this session's controller.
-    let (managed, append_system_prompt_file, env_extra) =
+    let (managed, append_system_prompt_file, mut env_extra) =
         claude_cli_spawn_steps::managed_claude_cli_launch(
             claude_cli_spawn_steps::ManagedClaudeCliLaunch {
                 tddy_data_dir,
@@ -214,6 +222,8 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             },
         )
         .await?;
+
+    env_extra.extend(provider_route.map(|route| route.env).unwrap_or_default());
 
     progress.begin_phase(StartStep::Agent);
     let handle = claude_cli_spawn_steps::spawn_claude_cli_process(
@@ -312,6 +322,27 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         livekit_server_identity: lk_server_identity,
         branch_conflict: None,
     }))
+}
+
+/// The session's provider route and its directory under `sessions_base/sessions/<id>/`, with the
+/// route's account recorded there. The route is resolved **before** the directory is created: a
+/// locked vault or an unusable account refuses the start with nothing on disk, and a chosen account
+/// never falls back to the vendor.
+pub(crate) fn create_routed_session_dir(
+    sessions_base: &Path,
+    session_id: &str,
+    account_access: &SessionAccountAccess,
+    route_sources: &RouteSources,
+    model: &str,
+) -> Result<(PathBuf, Option<StartRoute>), Status> {
+    let provider_route = start_route(account_access, Harness::ClaudeCli, route_sources, model)?;
+    let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+    std::fs::create_dir_all(&session_dir)
+        .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+    if let Some(route) = &provider_route {
+        route.record_in(&session_dir)?;
+    }
+    Ok((session_dir, provider_route))
 }
 
 pub use crate::claude_cli_spawn_steps;

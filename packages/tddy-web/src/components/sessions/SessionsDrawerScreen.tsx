@@ -1,70 +1,45 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
-import { ProjectService, type ProjectEntry } from "../../gen/project_pb";
-import { SessionService, SessionEntrySchema, type SessionEntry } from "../../gen/session_pb";
+import { ProjectService } from "../../gen/project_pb";
+import { SessionService, SessionEntrySchema, Signal } from "../../gen/session_pb";
 import { ActivityService } from "../../gen/activity_pb";
+import { AccountsService } from "../../gen/accounts_pb";
 import { CatalogService } from "../../gen/catalog_pb";
 import { ExecToolService } from "../../gen/exec_tools_pb";
 import { PrStackService } from "../../gen/pr_stack_pb";
 import { SessionAgentService } from "../../gen/session_agents_pb";
 import { SessionFilesService } from "../../gen/session_files_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
-import { CodeNavigationService } from "../../gen/code_navigation_pb";
 import { WorktreeService } from "../../gen/worktree_pb";
-import { useHttpClient } from "../../rpc/transportProvider";
-import { useHostConnection, useHostConnector } from "../../rpc/connections/registry";
-import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { useHostConnector } from "../../rpc/connections/registry";
+import { useDaemonClient, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
-import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
-import { owningHostForSession } from "../../utils/crossHostSessions";
-import { useRoomParticipants } from "../../hooks/useRoomParticipants";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
-import { useSessionManager } from "./sessionManager";
-import {
-  attachActionForSnapshot,
-  claimAfterFeedEnd,
-  shouldResetAttachmentOnFeedEnd,
-  type AttachClaim,
-} from "./attachClaim";
-import {
-  SessionRuntimeRegistry,
-  makeByteTap,
-  type ByteDelta,
-  type SessionRuntimeConnection,
-} from "./sessionRuntimeRegistry";
 import { sessionNotificationRegistry } from "./sessionNotificationRegistry";
 import { useSessionNotifications } from "../../rpc/useSessionNotifications";
 import { useAuthContext } from "../../hooks/authProvider";
 import { AppShell } from "../shell/AppShell";
-import { Button } from "../ui/button";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
-import { withoutJailedCodebaseHalves } from "./jailedCodebaseHalf";
 import { HostStatsFooter } from "./HostStatsFooter";
 import { useSessionAttachment } from "./useSessionAttachment";
-import { nextInspectorState } from "./inspectorState";
-import {
-  sessionsDrawerPathForSession,
-  parseSessionsDrawerSessionId,
-  isSessionsNewPath,
-  isInspectorTabName,
-  SESSIONS_DRAWER_ROUTE,
-  SESSIONS_NEW_ROUTE,
-  type InspectorTabName,
-} from "../../routing/appRoutes";
-import { PARAM_CODE, PARAM_FULL, PARAM_INSPECTOR } from "../../routing/appLocation";
-import { useAppLocation } from "../../routing/useAppLocation";
-import { Signal } from "../../gen/session_pb";
-import type { InspectorDrawerState } from "./SessionInspectorDrawer";
+import { sessionsDrawerPathForSession, SESSIONS_DRAWER_ROUTE, SESSIONS_NEW_ROUTE } from "../../routing/appRoutes";
 import { detectIsMobile, useIsMobile } from "../../hooks/useIsMobile";
 import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
-import { joinQuotedPaths } from "../../lib/shellQuote";
 import { isCliTerminalSession } from "../../constants/claudeCliModels";
-import { PanelLeftOpen } from "lucide-react";
+import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
+import { useSessionsDrawerAttachClaims } from "./useSessionsDrawerAttachClaims";
+import { useSessionsDrawerProjects } from "./useSessionsDrawerProjects";
+import { useSessionsDrawerRuntimeRegistry } from "./useSessionsDrawerRuntimeRegistry";
+import { useSessionsDrawerSessionList } from "./useSessionsDrawerSessionList";
+import { useSessionsDrawerRuntimeAttachment } from "./useSessionsDrawerRuntimeAttachment";
+import { useSessionsDrawerOwningHost } from "./useSessionsDrawerOwningHost";
+import { useSessionsDrawerActivation } from "./useSessionsDrawerActivation";
+import { useSessionsDrawerDeleteSelection } from "./useSessionsDrawerDeleteSelection";
+import { SessionsDrawerOpenListButton, SessionsDrawerUnknownSession } from "./SessionsDrawerScreenParts";
 
 // ---------------------------------------------------------------------------
 // Screen
@@ -109,6 +84,9 @@ export function SessionsDrawerScreen({
   const activityClient = useDaemonClient(ActivityService);
   // `#unbundle` node 8 took families A, L and P to their own services on the same daemon and wire.
   const catalogClient = useDaemonClient(CatalogService);
+  // The signed-in person's provider accounts live in this daemon's vault; the New-session form lists
+  // them for the harness it is about to start.
+  const accountsClient = useDaemonClient(AccountsService);
   const execToolClient = useDaemonClient(ExecToolService);
   const prStackClient = useDaemonClient(PrStackService);
 
@@ -135,138 +113,26 @@ export function SessionsDrawerScreen({
     [connectHost],
   );
 
-  // Selection is derived from the URL, not held in state: that is what makes Back, Forward, a
-  // pasted link and a reload all move the screen through the same code path.
-  const { location, navigate, setParams } = useAppLocation();
-  const selectedSessionId = parseSessionsDrawerSessionId(location.path);
-  const mode: "list" | "creating" = isSessionsNewPath(location.path) ? "creating" : "list";
+  const {
+    location,
+    navigate,
+    setParams,
+    selectedSessionId,
+    mode,
+    inspectorTabParam,
+    inspectorState,
+    applyInspectorState,
+    handleInspectorToggle,
+    handleInspectorClose,
+    handleInspectorExpand,
+    handleInspectorRestore,
+  } = useSessionsDrawerInspector();
 
-  // Inspector state, likewise: the tab's presence in the URL *is* "the inspector is open".
-  const inspectorTabParam = location.params[PARAM_INSPECTOR] ?? "";
-  const inspectorTab: InspectorTabName = isInspectorTabName(inspectorTabParam)
-    ? inspectorTabParam
-    : "details";
-  const inspectorState: InspectorDrawerState =
-    inspectorTabParam === ""
-      ? "closed"
-      : location.params[PARAM_FULL] === "1"
-        ? "expanded"
-        : "open";
+  const claims = useSessionsDrawerAttachClaims();
+  const { attachClaimRef, settleAttach, listGenerationRef, awaitingCreatedSessionIdRef, unknownSession, setUnknownSession } =
+    claims;
 
-  /**
-   * Write an inspector state into the URL. `replace` for the transitions the screen makes on the
-   * operator's behalf (the closed default on selection, the open on an attach error) so Back does
-   * not step through states nobody chose; a plain push for a click.
-   */
-  const applyInspectorState = useCallback(
-    (next: InspectorDrawerState, options?: { replace?: boolean; tab?: InspectorTabName }) => {
-      const tab = options?.tab ?? inspectorTab;
-      setParams(
-        next === "closed"
-          ? { [PARAM_INSPECTOR]: null, [PARAM_FULL]: null }
-          : { [PARAM_INSPECTOR]: tab, [PARAM_FULL]: next === "expanded" ? "1" : null },
-        options,
-      );
-    },
-    [inspectorTab, setParams],
-  );
-
-  // A tab name the inspector does not have would render a blank panel — normalise it away.
-  useEffect(() => {
-    if (inspectorTabParam !== "" && !isInspectorTabName(inspectorTabParam)) {
-      setParams({ [PARAM_INSPECTOR]: "details" }, { replace: true });
-    }
-  }, [inspectorTabParam, setParams]);
-
-  // The attach already taken for the selected session's *current live epoch*. Written by the
-  // activation effect (selection), the liveness effect (a selected session that comes alive) and
-  // `handleResume`, so no two of them can fire a `ConnectSession` for the same session.
-  //
-  // "Live epoch" is the load-bearing part: the claim is dropped once a *later* list snapshot reports
-  // the session dormant. A session can die and be resumed repeatedly without the selection ever
-  // changing, and each revival owes a fresh attach — a claim that only reset on selection change
-  // would strand every resume after the first on an empty pane.
-  const attachClaimRef = useRef<AttachClaim | null>(null);
-  // The session whose last attach failed and was already given its one automatic retry.
-  const retriedAttachSessionRef = useRef<string | null>(null);
-  /**
-   * What a finished `ConnectSession` owes the attach claim.
-   *
-   * A failed attach took nothing, so its claim is given back and the liveness effect re-attaches on
-   * the next list snapshot — a live session offers no Resume to recover by. That is allowed once per
-   * session: a second consecutive failure keeps the claim, so a persistent failure stays on the
-   * `error` status and inspector instead of spinning a `ConnectSession` per poll.
-   */
-  const settleAttach = (sessionId: string, attached: boolean) => {
-    if (attached) {
-      retriedAttachSessionRef.current = null;
-      return;
-    }
-    if (retriedAttachSessionRef.current === sessionId) return;
-    retriedAttachSessionRef.current = sessionId;
-    if (attachClaimRef.current?.sessionId === sessionId) attachClaimRef.current = null;
-  };
-  // Bumped once per session-list snapshot, so an attach claim can record which snapshot it was taken
-  // under. Without it a resume could not be told apart from a stale dormant reading: `ResumeSession`
-  // returns before the daemon's next `ListSessions`, so the list keeps reporting the session dormant
-  // for up to one poll after the attach is already established.
-  const listGenerationRef = useRef(0);
-  // The session id the activation effect below has already run for. Keyed on the id (not a one-shot
-  // boolean) so an inbound URL change — Back, a pasted link — activates the newly named session,
-  // while a re-render for the same id does not re-connect it.
-  const activatedSessionIdRef = useRef<string | null>(null);
-  // Whether the activation effect has run at all. The first activation honours an `?inspector=` the
-  // URL already carried (a deep link asked for that tab); later ones recompute the default for the
-  // newly selected session, as selecting a session in the drawer has always done.
-  const firstActivationPendingRef = useRef(true);
-  // The session this screen just created and navigated to. `StartSession` returns before the list
-  // refresh that carries the new session lands, so until then its absence from an already-loaded
-  // list means "not listed yet", not "unknown" — the activation effect waits for it instead.
-  const awaitingCreatedSessionIdRef = useRef<string | null>(null);
-  // A deep link (`#/sessions/:id`) that resolves to no known session after the list loads shows a
-  // not-found state instead of silently no-opping. Driven by local state so it dismisses on Home
-  // without depending on a hash change.
-  const [unknownSession, setUnknownSession] = useState(false);
-  // Sessions ticked for bulk delete — a Set preserves insertion (selection) order, which the bulk
-  // delete replays so sessions are removed in the order they were selected.
-  const [selectedForDelete, setSelectedForDelete] = useState<Set<string>>(() => new Set());
-  // Bulk-selection mode: off by default so the drawer reads as a plain list. The bottom minibar
-  // toggles it on, which is what reveals the per-row checkboxes and the Select-all / Delete actions.
-  const [selectionMode, setSelectionMode] = useState(false);
-
-  const toggleSelectForDelete = useCallback((sessionId: string) => {
-    setSelectedForDelete((prev) => {
-      const next = new Set(prev);
-      if (next.has(sessionId)) next.delete(sessionId);
-      else next.add(sessionId);
-      return next;
-    });
-  }, []);
-
-  const enterSelectionMode = useCallback(() => setSelectionMode(true), []);
-
-  // Leaving selection mode always clears the tick set — a stale selection must not survive into the
-  // next time the operator opens the bar.
-  const exitSelectionMode = useCallback(() => {
-    setSelectionMode(false);
-    setSelectedForDelete(new Set());
-  }, []);
-
-  // The project registry (daemon-level RPC over the selected-daemon common-room connection). Used
-  // to resolve an unscoped session's project from its `repoPath` before the worktree RPCs — those
-  // require a non-empty `project_id`. Falls back to an empty list when no daemon is selected yet or
-  // the call fails, so the drawer still renders.
-  const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  useEffect(() => {
-    if (!projectClient) {
-      setProjects([]);
-      return;
-    }
-    projectClient
-      .listProjects({ sessionToken })
-      .then((res) => setProjects(res.projects))
-      .catch(() => setProjects([]));
-  }, [projectClient, sessionToken]);
+  const projects = useSessionsDrawerProjects(projectClient, sessionToken);
 
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
@@ -277,244 +143,58 @@ export function SessionsDrawerScreen({
 
   const connectedSessionId =
     attachment.status === "connected" ? attachment.connection.sessionId : null;
+  const {
+    runtimeRegistry,
+    runtimes,
+    buildSessionExecToolClient,
+    buildSessionActivityClient,
+    onSessionRegisterInsert,
+    onSessionBytes,
+    handleInsertPathIntoTerminal,
+  } = useSessionsDrawerRuntimeRegistry(connectedSessionId);
 
-  // Per-session runtime registry: one entry per attached session, surviving focus switches.
-  // The inspector reads byte counters + last-received from it for active sessions; inactive sessions
-  // fall back to the daemon-sourced `SessionEntry` fields (req 5 dual source). Created once and kept
-  // in a ref so the `SessionRuntimeRegistry` instance (and its cached `runtimes` snapshot) is stable
-  // across renders — must be instantiated before any callback that touches it (buildSessionClient,
-  // onSessionDisconnect).
-  const runtimeRegistryRef = useRef<SessionRuntimeRegistry | null>(null);
-  runtimeRegistryRef.current ??= new SessionRuntimeRegistry();
-  const runtimeRegistry = runtimeRegistryRef.current;
-  const runtimes = useSyncExternalStore(
-    (listener) => runtimeRegistry.subscribe(listener),
-    () => runtimeRegistry.runtimes,
-    () => runtimeRegistry.runtimes,
-  );
-
-  // This screen is route-level, so any navigation away unmounts it and takes the registry ref with
-  // it — and with the registry goes the last reference to every session connection it was holding.
-  // Releasing them here is the only thing standing between "the operator opened the projects page"
-  // and a joined LiveKit room plus a self-rescheduling token timer per session, alive until the tab
-  // is closed.
-  useEffect(() => () => runtimeRegistry.closeAll(), [runtimeRegistry]);
-
-  // Session-scoped SessionService client — the one that reaches the session's own process rather
-  // than the daemon that hosts it. Built LAZILY, only when the user actually invokes a session-scoped
-  // RPC (ExecuteTool), so that lifecycle RPCs (Delete/Signal/Resume/Connect) stay daemon-direct.
-  // `ClaimTerminalControl` is no longer one of them: the terminal RPCs left `SessionService` for
-  // `terminal_session.TerminalSessionService`, and each runtime builds that client off its own
-  // connection. The connection memoises the client per service,
-  // so an unchanged route yields one stable client identity: this callback is invoked inline while
-  // rendering, and consumers key stream effects on the client.
-  //
-  // Read from the runtime registry rather than from the attachment: the registry holds the
-  // connections that are still open, so a session whose runtime has been evicted yields `null` here
-  // — the answer the inspector's `buildSessionClient?.() ?? client` fallback already expects — in
-  // place of a released connection that would refuse the call.
-  const buildSessionExecToolClient = useCallback(
-    (): Client<typeof ExecToolService> | null =>
-      connectedSessionId
-        ? (runtimeRegistry.get(connectedSessionId)?.connection?.clientFor(ExecToolService) ?? null)
-        : null,
-    [connectedSessionId, runtimeRegistry],
-  );
-
-  // The same session-scoped route, addressed at `activity.ActivityService`: `tddy-coder`'s session
-  // participant serves the replay and activity families there since `#unbundle` node 7, so the
-  // transcript still comes off the session's own process when it has one. A second builder rather
-  // than a widened one because `clientFor` is per service — one callback can only return one
-  // service's client.
-  const buildSessionActivityClient = useCallback(
-    (): Client<typeof ActivityService> | null =>
-      connectedSessionId
-        ? (runtimeRegistry.get(connectedSessionId)?.connection?.clientFor(ActivityService) ?? null)
-        : null,
-    [connectedSessionId, runtimeRegistry],
-  );
-
-  // Register a session's Agent-terminal text-insert (fired once its terminal mounts), so the
-  // inspector's Files tab can insert an uploaded file's host path into the focused session's terminal
-  // via a click/tap.
-  const onSessionRegisterInsert = useCallback(
-    (sessionId: string, insertInput: (text: string) => void) => {
-      runtimeRegistry.setInsertInput(sessionId, insertInput);
-    },
-    [runtimeRegistry],
-  );
-
-  // Fold a session's terminal I/O bytes into its runtime counters as the terminal fires them (per
-  // output chunk / input yield). The registry's `notify()` re-renders the screen (via
-  // `useSyncExternalStore`), so the inspector's byte meter ticks live — even for a backgrounded session.
-  const onSessionBytes = useCallback(
-    (sessionId: string, delta: ByteDelta) => {
-      makeByteTap(runtimeRegistry, sessionId)(delta);
-    },
-    [runtimeRegistry],
-  );
-
-  // The merged session list, refresh, and change events all live in one place: `SessionManager`. It
-  // unions the selected host's sessions (from ListSessions, refreshed via the window-bound
-  // `sessionsRefreshBridge`) with the live cross-host sessions observed as common-room coder
-  // participants — LiveKit presence is the keep-alive that makes a non-selected host's session visible.
-  const participants = useRoomParticipants(room);
-  // Whether this list can see the other hosts at all. The cross-host half of it is presence — a
-  // session on a non-selected host is observed as a common-room coder participant — so on a wire
-  // that carries none the union silently collapses to `ListSessions` for the selected host, which
-  // reads as "this host has no other sessions". The drawer says so instead (PRD AC 5).
-  //
-  // Read through the same rule the LiveKit screen uses, so a room that is merely mid-join does not
-  // produce a claim about the connection that the next second withdraws.
-  const selectedHost = useHostConnection(selectedInstanceId);
-  const crossHostSessionsVisible =
-    useCapabilityAvailability(selectedHost, "presence") !== "unavailable";
-  const { sessions: sortedSessions, addOptimisticSession, sessionMetadataBySessionId } = useSessionManager(
+  const {
+    crossHostSessionsVisible,
+    sortedSessions,
+    addOptimisticSession,
+    sessionMetadataBySessionId,
+    selectedSession,
+    listGeneration,
+    drawerSessions,
+  } = useSessionsDrawerSessionList({
     client,
     sessionToken,
-    participants,
-    selectedInstanceId ?? "",
-  );
+    room,
+    selectedInstanceId,
+    selectedSessionId,
+    listGenerationRef,
+  });
 
-  const selectedSession = useMemo(
-    () => sortedSessions.find((s) => s.sessionId === selectedSessionId) ?? null,
-    [sortedSessions, selectedSessionId],
-  );
+  const { onSessionDisconnect, selectedTraffic } = useSessionsDrawerRuntimeAttachment({
+    attachment,
+    attachmentHint,
+    resetAttachment,
+    connectedSessionId,
+    runtimeRegistry,
+    runtimes,
+    sortedSessions,
+    selectedSession,
+    attachClaimRef,
+  });
 
-  // Disconnect a runtime terminal. Evicts the session's runtime; what the claim and the attachment
-  // owe that eviction is `claimAfterFeedEnd`'s and `shouldResetAttachmentOnFeedEnd`'s to say, read
-  // off the same session list the liveness effect below reads.
-  //
-  // For a terminal session the feed *is* the attach: it can drop under a session the daemon still
-  // reports alive (a `pty_done` on a live agent), so the claim goes with it — holding a claim for an
-  // attach that no longer exists is what would strand the pane on the reconnect placeholder, since
-  // that effect returns early on the claim and a live session offers no Resume button to recover by
-  // hand — and resetting the attachment is how the screen re-evaluates state for the next selection.
-  // For a workflow-owned session the ended feed is the hidden runtime layer's, which has no PTY to
-  // stream: neither the claim nor the attachment it says anything about belongs to it.
-  const onSessionDisconnect = useCallback(
-    (sessionId: string) => {
-      // Evicting a runtime *releases* its connection, and the attachment names the very same
-      // object. So whether the attachment survives is not only a question about the claim: a
-      // released connection's `clientFor` and `transport` throw, and an attachment still reporting
-      // `{status:"connected", connection}` for one would have every consumer — the inspector's
-      // session client, the traffic strip's room, node 4's media gates — reading "connected" off a
-      // connection that can no longer answer anything.
-      const releasedTheAttachedConnection =
-        sessionId === connectedSessionId && runtimeRegistry.get(sessionId)?.connection != null;
-      runtimeRegistry.disconnect(sessionId);
-      const session = sortedSessions.find((s) => s.sessionId === sessionId);
-      if (!session) {
-        // The list no longer carries the session, so there is no pane to hold an attach for.
-        if (attachClaimRef.current?.sessionId === sessionId) attachClaimRef.current = null;
-        if (sessionId === connectedSessionId) resetAttachment();
-        return;
-      }
-      attachClaimRef.current = claimAfterFeedEnd({ claim: attachClaimRef.current, session });
-      if (releasedTheAttachedConnection || shouldResetAttachmentOnFeedEnd({ session, connectedSessionId })) {
-        resetAttachment();
-      }
-    },
-    [runtimeRegistry, sortedSessions, connectedSessionId, resetAttachment],
-  );
-
-  // Count each session-list snapshot as it arrives. Done during render (not in an effect) so a claim
-  // taken from an event handler in the same commit records the snapshot the operator was actually
-  // looking at, rather than one the effect queue has not stamped yet.
-  const listGeneration = useMemo(() => {
-    listGenerationRef.current += 1;
-    return listGenerationRef.current;
-  }, [sortedSessions]);
-
-  // A pr-stack orchestrator is itself idle while its children do the work; when a child is live,
-  // the orchestrator must stay reachable in the drawer (grouped with its children) rather than
-  // collapsing into the disconnected "Remaining" partition mid-flight. Reflect that by treating an
-  // orchestrator as active whenever a session it owns is active. This only affects drawer grouping;
-  // the main pane keeps the raw list so branch→session resolution reads each child's true activity.
-  const drawerSessions = useMemo(() => {
-    // A sandboxed-codebase placement is served by two sessions on one daemon; only the agent half
-    // is a session the operator started. Dropped here rather than in `sortedSessions` for the same
-    // reason the orchestrator rule lives here: the main pane keeps the raw list, so branch→session
-    // resolution and `codebase_session_id` lookups still see both halves.
-    const listed = withoutJailedCodebaseHalves(sortedSessions);
-    const activeOrchestratorIds = new Set(
-      listed
-        .filter((s) => s.isActive && s.orchestratorSessionId.length > 0)
-        .map((s) => s.orchestratorSessionId),
-    );
-    if (activeOrchestratorIds.size === 0) return listed;
-    return listed.map((s) =>
-      !s.isActive && activeOrchestratorIds.has(s.sessionId) ? { ...s, isActive: true } : s,
-    );
-  }, [sortedSessions]);
-
-  // Register a session in the runtime registry on successful attach, storing the connection
-  // params so the runtime layer can render its terminal independently of the focused attachment.
-  // `lastDataReceivedAt` starts at the attach moment so the inspector reads "0s ago" before the
-  // first DataReceived event lands. Re-attach (an existing backgrounded runtime) refreshes the
-  // connection params without resetting byte counters.
-  useEffect(() => {
-    if (attachment.status !== "connected" || !attachmentHint) return;
-    const sessionId = attachment.connection.sessionId;
-    const conn: SessionRuntimeConnection = {
-      connection: attachment.connection,
-      hint: attachmentHint,
-    };
-    const existing = runtimeRegistry.get(sessionId);
-    if (!existing) {
-      runtimeRegistry.add(sessionId, {
-        sessionId,
-        attached: true,
-        ...conn,
-        bytesIn: 0,
-        bytesOut: 0,
-        lastDataReceivedAt: Date.now(),
-      });
-    } else {
-      runtimeRegistry.updateConnection(sessionId, conn);
-    }
-    runtimeRegistry.focus(sessionId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachment, attachmentHint]);
-
-  // Compute the inspector traffic source for the selected session: live runtime (active) wins;
-  // otherwise the daemon-sourced `SessionEntry` fields (inactive / non-LiveKit sessions).
-  const selectedTraffic = useMemo(() => {
-    if (!selectedSession) return null;
-    const live = runtimeRegistry.get(selectedSession.sessionId);
-    if (live) {
-      return { bytesIn: live.bytesIn, bytesOut: live.bytesOut, lastDataReceivedAt: live.lastDataReceivedAt };
-    }
-    const fromEntry = Number(selectedSession.bytesIn ?? 0n) || 0;
-    const fromEntryOut = Number(selectedSession.bytesOut ?? 0n) || 0;
-    const lastStr = selectedSession.lastDataReceivedAt ?? "";
-    const lastNum = lastStr ? Number(lastStr) : null;
-    return {
-      bytesIn: fromEntry,
-      bytesOut: fromEntryOut,
-      lastDataReceivedAt: Number.isFinite(lastNum) ? (lastNum as number) : null,
-    };
-  }, [selectedSession, runtimes, runtimeRegistry]);
-
-  // The daemon that owns the selected session — cross-host interaction (connect, resume, delete,
-  // terminate) must reach that daemon, not the selected one.
-  const selectedOwningHost = useMemo(
-    () => (selectedSession ? owningHostForSession(selectedSession, selectedInstanceId ?? "") : null),
-    [selectedSession, selectedInstanceId],
-  );
-  const activeClient = useDaemonClientFor(SessionService, selectedOwningHost);
-  const activeWorktreeClient = useDaemonClientFor(WorktreeService, selectedOwningHost);
-  const activeCodeNavigationClient = useDaemonClientFor(CodeNavigationService, selectedOwningHost);
-  const activeTerminalClient = useDaemonClientFor(TerminalSessionService, selectedOwningHost);
-  const activeSessionFilesClient = useDaemonClientFor(SessionFilesService, selectedOwningHost);
-  const activeSessionAgentClient = useDaemonClientFor(SessionAgentService, selectedOwningHost);
-  const activeActivityClient = useDaemonClientFor(ActivityService, selectedOwningHost);
-  const activeCatalogClient = useDaemonClientFor(CatalogService, selectedOwningHost);
-  const activeExecToolClient = useDaemonClientFor(ExecToolService, selectedOwningHost);
-  const activePrStackClient = useDaemonClientFor(PrStackService, selectedOwningHost);
-  // The same daemon as a connection rather than as a client: attaching a session opens a connection
-  // on its host, and the spawned-child runtimes attach theirs on the same one.
-  const activeHost = useHostConnection(selectedOwningHost);
+  const {
+    activeClient,
+    activeWorktreeClient,
+    activeCodeNavigationClient,
+    activeTerminalClient,
+    activeSessionFilesClient,
+    activeSessionAgentClient,
+    activeActivityClient,
+    activeCatalogClient,
+    activeExecToolClient,
+    activePrStackClient,
+    activeHost,
+  } = useSessionsDrawerOwningHost(selectedSession, selectedInstanceId);
 
   // Human-readable host label for a daemon instance id, with the local daemon's " (this daemon)"
   // suffix stripped — used for the owning-host badge on cross-host rows.
@@ -535,156 +215,26 @@ export function SessionsDrawerScreen({
       ),
     [selectedSession],
   );
-
-  /**
-   * Activate whichever session the URL names, once the list has loaded: set the inspector's default
-   * state and attach the session. One effect serves every way the selection can change — a drawer
-   * click, a deep link on load, Back/Forward, a pasted link — because they all just change the URL.
-   *
-   * Attaching here rather than in the click handler is what makes Back re-attach: `handleSelect`
-   * only navigates.
-   */
-  useEffect(() => {
-    if (!selectedSessionId) {
-      activatedSessionIdRef.current = null;
-      setUnknownSession(false);
-      // `inspector` / `full` / `code` describe a session's panes; with no session selected they
-      // describe nothing. Drop them so "back to sessions" cannot leave a URL claiming an open
-      // inspector over an empty pane. `replace` — this is cleanup, not a destination.
-      if (location.params[PARAM_INSPECTOR] || location.params[PARAM_FULL] || location.params[PARAM_CODE]) {
-        setParams(
-          { [PARAM_INSPECTOR]: null, [PARAM_FULL]: null, [PARAM_CODE]: null },
-          { replace: true },
-        );
-      }
-      return;
-    }
-    if (activatedSessionIdRef.current === selectedSessionId) return;
-    if (sortedSessions.length === 0) return; // list not loaded yet — retry on the next change
-    const session = sortedSessions.find((s) => s.sessionId === selectedSessionId);
-    if (!session && awaitingCreatedSessionIdRef.current === selectedSessionId) return; // just created — retry on the next change
-    awaitingCreatedSessionIdRef.current = null;
-    activatedSessionIdRef.current = selectedSessionId;
-    const honourUrlInspector = firstActivationPendingRef.current && inspectorTabParam !== "";
-    firstActivationPendingRef.current = false;
-
-    if (!session) {
-      // The URL names an id that is not in the loaded list — surface a not-found state.
-      setUnknownSession(true);
-      return;
-    }
-    setUnknownSession(false);
-
-    // A deep link that asked for a tab keeps it; otherwise the inspector takes its default state,
-    // which is closed whatever the session's liveness: an active session shows its terminal, an
-    // inactive one shows its recorded activities, and neither has the drawer opened for it.
-    if (!honourUrlInspector) {
-      const selected = nextInspectorState({ open: false, expanded: false }, { type: "select" });
-      applyInspectorState(selected.open ? "open" : "closed", { replace: true });
-    }
-
-    // Fast path — the session's runtime is already mounted in the registry (it was attached
-    // earlier and stays alive across focus switches). Restore the attachment from the registry's
-    // stored connection params so the screen re-evaluates state for the newly selected session
-    // WITHOUT an RPC round-trip: no re-connect, no fresh ClaimTerminalControl, no token race, and
-    // the existing terminal stream keeps flowing. The registry effect below re-focuses it.
-    // The claim is taken inside each branch rather than for any registry hit: a registry entry that
-    // is no longer connected restores nothing, so claiming on it would block the resume this dormant
-    // session is about to be given.
-    const existing = runtimeRegistry.get(selectedSessionId);
-    if (existing?.connection) {
-      attachClaimRef.current = { sessionId: selectedSessionId, listGeneration };
-      restoreAttachment({
-        state: { status: "connected", connection: existing.connection },
-        hint: existing.hint ?? null,
-      });
-      return;
-    }
-
-    // Slow path — not yet attached. Reset so the attachment effect re-evaluates state for the new
-    // selection, then connect to this session's owning daemon. `activeClient` is derived from
-    // `selectedSession`, which this render may not have caught up to, so build the client for this
-    // session's owner directly rather than reading `activeClient` here.
-    resetAttachment();
-    // An attach is owed for a live session only; a dormant one has no process to attach to and shows
-    // its recorded activities instead. Recording which id this effect took the attach for is what
-    // keeps the liveness effect below from issuing a second `ConnectSession` for the same session.
-    attachClaimRef.current = session.isActive
-      ? { sessionId: selectedSessionId, listGeneration }
-      : null;
-    if (session.isActive) {
-      const owningHost = connectHost(owningHostForSession(session, selectedInstanceId ?? ""));
-      if (owningHost) {
-        connectSession(selectedSessionId, sessionToken, owningHost)
-          .then((attached) => settleAttach(selectedSessionId, attached))
-          .catch((err) => {
-            console.debug("[SessionsDrawerScreen] connectSession error", err);
-          });
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSessionId, sortedSessions]);
-
-  /**
-   * Track the selected session's liveness across polls: attach it when it comes alive, and release
-   * the attach claim when it dies.
-   *
-   * A session can come alive under the operator — resumed from the pane's top bar, or resumed
-   * elsewhere and observed on the next list poll — and the activation effect above only runs once per
-   * *selection*, so without this the pane would keep showing recorded activities until the session
-   * was re-selected. Attaching here is what lets the base view return to the terminal on its own, as
-   * `docs/ft/web/inactive-session-activities.md` § Resume states.
-   *
-   * Releasing on death matters just as much: the same session can be resumed again without the
-   * selection ever changing, and that resume owes a fresh `ConnectSession`. Holding the claim past
-   * the death would silently swallow every resume after the first.
-   *
-   * Which of the three the snapshot owes is `attachActionForSnapshot`'s to decide — including why a
-   * dormant reading on the claim's own snapshot is not yet evidence of death.
-   */
-  useEffect(() => {
-    if (!selectedSession) return;
-    const action = attachActionForSnapshot({
-      session: selectedSession,
-      claim: attachClaimRef.current,
-      listGeneration,
-    });
-    switch (action) {
-      case "hold":
-        return;
-      case "release":
-        attachClaimRef.current = null;
-        return;
-      case "attach":
-        break;
-    }
-    const owningHost = connectHost(
-      owningHostForSession(selectedSession, selectedInstanceId ?? ""),
-    );
-    if (!owningHost) return;
-    attachClaimRef.current = { sessionId: selectedSession.sessionId, listGeneration };
-    const attachedId = selectedSession.sessionId;
-    connectSession(attachedId, sessionToken, owningHost)
-      .then((attached) => settleAttach(attachedId, attached))
-      .catch((err) => {
-        console.debug("[SessionsDrawerScreen] connectSession error", err);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSession, selectedInstanceId, connectHost, listGeneration]);
-
-  // React to attachment status changes: an attach **error** opens the inspector so the operator sees
-  // the problem — that is a failure to surface, not a liveness state. Every other status leaves the
-  // drawer alone. A session that simply has nothing to attach to ("idle" for an inactive session) no
-  // longer opens it: that session's pane shows its recorded activities instead.
-  useEffect(() => {
-    if (!selectedSessionId) return;
-    if (attachment.status === "error" && inspectorState !== "expanded") {
-      applyInspectorState("open", { replace: true });
-    }
-  // These transitions are driven by the attachment, not by the URL: re-running them whenever
-  // `inspectorState`/`applyInspectorState` change would fight the operator's own toggles.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachment.status, selectedSessionId]);
+  useSessionsDrawerActivation({
+    claims,
+    location,
+    setParams,
+    selectedSessionId,
+    inspectorTabParam,
+    inspectorState,
+    applyInspectorState,
+    sortedSessions,
+    selectedSession,
+    listGeneration,
+    runtimeRegistry,
+    attachment,
+    connectSession,
+    restoreAttachment,
+    resetAttachment,
+    connectHost,
+    selectedInstanceId,
+    sessionToken,
+  });
 
   // Selecting a session is a navigation plus one acknowledgement — the activation effect above does
   // the inspector and attachment work, so Back and a pasted link get the same treatment for
@@ -729,38 +279,22 @@ export function SessionsDrawerScreen({
     });
   };
 
-  // Delete every selected session in selection (insertion) order, routing each delete to the
-  // session's owning daemon. Sequential so the daemon processes them in the same order the operator
-  // ticked the rows, and so a single failure doesn't abandon the remaining deletes silently.
-  // Select-all toggles against the full visible list: if every session is already ticked, clear;
-  // otherwise tick them all (fresh Set so insertion order matches the current list order).
-  const toggleSelectAll = useCallback(() => {
-    setSelectedForDelete((prev) => {
-      const allIds = sortedSessions.map((s) => s.sessionId);
-      const allSelected = allIds.length > 0 && allIds.every((id) => prev.has(id));
-      return allSelected ? new Set() : new Set(allIds);
-    });
-  }, [sortedSessions]);
-
-  const handleBulkDelete = useCallback(async () => {
-    const ids = [...selectedForDelete];
-    for (const id of ids) {
-      const session = sortedSessions.find((s) => s.sessionId === id);
-      const owner = session
-        ? owningHostForSession(session, selectedInstanceId ?? "")
-        : (selectedInstanceId ?? "");
-      const targetClient = clientForHost(owner) ?? client;
-      if (!targetClient) continue;
-      try {
-        await deleteSession(id, sessionToken, targetClient);
-      } catch (err) {
-        console.debug("[SessionsDrawerScreen] bulk deleteSession error", err);
-      }
-    }
-    setSelectedForDelete(new Set());
-    setSelectionMode(false);
-    requestSessionsRefresh();
-  }, [selectedForDelete, sortedSessions, selectedInstanceId, clientForHost, client, deleteSession, sessionToken]);
+  const {
+    selectedForDelete,
+    selectionMode,
+    toggleSelectForDelete,
+    enterSelectionMode,
+    exitSelectionMode,
+    toggleSelectAll,
+    handleBulkDelete,
+  } = useSessionsDrawerDeleteSelection({
+    sortedSessions,
+    selectedInstanceId,
+    clientForHost,
+    client,
+    deleteSession,
+    sessionToken,
+  });
 
   const handleUnknownHome = () => {
     setUnknownSession(false);
@@ -808,25 +342,6 @@ export function SessionsDrawerScreen({
       });
   };
 
-  const handleInspectorToggle = () => {
-    const prevState = { open: inspectorState !== "closed", expanded: inspectorState === "expanded" };
-    const next = nextInspectorState(prevState, { type: "toggle" });
-    applyInspectorState(next.open ? (next.expanded ? "expanded" : "open") : "closed");
-  };
-
-  const handleInspectorClose = () => applyInspectorState("closed");
-
-  // Insert an uploaded file's host path (Files tab → Insert / tap) into the focused session's
-  // terminal, shell-escaped exactly as a native terminal file-drag would type it. The Files tab
-  // closes the inspector itself (via `onCloseInspector`), so this only performs the insert.
-  const handleInsertPathIntoTerminal = (hostPath: string) => {
-    const focusedId = runtimeRegistry.focusedSessionId;
-    if (!focusedId) return;
-    runtimeRegistry.get(focusedId)?.insertInput?.(joinQuotedPaths([hostPath]));
-  };
-  const handleInspectorExpand = () => applyInspectorState("expanded");
-  const handleInspectorRestore = () => applyInspectorState("open");
-
   const handleCreateSession = () => navigate(SESSIONS_NEW_ROUTE);
   const handleCancelCreate = () => navigate(SESSIONS_DRAWER_ROUTE);
   const handleSessionCreated = (sessionId: string) => {
@@ -859,15 +374,7 @@ export function SessionsDrawerScreen({
       >
         <div className="flex flex-1 min-h-0 overflow-hidden relative">
           {isMobile && !sessionListOpen && (
-            <button
-              type="button"
-              data-testid="sessions-drawer-open-overlay-btn"
-              onClick={() => setSessionListOpen(true)}
-              title="Open session list"
-              className="absolute top-2 left-2 z-20 flex items-center justify-center h-9 w-9 rounded-md border border-border bg-background/90 text-foreground shadow-md backdrop-blur-sm hover:bg-muted transition-colors"
-            >
-              <PanelLeftOpen className="h-5 w-5" />
-            </button>
+            <SessionsDrawerOpenListButton onOpen={() => setSessionListOpen(true)} />
           )}
           <SessionDrawer
             sessions={drawerSessions}
@@ -895,24 +402,7 @@ export function SessionsDrawerScreen({
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
           {unknownSession ? (
-            <div className="flex flex-1 min-h-0 items-center justify-center p-6">
-              <div
-                data-testid="terminal-route-unknown-session"
-                className="rounded-md border border-destructive/40 bg-destructive/5 p-4"
-              >
-                <p className="mb-3 text-sm text-foreground">
-                  Session not found or no longer available.
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  data-testid="terminal-route-unknown-session-home"
-                  onClick={handleUnknownHome}
-                >
-                  Back to sessions
-                </Button>
-              </div>
-            </div>
+            <SessionsDrawerUnknownSession onHome={handleUnknownHome} />
           ) : (
             <SessionMainPane
               selectedSession={selectedSession}
@@ -955,6 +445,7 @@ export function SessionsDrawerScreen({
                   ? (activityClient ?? undefined)
                   : (activeActivityClient ?? activityClient ?? undefined)
               }
+              accountsClient={accountsClient ?? undefined}
               catalogClient={
                 mode === "creating"
                   ? (catalogClient ?? undefined)

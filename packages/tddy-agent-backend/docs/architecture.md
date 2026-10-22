@@ -16,7 +16,7 @@ not the other way round, so the edge runs one way, engine → backend.
 (`the_agent_backend_does_not_depend_on_the_workflow_engine`). `agent-client-protocol` and
 `tokio-util` are dependencies here, for the ACP backends.
 
-`tddy-core` re-exports this crate whole (`pub use tddy_agent_backend::*;`), so every `tddy_core::{backend, stream, token_accounting, claude_argv, claude_hooks, cursor_hooks, spawn_env}::…` path consumers name resolves unchanged. New code should name `tddy_agent_backend` directly.
+`tddy-core` re-exports this crate whole (`pub use tddy_agent_backend::*;`), so every `tddy_core::{backend, stream, token_accounting, claude_argv, claude_hooks, cursor_hooks, spawn_env, provider_route}::…` path consumers name resolves unchanged. New code should name `tddy_agent_backend` directly.
 `backend::write_codex_thread_id_file` is `pub` because the workflow engine calls it across the
 crate boundary. It is not API.
 
@@ -50,6 +50,30 @@ Cursor's question-tool shapes: [cursor-ask-question-schema.md](cursor-ask-questi
 
 - **env_non_empty**: Reads an environment variable, returning `None` when it is unset **or blank** — whitespace included. Every `TDDY_*` variable in the workspace is exported by an outer process (a daemon spawning a jail, a shell wrapper, a systemd unit), and all three can export one empty without meaning to: a blank `TDDY_SOCKET` is not a socket path and a blank join token is not a token, so "set to nothing" and "unset" are the same claim and must read as the same value.
 - **One spelling, deliberately**: the workspace had grown three of this rule, and two of them disagreed — one trimmed before testing for empty and one did not, so a LiveKit variable exported as `" "` configured a transport whose URL was one space. Callers that read a spawn variable use this function rather than declaring a fourth reading.
+
+## Provider routes (`provider_route`)
+
+What a harness process needs to run on a model-provider account instead of its vendor — pure data,
+applied by the caller (`tddy-agent-launch` for a PTY). Product view:
+[provider accounts § Running a harness on an account](../../../docs/ft/daemon/provider-accounts.md#running-a-harness-on-an-account).
+
+| Item | Role |
+|---|---|
+| `Harness` | the ten harnesses: `Claude`, `ClaudeAcp`, `ClaudeCli`, `Codex`, `CodexAcp`, `OpenCode`, `OpenCodeCli`, `MuseCli`, `Cursor`, `CursorCli`. `from_agent_or_session_type(id)` / `id()` are inverse over the agent ids and session types; `stub`, `tool` and specialized-agent names are `None` |
+| `RouteTarget { preset, endpoints: RouteEndpoints, api_key: RouteSecret, model }` | one account and the model every model choice is pinned to. `RouteEndpoints` holds the `anthropic_messages`, `openai_responses`, `openai_chat` roots |
+| `RouteSecret` | a credential value whose `Debug` is `RouteSecret(<redacted>)`; `expose()` is for the one place that hands it to a child |
+| `HarnessRoute { env, secret_env, files: Vec<RouteFile>, args }` | what the harness is launched with; the key is only ever in `secret_env` |
+| `RouteRefusal` | `HarnessCannotBeRouted` (Cursor), `ProtocolNotServed { needs }`, `PresetNotAccepted` (Muse Code: Meta only), `NotYetRoutable(harness)`; `Display` is the sentence an operator reads |
+| `route_supported(harness, preset, protocols)` | the capability matrix, answered without building a route; `protocols` are the wire spellings `anthropic-messages`, `openai-responses`, `openai-chat` |
+| `resolve_route(harness, target)` | the route. Claude Code (all three harnesses): `ANTHROPIC_BASE_URL` = the Anthropic Messages root, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` = the model; secret `ANTHROPIC_AUTH_TOKEN`; args `--model <model>`. Cursor: `HarnessCannotBeRouted`. Codex, OpenCode and Muse Code: `NotYetRoutable` |
+| `RouteChoice { BuiltIn, Account(id) }`, `RouteSources { session, agent_definition, user_default }`, `choose_route` | precedence: session over agent definition over the person's default; `BuiltIn` at a level overrides everything below it; `None` is the vendor |
+
+The matrix covers every harness, once, here. A harness whose route body is added later replaces its
+`NotYetRoutable` arm in `resolve_route`; nothing else declares a second matrix.
+
+Tests: `tests/provider_route_acceptance.rs` — env shape and key placement for the three Claude
+harnesses, the Baseten and Cursor refusals, `route_supported`, the id round-trip, precedence, and the
+redacted `Debug`.
 
 ## Token accounting (`token_accounting`)
 

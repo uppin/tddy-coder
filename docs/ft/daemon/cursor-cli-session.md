@@ -97,6 +97,8 @@ Optional `cursor_cli:` block in `daemon.yaml`:
 
 **CreateSessionPane** is the primary entry point for the third session type. Terminal mount helpers in `ConnectionScreen` and `SessionsDrawerScreen` treat `cursor-cli` like `claude-cli` for gRPC terminal attachment.
 
+Cursor's agent cannot be pointed at another provider, so a cursor-cli session always runs on Cursor. The form's **Provider** field shows, in place of a select, the reason the daemon gives (`ListProviderRoutes` answers `harness_routable = false` for `cursor-cli`) — see [provider accounts § Running a harness on an account](provider-accounts.md#running-a-harness-on-an-account).
+
 ### Proto
 
 No new RPCs. `sandbox = true` with `session_type = "cursor-cli"` starts a Seatbelt (macOS) or cgroups+namespaces (Linux) sandboxed session via `start_sandboxed_cursor_cli_session`, mirroring `claude-cli`.

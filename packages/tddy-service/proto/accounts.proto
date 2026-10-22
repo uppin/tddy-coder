@@ -35,6 +35,9 @@ service AccountsService {
   rpc ConnectProviderAccount(ConnectProviderAccountRequest) returns (ConnectProviderAccountResponse);
   // The models one provider account's endpoint serves, asked of the endpoint with that account's key.
   rpc ListProviderAccountModels(ListProviderAccountModelsRequest) returns (ListProviderAccountModelsResponse);
+  // The caller's provider accounts, each marked with whether `harness` can run on it and why not.
+  // The matrix lives in the daemon; a client never re-derives it.
+  rpc ListProviderRoutes(ListProviderRoutesRequest) returns (ListProviderRoutesResponse);
 }
 
 // One linked account, as a person sees it.
@@ -256,4 +259,27 @@ message ListProviderAccountModelsRequest {
 
 message ListProviderAccountModelsResponse {
   repeated string model_ids = 1;
+}
+
+message ListProviderRoutesRequest {
+  string session_token = 1;
+  // A tool-session agent id ("claude", "codex-acp", …) or a CLI session type ("claude-cli", …).
+  string harness = 2;
+}
+
+message ProviderRouteOption {
+  string account_id = 1;
+  string label = 2;
+  string preset = 3;
+  bool supported = 4;
+  // Why `harness` cannot run on this account; empty when supported.
+  string reason = 5;
+}
+
+message ListProviderRoutesResponse {
+  repeated ProviderRouteOption options = 1;
+  // False when the harness cannot run on any provider account (Cursor); `options` are then all
+  // unsupported and `harness_reason` says why.
+  bool harness_routable = 2;
+  string harness_reason = 3;
 }

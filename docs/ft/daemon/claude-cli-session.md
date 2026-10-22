@@ -98,6 +98,76 @@ Linux's unprivileged-userns restriction does not apply. See
     `mcp__tddy-tools__*` tool calls executed on the host worktree.
 22. On non-macOS, `sandbox = true` returns `failed_precondition` (no fallback).
 
+## Running on a provider account
+
+A claude-cli session can run Claude Code on one of the operator's
+[provider accounts](provider-accounts.md) instead of Anthropic. The session's Claude Code then talks
+to that account's Anthropic Messages endpoint with that account's key, and every model it may choose
+is pinned to the session's model, so no request reaches Anthropic.
+
+### Choosing the account
+
+`StartSessionRequest` carries the session-level choice:
+
+| Field | Meaning |
+|---|---|
+| `provider_account_id = 41` | run on this account (an id `ConnectProviderAccount` gave). Empty = no choice at this level |
+| `provider_built_in = 42` | explicitly the vendor ("Anthropic (built in)"), overriding an agent definition's or the person's default account |
+
+The two are exclusive; a request that sends both runs on the named account, never on the vendor the
+operator did not ask for. The account a session runs on is chosen by precedence — **session over
+agent definition over the person's default** — and an explicit built-in choice at a higher level
+overrides an account at a lower one. Only the session level is fed from a start request; nothing
+fills the agent-definition or default level yet. A start that chooses nothing runs exactly as a
+session on Anthropic always has (host `.credentials.json`, OAuth token).
+
+The web's New-session form offers the choice as **Provider** — see
+[tool-session model selection § Provider](../web/tool-session-model-selection.md#provider).
+
+### What the session is launched with
+
+An unsandboxed claude-cli start resolves the account **before anything is created** — no session
+directory, worktree or process exists when it refuses. It reads the account from the session owner's
+vault exactly as it reads their GitHub identity, then launches `claude --model <model>` in the PTY
+with, added to the session's environment:
+
+| Variable | Value |
+|---|---|
+| `ANTHROPIC_BASE_URL` | the account's Anthropic Messages root |
+| `ANTHROPIC_AUTH_TOKEN` | the account's key |
+| `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` | the session's model |
+
+The key reaches only the agent child's environment: it is never on argv and never logged. Unlike the
+GitHub token there is no per-call socket Claude Code could ask instead, so the environment is where it
+reads its key.
+
+**No fallback.** A start that chose an account never runs on Anthropic instead. It is refused with:
+
+| Situation | Status |
+|---|---|
+| The owner's vault is locked or uninitialized, or no vaults are configured | `FAILED_PRECONDITION` |
+| The vault holds no provider account with that id | `NOT_FOUND` |
+| The account's endpoint does not serve Anthropic Messages (Baseten, Modal, an OpenAI-compatible endpoint) | `INVALID_ARGUMENT`, naming the protocol Claude Code needs |
+| An account was chosen with an empty model | `INVALID_ARGUMENT` — choose a model the account serves |
+| The harness cannot be routed in this build | `UNIMPLEMENTED` |
+
+A **sandboxed** claude-cli start (`sandbox = true`) that chooses an account is refused with
+`FAILED_PRECONDITION` "running on a provider account is not yet supported in a sandbox": the jail
+has no way yet to hand the harness its key. A sandboxed start that chooses nothing is unaffected.
+
+A **child** session a pr-stack orchestrator spawns, and a **conversation** a grill-me orchestrator
+spawns, run on the vendor: the orchestrator's account is not inherited.
+
+### Persistence and resume
+
+A session started on an account records it in **`provider-account.yaml`** beside `.session.yaml` —
+the account id and the model, never the key. A session on its vendor writes no file.
+
+Resume re-reads that record and resolves the account against the owner's vault **as it stands at the
+resume**: a rotated key is what the resumed session runs on, and an account removed since the start —
+or a vault locked since — refuses the resume with the same statuses a start gets, rather than running
+it on Anthropic. A session with no record resumes on the vendor.
+
 ## Non-goals (out of scope)
 
 - Web UI support for sandboxed sessions (service-level only; same as remote mode).
@@ -106,6 +176,7 @@ Linux's unprivileged-userns restriction does not apply. See
 - Model switching after session start.
 - Session chaining (`previous_session_id`) for Claude Code CLI sessions.
 - LiveKit presence for Claude Code CLI session processes (no `--livekit-*` args passed).
+- Switching a session's provider account after its start.
 
 ## Architecture
 

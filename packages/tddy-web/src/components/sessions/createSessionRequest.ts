@@ -28,6 +28,10 @@ export interface CreateSessionFormValues {
   stackParentDaemonInstanceId: string;
   prStackBaseSessionId: string;
   model: string;
+  /** The provider account the harness runs on; empty or absent for its vendor. */
+  providerAccountId?: string;
+  /** The operator explicitly chose the vendor, overriding any default account. */
+  providerBuiltIn?: boolean;
   permissionMode: string;
   dangerouslySkipPermissions: boolean;
   placementWithdrawsPermissionBypass: boolean;
@@ -70,6 +74,8 @@ export function buildStartSessionRequest(
     stackParentDaemonInstanceId,
     prStackBaseSessionId,
     model,
+    providerAccountId,
+    providerBuiltIn,
     permissionMode,
     dangerouslySkipPermissions,
     placementWithdrawsPermissionBypass,
@@ -163,6 +169,8 @@ export function buildStartSessionRequest(
     stackNodeId,
     sessionType: "claude-cli",
     model,
+    providerAccountId,
+    providerBuiltIn,
     permissionMode,
     dangerouslySkipPermissions: placementWithdrawsPermissionBypass
       ? false

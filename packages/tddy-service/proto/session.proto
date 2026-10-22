@@ -598,6 +598,13 @@ message StartSessionRequest {
   // own project row, so the peer acts the same way even if its copy of the project was never set.
   // A start that names a source keeps it on resume. See docs/ft/daemon/github-identity.md.
   GithubSource github_source = 40;
+  // Run the session's harness on this model-provider account (accounts.ConnectProviderAccount)
+  // instead of its vendor. Empty = no choice at this level, so an agent definition or the person's
+  // default may decide. A harness that cannot run on the account refuses the start.
+  string provider_account_id = 41;
+  // Explicitly the harness's own vendor ("Anthropic (built in)"), overriding an agent definition's
+  // or the person's default account. Exclusive with `provider_account_id`.
+  bool provider_built_in = 42;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

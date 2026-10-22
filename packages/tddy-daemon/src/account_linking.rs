@@ -268,10 +268,12 @@ pub fn accounts_service_over(
         Arc::clone(vaults),
         subject_of.clone(),
     ));
-    let service = AccountsServiceImpl::new(Arc::clone(&store)).with_provider_accounts(
-        store,
-        Arc::new(HttpProviderModelProbe::new(reqwest::Client::new())),
-    );
+    let service = AccountsServiceImpl::new(Arc::clone(&store))
+        .with_provider_accounts(
+            store,
+            Arc::new(HttpProviderModelProbe::new(reqwest::Client::new())),
+        )
+        .with_route_support(Arc::new(crate::provider_route_support::HarnessRouteSupport));
     match linking_provider {
         Some(provider) => service.with_linking(
             Arc::new(GitHubAccountLinker::new(provider)),

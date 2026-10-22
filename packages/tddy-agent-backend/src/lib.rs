@@ -8,6 +8,7 @@ pub mod backend;
 pub mod claude_argv;
 pub mod claude_hooks;
 pub mod cursor_hooks;
+pub mod provider_route;
 pub mod spawn_env;
 pub mod stream;
 pub mod token_accounting;

@@ -36,6 +36,10 @@ Record metadata keys: `preset`, `probed_at`, `endpoint.<wire protocol>`.
   the id it got. `SessionVaultAccountStore` makes that choice atomic with the write by holding a
   store-wide mutex from the vault read to the `put` — the vault serialises each operation, not the
   read-then-write between them.
+- **`RouteSupport`** (`harness_routable(harness) -> Result<(), String>`, `supports(harness, preset,
+  protocols) -> Result<(), String>`) — which harness can run on which account. A port because the
+  matrix is `tddy_agent_backend::provider_route`'s; this crate does not depend on the harness crates.
+  The daemon's implementation is `tddy_daemon::provider_route_support::HarnessRouteSupport`.
 
 ## Service
 
@@ -47,9 +51,18 @@ answer `FAILED_PRECONDITION`. `ConnectProviderAccount`: preset → key present �
 a probe failure is `UNAVAILABLE`. `AccountSummary.preset` / `wire_protocols` are filled from
 `ProviderAccount::from_record` and are empty for every other account.
 
+`AccountsServiceImpl::with_route_support(support)` wires `ListProviderRoutes`; without it that RPC
+answers `FAILED_PRECONDITION`. It lists the vault (`AccountStore::list`, so a locked vault refuses as
+`ListAccounts` does), keeps the provider accounts in vault order, and marks each with
+`RouteSupport::supports(harness, preset, wire protocols)` — or, when `harness_routable` refuses, marks
+every account with that one reason and answers `harness_routable = false`, `harness_reason`. The
+reasons are passed through verbatim.
+
 ## Tests
 
 - `src/provider_account.rs` unit tests — the preset table, `endpoints_for` refusals, the codec, ids.
 - `src/vault_store.rs` — simultaneous puts of one id each get their own; a held id is numbered.
 - `tests/provider_accounts_acceptance.rs` — the RPCs over an in-memory store and a fake probe.
+- `tests/provider_routes_acceptance.rs` — `ListProviderRoutes` over a fake matrix: provider accounts
+  only, vault order, verdicts verbatim; an unroutable harness; the unwired refusal.
 - `tddy-daemon/tests/provider_model_probe.rs` — the HTTP probe against a local stub endpoint.

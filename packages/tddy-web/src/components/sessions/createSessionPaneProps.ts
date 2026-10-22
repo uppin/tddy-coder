@@ -9,6 +9,7 @@ import type { Client } from "@connectrpc/connect";
 import type { SessionService } from "../../gen/session_pb";
 import type { ProjectService } from "../../gen/project_pb";
 import type { CatalogService } from "../../gen/catalog_pb";
+import type { AccountsService } from "../../gen/accounts_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
@@ -19,6 +20,7 @@ import type { SessionType } from "./createSessionRequest";
 type ConnectionClient = Client<typeof SessionService>;
 type ProjectClient = Client<typeof ProjectService>;
 type CatalogClient = Client<typeof CatalogService>;
+type AccountsClient = Client<typeof AccountsService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
 
@@ -89,6 +91,12 @@ export interface CreateSessionPaneProps {
   projectClient: ProjectClient;
   /** `catalog.CatalogService` on the same host as `client` — tools, agents and model probes. */
   catalogClient: CatalogClient;
+  /**
+   * `accounts.AccountsService` on the same host as `client` — the provider accounts a session's
+   * harness may run on (`ListProviderRoutes`) and their models. Absent: no provider picker is
+   * shown, and every session runs on its harness's vendor.
+   */
+  accountsClient?: AccountsClient;
   /**
    * The session-files service on the same host as `client` — the form stages its local attachments
    * and lists the upload scope through it. Required for the reason `worktreeClient` is: without one
