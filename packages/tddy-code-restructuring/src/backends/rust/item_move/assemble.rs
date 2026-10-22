@@ -134,6 +134,19 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
     reach::reach_the_destination(moving, &mut texts, &region, facade, &mut edits)?;
 
     let mut files = BTreeMap::new();
+    changed_files(texts, edits, &mut files)?;
+    Ok(Assembled {
+        files,
+        report: landing.report,
+        notes,
+    })
+}
+
+fn changed_files(
+    texts: BTreeMap<String, String>,
+    edits: BTreeMap<String, Vec<Edit>>,
+    files: &mut BTreeMap<String, (String, String)>,
+) -> Result<()> {
     for (path, mut list) in edits {
         list.sort_by(|one, other| {
             (one.start, one.end, &one.text).cmp(&(other.start, other.end, &other.text))
@@ -145,11 +158,7 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
             files.insert(path, (old, new));
         }
     }
-    Ok(Assembled {
-        files,
-        report: landing.report,
-        notes,
-    })
+    Ok(())
 }
 
 fn original_texts(moving: &Moving<'_>) -> Result<BTreeMap<String, String>> {
