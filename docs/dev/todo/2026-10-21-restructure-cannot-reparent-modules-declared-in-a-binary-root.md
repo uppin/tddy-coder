@@ -64,3 +64,13 @@ library root, respell the moved files' `<package>::` paths as `crate::`, and re-
 **Marked in code:** `TODO(restructure-engine)` at the two refusals in
 `packages/tddy-code-restructuring/src/backends/rust/module_reparent/survey.rs`, and above the widened
 `run_restructure` in `packages/tddy-tools/src/index_client.rs`.
+
+## Hit again by `#satellite` 16/16 (the sweep, 2026-10-22): `build.rs`
+
+`packages/tddy-service/build.rs` (744 production lines, `main` alone 682) is a crate-root file under no
+`src/` directory, so the same resolution rule refuses it: `build.rs is not under packages/tddy-service/src, so
+it is no module of the package`. The sweep cut `main` by hand, with the developer's consent, into
+`build/{core_services,unbundled_families,platform_services,descriptors}.rs` (`#[path]`-included from
+`build.rs`, bodies byte-identical, every function at most 57 lines), proved by a `diff -r` of the generated
+`OUT_DIR` before and after. `TODO(restructure-engine)` at the head of `build.rs`. The engine would need to
+treat a package's `build.rs` as a crate root of its own.

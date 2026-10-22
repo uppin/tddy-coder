@@ -1,6 +1,7 @@
 # complexity: run_call_tool
 
-**Location:** `packages/tddy-tools/src/cli.rs:525` — `run_call_tool`
+**Location:** `packages/tddy-tools/src/cli/session_tools.rs:82` — `run_call_tool`
+**Moved:** 2026-10-22 — by `#satellite` 16/16 (the sweep), unchanged in length and shape, into its own module.
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **93 lines** · **nesting depth 4** · 1 parameters · 11 branch/match lines · 3 early exits

@@ -25,3 +25,13 @@ arm; add a CI job that builds `--no-default-features`.
 LiveKit crate. The three client wiring crates have no `livekit` feature. If this entry is taken
 for the daemon, the feature belongs on the daemon's wiring (`tddy-daemon`), and a matching one on a
 client `-cli` crate would be a new decision, not a restoration.
+
+## Assessed by `#satellite` 16/16 (the sweep, 2026-10-22): not done there
+
+The sweep's brief allowed this as a fix "if achievable"; it was judged not to be, and not attempted:
+`runtime::build` (now `BuildContext`'s stages) names LiveKit types in seven of its eleven files
+(`identity`, `integrations`, `mount`, `mount_host`, `mount_entries`, `mount_socket`, `mount_accounts`), as do
+`tasks.rs` (`CommonRoomSupervisorTask`, `OauthLoopbackTunnel`), `runtime.rs` (`PeerDiscoveryHandles`) and
+`credential_sync.rs` (`livekit::Room`), so a `livekit` feature needs a `not(feature)` arm for each of
+them, not one in `runtime.rs`; `tddy-daemon/src/lib.rs` and `livekit_host_ports.rs`, which the feature also
+changes, are edited by open PR #694. It is a design of its own, best done on the stages the sweep left.
