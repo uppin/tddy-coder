@@ -60,7 +60,8 @@ progress fold too; `Apply` starts the servers its plan needs (`servers_for_a_run
 `has_an_index`, `CodeNavigationServiceImpl::with_supports`, `code_session::start(.., supports, ..)`,
 `warm_for_session_with_supports`, `IndexWarmupObserver::with_supports`, `IndexLspExecutor::with_supports` — every
 session-level "does this worktree have an index" asks `serves_workspace` over the host's registry.
-`runtime.rs` builds that registry once (`code_navigation::host_supports()`).
+`runtime.rs`'s `build` builds that registry once (`code_navigation::host_supports()`, re-exported
+`SupportRegistry`) and `BuildContext::index_supports` hands it to `mount_host` and `mount_entries`.
 
 ## Tests
 
@@ -78,7 +79,8 @@ extension-only worktree's index state, an `Apply` rename through the daemon); `e
   `extension-code-actions` and `extension-wasm-command`, so not split here — recorded as
   `packages/tddy-index-daemon/docs/code-issues/oversized-file-index.md` for after the stack.
 - `tddy-zed-extensions/src/support.rs` 457 → 491 (512 before the settings read moved to `server::served`).
-- `tddy-daemon/src/runtime.rs` 1,867 → 1,867 (`build` 1,080 → 1,078); `runner/entry_points/store_run.rs` 509 → 501
+- `tddy-daemon/src/runtime/`: +2 lines in `runtime.rs`'s `build`, +10 in `build_context.rs`, +1 each in
+  `mount_host.rs` and `mount_entries.rs` — all under budget. `runner/entry_points/store_run.rs` 509 → 501
   (pre-existing, recorded as `oversized-file-runner-store-run.md`).
 
 ## Left open (backlog)
