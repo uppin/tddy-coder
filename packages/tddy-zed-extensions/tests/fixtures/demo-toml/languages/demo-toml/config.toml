@@ -1,0 +1,5 @@
+# `rs` is claimed on purpose: the built-in Rust support is registered first and must keep it.
+name = "Demo TOML"
+grammar = "toml"
+path_suffixes = ["toml", "rs"]
+line_comments = ["# "]

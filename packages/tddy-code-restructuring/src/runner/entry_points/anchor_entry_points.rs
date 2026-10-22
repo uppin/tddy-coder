@@ -17,7 +17,7 @@ use crate::item_anchor::item_anchor_at;
 
 use super::super::options::usage;
 
-use super::registry_for;
+use super::registry_with_installed;
 
 use crate::RestructureError;
 
@@ -43,19 +43,19 @@ pub fn item_anchors(
     client: Option<Arc<LspClient>>,
     cancel: CancellationToken,
 ) -> Result<Anchor> {
-    let client = client.ok_or_else(|| {
-        RestructureError::MalformedPlan("anchors requires a rust-analyzer LSP session".into())
-    })?;
     let source = options.source()?;
     let file = source.to_string_lossy().to_string();
 
-    let mut registry = registry_for(
-        root,
-        client,
-        cancel,
-        Arc::clone(&options.progress),
-        options.trace,
-    );
+    // A file only an installed language claims is answered from its text: no server is needed, and
+    // none is asked.
+    let mut registry = if options.is_served_without_a_server(&source) {
+        options.installed.backends_static(root)
+    } else {
+        let client = client.ok_or_else(|| {
+            RestructureError::MalformedPlan("anchors requires a rust-analyzer LSP session".into())
+        })?;
+        registry_with_installed(root, client, cancel, &options)
+    };
     match options.at {
         Some(_) if !options.items.is_empty() => {
             Err(usage("anchors takes --items or --at, not both"))

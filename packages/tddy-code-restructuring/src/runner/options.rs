@@ -6,9 +6,11 @@
 //! [`Options`] without caring how it was read.
 
 use crate::backends::rust::{discard, ProgressSink, WAIT_HEARTBEAT};
+use crate::language::SupportRegistry;
 use crate::spawn_record::SpawnRecorder;
 use crate::{RestructureError, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 const USAGE: &str = "\
@@ -127,6 +129,16 @@ pub struct Options {
     /// shortens it so that it does not have to wait thirty seconds for a beat. The waits of a run
     /// beat at this cadence; the compile gate's check does too.
     pub wait_heartbeat: Duration,
+    /// The languages registered after the built-ins — an installed Zed extension's — that this run
+    /// routes the files the built-ins do not claim to.
+    ///
+    /// A collaborator, like the sinks above: the front end builds it (`tddy-tools` and the index
+    /// daemon, through `tddy_zed_extensions::InstalledExtensions`), because this crate cannot
+    /// depend on the crate that loads extensions. Empty by default — no language beyond the
+    /// built-ins, which is what a run knew before extensions existed. An `anchors` or a static
+    /// `check` whose files are all claimed by a support with no server starts no language server
+    /// (`#reshape` extension-outline, R5–R7).
+    pub installed: Arc<SupportRegistry>,
 }
 
 impl Default for Options {
@@ -156,6 +168,7 @@ impl Default for Options {
             trace: untraced,
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
+            installed: Arc::new(SupportRegistry::new()),
         }
     }
 }
@@ -250,6 +263,17 @@ impl Options {
         self.target
             .clone()
             .ok_or_else(|| usage("a plan file is required"))
+    }
+
+    /// Whether `file` is claimed by a language of [`Self::installed`] that runs no server, and by
+    /// no built-in: its item anchors are answered from the file's text, so nothing about it needs a
+    /// language server (`#reshape` extension-outline, R5–R7).
+    pub fn is_served_without_a_server(&self, file: &Path) -> bool {
+        SupportRegistry::with_builtins().support_of(file).is_none()
+            && self
+                .installed
+                .support_of(file)
+                .is_some_and(|support| support.launch().is_none())
     }
 
     /// The source file a command was given.

@@ -120,7 +120,11 @@ async fn main() -> ExitCode {
         Lifetime::SingleShot(requested) => {
             // The task registry is the serving path's; a single-shot run holds the servers only
             // long enough to shut them down again.
-            let (_tasks, servers, service) = wired(&rust_analyzer, spawn_observer);
+            let Ok((_tasks, servers, service)) =
+                wired(&rust_analyzer, spawn_observer).inspect_err(report_wiring_failure)
+            else {
+                return ExitCode::FAILURE;
+            };
             let verdict = single_shot::run_once(service.as_ref(), requested).await;
             // A plan this run loaded or changed is written back before the process goes, as a
             // serving one does on shutdown: the run is over and nothing else will.
@@ -137,7 +141,11 @@ async fn main() -> ExitCode {
             }
         }
         Lifetime::Serve(transports) => {
-            let (tasks, servers, service) = wired(&rust_analyzer, spawn_observer);
+            let Ok((tasks, servers, service)) =
+                wired(&rust_analyzer, spawn_observer).inspect_err(report_wiring_failure)
+            else {
+                return ExitCode::FAILURE;
+            };
             match serve::serve(transports, service, servers, tasks).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(failure) => {
@@ -156,13 +164,17 @@ async fn main() -> ExitCode {
 /// run, because the serving path needs the same handle in more than one place and a second
 /// construction shape would be a second thing to keep in step.
 ///
-/// The allow-list is the one the built-in Rust support launches, with the configured program. This
-/// process cannot share `tddy-daemon`'s registry: the handshake is fixed at spawn, and the handshake
+/// The allow-list is the one the built-in Rust support launches, with the configured program.
+/// TODO(extension-language-server): an installed language that launches a server is allowed here
+/// too; today none does, so the built-in's is the whole list.
+///
+/// This process cannot share `tddy-daemon`'s registry: the handshake is fixed at spawn, and the handshake
 /// is what this process's server needs to answer code actions and count columns the way it does.
 fn wired(
     rust_analyzer: &str,
     spawn_observer: Option<Arc<dyn SpawnObserver>>,
-) -> (TaskRegistry, LspRegistry, Arc<CodeIndexServiceImpl>) {
+) -> anyhow::Result<(TaskRegistry, LspRegistry, Arc<CodeIndexServiceImpl>)> {
+    let installed = installed_languages()?;
     let tasks = TaskRegistry::new();
     let registry = LspRegistry::new(
         SupportRegistry::with_builtin_rust(RustSupport::launching(rust_analyzer)).allow_list(),
@@ -173,11 +185,20 @@ fn wired(
         Some(observer) => registry.with_spawn_observer(observer),
         None => registry,
     };
-    let service = Arc::new(CodeIndexServiceImpl::new(CodeIndexPorts {
-        servers: servers.clone(),
-        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
-    }));
-    (tasks, servers, service)
+    let service = Arc::new(CodeIndexServiceImpl::with_supports(
+        CodeIndexPorts {
+            servers: servers.clone(),
+            wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
+        },
+        Arc::new(installed),
+    ));
+    Ok((tasks, servers, service))
+}
+
+/// Why [`wired`] could not stand the service up — the installed extensions did not load — said once
+/// before the process exits.
+fn report_wiring_failure(failure: &anyhow::Error) {
+    log::error!(target: MAIN, "installed extensions: {failure:#}");
 }
 
 /// Point this process's stderr at `path`.
@@ -204,4 +225,20 @@ fn send_stderr_to(path: &std::path::Path) -> anyhow::Result<()> {
          unix operation",
         path.display()
     )
+}
+
+/// The languages this process routes after the built-ins: every installed Zed extension's under
+/// `<tddy data dir>/extensions` (`TDDY_DATA_DIR`, else `$HOME/.tddy`), each grammar that does not
+/// load logged once, by name, and leaving the other languages working (`#reshape`
+/// extension-outline, R8). The cold CLI registers the same through `tddy-tools`, which is what
+/// keeps the two answering the same anchors.
+fn installed_languages() -> anyhow::Result<SupportRegistry> {
+    let dir = tddy_zed_extensions::ExtensionsDir::resolve()?;
+    let mut installed = SupportRegistry::new();
+    for failure in
+        tddy_zed_extensions::InstalledExtensions::with_installed_extensions(&mut installed, &dir)?
+    {
+        log::error!(target: MAIN, "{failure}");
+    }
+    Ok(installed)
 }

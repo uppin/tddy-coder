@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use tddy_code_analysis::complexity_cache::InMemoryComplexityCache;
 use tddy_code_restructuring::plan_store::{FlushPolicy, PlanStore};
 use tddy_code_restructuring::spawn_record::SpawnRecorder;
+use tddy_code_restructuring::SupportRegistry;
 use tddy_lsp::client::LspClient;
 use tddy_lsp::registry::{workspace_root_for, LspKey};
 use tddy_lsp::{LanguageId, LspRegistry};
@@ -97,6 +98,11 @@ pub struct WorkspaceIndex {
     flusher: Arc<std::sync::Once>,
     /// What followers of a root hear besides its server's progress ([`crate::watch_root`]).
     signals: RootSignals,
+    /// The languages beyond Rust this host routes a file to by the support that claims it — an
+    /// installed extension's (`#reshape` extension-outline, R8; its server, extension-language-server
+    /// R7). Empty unless [`WorkspaceIndex::with_supports`] says otherwise: Rust only, as before
+    /// extensions existed.
+    supports: Arc<SupportRegistry>,
 }
 
 impl WorkspaceIndex {
@@ -110,7 +116,23 @@ impl WorkspaceIndex {
             plans: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             flusher: Arc::new(std::sync::Once::new()),
             signals: RootSignals::default(),
+            supports: Arc::new(SupportRegistry::new()),
         }
+    }
+
+    /// Route the files `supports` claim to their supports (`#reshape` extension-outline, R8): their
+    /// anchors and outlines from the support's grammar, their server — if it launches one — from
+    /// the registry (extension-language-server, R7). The registry this index was built over must
+    /// allow each of their launches — a host builds it from [`SupportRegistry::allow_list`].
+    #[must_use]
+    pub fn with_supports(mut self, supports: Arc<SupportRegistry>) -> Self {
+        self.supports = supports;
+        self
+    }
+
+    /// The languages beyond Rust this host routes to, for the `installed` of a run's options.
+    pub(crate) fn supports(&self) -> Arc<SupportRegistry> {
+        Arc::clone(&self.supports)
     }
 
     /// The recorder a run's own processes go through, reporting to the same observer this index's

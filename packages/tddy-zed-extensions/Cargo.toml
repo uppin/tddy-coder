@@ -21,14 +21,26 @@ tar = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The language-support interface an installed extension's languages implement (K11), and the item
+# anchor traits their outline answers. No cycle: tddy-code-restructuring knows nothing of Zed.
+tddy-code-restructuring = { path = "../tddy-code-restructuring" }
+tddy-lsp = { path = "../tddy-lsp" }
 thiserror = "2"
 # `extension.toml` and `languages/<x>/config.toml`; the version tddy-daemon-kernel already uses.
 toml = "0.9"
+# An installed extension's grammar is a `grammars/<name>.wasm`, loaded through tree-sitter's WASM
+# loader (developer decision and consent, 2026-10-19). The `wasm` feature brings wasmtime through
+# `wasmtime-c-api` (wasmtime 36 for tree-sitter 0.26.x) and re-exports it as
+# `tree_sitter::wasmtime`, so no second wasmtime is declared here.
+tree-sitter = { version = "0.26.13", features = ["wasm"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# `CancellationToken`, which the static `check` entry point takes: already a dependency of
+# tddy-code-restructuring at this version, so no new crate enters the tree.
+tokio-util = "0.7"
 # The fixture registry: already a dev-dependency of tddy-tools, so no new crate enters the tree.
 # It matches the query parameters R4 requires, which a hand-rolled listener would have to parse.
 wiremock = "0.6"

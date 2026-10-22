@@ -101,6 +101,11 @@ impl BackendRegistry {
         self.backends.push(backend);
     }
 
+    /// Every backend of `other`, after those already here: the first to claim a file keeps it.
+    pub fn extend(&mut self, other: BackendRegistry) {
+        self.backends.extend(other.backends);
+    }
+
     /// Find the backend for a file and confirm it supports the operation.
     ///
     /// An unsupported operation is an error, never a silent skip: skipping it would leave the tree
@@ -158,6 +163,19 @@ impl ItemResolver for BackendRegistry {
                 op: "item anchors".to_string(),
             })?
             .resolve_item(file, item)
+    }
+
+    /// The module path of `file` as the backend that claims it reads one.
+    fn module_of(&mut self, root: &Path, file: &str) -> Result<Vec<String>> {
+        let backend = self.backend_of(Path::new(file))?;
+        let name = backend.language().to_string();
+        backend
+            .item_resolver()
+            .ok_or(crate::RestructureError::UnsupportedOp {
+                backend: name,
+                op: "item anchors".to_string(),
+            })?
+            .module_of(root, file)
     }
 }
 
@@ -363,6 +381,96 @@ mod tests {
                 assert_eq!((backend.as_str(), op.as_str()), ("rust", "item anchors"));
             }
             other => panic!("expected UnsupportedOp, got {:?}", other.err()),
+        }
+    }
+
+    /// A backend for `.cfg` that reads its files itself, built knowing its workspace root (as
+    /// `LanguageSupport::backend(server, root)` builds one): it answers a file's module as
+    /// `<its root>:<file>`, so a test sees both that the call reached it and which root it holds.
+    struct AFileRootedBackend {
+        language: LanguageId,
+        root: PathBuf,
+    }
+
+    impl AFileRootedBackend {
+        fn over(root: &Path) -> Self {
+            Self {
+                language: LanguageId::new("cfg"),
+                root: root.to_path_buf(),
+            }
+        }
+    }
+
+    impl LanguageBackend for AFileRootedBackend {
+        fn language(&self) -> &LanguageId {
+            &self.language
+        }
+
+        fn handles_extension(&self, extension: &str) -> bool {
+            extension == "cfg"
+        }
+
+        fn supports(&self, _kind: RefactorKind) -> bool {
+            false
+        }
+
+        fn resolve(
+            &mut self,
+            _op: &RefactorOp,
+            _workspace: &Workspace<'_>,
+        ) -> crate::Result<Resolution> {
+            Ok(Resolution::default())
+        }
+
+        fn item_resolver(&mut self) -> Option<&mut dyn ItemResolver> {
+            Some(self)
+        }
+    }
+
+    impl ItemResolver for AFileRootedBackend {
+        fn resolve_item(
+            &mut self,
+            _file: &str,
+            _item: &ItemPath,
+        ) -> crate::Result<crate::item_anchor::ResolvedItem> {
+            unreachable!("no registry test resolves an item through this backend")
+        }
+
+        fn module_of(&mut self, _root: &Path, file: &str) -> crate::Result<Vec<String>> {
+            Ok(vec![format!("{}:{file}", self.root.display())])
+        }
+    }
+
+    #[test]
+    fn a_files_module_is_answered_by_the_backend_that_reads_its_own_files() {
+        // Given a registry holding a backend that reads files itself, built over a workspace root
+        let mut registry = BackendRegistry::new();
+        registry.register(Box::new(AFileRootedBackend::over(Path::new("/work/tree"))));
+
+        // When the module of a file that backend claims is asked for
+        let module = registry.module_of(Path::new("/work/tree"), "conf/app.cfg");
+
+        // Then the registry routed it to that backend, which answers it from the root it holds
+        assert_eq!(
+            module.expect("the backend answers"),
+            vec!["/work/tree:conf/app.cfg".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_files_module_through_a_backend_without_a_resolver_is_refused_by_name() {
+        // Given a backend for `.rs` that offers no item resolver
+        let mut registry = registry();
+
+        // When the module of a Rust file is asked for
+        let module = registry.module_of(Path::new("/work/tree"), "src/lib.rs");
+
+        // Then it is refused as an unsupported operation, as resolving an item there is
+        match module {
+            Err(RestructureError::UnsupportedOp { backend, op }) => {
+                assert_eq!((backend.as_str(), op.as_str()), ("rust", "item anchors"));
+            }
+            other => panic!("expected UnsupportedOp, got {other:?}"),
         }
     }
 }

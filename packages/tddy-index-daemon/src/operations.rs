@@ -111,6 +111,7 @@ pub(crate) async fn serve_check(
             // them in the one record the host named with `--spawn-record`.
             spawns: index.spawn_recorder(),
             wait_heartbeat: index.wait_heartbeat(),
+            installed: index.supports(),
             ..Options::default()
         };
 

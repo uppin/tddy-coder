@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use tddy_code_restructuring::item_anchor;
 use tddy_code_restructuring::plan_store::{OpStaleness, PlanStore};
 use tddy_code_restructuring::runner::{self, Command, Options};
+use tddy_code_restructuring::Anchor;
 use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
 
@@ -49,6 +50,85 @@ async fn anchor_covering(
     root: PathBuf,
     request: AnchorsRequest,
 ) -> Result<AnchorsResponse, Status> {
+    let at = anchored_position(&request)?;
+
+    let _queued = index.hold(&root).await;
+    let options = Options {
+        command: Command::Anchors,
+        target: Some(PathBuf::from(&request.file)),
+        items: request.items,
+        at,
+        progress: logged_progress(),
+        trace: logged_trace,
+        wait_heartbeat: index.wait_heartbeat(),
+        installed: index.supports(),
+        ..Options::default()
+    };
+    // A file only an installed language without a server claims is anchored from its text: no
+    // server is started for it, and none is waited for.
+    let client = if options.is_served_without_a_server(std::path::Path::new(&request.file)) {
+        None
+    } else {
+        Some(index.client_for(&root).await?)
+    };
+
+    // A unary handler has no stream to learn its caller left through, but it is dropped when the
+    // caller goes: the guard turns that drop into the cancellation the index waits listen to. Without
+    // it the wait runs on inside `spawn_blocking` holding `index.hold(root)`, and every later
+    // request for this workspace queues behind it.
+    let cancel = CancellationToken::new();
+    let _stop_when_dropped = cancel.clone().drop_guard();
+    let (anchor, range) =
+        tokio::task::spawn_blocking(move || anchor_and_span(&root, options, client, cancel))
+            .await
+            .map_err(|failure| joined("anchors", &failure))?
+            .map_err(|refusal: tddy_code_restructuring::RestructureError| status_of(&refusal))?;
+
+    Ok(AnchorsResponse {
+        anchor_json: tddy_code_restructuring::console::item_anchor(&anchor),
+        range: Some(wire_range(range)),
+    })
+}
+
+/// The anchor `options` asks for and the range it covers in the tree as it stands: with `client`
+/// over the built-ins then the installed languages, without one over the installed languages alone
+/// (a file only a server-less one claims).
+fn anchor_and_span(
+    root: &std::path::Path,
+    options: Options,
+    client: Option<std::sync::Arc<tddy_lsp::client::LspClient>>,
+    cancel: CancellationToken,
+) -> Result<(Anchor, tddy_code_restructuring::Range), tddy_code_restructuring::RestructureError> {
+    let installed = std::sync::Arc::clone(&options.installed);
+    let (progress, heartbeat) = (
+        std::sync::Arc::clone(&options.progress),
+        options.wait_heartbeat,
+    );
+    let anchor = runner::item_anchors(root, options, client.clone(), cancel.clone())?;
+    let mut registry = match client {
+        Some(client) => {
+            let mut registry = runner::registry_for_waiting(
+                root,
+                client,
+                cancel,
+                progress,
+                logged_trace,
+                heartbeat,
+            );
+            registry.extend(installed.backends_static(root));
+            registry
+        }
+        None => installed.backends_static(root),
+    };
+    let range = item_anchor::span_of(&anchor, root, &mut registry)?;
+    Ok((anchor, range))
+}
+
+/// The position an `anchors` request anchors at, `None` for one naming items — refused when it
+/// names no file, or neither items nor a position, or both.
+fn anchored_position(
+    request: &AnchorsRequest,
+) -> Result<Option<tddy_code_restructuring::Range>, Status> {
     if request.file.trim().is_empty() {
         return Err(Status::invalid_argument("the request names no file"));
     }
@@ -63,63 +143,21 @@ async fn anchor_covering(
             "the request names both items and a position — an anchor covers one or the other",
         ));
     }
+    Ok(at)
+}
 
-    let _queued = index.hold(&root).await;
-    let client = index.client_for(&root).await?;
-    let progress = logged_progress();
-    let options = Options {
-        command: Command::Anchors,
-        target: Some(PathBuf::from(&request.file)),
-        items: request.items,
-        at,
-        progress: std::sync::Arc::clone(&progress),
-        trace: logged_trace,
-        wait_heartbeat: index.wait_heartbeat(),
-        ..Options::default()
-    };
-
-    // A unary handler has no stream to learn its caller left through, but it is dropped when the
-    // caller goes: the guard turns that drop into the cancellation the index waits listen to. Without
-    // it the wait runs on inside `spawn_blocking` holding `index.hold(root)`, and every later
-    // request for this workspace queues behind it.
-    let cancel = CancellationToken::new();
-    let _stop_when_dropped = cancel.clone().drop_guard();
-    let options_heartbeat = options.wait_heartbeat;
-    let (anchor, range) = tokio::task::spawn_blocking(move || {
-        let anchor = runner::item_anchors(
-            &root,
-            options,
-            Some(std::sync::Arc::clone(&client)),
-            cancel.clone(),
-        )?;
-        let mut registry = runner::registry_for_waiting(
-            &root,
-            client,
-            cancel,
-            progress,
-            logged_trace,
-            options_heartbeat,
-        );
-        let range = item_anchor::span_of(&anchor, &root, &mut registry)?;
-        Ok((anchor, range))
-    })
-    .await
-    .map_err(|failure| joined("anchors", &failure))?
-    .map_err(|refusal: tddy_code_restructuring::RestructureError| status_of(&refusal))?;
-
-    Ok(AnchorsResponse {
-        anchor_json: tddy_code_restructuring::console::item_anchor(&anchor),
-        range: Some(SourceRange {
-            start: Some(SourcePosition {
-                line: range.start.line,
-                column: range.start.col,
-            }),
-            end: Some(SourcePosition {
-                line: range.end.line,
-                column: range.end.col,
-            }),
+/// `range` on the wire.
+fn wire_range(range: tddy_code_restructuring::Range) -> SourceRange {
+    SourceRange {
+        start: Some(SourcePosition {
+            line: range.start.line,
+            column: range.start.col,
         }),
-    })
+        end: Some(SourcePosition {
+            line: range.end.line,
+            column: range.end.col,
+        }),
+    }
 }
 
 /// Rewrite a plan's snapshot header to the tree as it stands, and for an item-anchored plan

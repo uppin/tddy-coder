@@ -74,6 +74,12 @@ pub enum ExtensionError {
 
     #[error("{id:?} is not a valid extension id: it must be one name, such as demo-lang")]
     InvalidExtensionId { id: String },
+
+    /// The wasmtime engine every installed grammar loads into did not start, so no extension
+    /// language can be loaded (`#reshape` extension-outline). Not a grammar's failure: that is a
+    /// [`crate::GrammarLoadError`] and spares the other extensions.
+    #[error("the WASM engine extension grammars load into did not start: {message}")]
+    GrammarEngineUnavailable { message: String },
 }
 
 impl ExtensionError {

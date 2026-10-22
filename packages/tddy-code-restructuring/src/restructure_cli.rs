@@ -40,7 +40,19 @@ pub use crate::restructure_args::{
 };
 
 pub async fn run(args: RestructureArgs) -> Result<()> {
+    run_with_installed(args, SupportRegistry::new()).await
+}
+
+/// [`run`], routing the files the built-ins do not claim to `installed` — the languages a front end
+/// registered after them. `tddy-tools` passes the installed Zed extensions'
+/// (`tddy_zed_extensions::InstalledExtensions`), which this crate cannot load itself without
+/// depending on the crate that implements its own interface.
+///
+/// An `anchors`, or a static `check`, whose files a support with no server claims starts no
+/// rust-analyzer (`#reshape` extension-outline, R5–R7).
+pub async fn run_with_installed(args: RestructureArgs, installed: SupportRegistry) -> Result<()> {
     let mut options = options_for(args);
+    options.installed = Arc::new(installed);
 
     // The one place the process directory becomes a workspace root. The library takes the root as a
     // parameter and reads the process directory nowhere, so that one process can serve several
@@ -266,7 +278,12 @@ const REQUEST_BOUND_ABOVE_ANY_COLD_INDEX: Duration = Duration::from_secs(600);
 
 fn needs_lsp_client(options: &Options) -> bool {
     match options.command {
-        Command::Apply | Command::Anchors => true,
+        Command::Apply => true,
+        // An `anchors` over a file only an installed language without a server claims is answered
+        // from the file's text.
+        Command::Anchors => !options
+            .source()
+            .is_ok_and(|source| options.is_served_without_a_server(&source)),
         Command::Check => options.deep,
         // A snapshot re-hashes the files the plan's header names against the working tree. There
         // is no seam to resolve and nothing to ask a server about, so starting one would cost

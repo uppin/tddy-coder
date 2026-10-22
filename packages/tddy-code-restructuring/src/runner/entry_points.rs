@@ -91,8 +91,10 @@ pub use store_run::{
 };
 
 /// Build a registry for static checks only (no LSP connection), for the workspace at `root`.
-fn registry_for_static(root: &Path) -> BackendRegistry {
-    SupportRegistry::with_builtins().backends_static(root)
+fn registry_for_static(root: &Path, installed: &SupportRegistry) -> BackendRegistry {
+    let mut registry = SupportRegistry::with_builtins().backends_static(root);
+    registry.extend(installed.backends_static(root));
+    registry
 }
 
 /// Build a registry backed by rust-analyzer through the shared LSP client, for the workspace at
@@ -112,6 +114,26 @@ pub fn registry_for(
     trace: fn(&str),
 ) -> BackendRegistry {
     registry_for_waiting(root, client, cancel, progress, trace, WAIT_HEARTBEAT)
+}
+
+/// [`registry_for`], then the server-less backends of `options.installed` after the built-ins': the
+/// registry an `anchors` or a deep `check` routes by, so a file an installed language claims
+/// reaches that language's outline backend (`#reshape` extension-outline, R5–R6).
+fn registry_with_installed(
+    root: &Path,
+    client: Arc<LspClient>,
+    cancel: CancellationToken,
+    options: &Options,
+) -> BackendRegistry {
+    let mut registry = registry_for(
+        root,
+        client,
+        cancel,
+        Arc::clone(&options.progress),
+        options.trace,
+    );
+    registry.extend(options.installed.backends_static(root));
+    registry
 }
 
 /// [`registry_for`] for a caller that owns the cadence at which a wait says what it is waiting for.
@@ -286,7 +308,7 @@ mod tests {
     #[test]
     fn offers_the_reference_engine_a_cross_crate_move_survey_needs() {
         // Given the registry a check builds
-        let mut registry = registry_for_static(Path::new("."));
+        let mut registry = registry_for_static(Path::new("."), &SupportRegistry::new());
 
         // When the backend for a Rust module is asked for its reference engine
         let backend = registry

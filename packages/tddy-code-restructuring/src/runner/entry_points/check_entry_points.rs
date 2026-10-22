@@ -18,7 +18,7 @@ use crate::item_anchor::{has_item_anchors, plan_file_has_item_anchors};
 
 use super::registry_for_static;
 
-use super::registry_for;
+use super::{registry_for, registry_with_installed};
 
 use crate::RestructureError;
 
@@ -146,6 +146,9 @@ pub fn snapshot_resolving(
             "snapshot of a plan with item anchors requires a rust-analyzer LSP session".into(),
         )
     })?;
+    // TODO(extension-language-server): route through `options.installed` too, and ask no client
+    // when every item anchor lies in a file a server-less installed language claims — today a
+    // snapshot re-resolves only the built-ins' item anchors.
     let mut registry = registry_for(
         root,
         client,
@@ -228,15 +231,9 @@ pub fn check_plan(
                 "deep check requires a rust-analyzer LSP session".into(),
             )
         })?;
-        registry_for(
-            root,
-            client,
-            cancel,
-            Arc::clone(&options.progress),
-            options.trace,
-        )
+        registry_with_installed(root, client, cancel, &options)
     } else {
-        registry_for_static(root)
+        registry_for_static(root, &options.installed)
     };
     let mut findings: Vec<Finding> = Vec::new();
     // Resolved before anything reads an anchor, so every check below sees the ranges an apply would
@@ -248,6 +245,9 @@ pub fn check_plan(
     } else if options.deep {
         item_anchor::resolve_item_anchors(&plan, root, &mut registry)?
     } else {
+        // The item anchors of files a language with no server claims are cheap to resolve, so they
+        // are, here: what is left names items only a deep check can resolve.
+        let plan = lower_server_less_item_anchors(&plan, root, &options)?;
         findings.extend(item_anchor_findings(&plan, root)?);
         plan
     };
@@ -401,6 +401,41 @@ fn one_finding_per_refused_group(plan: &Plan, findings: Vec<Finding>) -> Vec<Fin
         );
     }
     merged
+}
+
+/// `plan` with the item anchors of every operation lowered whose item anchors all lie in files a
+/// language with no server claims (`Options::installed`, R6), resolved through that language's
+/// backend: a stale fingerprint, an absent or an ambiguous item is the check's refusal, as for Rust.
+///
+/// An operation with any other item anchor is left as written for [`item_anchor_findings`].
+fn lower_server_less_item_anchors(plan: &Plan, root: &Path, options: &Options) -> Result<Plan> {
+    let mut registry = options.installed.backends_static(root);
+    let mut lowered = plan.clone();
+    for op in &mut lowered.ops {
+        let item_files: Vec<&Path> = op
+            .anchors()
+            .filter(|anchor| matches!(anchor, Anchor::Item { .. } | Anchor::Items { .. }))
+            .map(|anchor| Path::new(anchor.file()))
+            .collect();
+        if item_files.is_empty()
+            || !item_files
+                .into_iter()
+                .all(|file| options.is_served_without_a_server(file))
+        {
+            continue;
+        }
+        let one_op = Plan {
+            ops: vec![op.clone()],
+            ..plan.clone()
+        };
+        if let Some(resolved) = item_anchor::resolve_item_anchors(&one_op, root, &mut registry)?
+            .ops
+            .pop()
+        {
+            *op = resolved;
+        }
+    }
+    Ok(lowered)
 }
 
 /// The findings a static check gives the operations whose anchors name items: what can be

@@ -1,0 +1,13 @@
+# Two languages sharing one grammar whose `.wasm` is not WebAssembly: the load must fail once,
+# naming this extension and the grammar, and leave every other extension's languages working.
+id = "broken-grammar"
+name = "Broken Grammar"
+version = "0.1.0"
+schema_version = 1
+authors = ["tddy <dev@tddy.invalid>"]
+description = "A grammar that does not load."
+repository = "https://example.invalid/broken-grammar"
+
+[grammars.broken]
+repository = "https://example.invalid/tree-sitter-broken"
+rev = "0000000000000000000000000000000000000000"
