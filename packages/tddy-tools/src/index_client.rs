@@ -18,6 +18,7 @@ use tddy_code_restructuring::restructure_cli::{
     RestructureLoadArgs, RestructurePlanArgs, RestructureSnapshotArgs, RestructureUnloadArgs,
     RestructureVerifyArgs,
 };
+use tddy_code_restructuring::SupportRegistry;
 use tddy_index_daemon::proto::code_index::{
     AnchorsRequest, ApplyRequest, CheckRequest, ListPlansRequest, LoadPlansRequest,
     PlanStatusRequest, SnapshotRequest, SourcePosition, SourceRange, UnloadPlansRequest,
@@ -36,12 +37,19 @@ const TDDY_INDEX_SOCKET: &str = "TDDY_INDEX_SOCKET";
 // the binary root by hand (see
 // docs/dev/todo/2026-10-21-restructure-cannot-reparent-modules-declared-in-a-binary-root.md)
 /// Run `args` against the warm daemon if one has been named, else against today's cold path.
-pub async fn run_restructure(args: RestructureArgs) -> Result<()> {
+///
+/// `installed` loads the languages registered after the built-ins — the installed Zed extensions',
+/// which this crate cannot load itself (the front end that links `tddy-zed-extensions` does). Only
+/// the cold path calls it: a warm daemon registers its own.
+pub async fn run_restructure(
+    args: RestructureArgs,
+    installed: impl FnOnce() -> Result<SupportRegistry>,
+) -> Result<()> {
     match warm_index_socket(std::env::var(TDDY_INDEX_SOCKET).ok().as_deref()) {
         Some(socket) if !answered_without_an_index(&args.command) => {
             restructure_at(&socket, args).await
         }
-        _ => tddy_code_restructuring::restructure_cli::run(args).await,
+        _ => tddy_code_restructuring::restructure_cli::run_with_installed(args, installed()?).await,
     }
 }
 

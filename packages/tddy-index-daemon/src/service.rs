@@ -65,6 +65,21 @@ impl CodeIndexServiceImpl {
         }
     }
 
+    /// [`CodeIndexServiceImpl::new`] for a host that registered languages beyond Rust: the files
+    /// `supports` claim are answered by the support that claims them (`#reshape`
+    /// extension-outline, R8). `ports.servers` must allow each support's launch.
+    #[must_use]
+    pub fn with_supports(
+        ports: CodeIndexPorts,
+        supports: Arc<tddy_code_restructuring::SupportRegistry>,
+    ) -> Self {
+        Self {
+            index: WorkspaceIndex::new(ports.servers)
+                .with_wait_heartbeat(ports.wait_heartbeat)
+                .with_supports(supports),
+        }
+    }
+
     /// Write every plan any root holds back to disk now, for a process about to stop.
     ///
     /// Plans are written back shortly after they change, but "shortly" is a delay, and a process
@@ -321,11 +336,7 @@ pub fn build_code_index_entry_with_supports(
     ports: CodeIndexPorts,
     supports: Arc<tddy_code_restructuring::SupportRegistry>,
 ) -> tddy_rpc::ServiceEntry {
-    let service = CodeIndexServiceImpl {
-        index: WorkspaceIndex::new(ports.servers)
-            .with_wait_heartbeat(ports.wait_heartbeat)
-            .with_supports(supports),
-    };
+    let service = CodeIndexServiceImpl::with_supports(ports, supports);
     let server = CodeIndexServiceServer::from_arc(Arc::new(service));
     tddy_rpc::ServiceEntry {
         name: CODE_INDEX_SERVICE,

@@ -9,7 +9,7 @@ use crate::backends::rust::{discard, ProgressSink, WAIT_HEARTBEAT};
 use crate::language::SupportRegistry;
 use crate::spawn_record::SpawnRecorder;
 use crate::{RestructureError, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -263,6 +263,17 @@ impl Options {
         self.target
             .clone()
             .ok_or_else(|| usage("a plan file is required"))
+    }
+
+    /// Whether `file` is claimed by a language of [`Self::installed`] that runs no server, and by
+    /// no built-in: its item anchors are answered from the file's text, so nothing about it needs a
+    /// language server (`#reshape` extension-outline, R5–R7).
+    pub fn is_served_without_a_server(&self, file: &Path) -> bool {
+        SupportRegistry::with_builtins().support_of(file).is_none()
+            && self
+                .installed
+                .support_of(file)
+                .is_some_and(|support| support.launch().is_none())
     }
 
     /// The source file a command was given.

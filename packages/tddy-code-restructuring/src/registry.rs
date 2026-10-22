@@ -101,6 +101,11 @@ impl BackendRegistry {
         self.backends.push(backend);
     }
 
+    /// Every backend of `other`, after those already here: the first to claim a file keeps it.
+    pub fn extend(&mut self, other: BackendRegistry) {
+        self.backends.extend(other.backends);
+    }
+
     /// Find the backend for a file and confirm it supports the operation.
     ///
     /// An unsupported operation is an error, never a silent skip: skipping it would leave the tree
@@ -162,10 +167,15 @@ impl ItemResolver for BackendRegistry {
 
     /// The module path of `file` as the backend that claims it reads one.
     fn module_of(&mut self, root: &Path, file: &str) -> Result<Vec<String>> {
-        let _ = (root, file);
-        // TODO(reshape-extension-outline): implement — route to the claiming backend's resolver,
-        // refusing by name (as `resolve_item` does) a backend that offers none.
-        todo!("BackendRegistry::module_of")
+        let backend = self.backend_of(Path::new(file))?;
+        let name = backend.language().to_string();
+        backend
+            .item_resolver()
+            .ok_or(crate::RestructureError::UnsupportedOp {
+                backend: name,
+                op: "item anchors".to_string(),
+            })?
+            .module_of(root, file)
     }
 }
 

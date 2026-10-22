@@ -49,16 +49,18 @@ impl ExtensionLanguage {
         extension_dir: &Path,
         manifest: &ExtensionManifest,
     ) -> Result<Vec<ExtensionLanguage>, ExtensionError> {
-        let _ = (extension_dir, manifest);
-        // TODO(reshape-extension-outline): implement
-        todo!("ExtensionLanguage::load_all")
+        let mut languages = Vec::new();
+        for relative in language_dirs(extension_dir, manifest)? {
+            languages.push(read_language(extension_dir, &relative, &manifest.id)?);
+        }
+        languages.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(languages)
     }
 
     /// The support id (R1): the language name lower-cased, each space a `-` — `"Elixir"` →
     /// `elixir`, `"Demo TOML"` → `demo-toml`.
     pub fn support_id(&self) -> LanguageId {
-        // TODO(reshape-extension-outline): implement
-        todo!("ExtensionLanguage::support_id")
+        LanguageId::new(&self.name.to_lowercase().replace(' ', "-"))
     }
 
     /// `<extension_dir>/grammars/<grammar>.wasm`.
@@ -67,6 +69,75 @@ impl ExtensionLanguage {
             .join("grammars")
             .join(format!("{}.wasm", self.grammar))
     }
+}
+
+/// The language directories, relative to the extension root: the manifest's `languages`, else every
+/// directory under `languages/` (none when there is no such directory).
+fn language_dirs(
+    extension_dir: &Path,
+    manifest: &ExtensionManifest,
+) -> Result<Vec<PathBuf>, ExtensionError> {
+    if !manifest.languages.is_empty() {
+        return Ok(manifest.languages.clone());
+    }
+    let languages = extension_dir.join("languages");
+    let entries = match std::fs::read_dir(&languages) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(ExtensionError::io(&languages, error)),
+    };
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| ExtensionError::io(&languages, error))?;
+        if entry.path().is_dir() {
+            dirs.push(Path::new("languages").join(entry.file_name()));
+        }
+    }
+    dirs.sort();
+    Ok(dirs)
+}
+
+/// The language the directory `relative` (to `extension_dir`) holds: its `config.toml` and, if it
+/// has one, its `outline.scm`.
+fn read_language(
+    extension_dir: &Path,
+    relative: &Path,
+    extension: &str,
+) -> Result<ExtensionLanguage, ExtensionError> {
+    let config_file = relative.join("config.toml");
+    let config_path = extension_dir.join(&config_file);
+    let text = match std::fs::read_to_string(&config_path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ExtensionError::LanguageConfigMissing {
+                extension: extension.to_string(),
+                file: config_file,
+            })
+        }
+        Err(error) => return Err(ExtensionError::io(&config_path, error)),
+    };
+    let config: LanguageConfig =
+        toml::from_str(&text).map_err(|error| ExtensionError::ManifestUnparsable {
+            extension: extension.to_string(),
+            file: config_file,
+            message: error.to_string(),
+        })?;
+
+    let outline_path = extension_dir.join(relative).join("outline.scm");
+    let outline_query = match std::fs::read_to_string(&outline_path) {
+        Ok(query) => Some(query),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(ExtensionError::io(&outline_path, error)),
+    };
+
+    Ok(ExtensionLanguage {
+        extension: extension.to_string(),
+        extension_dir: extension_dir.to_path_buf(),
+        name: config.name,
+        grammar: config.grammar,
+        path_suffixes: config.path_suffixes,
+        outline_query,
+    })
 }
 
 #[cfg(test)]

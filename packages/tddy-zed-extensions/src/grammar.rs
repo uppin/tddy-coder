@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use tree_sitter::{Language, Parser, Tree};
+use tree_sitter::{Language, Parser, Tree, WasmError, WasmErrorKind, WasmStore};
 
 /// A grammar that did not load (R8): reported once per run, naming the extension, the grammar and
 /// why — `extension <id>: grammar <g> did not load: <reason>`.
@@ -22,16 +22,8 @@ pub struct GrammarLoadError {
 /// The process's grammars: one engine, one store, each grammar loaded once.
 pub struct GrammarStore {
     /// The parser that owns the process's `WasmStore`.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-extension-outline): read by load and parse once implemented"
-    )]
     parser: Parser,
     /// Grammars already loaded, by `(extension dir, grammar name)`.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-extension-outline): read by load once implemented"
-    )]
     loaded: BTreeMap<(PathBuf, String), Language>,
 }
 
@@ -39,8 +31,17 @@ impl GrammarStore {
     /// A store with no grammar loaded: a fresh wasmtime engine and the `WasmStore` over it, set on
     /// the parser this store parses with.
     pub fn new() -> Result<Self, tree_sitter::WasmError> {
-        // TODO(reshape-extension-outline): implement
-        todo!("GrammarStore::new")
+        let engine = tree_sitter::wasmtime::Engine::default();
+        let store = WasmStore::new(&engine)?;
+        let mut parser = Parser::new();
+        parser.set_wasm_store(store).map_err(|error| WasmError {
+            kind: WasmErrorKind::Other,
+            message: error.to_string(),
+        })?;
+        Ok(Self {
+            parser,
+            loaded: BTreeMap::new(),
+        })
     }
 
     /// The grammar `grammar` of the extension `extension` installed at `extension_dir`, from its
@@ -51,16 +52,40 @@ impl GrammarStore {
         extension_dir: &Path,
         grammar: &str,
     ) -> Result<Language, GrammarLoadError> {
-        let _ = (extension, extension_dir, grammar);
-        // TODO(reshape-extension-outline): implement
-        todo!("GrammarStore::load")
+        let key = (extension_dir.to_path_buf(), grammar.to_string());
+        if let Some(language) = self.loaded.get(&key) {
+            return Ok(language.clone());
+        }
+        let failed = |reason: String| GrammarLoadError {
+            extension: extension.to_string(),
+            grammar: grammar.to_string(),
+            reason,
+        };
+        let file = extension_dir
+            .join("grammars")
+            .join(format!("{grammar}.wasm"));
+        let bytes =
+            std::fs::read(&file).map_err(|error| failed(format!("{}: {error}", file.display())))?;
+
+        // The parser owns the store; it is taken out to load into and put back whatever came of it.
+        let mut store = self
+            .parser
+            .take_wasm_store()
+            .ok_or_else(|| failed("the parser holds no WASM store".to_string()))?;
+        let loaded = store.load_language(grammar, &bytes);
+        self.parser
+            .set_wasm_store(store)
+            .map_err(|error| failed(error.to_string()))?;
+        let language = loaded.map_err(|error| failed(error.to_string()))?;
+
+        self.loaded.insert(key, language.clone());
+        Ok(language)
     }
 
     /// `text` parsed with `language`, which this store loaded.
     pub fn parse(&mut self, language: &Language, text: &str) -> Option<Tree> {
-        let _ = (language, text);
-        // TODO(reshape-extension-outline): implement
-        todo!("GrammarStore::parse")
+        self.parser.set_language(language).ok()?;
+        self.parser.parse(text, None)
     }
 }
 

@@ -360,7 +360,7 @@ pub fn items_anchor(
     names: &[String],
     resolver: &mut dyn ItemResolver,
 ) -> Result<Anchor> {
-    let module = module_path_of(root, file)?.join("::");
+    let module = resolver.module_of(root, file)?.join("::");
     let items = names
         .iter()
         .map(|name| ItemPath::parse(&qualified_in_module(&module, file, name)?))

@@ -131,6 +131,20 @@ fn room_connector() -> Arc<dyn RoomConnector> {
     Arc::new(tddy_livekit::room_connector::LiveKitRoomConnector)
 }
 
+/// The installed Zed extensions' languages, registered after the built-ins for a cold
+/// `restructure`. A grammar that does not load is said once on stderr, naming its extension and
+/// grammar, and leaves every other language working (`#reshape` extension-outline, R8).
+fn installed_languages() -> Result<tddy_code_restructuring::SupportRegistry> {
+    use tddy_zed_extensions::InstalledExtensions;
+
+    let dir = tddy_zed_extensions::ExtensionsDir::resolve()?;
+    let mut installed = tddy_code_restructuring::SupportRegistry::new();
+    for failure in installed.with_installed_extensions(&dir)? {
+        eprintln!("restructure: {failure}");
+    }
+    Ok(installed)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_logging();
@@ -166,7 +180,9 @@ async fn main() -> Result<()> {
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         Some(Subcommand::ListModels(s)) => tddy_tools::list_models::run_list_models(&s).await?,
         Some(Subcommand::Analyze(s)) => tddy_code_analysis::analyze_cli::run(s)?,
-        Some(Subcommand::Restructure(s)) => index_client::run_restructure(s).await?,
+        Some(Subcommand::Restructure(s)) => {
+            index_client::run_restructure(s, installed_languages).await?
+        }
         Some(Subcommand::Extensions(s)) => tddy_zed_extensions::cli::run(s).await?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");

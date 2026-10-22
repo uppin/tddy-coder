@@ -65,7 +65,6 @@ async fn anchor_covering(
     }
 
     let _queued = index.hold(&root).await;
-    let client = index.client_for(&root).await?;
     let progress = logged_progress();
     let options = Options {
         command: Command::Anchors,
@@ -75,7 +74,15 @@ async fn anchor_covering(
         progress: std::sync::Arc::clone(&progress),
         trace: logged_trace,
         wait_heartbeat: index.wait_heartbeat(),
+        installed: index.supports(),
         ..Options::default()
+    };
+    // A file only an installed language without a server claims is anchored from its text: no
+    // server is started for it, and none is waited for.
+    let client = if options.is_served_without_a_server(std::path::Path::new(&request.file)) {
+        None
+    } else {
+        Some(index.client_for(&root).await?)
     };
 
     // A unary handler has no stream to learn its caller left through, but it is dropped when the
@@ -86,20 +93,23 @@ async fn anchor_covering(
     let _stop_when_dropped = cancel.clone().drop_guard();
     let options_heartbeat = options.wait_heartbeat;
     let (anchor, range) = tokio::task::spawn_blocking(move || {
-        let anchor = runner::item_anchors(
-            &root,
-            options,
-            Some(std::sync::Arc::clone(&client)),
-            cancel.clone(),
-        )?;
-        let mut registry = runner::registry_for_waiting(
-            &root,
-            client,
-            cancel,
-            progress,
-            logged_trace,
-            options_heartbeat,
-        );
+        let installed = std::sync::Arc::clone(&options.installed);
+        let anchor = runner::item_anchors(&root, options, client.clone(), cancel.clone())?;
+        let mut registry = match client {
+            Some(client) => {
+                let mut registry = runner::registry_for_waiting(
+                    &root,
+                    client,
+                    cancel,
+                    progress,
+                    logged_trace,
+                    options_heartbeat,
+                );
+                registry.extend(installed.backends_static(&root));
+                registry
+            }
+            None => installed.backends_static(&root),
+        };
         let range = item_anchor::span_of(&anchor, &root, &mut registry)?;
         Ok((anchor, range))
     })

@@ -91,8 +91,10 @@ pub use store_run::{
 };
 
 /// Build a registry for static checks only (no LSP connection), for the workspace at `root`.
-fn registry_for_static(root: &Path) -> BackendRegistry {
-    SupportRegistry::with_builtins().backends_static(root)
+fn registry_for_static(root: &Path, installed: &SupportRegistry) -> BackendRegistry {
+    let mut registry = SupportRegistry::with_builtins().backends_static(root);
+    registry.extend(installed.backends_static(root));
+    registry
 }
 
 /// Build a registry backed by rust-analyzer through the shared LSP client, for the workspace at
@@ -286,7 +288,7 @@ mod tests {
     #[test]
     fn offers_the_reference_engine_a_cross_crate_move_survey_needs() {
         // Given the registry a check builds
-        let mut registry = registry_for_static(Path::new("."));
+        let mut registry = registry_for_static(Path::new("."), &SupportRegistry::new());
 
         // When the backend for a Rust module is asked for its reference engine
         let backend = registry

@@ -174,11 +174,11 @@ test reaches only this node's bodies plus code already implemented.
   on the daemon's missing routing)
 - [x] Contract: failing unit tests for the owned surface
 - [ ] USER REVIEW of the acceptance tests (ticked at `/green` start)
-- [ ] Language loading, grammar store, outline
-- [ ] Support + backend + registration (CLI and daemon)
+- [x] Language loading, grammar store, outline
+- [x] Support + backend + registration (CLI and daemon)
 - [x] Fixture grammar vendored with licence (tree-sitter-toml, MIT)
 - [ ] Docs: `## Languages from an extension` in zed-extensions.md; `## Languages` in rust-code-restructuring.md
-- [ ] Binary-size/compile-time note for wasmtime in the changeset
+- [x] Binary-size/compile-time note for wasmtime in the changeset
 - [ ] Code Quality
 
 ## Testing plan
@@ -195,11 +195,32 @@ Measured at the contract commit, `tree-sitter` 0.26.13 `wasm` on this Mac (Apple
 - **Binary size:** that standalone release binary (load a grammar, parse, run a query) is **11.2 MB**. The real
   growth of `tddy-tools` / `tddy-index-daemon` is measured at green, once the code is reachable; at the contract
   commit the daemon's debug binary grew 0.8 MB (58.9 → 59.7 MB) because nothing calls into wasmtime yet.
+- **Daemon, measured at green:** the debug `tddy-index-daemon` is **108.3 MB** (59.7 MB at the contract commit, +48.6 MB)
+  once the grammar store is reachable from `main`. Release size of the daemon and of `tddy-tools` is **not measured**
+  (the standalone 11.2 MB figure above is the estimate).
 
 ## Refactoring Needed
 
-_None yet._
+- `snapshot_resolving` and `apply` (`store_run`) do not route through `Options::installed`: a plan with extension-language
+  item anchors is not re-resolved by `snapshot`, and an apply of one is refused for want of a rust-analyzer session.
+  Extension languages support no operation (R7), so `apply` has nothing to do; `snapshot` of such a plan is a follow-up.
+- A whole-file-name `path_suffixes` entry (`Cargo.lock`) is claimed by `ExtensionSupport::claims` but
+  `BackendRegistry` routes by extension, so it never reaches the outline backend (TODO in `support.rs`).
+- The daemon's allow-list is the built-in Rust one only; K22 extends it when an installed language launches a server
+  (TODO(extension-language-server) in `tddy-index-daemon/src/main.rs`).
+
+## Documentation notes (packages/*/docs is not edited directly)
+
+- `## Languages from an extension` for the zed-extensions package doc: suffix claims (R2), the outline tier (R3), item path
+  `<file>::<context>::<name>` (R4), no server (R7), a grammar that does not load reported once per run (R8).
+- `## Languages` for the rust-code-restructuring package doc: `Options::installed`, `run_with_installed`,
+  `ItemResolver::module_of`, `BackendRegistry::extend`, and the static `check` resolving server-less item anchors (R6).
 
 ## Validation Results
 
-_Not run._
+Scoped, through `./dev`:
+
+- `./test -p tddy-zed-extensions`: 10 unit + cli 3 + install 15 + outline 11, all pass.
+- `./test -p tddy-code-restructuring -p tddy-index-daemon`: 2032 passed, 0 failed, 19 ignored (incl. `the_daemon_answers_the_same_anchors_as_the_cli`).
+- `cargo clippy -p tddy-zed-extensions -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools -p tddy-tools-cli --all-targets -- -D warnings`: clean.
+- `tddy-tools` / `tddy-tools-cli` compile (`--all-targets`); their test suites were not run.

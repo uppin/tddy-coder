@@ -102,10 +102,6 @@ pub struct WorkspaceIndex {
     /// installed extension's (`#reshape` extension-outline, R8; its server, extension-language-server
     /// R7). Empty unless [`WorkspaceIndex::with_supports`] says otherwise: Rust only, as before
     /// extensions existed.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-extension-outline): anchors and a static check route through it once implemented"
-    )]
     supports: Arc<SupportRegistry>,
 }
 
@@ -132,6 +128,11 @@ impl WorkspaceIndex {
     pub fn with_supports(mut self, supports: Arc<SupportRegistry>) -> Self {
         self.supports = supports;
         self
+    }
+
+    /// The languages beyond Rust this host routes to, for the `installed` of a run's options.
+    pub(crate) fn supports(&self) -> Arc<SupportRegistry> {
+        Arc::clone(&self.supports)
     }
 
     /// The recorder a run's own processes go through, reporting to the same observer this index's
