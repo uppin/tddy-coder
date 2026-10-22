@@ -45,7 +45,6 @@ fn a_mode_change_with_no_mode() -> ModeChanged {
 fn a_presenter_event(mode_changed: ModeChanged) -> ServerMessage {
     ServerMessage {
         event: Some(Event::ModeChanged(mode_changed)),
-        ..Default::default()
     }
 }
 
@@ -152,7 +151,9 @@ async fn no_operator_channel_accepts_every_presenter_event() {
         a_presenter_event(a_mode_change_to(Variant::Select(AppModeSelect::default())));
 
     // When
-    let outcome = channel.on_presenter_event(SESSION_ID, &a_select_prompt).await;
+    let outcome = channel
+        .on_presenter_event(SESSION_ID, &a_select_prompt)
+        .await;
 
     // Then — an error would end the session's observer loop, and with it the drawer indicator
     assert!(outcome.is_ok(), "{outcome:?}");

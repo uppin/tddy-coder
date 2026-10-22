@@ -1,5 +1,5 @@
-//! Unit: `TelegramNotificationSubscriber` — Telegram's interest in the notification bus, and the
-//! dedupe and routing it keeps from today's `TelegramSessionWatcher`.
+//! Unit: `TelegramDaemonHooks` as the daemon's operator channel — Telegram's interest in the
+//! notification bus, and the dedupe and routing it keeps from today's `TelegramSessionWatcher`.
 //!
 //! PRD: docs/ft/daemon/session-notifications.md (FR2, FR7).
 //!
@@ -12,14 +12,13 @@
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tddy_daemon_kernel::config::{DaemonConfig, TelegramConfig};
+use tddy_daemon_kernel::operator_channel::SharedOperatorChannel;
 use tddy_session_lifecycle::session_notifications::{
     SessionNotification, SessionNotificationKind, SessionNotificationSource,
-    SessionNotificationSubscriber,
 };
 use tddy_telegram::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
-use tddy_telegram_control::telegram_notification_subscriber::TelegramNotificationSubscriber;
 use tddy_telegram_control::telegram_notifier::{InMemoryTelegramSender, TelegramSessionWatcher};
 use tddy_telegram_control::telegram_session_subscriber::TelegramDaemonHooks;
 
@@ -63,7 +62,7 @@ fn an_activity_notification() -> SessionNotification {
 }
 
 /// An attention notification raised by a `tddy-coder` workflow session's presenter — the class
-/// whose Telegram surface carries inline keyboards and therefore is not this subscriber's to send.
+/// whose Telegram surface carries inline keyboards and therefore is not this path's to send.
 fn a_presenter_attention_notification() -> SessionNotification {
     SessionNotification {
         source: SessionNotificationSource::Presenter,
@@ -119,11 +118,11 @@ fn two_chats_tracking_different_sessions() -> SharedTelegramTrackedSessionCoordi
     tracked
 }
 
-/// A subscriber over an in-memory sender, so a test reads what would have been sent.
-fn a_telegram_subscriber(
+/// Telegram's channel over an in-memory sender, so a test reads what would have been sent.
+fn a_telegram_channel(
     config: DaemonConfig,
     tracked: SharedTelegramTrackedSessionCoordinator,
-) -> (TelegramNotificationSubscriber, Arc<InMemoryTelegramSender>) {
+) -> (SharedOperatorChannel, Arc<InMemoryTelegramSender>) {
     let sender = Arc::new(InMemoryTelegramSender::new());
     let watcher = TelegramSessionWatcher::with_elicitation_select_options_coordinator_and_tracked(
         Arc::new(StdMutex::new(std::collections::HashMap::new())),
@@ -138,7 +137,7 @@ fn a_telegram_subscriber(
             as Arc<dyn tddy_telegram_control::telegram_notifier::TelegramSender + Send + Sync>,
         watcher: Arc::new(tokio::sync::Mutex::new(watcher)),
     });
-    (TelegramNotificationSubscriber::new(hooks), sender)
+    (hooks, sender)
 }
 
 // ---------------------------------------------------------------------------
@@ -148,13 +147,13 @@ fn a_telegram_subscriber(
 #[test]
 fn wants_an_attention_notification_from_the_activity_status_path() {
     // Given
-    let (subscriber, _) = a_telegram_subscriber(
+    let (channel, _) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         no_chat_tracks_the_session(),
     );
 
     // When / Then
-    assert!(subscriber.wants(&an_attention_notification()));
+    assert!(channel.wants_notification(&an_attention_notification()));
 }
 
 /// FR7: the indicator feed is why `ACTIVITY` exists. Sending it to a chat would turn every tool
@@ -162,13 +161,13 @@ fn wants_an_attention_notification_from_the_activity_status_path() {
 #[test]
 fn declines_an_activity_notification() {
     // Given
-    let (subscriber, _) = a_telegram_subscriber(
+    let (channel, _) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         no_chat_tracks_the_session(),
     );
 
     // When / Then
-    assert!(!subscriber.wants(&an_activity_notification()));
+    assert!(!channel.wants_notification(&an_activity_notification()));
 }
 
 /// The presenter's elicitations still ship through `telegram_notifier`, keyboards and per-chat
@@ -176,23 +175,22 @@ fn declines_an_activity_notification() {
 #[test]
 fn declines_an_attention_notification_raised_by_the_presenter() {
     // Given
-    let (subscriber, _) = a_telegram_subscriber(
+    let (channel, _) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         no_chat_tracks_the_session(),
     );
 
     // When / Then
-    assert!(!subscriber.wants(&a_presenter_attention_notification()));
+    assert!(!channel.wants_notification(&a_presenter_attention_notification()));
 }
 
 #[test]
 fn declines_everything_when_telegram_is_not_configured() {
     // Given — a daemon with no `telegram:` block
-    let (subscriber, _) =
-        a_telegram_subscriber(DaemonConfig::default(), no_chat_tracks_the_session());
+    let (channel, _) = a_telegram_channel(DaemonConfig::default(), no_chat_tracks_the_session());
 
     // When / Then
-    assert!(!subscriber.wants(&an_attention_notification()));
+    assert!(!channel.wants_notification(&an_attention_notification()));
 }
 
 // ---------------------------------------------------------------------------
@@ -202,14 +200,14 @@ fn declines_everything_when_telegram_is_not_configured() {
 #[tokio::test]
 async fn sends_only_to_the_chats_tracking_the_session_when_any_do() {
     // Given — one chat is tracking the session, another is on the broadcast list
-    let (subscriber, sender) = a_telegram_subscriber(
+    let (channel, sender) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         a_chat_tracking_the_session(),
     );
 
     // When
-    subscriber
-        .deliver(&an_attention_notification())
+    channel
+        .on_notification(&an_attention_notification())
         .await
         .expect("delivery to an in-memory sender must succeed");
 
@@ -225,14 +223,14 @@ async fn sends_only_to_the_chats_tracking_the_session_when_any_do() {
 async fn does_not_reach_a_chat_that_claimed_a_different_session() {
     // Given — this session is claimed by one chat, another session by a second chat, and a third
     // chat is on the broadcast list
-    let (subscriber, sender) = a_telegram_subscriber(
+    let (channel, sender) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         two_chats_tracking_different_sessions(),
     );
 
     // When
-    subscriber
-        .deliver(&an_attention_notification())
+    channel
+        .on_notification(&an_attention_notification())
         .await
         .expect("delivery to an in-memory sender must succeed");
 
@@ -244,14 +242,14 @@ async fn does_not_reach_a_chat_that_claimed_a_different_session() {
 #[tokio::test]
 async fn falls_back_to_the_broadcast_list_when_no_chat_tracks_the_session() {
     // Given — a session started from the web UI, which no chat has claimed
-    let (subscriber, sender) = a_telegram_subscriber(
+    let (channel, sender) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         no_chat_tracks_the_session(),
     );
 
     // When
-    subscriber
-        .deliver(&an_attention_notification())
+    channel
+        .on_notification(&an_attention_notification())
         .await
         .expect("delivery to an in-memory sender must succeed");
 
@@ -266,14 +264,14 @@ async fn falls_back_to_the_broadcast_list_when_no_chat_tracks_the_session() {
 #[tokio::test]
 async fn sends_to_every_chat_on_the_broadcast_list() {
     // Given
-    let (subscriber, sender) = a_telegram_subscriber(
+    let (channel, sender) = a_telegram_channel(
         a_config_broadcasting_to_two_chats(),
         no_chat_tracks_the_session(),
     );
 
     // When
-    subscriber
-        .deliver(&an_attention_notification())
+    channel
+        .on_notification(&an_attention_notification())
         .await
         .expect("delivery to an in-memory sender must succeed");
 
@@ -285,16 +283,16 @@ async fn sends_to_every_chat_on_the_broadcast_list() {
 #[tokio::test]
 async fn sends_the_notification_text_verbatim() {
     // Given
-    let (subscriber, sender) = a_telegram_subscriber(
+    let (channel, sender) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         no_chat_tracks_the_session(),
     );
     let notification = an_attention_notification();
 
     // When
-    subscriber.deliver(&notification).await.unwrap();
+    channel.on_notification(&notification).await.unwrap();
 
-    // Then — the bus owns the copy; the subscriber is a delivery mechanism, not an author
+    // Then — the bus owns the copy; the channel is a delivery mechanism, not an author
     assert_eq!(sender.recorded()[0].1, notification.text);
 }
 
@@ -309,11 +307,11 @@ async fn sends_nothing_when_no_chat_tracks_the_session_and_the_broadcast_list_is
         }),
         ..Default::default()
     };
-    let (subscriber, sender) = a_telegram_subscriber(config, no_chat_tracks_the_session());
+    let (channel, sender) = a_telegram_channel(config, no_chat_tracks_the_session());
 
     // When
-    subscriber
-        .deliver(&an_attention_notification())
+    channel
+        .on_notification(&an_attention_notification())
         .await
         .unwrap();
 
@@ -326,23 +324,23 @@ async fn sends_nothing_when_no_chat_tracks_the_session_and_the_broadcast_list_is
 // ---------------------------------------------------------------------------
 
 /// The bus publishes every reported status so the web can keep a dot alive; Telegram must not turn
-/// that into repeat messages. Suppression therefore lives in this subscriber, and it is the
+/// that into repeat messages. Suppression therefore lives in this channel, and it is the
 /// behaviour `repeated_same_status_does_not_realert` already pins through the RPC.
 #[tokio::test]
 async fn does_not_send_the_same_attention_notification_twice_in_a_row() {
     // Given
-    let (subscriber, sender) = a_telegram_subscriber(
+    let (channel, sender) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         no_chat_tracks_the_session(),
     );
 
     // When — the same notification is published twice, as a re-reported status would be
-    subscriber
-        .deliver(&an_attention_notification())
+    channel
+        .on_notification(&an_attention_notification())
         .await
         .unwrap();
-    subscriber
-        .deliver(&an_attention_notification())
+    channel
+        .on_notification(&an_attention_notification())
         .await
         .unwrap();
 
@@ -354,7 +352,7 @@ async fn does_not_send_the_same_attention_notification_twice_in_a_row() {
 #[tokio::test]
 async fn sends_again_once_the_session_has_moved_on_and_come_back() {
     // Given
-    let (subscriber, sender) = a_telegram_subscriber(
+    let (channel, sender) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         no_chat_tracks_the_session(),
     );
@@ -365,9 +363,9 @@ async fn sends_again_once_the_session_has_moved_on_and_come_back() {
     };
 
     // When — waiting, then done, then waiting again
-    subscriber.deliver(&waiting).await.unwrap();
-    subscriber.deliver(&done).await.unwrap();
-    subscriber.deliver(&waiting).await.unwrap();
+    channel.on_notification(&waiting).await.unwrap();
+    channel.on_notification(&done).await.unwrap();
+    channel.on_notification(&waiting).await.unwrap();
 
     // Then — three genuine changes, three messages
     assert_eq!(sender.recorded().len(), 3);
@@ -376,7 +374,7 @@ async fn sends_again_once_the_session_has_moved_on_and_come_back() {
 #[tokio::test]
 async fn keeps_two_sessions_dedupe_state_apart() {
     // Given
-    let (subscriber, sender) = a_telegram_subscriber(
+    let (channel, sender) = a_telegram_channel(
         a_config_broadcasting_to_one_chat(),
         no_chat_tracks_the_session(),
     );
@@ -387,11 +385,11 @@ async fn keeps_two_sessions_dedupe_state_apart() {
     };
 
     // When — the same wording for two different sessions
-    subscriber
-        .deliver(&an_attention_notification())
+    channel
+        .on_notification(&an_attention_notification())
         .await
         .unwrap();
-    subscriber.deliver(&other).await.unwrap();
+    channel.on_notification(&other).await.unwrap();
 
     // Then — one message each; a shared dedupe key would have swallowed the second
     assert_eq!(sender.recorded().len(), 2);

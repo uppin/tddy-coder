@@ -36,12 +36,6 @@ pub use tddy_daemon_sandbox::*;
 /// own name in the crate it moved to, so `crate::worktrees::X` goes on resolving here and no
 /// caller in this crate changed.
 pub use tddy_projects::{project_provision, project_storage};
-/// The per-chat active-elicitation lease, which now lives in `tddy-telegram`.
-///
-/// Re-exported under its own name so `crate::active_elicitation::X` — and
-/// `tddy_daemon::active_elicitation::X` in the four acceptance suites that stay here — goes on
-/// resolving unchanged. No caller moved with it.
-pub use tddy_telegram::active_elicitation;
 pub use tddy_worktree_service::{
     base_sync_cache, branch_intent, branch_owner, remote_git_service, worktree_files, worktrees,
 };
@@ -65,11 +59,6 @@ pub use tddy_session_files::{
     session_context_docs, session_file_upload, session_uploads, session_workflow_files,
     stack_doc_attachments,
 };
-/// Presenter-gate classification, which now lives in `tddy-telegram`.
-///
-/// `session_list_enrichment` and `session_notifications` are its callers and stay here; that edge
-/// is `tddy-daemon` → `tddy-telegram`, the same direction as every other facade in this file.
-pub use tddy_telegram::elicitation;
 pub mod worktree_tonic_adapter {
     pub use tddy_service::proto::worktree::WorktreeServiceTonicAdapter;
 }
@@ -89,7 +78,7 @@ pub use tddy_host_service::{
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
 /// The per-session presenter observer: one gRPC stream feeding the notification bus and, through the
-/// kernel's `PresenterEventSink` port, whichever chat surface the daemon injected.
+/// kernel's `OperatorChannel` port, whichever chat surface the daemon injected.
 pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};
 /// Where a clone's checkout is on this host, plus a re-export of the clone store and the mirror
 /// that moved to `tddy-session-agents` with `#unbundle` node 7. All are reached as
@@ -123,8 +112,6 @@ pub use tddy_session_agents::{
 /// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
 pub use tddy_session_split::{split_session, workspace_session};
-pub use tddy_telegram::telegram_github_link;
-pub use tddy_telegram::telegram_tracked_session;
 pub mod terminal_session_adapter;
 pub use tddy_tool_engine::tool_call_log;
 pub mod pr_stack_rpc;

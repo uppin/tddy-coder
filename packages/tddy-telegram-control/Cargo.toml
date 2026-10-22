@@ -22,8 +22,9 @@ uuid = { version = "1", features = ["v4"] }
 # `tddy-telegram`, its other user is `tddy-daemon`'s `runtime.rs`, which builds the `Bot`.
 teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
 tddy-core = { path = "../tddy-core" }
-# `PresenterEventSink`, the port `TelegramDaemonHooks` implements. (`DaemonConfig` is the kernel's
-# too, but this crate names it through `tddy_session_lifecycle::config`, which re-exports it.)
+# `OperatorChannel`, the port `TelegramDaemonHooks` implements, and the `SessionNotification` types
+# it names. (`DaemonConfig` is the kernel's too, but this crate names it through
+# `tddy_session_lifecycle::config`, which re-exports it.)
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `SessionRooms`: Delete closes a session's room through the port.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
@@ -31,13 +32,14 @@ tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 # this crate's graph through `tddy-session-lifecycle`.
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-service = { path = "../tddy-service" }
-# `TelegramNotificationSubscriber` is a subscriber of this crate's bus.
+# `LastDeliveredPerSession`: the per-session dedupe Telegram's channel keeps for bus notifications.
 tddy-session-activity = { path = "../tddy-session-activity" }
 tddy-spawn = { path = "../tddy-spawn" }
 # The two crates this one sits between. `tddy-telegram` is the transport and the chat-side state
 # (`TelegramSender`, the elicitation lease, the tracked-session gate); `tddy-session-lifecycle` is
-# the session machinery the control plane drives. It cannot live in either: `tddy-telegram` does
-# not depend on `tddy-session-lifecycle`, which depends on it.
+# the session machinery the control plane drives. It cannot live in either: `tddy-telegram` is the
+# transport and drives no session, and no session crate may name a Telegram crate
+# (`tddy-daemon-extensions/tests/telegram_is_a_satellite.rs`).
 # `Status`/`Code`: a Telegram start tells the exposure port's "nothing wired" (`FailedPrecondition`)
 # from a real failure. Already in this crate's graph through `tddy-daemon-extensions`.
 tddy-rpc = { path = "../tddy-rpc" }

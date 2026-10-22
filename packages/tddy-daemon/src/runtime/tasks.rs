@@ -56,6 +56,8 @@ pub struct RuntimeTasks {
         Arc<tddy_session_lifecycle::relay_idle::IdleTimeoutTracker>,
         tokio::sync::oneshot::Sender<()>,
     )>,
+    /// Asks Telegram whether the configured bot token works, before the dispatcher starts.
+    pub(super) telegram_identity_check: Option<TelegramIdentityCheck>,
     pub(super) telegram_inbound: Option<TelegramInbound>,
     /// `#keyring` 6/9's peer-join watch, when a common room and an open-vault population exist to
     /// sync over. See `credential_sync::run_publish_watch`.
@@ -151,6 +153,25 @@ pub(super) struct TelegramInbound {
             >,
         >,
     >,
+}
+
+/// The bot's `getMe`, reported on Telegram's status-board entry with the token redacted from any
+/// error.
+pub(super) struct TelegramIdentityCheck {
+    pub(super) bot: Bot,
+    pub(super) status: tddy_daemon_extensions::IntegrationReporter,
+    pub(super) bot_token: String,
+}
+
+impl TelegramIdentityCheck {
+    async fn run(self) {
+        tddy_telegram::status::report_bot_identity(
+            &tddy_telegram::status::TeloxideBotIdentity::new(self.bot),
+            &self.status,
+            &self.bot_token,
+        )
+        .await;
+    }
 }
 
 /// The tasks a host started, so it can stop them when its server is done.
@@ -285,8 +306,19 @@ impl RuntimeTasks {
             )));
         }
 
-        if let Some(inbound) = self.telegram_inbound {
+        // The identity check runs first, so the board says whether the token works before the
+        // dispatcher's long poll starts failing on a bad one. It runs for a bot whose inbound
+        // control is unavailable too: its notifications still go out on the same token.
+        let telegram_identity_check = self.telegram_identity_check;
+        let telegram_inbound = self.telegram_inbound;
+        if telegram_identity_check.is_some() || telegram_inbound.is_some() {
             handles.push(tokio::spawn(async move {
+                if let Some(check) = telegram_identity_check {
+                    check.run().await;
+                }
+                let Some(inbound) = telegram_inbound else {
+                    return;
+                };
                 if let Err(e) = tddy_telegram_control::telegram_bot::run_telegram_bot(
                     inbound.bot,
                     inbound.harness,

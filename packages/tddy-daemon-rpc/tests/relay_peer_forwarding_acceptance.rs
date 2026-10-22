@@ -89,7 +89,7 @@ fn service_with_known_remote_peer(config: DaemonConfig, sessions_base: PathBuf) 
         user_resolver_valid(),
         None,
         tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     ))
 }
@@ -210,7 +210,7 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
         user_resolver_valid(),
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     ));
 
@@ -286,7 +286,7 @@ async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
         user_resolver_valid(),
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     ));
 

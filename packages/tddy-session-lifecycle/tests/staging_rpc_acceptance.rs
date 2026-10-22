@@ -82,7 +82,7 @@ fn minimal_service(
         user_resolver,
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_staging_base_dir(staging_base)

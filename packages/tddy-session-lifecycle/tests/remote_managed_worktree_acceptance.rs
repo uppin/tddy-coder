@@ -133,7 +133,7 @@ fn service_with_known_codebase_peer_and_config(
         user_resolver_valid(),
         None,
         tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )))
 }

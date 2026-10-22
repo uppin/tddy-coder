@@ -454,7 +454,7 @@ fn session_host(
         user_resolver,
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
 }

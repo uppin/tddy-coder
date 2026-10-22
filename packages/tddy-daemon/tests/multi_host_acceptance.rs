@@ -310,7 +310,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         user_resolver.clone(),
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 
@@ -388,7 +388,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
                 },
             ),
         ),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
 

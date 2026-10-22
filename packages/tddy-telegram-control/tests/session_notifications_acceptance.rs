@@ -6,7 +6,7 @@
 //! The path under test is the real one: `DaemonSessionHost::report_session_status` is called
 //! with a valid `hook_token`, exactly as the per-worktree `tddy-tools session-hook` calls it when
 //! Claude Code fires a hook. One publish onto `SessionNotificationBus` must reach every interested
-//! subscriber — the Telegram subscriber that ships today's copy, and any indicator subscriber
+//! subscriber — Telegram's operator channel that ships today's copy, and any indicator subscriber
 //! sitting beside it.
 
 use std::path::PathBuf;
@@ -18,13 +18,12 @@ use tddy_rpc::Request;
 use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::session_notifications::{
-    RecordingSessionNotificationSubscriber, SessionNotificationBus, SessionNotificationKind,
-    SessionNotificationSource,
+    OperatorChannelSubscriber, RecordingSessionNotificationSubscriber, SessionNotificationBus,
+    SessionNotificationKind, SessionNotificationSource,
 };
 use tddy_telegram::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
-use tddy_telegram_control::telegram_notification_subscriber::TelegramNotificationSubscriber;
 use tddy_telegram_control::telegram_notifier::{InMemoryTelegramSender, TelegramSessionWatcher};
 use tddy_telegram_control::telegram_session_subscriber::TelegramDaemonHooks;
 
@@ -126,7 +125,7 @@ fn telegram_hooks(sender: Arc<InMemoryTelegramSender>) -> Arc<TelegramDaemonHook
     })
 }
 
-/// A `DaemonSessionHost` whose notification bus carries the Telegram subscriber and one
+/// A `DaemonSessionHost` whose notification bus carries Telegram's operator channel and one
 /// indicator subscriber — the shape `main.rs` assembles in production.
 fn a_service_with_both_subscribers(
     sessions_base: PathBuf,
@@ -140,9 +139,9 @@ fn a_service_with_both_subscribers(
 
     let hooks = telegram_hooks(sender);
     let bus = SessionNotificationBus::new()
-        .with_subscriber(Arc::new(TelegramNotificationSubscriber::new(Arc::clone(
-            &hooks,
-        ))))
+        .with_subscriber(Arc::new(OperatorChannelSubscriber::new(
+            Arc::clone(&hooks) as _
+        )))
         .with_subscriber(indicators);
 
     DaemonSessionHost::new(
@@ -152,7 +151,7 @@ fn a_service_with_both_subscribers(
         user_resolver,
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&a_daemon_config()),
-        Some(hooks),
+        hooks,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_session_notification_bus(Arc::new(bus))

@@ -685,7 +685,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             // constructs by hand; adding it is a change of its own. The Telegram surface for these
             // sessions is unaffected — it never went through the bus.
             tddy_session_lifecycle::presenter_observer_task::spawn_presenter_observer_task(
-                Some(Arc::clone(hooks) as SharedPresenterEventSink),
+                Arc::clone(hooks) as SharedOperatorChannel,
                 None,
                 &result.session_id,
                 result.grpc_port,

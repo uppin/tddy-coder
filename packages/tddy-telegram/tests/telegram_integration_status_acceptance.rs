@@ -195,7 +195,10 @@ async fn a_failed_send_reports_unreachable_with_the_error() {
         .await;
 
     // Then — the caller still sees the failure, and the board says why
-    assert!(outcome.is_err(), "a failed send is not reported as delivered");
+    assert!(
+        outcome.is_err(),
+        "a failed send is not reported as delivered"
+    );
     let error = unreachable_error_of(telegram_state_on(&board));
     assert!(
         error.contains("connection refused"),

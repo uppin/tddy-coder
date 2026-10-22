@@ -157,7 +157,7 @@ fn a_service_with_a_notification_stream(sessions_base: PathBuf) -> DaemonSession
         user_resolver,
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&a_config_for_two_operators()),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_session_notification_bus(Arc::new(bus))

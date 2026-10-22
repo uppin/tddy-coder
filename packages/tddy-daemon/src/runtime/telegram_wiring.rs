@@ -1,5 +1,5 @@
 use crate::config::DaemonConfig;
-use crate::runtime::tasks::TelegramInbound;
+use crate::runtime::tasks::{TelegramIdentityCheck, TelegramInbound};
 use crate::runtime::RuntimeOptions;
 use std::collections::HashMap;
 use std::path::Path;
@@ -9,11 +9,13 @@ use teloxide::prelude::Bot;
 use tokio::sync::Mutex;
 
 /// What a configured Telegram bot contributes: the hooks every session-notification path publishes
-/// through, and the inbound dispatcher that serves the buttons an operator presses.
+/// through, the identity check that tells the status board whether its token works, and the inbound
+/// dispatcher that serves the buttons an operator presses.
 // TODO(restructure-engine): `move_item` widened `build_telegram` but not the private struct it returns.
 pub(super) struct TelegramWiring {
     pub(super) hooks:
         Option<Arc<tddy_telegram_control::telegram_session_subscriber::TelegramDaemonHooks>>,
+    pub(super) identity_check: Option<TelegramIdentityCheck>,
     pub(super) inbound: Option<TelegramInbound>,
 }
 
@@ -43,12 +45,16 @@ pub(super) fn build_telegram(
     claude_cli_manager: &Arc<tddy_session_lifecycle::cli_session_manager::CliSessionManager>,
     session_rooms: &Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
     terminal_exposure: &Arc<dyn tddy_daemon_extensions::TerminalExposure>,
+    telegram_status: &tddy_daemon_extensions::IntegrationReporter,
 ) -> TelegramWiring {
+    // No block, switched off, or no token: no bot. Which of the three it is was already reported
+    // on the status board from the same block (`tddy_telegram::status::configured_state`).
     let tg = match config.telegram.as_ref() {
         Some(tg) if tg.enabled && !tg.bot_token.is_empty() => tg,
         _ => {
             return TelegramWiring {
                 hooks: None,
+                identity_check: None,
                 inbound: None,
             }
         }
@@ -58,16 +64,28 @@ pub(super) fn build_telegram(
     let teloxide_sender =
         Arc::new(tddy_telegram_control::telegram_notifier::TeloxideSender::new(bot.clone()));
     let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
-    let sender: Arc<dyn TelegramSender + Send + Sync> = teloxide_sender.clone();
+    // Every send the hooks make — notifications, elicitations, the lifecycle messages — reports
+    // its outcome on Telegram's board entry, token redacted.
+    let sender: Arc<dyn TelegramSender + Send + Sync> =
+        Arc::new(tddy_telegram::status::ReportingSender::new(
+            tddy_telegram_control::telegram_notifier::TeloxideSender::new(bot.clone()),
+            telegram_status.clone(),
+            &tg.bot_token,
+        ));
+    let identity_check = Some(TelegramIdentityCheck {
+        bot: bot.clone(),
+        status: telegram_status.clone(),
+        bot_token: tg.bot_token.clone(),
+    });
     let elicitation_select_options: tddy_telegram_control::telegram_notifier::ElicitationSelectOptionsCache =
         Arc::new(StdMutex::new(HashMap::new()));
     let elicitation_multi_select_meta: tddy_telegram_control::telegram_notifier::ElicitationMultiSelectMetaCache =
         Arc::new(StdMutex::new(HashMap::new()));
     let active_elicitation = Arc::new(StdMutex::new(
-        tddy_session_lifecycle::active_elicitation::ActiveElicitationCoordinator::new(),
+        tddy_telegram::active_elicitation::ActiveElicitationCoordinator::new(),
     ));
     let telegram_tracked = Arc::new(StdMutex::new(
-        tddy_session_lifecycle::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
+        tddy_telegram::telegram_tracked_session::TelegramTrackedSessionCoordinator::new(),
     ));
     let watcher = Arc::new(Mutex::new(
         tddy_telegram_control::telegram_notifier::TelegramSessionWatcher::with_elicitation_caches_coordinator_and_tracked(
@@ -98,6 +116,7 @@ pub(super) fn build_telegram(
                 );
                 return TelegramWiring {
                     hooks: Some(hooks),
+                    identity_check,
                     inbound: None,
                 };
             }
@@ -144,6 +163,7 @@ pub(super) fn build_telegram(
 
     TelegramWiring {
         hooks: Some(hooks),
+        identity_check,
         inbound: Some(TelegramInbound { bot, harness }),
     }
 }

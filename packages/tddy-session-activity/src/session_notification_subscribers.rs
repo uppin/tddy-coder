@@ -2,11 +2,11 @@
 //!
 //! PRD: `docs/ft/daemon/session-notifications.md` (FR2, FR3, FR7).
 //!
-//! `tddy-daemon`'s Telegram subscriber is the other one, and it stayed there: it delivers through
-//! the daemon's bot hooks and reads the daemon's `telegram:` config block, neither of which this
-//! crate has or should acquire. It implements the same
-//! [`crate::session_notifications::SessionNotificationSubscriber`] trait from the far side of the
-//! crate boundary, which is the whole point of the trait.
+//! The other one is the daemon's operator channel (Telegram's, on a daemon that has one), registered
+//! through [`crate::session_notifications::OperatorChannelSubscriber`]: it delivers through the
+//! daemon's bot hooks and reads the daemon's `telegram:` config block, neither of which this crate
+//! has or should acquire. It implements the kernel's `OperatorChannel` port from the far side of
+//! the crate boundary, which is the whole point of the port.
 
 use async_trait::async_trait;
 use tokio::sync::broadcast;

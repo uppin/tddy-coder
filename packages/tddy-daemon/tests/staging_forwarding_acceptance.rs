@@ -179,7 +179,7 @@ async fn two_daemons() -> TwoDaemons {
         user_resolver.clone(),
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_staging_base_dir(staging_b.path().to_path_buf());
@@ -253,7 +253,7 @@ async fn two_daemons() -> TwoDaemons {
                 common_room_livekit_room: room_slot,
             }),
         ),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_staging_base_dir(staging_a.path().to_path_buf());

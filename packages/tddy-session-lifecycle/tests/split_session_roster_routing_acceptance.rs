@@ -219,7 +219,7 @@ fn a_daemon_in_the_common_room(sessions: tempfile::TempDir) -> ADaemonInTheCommo
                 common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
             }),
         ),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     );
 

@@ -10,7 +10,7 @@
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tddy_daemon_kernel::config::{DaemonConfig, TelegramConfig};
-use tddy_daemon_kernel::operator_channel::{OperatorChannel, SharedOperatorChannel};
+use tddy_daemon_kernel::operator_channel::SharedOperatorChannel;
 use tddy_daemon_kernel::session_notification::{
     SessionNotification, SessionNotificationKind, SessionNotificationSource,
 };
@@ -81,7 +81,9 @@ fn a_chat_tracking_the_session() -> SharedTelegramTrackedSessionCoordinator {
 }
 
 /// Telegram's channel over an in-memory sender, so a test reads what a chat would have received.
-fn a_telegram_channel(config: DaemonConfig) -> (SharedOperatorChannel, Arc<InMemoryTelegramSender>) {
+fn a_telegram_channel(
+    config: DaemonConfig,
+) -> (SharedOperatorChannel, Arc<InMemoryTelegramSender>) {
     let sender = Arc::new(InMemoryTelegramSender::new());
     let watcher = TelegramSessionWatcher::with_elicitation_select_options_coordinator_and_tracked(
         Arc::new(StdMutex::new(std::collections::HashMap::new())),

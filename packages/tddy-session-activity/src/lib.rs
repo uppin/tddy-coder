@@ -17,6 +17,7 @@
 //! [`tddy_service::session_activity::next_tick`] for why — and is re-exported here because this is
 //! the crate that stamps the ticks.
 
+pub mod pending_elicitation;
 pub mod presenter_intent_client;
 pub mod presenter_observer_spawn;
 pub mod presenter_observer_task;
@@ -46,6 +47,6 @@ pub use service::ActivityServiceImpl;
 ///
 /// Defined in `tddy-service` and re-exported here. The producer of these ticks is this crate and
 /// `tddy-daemon-livekit`'s session room; the consumer is `tddy-session-sync`, a standalone shipped
-/// binary. Reaching the rule through this crate would put its `livekit` and `tddy-telegram`
-/// dependency trees in that binary for three symbols.
+/// binary. Reaching the rule through this crate would put its `livekit` dependency tree in that
+/// binary for three symbols.
 pub use tddy_service::session_activity::{next_tick, FIRST_TICK, NO_TICK};

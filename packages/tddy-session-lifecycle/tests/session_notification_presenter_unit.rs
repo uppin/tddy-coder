@@ -6,9 +6,9 @@
 //! their dot is driven entirely by the `PresenterObserver.ObserveEvents` stream. The classification
 //! is a pure mapping over `ServerMessage`, so it is pinned here as a table of cases.
 //!
-//! Every notification produced here is `Presenter`-sourced, which the Telegram subscriber declines
-//! (`telegram_notification_subscriber_unit.rs`): a workflow session's elicitations already reach
-//! Telegram through `telegram_notifier`'s keyboard-bearing surface. These events exist to move a
+//! Every notification produced here is `Presenter`-sourced, which the Telegram operator channel
+//! declines (`telegram_notification_subscriber_unit.rs`): a workflow session's elicitations already
+//! reach Telegram through `telegram_notifier`'s keyboard-bearing surface. These events exist to move a
 //! dot, not to send a message.
 
 use tddy_service::gen::server_message::Event;

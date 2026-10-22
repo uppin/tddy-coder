@@ -13,31 +13,32 @@
 //! - [`elicitation`] — what counts as a presenter gate worth asking an operator about.
 //! - [`telegram_tracked_session`] — the per-chat tracked-session gate and traffic logging.
 //! - [`telegram_github_link`] — the Telegram user ↔ GitHub login binding.
+//! - [`status`] — Telegram's entry on the daemon's integration status board, and the token
+//!   redaction every error written there passes through.
 //!
 //! The other four — `telegram_session_control`, `telegram_bot`, `telegram_session_subscriber` and
 //! `telegram_multi_select_shortcuts` — plus `telegram_notifier`'s policy half
-//! (`TelegramSessionWatcher`) could not come here, because they drive the session lifecycle and
-//! `tddy-session-lifecycle` depends on this crate: holding them would close a cycle. They are the
-//! **control plane**, and since `#carve` 8/11 they live in `tddy-telegram-control`, which sits
-//! between this crate and `tddy-session-lifecycle` and depends on both.
+//! (`TelegramSessionWatcher`) did not come here, because they drive the session lifecycle. They
+//! are the **control plane**, and since `#carve` 8/11 they live in `tddy-telegram-control`, which
+//! sits above this crate and `tddy-session-lifecycle` and depends on both.
 //!
 //! `teloxide` is therefore used here (the transport) and by `tddy-telegram-control`'s
 //! `telegram_bot`; `tddy-daemon`'s `runtime` still builds the `Bot` itself.
 //!
 //! # Direction of dependency
 //!
-//! One way only: `tddy-session-lifecycle`, `tddy-session-activity` and `tddy-telegram-control`
-//! depend on `tddy-telegram`, never the reverse. Nothing here names either as a path — the doc references to the control
-//! plane are deliberately plain code spans, not intra-doc links, because this crate cannot see it.
-//!
-//! `tddy-session-lifecycle`'s `session_list_enrichment` and `tddy-session-activity`'s
-//! notifications call [`elicitation`], which is that same one-way edge; the modules that call
-//! *back* into them (`telegram_session_control`, `telegram_session_subscriber`) are the control
-//! plane, which now sits above both crates in `tddy-telegram-control`, so neither pair is mutual.
+//! Telegram is a **satellite**: only `tddy-telegram-control` (the control plane) and `tddy-daemon`
+//! (the wiring) depend on this crate, never a session crate or the kernel — the ratchet
+//! `tddy-daemon-extensions/tests/telegram_is_a_satellite.rs` holds that line. The core reaches a
+//! chat only through `tddy_daemon_kernel::operator_channel::OperatorChannel`, which the control
+//! plane's `TelegramDaemonHooks` implements. Nothing here names the control plane as a path — the
+//! doc references to it are deliberately plain code spans, not intra-doc links, because this crate
+//! cannot see it.
 
 pub mod active_elicitation;
 pub mod elicitation;
 pub mod sender;
+pub mod status;
 pub mod telegram_github_link;
 pub mod telegram_tracked_session;
 

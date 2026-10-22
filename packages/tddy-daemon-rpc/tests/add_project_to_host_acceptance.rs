@@ -99,7 +99,7 @@ fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
                 common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
             }),
         ),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     ))
 }

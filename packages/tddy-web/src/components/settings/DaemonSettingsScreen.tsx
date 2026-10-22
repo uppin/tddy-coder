@@ -22,7 +22,7 @@ export interface DaemonSettingsScreenProps {
 const inputClass = "w-full rounded border border-border px-2 py-1 text-sm";
 const labelClass = "block text-sm mb-1 text-muted-foreground";
 
-/** How often the LiveKit status line is re-read while the screen is open. */
+/** How often the integration status lines are re-read while the screen is open. */
 const INTEGRATION_STATUS_POLL_MS = 5000;
 
 export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScreenProps) {
@@ -34,6 +34,8 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
   const [saving, setSaving] = useState(false);
   // Null when there is no line to show: an older daemon, or one with no LiveKit entry.
   const [liveKitStatusText, setLiveKitStatusText] = useState<string | null>(null);
+  // The same for Telegram: a daemon that reports no `telegram` entry shows no Telegram line.
+  const [telegramStatusText, setTelegramStatusText] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,31 +57,39 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
   // Set once the daemon answers `Unimplemented`: an older daemon will not learn the call mid-session.
   const statusUnsupported = useRef(false);
 
-  const readLiveKitStatus = useCallback(async () => {
+  const readIntegrationStatus = useCallback(async () => {
     if (statusUnsupported.current) return;
     try {
       const response = await client.getIntegrationStatus({ sessionToken });
-      const livekit = response.integrations.find((entry) => entry.id === "livekit");
-      setLiveKitStatusText(livekit ? integrationStatusText(livekit, new Date()) : null);
+      const now = new Date();
+      const statusTextOf = (id: string) => {
+        const entry = response.integrations.find((candidate) => candidate.id === id);
+        return entry ? integrationStatusText(entry, now) : null;
+      };
+      setLiveKitStatusText(statusTextOf("livekit"));
+      setTelegramStatusText(statusTextOf("telegram"));
     } catch (err) {
       const connectError = ConnectError.from(err);
       if (connectError.code === Code.Unimplemented) {
         // A daemon too old to report its integrations is not a broken one: no line, form unaffected.
         statusUnsupported.current = true;
         setLiveKitStatusText(null);
+        setTelegramStatusText(null);
         return;
       }
       // Shown on the status line, not in the save error: a failed poll says nothing about the form.
+      // Said once, on LiveKit's line: whether the daemon has a Telegram entry at all is unknown.
       setLiveKitStatusText(`Status unavailable: ${connectError.rawMessage}`);
+      setTelegramStatusText(null);
     }
   }, [client, sessionToken]);
 
   useEffect(() => {
     statusUnsupported.current = false;
-    void readLiveKitStatus();
-    const interval = setInterval(() => void readLiveKitStatus(), INTEGRATION_STATUS_POLL_MS);
+    void readIntegrationStatus();
+    const interval = setInterval(() => void readIntegrationStatus(), INTEGRATION_STATUS_POLL_MS);
     return () => clearInterval(interval);
-  }, [readLiveKitStatus]);
+  }, [readIntegrationStatus]);
 
   // Typed per field rather than as `string`, so the LiveKit switch is edited through the same one
   // helper every text field is — a checkbox writing a boolean is not a different kind of edit.
@@ -99,7 +109,7 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
       setRestartRequired(response.restartRequired);
       setError(null);
       // The save is the operator's cue to look at whether the daemon can now reach the new server.
-      void readLiveKitStatus();
+      void readIntegrationStatus();
     } catch (err) {
       // The form keeps what was entered: a refused value is the one the operator has to correct.
       setError(ConnectError.from(err).rawMessage);
@@ -192,6 +202,16 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
               />
             </label>
           </div>
+
+          {/* Telegram is configured in the YAML file; only its live state is shown here. */}
+          {telegramStatusText === null ? null : (
+            <div className="flex max-w-md flex-col gap-1 rounded-md border border-border p-4">
+              <div className="font-medium">Telegram</div>
+              <div data-testid="daemon-settings-telegram-status" className="text-sm">
+                {telegramStatusText}
+              </div>
+            </div>
+          )}
 
           {/* Where the daemon listens is edited in the YAML file: changing it needs a restart. */}
           <div className="flex max-w-md flex-col gap-1 rounded-md border border-border p-4 text-sm">

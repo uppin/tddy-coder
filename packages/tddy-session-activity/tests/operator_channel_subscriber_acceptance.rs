@@ -55,7 +55,6 @@ fn a_select_prompt() -> ServerMessage {
                 variant: Some(Variant::Select(AppModeSelect::default())),
             }),
         })),
-        ..Default::default()
     }
 }
 

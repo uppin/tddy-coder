@@ -35,6 +35,8 @@ tddy-service = { path = "../tddy-service" }
 tddy-github = { path = "../tddy-github" }
 # `config::DaemonConfig` — the `telegram:` block that says whether to send and to which chats.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `status` reports Telegram's state on the daemon's `IntegrationStatusBoard`, as LiveKit does.
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 
 [dev-dependencies]
 rstest = { workspace = true }
