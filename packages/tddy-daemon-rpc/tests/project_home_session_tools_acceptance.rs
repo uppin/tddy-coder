@@ -1,0 +1,343 @@
+//! Acceptance: a project-home session lists, starts, reads and diffs its project's other sessions
+//! through four `ExecuteTool` tools — scoped to its own project, refused for any other session.
+//!
+//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session-tools.md (`#project-home` 5/7).
+
+use std::path::{Path, PathBuf};
+
+use tddy_daemon_rpc::test_util::{test_service, TestDaemon};
+use tddy_projects::project_storage::{write_projects, ProjectData};
+use tddy_rpc::{Code, Request};
+use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::session::{
+    ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+};
+use tddy_session_lifecycle::test_util::TEST_TOKEN;
+
+const THIS_PROJECT: &str = "019d105b-ac0f-78d3-9a89-409731145a3b";
+const OTHER_PROJECT: &str = "019d105b-ac0f-78d3-9a89-409731145a3c";
+
+fn git(cwd: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_AUTHOR_NAME", "Test")
+        .env("GIT_AUTHOR_EMAIL", "t@t.com")
+        .env("GIT_COMMITTER_NAME", "Test")
+        .env("GIT_COMMITTER_EMAIL", "t@t.com")
+        .status()
+        .unwrap_or_else(|e| panic!("git {args:?} failed to run: {e}"));
+    assert!(status.success(), "git {args:?} must succeed in {cwd:?}");
+}
+
+fn a_repo_with_origin() -> tempfile::TempDir {
+    let repo = tempfile::tempdir().unwrap();
+    git(repo.path(), &["init", "-q", "-b", "main"]);
+    git(
+        repo.path(),
+        &["commit", "-q", "--allow-empty", "-m", "init"],
+    );
+    git(
+        repo.path(),
+        &["remote", "add", "origin", repo.path().to_str().unwrap()],
+    );
+    git(repo.path(), &["push", "-q", "-u", "origin", "main"]);
+    repo
+}
+
+fn a_project(project_id: &str, repo: &Path) -> ProjectData {
+    ProjectData {
+        project_id: project_id.to_string(),
+        name: project_id.to_string(),
+        git_url: String::new(),
+        main_repo_path: repo.display().to_string(),
+        main_branch_ref: Some("origin/main".to_string()),
+        remote_name: None,
+        host_repo_paths: Default::default(),
+        accounts: Vec::new(),
+        local_gh: false,
+        home_agent: None,
+    }
+}
+
+/// A daemon with two projects: a project-home session and two ordinary sessions in this project,
+/// and one session in the other project.
+struct World {
+    service: TestDaemon,
+    sessions: tempfile::TempDir,
+    home: String,
+    sibling: String,
+    second_sibling: String,
+    foreign: String,
+    _repos: (tempfile::TempDir, tempfile::TempDir),
+}
+
+impl World {
+    fn worktree_of(&self, session_id: &str) -> PathBuf {
+        let dir = tddy_core::session_lifecycle::unified_session_dir_path(
+            self.sessions.path(),
+            session_id,
+        );
+        PathBuf::from(
+            tddy_core::read_session_metadata(&dir)
+                .expect("session metadata")
+                .repo_path
+                .expect("worktree"),
+        )
+    }
+
+    async fn call_as(
+        &self,
+        session_id: &str,
+        tool: &str,
+        args: serde_json::Value,
+    ) -> Result<ExecuteToolResponse, tddy_rpc::Status> {
+        self.service
+            .execute_tool(Request::direct(ExecuteToolRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: session_id.to_string(),
+                tool_name: tool.to_string(),
+                args_json: args.to_string(),
+                daemon_instance_id: String::new(),
+                conversation_id: String::new(),
+            }))
+            .await
+            .map(|r| r.into_inner())
+    }
+
+    async fn call_as_home(&self, tool: &str, args: serde_json::Value) -> ExecuteToolResponse {
+        self.call_as(&self.home, tool, args)
+            .await
+            .unwrap_or_else(|s| panic!("{tool} is served to the home session: {s}"))
+    }
+}
+
+async fn a_workspace_in(service: &TestDaemon, project_id: &str) -> String {
+    service
+        .start_session(Request::direct(StartSessionRequest {
+            session_token: TEST_TOKEN.to_string(),
+            project_id: project_id.to_string(),
+            session_type: "workspace".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .expect("workspace session starts")
+        .into_inner()
+        .session_id
+}
+
+async fn a_project_home_world() -> World {
+    let this_repo = a_repo_with_origin();
+    let other_repo = a_repo_with_origin();
+    let sessions = tempfile::tempdir().unwrap();
+    write_projects(
+        &sessions.path().join("projects"),
+        &[
+            a_project(THIS_PROJECT, this_repo.path()),
+            a_project(OTHER_PROJECT, other_repo.path()),
+        ],
+    )
+    .unwrap();
+    let service = test_service(sessions.path().to_path_buf());
+    let home = a_workspace_in(&service, THIS_PROJECT).await;
+    let sibling = a_workspace_in(&service, THIS_PROJECT).await;
+    let second_sibling = a_workspace_in(&service, THIS_PROJECT).await;
+    let foreign = a_workspace_in(&service, OTHER_PROJECT).await;
+    let home_dir = tddy_core::session_lifecycle::unified_session_dir_path(sessions.path(), &home);
+    let mut meta = tddy_core::read_session_metadata(&home_dir).unwrap();
+    meta.session_role = Some("project-home".to_string());
+    tddy_core::session_metadata::write_session_metadata(&home_dir, &meta).unwrap();
+    World {
+        service,
+        sessions,
+        home,
+        sibling,
+        second_sibling,
+        foreign,
+        _repos: (this_repo, other_repo),
+    }
+}
+
+fn listed_ids(response: &ExecuteToolResponse) -> Vec<String> {
+    let listed: serde_json::Value =
+        serde_json::from_str(&response.result_json).expect("JSON result");
+    let mut ids: Vec<String> = listed["sessions"]
+        .as_array()
+        .expect("a sessions array")
+        .iter()
+        .map(|s| s["session_id"].as_str().unwrap().to_string())
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn a_project_home_session_lists_its_projects_sessions_with_status() {
+    // Given
+    let world = a_project_home_world().await;
+
+    // When
+    let listed = world
+        .call_as_home("ListProjectSessions", serde_json::json!({}))
+        .await;
+
+    // Then — this project's other sessions, not itself, not the other project's
+    assert!(!listed.is_error, "{}", listed.error_message);
+    let mut expected = vec![world.sibling.clone(), world.second_sibling.clone()];
+    expected.sort();
+    assert_eq!(listed_ids(&listed), expected);
+    let first: serde_json::Value = serde_json::from_str(&listed.result_json).unwrap();
+    let row = &first["sessions"][0];
+    assert!(row["worktree"].as_str().is_some_and(|w| !w.is_empty()));
+    assert!(row.get("is_active").is_some() && row.get("agent_status").is_some());
+}
+
+#[tokio::test]
+async fn a_project_home_session_starts_a_session_tagged_with_itself_as_orchestrator() {
+    // Given
+    let world = a_project_home_world().await;
+
+    // When
+    let started = world
+        .call_as_home(
+            "StartProjectSession",
+            serde_json::json!({ "session_type": "workspace" }),
+        )
+        .await;
+
+    // Then
+    assert!(!started.is_error, "{}", started.error_message);
+    let new_id = serde_json::from_str::<serde_json::Value>(&started.result_json).unwrap()
+        ["session_id"]
+        .as_str()
+        .expect("the new session id")
+        .to_string();
+    let listed = world
+        .service
+        .list_sessions(Request::direct(ListSessionsRequest {
+            session_token: TEST_TOKEN.to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner()
+        .sessions;
+    let new_session = listed
+        .iter()
+        .find(|s| s.session_id == new_id)
+        .expect("listed");
+    assert_eq!(new_session.project_id, THIS_PROJECT);
+    assert_eq!(new_session.orchestrator_session_id, world.home);
+}
+
+#[tokio::test]
+async fn a_project_home_session_reads_a_file_and_lists_a_directory_in_another_worktree() {
+    // Given
+    let world = a_project_home_world().await;
+    let worktree = world.worktree_of(&world.sibling);
+    std::fs::create_dir_all(worktree.join("notes")).unwrap();
+    std::fs::write(worktree.join("notes/plan.md"), "ship the parser\n").unwrap();
+
+    // When
+    let file = world
+        .call_as_home(
+            "ReadSessionWorktree",
+            serde_json::json!({ "session_id": world.sibling, "path": "notes/plan.md" }),
+        )
+        .await;
+    let dir = world
+        .call_as_home(
+            "ReadSessionWorktree",
+            serde_json::json!({ "session_id": world.sibling, "path": "notes" }),
+        )
+        .await;
+
+    // Then
+    assert!(!file.is_error, "{}", file.error_message);
+    assert!(file.result_json.contains("ship the parser"));
+    assert!(!dir.is_error, "{}", dir.error_message);
+    assert!(dir.result_json.contains("plan.md"));
+}
+
+#[tokio::test]
+async fn a_project_home_session_gets_a_target_worktrees_diff_against_its_base() {
+    // Given an uncommitted change in the sibling's worktree
+    let world = a_project_home_world().await;
+    std::fs::write(
+        world.worktree_of(&world.sibling).join("added.rs"),
+        "fn added() {}\n",
+    )
+    .unwrap();
+
+    // When
+    let diff = world
+        .call_as_home(
+            "DiffSessionWorktree",
+            serde_json::json!({ "session_id": world.sibling }),
+        )
+        .await;
+
+    // Then
+    assert!(!diff.is_error, "{}", diff.error_message);
+    assert!(diff.result_json.contains("added.rs"));
+    assert!(diff.result_json.contains("fn added()"));
+}
+
+#[tokio::test]
+async fn a_target_in_another_project_is_refused() {
+    // Given
+    let world = a_project_home_world().await;
+
+    // When
+    let read = world
+        .call_as_home(
+            "ReadSessionWorktree",
+            serde_json::json!({ "session_id": world.foreign, "path": "." }),
+        )
+        .await;
+
+    // Then
+    assert!(read.is_error);
+    assert!(
+        read.error_message.contains("another project"),
+        "{}",
+        read.error_message
+    );
+}
+
+#[tokio::test]
+async fn a_path_escaping_the_target_worktree_is_refused() {
+    // Given
+    let world = a_project_home_world().await;
+
+    // When
+    let read = world
+        .call_as_home(
+            "ReadSessionWorktree",
+            serde_json::json!({ "session_id": world.sibling, "path": "../../etc/passwd" }),
+        )
+        .await;
+
+    // Then
+    assert!(read.is_error);
+    assert!(
+        read.error_message.contains("outside the worktree"),
+        "refused for escaping, not for anything else: {}",
+        read.error_message
+    );
+    assert!(!read.result_json.contains("root:"));
+}
+
+#[tokio::test]
+async fn a_session_without_the_project_home_role_cannot_call_the_tools() {
+    // Given
+    let world = a_project_home_world().await;
+
+    // When
+    let refusal = world
+        .call_as(&world.sibling, "ListProjectSessions", serde_json::json!({}))
+        .await
+        .expect_err("an ordinary session is refused");
+
+    // Then
+    assert_eq!(refusal.code(), Code::PermissionDenied);
+}

@@ -5,6 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — more than one crate (tddy-tool-engine, tddy-worktree-service, tddy-daemon-rpc, tddy-tools); daemon RPC seam (`ExecuteTool` → session listing / start); integration tests
 **Stack**: #project-home 5/7. Base: `feature/project-home/home-session`.
+**PR**: [#700](https://github.com/uppin/tddy-coder/pull/700)
 
 ## Initial Discovery
 
@@ -47,15 +48,26 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 ```rust
 // tddy-worktree-service::session_target (new)
 pub struct SessionTarget { pub session_id: String, pub project_id: String, pub worktree: PathBuf, pub branch: String, pub base_ref: String, pub is_active: bool }
-pub enum SessionTargetError { NotFound, OtherProject, IsHome, NoWorktree }
-pub fn resolve_session_target(listing: &dyn SessionListing, home: &HomeCaller, target_session_id: &str) -> Result<SessionTarget, SessionTargetError>;
+pub struct TargetRecord { pub session_id, pub project_id, pub worktree: Option<PathBuf>, pub branch, pub base_ref, pub is_active }
+pub struct HomeCaller { pub session_id: String, pub project_id: String }
+pub enum SessionTargetError { NotFound(String), OtherProject(String), IsHome, NoWorktree(String) }
+pub fn resolve_session_target(records: &[TargetRecord], home: &HomeCaller, target_session_id: &str) -> Result<SessionTarget, SessionTargetError>;  // pure; the daemon builds `records` from `.session.yaml`
 // tddy-tool-engine::project_home_tools (new)
 pub const LIST_PROJECT_SESSIONS: &str = "ListProjectSessions";
 pub const START_PROJECT_SESSION: &str = "StartProjectSession";
 pub const READ_SESSION_WORKTREE: &str = "ReadSessionWorktree";
 pub const DIFF_SESSION_WORKTREE: &str = "DiffSessionWorktree";
 pub fn project_home_tool_defs() -> Vec<ToolDef>;
-pub trait ProjectHomePort { fn list_sessions(&self, project_id: &str) -> Vec<ListedSession>; fn start_session(&self, req: StartProjectSessionArgs) -> Result<String, String>; }
+pub struct ListedSession { session_id, branch, worktree, is_active, agent_status, pending_elicitation }
+pub struct StartProjectSessionArgs { session_type, prompt, agent, new_branch_name }
+pub trait ProjectHomePort: Send + Sync {
+    fn list_sessions(&self, project_id: &str, home_session_id: &str) -> anyhow::Result<Vec<ListedSession>>;
+    fn start_session(&self, project_id: &str, home_session_id: &str, args: StartProjectSessionArgs) -> anyhow::Result<String>;
+}
+// Wire contract the tests pin: a role refusal is `PermissionDenied`; a target/path refusal is an
+// `is_error` result whose message names it ("another project", "outside the worktree").
+// ListProjectSessions → {"sessions":[{session_id, worktree, is_active, agent_status, …}]};
+// StartProjectSession → {"session_id"}; ReadSessionWorktree {session_id, path}; DiffSessionWorktree {session_id}
 ```
 Plus the failing tests below. Bodies `// TODO(home-session-tools): implement`.
 
@@ -133,12 +145,20 @@ session; unit tests for the resolver's rules.
 | `a_target_in_another_project_is_refused` | same | scope |
 | `a_path_escaping_the_target_worktree_is_refused` | same | containment |
 | `a_session_without_the_project_home_role_cannot_call_the_tools` | same | role gate |
-| `resolving_the_home_session_itself_is_refused` | `packages/tddy-worktree-service/src/session_target.rs` (`#[cfg(test)]`) | IsHome |
+| `resolving_a_session_of_the_same_project_returns_its_worktree_and_activity` | `packages/tddy-worktree-service/src/session_target.rs` (`#[cfg(test)]`) | happy path |
+| `resolving_the_home_session_itself_is_refused` | same | IsHome |
+| `resolving_a_session_of_another_project_is_refused` / `resolving_a_session_without_a_worktree_is_refused` | same | OtherProject / NoWorktree |
 | `resolving_an_unknown_session_is_not_found` | same | NotFound |
 
 ## Decisions & Trade-offs
 - **Exec tools over `ExecuteTool`**, not new static MCP tools in `tddy-tools`: a managed agent already reaches the daemon only through that path, and `server.rs` is over budget.
 - **Role-gated**: these tools reach across sessions; only the read-only home agent gets them.
+
+## Red-phase notes
+
+- Verified failing (2026-10-23): 7/7 `project_home_session_tools_acceptance` (tools not in the catalog / no role gate), 4/5 `session_target` unit tests (`resolving_an_unknown_session_is_not_found` passes already — the stub's only answer — and stays as a guard).
+- The acceptance world uses `workspace` sessions and marks one `project-home` in its metadata, so these tests need node 4's role field and `ExecuteTool` role path but not its ensure behaviour; node 4's read-only filter must let these four names through for the role.
+- `StartProjectSession` from a daemon-hosted session goes through the daemon's start path (not the `TDDY_SOCKET` relay `spawn_conversation` uses), with `orchestrator_session_id` = the home session.
 
 ## Technical Debt & Production Readiness
 
@@ -160,10 +180,10 @@ session; unit tests for the resolver's rules.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
