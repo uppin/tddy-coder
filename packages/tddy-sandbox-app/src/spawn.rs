@@ -60,7 +60,8 @@ impl AgentKind {
 /// Refusal for an agent kind this app does not start yet. A jailed OpenCode or Muse session runs on
 /// a provider account, and this app passes none: the route is the daemon's to supply. This app also
 /// has no persistent home or binary flag for either kind, so there is nothing honest to start with.
-// TODO(sandboxed-routes): start OpenCode and Muse here once this app carries a provider route.
+// TODO(sandboxed-routes): start OpenCode and Muse here once this app carries a provider route —
+// docs/dev/todo/2026-10-22-sandbox-app-cannot-start-opencode-or-muse.md.
 fn unstarted_agent_kind(kind: AgentKind) -> anyhow::Error {
     anyhow::anyhow!(
         "--agent-kind {kind:?} is not started by tddy-sandbox-app yet: a jailed {kind:?} session \
