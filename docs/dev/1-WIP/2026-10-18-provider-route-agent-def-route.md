@@ -3,6 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
+**Complexity**: 4/5 — two new modules and a new on-disk profile format (`<tddyhome>/agents/*.yaml` with `harness:`), with start mapping across `tddy-discovery` and `tddy-agent-launch`; no concurrency; reversible behind the loader.
 **Stack**: #provider-route 8/9. Base: `feature/provider-route/opencode-acp`. PR: [#669](https://github.com/uppin/tddy-coder/pull/669).
 
 ## Initial Discovery
