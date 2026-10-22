@@ -517,8 +517,8 @@ mod tests {
             Some(LaunchSpec::new("/opt/fake-ls"))
         }
 
-        fn workspace_root(&self, _file: &Path, root: &Path) -> PathBuf {
-            root.to_path_buf()
+        fn workspace_root(&self, _file: &Path, root: &Path) -> Result<PathBuf, tddy_lsp::LspError> {
+            Ok(root.to_path_buf())
         }
 
         fn backend(&self, _server: ServerHandle<'_>, _root: &Path) -> Box<dyn LanguageBackend> {

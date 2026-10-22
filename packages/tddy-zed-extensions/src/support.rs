@@ -227,6 +227,7 @@ impl ExtensionSupport {
             grammar,
             outline,
             store,
+            server: ServerChoice::Undeclared,
         })
     }
 
