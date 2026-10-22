@@ -1125,14 +1125,7 @@ impl RustBackend {
                 (self.progress)(&format!("waiting for assist `{wanted}`"));
                 reported_wait = true;
             }
-            let actions = self.request_settled(
-                "textDocument/codeAction",
-                json!({
-                    "textDocument": { "uri": uri },
-                    "range": lsp_range(target),
-                    "context": context_for(assist.kinds)
-                }),
-            )?;
+            let actions = self.settled_actions(uri, assist, target)?;
 
             if let Some(action) = titled(&actions, wanted) {
                 return Ok(action);
@@ -1164,6 +1157,18 @@ impl RustBackend {
                 ));
             }
         }
+    }
+
+    fn settled_actions(&mut self, uri: &str, assist: Assist, target: Range) -> Result<Value> {
+        let actions = self.request_settled(
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": lsp_range(target),
+                "context": context_for(assist.kinds)
+            }),
+        )?;
+        Ok(actions)
     }
 }
 
