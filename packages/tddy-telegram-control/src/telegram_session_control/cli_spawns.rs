@@ -1,3 +1,5 @@
+//! The Claude and Cursor model-pick callbacks, and the CLI spawns they end in.
+
 use crate::telegram_session_control::*;
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {

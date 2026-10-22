@@ -1,5 +1,6 @@
-//! `/start-workflow`, `/start-claude` and `/start-cursor`: session creation, the model-pick
-//! callbacks, and the Claude and Cursor CLI spawns. (The model-pick keyboards are in `pickers`.)
+//! `/start-workflow`, `/start-claude` and `/start-cursor`: session creation up to the model pick.
+//! (The model-pick keyboards are in `pickers`; the model-pick callbacks and the Claude and Cursor
+//! CLI spawns they end in are in `cli_spawns`.)
 
 use super::*;
 
