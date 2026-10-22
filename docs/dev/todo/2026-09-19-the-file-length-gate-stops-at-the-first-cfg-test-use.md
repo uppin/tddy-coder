@@ -2,6 +2,7 @@
 
 **Category:** Defect
 **Source:** `/pr-wrap` step 3.5 on PR #518, cross-checked against `/analyze-clean-code`
+**Deferred by developer 2026-10-22** — the .agents/ gate switch-over (pr-wrap 3.5, code-restructuring SKILL.md:17, code-issue-record.md:27); owner: #reshape sweep node
 **Claimed by:** none — #612 (`#reshape 17/24`) delivered the count, not the gate change (see below)
 
 `/pr-wrap` step 3.5 and every `packages/*/docs/code-issues/oversized-file-*.md` record measure Rust

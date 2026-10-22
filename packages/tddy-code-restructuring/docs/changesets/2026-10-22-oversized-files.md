@@ -19,7 +19,7 @@
 - **Deferred by developer 2026-10-21:** the five splits (`crate_move/test_binary.rs` 967, `crate_move/test_modules.rs`
   664, `verify/retarget.rs` 631, `runner/tidy.rs` 542, `backends/rust/item_move/assemble.rs` 521), with their planned
   seams, in `docs/dev/todo/2026-10-21-reshape-oversized-files-splits-deferred.md`.
-- **Not done:** `/pr-wrap` step 3.5 still measures with its `awk` cut; switching it to `tddy-tools restructure lines`
+- **Deferred by developer 2026-10-22 (acceptance 11):** `/pr-wrap` step 3.5 still measures with its `awk` cut; switching it to `tddy-tools restructure lines`
   is left in `docs/dev/todo/2026-09-19-the-file-length-gate-stops-at-the-first-cfg-test-use.md`.
 
 Docs: [README.md](../../README.md), [Rust code restructuring](../../../../docs/ft/coder/rust-code-restructuring.md).
