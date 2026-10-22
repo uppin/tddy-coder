@@ -548,6 +548,10 @@ pub fn backend_selection_question() -> ClarificationQuestion {
                 label: "Stub".to_string(),
                 description: "Test backend with simulated responses".to_string(),
             },
+            QuestionOption {
+                label: "OpenCode".to_string(),
+                description: "OpenCode over ACP (default model: fireworks/kimi-k2)".to_string(),
+            },
         ],
         multi_select: false,
         allow_other: false,
@@ -616,6 +620,7 @@ pub fn backend_from_label(label: &str) -> (&'static str, &'static str) {
         "Codex" => ("codex", "gpt-5"),
         "Codex ACP" => ("codex-acp", "gpt-5"),
         "Stub" => ("stub", "stub"),
+        "OpenCode" => ("opencode", OPENCODE_DEFAULT_MODEL),
         _ => ("claude", "opus"),
     }
 }
@@ -629,6 +634,10 @@ const CLAUDE_MODEL_ALIASES: &[(&str, &str)] = &[
     ("sonnet", "Claude Sonnet (latest)"),
     ("haiku", "Claude Haiku (latest)"),
 ];
+
+/// The model an OpenCode session runs with when it names none: an OpenCode `provider/model` id, the
+/// form `opencode models` lists. Shared by every OpenCode catalog below.
+const OPENCODE_DEFAULT_MODEL: &str = "fireworks/kimi-k2";
 
 /// Version-pinned Claude ids, offered after [`CLAUDE_MODEL_ALIASES`] for a run that must not drift
 /// between releases (a reproduction, or a benchmark comparing two generations). Labelled `(pinned)`
@@ -651,6 +660,7 @@ pub fn default_model_for_agent(agent: &str) -> &'static str {
         "codex" => "gpt-5",
         "codex-acp" => "gpt-5",
         "stub" => "stub",
+        "opencode" => OPENCODE_DEFAULT_MODEL,
         _ => CLAUDE_DEFAULT_MODEL,
     }
 }
@@ -700,6 +710,10 @@ pub fn curated_models_for_agent(agent: &str) -> BackendModels {
         "codex" | "codex-acp" => (&[("gpt-5", "GPT-5")], "gpt-5"),
         "cursor" => (&[("composer-2.5", "Composer 2.5")], "composer-2.5"),
         "stub" => (&[("stub", "Stub")], "stub"),
+        "opencode" => (
+            &[(OPENCODE_DEFAULT_MODEL, "Kimi K2")],
+            OPENCODE_DEFAULT_MODEL,
+        ),
         _ => (CLAUDE_MODEL_ALIASES, CLAUDE_DEFAULT_MODEL),
     };
     catalog_from(models, default_model)
@@ -834,6 +848,7 @@ pub fn preselected_index_for_agent(agent: &str) -> usize {
         "codex" => 3,
         "codex-acp" => 4,
         "stub" => 5,
+        "opencode" => 6,
         _ => 0,
     }
 }
@@ -1066,9 +1081,9 @@ mod tests {
     }
 
     #[test]
-    fn backend_selection_question_returns_six_options_including_codex_variants() {
+    fn backend_selection_question_returns_seven_options_including_codex_and_opencode() {
         let q = backend_selection_question();
-        assert_eq!(q.options.len(), 6);
+        assert_eq!(q.options.len(), 7);
         assert!(!q.multi_select);
         assert!(!q.allow_other);
     }
@@ -1085,7 +1100,8 @@ mod tests {
                 "Cursor",
                 "Codex",
                 "Codex ACP",
-                "Stub"
+                "Stub",
+                "OpenCode"
             ]
         );
     }
@@ -1168,6 +1184,7 @@ mod tests {
         assert_eq!(preselected_index_for_agent("codex"), 3);
         assert_eq!(preselected_index_for_agent("codex-acp"), 4);
         assert_eq!(preselected_index_for_agent("stub"), 5);
+        assert_eq!(preselected_index_for_agent("opencode"), 6);
         assert_eq!(preselected_index_for_agent("unknown"), 0);
     }
 }

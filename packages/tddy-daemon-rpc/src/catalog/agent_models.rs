@@ -26,8 +26,9 @@ pub(super) fn agent_models_cache() -> &'static std::sync::Mutex<
 
 /// Build the `tddy-tools list-models` argv for an agent probe. Always `["list-models", "--agent",
 /// <agent>]`; appends `["--cursor-cli-path", <path>]` when probing `cursor`, or
-/// `["--opencode-cli-path", <path>]` when probing `opencode-cli`, with a resolved `binary_path`, so
-/// the impersonated child execs the fully-qualified binary instead of a PATH lookup.
+/// `["--opencode-cli-path", <path>]` when probing `opencode` or `opencode-cli` (one binary, run as
+/// `opencode acp` by the first and as `opencode models` by the second), with a resolved
+/// `binary_path`, so the impersonated child execs the fully-qualified binary instead of a PATH lookup.
 pub(super) fn list_models_probe_args(
     agent: &str,
     binary_path: Option<&std::path::Path>,
@@ -39,7 +40,7 @@ pub(super) fn list_models_probe_args(
     ];
     let path_flag = match agent {
         "cursor" => Some("--cursor-cli-path"),
-        "opencode-cli" => Some("--opencode-cli-path"),
+        "opencode" | "opencode-cli" => Some("--opencode-cli-path"),
         _ => None,
     };
     if let (Some(flag), Some(path)) = (path_flag, binary_path) {

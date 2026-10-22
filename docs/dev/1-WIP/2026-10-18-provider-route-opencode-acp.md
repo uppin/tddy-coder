@@ -3,6 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
+**Complexity**: 4 — more than one crate (`tddy-agent-backend`, `tddy-coder`, `tddy-tools`, `tddy-integration-tests`), a spawned ACP child process, and an integration test against a scripted fake ACP agent
 **Stack**: #provider-route 7/9. Base: `feature/provider-route/muse-cli`. PR: [#668](https://github.com/uppin/tddy-coder/pull/668).
 
 ## Initial Discovery

@@ -108,6 +108,8 @@ allowed_agents:
     label: "Codex"
   - id: codex-acp
     label: "Codex ACP"
+  - id: opencode
+    label: "OpenCode ACP"
 
 allowed_tools:
   - path: "target/debug/tddy-coder"

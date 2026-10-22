@@ -138,6 +138,6 @@ mod tests {
         // Given
         let q = backend_selection_question();
         // When / Then
-        assert_eq!(resolve_backend_selection_index(99, &q), "Stub");
+        assert_eq!(resolve_backend_selection_index(99, &q), "OpenCode");
     }
 }

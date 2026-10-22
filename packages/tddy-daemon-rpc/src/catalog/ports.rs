@@ -125,7 +125,14 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
                 &self.config,
             ))
         } else {
-            tddy_core::cli_harness::cli_harness(&agent)
+            // The `opencode` ACP agent runs the same binary the `opencode-cli` harness lists with,
+            // so it resolves that harness's binary.
+            let harness_session = if agent == "opencode" {
+                "opencode-cli"
+            } else {
+                agent.as_str()
+            };
+            tddy_core::cli_harness::cli_harness(harness_session)
                 .filter(|harness| {
                     matches!(
                         harness.models,

@@ -15,8 +15,8 @@ use tddy_core::backend::{render_models_json, resolve_agent_models, BackendCliPat
 #[derive(Parser)]
 #[command(name = "list-models")]
 pub struct ListModelsArgs {
-    /// Agent id ("claude", "claude-acp", "cursor", "codex", "codex-acp", "stub") or a CLI-harness
-    /// pseudo-agent ("claude-cli", "cursor-cli", "opencode-cli").
+    /// Agent id ("claude", "claude-acp", "cursor", "codex", "codex-acp", "opencode", "stub") or a
+    /// CLI-harness pseudo-agent ("claude-cli", "cursor-cli", "opencode-cli").
     #[arg(long)]
     pub agent: String,
 
@@ -24,7 +24,8 @@ pub struct ListModelsArgs {
     #[arg(long)]
     pub cursor_cli_path: Option<PathBuf>,
 
-    /// Override the `opencode` binary path.
+    /// Override the `opencode` binary path. Names the binary `opencode models` runs for the
+    /// `opencode-cli` harness, and the binary `opencode acp` runs for the `opencode` agent.
     #[arg(long)]
     pub opencode_cli_path: Option<PathBuf>,
 
@@ -35,10 +36,6 @@ pub struct ListModelsArgs {
     /// Override the `codex-acp` binary path.
     #[arg(long)]
     pub codex_acp_cli_path: Option<PathBuf>,
-
-    /// Override the `opencode` binary path (enumerated through `opencode acp`).
-    #[arg(long)]
-    pub opencode_cli_path: Option<PathBuf>,
 }
 
 impl ListModelsArgs {
@@ -49,7 +46,6 @@ impl ListModelsArgs {
             opencode_cli_path: self.opencode_cli_path.clone(),
             claude_acp_cli_path: self.claude_acp_cli_path.clone(),
             codex_acp_cli_path: self.codex_acp_cli_path.clone(),
-            opencode_cli_path: self.opencode_cli_path.clone(),
         }
     }
 }

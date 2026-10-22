@@ -42,6 +42,9 @@ pub struct Config {
     /// Path to the Codex ACP stdio agent (`codex-acp`); overrides `TDDY_CODEX_ACP_CLI` and default discovery.
     #[serde(default)]
     pub codex_acp_cli_path: Option<PathBuf>,
+    /// Path to the OpenCode binary run as `opencode acp`; overrides `TDDY_OPENCODE_CLI` and default discovery.
+    #[serde(default)]
+    pub opencode_cli_path: Option<PathBuf>,
     #[serde(default)]
     pub prompt: Option<String>,
     #[serde(default)]
@@ -191,6 +194,9 @@ pub fn merge_config_into_args(args: &mut Args, config: Config) {
     }
     if args.codex_acp_cli_path.is_none() {
         args.codex_acp_cli_path = config.codex_acp_cli_path;
+    }
+    if args.opencode_cli_path.is_none() {
+        args.opencode_cli_path = config.opencode_cli_path;
     }
     if args.prompt.is_none() {
         args.prompt = config.prompt;
@@ -386,6 +392,7 @@ github:
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
             remote: false,
@@ -449,6 +456,7 @@ github:
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
             remote: false,
@@ -515,6 +523,7 @@ github:
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: Some("tdd".to_string()),
             remote: false,
@@ -578,6 +587,7 @@ github:
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
             remote: false,
@@ -708,6 +718,7 @@ log:
             cursor_agent_path: None,
             codex_cli_path: None,
             codex_acp_cli_path: None,
+            opencode_cli_path: None,
             codex_oauth_login: false,
             recipe: None,
             remote: false,

@@ -102,3 +102,26 @@ fn an_opencode_cli_probe_without_a_resolved_path_omits_the_flag() {
         ]
     );
 }
+
+/// The OpenCode ACP agent's probe hands `tddy-tools` the binary the daemon resolved for the
+/// `opencode-cli` harness, under the same flag: `tddy-tools` runs it as `opencode acp`.
+#[test]
+fn an_opencode_acp_probe_carries_the_resolved_opencode_binary_path() {
+    // Given
+    let resolved = Path::new("/home/dev/.opencode/bin/opencode");
+
+    // When
+    let args = list_models_probe_args("opencode", Some(resolved));
+
+    // Then
+    assert_eq!(
+        args,
+        vec![
+            "list-models".to_string(),
+            "--agent".to_string(),
+            "opencode".to_string(),
+            "--opencode-cli-path".to_string(),
+            "/home/dev/.opencode/bin/opencode".to_string(),
+        ]
+    );
+}
