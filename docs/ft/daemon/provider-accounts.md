@@ -73,7 +73,28 @@ An unsupported pair is refused with the reason, never silently ignored. Of the h
 admits, **`claude-cli`** and **`opencode-cli`** started unsandboxed are run on an account today
 ([Claude Code CLI session § Running on a provider account](claude-cli-session.md#running-on-a-provider-account),
 [OpenCode CLI session § Running on a provider account](opencode-cli-session.md#running-on-a-provider-account));
-any other harness asked to run on an account is refused as not routable in this build.
+so is a **tool session** whose agent is `claude`, `claude-acp`, `codex` or `codex-acp` (below). Any
+other harness asked to run on an account is refused as not routable in this build.
+
+### Tool sessions
+
+A tool session (headless `tddy-coder`) started or resumed with an account gets its route in a file,
+because the spawned process's environment carries no credential:
+
+- The daemon resolves the route for the session's agent before anything is created, writes it to
+  `<session_dir>/provider-route.json` — mode `0600`, owned by the session's OS user — and passes
+  `tddy-coder --provider-route-path <file>`. No key is on the command line or in the spawn
+  environment. Resume re-resolves the account and model the start recorded.
+- `tddy-coder` refuses a route file with any group or other permission bit, or one that is not a
+  route; the session does not start on the vendor instead.
+- Claude agents get the same Anthropic route as a claude-cli session. Codex agents get the account
+  declared as a Responses provider (`tddy-route`) through `-c` overrides and the model through `-m`
+  (`codex exec`) or `-c model=` (`codex-acp`); the key is in the child's `TDDY_ROUTE_API_KEY`.
+- An account with no agent, a `cursor` agent, the `stub` or a specialized agent definition is
+  refused with the reason. A tool session started from Telegram cannot choose an account
+  (`docs/dev/todo/2026-10-22-telegram-tool-sessions-choose-no-provider-account.md`).
+- The Codex `-c` overrides follow Codex's documented `config.toml` keys; they were checked against
+  `codex-acp --help`, and every test runs a stub binary rather than a real `codex`.
 
 ### `ListProviderRoutes`
 

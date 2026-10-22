@@ -64,7 +64,8 @@ export function CreateSessionProviderField({
         onChange={(e) => onChange(e.target.value)}
       >
         {/* TODO(tool-route): this is the vendor of a Claude Code session only; a Codex tool session
-            runs on OpenAI, so its built-in option needs the harness's vendor name from the daemon. */}
+            runs on OpenAI, so its built-in option needs the harness's vendor name from the daemon
+            (docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md). */}
         <option value={BUILT_IN_PROVIDER}>Anthropic (built in)</option>
         {choices.map((choice) => (
           <option

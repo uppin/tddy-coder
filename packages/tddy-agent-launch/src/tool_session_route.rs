@@ -28,6 +28,12 @@ pub fn tool_session_route_json(
     if choose_route(sources).is_none() {
         return Ok(None);
     }
+    if agent.is_empty() {
+        return Err(Status::invalid_argument(
+            "a tool session on a provider account must name its agent: the account is chosen for \
+             the harness that runs it",
+        ));
+    }
     let harness = Harness::from_agent_or_session_type(agent).ok_or_else(|| {
         Status::invalid_argument(format!(
             "the {agent:?} agent cannot run on a provider account: only a harness can, and a \

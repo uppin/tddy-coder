@@ -15,10 +15,11 @@
 
 ## Behavior
 
-- **Worker model:** dedicated thread, **`tokio::LocalSet`**, **`ClientSideConnection`** over the child’s stdio (**`agent-client-protocol`** **0.10.4**, **`unstable`** feature for request builders).
+- **Worker model:** dedicated thread, started on the backend's first command rather than at construction, **`tokio::LocalSet`**, **`ClientSideConnection`** over the child’s stdio (**`agent-client-protocol`** **0.10.4**, **`unstable`** feature for request builders).
 - **Lifecycle:** **`initialize`** once, then **`new_session`** or **`load_session`** (resume), then **`prompt`** with merged Codex-style prompts (**`merge_codex_prompt`**).
 - **Progress:** **`session_notification`** maps agent chunks, tool calls, and plan entries to **`ProgressSink`** (**`TaskProgress`**, **`ToolUse`**, **`TaskStarted`**).
 - **Permissions:** **`request_permission`** auto-approves with a one-shot allow option when enabled.
+- **Provider account:** with `--provider-route-path` the agent is spawned with the route's `-c model_provider…` overrides, the model as `-c model="<model>"` (`codex-acp` has no `-m`) and the key in `TDDY_ROUTE_API_KEY` — see [provider accounts § Tool sessions](../daemon/provider-accounts.md#tool-sessions).
 - **Tests:** **`tddy-acp-stub`** can stand in for **`codex-acp`**; stub **`initialize`** advertises **`load_session`**. Integration coverage includes **`codex_acp_backend`** and **`acp_backend_acceptance`**.
 
 ## Coexistence with `CodexBackend`

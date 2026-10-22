@@ -4,8 +4,10 @@
 
 use std::sync::Arc;
 
-use tddy_accounts::{endpoints_for, preset, ProviderAccount};
-use tddy_core::provider_route::{RouteChoice, RouteSources};
+use tddy_accounts::{endpoints_for, preset, presets, PresetEndpoint, ProviderAccount};
+use tddy_core::provider_route::{
+    resolve_route, Harness, RouteChoice, RouteEndpoints, RouteSecret, RouteSources, RouteTarget,
+};
 use tddy_core::provider_route_file::route_from_json;
 use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
 use tddy_rpc::Code;
@@ -110,4 +112,53 @@ fn a_tool_session_that_chooses_nothing_gets_no_route_file() {
             .expect("no choice"),
         None
     );
+}
+
+#[test]
+fn a_tool_session_on_an_account_that_names_no_agent_is_refused() {
+    // Given
+    let (_dir, access) = ada_holding_a_meta_account();
+
+    // When
+    let refusal =
+        tool_session_route_json(&access, "", &on_meta(), "muse-wonder-1.0").expect_err("refused");
+
+    // Then
+    assert_eq!(refusal.code(), Code::InvalidArgument);
+    assert!(refusal.message().contains("must name its agent"));
+}
+
+#[test]
+fn codex_declares_every_responses_preset_under_the_label_the_accounts_table_gives_it() {
+    // Given every preset whose endpoint can serve OpenAI Responses
+    for preset in presets()
+        .iter()
+        .filter(|p| !matches!(p.openai_responses, PresetEndpoint::NotServed))
+    {
+        let target = RouteTarget {
+            preset: preset.id.to_string(),
+            endpoints: RouteEndpoints {
+                openai_responses: Some("https://provider.example/v1".to_string()),
+                ..RouteEndpoints::default()
+            },
+            api_key: RouteSecret::new("k"),
+            model: "m".to_string(),
+        };
+
+        // When
+        let route = resolve_route(Harness::Codex, &target)
+            .unwrap_or_else(|refusal| panic!("{}: {refusal}", preset.id));
+
+        // Then the Codex provider carries the preset's own label
+        let name = format!(
+            "model_providers.tddy-route.name={}",
+            serde_json::to_string(preset.label).expect("json")
+        );
+        assert!(
+            route.args.contains(&name),
+            "{}: {:?}",
+            preset.id,
+            route.args
+        );
+    }
 }

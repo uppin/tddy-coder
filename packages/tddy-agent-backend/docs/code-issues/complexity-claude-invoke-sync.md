@@ -43,3 +43,7 @@ the seam with `restructure check --deep` against a warm index (`./run-index-daem
 ⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
 the numbers still hold and that the finding is real before spending a PR on it — an unverified
 finding is a lead, not an issue.
+
+## Measurement update 2026-10-22 — #provider-route 4/9 (#665)
+
+**Touched, slightly worse:** two route branches (`splice_route_args` on the argv, the route env on the child), +6 lines, nesting unchanged. Not re-measured with the scan.

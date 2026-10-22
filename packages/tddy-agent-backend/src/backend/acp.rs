@@ -334,9 +334,7 @@ async fn spawn_agent(
         cmd.arg(arg);
     }
     if let Some(route) = route {
-        for (key, value) in route_child_env(route) {
-            cmd.env(key, value);
-        }
+        cmd.envs(route_child_env(route));
     }
     cmd.stdin(std::process::Stdio::piped());
     cmd.stdout(std::process::Stdio::piped());
@@ -359,7 +357,7 @@ pub struct ClaudeAcpBackend {
     agent_path: PathBuf,
     agent_args: Vec<String>,
     /// The provider route the agent runs on (`with_provider_route`); `None` for the vendor.
-    pub(super) provider_route: Option<HarnessRoute>,
+    provider_route: Option<HarnessRoute>,
     worker: OnceLock<mpsc::Sender<AcpCommand>>,
 }
 
@@ -397,6 +395,13 @@ impl ClaudeAcpBackend {
             provider_route: None,
             worker: OnceLock::new(),
         }
+    }
+
+    /// Run the agent on `route`. A worker started before the route was set runs the vendor:
+    /// dropping its channel ends it, and the next command starts one on the route.
+    pub(super) fn set_provider_route(&mut self, route: HarnessRoute) {
+        self.provider_route = Some(route);
+        self.worker = OnceLock::new();
     }
 
     /// The worker's command channel, starting the worker on first use.

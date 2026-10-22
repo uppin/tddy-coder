@@ -3,6 +3,10 @@
 //! Args is the common runtime type. CoderArgs and DemoArgs are CLI parser types
 //! with different agent constraints; both convert to Args via From.
 
+use crate::codex_binaries::{resolve_codex_acp_binary, resolve_codex_binary};
+use crate::provider_route_arg::{
+    apply_provider_route, load_provider_route, refuse_route_for_definition,
+};
 use anyhow::Context;
 use clap::Parser;
 use std::io::{self, IsTerminal, Read, Write};
@@ -280,20 +284,6 @@ fn resolve_specialized_agent_defs(
     Ok(defs)
 }
 
-/// The provider route `--provider-route-path` names, loaded. A file another account can read, or one
-/// that is not a route, stops the run: a session asked to run on an account never runs on the
-/// vendor instead. The message names the path and never the contents, which hold a key.
-fn load_provider_route(args: &Args) -> anyhow::Result<Option<HarnessRoute>> {
-    args.provider_route_path
-        .as_deref()
-        .map(|path| {
-            tddy_core::provider_route_file::load_route_file(path).map_err(|reason| {
-                anyhow::anyhow!("--provider-route-path could not be used: {reason}")
-            })
-        })
-        .transpose()
-}
-
 /// The backend `args` runs for `agent`, with the specialized defs and the provider route `args`
 /// names applied by [`create_backend`].
 fn create_backend_for_args(args: &Args, agent: &str) -> anyhow::Result<SharedBackend> {
@@ -305,7 +295,7 @@ fn create_backend_for_args(args: &Args, agent: &str) -> anyhow::Result<SharedBac
         None,
         None,
         &resolve_specialized_agent_defs(args)?,
-        load_provider_route(args)?,
+        load_provider_route(args.provider_route_path.as_deref())?,
     )
 }
 
@@ -2504,77 +2494,6 @@ fn resolve_cursor_agent_binary(cursor_agent_path: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(CursorBackend::DEFAULT_CLI_BINARY))
 }
 
-/// Resolve Codex CLI: `--codex-cli-path` / config, then `TDDY_CODEX_CLI`, then `codex` on `PATH`.
-fn resolve_codex_binary(codex_cli_path: Option<&Path>) -> PathBuf {
-    codex_cli_path
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("TDDY_CODEX_CLI").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from(CodexBackend::DEFAULT_CLI_BINARY))
-}
-
-/// Resolve `codex-acp` stdio agent: explicit path / env, then `codex-acp` beside resolved `codex`, else `codex-acp` on `PATH`.
-fn resolve_codex_acp_binary(
-    codex_acp_cli_path: Option<&Path>,
-    codex_cli_path: Option<&Path>,
-) -> PathBuf {
-    if let Some(p) = codex_acp_cli_path {
-        return p.to_path_buf();
-    }
-    if let Some(p) = std::env::var_os("TDDY_CODEX_ACP_CLI").map(PathBuf::from) {
-        return p;
-    }
-    let codex = resolve_codex_binary(codex_cli_path);
-    if let Some(acp) = codex_acp_beside_resolved_codex(&codex) {
-        return acp;
-    }
-    PathBuf::from(tddy_core::backend::codex_acp::DEFAULT_CODEX_ACP_BINARY)
-}
-
-/// If `codex` resolves to a concrete file, return `codex-acp` in the same directory when it exists.
-fn codex_acp_beside_resolved_codex(codex: &std::path::Path) -> Option<PathBuf> {
-    let codex_file = if codex.is_absolute() {
-        codex.to_path_buf()
-    } else if codex.components().count() == 1 {
-        #[cfg(unix)]
-        {
-            resolve_executable_on_path(codex.as_os_str())?
-        }
-        #[cfg(not(unix))]
-        {
-            return None;
-        }
-    } else {
-        return None;
-    };
-    if !codex_file.is_file() {
-        return None;
-    }
-    let parent = codex_file.parent()?;
-    let acp = parent.join(tddy_core::backend::codex_acp::DEFAULT_CODEX_ACP_BINARY);
-    if acp.is_file() {
-        Some(acp)
-    } else {
-        None
-    }
-}
-
-#[cfg(unix)]
-fn resolve_executable_on_path(name: &std::ffi::OsStr) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            if let Ok(meta) = std::fs::metadata(&candidate) {
-                if meta.permissions().mode() & 0o111 != 0 {
-                    return Some(candidate);
-                }
-            }
-        }
-    }
-    None
-}
-
 /// Create backend once at startup (plain mode, no progress events).
 /// StubBackend always uses InMemoryToolExecutor (no tddy-tools): stub simulates the agent,
 /// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor/Codex)
@@ -2599,14 +2518,7 @@ fn create_backend(
 ) -> anyhow::Result<SharedBackend> {
     log::info!("[tddy-coder] using agent: {}", agent);
     if let Some(def) = specialized_agent_defs.iter().find(|d| d.name == agent) {
-        // A definition is its own endpoint: a route cannot be applied to it, so it is refused
-        // rather than the session running on the definition's endpoint instead of the account.
-        if provider_route.is_some() {
-            anyhow::bail!(
-                "agent {agent:?} is a specialized agent definition, which cannot run on a provider \
-                 account: its definition is its own endpoint"
-            );
-        }
+        refuse_route_for_definition(agent, provider_route.as_ref())?;
         // The def is the whole configuration — endpoint, model, turn budget and credential. No
         // flag can override it: one that could would run the session against a model the operator
         // never configured while still reporting the def's name
@@ -2666,13 +2578,10 @@ fn create_backend(
             );
         }
     };
-    let backend = match provider_route {
-        Some(route) => backend
-            .with_provider_route(route)
-            .map_err(anyhow::Error::msg)?,
-        None => backend,
-    };
-    Ok(SharedBackend::from_any(backend))
+    Ok(SharedBackend::from_any(apply_provider_route(
+        backend,
+        provider_route,
+    )?))
 }
 
 /// The coding-backend ids `create_backend` dispatches on directly, as opposed to the named
@@ -3404,7 +3313,7 @@ fn run_full_workflow_tui(
         let codex_path_for_factory = args.codex_cli_path.clone();
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
         let specialized_agent_defs_for_factory = resolve_specialized_agent_defs(args)?;
-        let provider_route_for_factory = load_provider_route(args)?;
+        let provider_route_for_factory = load_provider_route(args.provider_route_path.as_deref())?;
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {

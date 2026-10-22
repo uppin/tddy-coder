@@ -153,8 +153,9 @@ when that is an absolute path, as it does Cursor's.
 For the CLI session types (`claude-cli`, `cursor-cli`) the form shows a **Provider** field beside the
 model: where the session's harness runs — its own vendor, or one of the person's
 [provider accounts](../daemon/provider-accounts.md). It is shown only when the form was given an
-`accounts.AccountsService` client; without one every session runs on its vendor. Tool sessions show
-no Provider field.
+`accounts.AccountsService` client; without one every session runs on its vendor. A **tool session**
+shows it too, for the agent it picked (`claude`, `claude-acp`, `codex`, `codex-acp`; `cursor` shows
+the daemon's reason).
 
 - The options come from `ListProviderRoutes(harness)`; the form keeps no harness-to-provider matrix
   of its own. For `claude-cli` the select's first option is **Anthropic (built in)**, selected by
@@ -167,8 +168,8 @@ no Provider field.
 - Choosing an account switches the model list from `ListAgentModels` to
   `ListProviderAccountModels(account_id)` — the account's own models — and preselects the first.
   Choosing the vendor again switches back to the vendor's catalog.
-- Changing the session type resets the field to its untouched state.
-- On submit, a claude-cli start carries `provider_account_id` (the chosen account, else empty) and
+- Changing the session type, or a tool session's agent, resets the field to its untouched state.
+- On submit, a claude-cli or tool-session start carries `provider_account_id` (the chosen account, else empty) and
   `provider_built_in` (true only when the operator explicitly chose the vendor). An untouched field
   sends neither, so a lower-level default may still decide; the daemon applies the precedence. See
   [Claude Code CLI session § Running on a provider account](../daemon/claude-cli-session.md#running-on-a-provider-account).
@@ -209,6 +210,11 @@ must not silently look available.
   catalogs all originate from the daemon/`tddy-core`.
 
 ## Known limitations
+
+- **The built-in option is labelled "Anthropic (built in)" for every harness**, including a Codex tool
+  session (whose vendor is OpenAI), and a specialized agent definition shows the daemon's "unknown
+  harness" reason in the field. Both need harness metadata from the daemon
+  (`docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md`).
 
 - **Retained `CLAUDE_CLI_MODELS` for the legacy `ConnectionScreen`** — `CreateSessionPane` no longer
   reads the hardcoded `packages/tddy-web/src/constants/claudeCliModels.ts` `CLAUDE_CLI_MODELS`

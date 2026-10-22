@@ -54,7 +54,7 @@ Cursor's question-tool shapes: [cursor-ask-question-schema.md](cursor-ask-questi
 ## Provider routes (`provider_route`)
 
 What a harness process needs to run on a model-provider account instead of its vendor — pure data,
-applied by the caller (`tddy-agent-launch` for a PTY). Product view:
+applied by the caller (`tddy-agent-launch` for a PTY, the backends in [Routed backends](#routed-backends-provider_route_file-backendrouted) for a tool session). Product view:
 [provider accounts § Running a harness on an account](../../../docs/ft/daemon/provider-accounts.md#running-a-harness-on-an-account).
 
 | Item | Role |
@@ -65,7 +65,7 @@ applied by the caller (`tddy-agent-launch` for a PTY). Product view:
 | `HarnessRoute { env, secret_env, files: Vec<RouteFile>, args }` | what the harness is launched with; the key is only ever in `secret_env` |
 | `RouteRefusal` | `HarnessCannotBeRouted` (Cursor), `ProtocolNotServed { needs }`, `PresetNotAccepted` (Muse Code: Meta only), `NotYetRoutable(harness)`; `Display` is the sentence an operator reads |
 | `route_supported(harness, preset, protocols)` | the capability matrix, answered without building a route; `protocols` are the wire spellings `anthropic-messages`, `openai-responses`, `openai-chat` |
-| `resolve_route(harness, target)` | the route. Claude Code (all three harnesses): `ANTHROPIC_BASE_URL` = the Anthropic Messages root, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` = the model; secret `ANTHROPIC_AUTH_TOKEN`; args `--model <model>`. OpenCode (`OpenCode`, `OpenCodeCli`): files `[opencode.json]` (`opencode_config_for`), secret `TDDY_OPENCODE_PROVIDER_KEY` (`OPENCODE_ROUTE_KEY_ENV`), args `--model tddy-route/<model>`; an account serving neither OpenAI protocol is `ProtocolNotServed`. Cursor: `HarnessCannotBeRouted`. Codex and Muse Code: `NotYetRoutable` |
+| `resolve_route(harness, target)` | the route. Claude Code (all three harnesses): `ANTHROPIC_BASE_URL` = the Anthropic Messages root, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` = the model; secret `ANTHROPIC_AUTH_TOKEN`; args `--model <model>`. OpenCode (`OpenCode`, `OpenCodeCli`): files `[opencode.json]` (`opencode_config_for`), secret `TDDY_OPENCODE_PROVIDER_KEY` (`OPENCODE_ROUTE_KEY_ENV`), args `--model tddy-route/<model>`; an account serving neither OpenAI protocol is `ProtocolNotServed`. Codex (`Codex`, `CodexAcp`, in `provider_route/codex.rs`): secret `TDDY_ROUTE_API_KEY` (`CODEX_ROUTE_KEY_ENV`); args `-c model_provider="tddy-route"`, `-c model_providers.tddy-route.{name,base_url,env_key,wire_api="responses"}` (`CODEX_ROUTE_PROVIDER_ID`), `-m <model>` — values are TOML basic strings, the key is never an argument. Only an account serving OpenAI Responses (`ProtocolNotServed` otherwise); the provider's `name` is the preset label from a closed table (`meta`, `openai-compatible`) — a preset outside it is `NotYetRoutable`, and `tddy-agent-launch`'s `codex_declares_every_responses_preset_under_the_label_the_accounts_table_gives_it` ties the table to `tddy_accounts::presets()`. Cursor: `HarnessCannotBeRouted`. Muse Code: `NotYetRoutable` |
 | `opencode_config_for(target) -> Option<RouteFile>` | the `opencode.json` declaring the account as provider `OPENCODE_ROUTE_PROVIDER_ID` (`tddy-route`) and selecting `target.model` on it: `@ai-sdk/openai` over the Responses root with `include: ["reasoning.encrypted_content"]` when the account serves Responses, `@ai-sdk/openai-compatible` over the Chat root otherwise; `apiKey` is `{env:TDDY_OPENCODE_PROVIDER_KEY}`, never the key. `None` when the account serves neither — the wire is selected through a private `OpenAiWire`, so no input panics |
 | `RouteChoice { BuiltIn, Account(id) }`, `RouteSources { session, agent_definition, user_default }`, `choose_route` | precedence: session over agent definition over the person's default; `BuiltIn` at a level overrides everything below it; `None` is the vendor |
 
@@ -78,6 +78,30 @@ redacted `Debug`.
 `tests/opencode_route_acceptance.rs` — the generated `opencode.json` on Meta (Responses, reasoning
 carried) and Baseten (Chat Completions), no key in the file, the OpenCode route's files / secret /
 `--model` argument, and the refusal and `None` for an Anthropic-only account.
+`tests/codex_route_acceptance.rs` — the Codex overrides and key on Meta, and the refusal of an account
+without Responses.
+
+## Routed backends (`provider_route_file`, `backend::routed`)
+
+A tool session's route travels from the daemon to `tddy-coder` in a file, because the spawn's
+environment allowlist carries no credential.
+
+| Item | Role |
+|---|---|
+| `provider_route_file::{PROVIDER_ROUTE_FILENAME, route_to_json, route_from_json, load_route_file}` | `provider-route.json` in the session directory: `{env, secret_env, files, args}`, every field required, unknown fields refused. A parse error names the position, never the text. `load_route_file` reads the mode from the open file and refuses any group or other bit |
+| `AnyBackend::with_provider_route(route) -> Result<Self, String>` | the one entry `tddy-coder` calls. Cursor and the stub are refused with the reason |
+| `ClaudeCodeBackend::with_provider_route` | the route's env and secret env on every `claude -p` child (before the backend's own `TDDY_*`), and its args, with the route's `--model` replacing the request's |
+| `ClaudeAcpBackend::with_provider_route` | the route's env on the agent child; its args are not passed (the agent reads its model from the env) |
+| `CodexBackend::with_provider_route` | `build_codex_exec_argv` takes the route's args in place of `-m <request model>`; the key in the child's env |
+| `CodexAcpBackend::with_provider_route` | `codex-acp` takes the same `-c` overrides, with `-m <model>` rewritten to `-c model="<model>"` (`codex_acp_route_args`); the key in the agent's env |
+
+The two ACP backends start their worker thread, and so the agent, on the first command (a
+`OnceLock`), not at construction, so a route set after construction reaches the agent. Setting a route
+replaces a worker that already started. A spawn failure surfaces through the command channel.
+
+Tests: `tests/provider_route_file.rs` (round-trip, owner-only load, a group-readable file refused);
+`tddy-coder/tests/tool_session_provider_route.rs` drives each backend against stub binaries that record
+argv and env.
 
 ## CLI harnesses (`cli_harness`)
 

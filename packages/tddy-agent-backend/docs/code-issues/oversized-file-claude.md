@@ -25,3 +25,7 @@
 | C | `impl ClaudeCodeBackend` invoke path (L435–767), which is mostly `invoke_sync` — its own record, `complexity-claude-invoke-sync.md` | ~330 |
 
 Seams A and B leave the file at about 450 lines. `invoke_sync` (330 lines) is the rest, and its complexity record owns that. Prove the seams with `restructure check --deep` before applying them.
+
+## Measurement update 2026-10-22 — #provider-route 4/9 (#665)
+
+**Narrowed, still over:** 767 → 644 production lines. #665 added the provider route (+18, to 785), and its wrap applied seam A by hand: the transcript readers moved to `backend/claude/transcript_usage.rs`, re-exported from `claude.rs`. Seam B (~175) and `invoke_sync` remain; seam B alone brings it to about 470. Still unclaimed.
