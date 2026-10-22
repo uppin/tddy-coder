@@ -98,12 +98,7 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         &mut notes,
     )?;
 
-    let moved_names: BTreeSet<String> = moving
-        .run
-        .items
-        .iter()
-        .map(|item| item.name.clone())
-        .collect();
+    let moved_names = names_of_items(moving);
     let moved = moved_text(
         moving,
         &region,
@@ -132,6 +127,16 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         report: landing.report,
         notes,
     })
+}
+
+fn names_of_items(moving: &Moving<'_>) -> BTreeSet<String> {
+    let moved_names: BTreeSet<String> = moving
+        .run
+        .items
+        .iter()
+        .map(|item| item.name.clone())
+        .collect();
+    moved_names
 }
 
 fn absorb_doc_links(
