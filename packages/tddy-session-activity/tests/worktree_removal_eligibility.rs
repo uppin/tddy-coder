@@ -55,3 +55,11 @@ fn an_opencode_cli_session_is_eligible_for_worktree_removal() {
     // kept by `is_daemon_managed_worktree`.
     assert!(worktree_removal_applies_to("opencode-cli"));
 }
+
+#[test]
+fn a_muse_cli_session_is_eligible_for_worktree_removal() {
+    // Then — like opencode-cli, a muse-cli session is new and its worktree is cut for it alone, so
+    // deleting the session must not leak it. A client-supplied checkout is still kept by
+    // `is_daemon_managed_worktree`.
+    assert!(worktree_removal_applies_to("muse-cli"));
+}

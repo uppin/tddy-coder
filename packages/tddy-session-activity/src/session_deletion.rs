@@ -30,18 +30,22 @@ pub fn is_daemon_managed_worktree(worktree: &Path) -> bool {
 /// Whether a session of this type owns the worktree its `.session.yaml` records, and therefore
 /// whether `DeleteSession` should remove it.
 ///
-/// `claude-cli`, `opencode-cli` and `workspace` sessions each get a worktree cut for them alone — a workspace
-/// session *is* its worktree and nothing else, so leaving it behind leaks the only thing the session
-/// was for (see `docs/ft/daemon/remote-managed-worktree.md` § Teardown). A `tool` (tddy-coder)
-/// session records the project's shared checkout instead, and an empty type is a legacy file
-/// predating `session_type`; removing either would delete a tree other sessions depend on.
+/// `claude-cli`, `opencode-cli`, `muse-cli` and `workspace` sessions each get a worktree cut for them
+/// alone — a workspace session *is* its worktree and nothing else, so leaving it behind leaks the
+/// only thing the session was for (see `docs/ft/daemon/remote-managed-worktree.md` § Teardown). A
+/// `tool` (tddy-coder) session records the project's shared checkout instead, and an empty type is a
+/// legacy file predating `session_type`; removing either would delete a tree other sessions depend
+/// on.
 ///
 /// `cursor-cli` leaks its worktree the same way `workspace` did, but it predates this rule:
 /// including it here would change behaviour for sessions that already exist, so it is tracked in
-/// `docs/dev/TODO.md` rather than fixed in passing. `opencode-cli` is new, and its worktree is cut
-/// for it alone, so it is removed with its session from the start.
+/// `docs/dev/TODO.md` rather than fixed in passing. `opencode-cli` and `muse-cli` are new, and each
+/// is cut a worktree for it alone, so it is removed with its session from the start.
 pub fn worktree_removal_applies_to(session_type: &str) -> bool {
-    matches!(session_type, "claude-cli" | "opencode-cli" | "workspace")
+    matches!(
+        session_type,
+        "claude-cli" | "opencode-cli" | "muse-cli" | "workspace"
+    )
 }
 
 /// After SIGKILL the child may be a zombie until its parent reaps it; `kill(pid, 0)` still succeeds.

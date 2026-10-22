@@ -1,18 +1,21 @@
-//! OpenCode (`opencode-cli`) session start and resume for the launch topic.
+//! Start and resume of a registered CLI harness that is cut a worktree of its own — OpenCode
+//! (`opencode-cli`) and Muse Code (`muse-cli`) — for the launch topic. The harness is the caller's
+//! registry entry ([`CliHarness`]); nothing here is particular to one of them.
 //!
 //! The same shape as a Cursor session — a daemon-cut worktree, a PTY relayed over the daemon's own
-//! connection — minus what OpenCode has no counterpart of: no hooks are installed, no chat id is
-//! minted (a resume is `--continue` in the worktree, and a session owns its worktree), and the
+//! connection — minus what these harnesses have no counterpart of: no hooks are installed, no chat
+//! id is minted (a resume is `--continue` in the worktree, and a session owns its worktree), and the
 //! session is never sandboxed.
 //!
-//! A chosen provider account is applied as a route ([`start_cli_route`]): its generated
-//! `opencode.json` lives in the session directory, its key reaches the child's environment only.
+//! A chosen provider account is applied as a route ([`start_cli_route`]): any file it generates
+//! (OpenCode's `opencode.json`) lives in the session directory, its key reaches the child's
+//! environment only.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_core::cli_harness::{cli_harness, CliHarness, CliLaunch};
+use tddy_core::cli_harness::{CliHarness, CliLaunch};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::RouteSources;
 use tddy_core::{write_session_metadata, SessionMetadata};
@@ -25,18 +28,19 @@ use tddy_service::proto::session::{
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
-use crate::cli_route_launch::{resume_cli_route, start_cli_route, CliRouteLaunch};
+use crate::cli_route_launch::{
+    launch_model_for, resume_cli_route, start_cli_route, CliRouteLaunch,
+};
 use crate::cli_session_worktree::{
     provision_cli_worktree, semantic_index_env, CliWorktree, CliWorktreeStart,
 };
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::stack_parent::SpawnStackParent;
 
-/// The session type this module serves.
-const OPENCODE_CLI: &str = "opencode-cli";
-
-/// Everything one OpenCode start reads.
-pub(crate) struct OpenCodeCliStart<'a> {
+/// Everything one CLI harness start reads.
+pub(crate) struct CliHarnessStart<'a> {
+    /// The registered harness the session runs.
+    pub harness: &'static CliHarness,
     pub config: &'a DaemonConfig,
     pub tddy_data_dir: &'a Path,
     pub cli_manager: &'a Arc<CliSessionManager>,
@@ -45,7 +49,7 @@ pub(crate) struct OpenCodeCliStart<'a> {
     /// Authorizes the `workspace` starts this session's seeded agents need on their own hosts.
     pub session_token: &'a str,
     pub sessions_base: PathBuf,
-    /// The model the operator chose; empty leaves the choice to OpenCode.
+    /// The model the operator chose; empty leaves the choice to the harness.
     pub model: &'a str,
     pub project_id: &'a str,
     pub repo_path: &'a str,
@@ -67,14 +71,9 @@ pub(crate) struct OpenCodeCliStart<'a> {
     pub progress: &'a AttachmentProgressSink,
 }
 
-fn opencode_harness() -> Result<&'static CliHarness, Status> {
-    cli_harness(OPENCODE_CLI)
-        .ok_or_else(|| Status::internal("the opencode-cli harness is not registered"))
-}
-
-/// The binary OpenCode is run as: the environment, then `cli_harnesses.opencode-cli.binary_path`
-/// in the daemon config, then the registry's default.
-fn opencode_binary(config: &DaemonConfig, harness: &CliHarness) -> String {
+/// The binary `harness` is run as: its environment variable, then
+/// `cli_harnesses.<session type>.binary_path` in the daemon config, then the registry's default.
+fn harness_binary(config: &DaemonConfig, harness: &CliHarness) -> String {
     config.cli_harness_binary(
         harness.session_type,
         harness.default_binary,
@@ -82,12 +81,13 @@ fn opencode_binary(config: &DaemonConfig, harness: &CliHarness) -> String {
     )
 }
 
-/// Start an OpenCode session: cut its worktree, apply its provider route, spawn `opencode` in a
-/// PTY and record `.session.yaml`.
-pub(crate) async fn start_opencode_cli_session(
-    start: OpenCodeCliStart<'_>,
+/// Start a CLI harness session: cut its worktree, apply its provider route, spawn the harness in
+/// a PTY and record `.session.yaml`.
+pub(crate) async fn start_cli_harness_session(
+    start: CliHarnessStart<'_>,
 ) -> Result<Response<StartSessionResponse>, Status> {
-    let OpenCodeCliStart {
+    let CliHarnessStart {
+        harness,
         config,
         tddy_data_dir,
         cli_manager,
@@ -113,7 +113,6 @@ pub(crate) async fn start_opencode_cli_session(
         route_sources,
         progress,
     } = start;
-    let harness = opencode_harness()?;
     let project_id = project_id.trim();
     let repo_path = repo_path.trim();
 
@@ -122,7 +121,8 @@ pub(crate) async fn start_opencode_cli_session(
         .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
 
     // Resolved before anything is cut or spawned: an account that is missing, locked or cannot
-    // serve OpenCode fails the start, and OpenCode never silently runs on its own setup instead.
+    // serve the harness fails the start, and the harness never silently runs on its own setup
+    // instead.
     let route = start_cli_route(account_access, harness, route_sources, model, &session_dir)?;
 
     let intent = tddy_session_split::service_util::write_initial_changeset(
@@ -133,7 +133,7 @@ pub(crate) async fn start_opencode_cli_session(
             selected_integration_base_ref,
             selected_branch_to_work_on,
         },
-        BranchIntentPolicy::opencode_cli(),
+        BranchIntentPolicy::cli_harness(harness.session_type),
         None,
         &session_dir,
         stack_parent.session_id(),
@@ -145,8 +145,8 @@ pub(crate) async fn start_opencode_cli_session(
         project,
     } = provision_cli_worktree(
         &CliWorktreeStart {
-            session_type: OPENCODE_CLI,
-            cut_label: "start_opencode_cli_session: create worktree",
+            session_type: harness.session_type,
+            cut_label: "start_cli_harness_session: create worktree",
             session_id,
             session_dir: &session_dir,
             sessions_base: &sessions_base,
@@ -202,9 +202,8 @@ pub(crate) async fn start_opencode_cli_session(
     );
 
     progress.begin_phase(StartStep::Agent);
-    let binary = opencode_binary(config, harness);
-    // A routed launch leaves the model to the route, which names it on the generated provider.
-    let launch_model = if route.is_some() { "" } else { model };
+    let binary = harness_binary(config, harness);
+    let launch_model = launch_model_for(harness, route.is_some(), model);
     let launched = launch(
         cli_manager,
         harness,
@@ -232,7 +231,7 @@ pub(crate) async fn start_opencode_cli_session(
         ..tddy_session_split::service_util::starting_session_metadata(
             session_id,
             project_id,
-            OPENCODE_CLI,
+            harness.session_type,
         )
     };
     write_session_metadata(&session_dir, &meta)
@@ -243,7 +242,8 @@ pub(crate) async fn start_opencode_cli_session(
 
     log::info!(
         target: "tddy_daemon::connection_service",
-        "started opencode-cli session {session_id} pid={pid} worktree={} user={os_user}",
+        "started {} session {session_id} pid={pid} worktree={} user={os_user}",
+        harness.session_type,
         worktree_path.display()
     );
 
@@ -257,10 +257,11 @@ pub(crate) async fn start_opencode_cli_session(
 }
 
 impl crate::launch_ports::LaunchSessions {
-    /// The `opencode-cli` resume: the session's commit identity and its owner's vault, then
-    /// [`resume_opencode_cli_session`].
-    pub(crate) async fn resume_opencode_cli(
+    /// The resume of a CLI harness session: the session's commit identity and its owner's vault,
+    /// then [`resume_cli_harness_session`].
+    pub(crate) async fn resume_cli_harness(
         &self,
+        harness: &'static CliHarness,
         os_user: &str,
         req: &ResumeSessionRequest,
         session_dir: &Path,
@@ -272,7 +273,8 @@ impl crate::launch_ports::LaunchSessions {
             &metadata.project_id,
             &req.session_token,
         );
-        resume_opencode_cli_session(
+        resume_cli_harness_session(
+            harness,
             &self.claude_cli_manager,
             &self.config,
             &self.host.session_account_access(&req.session_token),
@@ -285,10 +287,12 @@ impl crate::launch_ports::LaunchSessions {
     }
 }
 
-/// Resume an OpenCode session: `opencode --continue` in its worktree, with its provider route
-/// re-resolved from the vault as it stands now. Refused when the worktree is gone — there is
-/// nothing for `--continue` to continue.
-async fn resume_opencode_cli_session(
+/// Resume a CLI harness session: the harness's resume argv (`--continue`) in its worktree, with its
+/// provider route re-resolved from the vault as it stands now. Refused when the worktree is gone —
+/// there is nothing for `--continue` to continue.
+#[allow(clippy::too_many_arguments)]
+async fn resume_cli_harness_session(
+    harness: &CliHarness,
     cli_manager: &Arc<CliSessionManager>,
     config: &DaemonConfig,
     account_access: &SessionAccountAccess,
@@ -299,20 +303,20 @@ async fn resume_opencode_cli_session(
     // checkout's own).
     git_environment: Vec<(String, String)>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
-    let harness = opencode_harness()?;
     let worktree_path = meta
         .repo_path
         .as_ref()
         .map(PathBuf::from)
         .unwrap_or_else(|| session_dir.to_path_buf());
     if !worktree_path.exists() {
-        return Err(Status::failed_precondition(
-            "worktree no longer exists; cannot resume opencode-cli session",
-        ));
+        return Err(Status::failed_precondition(format!(
+            "worktree no longer exists; cannot resume {} session",
+            harness.session_type
+        )));
     }
 
     let route = resume_cli_route(account_access, harness, session_dir)?;
-    let binary = opencode_binary(config, harness);
+    let binary = harness_binary(config, harness);
     let launched = launch(
         cli_manager,
         harness,

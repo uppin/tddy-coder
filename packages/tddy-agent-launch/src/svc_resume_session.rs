@@ -87,10 +87,15 @@ impl LaunchSessions {
             );
         }
 
-        // --- opencode-cli branch: resume without LiveKit ---
-        if metadata.session_type.as_deref() == Some("opencode-cli") {
+        // --- every other registered CLI harness (opencode-cli, muse-cli): resume without LiveKit.
+        // claude-cli and cursor-cli are registered too, and have returned above. ---
+        if let Some(harness) = metadata
+            .session_type
+            .as_deref()
+            .and_then(tddy_core::cli_harness::cli_harness)
+        {
             return bridge_conn_resume_response(
-                self.resume_opencode_cli(os_user, &req, &session_dir, metadata)
+                self.resume_cli_harness(harness, os_user, &req, &session_dir, metadata)
                     .await,
             );
         }
