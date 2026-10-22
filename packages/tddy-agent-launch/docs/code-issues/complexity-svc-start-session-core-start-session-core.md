@@ -1,6 +1,6 @@
 # complexity: start_session_core
 
-**Location:** `packages/tddy-agent-launch/src/svc_start_session_core.rs:62` — `start_session_core`
+**Location:** `packages/tddy-agent-launch/src/svc_start_session_core.rs:62` — `start_session_on_request` (was `start_session_core`, renamed by #669)
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **842 lines** · **nesting depth 6** · 1 parameters · 40 branch/match lines · 54 early exits
@@ -24,6 +24,7 @@
 | 2026-10-07 | 377 | — | — | — | touched by `#carve` 18/21 (`SplitSessions`): +3 (374 → 377, fn line to closing brace) from three `self.split_sessions()` re-points where the launch topic calls the split topic through its handle. No control flow added. Measured by brace matching on `HEAD` vs `origin/master` |
 | 2026-10-08 | 386 | — | — | — | `#carve` 20/21 (launch start): +5 against `origin/master` (381 -> 386, fn line to closing brace). Re-pointed to `impl LaunchSessions`; rustfmt wraps the three roster calls (`self.agent_roster.agent_def_for_spawn(…)`, `seeded_roster_records(…)`) and the `DaemonSeedCloneClaimant { service: … }` literal over more lines. No control flow added. **Regressed, kept open**: still over 60 lines |
 | 2026-10-09 | 386 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
+| 2026-10-22 | 393 | — | — | — | touched by #669 (`#provider-route` 8/9) and **unchanged by it**: 393 on `origin/feature/provider-route/opencode-acp` (`1b488545a`) and on HEAD, by brace matching (fn line to closing brace). The function is renamed `start_session_on_request` (`pub(crate)`); `start_session_core` is now a two-statement wrapper in `harness_profile_request.rs` that applies a harness profile first, so the profile step added no line here. Nesting, branches and exits not re-derived |
 
 ## What the tool found
 

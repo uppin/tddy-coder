@@ -131,6 +131,59 @@ allowed_tools:
     );
 }
 
+/// **list_agents_lists_harness_profiles**: a harness profile in `<tddyhome>/agents/` is listed
+/// after the configured agents, labelled by its `label`, or by its name when it has none.
+#[tokio::test]
+async fn list_agents_lists_harness_profiles() {
+    // Given
+    let yaml = r#"
+users:
+  - github_user: "u"
+    os_user: "u"
+allowed_agents:
+  - id: claude
+    label: Claude
+"#;
+    let (_dir, path) = write_config(yaml);
+    let config = DaemonConfig::load(&path).unwrap();
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let agents_dir = sessions_tmp.path().join("agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::write(
+        agents_dir.join("a-claude-on-meta.yaml"),
+        "name: claude-on-meta\nlabel: Claude Code · Meta Wonder\nharness: claude-cli\nprovider_account: meta-hackathon\nmodel: muse-wonder-1.0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agents_dir.join("b-opencode-on-meta.yaml"),
+        "name: opencode-on-meta\nharness: opencode-cli\nprovider_account: meta-hackathon\nmodel: muse-wonder-1.0\n",
+    )
+    .unwrap();
+    let service = service_with_config(config, sessions_tmp.path().to_path_buf());
+
+    // When
+    let agents = service
+        .list_agents(Request::direct(ListAgentsRequest {}))
+        .await
+        .expect("ListAgents must succeed")
+        .into_inner()
+        .agents;
+
+    // Then
+    let rows: Vec<(&str, &str)> = agents
+        .iter()
+        .map(|a| (a.id.as_str(), a.label.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("claude", "Claude"),
+            ("claude-on-meta", "Claude Code · Meta Wonder"),
+            ("opencode-on-meta", "opencode-on-meta"),
+        ]
+    );
+}
+
 /// **list_tools_unchanged_with_new_config_field**: `allowed_agents` alongside `allowed_tools` does
 /// not change `ListTools` mapping.
 #[tokio::test]
@@ -221,6 +274,51 @@ allowed_agents:
     assert!(
         msg.contains("allowed_agents") || msg.contains("not listed"),
         "message should mention allowlist; got: {}",
+        err.message
+    );
+}
+
+/// **start_session_as_a_harness_profile_resolves_its_account**: a profile's name passes the agent
+/// gate and the start goes on to resolve the profile's account in the starter's vault — here there
+/// is none, so the start is refused naming the profile rather than started on the vendor.
+#[tokio::test]
+async fn start_session_as_a_harness_profile_resolves_its_account() {
+    // Given
+    let yaml = r#"
+users:
+  - github_user: "testuser"
+    os_user: "testdev"
+allowed_agents:
+  - id: permitted-agent
+"#;
+    let (_dir, path) = write_config(yaml);
+    let config = DaemonConfig::load(&path).unwrap();
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let agents_dir = sessions_tmp.path().join("agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::write(
+        agents_dir.join("claude-on-meta.yaml"),
+        "name: claude-on-meta\nharness: claude-cli\nprovider_account: meta-hackathon\nmodel: muse-wonder-1.0\n",
+    )
+    .unwrap();
+    let service = service_with_config(config, sessions_tmp.path().to_path_buf());
+
+    // When
+    let err = service
+        .start_session(Request::direct(StartSessionRequest {
+            session_token: "valid-token".to_string(),
+            project_id: "no-such-project".to_string(),
+            agent: "claude-on-meta".to_string(),
+            ..Default::default()
+        }))
+        .await
+        .expect_err("no vault holds the profile's account");
+
+    // Then
+    assert_eq!(err.code, Code::FailedPrecondition, "{}", err.message);
+    assert!(
+        err.message.contains("claude-on-meta") && err.message.contains("meta-hackathon"),
+        "{}",
         err.message
     );
 }

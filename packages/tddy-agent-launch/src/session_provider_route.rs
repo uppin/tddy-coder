@@ -118,7 +118,7 @@ pub(crate) fn route_on_account(
 
 /// A vault refusal as the status a start answers with: the same codes whichever account kind was
 /// asked for.
-fn status_of_refusal(refusal: SessionIdentityRefusal) -> Status {
+pub(crate) fn status_of_refusal(refusal: SessionIdentityRefusal) -> Status {
     let message = refusal.to_string();
     match refusal {
         SessionIdentityRefusal::NoVaultsConfigured => Status::failed_precondition(message),
@@ -131,6 +131,7 @@ fn status_of_refusal(refusal: SessionIdentityRefusal) -> Status {
         SessionIdentityRefusal::Vault(AccountsError::NotFound { .. }) => Status::not_found(message),
         SessionIdentityRefusal::Vault(AccountsError::Unavailable(_)) => Status::internal(message),
         SessionIdentityRefusal::Identity(_) => Status::failed_precondition(message),
+        SessionIdentityRefusal::AmbiguousLabel(_) => Status::invalid_argument(message),
     }
 }
 

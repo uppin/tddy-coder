@@ -7,6 +7,7 @@ pub mod backend;
 pub mod catalog_entry;
 pub mod catalog_service;
 pub mod discovery;
+pub mod harness_profile;
 pub mod openai;
 /// The live roster of agents attached to a session: what the daemon says is attached, what those
 /// agents have taken over, and the conversation RPCs that reach the ones this process cannot run.

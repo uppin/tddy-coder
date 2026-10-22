@@ -5,7 +5,7 @@ Family **A** — the tools-and-agents catalogue the daemon exposes to pickers an
 | RPC | Purpose |
 |-----|---------|
 | `ListTools` | Allowed `tddy-*` binaries from config (`allowed_tools`). |
-| `ListAgents` | Allowed coding backends from config (`allowed_agents`). |
+| `ListAgents` | Allowed coding backends from config (`allowed_agents`), then registry assistants, then [harness profiles](../../../docs/ft/daemon/harness-profiles.md) from `<tddy_data_dir>/agents` (`harness_profile::harness_profile_rows`: id = profile name, label = `label` or name; appended in `tddy-daemon-rpc`'s `catalog/ports.rs` `list_agents`). |
 | `ListAgentModels` | Models available from the daemon's registry integration. |
 | `ListSubagents` | Specialized agent defs this daemon can attach — `<tddyhome>/agents/*.yaml` and registry assistants, answered from the same resolution path as attach. See [specialized-subagents.md](../../../docs/ft/coder/specialized-subagents.md). |
 

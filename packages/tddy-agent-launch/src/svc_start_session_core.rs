@@ -19,11 +19,9 @@ use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 use crate::placement::classify_placement;
 use crate::placement::PlacementRequest;
 
-use tddy_rpc::Status;
-
-use tddy_service::proto::session::StartSessionResponse;
-
 use tddy_rpc::Response;
+use tddy_rpc::Status;
+use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
@@ -60,7 +58,7 @@ impl LaunchSessions {
     /// TODO(indexing-indicators): the sandboxed claude-cli / cursor-cli, tool and split starts do
     /// not report phases or announce their worktree yet; claude-cli, cursor-cli and workspace starts
     /// do — see `docs/dev/todo/2026-10-03-start-phases-and-code-index-warm-skip-sandboxed-tool-and-split-starts.md`.
-    pub async fn start_session_core(
+    pub(crate) async fn start_session_on_request(
         &self,
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,

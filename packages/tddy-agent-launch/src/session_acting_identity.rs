@@ -11,6 +11,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::provider_account_lookup::find_provider_account;
 use crate::session_git::{session_git_environment, session_git_environment_of};
 use tddy_accounts::local_gh::{github_hostname_of, local_gh_git_identity};
 use tddy_accounts::{
@@ -35,6 +36,8 @@ pub enum SessionIdentityRefusal {
     Vault(AccountsError),
     /// The vault was read and the project does not resolve to a usable account.
     Identity(IdentityError),
+    /// More than one provider account carries the label a start named it by.
+    AmbiguousLabel(String),
 }
 
 impl std::fmt::Display for SessionIdentityRefusal {
@@ -59,6 +62,10 @@ impl std::fmt::Display for SessionIdentityRefusal {
                 write!(f, "the credential vault could not be read: {reason}")
             }
             Self::Identity(error) => error.fmt(f),
+            Self::AmbiguousLabel(label) => write!(
+                f,
+                "more than one provider account is labelled {label:?}: name it by its id"
+            ),
         }
     }
 }
@@ -151,23 +158,13 @@ impl SessionAccountAccess {
             .map_err(SessionIdentityRefusal::Identity)
     }
 
-    /// The model-provider account `account_id` names in the session owner's vault — read the same
-    /// way, with the same refusals, as the GitHub identity.
+    /// The model-provider account `id_or_label` names in the session owner's vault — read the same
+    /// way, with the same refusals, as the GitHub identity. See [`find_provider_account`].
     pub fn provider_account(
         &self,
-        account_id: &str,
+        id_or_label: &str,
     ) -> Result<tddy_accounts::ProviderAccount, SessionIdentityRefusal> {
-        let wanted = AccountId::new(account_id);
-        self.held_accounts()?
-            .iter()
-            .filter(|record| record.account == wanted)
-            .find_map(tddy_accounts::ProviderAccount::from_record)
-            .ok_or_else(|| {
-                SessionIdentityRefusal::Vault(AccountsError::NotFound {
-                    provider: ProviderId::new("provider"),
-                    account: wanted,
-                })
-            })
+        find_provider_account(&self.held_accounts()?, id_or_label)
     }
 
     /// The provider account the session owner made their default for `harness`, if any — the

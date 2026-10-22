@@ -295,6 +295,10 @@ message SubagentInfo {
 }
 ```
 
+A `<tddyhome>/agents/*.yaml` file with a top-level `harness:` key is not an agent definition but a
+[harness profile](harness-profiles.md): it is never advertised here or attachable, and is offered in
+`ListAgents` instead, as something to start a session with.
+
 **What it advertises is every def source a name resolves against on the serving daemon** — its
 `<tddyhome>/agents/*.yaml` defs *and* its registry assistants (Models & Agents), a registry assistant
 winning a name tie. It is answered from the same `resolvable_agent_defs()` an attach resolves against,

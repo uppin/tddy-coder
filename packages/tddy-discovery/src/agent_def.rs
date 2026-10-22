@@ -194,14 +194,40 @@ pub fn load_agent_defs(dir: &Path) -> Vec<SpecializedAgentDef> {
                 continue;
             }
         };
-        match serde_yaml::from_str::<SpecializedAgentDef>(&contents) {
-            Ok(def) => defs.push(def),
-            Err(e) => {
+        match read_agent_def_document(&contents) {
+            AgentDefDocument::Def(def) => defs.push(*def),
+            AgentDefDocument::HarnessProfile => {
+                log::debug!("agent_def: {} is a harness profile", path.display());
+            }
+            AgentDefDocument::Malformed(e) => {
                 log::warn!("agent_def: failed to parse {}: {e}", path.display());
             }
         }
     }
     defs
+}
+
+/// What one file in the agents dir is, as far as [`load_agent_defs`] is concerned.
+#[derive(Debug)]
+pub enum AgentDefDocument {
+    Def(Box<SpecializedAgentDef>),
+    /// A `harness:` document: read by `crate::harness_profile::load_harness_profiles`, skipped here.
+    HarnessProfile,
+    Malformed(String),
+}
+
+/// Classify one agents-dir document. A profile is recognised before the def parse, so it is a
+/// deliberate skip rather than a parse failure.
+pub fn read_agent_def_document(yaml: &str) -> AgentDefDocument {
+    match crate::harness_profile::names_a_harness(yaml) {
+        Ok(true) => return AgentDefDocument::HarnessProfile,
+        Ok(false) => {}
+        Err(e) => return AgentDefDocument::Malformed(e),
+    }
+    match serde_yaml::from_str::<SpecializedAgentDef>(yaml) {
+        Ok(def) => AgentDefDocument::Def(Box::new(def)),
+        Err(e) => AgentDefDocument::Malformed(e.to_string()),
+    }
 }
 
 /// The full resolved set of specialized agent defs: exactly what `dir` holds, and nothing else.

@@ -117,8 +117,9 @@ guessing.
 
 A session's account is chosen at three levels, highest first: the **session** (the operator's choice
 on start), the **agent definition** it was started with, and the **person's default** for the harness.
-An explicit "built in" choice at a level overrides any account below it. The session and default
-levels are fed; nothing fills the agent-definition level yet.
+An explicit "built in" choice at a level overrides any account below it. All three levels are fed:
+the agent-definition level by a [harness profile](harness-profiles.md) the session was started with.
+Once a profile's account is chosen, the person's default is not read.
 
 ### A person's default per harness
 
@@ -159,4 +160,5 @@ an account yet. Tool sessions decide from the session-level choice only
 
 - [Account linking](account-linking.md) — the other way an account enters the vault.
 - [Claude Code CLI session](claude-cli-session.md#running-on-a-provider-account) — the harness that runs on an account.
+- [Harness profiles](harness-profiles.md) — agent definitions that name an account (the agent-definition level).
 - Implementation: [tddy-accounts provider accounts](../../../packages/tddy-accounts/docs/provider-accounts.md)
