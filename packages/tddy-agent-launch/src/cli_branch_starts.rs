@@ -244,8 +244,8 @@ impl LaunchSessions {
 
 impl LaunchSessions {
     /// The start of a registered CLI harness that is cut a worktree of its own (`opencode-cli`,
-    /// `muse-cli`): refused in a sandbox or over a managed codebase, otherwise the shared CLI
-    /// prelude, the seeded roster resolved before the spawn, then the harness in a PTY.
+    /// `muse-cli`): refused over a managed codebase, otherwise the shared CLI prelude, then the
+    /// harness in its jail when the session is sandboxed, or in a PTY when it is not.
     pub(super) async fn start_cli_harness(
         &self,
         harness: &'static CliHarness,
@@ -253,14 +253,6 @@ impl LaunchSessions {
         progress: &AttachmentProgressSink,
         os_user: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        // TODO(provider-route-jail): these harnesses are not sandboxed yet (#provider-route 9/9).
-        // Refused rather than run unsandboxed.
-        if req.sandbox {
-            return Err(Status::failed_precondition(format!(
-                "{} sessions cannot run in a sandbox yet",
-                harness.session_type
-            )));
-        }
         // None of them has a workflow of its own for a managed codebase to drive.
         if req.managed_codebase {
             return Err(Status::invalid_argument(format!(
@@ -271,9 +263,13 @@ impl LaunchSessions {
         let start = self.cli_start_prelude(req, progress, os_user).await?;
         let sessions_base = start.sessions_base.clone();
         let session_id = start.session_id.clone();
-        let started = self
-            .start_cli_harness_from_request(harness, req, os_user, start, progress)
-            .await?;
+        let started = if req.sandbox {
+            self.start_sandboxed_cli_harness_from_request(harness, req, os_user, start, progress)
+                .await?
+        } else {
+            self.start_cli_harness_from_request(harness, req, os_user, start, progress)
+                .await?
+        };
         self.announce_worktree_ready(&sessions_base, &session_id);
         Ok(started)
     }

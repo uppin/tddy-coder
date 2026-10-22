@@ -110,7 +110,13 @@ impl LaunchSessions {
         let (sandbox_root, egress_dir, scratch_dir, scratch_tmp, context_dir) =
             relaunch_jail_dirs::prepare_relaunch_dirs(session_dir)?;
 
-        relaunch_jail_dirs::refresh_relaunch_context_dir(worktree_path, agents, &context_dir)?;
+        // This relaunch serves `claude-cli` alone, so the agent's allow-list is Claude Code's.
+        relaunch_jail_dirs::refresh_relaunch_context_dir(
+            worktree_path,
+            agents,
+            &context_dir,
+            "claude-cli",
+        )?;
 
         let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
             self.config

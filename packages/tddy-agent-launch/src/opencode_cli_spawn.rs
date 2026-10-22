@@ -73,7 +73,7 @@ pub(crate) struct CliHarnessStart<'a> {
 
 /// The binary `harness` is run as: its environment variable, then
 /// `cli_harnesses.<session type>.binary_path` in the daemon config, then the registry's default.
-fn harness_binary(config: &DaemonConfig, harness: &CliHarness) -> String {
+pub(crate) fn harness_binary(config: &DaemonConfig, harness: &CliHarness) -> String {
     config.cli_harness_binary(
         harness.session_type,
         harness.default_binary,

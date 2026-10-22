@@ -90,6 +90,19 @@ impl LaunchSessions {
 
         // --- any other registered CLI harness (opencode-cli, muse-cli): resume without LiveKit ---
         if let Some(harness) = metadata.session_type.as_deref().and_then(cli_harness) {
+            // A sandboxed session resumes in its jail and never on the host's PTY.
+            if metadata.sandbox == Some(true) {
+                return bridge_conn_resume_response(
+                    self.resume_sandboxed_cli_harness(
+                        harness,
+                        os_user,
+                        &req,
+                        &session_dir,
+                        metadata,
+                    )
+                    .await,
+                );
+            }
             return bridge_conn_resume_response(
                 self.resume_cli_harness(harness, os_user, &req, &session_dir, metadata)
                     .await,
