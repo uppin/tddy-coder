@@ -31,7 +31,7 @@ Docs: [provider accounts § A person's default per harness](../../ft/daemon/prov
 Backlog: `2026-10-04-keyring-accounts-rename-lost-update` (⚠ DURING) **kept and extended** with this
 PR's second read-then-put site (`set_provider_account_defaults`, `TODO(keyring)`). **Added**
 `2026-10-22-tool-session-starts-ignore-the-provider-default` (tool-session starts are #665's and were
-still a `todo!()`). `2026-10-21-tddy-accounts-service-rs-over-file-budget` updated: 703 → 761
+still a `todo!()`). `2026-10-21-tddy-accounts-service-rs-over-file-budget` updated: 714 → 772
 production lines, still deferred as stack-shared.
 
 File budget: `AccountsScreen.tsx` 486 → 503 was decomposed here (`ProviderModels.tsx`), ending at

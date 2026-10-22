@@ -20,7 +20,7 @@ via the `code-restructuring` skill, until `service.rs` is under 500 production l
 (`list_provider_routes`, `with_route_support`). Still deferred for the same stack-shared reason:
 later nodes (#666+) modify the file too.
 
-**#666 (`#provider-route` 5/9):** grew `service.rs` **703 → 761 production lines**
+**#666 (`#provider-route` 5/9):** grew `service.rs` **714 → 772 production lines**
 (`set_provider_account_defaults`, `with_provider_account_defaults`, the `defaults` port field, and
 `default_for` on `summary_of`). The harness validation went to `provider_account.rs`
 (`refuse_undrivable`), and the duplicated "no route matrix is wired" refusal became one
