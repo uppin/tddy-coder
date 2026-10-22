@@ -155,6 +155,11 @@ file's layout, not a behaviour; not an edge).
 - **Deferred by developer 2026-10-22:** the two files over the 500-production-line budget after this PR, `runner/entry_points/store_run.rs`
   (507) and `crate_move.rs` (513), listed in `engine_file_budget_shape`'s `NOT_YET_SPLIT`. Owned by the sweep node:
   [todo/2026-10-22-reshape-fn-sizes-rest-over-budget-files-deferred.md](../todo/2026-10-22-reshape-fn-sizes-rest-over-budget-files-deferred.md).
+- **Deferred by developer 2026-10-22:** `cluster_edits` (`crate_move/cluster.rs`, 67 lines after its earlier cuts) and `check_plan`
+  (`runner/entry_points/check_entry_points.rs`, 99 lines before its one further cut). The further cut for each (the `Gathering`
+  destructure, and the registry choice) was reverted: its verify showed a lost `mut` that is not in the accepted families. Exempted in
+  `function_length_budget`; engine todo section 6, owned by the sweep node:
+  [todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md](../todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md).
 
 ## Technical changes
 

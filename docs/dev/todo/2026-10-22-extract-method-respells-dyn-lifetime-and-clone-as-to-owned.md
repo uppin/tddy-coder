@@ -80,3 +80,19 @@ Function `apply_held_plan` (`runner/entry_points/store_run.rs`), 161 lines after
 
 Wanted: comment carry for an extraction whose range sits between two statements that have comments in between, and
 `extract_method` returning several locals a later part of the loop reads (or a loop-phase seam the engine accepts).
+
+## 6. `cluster_edits` and `check_plan`: one further cut each still leaves them over 60, and one shape is outside the accepted families
+
+Developer decision 2026-10-22 ("one more cut each, then defer"). Both partial cuts are kept in history, and both functions are exempted.
+
+- `cluster_edits` (`crate_move/cluster.rs`), 71 lines before the extra cut. The extra cut, the `Gathering` destructure (lines
+  224–236 of the item) into `unpack_gathering`, passed `check --deep` and applied, but the function was still 67 lines. Its
+  verify shape was `mut merged,` and `mut dev_crates_named,` lost from the struct pattern: a tuple binding cannot keep a
+  struct pattern's `mut`. Not in the accepted families, so it was reverted.
+- `check_plan` (`runner/entry_points/check_entry_points.rs`), 99 lines before the extra cut. The extra cut, the registry choice
+  (lines 225–240) into `choose_registry`, passed `check --deep` and applied, but the function would still be about 84 lines. Its
+  verify shape was `let mut registry = if options.deep {` lost to `let registry = if …` in the new function, because the new
+  function returns the binding and drops `mut`. Not in the accepted families, so it was reverted.
+
+Wanted: `extract_method` keeps `mut` on a binding it moves into a returned tuple or a returned value, or `verify` accounts
+for a `mut` dropped only where the new function returns the binding.

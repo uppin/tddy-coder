@@ -24,9 +24,9 @@ const LEFT_TO_THE_BACKEND_NODE: &str = "backends";
 /// Functions over the cap that the developer deferred on 2026-10-22, as `(file under src/, name)`. Each is cut by the
 /// `#reshape` sweep node; see `docs/dev/todo/2026-10-22-reshape-fn-sizes-rest-four-functions-deferred.md`, and for
 /// `refreshed` `docs/dev/todo/2026-10-22-extract-method-respells-dyn-lifetime-and-clone-as-to-owned.md`.
-// TODO(reshape-sweep): the sweep node cuts these eight and removes this exemption. `sightings` is in the engine todo's
-// section 3, `parse_op` in section 4, `apply_held_plan` in section 5.
-const DEFERRED_BY_THE_DEVELOPER: [(&str, &str); 8] = [
+// TODO(reshape-sweep): the sweep node cuts these ten and removes this exemption. `sightings` is in the engine todo's
+// section 3, `parse_op` in section 4, `apply_held_plan` in section 5, `cluster_edits` and `check_plan` in section 6.
+const DEFERRED_BY_THE_DEVELOPER: [(&str, &str); 10] = [
     ("crate_move/test_modules.rs", "sorted"),
     ("crate_move/test_modules.rs", "follow_changes"),
     ("crate_move/cluster/gathering.rs", "member_changes"),
@@ -35,6 +35,8 @@ const DEFERRED_BY_THE_DEVELOPER: [(&str, &str); 8] = [
     ("crate_move/source_scan/sighting_walk.rs", "sightings"),
     ("plan/codec.rs", "parse_op"),
     ("runner/entry_points/store_run.rs", "apply_held_plan"),
+    ("crate_move/cluster.rs", "cluster_edits"),
+    ("runner/entry_points/check_entry_points.rs", "check_plan"),
 ];
 
 /// One function and its length.
