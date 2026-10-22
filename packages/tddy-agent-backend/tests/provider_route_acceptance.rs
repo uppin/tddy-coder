@@ -228,12 +228,14 @@ fn a_route_can_be_logged_without_its_key() {
 
 #[test]
 fn only_the_harnesses_with_a_built_route_answer_routable() {
-    // Then Claude Code and OpenCode are routable today, Cursor never is, and the rest wait for
-    // their route
+    // Then Claude Code, Codex and OpenCode are routable today, Cursor never is, and Muse Code waits
+    // for its route
     for harness in [
         Harness::Claude,
         Harness::ClaudeAcp,
         Harness::ClaudeCli,
+        Harness::Codex,
+        Harness::CodexAcp,
         Harness::OpenCode,
         Harness::OpenCodeCli,
     ] {
@@ -245,7 +247,8 @@ fn only_the_harnesses_with_a_built_route_answer_routable() {
             Err(RouteRefusal::HarnessCannotBeRouted { harness })
         );
     }
-    for harness in [Harness::Codex, Harness::CodexAcp, Harness::MuseCli] {
+    {
+        let harness = Harness::MuseCli;
         assert_eq!(
             harness_routable(harness),
             Err(RouteRefusal::NotYetRoutable(harness))

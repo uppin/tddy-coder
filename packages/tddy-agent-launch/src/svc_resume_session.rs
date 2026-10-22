@@ -24,6 +24,7 @@ use tddy_rpc::Response;
 use tddy_service::proto::session::ResumeSessionRequest;
 
 use crate::launch_ports::LaunchSessions;
+use crate::tool_session_route::resumed_tool_session_route_json;
 use tddy_rpc::Request;
 use tddy_spawn::spawner;
 
@@ -149,6 +150,13 @@ impl LaunchSessions {
                 .map_err(|e| Status::internal(format!("failed to serialize agent def: {e}")))?,
             None => None,
         };
+        // A session started on a provider account resumes on it: the account its start recorded is
+        // re-resolved against the owner's vault as it stands now, and a refusal resumes nothing.
+        let provider_route_json = resumed_tool_session_route_json(
+            &self.host.session_account_access(&req.session_token),
+            resume_agent.as_deref().unwrap_or_default(),
+            &session_dir,
+        )?;
         // One resolution for the project this session belongs to, as on start; a project that no
         // longer resolves resumes the session under the checkout's own identity, with the reason
         // logged. Only the commit pairs go to the child — never the account's token.
@@ -184,6 +192,7 @@ impl LaunchSessions {
                 project_id: Some(metadata.project_id.clone()).filter(|id| !id.is_empty()),
                 agent: resume_agent,
                 agent_def_json: resume_agent_def,
+                provider_route_json,
                 recipe: resume_recipe,
                 stack_parent: None,
                 stack_node_id: None,

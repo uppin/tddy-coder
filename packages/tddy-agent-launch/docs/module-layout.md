@@ -43,7 +43,8 @@ steps are in sibling modules:
 | `cli_session_worktree.rs` | what a daemon-cut CLI session's worktree needs, shared by cursor-cli and opencode-cli: `provision_cli_worktree(&CliWorktreeStart, …) -> CliWorktree { path, project }` (cut or adopt the worktree, push the new branch when asked) and `semantic_index_env` |
 | `opencode_cli_spawn.rs` | the [OpenCode CLI session](../../../docs/ft/daemon/opencode-cli-session.md): `start_opencode_cli_session(OpenCodeCliStart)` (route first, then worktree, seeded clones, commit identity, spawn, `.session.yaml`) and `LaunchSessions::resume_opencode_cli` (`opencode --continue`, route re-resolved; refused when the worktree is gone). The binary is `DaemonConfig::cli_harness_binary` for the registry's descriptor |
 | `tool_session_spawn.rs` | `spawn_tool_session` and `spawn_tddy_coder`: the one `tddy-coder` spawn, for both a start and a resume |
-| `tool_spawn_plan.rs` | `ToolSpawnPlan` (what the child is spawned with) and `ToolSpawnPurpose` (`Start` / `Resume`) |
+| `tool_session_route.rs` | a tool session's provider route as route-file JSON: `tool_session_route_json`, `resumed_tool_session_route_json`; see [Provider route of a session](#provider-route-of-a-session) |
+| `tool_spawn_plan.rs` | `ToolSpawnPlan` (what the child is spawned with, including `provider_route_json`) and `ToolSpawnPurpose` (`Start` / `Resume`) |
 | `svc_ensure_project_available_for_start.rs`, `svc_index_workspace_worktree.rs` | project provisioning for a start; the semantic index over a workspace worktree |
 | `clone_planner.rs`, `clone_backend.rs`, `clone_ssh_env.rs`, `start_keepalive.rs` | how a clone reaches its remote and runs; see [Cloning a project](#cloning-a-project-for-a-start) |
 | `svc_start_claude_cli_session.rs` | the non-sandboxed Claude CLI start; holds `SessionStdioEndpoint` (the reverse stdio endpoint to a spawned `tddy-coder`) |
@@ -160,6 +161,16 @@ to a claude-cli session (behaviour:
   (`route_on_account`), writes the files and records `provider-account.yaml`; `resume_cli_route`
   re-resolves the record and writes the files again. opencode-cli uses them; a routed start passes no
   `--model` of its own, the route's `--model tddy-route/<model>` names it.
+- `tool_session_route.rs` routes a **tool session** (headless `tddy-coder`):
+  `tool_session_route_json(access, agent, sources, model) -> Result<Option<String>, Status>` returns
+  `None` when nothing is chosen (the vault is never read), refuses `INVALID_ARGUMENT` for an empty
+  agent and for an agent that is not a harness (`stub`, a specialized definition), and otherwise
+  resolves through `resolve_session_route` (Cursor refused there) into
+  [route-file JSON](../../tddy-agent-backend/docs/architecture.md#routed-backends-provider_route_file-backendrouted).
+  `spawn_tool_session` resolves it before anything is created and sets
+  `ToolSpawnPlan.provider_route_json`; `tddy-spawn` writes it to `<session_dir>/provider-route.json`
+  (`0600`, chowned to the session user) and passes `--provider-route-path`. Resume calls
+  `resumed_tool_session_route_json`, which re-resolves the start's `provider-account.yaml` record.
 - `StackChildSpawnHandler` and `GrillMeConversationSpawnHandler` pass `RouteSources::default()`:
   a spawned child or conversation runs on its vendor.
 
@@ -167,7 +178,10 @@ Tests: `src/session_provider_route_tests.rs` — a real unlocked vault holding a
 PTY env and records the account and model but never the key; a start choosing nothing, a locked
 vault, an unknown account, Cursor, an empty model and a sandboxed start are each refused or left on
 the vendor as above; the request mapping; and resume with a record, with none, and after the account
-was removed.
+was removed. `src/tool_session_route_tests.rs` — a Codex tool session on Meta gets a route file with
+the Responses provider and the key; Cursor, a specialized definition and an empty agent are refused;
+choosing nothing gives no file; every Responses preset in `tddy_accounts::presets()` is declared to
+Codex under its own label.
 
 ## Placement and the session's git environment
 

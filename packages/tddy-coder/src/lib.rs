@@ -3,10 +3,12 @@
 pub mod acp_agent;
 pub mod acp_host;
 pub mod build_executor;
+mod codex_binaries;
 pub mod config;
 pub mod conversation_spawn_relay;
 pub mod participant_host;
 pub mod plain;
+mod provider_route_arg;
 pub mod recipe;
 pub mod remote;
 pub mod run;

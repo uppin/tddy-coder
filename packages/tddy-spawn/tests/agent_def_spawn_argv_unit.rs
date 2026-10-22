@@ -120,6 +120,7 @@ fn a_resolved_agent_def_travels_with_the_spawn_so_the_child_can_build_its_backen
         new_session_id: Some("session-a"),
         agent: Some("repo-explorer"),
         agent_def_json: Some(&def_json),
+        provider_route_json: None,
         ..Default::default()
     });
 
@@ -144,6 +145,7 @@ fn the_handed_over_def_is_readable_only_by_the_account_the_session_runs_as() {
         new_session_id: Some("session-a"),
         agent: Some("repo-explorer"),
         agent_def_json: Some(&def_json),
+        provider_route_json: None,
         ..Default::default()
     });
 
@@ -167,6 +169,7 @@ fn the_credential_the_def_carries_never_appears_on_the_childs_argv() {
         new_session_id: Some("session-a"),
         agent: Some("repo-explorer"),
         agent_def_json: Some(&def_json),
+        provider_route_json: None,
         ..Default::default()
     });
 

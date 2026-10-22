@@ -3,12 +3,17 @@
 //! Args is the common runtime type. CoderArgs and DemoArgs are CLI parser types
 //! with different agent constraints; both convert to Args via From.
 
+use crate::codex_binaries::{resolve_codex_acp_binary, resolve_codex_binary};
+use crate::provider_route_arg::{
+    apply_provider_route, load_provider_route, refuse_route_for_definition,
+};
 use anyhow::Context;
 use clap::Parser;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tddy_core::provider_route::HarnessRoute;
 use tddy_core::usage_watcher::{spawn_session_usage_watcher, SessionUsageWatchConfig};
 use tddy_core::workflow::graph::ExecutionStatus;
 use tddy_core::{
@@ -279,6 +284,21 @@ fn resolve_specialized_agent_defs(
     Ok(defs)
 }
 
+/// The backend `args` runs for `agent`, with the specialized defs and the provider route `args`
+/// names applied by [`create_backend`].
+fn create_backend_for_args(args: &Args, agent: &str) -> anyhow::Result<SharedBackend> {
+    create_backend(
+        agent,
+        args.cursor_agent_path.as_deref(),
+        args.codex_cli_path.as_deref(),
+        args.codex_acp_cli_path.as_deref(),
+        None,
+        None,
+        &resolve_specialized_agent_defs(args)?,
+        load_provider_route(args.provider_route_path.as_deref())?,
+    )
+}
+
 /// CLI `--output-dir` when set, else `"."` (derive repo root from cwd / default sessions base).
 /// Provenance recorded on this session's `agent-activity.jsonl` rows. The coder hosts tool
 /// execution for tool sessions (`"coder"`) and cursor-cli sessions (`"cursor-cli"`).
@@ -489,6 +509,9 @@ pub struct Args {
     /// validated. A path rather than the JSON itself because the def carries the provider
     /// credential, and argv is world-readable.
     pub agent_def_path: Option<PathBuf>,
+    /// File holding the session's provider route (`--provider-route-path`): the account endpoint,
+    /// model and key the backend's child runs on. Owner-only, written by `tddy-daemon`.
+    pub provider_route_path: Option<PathBuf>,
     pub prompt: Option<String>,
     /// When Some(port), gRPC server runs alongside TUI on the given port.
     pub grpc: Option<u16>,
@@ -648,6 +671,13 @@ pub struct CoderArgs {
     /// world-readable through `/proc/<pid>/cmdline`.
     #[arg(long, value_name = "PATH")]
     pub agent_def_path: Option<PathBuf>,
+
+    /// File holding the session's provider route, as JSON (`tddy_core::provider_route_file`):
+    /// what the backend's child is given to run on a model-provider account instead of its vendor.
+    /// Written `0600` by `tddy-daemon`; refused when anyone else can read it. A path, not the JSON:
+    /// it carries the account's key.
+    #[arg(long, value_name = "PATH")]
+    pub provider_route_path: Option<PathBuf>,
 
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
     #[arg(long)]
@@ -1017,6 +1047,7 @@ impl From<CoderArgs> for Args {
             log_level: parse_log_level(a.log_level.as_deref()),
             agent: a.agent,
             agent_def_path: a.agent_def_path,
+            provider_route_path: a.provider_route_path,
             prompt: a.prompt,
             grpc: a.grpc,
             session_id: a.session_id,
@@ -1074,6 +1105,7 @@ impl From<DemoArgs> for Args {
             log_level: parse_log_level(a.log_level.as_deref()),
             agent: a.agent.or(Some("stub".to_string())),
             agent_def_path: None,
+            provider_route_path: None,
             prompt: a.prompt,
             grpc: a.grpc,
             session_id: a.session_id,
@@ -1347,15 +1379,7 @@ pub fn run_with_args(
         args.model.as_deref().unwrap_or("(default)")
     );
 
-    let backend = create_backend(
-        &resolved_agent,
-        args.cursor_agent_path.as_deref(),
-        args.codex_cli_path.as_deref(),
-        args.codex_acp_cli_path.as_deref(),
-        None,
-        None,
-        &resolve_specialized_agent_defs(args)?,
-    )?;
+    let backend = create_backend_for_args(args, &resolved_agent)?;
 
     if args.goal.as_deref() == Some("acceptance-tests") {
         let session_dir = args.session_dir.as_ref().context("session directory")?;
@@ -1571,15 +1595,7 @@ fn resolve_agent_home_dir() -> PathBuf {
 /// No TUI is rendered: physical fd 1 is the JSON-RPC channel.
 fn run_acp_agent(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     let agent_str = args.agent.as_deref().unwrap_or("claude").to_string();
-    let backend = create_backend(
-        &agent_str,
-        args.cursor_agent_path.as_deref(),
-        args.codex_cli_path.as_deref(),
-        args.codex_acp_cli_path.as_deref(),
-        None,
-        None,
-        &resolve_specialized_agent_defs(args)?,
-    )?;
+    let backend = create_backend_for_args(args, &agent_str)?;
     let recipe = recipe_arc_for_args(args)?;
     let data_dir = resolve_tddy_data_dir(args);
     crate::acp_agent::run_acp(backend, recipe, data_dir, shutdown)
@@ -1768,15 +1784,7 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
     if args.agent.is_none() {
         verify_tddy_tools_available(agent_str)?;
     }
-    let backend = create_backend(
-        agent_str,
-        args.cursor_agent_path.as_deref(),
-        args.codex_cli_path.as_deref(),
-        args.codex_acp_cli_path.as_deref(),
-        None,
-        None,
-        &resolve_specialized_agent_defs(args)?,
-    )?;
+    let backend = create_backend_for_args(args, agent_str)?;
     let has_token = args.livekit_token.is_some();
     let has_key_secret = args.livekit_api_key.is_some() && args.livekit_api_secret.is_some();
     let livekit_enabled = args.livekit_url.is_some()
@@ -2486,77 +2494,6 @@ fn resolve_cursor_agent_binary(cursor_agent_path: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(CursorBackend::DEFAULT_CLI_BINARY))
 }
 
-/// Resolve Codex CLI: `--codex-cli-path` / config, then `TDDY_CODEX_CLI`, then `codex` on `PATH`.
-fn resolve_codex_binary(codex_cli_path: Option<&Path>) -> PathBuf {
-    codex_cli_path
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("TDDY_CODEX_CLI").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from(CodexBackend::DEFAULT_CLI_BINARY))
-}
-
-/// Resolve `codex-acp` stdio agent: explicit path / env, then `codex-acp` beside resolved `codex`, else `codex-acp` on `PATH`.
-fn resolve_codex_acp_binary(
-    codex_acp_cli_path: Option<&Path>,
-    codex_cli_path: Option<&Path>,
-) -> PathBuf {
-    if let Some(p) = codex_acp_cli_path {
-        return p.to_path_buf();
-    }
-    if let Some(p) = std::env::var_os("TDDY_CODEX_ACP_CLI").map(PathBuf::from) {
-        return p;
-    }
-    let codex = resolve_codex_binary(codex_cli_path);
-    if let Some(acp) = codex_acp_beside_resolved_codex(&codex) {
-        return acp;
-    }
-    PathBuf::from(tddy_core::backend::codex_acp::DEFAULT_CODEX_ACP_BINARY)
-}
-
-/// If `codex` resolves to a concrete file, return `codex-acp` in the same directory when it exists.
-fn codex_acp_beside_resolved_codex(codex: &std::path::Path) -> Option<PathBuf> {
-    let codex_file = if codex.is_absolute() {
-        codex.to_path_buf()
-    } else if codex.components().count() == 1 {
-        #[cfg(unix)]
-        {
-            resolve_executable_on_path(codex.as_os_str())?
-        }
-        #[cfg(not(unix))]
-        {
-            return None;
-        }
-    } else {
-        return None;
-    };
-    if !codex_file.is_file() {
-        return None;
-    }
-    let parent = codex_file.parent()?;
-    let acp = parent.join(tddy_core::backend::codex_acp::DEFAULT_CODEX_ACP_BINARY);
-    if acp.is_file() {
-        Some(acp)
-    } else {
-        None
-    }
-}
-
-#[cfg(unix)]
-fn resolve_executable_on_path(name: &std::ffi::OsStr) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            if let Ok(meta) = std::fs::metadata(&candidate) {
-                if meta.permissions().mode() & 0o111 != 0 {
-                    return Some(candidate);
-                }
-            }
-        }
-    }
-    None
-}
-
 /// Create backend once at startup (plain mode, no progress events).
 /// StubBackend always uses InMemoryToolExecutor (no tddy-tools): stub simulates the agent,
 /// so it stores results directly. ProcessToolExecutor is for real agents (Claude/Cursor/Codex)
@@ -2576,9 +2513,12 @@ fn create_backend(
     // Resolved specialized-agent defs (<tddyhome>/agents/*.yaml, `--agent-def-path` — see
     // docs/ft/coder/specialized-subagents.md).
     specialized_agent_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+    // The provider route the session runs on (`--provider-route-path`), applied to the backend.
+    provider_route: Option<HarnessRoute>,
 ) -> anyhow::Result<SharedBackend> {
     log::info!("[tddy-coder] using agent: {}", agent);
     if let Some(def) = specialized_agent_defs.iter().find(|d| d.name == agent) {
+        refuse_route_for_definition(agent, provider_route.as_ref())?;
         // The def is the whole configuration — endpoint, model, turn budget and credential. No
         // flag can override it: one that could would run the session against a model the operator
         // never configured while still reporting the def's name
@@ -2638,7 +2578,10 @@ fn create_backend(
             );
         }
     };
-    Ok(SharedBackend::from_any(backend))
+    Ok(SharedBackend::from_any(apply_provider_route(
+        backend,
+        provider_route,
+    )?))
 }
 
 /// The coding-backend ids `create_backend` dispatches on directly, as opposed to the named
@@ -2744,6 +2687,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             std::slice::from_ref(&def),
+            None,
         )
         .expect("the resolved def must build a backend");
         let result = backend
@@ -2793,6 +2737,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             std::slice::from_ref(&def),
+            None,
         )
         .expect("the resolved def must build a backend")
         .invoke(InvokeRequest {
@@ -2841,6 +2786,7 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             std::slice::from_ref(&def),
+            None,
         )
         .expect("a resolved def name must build a backend");
 
@@ -3016,7 +2962,7 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let error = create_backend("repo-explorer", None, None, None, None, None, &defs)
+        let error = create_backend("repo-explorer", None, None, None, None, None, &defs, None)
             .expect_err("an unresolvable agent must not silently become Claude");
 
         // Then
@@ -3034,7 +2980,7 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let backend = create_backend("claude", None, None, None, None, None, &defs)
+        let backend = create_backend("claude", None, None, None, None, None, &defs, None)
             .expect("'claude' names a coding backend");
 
         // Then
@@ -3367,6 +3313,7 @@ fn run_full_workflow_tui(
         let codex_path_for_factory = args.codex_cli_path.clone();
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
         let specialized_agent_defs_for_factory = resolve_specialized_agent_defs(args)?;
+        let provider_route_for_factory = load_provider_route(args.provider_route_path.as_deref())?;
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
             Box::new(move |agent: &str| {
@@ -3379,6 +3326,7 @@ fn run_full_workflow_tui(
                     socket_path_for_factory.as_deref(),
                     None,
                     &specialized_agent_defs_for_factory,
+                    provider_route_for_factory.clone(),
                 )
                 .map_err(|e| e.to_string())
             }),
@@ -3398,15 +3346,7 @@ fn run_full_workflow_tui(
         p.show_backend_selection(q, idx);
     } else {
         let agent = args.agent.as_deref().unwrap();
-        let backend = create_backend(
-            agent,
-            args.cursor_agent_path.as_deref(),
-            args.codex_cli_path.as_deref(),
-            args.codex_acp_cli_path.as_deref(),
-            socket_path.as_deref(),
-            None,
-            &resolve_specialized_agent_defs(args)?,
-        )?;
+        let backend = create_backend_for_args(args, agent)?;
         presenter.lock().unwrap().start_workflow(
             backend,
             cli_output_dir_param(args),
@@ -3780,15 +3720,7 @@ fn waiting_for_input_has_pending_questions(
 
 fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     let agent_str = resolve_agent_for_full_workflow_plain(args)?;
-    let backend = create_backend(
-        &agent_str,
-        args.cursor_agent_path.as_deref(),
-        args.codex_cli_path.as_deref(),
-        args.codex_acp_cli_path.as_deref(),
-        None,
-        None,
-        &resolve_specialized_agent_defs(args)?,
-    )?;
+    let backend = create_backend_for_args(args, &agent_str)?;
 
     let recipe = recipe_arc_for_args(args)?;
     let mut session_dir = args.session_dir.clone().context("session directory")?;
@@ -4317,6 +4249,7 @@ mod resume_session_config_tests {
             log_level: None,
             agent: None,
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: None,
@@ -4390,6 +4323,7 @@ mod resume_session_identity_tests {
             log_level: None,
             agent: Some("claude".to_string()),
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: None,
@@ -4464,6 +4398,7 @@ mod session_dir_sync_tests {
             log_level: None,
             agent: Some("claude".to_string()),
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: Some(sid.to_string()),
@@ -4554,6 +4489,7 @@ mod changeset_agent_resume_tests {
             log_level: None,
             agent: Some("claude".to_string()),
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: Some(sid.to_string()),
@@ -4661,6 +4597,7 @@ mod post_tui_workflow_exit_tests {
             log_level: None,
             agent: None,
             agent_def_path: None,
+            provider_route_path: None,
             prompt: None,
             grpc: None,
             session_id: Some(session_id.to_string()),

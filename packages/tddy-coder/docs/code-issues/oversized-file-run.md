@@ -47,3 +47,7 @@ This file has **three** `#[cfg(test)]` modules (L2683, L2880, L4359). Seam A in 
 ## Measurement update 2026-10-19 — #satellite 8/13 (#630)
 
 **Shrank, split still deferred:** 2,678 → 2,655 production lines (-23). The coder's room participant now goes through the `SessionParticipantHost` port (`participant_host.rs`): the four per-credential `livekit` join branches and their token-provider plumbing collapse into `participant_join_from_cli`. Dependent PRs (#631+, `feature/satellite/status-ui` and siblings) also touch this file, so no decomposition here. Still unclaimed.
+
+## Measurement update 2026-10-22 — #provider-route 4/9 (#665)
+
+**Narrowed, still over:** 2,655 → 2,595 production lines. `--provider-route-path` added 34 (to 2,689); the wrap moved route loading and application to `provider_route_arg.rs` and the Codex binary resolution (`resolve_codex_binary`, `resolve_codex_acp_binary`, `codex_acp_beside_resolved_codex`, `resolve_executable_on_path` — part of seam D) to `codex_binaries.rs`. Still unclaimed.

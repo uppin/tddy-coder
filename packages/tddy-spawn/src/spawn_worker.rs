@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::spawner::{self, LiveKitCreds, SpawnOptions, SpawnResult};
 
+mod clone_request;
+pub use clone_request::CloneRequest;
+
 fn default_spawn_mouse() -> bool {
     true
 }
@@ -46,6 +49,10 @@ pub struct SpawnRequest {
     /// child cannot read. Omit in JSON for legacy clients.
     #[serde(default)]
     pub agent_def_json: Option<String>,
+    /// The session's provider route as route-file JSON (`tddy_core::provider_route_file`), handed
+    /// to the spawned `tddy-coder` as `--provider-route-path`. Omit in JSON for legacy clients.
+    #[serde(default)]
+    pub provider_route_json: Option<String>,
     /// Passed as `--mouse` when true (default). Omit in JSON for legacy clients.
     #[serde(default = "default_spawn_mouse")]
     pub mouse: bool,
@@ -124,35 +131,6 @@ fn default_child_log_level() -> String {
 
 fn default_child_log_format() -> String {
     spawner::CHILD_LOG_FORMAT_FALLBACK.to_string()
-}
-
-/// Request to clone a git repository as an OS user.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloneRequest {
-    pub os_user: String,
-    pub git_url: String,
-    pub destination: String,
-    /// Environment the clone runs with (see `clone_env::CloneSshEnv`). Optional on the wire: a
-    /// request from a daemon that predates the field carries none.
-    #[serde(default)]
-    pub env: std::collections::BTreeMap<String, String>,
-}
-
-impl CloneRequest {
-    /// Run the clone as the requested OS user, with the request's environment on the `git` child.
-    fn run(&self) -> anyhow::Result<()> {
-        let env: Vec<(&str, &str)> = self
-            .env
-            .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str()))
-            .collect();
-        spawner::clone_as_user_with_env(
-            &self.os_user,
-            &self.git_url,
-            Path::new(&self.destination),
-            &env,
-        )
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -374,6 +352,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         project_id: req.project_id.as_deref(),
                         agent: req.agent.as_deref(),
                         agent_def_json: req.agent_def_json.as_deref(),
+                        provider_route_json: req.provider_route_json.as_deref(),
                         mouse: req.mouse,
                         recipe: req.recipe.as_deref(),
                         stack_parent: req.stack_parent.as_deref(),
@@ -481,6 +460,7 @@ pub fn build_spawn_request(
         project_id: opts.project_id.map(String::from),
         agent: opts.agent.map(String::from),
         agent_def_json: opts.agent_def_json.map(String::from),
+        provider_route_json: opts.provider_route_json.map(String::from),
         mouse: opts.mouse,
         common_room: livekit.common_room.clone(),
         daemon_instance_id: livekit.daemon_instance_id.clone(),

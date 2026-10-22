@@ -25,3 +25,7 @@
 | C | the worker: `run_codex_acp_worker`, `spawn_codex_acp_agent` (L177–445) — `run_codex_acp_worker` has its own record, `complexity-codex-acp-run-codex-acp-worker.md` | ~270 |
 
 Seam A alone brings it to about 440 lines. Prove the seams with `restructure check --deep` before applying them.
+
+## Measurement update 2026-10-22 — #provider-route 4/9 (#665)
+
+**Narrowed, still over:** 562 → 541 production lines. #665 added the lazy worker and the route (+42, to 604); its wrap moved seam B's three OAuth relay functions to `backend/codex_acp/oauth.rs` and `codex_acp_route_args` to `routed.rs`. Seam A (~120) still closes it. Still unclaimed.

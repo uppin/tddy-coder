@@ -136,6 +136,10 @@ export function buildStartSessionRequest(
       prStackBaseSessionId: recipe === "pr-stack" ? prStackBaseSessionId : "",
       sessionType: "",
       model,
+      // The account the agent runs on, or the vendor. The daemon refuses an agent that cannot run
+      // on the account it is named with, rather than starting it on the vendor.
+      providerAccountId,
+      providerBuiltIn,
       permissionMode: "",
       initialPrompt: "",
       sandbox: false,

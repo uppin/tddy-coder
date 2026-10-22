@@ -39,6 +39,9 @@ pub struct ToolSpawnPlan {
     pub project_id: Option<String>,
     pub agent: Option<String>,
     pub agent_def_json: Option<String>,
+    /// The session's provider route as route-file JSON; written owner-only and named to the child
+    /// as `--provider-route-path`.
+    pub provider_route_json: Option<String>,
     pub recipe: Option<String>,
     pub stack_parent: Option<String>,
     pub stack_node_id: Option<String>,
@@ -58,6 +61,7 @@ impl ToolSpawnPlan {
             project_id: self.project_id.as_deref(),
             agent: self.agent.as_deref(),
             agent_def_json: self.agent_def_json.as_deref(),
+            provider_route_json: self.provider_route_json.as_deref(),
             mouse,
             recipe: self.recipe.as_deref(),
             stack_parent: self.stack_parent.as_deref(),

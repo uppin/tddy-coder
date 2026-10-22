@@ -11,6 +11,10 @@
 //! Meta, and Cursor's agent cannot be redirected. A harness whose route body has not been built yet
 //! answers [`RouteRefusal::NotYetRoutable`] — a refusal, never a silent run on the vendor.
 
+mod codex;
+use codex::codex_route;
+pub use codex::{CODEX_ROUTE_KEY_ENV, CODEX_ROUTE_PROVIDER_ID};
+
 /// Every harness a session can run, by the id a session type or tool-session agent names it with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Harness {
@@ -267,9 +271,8 @@ fn route_body(harness: Harness) -> Result<RouteBody, RouteRefusal> {
             Err(RouteRefusal::HarnessCannotBeRouted { harness })
         }
         Harness::OpenCode | Harness::OpenCodeCli => Ok(opencode_route),
-        Harness::Codex | Harness::CodexAcp | Harness::MuseCli => {
-            Err(RouteRefusal::NotYetRoutable(harness))
-        }
+        Harness::Codex | Harness::CodexAcp => Ok(codex_route),
+        Harness::MuseCli => Err(RouteRefusal::NotYetRoutable(harness)),
     }
 }
 

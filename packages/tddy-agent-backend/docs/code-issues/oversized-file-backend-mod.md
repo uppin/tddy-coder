@@ -16,6 +16,7 @@
 |---|---|---|
 | 2026-09-23 | 877 | first detection, at the file's new home. The size is inherited from `tddy-core`, not grown: 878 → 877, because Cut 1 folded the two `crate::workflow` imports into one `use tddy_workflow::{GoalHints, GoalId}`. `write_codex_thread_id_file` widened `pub(crate)` → `pub` on its re-export line (the workflow engine calls it) |
 | 2026-10-22 | 879 | `#provider-route` 3/9 (#664): 877 → 879 — the `opencode` row of `context_globs_for_agent` (one comment, one arm). **Regressed, split deferred**: the file is stack-shared (`#provider-route` 4/9 #665 and 7/9 #668 also change it), and a split mid-stack would conflict in both; the follow-up is after the stack lands |
+| 2026-10-22 | 880 | `#provider-route` 4/9 (#665): 879 → 880 — `mod routed;`. **Regressed, split deferred**: still stack-shared with `#provider-route` 7/9 (#668) |
 
 ## What would close it — candidate seams (not proven)
 

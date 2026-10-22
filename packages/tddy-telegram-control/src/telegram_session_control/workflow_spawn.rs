@@ -331,6 +331,9 @@ fn telegram_spawn_options<'a>(
         agent: inputs.agent.as_deref(),
         // A Telegram spawn names a config-allowlist agent, which the child resolves for itself.
         agent_def_json: None,
+        // A Telegram start chooses no provider account, so it runs on the vendor
+        // (docs/dev/todo/2026-10-22-telegram-tool-sessions-choose-no-provider-account.md).
+        provider_route_json: None,
         mouse: inputs.mouse,
         recipe: inputs.recipe.as_deref(),
         stack_parent: None,

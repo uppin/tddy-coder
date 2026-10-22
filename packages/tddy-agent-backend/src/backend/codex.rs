@@ -9,8 +9,10 @@
 //! **`codex login`** (stdout + `BROWSER`); see [`CodexBackend::spawn_oauth_login`] and the
 //! `tddy-coder` `BROWSER` hook for capturing that URL into the session dir.
 
+use super::routed::route_child_env;
 use super::{InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
+use crate::provider_route::HarnessRoute;
 use crate::stream::codex::{
     codex_jsonl_last_error_message, codex_stderr_brief_for_user, parse_codex_jsonl_output,
 };
@@ -19,59 +21,22 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tddy_workflow::PermissionHint;
 
+mod login_text;
+use login_text::codex_openai_auth_remediation;
+pub use login_text::{scrape_codex_oauth_authorize_url_from_text, write_codex_thread_id_file};
+
 /// Basename under the TDDY artifact session directory; stores Codex CLI `thread_id` for `codex exec resume`.
 pub const CODEX_THREAD_ID_FILENAME: &str = "codex_thread_id";
 
 /// Basename written when Codex invokes `BROWSER` with the OpenAI authorize URL (`tddy-coder` hook).
 pub const CODEX_OAUTH_AUTHORIZE_URL_FILENAME: &str = "codex_oauth_authorize.url";
 
-/// Extract an `https://…` URL from a line of `codex login` output (or any single-line text).
-#[must_use]
-pub fn scrape_codex_oauth_authorize_url_from_text(s: &str) -> Option<String> {
-    let s = s.trim();
-    let start = s.find("https://")?;
-    let rest = &s[start..];
-    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-    let mut url = rest[..end].to_string();
-    while url.ends_with(')') || url.ends_with('"') || url.ends_with('\'') || url.ends_with(',') {
-        url.pop();
-    }
-    (url.len() > "https://".len()).then_some(url)
-}
-
-/// When Codex/OpenAI returns 401-style text, append a short fix hint for the TUI.
-fn codex_openai_auth_remediation(detail: &str) -> Option<&'static str> {
-    let d = detail.to_lowercase();
-    if !d.contains("401") {
-        return None;
-    }
-    if d.contains("unauthorized")
-        || d.contains("missing bearer")
-        || d.contains("authentication")
-        || d.contains("invalid api key")
-    {
-        Some(
-            "Fix: not signed in to OpenAI for Codex. `codex exec --json` does not print a login URL or start browser OAuth — only API errors.\n\
-             Run `codex login` first (URL on stdout + BROWSER), or `tddy-coder --session-dir <artifact_dir> --codex-oauth-login` to capture the link for the web UI.\n\
-             Or use an API key: `printenv OPENAI_API_KEY | codex login --with-api-key`.",
-        )
-    } else {
-        None
-    }
-}
-
-pub fn write_codex_thread_id_file(session_dir: &Path, thread_id: &str) {
-    let path = session_dir.join(CODEX_THREAD_ID_FILENAME);
-    match crate::atomic_file::write_atomic(&path, thread_id.trim()) {
-        Ok(()) => log::debug!("[tddy-codex] persisted thread id to {}", path.display()),
-        Err(e) => log::warn!("[tddy-codex] could not write {}: {}", path.display(), e),
-    }
-}
-
 /// Backend that invokes the Codex CLI (`codex` on PATH by default).
 #[derive(Debug, Clone)]
 pub struct CodexBackend {
     binary_path: PathBuf,
+    /// The provider route the child runs on (`with_provider_route`); `None` for the vendor.
+    pub(super) provider_route: Option<HarnessRoute>,
 }
 
 impl Default for CodexBackend {
@@ -87,12 +52,16 @@ impl CodexBackend {
     pub fn new() -> Self {
         Self {
             binary_path: PathBuf::from(Self::DEFAULT_CLI_BINARY),
+            provider_route: None,
         }
     }
 
     #[must_use]
     pub fn with_path(path: PathBuf) -> Self {
-        Self { binary_path: path }
+        Self {
+            binary_path: path,
+            provider_route: None,
+        }
     }
 
     /// Run `codex login` with **browser OAuth** (the default `codex login` flow, **not** `--device-auth`).
@@ -182,7 +151,7 @@ impl CodexBackend {
 
     fn invoke_sync(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         let merged_prompt = merge_codex_prompt(&request)?;
-        let args = build_codex_exec_argv(&request, &merged_prompt);
+        let args = build_codex_exec_argv(&request, &merged_prompt, self.provider_route.as_ref());
 
         let mut cmd = Command::new(&self.binary_path);
         if let Some(ref wd) = request.working_dir {
@@ -218,6 +187,11 @@ impl CodexBackend {
         );
 
         cmd.env("PATH", super::path_with_exe_dir());
+        // The route's variables come before the backend's own, so a route can never shadow a
+        // `TDDY_*` variable the session depends on.
+        if let Some(ref route) = self.provider_route {
+            cmd.envs(route_child_env(route));
+        }
         #[cfg(unix)]
         if let Some(ref sd) = request.session_dir {
             let oauth_out = sd.join(CODEX_OAUTH_AUTHORIZE_URL_FILENAME);
@@ -440,7 +414,15 @@ pub(crate) fn merge_codex_prompt(request: &InvokeRequest) -> Result<String, Back
 /// - Resume: `exec [-C dir] [-s SANDBOX] --json resume [-m model] <SESSION_ID> <PROMPT>`
 ///
 /// **Sandbox:** `-s read-only` for plan-style read-only goals; `-s workspace-write` otherwise.
-pub(crate) fn build_codex_exec_argv(request: &InvokeRequest, merged_prompt: &str) -> Vec<String> {
+///
+/// **Route:** on a provider account the route's arguments (`-c model_provider…`, `-m <model>`) take
+/// the model's place, so the route's model is the only one passed. The key is never an argument: it
+/// travels in the child's environment (see the invoke path).
+pub(crate) fn build_codex_exec_argv(
+    request: &InvokeRequest,
+    merged_prompt: &str,
+    route: Option<&HarnessRoute>,
+) -> Vec<String> {
     let mut args = vec!["exec".to_string()];
 
     if let Some(ref wd) = request.working_dir {
@@ -462,9 +444,14 @@ pub(crate) fn build_codex_exec_argv(request: &InvokeRequest, merged_prompt: &str
         args.push("resume".to_string());
     }
 
-    if let Some(ref m) = request.model {
-        args.push("-m".to_string());
-        args.push(m.clone());
+    match route {
+        Some(route) => args.extend(route.args.iter().cloned()),
+        None => {
+            if let Some(ref m) = request.model {
+                args.push("-m".to_string());
+                args.push(m.clone());
+            }
+        }
     }
 
     if let Some(super::SessionMode::Resume(id)) = &request.session {
@@ -553,7 +540,7 @@ mod tests {
         let merged = merge_codex_prompt(&req).expect("merge");
 
         // When
-        let args = build_codex_exec_argv(&req, &merged);
+        let args = build_codex_exec_argv(&req, &merged, None);
 
         // Then
         assert_eq!(
@@ -584,7 +571,7 @@ mod tests {
         let merged = merge_codex_prompt(&req).expect("merge");
 
         // When
-        let args = build_codex_exec_argv(&req, &merged);
+        let args = build_codex_exec_argv(&req, &merged, None);
 
         // Then
         let pos_json = args.iter().position(|a| a == "--json").expect("--json");
@@ -610,7 +597,7 @@ mod tests {
         let merged = merge_codex_prompt(&req).expect("merge");
 
         // When
-        let args = build_codex_exec_argv(&req, &merged);
+        let args = build_codex_exec_argv(&req, &merged, None);
 
         // Then
         let pos_resume = args.iter().position(|a| a == "resume").expect("resume");
@@ -631,7 +618,7 @@ mod tests {
         let merged = merge_codex_prompt(&req).expect("merge");
 
         // When
-        let args = build_codex_exec_argv(&req, &merged);
+        let args = build_codex_exec_argv(&req, &merged, None);
 
         // Then
         let pos_m = args
@@ -666,7 +653,7 @@ mod tests {
         let merged = merge_codex_prompt(&req).expect("merge");
 
         // When
-        let args = build_codex_exec_argv(&req, &merged);
+        let args = build_codex_exec_argv(&req, &merged, None);
 
         // Then
         assert!(

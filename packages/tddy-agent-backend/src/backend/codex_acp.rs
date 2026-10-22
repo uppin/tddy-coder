@@ -6,14 +6,19 @@
 //! **`BROWSER`** / **`TDDY_CODEX_OAUTH_OUT`** path as [`super::CodexBackend`] so tddy-web can poll
 //! [`super::CODEX_OAUTH_AUTHORIZE_URL_FILENAME`].
 
+use super::routed::{codex_acp_route_args, route_child_env};
 use super::{InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
 use crate::error::BackendError;
+use crate::provider_route::HarnessRoute;
 use crate::stream::ProgressEvent;
 use agent_client_protocol::{self as acp, Agent as _, Client};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+
+mod oauth;
+use oauth::{acp_error_suggests_retry_oauth, run_oauth_login_via_codex_cli};
 
 #[derive(Debug, Default)]
 struct CodexAcpAccumulator {
@@ -134,50 +139,12 @@ impl Client for TddyCodexAcpClient {
     }
 }
 
-fn acp_error_suggests_retry_oauth(msg: &str) -> bool {
-    let m = msg.to_lowercase();
-    m.contains("auth")
-        || m.contains("401")
-        || m.contains("unauthorized")
-        || m.contains("login")
-        || m.contains("credential")
-        || m.contains("not signed")
-}
-
-fn invoke_codex_oauth_login_blocking(
-    codex_bin: PathBuf,
-    session_dir: PathBuf,
-) -> Result<(), BackendError> {
-    let backend = super::CodexBackend::with_path(codex_bin);
-    let mut child = backend.spawn_oauth_login(&session_dir)?;
-    let status = child
-        .wait()
-        .map_err(|e| BackendError::InvocationFailed(format!("codex login wait: {e}")))?;
-    if !status.success() {
-        return Err(BackendError::InvocationFailed(format!(
-            "codex login exited with status {:?}",
-            status.code()
-        )));
-    }
-    Ok(())
-}
-
-async fn run_oauth_login_via_codex_cli(
-    codex_cli_path: PathBuf,
-    session_dir: PathBuf,
-) -> Result<(), BackendError> {
-    tokio::task::spawn_blocking(move || {
-        invoke_codex_oauth_login_blocking(codex_cli_path, session_dir)
-    })
-    .await
-    .map_err(|e| BackendError::InvocationFailed(format!("codex login join: {e}")))?
-}
-
 /// Runs the Codex ACP worker on a dedicated thread with `LocalSet`.
 fn run_codex_acp_worker(
     agent_path: PathBuf,
     agent_args: Vec<String>,
     codex_cli_path: PathBuf,
+    route: Option<HarnessRoute>,
     mut cmd_rx: mpsc::Receiver<CodexAcpCommand>,
 ) {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -186,7 +153,8 @@ fn run_codex_acp_worker(
         .expect("codex acp worker runtime");
     let local_set = tokio::task::LocalSet::new();
     rt.block_on(local_set.run_until(async move {
-        let mut child = match spawn_codex_acp_agent(&agent_path, &agent_args).await {
+        let mut child = match spawn_codex_acp_agent(&agent_path, &agent_args, route.as_ref()).await
+        {
             Ok(c) => c,
             Err(e) => {
                 while let Some(cmd) = cmd_rx.recv().await {
@@ -422,10 +390,14 @@ fn run_codex_acp_worker(
 async fn spawn_codex_acp_agent(
     agent_path: &PathBuf,
     agent_args: &[String],
+    route: Option<&HarnessRoute>,
 ) -> Result<tokio::process::Child, BackendError> {
     let mut cmd = tokio::process::Command::new(agent_path);
     for arg in agent_args {
         cmd.arg(arg);
+    }
+    if let Some(route) = route {
+        cmd.envs(route_child_env(route));
     }
     cmd.stdin(std::process::Stdio::piped());
     cmd.stdout(std::process::Stdio::piped());
@@ -446,10 +418,17 @@ async fn spawn_codex_acp_agent(
 pub const DEFAULT_CODEX_ACP_BINARY: &str = "codex-acp";
 
 /// Backend that invokes **`codex-acp`** over ACP (stdio JSON-RPC).
+///
+/// The worker thread spawns the agent once, when it starts, so it starts on the first command
+/// rather than at construction: a route set by [`CodexAcpBackend::with_provider_route`] has to be
+/// known before the agent exists.
 pub struct CodexAcpBackend {
     agent_path: PathBuf,
     agent_args: Vec<String>,
-    cmd_tx: mpsc::Sender<CodexAcpCommand>,
+    codex_cli_path: PathBuf,
+    /// The provider route the agent runs on (`with_provider_route`); `None` for the vendor.
+    provider_route: Option<HarnessRoute>,
+    worker: OnceLock<mpsc::Sender<CodexAcpCommand>>,
 }
 
 impl std::fmt::Debug for CodexAcpBackend {
@@ -472,17 +451,7 @@ impl Default for CodexAcpBackend {
         let agent = std::env::var_os("TDDY_CODEX_ACP_CLI")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_CODEX_ACP_BINARY));
-        let agent_path = agent.clone();
-        let (cmd_tx, cmd_rx) = mpsc::channel(16);
-        let codex_cli = resolve_codex_cli_for_oauth();
-        std::thread::spawn(move || {
-            run_codex_acp_worker(agent, Vec::new(), codex_cli, cmd_rx);
-        });
-        Self {
-            agent_path,
-            agent_args: Vec::new(),
-            cmd_tx,
-        }
+        Self::unstarted(agent, Vec::new(), resolve_codex_cli_for_oauth())
     }
 }
 
@@ -495,32 +464,49 @@ impl CodexAcpBackend {
     /// Spawn the given ACP agent binary (e.g. **`tddy-acp-stub`** in integration tests).
     #[must_use]
     pub fn with_agent_path(path: PathBuf) -> Self {
-        let agent_path = path.clone();
-        let (cmd_tx, cmd_rx) = mpsc::channel(16);
-        let codex_cli = resolve_codex_cli_for_oauth();
-        std::thread::spawn(move || {
-            run_codex_acp_worker(path, Vec::new(), codex_cli, cmd_rx);
-        });
-        Self {
-            agent_path,
-            agent_args: Vec::new(),
-            cmd_tx,
-        }
+        Self::unstarted(path, Vec::new(), resolve_codex_cli_for_oauth())
     }
 
     /// Like [`Self::with_agent_path`] but uses a specific **`codex`** binary for `codex login` OAuth relay.
     #[must_use]
     pub fn with_agent_and_codex_paths(agent_path: PathBuf, codex_cli_path: PathBuf) -> Self {
-        let display_path = agent_path.clone();
-        let (cmd_tx, cmd_rx) = mpsc::channel(16);
-        std::thread::spawn(move || {
-            run_codex_acp_worker(agent_path, Vec::new(), codex_cli_path, cmd_rx);
-        });
+        Self::unstarted(agent_path, Vec::new(), codex_cli_path)
+    }
+
+    fn unstarted(agent_path: PathBuf, agent_args: Vec<String>, codex_cli_path: PathBuf) -> Self {
         Self {
-            agent_path: display_path,
-            agent_args: Vec::new(),
-            cmd_tx,
+            agent_path,
+            agent_args,
+            codex_cli_path,
+            provider_route: None,
+            worker: OnceLock::new(),
         }
+    }
+
+    /// Run the agent on `route`. A worker started before the route was set runs the vendor:
+    /// dropping its channel ends it, and the next command starts one on the route.
+    pub(super) fn set_provider_route(&mut self, route: HarnessRoute) {
+        self.provider_route = Some(route);
+        self.worker = OnceLock::new();
+    }
+
+    /// The worker's command channel, starting the worker on first use. On a route the agent is
+    /// given the route's `-c` overrides, and its environment when it is spawned.
+    fn commands(&self) -> &mpsc::Sender<CodexAcpCommand> {
+        self.worker.get_or_init(|| {
+            let (cmd_tx, cmd_rx) = mpsc::channel(16);
+            let agent_path = self.agent_path.clone();
+            let codex_cli_path = self.codex_cli_path.clone();
+            let route = self.provider_route.clone();
+            let mut agent_args = self.agent_args.clone();
+            if let Some(route) = &route {
+                agent_args.extend(codex_acp_route_args(route));
+            }
+            std::thread::spawn(move || {
+                run_codex_acp_worker(agent_path, agent_args, codex_cli_path, route, cmd_rx)
+            });
+            cmd_tx
+        })
     }
 }
 
@@ -528,7 +514,7 @@ impl CodexAcpBackend {
 impl super::CodingBackend for CodexAcpBackend {
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
         let (response_tx, response_rx) = oneshot::channel();
-        self.cmd_tx
+        self.commands()
             .send(CodexAcpCommand::Prompt {
                 request,
                 response_tx,
@@ -548,7 +534,7 @@ impl super::CodingBackend for CodexAcpBackend {
 
     async fn list_models(&self) -> Result<super::BackendModels, BackendError> {
         let (response_tx, response_rx) = oneshot::channel();
-        self.cmd_tx
+        self.commands()
             .send(CodexAcpCommand::ListModels { response_tx })
             .await
             .map_err(|_| {
