@@ -52,6 +52,10 @@ pub struct RuntimeTasks {
     pub(super) agent_tool_socket: Option<(PathBuf, Vec<tddy_rpc::ServiceEntry>)>,
     pub(super) lsp_idle_reaper: Option<tddy_lsp::LspRegistry>,
     pub(super) index_daemon: Option<crate::index_daemon::IndexDaemonRegistry>,
+    /// The session host, whose project-home sessions a periodic task stops once idle
+    /// (`#project-home` 6/7). `None` on a host that serves no sessions.
+    pub(super) project_home_reaper:
+        Option<Arc<tddy_session_lifecycle::connection_service::DaemonSessionHost>>,
     pub(super) relay_idle_monitor: Option<(
         Arc<tddy_session_lifecycle::relay_idle::IdleTimeoutTracker>,
         tokio::sync::oneshot::Sender<()>,
@@ -275,6 +279,29 @@ impl RuntimeTasks {
                 loop {
                     ticker.tick().await;
                     index_daemon.reap_idle().await;
+                }
+            }));
+        }
+
+        // Stops a project-home session once its agent has been idle for `project_home.idle_stop_secs`
+        // (`#project-home` 6/7). A session stopped here resumes, same conversation, on its next
+        // ensure, so the period is only the granularity of the stop.
+        if let Some(host) = self.project_home_reaper {
+            handles.push(tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(Duration::from_secs(30));
+                ticker.tick().await; // consume the immediate first tick
+                loop {
+                    ticker.tick().await;
+                    let stopped = host
+                        .reap_idle_project_home_sessions(std::time::SystemTime::now())
+                        .await;
+                    if !stopped.is_empty() {
+                        log::info!(
+                            target: "tddy_daemon::project_home",
+                            "stopped {} idle project-home session(s): {stopped:?}",
+                            stopped.len()
+                        );
+                    }
                 }
             }));
         }

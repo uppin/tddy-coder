@@ -72,6 +72,7 @@ impl BuildContext {
             agent_tool_socket: None,
             lsp_idle_reaper: None,
             index_daemon: None,
+            project_home_reaper: None,
             relay_idle_monitor: relay.relay_idle_monitor,
             telegram_identity_check: telegram.identity_check,
             telegram_inbound: telegram.inbound,

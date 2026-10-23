@@ -81,10 +81,10 @@ No per-session idle stop exists; `tddy_task::IdleTimeoutTracker` serves the rela
 
 ## Scope
 
-- [ ] Config section
-- [ ] Idle policy
-- [ ] Reaper task + runtime wiring
-- [ ] Tests
+- [x] Config section
+- [x] Idle policy
+- [x] Reaper task + runtime wiring
+- [x] Tests (written in red; run in CI — see Green-phase notes)
 
 ## Technical Changes
 
@@ -128,6 +128,14 @@ then runs the reaper with an advanced clock (`now + 11 min`) — deterministic, 
 - Idleness is read from the hook-reported `activity_status` (`Running` = busy) and `updated_at`, which `update_activity_status` bumps on every report — not from the inferred `SessionAgentStatus`, which is `UNSPECIFIED` ("nothing to say") for sessions with no observed conversation.
 - The periodic task in `tddy-daemon/src/runtime/tasks.rs` is green's (period ≤ 30 s), calling `DaemonSessionHost::reap_idle_project_home_sessions(SystemTime::now())`.
 
+## Green-phase notes
+
+- Implemented: `IdleObservation::from_metadata`, `should_stop`, `LaunchSessions::reap_idle_project_home_sessions` (`project_home_idle.rs`), and the 30 s task (`RuntimeTasks::project_home_reaper`, spawned in `runtime/tasks.rs`, handed the session host in `runtime/mount_host.rs`).
+- Candidates are the listing's `is_active` sessions with the `project-home` role; idleness comes from `.session.yaml`'s `activity_status` and `updated_at`.
+- The stop is the one an explicit termination makes: `CliSessionManager::stop_session` cancels the tracked terminal (SIGTERM, then SIGKILL to its child) and forgets it, so `EnsureProjectHomeSession` no longer sees it as running. The reaper then waits up to 5 s for the pid to exit before it counts the session as stopped. `.session.yaml` is not written, so resume keeps the conversation.
+- Tests: deferred to CI (developer instruction 2026-10-23, build only locally). Local gate: `cargo clippy -p tddy-agent-launch -p tddy-daemon --all-targets -- -D warnings` and the `cargo check --all-targets` of `tddy-session-lifecycle`.
+- Watch in CI: the acceptance tests reap sessions whose stub process was started moments earlier, so they assume the pid is still alive when the reaper runs (`is_active`). If CI shows the stub exiting first, the fixture, not the policy, needs changing.
+
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
@@ -152,8 +160,8 @@ then runs the reaper with an advanced clock (`now + 11 min`) — deterministic, 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
