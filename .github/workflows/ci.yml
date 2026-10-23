@@ -241,21 +241,33 @@ jobs:
           find fixture-bins -maxdepth 1 -type f -exec cp -p {} target/debug/ \;
           find fixture-bins/examples -maxdepth 1 -type f -exec cp -p {} target/debug/examples/ \;
 
+      # A sliding window over the workspace: batches of packages, each built, run, and its test
+      # binaries deleted before the next. `cargo nextest run --workspace` builds all ~1,070 test
+      # binaries first — each statically linking its crate's dependency graph — and that no longer
+      # fits the runner's disk (`rustc`: "No space left on device", 110 GB free at the start). A
+      # filterset does not help: nextest applies `-E` after building. The cap bounds how many test
+      # binaries exist at once; see scripts/nextest-windowed.ts.
       - name: cargo nextest
         id: nextest
-        # Keep going on failure so the JUnit report still publishes; the report
+        # Keep going on failure so the JUnit reports still publish; the report
         # step below is what fails the job.
         continue-on-error: true
         # ANDed with the profile's default-filter, so the exclusions in
         # .config/nextest.toml apply to every leg.
         run: |
           e2e="$(cat .config/rust-e2e.filterset)"
-          ./dev cargo nextest run --workspace --profile ci --locked -E "not ($e2e)"
+          ./dev bun scripts/nextest-windowed.ts --max-binaries 120 -- --profile ci --locked -E "not ($e2e)"
+
+      - name: Disk after the tests
+        if: always()
+        run: |
+          df -h /
+          du -sh target 2>/dev/null || true
 
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
         with:
-          report_paths: target/nextest/ci/junit.xml
+          report_paths: target/nextest/ci/junit-*.xml
           check_name: Rust tests
           detailed_summary: true
           fail_on_failure: true
@@ -266,7 +278,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: junit-rust
-          path: target/nextest/ci/junit.xml
+          path: target/nextest/ci/junit-*.xml
           if-no-files-found: warn
           retention-days: 14
 
