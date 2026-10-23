@@ -64,6 +64,9 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     ssh_config_host: &str,
     // Recorded in the session's initial metadata, so `ListSessions` reports the session as managed.
     managed_codebase: bool,
+    // The session's standing role. Recorded in the session's record before the agent is spawned, and
+    // for "project-home" the agent is pre-approved that role's tool set. Empty for an ordinary session.
+    session_role: &str,
     // A checkout to run in directly (a project's home worktree) instead of cutting a session
     // worktree. Empty cuts one, as every other claude-cli start does.
     repo_path: &str,
@@ -231,6 +234,15 @@ pub(crate) async fn spawn_claude_cli_session_inner(
 
     env_extra.extend(provider_route.map(|route| route.env).unwrap_or_default());
 
+    // The role is on disk before the agent exists, so the daemon never reads a home session as ordinary.
+    claude_cli_spawn_steps::record_role_before_spawn(
+        &session_dir,
+        session_id,
+        project_id,
+        session_role,
+        &worktree_path,
+        managed_codebase,
+    )?;
     progress.begin_phase(StartStep::Agent);
     let handle = claude_cli_spawn_steps::spawn_claude_cli_process(
         claude_cli_spawn_steps::ClaudeCliProcess {
@@ -247,6 +259,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             managed,
             append_system_prompt_file,
             env_extra,
+            session_role,
         },
     )
     .await?;
@@ -267,6 +280,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             Some(ssh_alias.to_string())
         },
         managed_codebase,
+        session_role: Some(session_role.to_string()).filter(|role| !role.is_empty()),
         ..tddy_session_split::service_util::starting_session_metadata(
             session_id,
             project_id,

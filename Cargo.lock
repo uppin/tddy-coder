@@ -12117,6 +12117,7 @@ dependencies = [
  "tddy-subagent-worktree",
  "tddy-task",
  "tddy-testing-commons",
+ "tddy-tool-engine",
  "tddy-workflow",
  "tddy-workflow-recipes",
  "tddy-worktree-service",

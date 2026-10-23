@@ -27,10 +27,9 @@ use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 use tddy_tool_engine::catalog::ToolDef;
 use tddy_tool_engine::project_home_tools::{
-    execute_project_home_tool, is_project_home_tool, project_home_offered_catalog, ListedSession,
+    execute_project_home_tool, is_project_home_tool, session_offered_catalog, ListedSession,
     ProjectHomePort, StartProjectSessionArgs,
 };
-use tddy_tool_engine::tool_catalog;
 use tddy_worktree_service::session_target::{HomeCaller, TargetRecord};
 
 use super::ExecToolRpcHandler;
@@ -99,11 +98,9 @@ impl ExecToolRpcHandler {
                 "session {session_id}: cannot read its record to tell which tools it is offered ({e})"
             ))
         })?;
-        if metadata.session_role.as_deref() == Some(PROJECT_HOME_ROLE) {
-            Ok(project_home_offered_catalog())
-        } else {
-            Ok(tool_catalog())
-        }
+        Ok(session_offered_catalog(
+            metadata.session_role.as_deref() == Some(PROJECT_HOME_ROLE),
+        ))
     }
 
     /// The OS user `session_token` maps to, as the start path resolves it.
@@ -297,9 +294,7 @@ impl ProjectHomePort for DaemonProjectHome {
             .map_err(|status| anyhow::anyhow!(status.message().to_string()))?
             .into_inner();
         if started.branch_conflict.is_some() {
-            anyhow::bail!(
-                "the session was not started: its branch is owned by another session"
-            );
+            anyhow::bail!("the session was not started: its branch is owned by another session");
         }
         tag_orchestrator(&self.sessions_base, &started.session_id, home_session_id)?;
         Ok(started.session_id)

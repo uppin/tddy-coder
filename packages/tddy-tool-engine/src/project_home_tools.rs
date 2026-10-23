@@ -41,7 +41,10 @@ pub const DIFF_SESSION_WORKTREE: &str = "DiffSessionWorktree";
 pub fn is_project_home_tool(name: &str) -> bool {
     matches!(
         name,
-        LIST_PROJECT_SESSIONS | START_PROJECT_SESSION | READ_SESSION_WORKTREE | DIFF_SESSION_WORKTREE
+        LIST_PROJECT_SESSIONS
+            | START_PROJECT_SESSION
+            | READ_SESSION_WORKTREE
+            | DIFF_SESSION_WORKTREE
     )
 }
 
@@ -55,6 +58,17 @@ pub fn project_home_offered_catalog() -> Vec<ToolDef> {
         .filter(|tool| is_project_home_allowed_tool(&tool.name))
         .chain(project_home_tool_defs())
         .collect()
+}
+
+/// The exec tools a session's agent is offered, by whether it is a project-home session: the
+/// project-home catalog for one, the daemon-wide catalog for any other. The one place that answer is
+/// decided, for every host that answers `ListExecTools` (the token route and the jail's bridge).
+pub fn session_offered_catalog(is_project_home: bool) -> Vec<ToolDef> {
+    if is_project_home {
+        project_home_offered_catalog()
+    } else {
+        tool_catalog()
+    }
 }
 
 /// One session as `ListProjectSessions` reports it.

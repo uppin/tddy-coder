@@ -16,9 +16,9 @@
 
 use std::path::{Path, PathBuf};
 
+use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::session_metadata::{write_session_metadata, PROJECT_HOME_ROLE};
-use tddy_core::{read_session_metadata, SessionMetadata};
+use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_discovery::harness_profile::{load_harness_profiles, HarnessProfile};
 use tddy_projects::project_storage::ProjectData;
 use tddy_rpc::{Request, Response, Status};
@@ -158,7 +158,7 @@ impl LaunchSessions {
             }
             None => {
                 let started = self
-                    .start_home(session_token, os_user, project, sessions_base, profile)
+                    .start_home(session_token, os_user, project, profile)
                     .await?;
                 Ok((started, EnsureOutcome::Started))
             }
@@ -204,7 +204,6 @@ impl LaunchSessions {
         session_token: &str,
         os_user: &str,
         project: &ProjectData,
-        sessions_base: &Path,
         profile: &HarnessProfile,
     ) -> Result<String, Status> {
         let home = home_worktree_for(project)?;
@@ -214,6 +213,9 @@ impl LaunchSessions {
             session_type: ENFORCING_HARNESS.to_string(),
             model: profile.model.clone(),
             managed_codebase: true,
+            // Recorded in the initial record before the agent is spawned, and the role the agent is
+            // pre-approved the project-home tool set for (`#project-home` 5/7 extends this ensure).
+            session_role: PROJECT_HOME_ROLE.to_string(),
             repo_path: home.to_string_lossy().into_owned(),
             ..Default::default()
         };
@@ -227,7 +229,6 @@ impl LaunchSessions {
             .start_session_core(start, &AttachmentProgressSink::discarding())
             .await?
             .into_inner();
-        record_home_role(sessions_base, &started.session_id)?;
         log::info!(
             "EnsureProjectHomeSession: started session {} for project {} as {os_user}",
             started.session_id,
@@ -316,14 +317,4 @@ fn find_home_session(
     Ok(sessions
         .into_iter()
         .find(|s| s.project_id == project_id && s.session_role == PROJECT_HOME_ROLE))
-}
-
-/// Mark `session_id` as its project's project-home session.
-fn record_home_role(sessions_base: &Path, session_id: &str) -> Result<(), Status> {
-    let session_dir = unified_session_dir_path(sessions_base, session_id);
-    let mut metadata: SessionMetadata = read_session_metadata(&session_dir)
-        .map_err(|e| Status::internal(format!("home session metadata: {e}")))?;
-    metadata.session_role = Some(PROJECT_HOME_ROLE.to_string());
-    write_session_metadata(&session_dir, &metadata)
-        .map_err(|e| Status::internal(format!("recording the home session's role: {e}")))
 }

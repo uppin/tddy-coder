@@ -1629,11 +1629,8 @@ pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> 
 ///
 /// The per-session answer is narrowed onto this catalog at `tools/list` time (see
 /// [`crate::exec_tool_admission`]). The daemon's session-scoped `ListExecTools` answer is asked over
-/// DaemonHttp and DaemonUds only: SandboxIpc carries no session identity, so a session on it is
-/// offered this static catalog.
-///
-/// TODO: SandboxIpc has no `ListExecTools` message, so a sandboxed session is never offered a
-/// daemon-decided set.
+/// every transport (HTTP, unix socket, the sandbox socket and LiveKit), and a failed ask refuses
+/// `tools/list`.
 pub fn exec_tool_catalog() -> Vec<RemoteToolDef> {
     tddy_tool_engine::tool_catalog()
         .into_iter()

@@ -62,10 +62,15 @@ impl LaunchSessions {
             .or_else(|| meta.repo_path.as_ref().map(PathBuf::from))
             .unwrap_or_else(|| session_dir.clone());
         let is_split = split.is_some();
-        let (split_args, split_env) = match split {
+        let (mut split_args, split_env) = match split {
             Some(w) => (w.extra_args, w.env),
             None => (Vec::new(), Vec::new()),
         };
+        // A role's pre-approved tool set is not persisted in the argv, so a resumed agent is given it
+        // again from the session's own record.
+        split_args.extend(crate::claude_cli_spawn_steps::role_allowed_tools_args(
+            meta.session_role.as_deref().unwrap_or_default(),
+        ));
 
         let manager = Arc::clone(&self.claude_cli_manager);
         let session_id_owned = session_id.to_string();

@@ -33,11 +33,12 @@ pub(crate) fn tool_root(worktree: &Path, conversation_id: &str) -> Result<PathBu
     }
 }
 
-/// The bytes to relay for `service`/`method`: a conversation-worktree request is rewritten to name
-/// the session this jail serves and to carry no credential, anything else passes through.
+/// The bytes to relay for `service`/`method`: a request that names a session (a conversation-worktree
+/// or a `ListExecTools` request) is rewritten to name the session this jail serves and to carry no
+/// credential, anything else passes through.
 ///
-/// The host answers that operation with no token to check — the jail is trusted for exactly the one
-/// session it was built for, as it is for every tool call — so the session it names must be the
+/// The host answers those operations with no token to check — the jail is trusted for exactly the one
+/// session it was built for, as it is for every tool call — so the session they name must be the
 /// runner's own, never whatever the agent inside put in the request.
 pub(crate) fn bind_to_this_session(
     service: &str,
@@ -46,10 +47,22 @@ pub(crate) fn bind_to_this_session(
     session_id: &str,
 ) -> Result<Vec<u8>, tddy_rpc::Status> {
     use prost::Message;
-    use tddy_service::proto::exec_tools::ConversationWorktreeRequest;
+    use tddy_service::proto::exec_tools::{ConversationWorktreeRequest, ListExecToolsRequest};
 
     if !tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS.contains(&(service, method)) {
         return Ok(payload.to_vec());
+    }
+    if method == "ListExecTools" {
+        // A malformed request is refused; a well-formed one carries nothing the jail does not set itself.
+        ListExecToolsRequest::decode(payload).map_err(|e| {
+            tddy_rpc::Status::invalid_argument(format!("decode ListExecToolsRequest: {e}"))
+        })?;
+        return Ok(ListExecToolsRequest {
+            session_id: session_id.to_string(),
+            session_token: String::new(),
+            daemon_instance_id: String::new(),
+        }
+        .encode_to_vec());
     }
     let request = ConversationWorktreeRequest::decode(payload).map_err(|e| {
         tddy_rpc::Status::invalid_argument(format!("decode ConversationWorktreeRequest: {e}"))
@@ -94,6 +107,35 @@ mod tests {
                 relayed.conversation_id
             ),
             ("mine".to_string(), String::new(), "explore".to_string())
+        );
+    }
+
+    #[test]
+    fn a_list_exec_tools_request_is_rebound_to_the_jails_own_session() {
+        use prost::Message;
+        use tddy_service::proto::exec_tools::ListExecToolsRequest;
+        let claimed = ListExecToolsRequest {
+            session_id: "someone-elses".into(),
+            session_token: "forged".into(),
+            daemon_instance_id: "elsewhere".into(),
+        };
+
+        let relayed = bind_to_this_session(
+            "exec_tools.ExecToolService",
+            "ListExecTools",
+            &claimed.encode_to_vec(),
+            "mine",
+        )
+        .unwrap();
+
+        let relayed = ListExecToolsRequest::decode(relayed.as_slice()).unwrap();
+        assert_eq!(
+            (
+                relayed.session_id,
+                relayed.session_token,
+                relayed.daemon_instance_id
+            ),
+            ("mine".to_string(), String::new(), String::new())
         );
     }
 

@@ -11,17 +11,16 @@
 //! A failed ask is a refusal: `tools/list` returns an error that names the failure, and no exec tool is
 //! offered. There is no catalog of this crate's own to fall back to.
 //!
-//! The one exception is a transport that cannot carry the question at all (the sandbox socket, LiveKit):
-//! it keeps the static exec catalog, as every session did before the daemon answered per session. That
-//! exception is pending a developer decision, because refusing it would remove every exec tool from those
-//! sessions (see the changeset, `#project-home` 5/7, "Open").
+//! Every transport asks: the daemon's HTTP relay and unix socket, the sandbox socket (the runner relays
+//! the question to the host daemon) and LiveKit (the remote daemon's `ExecToolService`). With no transport
+//! configured there is no daemon to ask, and no exec tool is registered to admit.
 
 use tddy_session_tool_client::SessionExecToolAnswer;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
 
 use crate::mcp_primitives::RemoteToolDef;
 
-/// The exec tool names of the static catalog, which is what a transport that cannot ask admits.
+/// The exec tool names of the static catalog: the daemon-wide set an unscoped caller is given.
 pub fn static_exec_tool_names() -> Vec<String> {
     tddy_tool_engine::tool_catalog()
         .into_iter()
@@ -40,8 +39,8 @@ pub fn admission_from_answer(answer: SessionExecToolAnswer) -> Result<Vec<String
             "tddy-tools cannot list this session's exec tools: {reason}. No exec tool is offered until \
              the daemon answers."
         )),
-        // PENDING DECISION (`#project-home` 5/7 "Open"): these transports cannot ask today.
-        SessionExecToolAnswer::CannotAsk(_) => Ok(static_exec_tool_names()),
+        // Nothing is configured to ask, and no exec tool is registered, so there is nothing to admit.
+        SessionExecToolAnswer::NoTransport => Ok(Vec::new()),
     }
 }
 
@@ -180,17 +179,15 @@ mod tests {
     }
 
     #[test]
-    fn a_transport_that_cannot_ask_keeps_the_static_catalog_until_decided() {
-        // Given a transport that cannot carry the question (pending a developer decision)
-        let answer = SessionExecToolAnswer::CannotAsk("sandbox socket");
+    fn no_configured_transport_admits_nothing_and_is_not_a_refusal() {
+        // Given no session-tool transport: no exec tool is registered, so there is nothing to admit
+        let admitted = admission_from_answer(SessionExecToolAnswer::NoTransport)
+            .expect("no transport is not a failed ask");
 
-        // When the admission is read
-        let admitted = admission_from_answer(answer).expect("pending: not refused yet");
-
-        // Then the static catalog, and never a project-home tool
-        assert_eq!(admitted, static_exec_tool_names());
-        assert!(!is_advertised("ReadSessionWorktree", &admitted));
-        assert!(is_advertised("Write", &admitted));
+        // Then nothing is admitted, and a tool outside the exec catalog is still advertised
+        assert_eq!(admitted, Vec::<String>::new());
+        assert!(is_advertised("approval_prompt", &admitted));
+        assert!(!is_advertised("Write", &admitted));
     }
 
     #[test]
