@@ -374,7 +374,7 @@ async fn with_extension_verifies(
     root: &std::path::Path,
     options: Options,
 ) -> Result<(Options, BTreeSet<String>), Status> {
-    let languages = index.verifiable();
+    let languages = index.verified_languages();
     if languages.is_empty() {
         return Ok((options, BTreeSet::new()));
     }

@@ -8,6 +8,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use tddy_code_restructuring::backends::server::file_uri_under;
 use tddy_code_restructuring::verify::{ParseNode, SourceChange, SourceFinding, SourceVerify};
 use tddy_code_restructuring::{LanguageSupport, Position, RestructureError};
 use tddy_lsp::{Diagnostic, LanguageId, LspClient, Range};
@@ -73,10 +74,10 @@ impl SourceVerify for ExtensionVerify {
             findings.extend(diagnostics.into_iter().map(|diagnostic| {
                 SourceFinding::NewErrorDiagnostic {
                     path: change.path.clone(),
-                    at: Position {
-                        line: diagnostic.range.start.line + 1,
-                        col: diagnostic.range.start.character + 1,
-                    },
+                    at: one_based(
+                        diagnostic.range.start.line,
+                        diagnostic.range.start.character,
+                    ),
                     message: diagnostic.message,
                 }
             }));
@@ -86,53 +87,45 @@ impl SourceVerify for ExtensionVerify {
     }
 }
 
+/// Where a server advertises that it answers `textDocument/diagnostic`.
+const PULL_DIAGNOSTICS_CAPABILITY: &str = "/capabilities/diagnosticProvider";
+
+/// Where a text the parser gives up on altogether is reported.
+const TEXT_START: Position = Position { line: 1, col: 1 };
+
+/// A zero-based line and column (an LSP position, a tree-sitter point) as a one-based [`Position`].
+fn one_based(line: u32, col: u32) -> Position {
+    Position {
+        line: line + 1,
+        col: col + 1,
+    }
+}
+
 impl ExtensionVerify {
     /// The error diagnostics `server` reports for `change.after` that it did not report for
     /// `change.before`, each read by a pull request after the text was announced — so the answer is
-    /// for that text and not for whatever the server last published. The document is closed again,
-    /// handing the file back to what is on disk.
+    /// for that text and not for whatever the server last published. The document is closed again
+    /// whatever the reads answered, handing the file back to what is on disk.
     fn new_diagnostics(
         &self,
         server: &LspClient,
         root: &Path,
         change: &SourceChange,
     ) -> tddy_code_restructuring::Result<Vec<Diagnostic>> {
-        let uri = format!("file://{}", root.join(&change.path).display());
-        let language_id = match self.support.server().launch() {
-            Some(launch) if !launch.language_id.is_empty() => launch.language_id.clone(),
-            _ => self.support.id().to_string(),
-        };
-        if server
-            .handshake()
-            .pointer("/capabilities/diagnosticProvider")
-            .is_none()
-        {
-            return Err(RestructureError::ServerDefect(format!(
-                "the language server of {} offers no pull diagnostics, so the errors a change \
-                 introduces cannot be read from it",
-                self.support.id()
-            )));
-        }
-        let read = |error: tddy_lsp::LspError| {
+        self.require_pull_diagnostics(server)?;
+        let uri = file_uri_under(root, &change.path);
+        let language_id = self.support.document_language_id();
+        let read = tokio::runtime::Handle::current().block_on(async {
+            let read = diagnostics_before_and_after(server, &uri, language_id, change).await;
+            let closed = server.did_close(&uri).await;
+            read.and_then(|both| closed.map(|()| both))
+        });
+        let (before, after) = read.map_err(|error| {
             RestructureError::ServerDefect(format!(
                 "reading diagnostics of {}: {error}",
                 change.path
             ))
-        };
-        let (before, after) = tokio::runtime::Handle::current()
-            .block_on(async {
-                server
-                    .sync_document(&uri, &language_id, &change.before)
-                    .await?;
-                let before = server.pull_diagnostics(&uri).await?;
-                server
-                    .sync_document(&uri, &language_id, &change.after)
-                    .await?;
-                let after = server.pull_diagnostics(&uri).await?;
-                server.did_close(&uri).await?;
-                Ok((before, after))
-            })
-            .map_err(read)?;
+        })?;
         Ok(new_error_diagnostics(
             &before,
             &after,
@@ -141,12 +134,29 @@ impl ExtensionVerify {
         ))
     }
 
+    /// Refuses a server that cannot be asked for the diagnostics of the text last sent to it: the
+    /// publish cache says nothing about that text, so a verify reading it would hold unchecked.
+    fn require_pull_diagnostics(&self, server: &LspClient) -> tddy_code_restructuring::Result<()> {
+        if server
+            .handshake()
+            .pointer(PULL_DIAGNOSTICS_CAPABILITY)
+            .is_some()
+        {
+            return Ok(());
+        }
+        Err(RestructureError::ServerDefect(format!(
+            "the language server of {} offers no pull diagnostics, so the errors a change \
+             introduces cannot be read from it",
+            self.support.id()
+        )))
+    }
+
     /// One [`SourceFinding::ParseError`] per `ERROR` / `MISSING` node of the grammar's parse of
     /// `change.after`; a text the parser gives up on altogether is one `ERROR` at its start.
     fn parse_findings(&self, change: &SourceChange) -> Vec<SourceFinding> {
         let found = match self.support.parse(&change.after) {
             Some(tree) => parse_errors(&tree),
-            None => vec![(ParseNode::Error, Position { line: 1, col: 1 })],
+            None => vec![(ParseNode::Error, TEXT_START)],
         };
         found
             .into_iter()
@@ -157,6 +167,25 @@ impl ExtensionVerify {
             })
             .collect()
     }
+}
+
+/// `change.before`, then `change.after`, announced as the text of `uri` and the diagnostics of each
+/// pulled back. Leaves the document open; the caller closes it.
+async fn diagnostics_before_and_after(
+    server: &LspClient,
+    uri: &str,
+    language_id: &str,
+    change: &SourceChange,
+) -> Result<(Vec<Diagnostic>, Vec<Diagnostic>), tddy_lsp::LspError> {
+    server
+        .sync_document(uri, language_id, &change.before)
+        .await?;
+    let before = server.pull_diagnostics(uri).await?;
+    server
+        .sync_document(uri, language_id, &change.after)
+        .await?;
+    let after = server.pull_diagnostics(uri).await?;
+    Ok((before, after))
 }
 
 /// The error diagnostics (severity 1) of `after` that `before` does not account for: one of
@@ -259,39 +288,40 @@ impl LineCarry {
 }
 
 /// Every `ERROR` and `MISSING` node of `tree`, outermost first in source order, with where it
-/// starts (one-based line, one-based byte column).
+/// starts (one-based line, one-based byte column). Walked with a cursor rather than by recursion,
+/// so a deeply nested error does not grow the stack; a subtree the parser found nothing wrong in is
+/// not entered.
 pub(crate) fn parse_errors(tree: &Tree) -> Vec<(ParseNode, Position)> {
     let mut found = Vec::new();
-    collect_parse_errors(tree.root_node(), &mut found);
-    found
+    let mut cursor = tree.walk();
+    loop {
+        let node = cursor.node();
+        let wrong = node.has_error() || node.is_missing();
+        if wrong {
+            if let Some(kind) = parse_node_of(node) {
+                let start = node.start_position();
+                found.push((kind, one_based(start.row as u32, start.column as u32)));
+            }
+        }
+        if wrong && cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return found;
+            }
+        }
+    }
 }
 
-/// `node` and everything below it that is an `ERROR` or `MISSING` node, parents before children;
-/// a subtree the parser found nothing wrong in is not entered.
-fn collect_parse_errors(node: Node<'_>, found: &mut Vec<(ParseNode, Position)>) {
-    if !node.has_error() && !node.is_missing() {
-        return;
-    }
-    let kind = if node.is_error() {
+/// What `node` is, when it is one a verify reports.
+fn parse_node_of(node: Node<'_>) -> Option<ParseNode> {
+    if node.is_error() {
         Some(ParseNode::Error)
     } else if node.is_missing() {
         Some(ParseNode::Missing)
     } else {
         None
-    };
-    if let Some(kind) = kind {
-        let start = node.start_position();
-        found.push((
-            kind,
-            Position {
-                line: start.row as u32 + 1,
-                col: start.column as u32 + 1,
-            },
-        ));
-    }
-    let mut children = node.walk();
-    for child in node.children(&mut children) {
-        collect_parse_errors(child, found);
     }
 }
 
@@ -331,8 +361,9 @@ mod tests {
     }
 
     #[test]
-    fn an_error_with_a_message_not_reported_before_is_new() {
-        // Given no error before, and one after
+    fn an_error_on_an_inserted_line_is_new_and_the_carried_one_is_not() {
+        // Given an error on line 1 before, and after a line was inserted below it, the same error
+        // on line 1 and another with the same message on the inserted line
         let after_text = "[server]\nport = BROKEN\nhost = BROKEN\n";
         let before = [a_diagnostic(1, 1, 7, 13, "unexpected BROKEN")];
         let after = [

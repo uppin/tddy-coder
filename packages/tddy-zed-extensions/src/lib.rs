@@ -26,6 +26,8 @@ pub mod registry;
 pub mod server;
 pub mod settings;
 pub mod support;
+#[cfg(feature = "testkit")]
+pub mod testkit;
 pub mod verify;
 
 mod archive;

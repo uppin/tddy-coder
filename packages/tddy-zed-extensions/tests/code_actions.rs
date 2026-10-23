@@ -57,8 +57,20 @@ fn the_port_rename(root: &Path) -> Value {
 
 /// demo-toml served by the fake server, offering the actions `code_actions(root)` builds.
 async fn a_server_offering(code_actions: impl FnOnce(&Path) -> Value) -> ARunningServer {
+    a_server_declared_as(
+        "[language_servers.fake-ls]\nlanguages = [\"Demo TOML\"]\n",
+        code_actions,
+    )
+    .await
+}
+
+/// [`a_server_offering`], with `fake-ls` declared for demo-toml by the manifest table `declared`.
+async fn a_server_declared_as(
+    declared: &str,
+    code_actions: impl FnOnce(&Path) -> Value,
+) -> ARunningServer {
     let installed = an_extensions_dir_with(&[AFixtureExtension::DemoToml]);
-    installed.declare_fake_ls_for_demo_toml();
+    installed.declare_in_demo_toml(declared);
     let workspace = a_workspace_holding_the_app_config();
     let file = installed.data_dir().join("code-actions.json");
     fs::write(&file, code_actions(workspace.root()).to_string()).expect("write the code actions");
@@ -94,6 +106,25 @@ impl ARunningServer {
             op,
         )
         .await
+    }
+
+    /// What the client answered each `workspace/applyEdit` the fake server sent, in order.
+    async fn the_apply_edit_answers(&self) -> Value {
+        self.the_fake_servers_record("tddy/applyEditAnswers").await
+    }
+
+    /// The params of each `textDocument/codeAction` request the fake server received, in order.
+    async fn the_code_action_requests(&self) -> Value {
+        self.the_fake_servers_record("tddy/codeActionRequests")
+            .await
+    }
+
+    async fn the_fake_servers_record(&self, method: &str) -> Value {
+        self.server
+            .client
+            .request_raw(method, Value::Null)
+            .await
+            .expect("the fake server replays what it recorded")
     }
 
     fn the_app_config(&self) -> String {
@@ -132,21 +163,21 @@ async fn an_action_carrying_an_edit_is_applied_by_title() {
     // Given a server offering two actions, one of which carries the rename of `port`
     let running = a_server_offering(|root| {
         json!({ "actions": [
-            { "title": "Sort keys", "kind": "source.sort", "edit": an_edit_of_the_app(root, 1, 0, 0, "") },
+            { "title": "Sort keys", "kind": "source.sort", "edit": an_edit_of_the_app(root, 0, 0, 0, "# sorted\n") },
             { "title": "Rename to listen_port", "kind": "refactor.rewrite", "edit": the_port_rename(root) },
         ] })
     })
     .await;
 
     // When the second is applied by its title
-    let applied = running
+    running
         .applying(an_apply_code_action(
             json!({ "title": "Rename to listen_port" }),
         ))
-        .await;
+        .await
+        .expect("the action applies");
 
     // Then its edit, and only its, is on disk (R1, R2)
-    assert!(applied.is_ok(), "the action was refused: {applied:?}");
     assert_eq!(
         running.the_app_config(),
         APP_TOML.replace("port = 8080", "listen_port = 8080")
@@ -166,19 +197,14 @@ async fn a_command_action_is_applied_from_the_servers_apply_edit() {
     .await;
 
     // When it is applied by its kind
-    let applied = running
+    running
         .applying(an_apply_code_action(json!({ "kind": "refactor.rewrite" })))
-        .await;
-    let answers = running
-        .server
-        .client
-        .request_raw("tddy/applyEditAnswers", Value::Null)
         .await
-        .expect("the fake server replays what the client answered");
+        .expect("the action applies");
+    let answers = running.the_apply_edit_answers().await;
 
     // Then the edit the server sent is on disk, written by the run, and the server was told it was
     // applied (R2, R3)
-    assert!(applied.is_ok(), "the action was refused: {applied:?}");
     assert_eq!(
         (running.the_app_config(), answers),
         (
@@ -256,7 +282,8 @@ async fn a_command_that_sends_no_edit_is_refused() {
         json!({
             "actions": [{ "title": "Do nothing", "kind": "refactor.rewrite",
                           "command": { "title": "Nothing", "command": "fake.nothing", "arguments": [] } }],
-            "command_edits": { "fake.other": [] },
+            // Only so the server advertises an executeCommandProvider; `fake.nothing` sends no edit.
+            "command_edits": { "fake.unrelated": [] },
         })
     })
     .await;
@@ -323,14 +350,14 @@ async fn verify_fails_on_a_parse_error_node() {
     // When the run is verified
     let findings = running.verifying_the_app_config().await;
 
-    // Then a parse error on line 3 is found (R5)
-    assert!(
-        findings.iter().any(|finding| matches!(
-            finding,
-            SourceFinding::ParseError { path, node: ParseNode::Error | ParseNode::Missing, at }
-                if path == APP && at.line == 3
-        )),
-        "no parse error on line 3 was found: {findings:?}"
+    // Then the one finding is the parse error on line 3, where the doubled `=` begins (R5)
+    assert_eq!(
+        findings,
+        vec![SourceFinding::ParseError {
+            path: APP.to_string(),
+            node: ParseNode::Error,
+            at: Position { line: 3, col: 6 },
+        }]
     );
 }
 
@@ -355,4 +382,41 @@ async fn verify_holds_for_a_clean_action() {
 
     // Then it holds (R5)
     assert_eq!(findings, Vec::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_server_is_asked_over_the_anchors_range_for_the_kinds_its_entry_declares() {
+    // Given fake-ls declared with the code-action kinds Zed would ask it for
+    let running = a_server_declared_as(
+        "[language_servers.fake-ls]\nlanguages = [\"Demo TOML\"]\ncode_action_kinds = [\"refactor.rewrite\"]\n",
+        |root| {
+            json!({ "actions": [
+                { "title": "Rename to listen_port", "kind": "refactor.rewrite", "edit": the_port_rename(root) },
+            ] })
+        },
+    )
+    .await;
+
+    // When an action is applied over line 3
+    running
+        .applying(an_apply_code_action(
+            json!({ "title": "Rename to listen_port" }),
+        ))
+        .await
+        .expect("the action applies");
+
+    // Then the server was asked once, over that line, for the declared kinds only (R1)
+    let requests = running.the_code_action_requests().await;
+    assert_eq!(
+        requests
+            .as_array()
+            .expect("the requests are a list")
+            .iter()
+            .map(|params| (params["range"].clone(), params["context"]["only"].clone()))
+            .collect::<Vec<_>>(),
+        vec![(
+            json!({ "start": { "line": 2, "character": 0 }, "end": { "line": 2, "character": 11 } }),
+            json!(["refactor.rewrite"])
+        )]
+    );
 }

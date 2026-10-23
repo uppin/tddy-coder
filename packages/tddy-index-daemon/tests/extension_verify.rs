@@ -8,7 +8,7 @@
 //! `--diagnoses BROKEN`: every `BROKEN` in a document is an error diagnostic. No real language
 //! server runs.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,44 +20,20 @@ use tddy_index_daemon::proto::code_index::{CodeIndexService, VerifyRequest, Veri
 use tddy_index_daemon::{CodeIndexPorts, CodeIndexServiceImpl};
 use tddy_lsp::LspRegistry;
 use tddy_task::TaskRegistry;
-use tddy_zed_extensions::{load_installed, ExtensionsDir};
+use tddy_zed_extensions::{load_installed, testkit, ExtensionsDir};
 
 const APP: &str = "config/app.toml";
 const APP_TOML: &str = "[server]\nhost = \"localhost\"\nport = 8080\n";
-
-fn the_extension_fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../tddy-zed-extensions/tests/fixtures")
-}
-
-fn copy_tree(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).expect("create the target");
-    for entry in std::fs::read_dir(from).expect("read a fixture dir") {
-        let entry = entry.expect("a fixture entry");
-        let target = to.join(entry.file_name());
-        if entry.path().is_dir() {
-            copy_tree(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), &target).expect("copy a fixture file");
-        }
-    }
-}
 
 /// A tddy data dir with `demo-toml` installed, `fake-ls` declared as its language's server and
 /// `settings.json` running the fake server with `--diagnoses BROKEN`.
 fn a_data_dir_with_a_diagnosing_extension_language() -> tempfile::TempDir {
     let data = tempfile::tempdir().expect("a temporary data dir");
-    let installed = data.path().join("extensions/installed/demo-toml");
-    copy_tree(&the_extension_fixtures().join("demo-toml"), &installed);
-    std::fs::create_dir_all(installed.join("grammars")).expect("grammars dir");
-    std::fs::copy(
-        the_extension_fixtures().join("grammars/tree-sitter-toml/toml.wasm"),
-        installed.join("grammars/toml.wasm"),
-    )
-    .expect("copy the vendored grammar");
-    let manifest = installed.join("extension.toml");
-    let mut text = std::fs::read_to_string(&manifest).expect("read the manifest");
-    text.push_str("\n[language_servers.fake-ls]\nlanguages = [\"Demo TOML\"]\n");
-    std::fs::write(&manifest, text).expect("declare the server");
+    testkit::install_demo_toml(data.path());
+    testkit::declare_in_demo_toml(
+        data.path(),
+        "[language_servers.fake-ls]\nlanguages = [\"Demo TOML\"]\n",
+    );
     let settings = json!({ "lsp": { "fake-ls": { "binary": {
         "path": env!("CARGO_BIN_EXE_fake_lsp"),
         "arguments": ["--diagnoses", "BROKEN"],
@@ -73,31 +49,7 @@ fn a_data_dir_with_a_diagnosing_extension_language() -> tempfile::TempDir {
 /// A committed git worktree holding [`APP`] as [`APP_TOML`] and no Cargo package.
 fn a_committed_worktree_holding_the_app_config() -> tempfile::TempDir {
     let workspace = tempfile::tempdir().expect("a temporary workspace");
-    std::fs::create_dir_all(workspace.path().join("config")).expect("config dir");
-    std::fs::write(workspace.path().join(APP), APP_TOML).expect("write the app config");
-    for args in [
-        vec!["init", "--quiet"],
-        vec!["add", "--all"],
-        vec![
-            "-c",
-            "user.name=tddy tests",
-            "-c",
-            "user.email=tests@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "--quiet",
-            "--message",
-            "baseline",
-        ],
-    ] {
-        let status = std::process::Command::new("git")
-            .args(&args)
-            .current_dir(workspace.path())
-            .status()
-            .expect("git runs");
-        assert!(status.success(), "git {args:?} failed");
-    }
+    testkit::commit_baseline(workspace.path(), &[(APP, APP_TOML)]);
     workspace
 }
 
@@ -126,7 +78,7 @@ fn a_service_over(data: &Path) -> CodeIndexServiceImpl {
         },
         Arc::new(supports),
     )
-    .with_verifiable(loaded.supports)
+    .with_verified_languages(loaded.supports)
 }
 
 /// `Verify` against `HEAD` of `workspace`, answered by `service`.

@@ -33,6 +33,8 @@ tddy-tools = { path = "../tddy-tools" }
 tddy-zed-extensions = { path = "../tddy-zed-extensions" }
 
 [dev-dependencies]
+# The `demo-toml` fixture builders the extension-verify suite shares with the other dependents.
+tddy-zed-extensions = { path = "../tddy-zed-extensions", features = ["testkit"] }
 assert_cmd = "2"
 async-trait = "0.1"
 predicates = "3"

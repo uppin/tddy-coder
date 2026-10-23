@@ -84,9 +84,12 @@ impl CodeIndexServiceImpl {
     /// languages a host registered with [`CodeIndexServiceImpl::with_supports`] — by their servers'
     /// new error diagnostics and their grammars' parse (`#reshape` extension-code-actions, R5).
     #[must_use]
-    pub fn with_verifiable(self, languages: Vec<tddy_zed_extensions::ExtensionSupport>) -> Self {
+    pub fn with_verified_languages(
+        self,
+        languages: Vec<tddy_zed_extensions::ExtensionSupport>,
+    ) -> Self {
         Self {
-            index: self.index.with_verifiable(languages),
+            index: self.index.with_verified_languages(languages),
         }
     }
 

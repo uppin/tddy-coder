@@ -28,7 +28,6 @@ use std::time::Duration;
 use clap::Parser;
 use tddy_code_restructuring::backends::rust::RustSupport;
 use tddy_code_restructuring::spawn_record::JsonlSpawnRecord;
-use tddy_code_restructuring::SupportRegistry;
 use tddy_index_daemon::{CodeIndexPorts, CodeIndexServiceImpl};
 use tddy_lsp::{LspRegistry, SpawnObserver};
 use tddy_task::TaskRegistry;
@@ -173,7 +172,10 @@ fn wired(
     rust_analyzer: &str,
     spawn_observer: Option<Arc<dyn SpawnObserver>>,
 ) -> anyhow::Result<(TaskRegistry, LspRegistry, Arc<CodeIndexServiceImpl>)> {
-    let (supports, extensions) = installed_languages(rust_analyzer)?;
+    let tddy_index_daemon::HostLanguages {
+        supports,
+        extensions,
+    } = installed_languages(rust_analyzer)?;
     let tasks = TaskRegistry::new();
     let registry = LspRegistry::new(
         supports.allow_list(),
@@ -192,7 +194,7 @@ fn wired(
             },
             Arc::new(supports),
         )
-        .with_verifiable(extensions),
+        .with_verified_languages(extensions),
     );
     Ok((tasks, servers, service))
 }
@@ -233,8 +235,6 @@ fn send_stderr_to(path: &std::path::Path) -> anyhow::Result<()> {
 /// every installed Zed extension's (see [`tddy_index_daemon::host_supports_launching`]), each grammar that
 /// does not load logged once, by name. The cold CLI registers the same through `tddy-tools`, which
 /// is what keeps the two answering the same anchors.
-fn installed_languages(
-    rust_analyzer: &str,
-) -> anyhow::Result<(SupportRegistry, Vec<tddy_zed_extensions::ExtensionSupport>)> {
+fn installed_languages(rust_analyzer: &str) -> anyhow::Result<tddy_index_daemon::HostLanguages> {
     tddy_index_daemon::host_languages_launching(RustSupport::launching(rust_analyzer))
 }

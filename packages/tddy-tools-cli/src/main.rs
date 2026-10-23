@@ -138,18 +138,15 @@ fn room_connector() -> Arc<dyn RoomConnector> {
 ///
 /// A cold run starts no language server for a verify, so these verifies judge by the grammar's parse
 /// alone; the warm index daemon also compares the servers' diagnostics.
-fn installed_languages() -> Result<index_client::InstalledLanguages> {
-    let dir = tddy_zed_extensions::ExtensionsDir::resolve()?;
-    let loaded = tddy_zed_extensions::load_installed(&dir)?;
+fn installed_languages() -> Result<index_client::ColdLanguages> {
+    use tddy_zed_extensions::InstalledExtensions;
+    let mut supports = tddy_code_restructuring::SupportRegistry::new();
+    let loaded = supports.register_installed(&tddy_zed_extensions::ExtensionsDir::resolve()?)?;
     for failure in &loaded.failures {
         eprintln!("restructure: {failure}");
     }
-    let mut installed = tddy_code_restructuring::SupportRegistry::new();
-    for support in &loaded.supports {
-        installed.register(Box::new(support.clone()));
-    }
     let verifies = tddy_zed_extensions::ExtensionVerify::for_languages(&loaded.supports, &[]);
-    Ok((installed, verifies))
+    Ok(index_client::ColdLanguages { supports, verifies })
 }
 
 #[tokio::main]

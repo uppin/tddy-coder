@@ -297,7 +297,13 @@ fn refuse_unless_bytes(client: &LspClient) -> Result<()> {
 
 /// The `file://` uri of `file` under the workspace root — spelled as the server's root uri is.
 pub(super) fn file_uri(workspace: &Workspace<'_>, file: &str) -> String {
-    format!("file://{}", workspace.root.join(file).display())
+    file_uri_under(workspace.root, file)
+}
+
+/// The `file://` uri of `file`, a path relative to `root`, spelled as a server's root uri is: the
+/// one spelling every front end that announces a document to a server uses.
+pub fn file_uri_under(root: &std::path::Path, file: &str) -> String {
+    format!("file://{}", root.join(file).display())
 }
 
 /// The server's rename answer as an edit: every document it names, paths relative to the root.

@@ -129,9 +129,9 @@ pub struct WorkspaceIndex {
     /// extensions existed.
     supports: Arc<SupportRegistry>,
     /// The installed extension languages `verify` judges the changed files of beyond Rust
-    /// (`#reshape` extension-code-actions, R5). Empty unless [`WorkspaceIndex::with_verifiable`]
+    /// (`#reshape` extension-code-actions, R5). Empty unless [`WorkspaceIndex::with_verified_languages`]
     /// says otherwise: `verify` compares Rust files only, as before.
-    verifiable: Arc<Vec<tddy_zed_extensions::ExtensionSupport>>,
+    verified_languages: Arc<Vec<tddy_zed_extensions::ExtensionSupport>>,
 }
 
 impl WorkspaceIndex {
@@ -146,7 +146,7 @@ impl WorkspaceIndex {
             flusher: Arc::new(std::sync::Once::new()),
             signals: RootSignals::default(),
             supports: Arc::new(SupportRegistry::new()),
-            verifiable: Arc::new(Vec::new()),
+            verified_languages: Arc::new(Vec::new()),
         }
     }
 
@@ -154,17 +154,17 @@ impl WorkspaceIndex {
     /// new error diagnostics and its grammar's parse (`#reshape` extension-code-actions, R5). The
     /// same languages a host registered with [`WorkspaceIndex::with_supports`].
     #[must_use]
-    pub fn with_verifiable(
+    pub fn with_verified_languages(
         mut self,
         languages: Vec<tddy_zed_extensions::ExtensionSupport>,
     ) -> Self {
-        self.verifiable = Arc::new(languages);
+        self.verified_languages = Arc::new(languages);
         self
     }
 
     /// The languages `verify` judges the changed files of, beyond Rust.
-    pub(crate) fn verifiable(&self) -> Arc<Vec<tddy_zed_extensions::ExtensionSupport>> {
-        Arc::clone(&self.verifiable)
+    pub(crate) fn verified_languages(&self) -> Arc<Vec<tddy_zed_extensions::ExtensionSupport>> {
+        Arc::clone(&self.verified_languages)
     }
 
     /// Route the files `supports` claim to their supports (`#reshape` extension-outline, R8): their

@@ -158,26 +158,35 @@ pub fn host_supports() -> anyhow::Result<SupportRegistry> {
 pub fn host_supports_launching(
     rust: tddy_code_restructuring::backends::rust::RustSupport,
 ) -> anyhow::Result<SupportRegistry> {
-    host_languages_launching(rust).map(|(supports, _)| supports)
+    host_languages_launching(rust).map(|host| host.supports)
+}
+
+/// The languages a host routes, and the installed extension languages among them that `verify`
+/// judges beyond Rust.
+pub struct HostLanguages {
+    /// The built-in Rust support, then every installed extension's languages.
+    pub supports: SupportRegistry,
+    /// The installed extension languages, sharing `supports`' grammar store.
+    pub extensions: Vec<tddy_zed_extensions::ExtensionSupport>,
 }
 
 /// [`host_supports_launching`], and the installed extension languages themselves beside the
-/// registry that holds them: what [`CodeIndexServiceImpl::with_verifiable`] verifies the changed
-/// files of (`#reshape` extension-code-actions, R5). Loaded once, so the registry and the verifies
-/// share one grammar store.
+/// registry that holds them: what [`CodeIndexServiceImpl::with_verified_languages`] verifies the
+/// changed files of (`#reshape` extension-code-actions, R5). Loaded once, so the registry and the
+/// verifies share one grammar store.
 pub fn host_languages_launching(
     rust: tddy_code_restructuring::backends::rust::RustSupport,
-) -> anyhow::Result<(SupportRegistry, Vec<tddy_zed_extensions::ExtensionSupport>)> {
-    let dir = tddy_zed_extensions::ExtensionsDir::resolve()?;
-    let loaded = tddy_zed_extensions::load_installed(&dir)?;
+) -> anyhow::Result<HostLanguages> {
+    use tddy_zed_extensions::InstalledExtensions;
+    let mut supports = SupportRegistry::with_builtin_rust(rust);
+    let loaded = supports.register_installed(&tddy_zed_extensions::ExtensionsDir::resolve()?)?;
     for failure in &loaded.failures {
         log::error!(target: "tddy_index_daemon::supports", "{failure}");
     }
-    let mut supports = SupportRegistry::with_builtin_rust(rust);
-    for support in &loaded.supports {
-        supports.register(Box::new(support.clone()));
-    }
-    Ok((supports, loaded.supports))
+    Ok(HostLanguages {
+        supports,
+        extensions: loaded.supports,
+    })
 }
 
 /// The proto's file-descriptor set, so a host can merge this service into gRPC reflection without

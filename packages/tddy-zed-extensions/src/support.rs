@@ -163,19 +163,29 @@ pub trait InstalledExtensions {
     fn with_installed_extensions(
         &mut self,
         dir: &ExtensionsDir,
-    ) -> Result<Vec<GrammarLoadError>, ExtensionError>;
+    ) -> Result<Vec<GrammarLoadError>, ExtensionError> {
+        self.register_installed(dir)
+            .map(|installed| installed.failures)
+    }
+
+    /// [`InstalledExtensions::with_installed_extensions`], handing back the loaded languages too: a
+    /// front end that also verifies them keeps these clones, sharing the registry's grammar store.
+    fn register_installed(
+        &mut self,
+        dir: &ExtensionsDir,
+    ) -> Result<InstalledLanguages, ExtensionError>;
 }
 
 impl InstalledExtensions for SupportRegistry {
-    fn with_installed_extensions(
+    fn register_installed(
         &mut self,
         dir: &ExtensionsDir,
-    ) -> Result<Vec<GrammarLoadError>, ExtensionError> {
+    ) -> Result<InstalledLanguages, ExtensionError> {
         let installed = load_installed(dir)?;
-        for support in installed.supports {
-            self.register(Box::new(support));
+        for support in &installed.supports {
+            self.register(Box::new(support.clone()));
         }
-        Ok(installed.failures)
+        Ok(installed)
     }
 }
 
@@ -324,16 +334,10 @@ impl LanguageSupport for ExtensionSupport {
         let outline = Box::new(self.outline_backend(root));
         match (&self.server, self.server.refusal(), server.server()) {
             (_, Some(reason), _) => Box::new(ServerBackend::without_command(outline, reason)),
-            (ServerChoice::Configured { launch, .. }, None, Some(live)) => {
-                let language_id = match launch.language_id.as_str() {
-                    "" => self.id.as_str(),
-                    declared => declared,
-                };
-                Box::new(
-                    ServerBackend::over(outline, live, language_id)
-                        .with_code_action_kinds(self.code_action_kinds.clone()),
-                )
-            }
+            (ServerChoice::Configured { .. }, None, Some(live)) => Box::new(
+                ServerBackend::over(outline, live, self.document_language_id())
+                    .with_code_action_kinds(self.code_action_kinds.clone()),
+            ),
             _ => outline,
         }
     }
@@ -349,6 +353,15 @@ impl ExtensionSupport {
             .lock()
             .expect("the grammar store is not poisoned")
             .parse(&self.grammar, text)
+    }
+
+    /// The `languageId` a document of this language is announced to its server as: the launch's
+    /// own, else the language's id.
+    pub fn document_language_id(&self) -> &str {
+        match self.server.launch() {
+            Some(launch) if !launch.language_id.is_empty() => &launch.language_id,
+            _ => self.id.as_str(),
+        }
     }
 }
 

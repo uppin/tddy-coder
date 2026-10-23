@@ -6,73 +6,26 @@
 //! under a data dir the child process is pointed at through `TDDY_DATA_DIR`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use tddy_zed_extensions::testkit;
 
 const APP: &str = "config/app.toml";
 const APP_TOML: &str = "[server]\nhost = \"localhost\"\nport = 8080\n";
 
-fn the_extension_fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../tddy-zed-extensions/tests/fixtures")
-}
-
-fn copy_tree(from: &Path, to: &Path) {
-    fs::create_dir_all(to).expect("create the target");
-    for entry in fs::read_dir(from).expect("read a fixture dir") {
-        let entry = entry.expect("a fixture entry");
-        let target = to.join(entry.file_name());
-        if entry.path().is_dir() {
-            copy_tree(&entry.path(), &target);
-        } else {
-            fs::copy(entry.path(), &target).expect("copy a fixture file");
-        }
-    }
-}
-
 /// A tddy data dir with `demo-toml` installed: the fixture extension plus the vendored grammar.
 fn a_data_dir_with_demo_toml_installed() -> tempfile::TempDir {
     let data = tempfile::tempdir().expect("a temporary data dir");
-    let installed = data.path().join("extensions/installed/demo-toml");
-    copy_tree(&the_extension_fixtures().join("demo-toml"), &installed);
-    fs::create_dir_all(installed.join("grammars")).expect("grammars dir");
-    fs::copy(
-        the_extension_fixtures().join("grammars/tree-sitter-toml/toml.wasm"),
-        installed.join("grammars/toml.wasm"),
-    )
-    .expect("copy the vendored grammar");
+    testkit::install_demo_toml(data.path());
     data
 }
 
 /// A committed git worktree holding [`APP`] as [`APP_TOML`].
 fn a_committed_worktree_holding_the_app_config() -> tempfile::TempDir {
     let workspace = tempfile::tempdir().expect("a temporary workspace");
-    fs::create_dir_all(workspace.path().join("config")).expect("config dir");
-    fs::write(workspace.path().join(APP), APP_TOML).expect("write the app config");
-    for args in [
-        vec!["init", "--quiet"],
-        vec!["add", "--all"],
-        vec![
-            "-c",
-            "user.name=tddy tests",
-            "-c",
-            "user.email=tests@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "--quiet",
-            "--message",
-            "baseline",
-        ],
-    ] {
-        let status = std::process::Command::new("git")
-            .args(&args)
-            .current_dir(workspace.path())
-            .status()
-            .expect("git runs");
-        assert!(status.success(), "git {args:?} failed");
-    }
+    testkit::commit_baseline(workspace.path(), &[(APP, APP_TOML)]);
     workspace
 }
 
