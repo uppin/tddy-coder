@@ -5,7 +5,7 @@ import { canResumeSession, sessionBaseViewMode } from "./sessionBaseView";
 import { SessionActivitiesPane } from "./SessionActivitiesPane";
 import { PARAM_CODE } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
-import { AgentActivityOverlay } from "./AgentActivityOverlay";
+import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { AgentPicker } from "./AgentPicker";
@@ -262,178 +262,173 @@ export function SessionMainPane({
       {!isCreating && (
         <>
           {/* Header toggles — always visible when a session is selected */}
-          {selectedSession && (
-            <div className="flex items-center justify-end gap-1 px-2 py-1 border-b border-border flex-shrink-0">
-              {codeNavigationClient && (
-                <SessionIndexingIndicator
-                  client={codeNavigationClient}
-                  sessionToken={sessionToken}
-                  sessionId={selectedSession.sessionId}
+          {selectedSession ? (
+            <SessionWithActivitySidebar
+              session={selectedSession}
+              sessionToken={sessionToken}
+              client={buildSessionActivityClient?.() ?? activityClient}
+              suppressed={baseViewMode === "activities"}
+              toolbar={(toggle) => (
+                <div className="flex items-center justify-end gap-1 px-2 py-1 border-b border-border flex-shrink-0">
+                  {codeNavigationClient && (
+                    <SessionIndexingIndicator
+                      client={codeNavigationClient}
+                      sessionToken={sessionToken}
+                      sessionId={selectedSession.sessionId}
+                    />
+                  )}
+                  {toggle}
+                  {/* Resume is keyed on liveness alone, so every dormant session offers it from the same
+                      position — including the ones whose base view (PR-Stack, workflow chat) is left
+                      alone. It calls the same handler as the inspector's own Resume. */}
+                  {dormant && (
+                    <Button
+                      data-testid={`sessions-main-resume-${selectedSession.sessionId}`}
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => onResume(selectedSession.sessionId)}
+                      title="Resume this session"
+                    >
+                      Resume
+                    </Button>
+                  )}
+                  {/* Attaches a specialized agent from the roster catalog to THIS session and opens a
+                      conversation tab with it. It does not spawn a peer session, which is what it used
+                      to do. Only offered with a daemon client in hand — there is no attach without one. */}
+                  {client && (
+                    <Button
+                      data-testid="session-agent-attach-btn"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setPickerOpen(true)}
+                      title="Attach an agent to this session and talk to it"
+                    >
+                      Add agent
+                    </Button>
+                  )}
+                  <Button
+                    data-testid="sessions-code-toggle"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={toggleCodePane}
+                    title="Toggle worktree code pane"
+                  >
+                    Code
+                  </Button>
+                  <Button
+                    data-testid="sessions-inspector-toggle"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={onToggleInspector}
+                    title="Toggle inspector"
+                  >
+                    Inspector
+                  </Button>
+                </div>
+              )}
+            >
+            {pickerOpen && sessionAgentClient && (
+              <div className="flex-shrink-0 border-b border-border px-2 py-2">
+                <AgentPicker
+                  testIdPrefix="session-agent-picker"
+                  errorTestId="session-agent-attach-error"
+                  onAttach={attachAgent}
+                  onClose={() => setPickerOpen(false)}
                 />
-              )}
-              {/* One transcript per pane: the overlay replays exactly what the Activities view is
-                  already showing, so it is suppressed there — and only there. It stays the only way
-                  to read the transcript for an active session and for a dormant session whose base
-                  view is a workflow screen. */}
-              {baseViewMode !== "activities" && (
-                <AgentActivityOverlay
-                  sessionId={selectedSession.sessionId}
+              </div>
+            )}
+
+              {/* The Inspector overlay is available regardless of which base view is showing below
+                  it — a custom per-workflow view (e.g. PR-Stack Chat Screen) only replaces the
+                  terminal, it does not replace the Inspector. */}
+              <div className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
+                {/* The base view always lives in the same `Panel` (stable id/order), whether or not
+                    the Code pane is open, so toggling never re-mounts it — a live terminal keeps its
+                    attachment and a chat keeps its LiveKit room. Opening the pane only adds the second
+                    panel + resize handle. */}
+                <PanelGroup direction="horizontal" className="flex-1 min-h-0">
+                  <Panel
+                    id="session-base-view"
+                    order={1}
+                    minSize={25}
+                    className="flex min-h-0 flex-col overflow-hidden"
+                  >
+                    {baseView}
+                  </Panel>
+                  {codeOpen && codePaneEnabled && worktreeClient && (
+                    <>
+                      <PanelResizeHandle className="w-1 bg-border transition-colors hover:bg-primary/40" />
+                      <Panel
+                        id="worktree-code-pane"
+                        order={2}
+                        defaultSize={40}
+                        minSize={20}
+                        className="flex min-h-0 flex-col overflow-hidden"
+                      >
+                        <WorktreeCodePane
+                          client={worktreeClient}
+                          sessionToken={sessionToken}
+                          projectId={resolvedProjectId}
+                          worktreePath={selectedSession.repoPath}
+                          navigationClient={codeNavigationClient}
+                        />
+                      </Panel>
+                    </>
+                  )}
+                </PanelGroup>
+                {/* Inspector overlay — available for every base view above. Key is suffixed
+                    (not just sessionId) because the customView branch above (e.g. PrStackScreen)
+                    is keyed on sessionId too, and both are siblings here — an identical key would
+                    collide. */}
+                <SessionInspectorDrawer
+                  key={`inspector-${selectedSession.sessionId}`}
+                  state={inspectorState}
+                  session={selectedSession}
+                  sessions={sessions}
+                  onClose={onInspectorClose}
+                  onExpand={onInspectorExpand}
+                  onRestore={onInspectorRestore}
+                  onResume={onResume}
+                  onDelete={onDelete}
+                  onTerminate={onTerminate}
+                  client={client}
+                  execToolClient={execToolClient}
+                  worktreeClient={worktreeClient}
+                  sessionFilesClient={sessionFilesClient}
                   sessionToken={sessionToken}
-                  sessionType={selectedSession.sessionType}
-                  client={buildSessionActivityClient?.() ?? activityClient}
+                  /* The media tabs are gated on the connection to the host that owns this session —
+                     `host`, the same connection the screen already resolved for every other
+                     cross-host read, so the tabs and the RPCs behind them cannot disagree about
+                     which daemon they are talking to.
+
+                     The *host* is the upstream fact, not the session: `capabilitiesForHint`
+                     (`rpc/connections/sessionAttachment.ts`) derives a session's capabilities from
+                     whether its attach hint names a room, and whether there is a room at all is
+                     decided by how the host is reached — a host reached without LiveKit can never
+                     hand out a room-backed session.
+
+                     Reading the session's own connection instead would also answer "no media" for a
+                     *dormant* session, which has no connection at all. That turns an unanswerable
+                     question into a refusal and hides tabs whose capability is in fact present,
+                     which is a behaviour change rather than gating. */
+                  hostConnection={host}
+                  room={room}
+                  serverIdentity={attachmentHint?.serverIdentity}
+                  traffic={traffic}
+                  buildSessionExecToolClient={buildSessionExecToolClient}
+                  onInsertPathIntoTerminal={onInsertPathIntoTerminal}
+                  onSwitchPeer={onSwitchPeer}
                 />
-              )}
-              {/* Resume is keyed on liveness alone, so every dormant session offers it from the same
-                  position — including the ones whose base view (PR-Stack, workflow chat) is left
-                  alone. It calls the same handler as the inspector's own Resume. */}
-              {dormant && (
-                <Button
-                  data-testid={`sessions-main-resume-${selectedSession.sessionId}`}
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={() => onResume(selectedSession.sessionId)}
-                  title="Resume this session"
-                >
-                  Resume
-                </Button>
-              )}
-              {/* Attaches a specialized agent from the roster catalog to THIS session and opens a
-                  conversation tab with it. It does not spawn a peer session, which is what it used
-                  to do. Only offered with a daemon client in hand — there is no attach without one. */}
-              {client && (
-                <Button
-                  data-testid="session-agent-attach-btn"
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={() => setPickerOpen(true)}
-                  title="Attach an agent to this session and talk to it"
-                >
-                  Add agent
-                </Button>
-              )}
-              <Button
-                data-testid="sessions-code-toggle"
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs"
-                onClick={toggleCodePane}
-                title="Toggle worktree code pane"
-              >
-                Code
-              </Button>
-              <Button
-                data-testid="sessions-inspector-toggle"
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs"
-                onClick={onToggleInspector}
-                title="Toggle inspector"
-              >
-                Inspector
-              </Button>
-            </div>
-          )}
-
-          {selectedSession && pickerOpen && sessionAgentClient && (
-            <div className="flex-shrink-0 border-b border-border px-2 py-2">
-              <AgentPicker
-                testIdPrefix="session-agent-picker"
-                errorTestId="session-agent-attach-error"
-                onAttach={attachAgent}
-                onClose={() => setPickerOpen(false)}
-              />
-            </div>
-          )}
-
-          {!selectedSession ? (
+              </div>
+            </SessionWithActivitySidebar>
+          ) : (
             // No session selected
             <div className="flex items-center justify-center flex-1 text-muted-foreground text-sm">
               Select a session
-            </div>
-          ) : (
-            // The Inspector overlay is available regardless of which base view is showing below
-            // it — a custom per-workflow view (e.g. PR-Stack Chat Screen) only replaces the
-            // terminal, it does not replace the Inspector.
-            <div className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
-              {/* The base view always lives in the same `Panel` (stable id/order), whether or not
-                  the Code pane is open, so toggling never re-mounts it — a live terminal keeps its
-                  attachment and a chat keeps its LiveKit room. Opening the pane only adds the second
-                  panel + resize handle. */}
-              <PanelGroup direction="horizontal" className="flex-1 min-h-0">
-                <Panel
-                  id="session-base-view"
-                  order={1}
-                  minSize={25}
-                  className="flex min-h-0 flex-col overflow-hidden"
-                >
-                  {baseView}
-                </Panel>
-                {codeOpen && codePaneEnabled && worktreeClient && (
-                  <>
-                    <PanelResizeHandle className="w-1 bg-border transition-colors hover:bg-primary/40" />
-                    <Panel
-                      id="worktree-code-pane"
-                      order={2}
-                      defaultSize={40}
-                      minSize={20}
-                      className="flex min-h-0 flex-col overflow-hidden"
-                    >
-                      <WorktreeCodePane
-                        client={worktreeClient}
-                        sessionToken={sessionToken}
-                        projectId={resolvedProjectId}
-                        worktreePath={selectedSession.repoPath}
-                        navigationClient={codeNavigationClient}
-                      />
-                    </Panel>
-                  </>
-                )}
-              </PanelGroup>
-              {/* Inspector overlay — available for every base view above. Key is suffixed
-                  (not just sessionId) because the customView branch above (e.g. PrStackScreen)
-                  is keyed on sessionId too, and both are siblings here — an identical key would
-                  collide. */}
-              <SessionInspectorDrawer
-                key={`inspector-${selectedSession.sessionId}`}
-                state={inspectorState}
-                session={selectedSession}
-                sessions={sessions}
-                onClose={onInspectorClose}
-                onExpand={onInspectorExpand}
-                onRestore={onInspectorRestore}
-                onResume={onResume}
-                onDelete={onDelete}
-                onTerminate={onTerminate}
-                client={client}
-                execToolClient={execToolClient}
-                worktreeClient={worktreeClient}
-                sessionFilesClient={sessionFilesClient}
-                sessionToken={sessionToken}
-                /* The media tabs are gated on the connection to the host that owns this session —
-                   `host`, the same connection the screen already resolved for every other
-                   cross-host read, so the tabs and the RPCs behind them cannot disagree about
-                   which daemon they are talking to.
-
-                   The *host* is the upstream fact, not the session: `capabilitiesForHint`
-                   (`rpc/connections/sessionAttachment.ts`) derives a session's capabilities from
-                   whether its attach hint names a room, and whether there is a room at all is
-                   decided by how the host is reached — a host reached without LiveKit can never
-                   hand out a room-backed session.
-
-                   Reading the session's own connection instead would also answer "no media" for a
-                   *dormant* session, which has no connection at all. That turns an unanswerable
-                   question into a refusal and hides tabs whose capability is in fact present,
-                   which is a behaviour change rather than gating. */
-                hostConnection={host}
-                room={room}
-                serverIdentity={attachmentHint?.serverIdentity}
-                traffic={traffic}
-                buildSessionExecToolClient={buildSessionExecToolClient}
-                onInsertPathIntoTerminal={onInsertPathIntoTerminal}
-                onSwitchPeer={onSwitchPeer}
-              />
             </div>
           )}
         </>

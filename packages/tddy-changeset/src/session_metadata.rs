@@ -111,6 +111,15 @@ pub struct SessionMetadata {
     /// docs/ft/web/1-WIP/PRD-2026-09-14-ssh-exec.md.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_config_host: Option<String>,
+    /// The session was started in managed-codebase mode: its agent reaches the code only through
+    /// daemon tools. Absent reads as `false`, and `false` is never written, so a file from before
+    /// this field reads exactly as it did. See `#project-home` 3/7.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub managed_codebase: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Keeps `agents_rev: 0` out of the file, so a session with no roster writes no roster keys at all
@@ -225,6 +234,7 @@ pub fn write_initial_tool_session_metadata(
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -296,6 +306,18 @@ pub fn repo_root_for_session(session_dir: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn a_session_yaml_without_the_key_reads_as_not_managed() {
+        // Given a file written before `managed_codebase` was recorded
+        let yaml = "session_id: s1\nproject_id: p1\ncreated_at: \"2026-10-22T00:00:00Z\"\nupdated_at: \"2026-10-22T00:00:00Z\"\nstatus: active\n";
+
+        // When it is read
+        let metadata: SessionMetadata = serde_yaml::from_str(yaml).expect("legacy metadata parses");
+
+        // Then the session is not managed
+        assert!(!metadata.managed_codebase);
+    }
 
     #[test]
     fn write_initial_tool_session_metadata_uses_dir_basename_as_session_id() {
@@ -684,6 +706,7 @@ session_type: workspace
             agent_daemon_instance_id: agent_daemon_instance_id.map(str::to_string),
             agent_session_id: agent_session_id.map(str::to_string),
             ssh_config_host: None,
+            managed_codebase: false,
             ..a_workspace_session()
         }
     }

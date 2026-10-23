@@ -342,6 +342,10 @@ message SessionEntry {
   // `~/.ssh/config`. Empty = LocalShell (today's host filesystem). When set, `repo_path` is the
   // worktree on that SSH target. See docs/ft/web/1-WIP/PRD-2026-09-14-ssh-exec.md.
   string ssh_config_host = 33;
+  // The session was started in managed-codebase mode (its agent reaches the code only through
+  // daemon tools). Recorded at start; `false` for sessions started before it was recorded. See
+  // `#project-home` 3/7.
+  bool managed_codebase = 34;
 }
 
 enum Signal {

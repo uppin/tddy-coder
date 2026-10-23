@@ -62,6 +62,8 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // at session start; a push failure fails the start.
     create_remote_branch: bool,
     ssh_config_host: &str,
+    // Recorded in the session's initial metadata, so `ListSessions` reports the session as managed.
+    managed_codebase: bool,
     // What the session's vault says about the project's GitHub account — read once, here, for the
     // commit identity the agent is launched with.
     account_access: &SessionAccountAccess,
@@ -260,6 +262,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         } else {
             Some(ssh_alias.to_string())
         },
+        managed_codebase,
         ..tddy_session_split::service_util::starting_session_metadata(
             session_id,
             project_id,

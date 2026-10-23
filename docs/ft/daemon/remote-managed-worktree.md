@@ -64,6 +64,11 @@ A fourth placement is requested by its own field rather than by a host id:
 that still has native filesystem tools has nothing to proxy through. A split placement without
 `managed_codebase` is a request error, not a silently co-located session.
 
+Every start path records `managed_codebase` in the session's `.session.yaml` (`false` is never
+written, so an older file reads as not managed), and `ListSessions` reports it as
+`SessionEntry.managed_codebase`. The web opens the agent activity sidebar by default for such a
+session ([agent activity pane](../web/agent-activity-pane.md#right-sidebar-open-by-default-for-managed-sessions)).
+
 A split placement needs a room integration (LiveKit): the agent's only route to its checkout is the
 session room the agent's daemon hosts. A daemon without one refuses the start with
 `FailedPrecondition` "cannot place a session's codebase on another daemon: …", before anything is
@@ -227,7 +232,7 @@ call is impossible, not merely discouraged.
 a split cursor session could only be *guided* — via `REMOTE_APPENDIX` and a `.cursor/rules/*.mdc`
 entry — never *prevented* from attempting native filesystem access. It would also need a context
 dir, an MCP config, tool-relay env, and resume-env plumbing that the non-sandboxed cursor path
-does not have today (`cursor_cli_spawn.rs:302` discards `managed_codebase` outright). That is
+does not have today (`cursor_cli_spawn.rs` only records `managed_codebase` in the session's metadata). That is
 substantial work for a materially weaker guarantee, so it is deferred and tracked in
 `docs/dev/TODO.md`.
 

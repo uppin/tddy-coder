@@ -132,11 +132,11 @@ impl LaunchSessions {
         stack_node_id: &str,
         // Specialized subagents (see docs/ft/coder/specialized-subagents.md). This sandboxed path
         // already never mounts the repo (`mounts: vec![]` below, unconditionally) —
-        // `managed_codebase` is accepted for request-shape/UI-intent clarity, not to toggle mount
-        // behavior. Names resolve against `<tddyhome>/agents` (+ builtins) and are wired into the
-        // jail env; all configuration (model, base_url, max_turns, replaces) comes exclusively
-        // from the resolved def.
-        _managed_codebase: bool,
+        // `managed_codebase` does not toggle mount behavior; it is recorded in the session's
+        // metadata so `ListSessions` reports the session as managed. Names resolve against
+        // `<tddyhome>/agents` (+ builtins) and are wired into the jail env; all configuration
+        // (model, base_url, max_turns, replaces) comes exclusively from the resolved def.
+        managed_codebase: bool,
         specialized_agents: &[String],
         // When `Some`, launch workflow-aware: inject the recipe's orchestration prompt and route the
         // agent's host-side `tddy-tools transition` to a per-session `WorkflowController`.
@@ -428,6 +428,7 @@ impl LaunchSessions {
             managed_recipe,
             started_agents,
             pid,
+            managed_codebase,
         )?;
         // The roster naming them is on disk now, so the clones belong to the session rather than to
         // the start that claimed them.

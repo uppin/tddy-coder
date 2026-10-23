@@ -19,6 +19,12 @@ interface AgentActivityOverlayProps {
   client?: Client<typeof ActivityService>;
 }
 
+// FIXME(activity-sidebar): no production mount since #project-home 3/7 — `SessionMainPane` mounts
+// `SessionWithActivitySidebar`, which replaces this top-bar popover. Kept only because the
+// AgentActivity* component specs mount it standalone. Delete it together with those specs (file
+// deletion needs the developer's go-ahead) or re-mount them on the sidebar. Backlog:
+// docs/dev/todo/2026-10-23-agent-activity-overlay-has-no-production-mount.md
+
 /**
  * Per-session, top-bar overlay that replays the agent's own ACP conversation as a read-only
  * transcript (streamed via `ActivityService.StreamAcpReplay`). The icon appears only once the

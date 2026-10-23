@@ -53,7 +53,7 @@ impl LaunchSessions {
         // that started it named it. Preferred over the branch when the base is resolved (D34).
         stack_node_id: &str,
         initial_prompt: &str,
-        _managed_codebase: bool,
+        managed_codebase: bool,
         specialized_agents: &[String],
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
         // When true, index the worktree before launch (blocking; aborts on failure) and point the
@@ -433,6 +433,7 @@ impl LaunchSessions {
             model: Some(model.to_string()),
             hook_token: Some(hook_token),
             sandbox: Some(true),
+            managed_codebase,
             recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             agents_rev: agent_roster::started_roster_rev(&started_agents),
             agents: started_agents,

@@ -108,6 +108,7 @@ fn a_claude_cli_session(session_id: &str, worktree: &Path) -> SessionMetadata {
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
     }
 }
 

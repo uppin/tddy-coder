@@ -61,6 +61,8 @@ impl LaunchSessions {
         // When true (new_branch_from_base only), push the new branch to origin at session start.
         create_remote_branch: bool,
         ssh_config_host: &str,
+        // Whether the session is started in managed-codebase mode; recorded at start.
+        managed_codebase: bool,
         // Where the session's provider account is chosen; see `session_route_sources`.
         route_sources: &RouteSources,
         progress: &AttachmentProgressSink,
@@ -134,6 +136,7 @@ impl LaunchSessions {
             semantic_index,
             create_remote_branch,
             ssh_config_host,
+            managed_codebase,
             &self.host.session_account_access(session_token),
             route_sources,
             &self.task_registry,

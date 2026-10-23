@@ -764,6 +764,8 @@ export const TEST_IDS = {
   agentActivityUnreadBadge: "agent-activity-unread-badge",
   /** The in-pane overlay listing one-line records. */
   agentActivityOverlay: "agent-activity-overlay",
+  /** The Agent Activity transcript docked as the session view's right sidebar (`#project-home` 3/7). */
+  agentActivitySidebar: "agent-activity-sidebar",
   /** Close control on the overlay. */
   agentActivityOverlayClose: "agent-activity-overlay-close",
   /** Tool-call detail dialog opened by clicking a tool entry in the transcript. */

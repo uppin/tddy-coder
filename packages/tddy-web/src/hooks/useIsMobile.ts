@@ -21,14 +21,37 @@ export function detectIsMobile(): boolean {
  * (e.g. window resizing or orientation changes).
  */
 export function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(detectIsMobile);
+  return useViewportFlag(detectIsMobile);
+}
+
+/** Whether a viewport this wide is below the `md` breakpoint. */
+export function isNarrowWidth(innerWidth: number): boolean {
+  return innerWidth < MOBILE_MAX_WIDTH_PX;
+}
+
+/**
+ * Width-only variant of {@link useIsMobile}: true below the `md` breakpoint whatever the input
+ * device. For a layout that depends on room alone — a docked column — where a touch-capable
+ * desktop at full width must keep its column rather than take the mobile overlay.
+ */
+export function useIsNarrowViewport(): boolean {
+  return useViewportFlag(detectIsNarrowViewport);
+}
+
+function detectIsNarrowViewport(): boolean {
+  return typeof window !== "undefined" && isNarrowWidth(window.innerWidth);
+}
+
+/** `detect()` now, re-evaluated on every viewport resize (window resizing, orientation changes). */
+function useViewportFlag(detect: () => boolean): boolean {
+  const [flag, setFlag] = useState(detect);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const update = () => setIsMobile(detectIsMobile());
+    const update = () => setFlag(detect());
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
-  }, []);
+  }, [detect]);
 
-  return isMobile;
+  return flag;
 }

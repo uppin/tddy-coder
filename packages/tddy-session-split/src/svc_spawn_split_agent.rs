@@ -406,6 +406,7 @@ fn write_split_agent_metadata(
         hook_token: Some(hook_token),
         codebase_daemon_instance_id: Some(codebase_instance_id.to_string()),
         codebase_session_id: Some(codebase_session_id.to_string()),
+        managed_codebase: req.managed_codebase,
         ..crate::service_util::starting_session_metadata(
             session_id,
             req.project_id.trim(),
