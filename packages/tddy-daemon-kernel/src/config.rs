@@ -53,7 +53,7 @@ fn default_codex_oauth_loopback_proxy_eligible() -> bool {
     true
 }
 
-pub use crate::config::sections::{IndexDaemonConfig, RelayConfig};
+pub use crate::config::sections::{IndexDaemonConfig, ProjectHomeConfig, RelayConfig};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
@@ -194,6 +194,10 @@ pub struct DaemonConfig {
     /// [`IndexDaemonConfig`]). Absent = [`IndexDaemonConfig::default`]; the section only overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_daemon: Option<IndexDaemonConfig>,
+    /// Project-home sessions (`#project-home` 6/7, see [`ProjectHomeConfig`]). Absent =
+    /// [`ProjectHomeConfig::default`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_home: Option<ProjectHomeConfig>,
 
     /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
     /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
@@ -269,6 +273,7 @@ impl Default for DaemonConfig {
             local: LocalConfig::default(),
             supervisor: None,
             index_daemon: None,
+            project_home: None,
             debug: None,
             max_attachment_bytes: default_max_attachment_bytes(),
         }
