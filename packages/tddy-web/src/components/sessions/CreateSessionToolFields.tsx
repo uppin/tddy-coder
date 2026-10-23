@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { SessionEntry } from "../../gen/session_pb";
 import type { HostReadFailure } from "../../rpc/useHostFanOut";
+import { InlineError } from "../ui/inline-error";
 import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 import { WORKFLOW_RECIPES } from "./createSessionRecipes";
@@ -19,6 +20,9 @@ export interface CreateSessionToolFieldsProps {
   setPrStackBaseSessionId: (sessionId: string) => void;
   stackBaseSessionOptions: SessionEntry[];
   modelField: ReactNode;
+  /** Why the tool catalog could not be read — a tool session cannot start without a tool, and the
+   *  form has none to pick when this fails. */
+  toolsError?: string | null;
 }
 
 /** Tool session fields. */
@@ -35,9 +39,15 @@ export function CreateSessionToolFields({
   setPrStackBaseSessionId,
   stackBaseSessionOptions,
   modelField,
+  toolsError = null,
 }: CreateSessionToolFieldsProps) {
   return (
     <>
+      <InlineError
+        testId="create-session-tools-load-error"
+        message={toolsError && `Tools unavailable: ${toolsError}`}
+      />
+
       <CreateSessionAgentSelect
         agents={offeredAgents}
         failures={offeredHostFailures}

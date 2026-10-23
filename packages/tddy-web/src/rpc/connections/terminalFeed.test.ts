@@ -19,7 +19,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import type { Client } from "@connectrpc/connect";
+import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import {
   SessionTerminalOutputSchema,
   StreamReplayMode,
@@ -164,7 +164,7 @@ const RETAINED_HISTORY = "cargo build --release\r\n";
  * The daemon that owns the session: it replays `frames` on each output stream open and then closes
  * it, recording every request it was handed.
  */
-function aDaemonReplaying(frames: OutputFrame[]) {
+function aDaemonReplaying(frames: OutputFrame[], refusingInput: () => string | null = () => null) {
   const opens: OutputOpen[] = [];
   const sends: InputSend[] = [];
   const historyRequests: HistoryRequest[] = [];
@@ -175,6 +175,8 @@ function aDaemonReplaying(frames: OutputFrame[]) {
     },
     async sendTerminalInput(req: InputSend) {
       sends.push(req);
+      const refusal = refusingInput();
+      if (refusal !== null) throw new ConnectError(refusal, Code.FailedPrecondition);
       return {};
     },
     async *getTerminalHistory(req: HistoryRequest) {
@@ -424,5 +426,56 @@ describe("a daemon-served terminal feed", () => {
 
     // Then the frame stamped `main` is this pane's own, not a foreign one
     expect(painted).toEqual(["claude> "]);
+  });
+
+  it("says why input was not delivered, and clears it on the next delivery", async () => {
+    // Given a daemon that refuses input until the lease comes back
+    let refusal: string | null = "terminal controlled by another screen";
+    const daemon = aDaemonReplaying([], () => refusal);
+    const deliveries: Array<string | null> = [];
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: { ...terminalOptions(), onInputDelivery: (failure) => deliveries.push(failure) },
+    });
+
+    // When one keystroke is refused and the next is delivered
+    feed.stream.send(bytesOf("a"));
+    await Promise.resolve().then(() => new Promise((r) => setTimeout(r, 0)));
+    refusal = null;
+    feed.stream.send(bytesOf("b"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Then the pane was told the daemon's reason, then that input flows again
+    expect(deliveries).toEqual(["terminal controlled by another screen", null]);
+  });
+
+  it("never lets a late refusal overwrite a later delivery", async () => {
+    // Given a daemon whose answers to two sends arrive out of order
+    const answers: Array<{ resolve: () => void; reject: (err: unknown) => void }> = [];
+    const client = {
+      async *streamTerminalOutput() {},
+      sendTerminalInput: () =>
+        new Promise<object>((resolve, reject) => answers.push({ resolve: () => resolve({}), reject })),
+    } as unknown as Client<typeof TerminalSessionService>;
+    const deliveries: Array<string | null> = [];
+    const feed = openDaemonTerminalFeed({
+      client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: { ...terminalOptions(), onInputDelivery: (failure) => deliveries.push(failure) },
+    });
+    feed.stream.send(bytesOf("a"));
+    feed.stream.send(bytesOf("b"));
+
+    // When the second send is delivered first, and the first is refused after it
+    answers[1].resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    answers[0].reject(new ConnectError("terminal controlled by another screen", Code.FailedPrecondition));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Then the pane still reads the latest send's outcome: delivered
+    expect(deliveries).toEqual([null]);
   });
 });

@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { ProjectService } from "../../gen/project_pb";
-import { SessionService, SessionEntrySchema, Signal } from "../../gen/session_pb";
+import { SessionService, SessionEntrySchema } from "../../gen/session_pb";
 import { ActivityService } from "../../gen/activity_pb";
 import { AccountsService } from "../../gen/accounts_pb";
 import { CatalogService } from "../../gen/catalog_pb";
@@ -13,13 +13,14 @@ import { SessionFilesService } from "../../gen/session_files_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { WorktreeService } from "../../gen/worktree_pb";
 import { useHostConnector } from "../../rpc/connections/registry";
-import { useDaemonClient, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { useDaemonClient, useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { sessionNotificationRegistry } from "./sessionNotificationRegistry";
 import { useSessionNotifications } from "../../rpc/useSessionNotifications";
 import { useAuthContext } from "../../hooks/authProvider";
+import { hostNotConnected } from "../../rpc/rpcFailure";
 import { AppShell } from "../shell/AppShell";
 import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
@@ -42,6 +43,12 @@ import { useSessionsDrawerOwningHost } from "./useSessionsDrawerOwningHost";
 import { useSessionsDrawerActivation } from "./useSessionsDrawerActivation";
 import { useSessionsDrawerDeleteSelection } from "./useSessionsDrawerDeleteSelection";
 import { SessionsDrawerOpenListButton, SessionsDrawerUnknownSession } from "./SessionsDrawerScreenParts";
+import { useSessionsDrawerPaneActions } from "./useSessionsDrawerPaneActions";
+import {
+  SessionsDrawerLoadNotices,
+  SessionsDrawerPaneError,
+  sessionsDrawerListNotices,
+} from "./SessionsDrawerNotices";
 
 // ---------------------------------------------------------------------------
 // Screen
@@ -93,9 +100,9 @@ export function SessionsDrawerScreen({
   const prStackClient = useDaemonClient(PrStackService);
 
   // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
-  // hook's only output is the write into `sessionNotificationRegistry`, which each row reads for
-  // itself — hence the bare call.
-  useSessionNotifications();
+  // dots are written into `sessionNotificationRegistry`, which each row reads for itself; what comes
+  // back is only whether the feed is still live, shown above the drawer when it is not.
+  const { error: notificationsError } = useSessionNotifications();
 
   const { selectedInstanceId } = useSelectedDaemon();
   // The common room, asked for by name rather than taken off the shared context. Three things in
@@ -103,7 +110,6 @@ export function SessionsDrawerScreen({
   // session-client stand-in in tests, and the terminal panes' own participant reads. A host reached
   // over a wire with no roster yields `null`, and each of those already handles its absence.
   const room = useHostPresence(selectedInstanceId);
-  const daemons = useDaemons();
   // Address any daemon's SessionService directly. Used to connect to a cross-host row's owning
   // daemon at click time, when the owner is known but the selected session (and thus `activeClient`)
   // hasn't updated yet — a host named that late cannot have a hook of its own, so it is resolved
@@ -134,7 +140,7 @@ export function SessionsDrawerScreen({
   const { attachClaimRef, settleAttach, listGenerationRef, awaitingCreatedSessionIdRef, unknownSession, setUnknownSession } =
     claims;
 
-  const projects = useSessionsDrawerProjects(projectClient, sessionToken);
+  const { projects, error: projectsError } = useSessionsDrawerProjects(projectClient, sessionToken);
   const projectHomes = useSessionsDrawerProjectHomes(catalogClient, projects);
 
   // Default closed on mobile (the open 280px panel would cover the main pane);
@@ -142,7 +148,9 @@ export function SessionsDrawerScreen({
   const [sessionListOpen, setSessionListOpen] = useState(() => !detectIsMobile());
   const isMobile = useIsMobile();
 
-  const { state: attachment, hint: attachmentHint, connectSession, resumeSession, deleteSession, signalSession, restore: restoreAttachment, reset: resetAttachment } = useSessionAttachment();
+  const attachmentControls = useSessionAttachment();
+  const { state: attachment, hint: attachmentHint, connectSession, restore: restoreAttachment, reset: resetAttachment } =
+    attachmentControls;
 
   const connectedSessionId =
     attachment.status === "connected" ? attachment.connection.sessionId : null;
@@ -159,6 +167,7 @@ export function SessionsDrawerScreen({
   const {
     crossHostSessionsVisible,
     sortedSessions,
+    listLoadError,
     addOptimisticSession,
     sessionMetadataBySessionId,
     selectedSession,
@@ -199,15 +208,22 @@ export function SessionsDrawerScreen({
     activeHost,
   } = useSessionsDrawerOwningHost(selectedSession, selectedInstanceId);
 
-  // Human-readable host label for a daemon instance id, with the local daemon's " (this daemon)"
-  // suffix stripped — used for the owning-host badge on cross-host rows.
-  const hostLabelForInstance = useCallback(
-    (instanceId: string): string => {
-      const host = daemons.find((d) => d.instanceId === instanceId);
-      return (host?.label ?? instanceId).replace(/ \(this daemon\)$/, "");
-    },
-    [daemons],
-  );
+  // A daemon instance id as a host is named in text (see `rpc/hostLabel`) — the owning-host badge on
+  // cross-host rows, and every "not connected" this screen says.
+  const hostLabelForInstance = useHostLabel();
+
+  const { paneError, reportAttachFailure, handleResume, handleDelete, handleTerminate } =
+    useSessionsDrawerPaneActions({
+      selectedSession,
+      selectedSessionId,
+      selectedInstanceId,
+      attachment: attachmentControls,
+      activeHost,
+      activeClient,
+      sessionToken,
+      attachClaimRef,
+      listGeneration,
+    });
 
   // Key-press shortcuts for the connected session's tool (shown as the mobile overlay).
   const mobileShortcuts = useMemo(
@@ -237,6 +253,8 @@ export function SessionsDrawerScreen({
     connectHost,
     selectedInstanceId,
     sessionToken,
+    hostLabelForInstance,
+    reportAttachFailure,
   });
 
   // Selecting a session is a navigation plus one acknowledgement — the activation effect above does
@@ -262,33 +280,6 @@ export function SessionsDrawerScreen({
     handleSelectSession,
   );
 
-  const handleResume = (sessionId: string) => {
-    if (!activeHost) return;
-    // `ResumeSession` returns the session's routing and `useSessionAttachment` puts the screen
-    // straight into `connected` — the attach for this live epoch is already done.
-    // Claiming it here stops the liveness effect from firing a second `ConnectSession` when the next
-    // list poll reports the session alive, which would mint a fresh browser identity and bounce the
-    // terminal through a reconnect and another `ClaimTerminalControl`. The claim is stamped with the
-    // snapshot the operator acted on, so the dormant readings still in flight cannot revoke it.
-    attachClaimRef.current = { sessionId, listGeneration };
-    resumeSession(sessionId, sessionToken, activeHost)
-      .then((attached) => {
-        // The resume never landed, so no attach was taken after all — release the claim so the
-        // liveness effect can still attach if the session turns out to be alive.
-        if (!attached) attachClaimRef.current = null;
-      })
-      .catch((err) => {
-        console.debug("[SessionsDrawerScreen] resumeSession error", err);
-      });
-  };
-
-  const handleDelete = (sessionId: string) => {
-    if (!activeClient) return;
-    deleteSession(sessionId, sessionToken, activeClient).catch((err) => {
-      console.debug("[SessionsDrawerScreen] deleteSession error", err);
-    });
-  };
-
   const {
     selectedForDelete,
     selectionMode,
@@ -297,13 +288,17 @@ export function SessionsDrawerScreen({
     exitSelectionMode,
     toggleSelectAll,
     handleBulkDelete,
+    bulkDeleteFailures,
   } = useSessionsDrawerDeleteSelection({
     sortedSessions,
     selectedInstanceId,
     clientForHost,
-    client,
-    deleteSession,
     sessionToken,
+    hostLabelForInstance,
+    onSessionDeleted: (sessionId) => {
+      // What the single-row delete does on success: the pane stops holding a session that is gone.
+      if (sessionId === selectedSessionId) resetAttachment();
+    },
   });
 
   const handleUnknownHome = () => {
@@ -336,22 +331,6 @@ export function SessionsDrawerScreen({
     );
   };
 
-  const handleTerminate = (sessionId: string) => {
-    if (!activeClient) return;
-    signalSession(sessionId, Signal.SIGTERM, sessionToken, activeClient)
-      .catch((err) => {
-        // Common cause: the session already ended (e.g. process exited on its own) before this
-        // click reached the daemon — refresh() below still corrects the stale `isActive` that
-        // caused the "Terminate" button to be shown for an already-dead session.
-        console.debug("[SessionsDrawerScreen] signalSession error", err);
-      })
-      .finally(() => {
-        // The daemon computes `isActive` from live PID liveness, not from a push update — refetch
-        // so the row (and its "Terminate" button) reflects the session's actual current state.
-        requestSessionsRefresh();
-      });
-  };
-
   const handleCreateSession = () => navigate(SESSIONS_NEW_ROUTE);
   const handleCancelCreate = () => navigate(SESSIONS_DRAWER_ROUTE);
   const handleSessionCreated = (sessionId: string) => {
@@ -360,12 +339,16 @@ export function SessionsDrawerScreen({
     awaitingCreatedSessionIdRef.current = sessionId;
     navigate(sessionsDrawerPathForSession(sessionId));
     const creatingHost = connectHost(selectedInstanceId);
-    if (!creatingHost) return;
-    connectSession(sessionId, sessionToken, creatingHost)
-      .then((attached) => settleAttach(sessionId, attached))
-      .catch((err) => {
-        console.debug("[SessionsDrawerScreen] connectSession after create error", err);
-      });
+    if (creatingHost) {
+      // Never rejects — a failed attach is the attachment's `error` state.
+      void connectSession(sessionId, sessionToken, creatingHost).then((attached) =>
+        settleAttach(sessionId, attached),
+      );
+    } else {
+      // The session was created, but the wire to its host is gone: say so on its pane rather than
+      // leaving it blank. The liveness effect attaches once a wire returns.
+      reportAttachFailure(hostNotConnected(hostLabelForInstance(selectedInstanceId ?? "")));
+    }
     // Refresh the sessions list so the newly-created session appears in the drawer
     // and selectedSession resolves to a non-null value.
     requestSessionsRefresh();
@@ -381,7 +364,9 @@ export function SessionsDrawerScreen({
         title="Sessions"
         onNavigate={onNavigate}
         dataTestId="sessions-drawer-screen"
+        requiresHost
       >
+        <SessionsDrawerLoadNotices projectsError={projectsError} notificationsError={notificationsError} />
         <div className="flex flex-1 min-h-0 overflow-hidden relative">
           {isMobile && !sessionListOpen && (
             <SessionsDrawerOpenListButton onOpen={() => setSessionListOpen(true)} />
@@ -408,12 +393,14 @@ export function SessionsDrawerScreen({
             onBulkDelete={() => {
               void handleBulkDelete();
             }}
+            notices={sessionsDrawerListNotices(listLoadError, bulkDeleteFailures)}
             projects={projects}
             projectHomes={projectHomes}
             onEnsureProjectHome={(projectId) =>
               ensureProjectHome(projectId, selectedInstanceId ?? "")
             }
           />
+          {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
           {unknownSession ? (

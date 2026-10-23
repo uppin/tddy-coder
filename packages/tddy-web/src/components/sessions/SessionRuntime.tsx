@@ -1,78 +1,28 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Minimize2 } from "lucide-react";
-import type { Client } from "@connectrpc/connect";
-import { type SessionEntry } from "../../gen/session_pb";
-import { type SessionAgentService } from "../../gen/session_agents_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { useSessionTerminalFeed } from "./useSessionTerminalFeed";
 import { SessionTerminalTabs } from "./SessionTerminalTabs";
 import { SessionAgentConversationPane } from "./SessionAgentConversationPane";
-import type { AgentConversation } from "./agentConversationTabs";
+import { SessionChildRuntime } from "./SessionChildRuntime";
 import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
 import { useChildSessions } from "./useChildSessions";
-import { useSessionAttachment } from "./useSessionAttachment";
 import { TerminalControlOverlay } from "./TerminalControlOverlay";
 import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
-import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
+import { useSessionPaneFullscreen } from "./useSessionPaneFullscreen";
+import { useAgentTerminalFocus } from "./useAgentTerminalFocus";
+import type { ByteDelta } from "./sessionRuntimeRegistry";
+import type { SessionRuntimeProps, TerminalClient } from "./sessionRuntimeProps";
 import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
-import type { HostConnection } from "../../rpc/connections/types";
-import type { ToolShortcutDef } from "../../lib/toolShortcuts";
-import {
-  exitDocumentFullscreen,
-  isTargetInActiveFullscreen,
-  requestElementFullscreen,
-} from "../../lib/browserFullscreen";
 import { safeTestIdPart } from "../../lib/testId";
 import { cn } from "../../lib/utils";
+import { InlineError } from "../ui/inline-error";
 
-type SessionAgentClient = Client<typeof SessionAgentService>;
-type TerminalClient = Client<typeof TerminalSessionService>;
-
-export interface SessionRuntimeProps {
-  /** This runtime's attached-session state (connection params + status). */
-  runtime: SessionRuntimeState;
-  /** True when this runtime is the focused (CSS-visible) one. Drives the control overlay + mobile
-   *  shortcut overlay; backgrounded runtimes stay mounted but `display:none`. */
-  focused: boolean;
-  sessionToken: string;
-  /** Owning daemon `session_agents.SessionAgentService` client — the agent-conversation panes hold
-   *  their conversation over it, and a spawned child runtime inherits it. Pass `null`/`undefined`
-   *  until the daemon is reachable. */
-  client?: SessionAgentClient | null;
-  /** Owning daemon `TerminalSessionService` client — the auto-claim-on-attach target, and the
-   *  fallback wire for host-served terminal I/O. Pass `null`/`undefined` until the daemon is
-   *  reachable. */
-  terminalClient?: TerminalClient | null;
-  /** The connection to the session's owning daemon — a spawned child conversation attaches its own
-   *  session over it. `null` until a host is reachable, which is when no child can be attached. */
-  host?: HostConnection | null;
-  /** Shortcut presets — shown as the mobile shortcut overlay on the focused runtime only. */
-  mobileShortcuts?: ToolShortcutDef[];
-  /** Register this session's Agent-terminal text-insert (for the inspector Files-tab click/tap
-   *  route). Fired once the terminal mounts. */
-  onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
-  /** Evict this runtime's terminal (e.g. remote session ended). */
-  onSessionDisconnect?: (sessionId: string) => void;
-  /** Account this session's terminal I/O bytes (see `GhosttyTerminalSession.onBytes`) so the
-   *  screen can fold them into the session's inspector counters. */
-  onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
-  /** The drawer's full session list — used to discover this session's spawned child conversations
-   *  (`orchestratorSessionId === this session`) and render them as tabs. */
-  sessions?: ReadonlyArray<SessionEntry>;
-  /** Open conversations with agents attached to this session, one tab and one pane each. Held by the
-   *  screen rather than here so switching sessions (which backgrounds this runtime) cannot end one. */
-  agentConversations?: readonly AgentConversation[];
-  /** The focused conversation's id, or `null` when a terminal or child tab holds the pane. */
-  activeAgentConversationId?: string | null;
-  /** Focus a conversation, or `null` to hand the pane back to the terminal/child tabs. */
-  onSelectAgentConversation?: (conversationId: string | null) => void;
-  /** Close a conversation's tab — the owner drops it, which cancels it. */
-  onCloseAgentConversation?: (conversationId: string) => void;
-}
+export type { SessionRuntimeProps } from "./sessionRuntimeProps";
 
 /**
  * One attached session's runtime: a terminal tab bar (Agent + bash terminals) over a stack of
@@ -140,7 +90,7 @@ export function SessionRuntime({
   // `buildSessionTerminalClient`.
   const session: Session | null =
     terminalClient != null ? { sessionId: runtime.sessionId, client: terminalClient } : null;
-  const { controlState, connected, claim: claimControl } = useTerminalControl(
+  const { controlState, connected, claim: claimControl, claimError } = useTerminalControl(
     session,
     sessionToken,
     buildSessionTerminalClient,
@@ -155,7 +105,15 @@ export function SessionRuntime({
     [buildSessionTerminalClient],
   );
 
-  const { terminals, activeTerminalId, setActive, open, close, dropEnded } = useSessionTerminals({
+  const {
+    terminals,
+    activeTerminalId,
+    setActive,
+    open,
+    close,
+    dropEnded,
+    error: terminalsError,
+  } = useSessionTerminals({
     sessionId: runtime.sessionId,
     sessionToken,
     client: sessionTerminalClient,
@@ -213,16 +171,6 @@ export function SessionRuntime({
     [onSessionBytes, runtime.sessionId],
   );
 
-  // Imperative focus handle for the Agent pane's terminal. Each terminal self-focuses once at
-  // mount, so first-selection works on its own; re-selecting an already-mounted runtime only flips
-  // CSS visibility, so we replay focus here when this runtime comes to the foreground.
-  const focusAgentTerminalRef = useRef<(() => void) | null>(null);
-  const registerAgentFocus = useCallback((focus: () => void) => {
-    focusAgentTerminalRef.current = focus;
-  }, []);
-  // The runtime's outer container — used by the focus guard to tell "focus landed inside me" from
-  // "a sibling session's terminal stole focus".
-  const containerRef = useRef<HTMLDivElement>(null);
   // The Agent pane, measured when its terminal opens so the daemon resizes the PTY before replaying.
   const agentPaneRef = useRef<HTMLDivElement>(null);
 
@@ -230,105 +178,30 @@ export function SessionRuntime({
   // A host-served session renders `GrpcSessionTerminal` instead, which builds its stream itself so
   // it can also account the daemon's input acks — there is nowhere on a `TerminalFrame` to carry
   // one, so a feed cannot express them (see the changeset).
+  // Why the Agent terminal's last send did not reach the PTY, when its feed can say (see
+  // `TerminalOptions.onInputDelivery`); the direct stream below keeps its own indicator.
+  const [agentInputError, setAgentInputError] = useState<string | null>(null);
   const agentTerminalFeed = useSessionTerminalFeed({
     connection: carriesMedia ? connection : null,
     sessionToken,
     controlToken: () => connected?.controlToken ?? "",
     containerRef: agentPaneRef,
+    onInputDelivery: setAgentInputError,
   });
 
-  // When this runtime becomes focused with the Agent pane active, return keyboard focus to its
-  // terminal — so selection alone makes the session ready to type, no click required. Never steals
-  // focus for a backgrounded runtime, and stays out of the way when a bash tab or child pane is up.
-  // TODO: `GrpcSessionTerminal` doesn't yet plumb a focus handle through to the terminal, so
-  // focus-on-select only works for a session carried over its own room.
   const agentPaneActive =
     activeChildSessionId === null &&
     activeAgentConversationId === null &&
     activeTerminalId === AGENT_TERMINAL_ID;
-  useEffect(() => {
-    if (focused && agentPaneActive) {
-      focusAgentTerminalRef.current?.();
-    }
-  }, [focused, agentPaneActive]);
-
-  // Focus guard: a backgrounded session keeps its terminal mounted, and a terminal that opens (or
-  // is re-selected) while still transiently visible auto-focuses itself — ghostty-web focuses on
-  // open and re-asserts it on a deferred timer. That lets a background session's terminal steal
-  // keyboard focus from the foreground one a beat after selection. While this runtime is the
-  // foreground one with its Agent pane active, reclaim focus whenever it lands in a *different*
-  // session's terminal (never for focus that legitimately moves to the drawer, inspector, etc.).
-  useEffect(() => {
-    if (!focused || !agentPaneActive) return;
-    const self = containerRef.current;
-    if (!self) return;
-    const onFocusIn = (e: FocusEvent) => {
-      const target = e.target as Node | null;
-      if (!target || self.contains(target)) return;
-      const stealer = (target as HTMLElement).closest?.(
-        "[data-testid^='sessions-runtime-terminal-']",
-      );
-      if (stealer) focusAgentTerminalRef.current?.();
-    };
-    document.addEventListener("focusin", onFocusIn, true);
-    return () => document.removeEventListener("focusin", onFocusIn, true);
-  }, [focused, agentPaneActive]);
-
-  // Full screen — the pane stack (not an individual pane) is the Fullscreen API target. Only one
-  // pane is ever visible, so fullscreening the stack shows exactly the active pane, and it keeps the
-  // terminal-control mutex and connection overlays — both siblings of the panes — on screen. Taking
-  // a single pane instead would drop the "Claim terminal" CTA behind the fullscreen layer and leave
-  // a session whose control another screen holds looking interactive while swallowing every key.
-  // The tab strip is deliberately left behind: full screen is the whole viewport for one terminal.
-  const paneStackRef = useRef<HTMLDivElement>(null);
-  // `active` is containment-based (this stack IS or CONTAINS the fullscreen element) so a parent
-  // runtime whose nested child conversation went fullscreen still offers the exit. `owned` is exact,
-  // and gates the floating exit control — otherwise a fullscreen child pane would draw its own exit
-  // button and its parent's on top of each other.
-  const [fullscreenActive, setFullscreenActive] = useState(false);
-  const [fullscreenOwned, setFullscreenOwned] = useState(false);
-
-  useEffect(() => {
-    const sync = () => {
-      const target = paneStackRef.current;
-      setFullscreenActive(isTargetInActiveFullscreen(target));
-      setFullscreenOwned(target !== null && document.fullscreenElement === target);
-    };
-    sync();
-    document.addEventListener("fullscreenchange", sync);
-    document.addEventListener("webkitfullscreenchange", sync as EventListener);
-    return () => {
-      document.removeEventListener("fullscreenchange", sync);
-      document.removeEventListener("webkitfullscreenchange", sync as EventListener);
-    };
-  }, []);
-
-  // A fullscreen transition re-lays-out the terminal and can drop keyboard focus on the way in or
-  // out; the focus-on-select effect above is keyed on selection, so it never fires here. Replay it
-  // so a terminal that fills the screen is immediately typeable.
-  useEffect(() => {
-    if (focused && agentPaneActive) focusAgentTerminalRef.current?.();
-  }, [fullscreenActive, focused, agentPaneActive]);
-
-  // Selecting another session (or another tab, for a child runtime) hides this runtime behind
-  // `display:none`. Browsers generally drop out of fullscreen when an ancestor is hidden, but not
-  // uniformly — and a top-layer element left over a hidden ancestor is a black screen the operator
-  // cannot navigate out of. Exit deliberately instead of relying on that, but only from the runtime
-  // that actually owns fullscreen: `exitDocumentFullscreen` is document-global.
-  useEffect(() => {
-    if (!focused && fullscreenOwned) void exitDocumentFullscreen().catch(() => undefined);
-  }, [focused, fullscreenOwned]);
-
-  const toggleFullscreen = useCallback(() => {
-    const target = paneStackRef.current;
-    if (isTargetInActiveFullscreen(target)) {
-      void exitDocumentFullscreen().catch(() => undefined);
-      return;
-    }
-    // The request rejects when the browser refuses (an iframe without `allowfullscreen`, a gesture
-    // the UA does not count as user-activated). Nothing to recover — the pane stays inline.
-    void requestElementFullscreen(target).catch(() => undefined);
-  }, []);
+  // The pane stack's full screen (see `useSessionPaneFullscreen`), and the Agent terminal's keyboard
+  // focus, which a fullscreen transition can drop.
+  const { paneStackRef, fullscreenActive, fullscreenOwned, toggleFullscreen } =
+    useSessionPaneFullscreen(focused);
+  const { containerRef, registerAgentFocus } = useAgentTerminalFocus({
+    focused,
+    agentPaneActive,
+    fullscreenActive,
+  });
 
   // A terminal pane (Agent/bash) is visible only when its tab is active AND nothing else holds the
   // pane — a selected child or agent conversation overlays the terminal stack.
@@ -365,6 +238,11 @@ export function SessionRuntime({
         fullscreenActive={fullscreenActive}
         onToggleFullscreen={toggleFullscreen}
       />
+      <InlineError
+        testId="sessions-terminal-error"
+        message={terminalsError}
+        className="flex-shrink-0 border-b border-border px-3 py-1 text-xs"
+      />
 
       {/* The pane stack. Its `position` is stated inline as well as in the utility class because
           every pane below is positioned against it, and the terminal panes carry their own inline
@@ -397,6 +275,13 @@ export function SessionRuntime({
               onRegisterFocus={registerAgentFocus}
               onRegisterInsertInput={registerInsertInput}
               onBytes={handleBytes}
+            />
+          )}
+          {carriesMedia && (
+            <InlineError
+              testId="terminal-input-error"
+              message={agentInputError && `Input not delivered: ${agentInputError}`}
+              className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[90%] rounded border border-destructive/40 bg-background/90 px-2 py-1 text-xs"
             />
           )}
           {connection && !carriesMedia && (
@@ -521,6 +406,7 @@ export function SessionRuntime({
                 isController={controlState.isController}
                 holderScreenId={controlState.holderScreenId}
                 onClaim={claimControl}
+                claimError={claimError}
               />
             )}
           </div>
@@ -550,97 +436,5 @@ export function SessionRuntime({
         )}
       </div>
     </div>
-  );
-}
-
-interface SessionChildRuntimeProps {
-  /** The spawned child conversation's session id. */
-  sessionId: string;
-  /** True when this child pane is the visible/interactive one. */
-  focused: boolean;
-  sessionToken: string;
-  client?: SessionAgentClient | null;
-  /** Owning daemon `TerminalSessionService` client, inherited from the parent runtime (see
-   *  `SessionRuntimeProps.terminalClient`). */
-  terminalClient?: TerminalClient | null;
-  /** The connection to the daemon that owns this child — the child attaches its own session over it. */
-  host?: HostConnection | null;
-  mobileShortcuts?: ToolShortcutDef[];
-  /** Register this child's Agent-terminal text-insert (see `SessionRuntime.onSessionRegisterInsert`). */
-  onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
-  /** Account this child's terminal I/O bytes to its own session id (see `SessionRuntime.onSessionBytes`). */
-  onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
-  /** Drop this child (its output stream ended) — removes the pane and returns focus to the parent. */
-  onDisconnect?: (sessionId: string) => void;
-  sessions?: ReadonlyArray<SessionEntry>;
-}
-
-/**
- * A spawned child conversation rendered inside its parent's runtime. It owns its own attachment —
- * attaching the child over `ConnectSession` the first time it is mounted (i.e. when its tab is
- * first selected) — and, once connected, renders a nested {@link SessionRuntime} for the child so
- * the child gets its own Agent + bash terminals (and, recursively, its own spawned conversations).
- */
-function SessionChildRuntime({
-  sessionId,
-  focused,
-  sessionToken,
-  client,
-  terminalClient,
-  host = null,
-  mobileShortcuts,
-  onSessionRegisterInsert,
-  onSessionBytes,
-  onDisconnect,
-  sessions = [],
-}: SessionChildRuntimeProps) {
-  const { state: attachment, hint, connectSession } = useSessionAttachment();
-
-  useEffect(() => {
-    if (!host) return;
-    void connectSession(sessionId, sessionToken, host).catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [host, sessionId, sessionToken]);
-
-  // A child's connection is this component's own — no registry holds it — so closing its tab has to
-  // release it here. Without that, opening and closing a conversation would leave the room its
-  // session was reached over joined for as long as the page stayed open.
-  const connection = attachment.status === "connected" ? attachment.connection : null;
-  useEffect(() => () => connection?.close(), [connection]);
-
-  // Project the attachment into a `SessionRuntimeState` the nested runtime can render. Until the
-  // child's `ConnectSession` resolves there is nothing to render yet.
-  const runtime = useMemo<SessionRuntimeState | null>(
-    () =>
-      connection
-        ? {
-            sessionId,
-            attached: true,
-            connection,
-            ...(hint ? { hint } : {}),
-            bytesIn: 0,
-            bytesOut: 0,
-            lastDataReceivedAt: null,
-          }
-        : null,
-    [connection, hint, sessionId],
-  );
-
-  if (!runtime) return null;
-
-  return (
-    <SessionRuntime
-      runtime={runtime}
-      focused={focused}
-      sessionToken={sessionToken}
-      client={client}
-      terminalClient={terminalClient}
-      host={host}
-      mobileShortcuts={mobileShortcuts}
-      onSessionRegisterInsert={onSessionRegisterInsert}
-      onSessionBytes={onSessionBytes}
-      onSessionDisconnect={onDisconnect}
-      sessions={sessions}
-    />
   );
 }

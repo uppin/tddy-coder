@@ -163,3 +163,62 @@ pub fn read_repo_file(repo_root: &Path, relative: &str) -> String {
     let path = repo_root.join(relative);
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
+
+/// The script's code, one trimmed line each, with every comment removed and blank lines dropped.
+///
+/// Static contract tests look for command lines; matched against the raw file, a needle is also
+/// satisfied by a comment that merely mentions the command, so a removed call would go unnoticed.
+/// A `#` opens a comment only at the start of a word and outside quotes, which keeps `${#a[@]}`,
+/// `$#` and `\#` as code.
+pub fn shell_code_lines(contents: &str) -> Vec<String> {
+    contents
+        .lines()
+        .map(strip_shell_comment)
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn strip_shell_comment(line: &str) -> &str {
+    let (mut single, mut double, mut escaped) = (false, false, false);
+    let mut previous: Option<char> = None;
+    for (i, c) in line.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if c == '\\' && !single {
+            escaped = true;
+        } else if c == '\'' && !double {
+            single = !single;
+        } else if c == '"' && !single {
+            double = !double;
+        } else if c == '#' && !single && !double && previous.is_none_or(char::is_whitespace) {
+            return &line[..i];
+        }
+        previous = Some(c);
+    }
+    line
+}
+
+#[cfg(test)]
+mod shell_code_lines_tests {
+    use super::shell_code_lines;
+
+    #[test]
+    fn comments_are_removed_and_hashes_in_code_are_kept() {
+        // Given
+        let script = "# dev_livekit_up in a header\n  foo  # trailing dev_livekit_up\n[ \"${#a[@]}\" -gt 0 ] && echo \"# not a comment\" '#' \\#x\n\n";
+
+        // When
+        let code = shell_code_lines(script);
+
+        // Then
+        assert_eq!(
+            code,
+            vec![
+                "foo".to_owned(),
+                "[ \"${#a[@]}\" -gt 0 ] && echo \"# not a comment\" '#' \\#x".to_owned(),
+            ]
+        );
+    }
+}

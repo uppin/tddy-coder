@@ -39,9 +39,12 @@ Starts `tddy-daemon` and the Vite dev server with `/rpc` proxied to the daemon.
 ./web-dev
 ```
 
-- Web UI: http://localhost:5173
-- Daemon: http://127.0.0.1:8899 (configured in `dev.daemon.yaml`)
+- Web UI and daemon: each on this checkout's own port in 49152–65535 — stable across restarts,
+  different per worktree — printed at startup (`=== VITE_URL=… ===`). Pin them with `VITE_PORT` /
+  `VITE_URL` and `DAEMON_PORT`.
+- LiveKit: a container `./web-dev` starts in Docker, unless `.env` names a complete server.
 - Config file: `dev.daemon.yaml`
+- See [docs/ft/web/local-web-dev.md](docs/ft/web/local-web-dev.md).
 
 ### 2. Daemon only (headless)
 

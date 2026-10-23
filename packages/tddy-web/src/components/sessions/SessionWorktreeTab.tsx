@@ -2,6 +2,9 @@ import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { useSessionWorktreeStats } from "../../rpc/useSessionWorktreeStats";
+import { hostNotConnected } from "../../rpc/rpcFailure";
+import { useActionFailure } from "../../hooks/useActionFailure";
+import { InlineError } from "../ui/inline-error";
 import { formatDiskBytes } from "./worktreeStatsFormat";
 import { formatLastCalculated } from "../../lib/worktreeSize";
 import { Button } from "../ui/button";
@@ -18,7 +21,9 @@ export interface SessionWorktreeTabProps {
  * Session Inspector → Worktree tab: the selected session's own worktree — lazy, streamed disk size
  * (None/Calculating/Cached) + diff summary, plus Clear (`git clean -fdx`) / Delete (two-step confirm)
  * and, when the worktree is missing, Restore. Refresh re-triggers the size calculation.
- * See docs/ft/web/session-worktree-inspector.md and docs/ft/web/worktree-disk-usage-streaming.md.
+ * A failed action, a failed stats stream and no client at all each show their reason above the
+ * tab's content. See docs/ft/web/session-worktree-inspector.md and
+ * docs/ft/web/worktree-disk-usage-streaming.md.
  */
 export function SessionWorktreeTab({
   client,
@@ -27,7 +32,7 @@ export function SessionWorktreeTab({
   sessionId,
   repoPath,
 }: SessionWorktreeTabProps) {
-  const { row, status, missing, refresh } = useSessionWorktreeStats(
+  const { row, status, missing, error: statsError, refresh } = useSessionWorktreeStats(
     client,
     sessionToken,
     projectId,
@@ -35,32 +40,45 @@ export function SessionWorktreeTab({
   );
   const [pendingClear, setPendingClear] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
+  const action = useActionFailure();
 
-  async function onConfirmClear() {
-    if (!client) return;
-    await client.cleanWorktree({ sessionToken, projectId, worktreePath: repoPath });
-    setPendingClear(false);
-    refresh();
+  function connected() {
+    if (!client) throw hostNotConnected(null);
+    return client;
   }
 
-  async function onConfirmDelete() {
-    if (!client) return;
-    await client.removeWorktree({ sessionToken, projectId, worktreePath: repoPath });
-    setPendingDelete(false);
-    // No recalculation here — the worktree is gone; the daemon's stream drops it from the snapshot.
+  function onConfirmClear() {
+    void action.run(async () => {
+      await connected().cleanWorktree({ sessionToken, projectId, worktreePath: repoPath });
+      setPendingClear(false);
+      refresh();
+    });
   }
 
-  async function onRestore() {
-    if (!client) return;
-    await client.restoreSessionWorktree({ sessionToken, projectId, sessionId });
-    refresh();
+  function onConfirmDelete() {
+    void action.run(async () => {
+      await connected().removeWorktree({ sessionToken, projectId, worktreePath: repoPath });
+      setPendingDelete(false);
+      // No recalculation here — the worktree is gone; the daemon's stream drops it from the snapshot.
+    });
   }
+
+  function onRestore() {
+    void action.run(async () => {
+      await connected().restoreSessionWorktree({ sessionToken, projectId, sessionId });
+      refresh();
+    });
+  }
+
+  // The action the operator just took outranks the stream's standing failure.
+  const error = action.error ?? statsError;
 
   return (
     <div
       data-testid="session-worktree-tab"
       className="px-3 py-3 flex flex-col gap-3 text-xs text-muted-foreground"
     >
+      <InlineError testId="session-worktree-error" message={error} className="text-xs" />
       {missing ? (
         <div data-testid="session-worktree-missing" className="flex flex-col gap-2">
           <p>This session&apos;s worktree is no longer on disk.</p>
@@ -70,10 +88,8 @@ export function SessionWorktreeTab({
               size="xs"
               variant="outline"
               data-testid="session-worktree-restore"
-              disabled={!client}
-              onClick={() => {
-                void onRestore();
-              }}
+              disabled={!client || action.pending}
+              onClick={onRestore}
             >
               Restore worktree
             </Button>
@@ -143,10 +159,8 @@ export function SessionWorktreeTab({
                 size="xs"
                 variant="destructive"
                 data-testid="session-worktree-clear-confirm"
-                disabled={!client}
-                onClick={() => {
-                  void onConfirmClear();
-                }}
+                disabled={!client || action.pending}
+                onClick={onConfirmClear}
               >
                 Confirm clear
               </Button>
@@ -170,17 +184,15 @@ export function SessionWorktreeTab({
                 size="xs"
                 variant="destructive"
                 data-testid="session-worktree-delete-confirm"
-                disabled={!client}
-                onClick={() => {
-                  void onConfirmDelete();
-                }}
+                disabled={!client || action.pending}
+                onClick={onConfirmDelete}
               >
                 Confirm delete
               </Button>
             ) : null}
           </div>
         </>
-      ) : (
+      ) : statsError ? null : (
         <p>Loading worktree stats…</p>
       )}
     </div>

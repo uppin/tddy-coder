@@ -17,6 +17,8 @@ import { tddyDebug } from "../../lib/debugMask";
 import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 import { TerminalStreamOffset } from "../../lib/terminalStreamOffset";
+import { rpcFailureText } from "../rpcFailure";
+import { inputDeliverySequence } from "./inputDelivery";
 import type { TerminalFeed, TerminalFrame, TerminalOptions, TerminalStream } from "./terminal";
 
 const dTerm = tddyDebug("tddy:term:feed");
@@ -79,11 +81,14 @@ export function openDaemonTerminalFeed({
   // here rather than by the caller so that a single feed is the only thing counting: two counters
   // over one stream would ack each other's bytes.
   let inputOffset = 0;
+  // Answers to sends can land out of order; only the newest settled one is reported.
+  const nextDelivery = inputDeliverySequence((failure) => options.onInputDelivery?.(failure));
 
   const stream: TerminalStream = {
     send(data: Uint8Array): void {
       if (closed) return;
       inputOffset += data.length;
+      const settle = nextDelivery();
       void client
         .sendTerminalInput({
           sessionToken: options.sessionToken,
@@ -95,14 +100,18 @@ export function openDaemonTerminalFeed({
           controlToken: options.controlToken(),
           inputOffset: BigInt(inputOffset),
         })
-        .catch((err) => {
-          dTerm(
-            "sendTerminalInput failed sessionId=%s terminalId=%s error=%o",
-            sessionId,
-            terminalId,
-            err instanceof Error ? err.message : err,
-          );
-        });
+        .then(
+          () => settle(null),
+          (err: unknown) => {
+            dTerm(
+              "sendTerminalInput failed sessionId=%s terminalId=%s error=%o",
+              sessionId,
+              terminalId,
+              err instanceof Error ? err.message : err,
+            );
+            settle(rpcFailureText(err));
+          },
+        );
     },
     onMessage(fn: (frame: TerminalFrame) => void): void {
       listeners.push(fn);

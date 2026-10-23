@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import type { ToolDef } from "../../gen/exec_tools_pb";
 import { defaultArgsFromSchema } from "./toolSchema";
+import { rpcFailureText } from "../../rpc/rpcFailure";
+import { InlineError } from "../ui/inline-error";
 
 interface ToolCallInfo {
   taskId: string;
@@ -65,12 +67,16 @@ export function SessionToolsTab({
   const [invoking, setInvoking] = useState(false);
   const [callLog, setCallLog] = useState<ToolCallInfo[]>([]);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  // Why the tool catalog / the call log last failed to load. A failed log is never shown as empty.
+  const [toolsError, setToolsError] = useState<string | null>(null);
+  const [callLogError, setCallLogError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     onListExecTools()
       .then((t) => {
         if (!cancelled) {
+          setToolsError(null);
           setTools(t);
           if (t.length > 0 && t[0].name) {
             setSelectedTool(t[0].name);
@@ -78,8 +84,8 @@ export function SessionToolsTab({
           }
         }
       })
-      .catch(() => {
-        /* ignore */
+      .catch((e: unknown) => {
+        if (!cancelled) setToolsError(rpcFailureText(e));
       });
     return () => {
       cancelled = true;
@@ -90,10 +96,13 @@ export function SessionToolsTab({
     let cancelled = false;
     onListSessionToolCalls()
       .then((calls) => {
-        if (!cancelled) setCallLog(calls);
+        if (!cancelled) {
+          setCallLog(calls);
+          setCallLogError(null);
+        }
       })
-      .catch(() => {
-        /* ignore */
+      .catch((e: unknown) => {
+        if (!cancelled) setCallLogError(rpcFailureText(e));
       });
     return () => {
       cancelled = true;
@@ -116,8 +125,10 @@ export function SessionToolsTab({
       try {
         const calls = await onListSessionToolCalls();
         setCallLog(calls);
-      } catch {
-        /* ignore */
+        setCallLogError(null);
+      } catch (e) {
+        // The invoke itself succeeded and its result stays shown; only the log refresh failed.
+        setCallLogError(rpcFailureText(e));
       }
     } catch (e) {
       setInvokeResult({ resultJson: "", isError: true, errorMessage: String(e) });
@@ -159,6 +170,7 @@ export function SessionToolsTab({
             </option>
           ))}
         </select>
+        <InlineError testId="sessions-tool-list-error" message={toolsError} className="text-xs" />
         <textarea
           data-testid="sessions-tool-invoke-args"
           value={argsJson}
@@ -196,8 +208,9 @@ export function SessionToolsTab({
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Call Log
         </span>
+        <InlineError testId="sessions-tool-call-log-error" message={callLogError} className="text-xs" />
         <div data-testid="sessions-tool-call-log" className="flex flex-col gap-1">
-          {reversedLog.length === 0 ? (
+          {reversedLog.length === 0 && callLogError ? null : reversedLog.length === 0 ? (
             <span className="text-xs text-muted-foreground">
               No tool calls recorded for this session yet.
             </span>

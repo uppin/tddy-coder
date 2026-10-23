@@ -27,9 +27,16 @@
 # Environment variables:
 #   WEB_HOST        — Address Vite listens on (default: 127.0.0.1). Use 0.0.0.0 for LAN. Separate from
 #                     the URL you open in the browser — set VITE_URL for that.
-#   VITE_PORT       — Port for Vite dev server (default: 5173)
+#   VITE_PORT       — Port for Vite dev server. Default: this checkout's own port in 49152-65535,
+#                     derived from its path so the browser origin (and the session it keeps) survives
+#                     a restart; a random free one, with a notice, while that is held. Printed at
+#                     startup. VITE_URL naming a port pins it. A pinned port already in use is an
+#                     error — ./web-dev never kills what it did not start.
+#   DAEMON_PORT     — Port tddy-daemon listens on (written into its temp config). Default: this
+#                     checkout's own port, chosen the same way.
 #   VITE_URL        — **Only env you need for “where is the app?”** Browser-facing origin (OAuth,
-#                     import.meta.env.VITE_URL). Default: http://127.0.0.1:<VITE_PORT>. LAN example:
+#                     import.meta.env.VITE_URL). Default: http://127.0.0.1:<VITE_PORT>. A port in it
+#                     pins VITE_PORT — set one when a real GitHub OAuth app needs a fixed redirect. LAN example:
 #                     VITE_URL=http://192.168.1.10:5173 (host must match how you open the page).
 #                     web-dev exports WEB_PUBLIC_URL=$VITE_URL for tddy-daemon (do not set WEB_PUBLIC_URL
 #                     for web-dev; a stale value in .env is overridden).
@@ -43,13 +50,18 @@
 #   TDDY_DAEMON_INSTANCE_ID — Override the daemon's LiveKit instance id (its participant identity in
 #                     the shared room). Overrides daemon_instance_id in the YAML; default is the
 #                     YAML value (dev) or the machine hostname. Inherited by tddy-daemon via env.
-#   LIVEKIT_PUBLIC_URL — Override LiveKit URL (tddy-daemon); e.g. ws://192.168.1.10:7880
-#   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET — LiveKit overrides (tddy-daemon)
+#   LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET — an existing LiveKit server to reuse. Unset
+#                     (the default), web-dev starts its own LiveKit container in Docker and removes it
+#                     on exit, including an error exit; set all three (in .env or the environment)
+#                     and that server is reused instead, after a reachability check. A partial set is
+#                     an error. LIVEKIT_PUBLIC_URL may stand in for LIVEKIT_URL. A LiveKit web-dev did
+#                     not start is never stopped. See scripts/dev-livekit.sh.
 #   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_REDIRECT_URI — GitHub OAuth (tddy-daemon)
 #   TDDY_TELEGRAM_BOT_TOKEN, TDDY_TELEGRAM_CHAT_IDS, TDDY_TELEGRAM_ENABLED — Telegram (tddy-daemon);
 #                     see docs/ft/daemon/telegram-notifications.md
 #
-# Press Ctrl+C to stop both servers.
+# Press Ctrl+C to stop both servers. A daemon or Vite port already in use is an error naming its
+# holder: ./web-dev never kills a process it did not start.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -57,6 +69,57 @@ cd "$(dirname "$0")"
 # shared with ./desktop-dev so the two launchers cannot drift apart.
 # shellcheck source=scripts/dev-runtime-binaries.sh
 source scripts/dev-runtime-binaries.sh
+# dev_livekit_up / dev_livekit_down — this run's LiveKit: its own container, or a reused server.
+# shellcheck source=scripts/dev-livekit.sh
+source scripts/dev-livekit.sh
+# dev_require_free_port / dev_wait_any — what `fuser -k` and `wait -n` were meant to do, on the
+# macOS /bin/bash 3.2 too, where neither works.
+# shellcheck source=scripts/dev-process.sh
+source scripts/dev-process.sh
+
+daemon_pid=""
+vite_pid=""
+# What this run starts, for the next run to stop should this one die without cleaning up (kill -9,
+# a crashed terminal). Per checkout; removed by on_exit once this run owns it.
+RUN_RECORD="tmp/web-dev.run"
+RUN_RECORD_OWNED=false
+
+# Stop the daemon and Vite this run started. Job control (`set -m`, below) makes each one lead its
+# own process group, so `kill -- -<pid>` reaches the nix shell and everything under it.
+stop_children() {
+  local pids=() pid
+  # By group, not by leader: the nix shell leading a group can exit while the daemon under it lives.
+  # These groups are this run's own, and a group id cannot be reused while any member is alive.
+  for pid in $daemon_pid $vite_pid; do
+    kill -0 -- "-$pid" 2>/dev/null && pids+=("$pid")
+  done
+  [ "${#pids[@]}" -gt 0 ] || return 0
+  for pid in "${pids[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done
+  for _ in 1 2 3 4 5; do
+    local alive=false
+    for pid in "${pids[@]}"; do kill -0 -- "-$pid" 2>/dev/null && alive=true; done
+    [ "$alive" = "true" ] || return 0
+    sleep 1
+  done
+  for pid in "${pids[@]}"; do kill -0 -- "-$pid" 2>/dev/null && kill -KILL -- "-$pid" 2>/dev/null || true; done
+}
+
+
+# Runs on every exit — normal, Ctrl+C and error alike — so neither the processes nor the LiveKit
+# container this run started outlive it.
+on_exit() {
+  stop_children
+  rm -f "${TMP_CONFIG:-}"
+  dev_livekit_down
+  [ "$RUN_RECORD_OWNED" = "true" ] && rm -f "$RUN_RECORD"
+  return 0
+}
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# The terminal closing ends the run as well: its children are in their own process groups (set -m)
+# and would not receive the hang-up themselves.
+trap 'exit 129' HUP
 
 # Load .env if present (does not override already-set env vars)
 if [ -f .env ]; then
@@ -94,18 +157,29 @@ done
 set -- "${filtered_args[@]+"${filtered_args[@]}"}"
 
 WEB_HOST="${WEB_HOST:-127.0.0.1}"
-VITE_PORT="${VITE_PORT:-5173}"
 # Daemon YAML path for this script (not the generic CONFIG env var from .env).
 # DAEMON_CONFIG overrides; default is dev.daemon.yaml at repo root.
 CONFIG="${DAEMON_CONFIG:-dev.daemon.yaml}"
 
+# DAEMON_PORT, VITE_PORT, VITE_URL: ephemeral unless pinned, pinned ones checked free — before
+# anything is built or started, so a run never collides with another worktree's or an earlier one's
+# (which would otherwise answer the readiness check below in the new daemon's place). A held port is
+# reported, never killed — see scripts/dev-process.sh.
+mkdir -p tmp
+dev_reap_previous_run "$RUN_RECORD"
+dev_run_record_init "$RUN_RECORD"
+RUN_RECORD_OWNED=true
+dev_resolve_ports
+
 daemon_args=()
 if [ -f "$CONFIG" ]; then
-  # Replace CURRENT_USER with $USER in a temp copy (daemon config uses os_user).
+  # Replace CURRENT_USER with $USER in a temp copy (daemon config uses os_user), and listen on this
+  # run's DAEMON_PORT rather than the YAML's fixed one.
   # Use | as delimiter so slashes in paths inside YAML are not conflated with sed's replacement.
   TMP_CONFIG=$(mktemp)
-  sed "s|CURRENT_USER|${USER}|g" "$CONFIG" > "$TMP_CONFIG"
-  trap 'rm -f "$TMP_CONFIG"' EXIT
+  sed -e "s|CURRENT_USER|${USER}|g" \
+    -e "s|^\([[:space:]]*web_port:\).*|\1 ${DAEMON_PORT}|" \
+    "$CONFIG" > "$TMP_CONFIG"
   daemon_args+=("-c" "$TMP_CONFIG")
 else
   echo "tddy-daemon requires -c CONFIG. ${CONFIG} not found." >&2
@@ -113,23 +187,13 @@ else
 fi
 
 # Pass through all user args (may include -c, --github-stub, etc.). If the user also passes -c,
-# the daemon may receive two -c flags; effective config is daemon-defined. DAEMON_PORT below still
-# comes from the CONFIG path selected above (not from a second -c on the CLI).
+# the daemon may receive two -c flags; effective config is daemon-defined, and the Vite proxy still
+# targets this run's DAEMON_PORT.
 daemon_args+=("$@")
 
-# Read daemon port from config for the Vite proxy (same file as CONFIG / DAEMON_CONFIG).
-# Supports web.port (tddy-coder) and listen.web_port (tddy-daemon)
-DAEMON_PORT=$(grep -E 'port:\s*[0-9]+' "$CONFIG" 2>/dev/null | head -1 | awk '{print $2}')
-DAEMON_PORT="${DAEMON_PORT:-8899}"
-
-# Public origin for OAuth / SPA: VITE_URL only (not WEB_HOST — that is bind-only).
-# Default matches local dev; override VITE_URL for LAN. Do not read WEB_PUBLIC_URL here — .env often
-# points it at the daemon port by mistake; we always set WEB_PUBLIC_URL from VITE_URL for the daemon.
-if [ -z "${VITE_URL:-}" ]; then
-  VITE_URL="http://127.0.0.1:${VITE_PORT}"
-fi
-VITE_URL="${VITE_URL%/}"
-export VITE_URL
+# Public origin for OAuth / SPA: VITE_URL only (not WEB_HOST — that is bind-only). Do not read
+# WEB_PUBLIC_URL here — .env often points it at the daemon port by mistake; we always set
+# WEB_PUBLIC_URL from VITE_URL for the daemon.
 export WEB_PUBLIC_URL="${VITE_URL}"
 
 echo "=== Starting tddy-daemon on :${DAEMON_PORT} (config: ${CONFIG}) ==="
@@ -184,15 +248,16 @@ if [ ! -x "$DAEMON_BIN" ]; then
   exit 1
 fi
 
-# Clean up stale processes from previous runs. SIGKILLs listeners on these ports; on a shared
-# machine, ensure ports are free or avoid conflicts before running ./web-dev.
-# In headless mode the Vite port is never used, so leave it alone.
-if [ "$HEADLESS" = "true" ]; then
-  fuser -k -9 -s "${DAEMON_PORT}/tcp" 2>/dev/null || true
-else
-  fuser -k -9 -s "${DAEMON_PORT}/tcp" "${VITE_PORT}/tcp" 2>/dev/null || true
-fi
-sleep 2
+# After the build (a failed build starts nothing) and before the daemon, which reads the
+# LIVEKIT_* overrides this exports. on_exit removes the container again. The daemon and Vite ports
+# are chosen but not yet bound, so the container's port block must be kept off them explicitly.
+DEV_LIVEKIT_AVOID_PORTS="${DAEMON_PORT} ${VITE_PORT}"
+dev_livekit_up
+[ -n "$DEV_LIVEKIT_CONTAINER" ] && dev_run_record_container "$RUN_RECORD" "$DEV_LIVEKIT_CONTAINER"
+echo "=== LiveKit: ${LIVEKIT_URL:-${LIVEKIT_PUBLIC_URL:-}} ==="
+
+# Each background launch below leads its own process group, so stop_children can stop it whole.
+set -m
 
 # Ensure writable build output dirs exist before the daemon starts.
 mkdir -p tmp/buildroot/disks tmp/buildroot/dl
@@ -201,26 +266,12 @@ mkdir -p tmp/buildroot/disks tmp/buildroot/dl
 # readiness timeout below: a cold/nix build takes far longer than the 90s the wait loop allows.
 ./dev "$DAEMON_BIN" "${daemon_args[@]}" &
 daemon_pid=$!
+dev_run_record_group "$RUN_RECORD" "$daemon_pid"
 
-# Wait for daemon to be ready (HTTP 200 on /api/config, verified twice to avoid race)
-# nix + daemon can take 10–15s on first run; allow 90s
-daemon_ready=false
-for i in $(seq 1 180); do
-  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/api/config" 2>/dev/null || echo "000")
-  if [ "$code" = "200" ]; then
-    sleep 1
-    code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/api/config" 2>/dev/null || echo "000")
-    if [ "$code" = "200" ]; then
-      daemon_ready=true
-      break
-    fi
-  fi
-  sleep 0.5
-done
-if [ "$daemon_ready" != "true" ]; then
-  echo "Error: daemon did not respond with HTTP 200 on http://127.0.0.1:${DAEMON_PORT}/api/config within 90s." >&2
-  echo "Check tmp/logs/daemon for errors. Port may be in use: fuser ${DAEMON_PORT}/tcp" >&2
-  kill -9 -"$daemon_pid" 2>/dev/null || true
+# Wait for the daemon to answer HTTP 200 on /api/config. nix + daemon can take 10–15s on a first
+# run, so allow 90s — but stop the moment the daemon exits instead of waiting that out.
+if ! dev_wait_http_ready "http://127.0.0.1:${DAEMON_PORT}/api/config" "$daemon_pid" 90 tddy-daemon; then
+  echo "Check tmp/logs/daemon for errors." >&2
   exit 1
 fi
 
@@ -231,19 +282,9 @@ if [ "$HEADLESS" = "true" ]; then
   echo "  Daemon (RPC):  http://127.0.0.1:${DAEMON_PORT}"
   echo ""
 
-  headless_cleanup() {
-    kill -TERM -"$daemon_pid" 2>/dev/null || true
-    sleep 2
-    kill -KILL -"$daemon_pid" 2>/dev/null || true
-    sleep 1
-    fuser -k -9 -s "${DAEMON_PORT:-8899}/tcp" 2>/dev/null || true
-    exit 0
-  }
-  trap headless_cleanup INT TERM
-
-  wait "$daemon_pid" 2>/dev/null || true
+  dev_wait_any "$daemon_pid"
   echo "Daemon exited — stopping" >&2
-  headless_cleanup
+  exit 1
 fi
 
 echo ""
@@ -259,27 +300,15 @@ echo "  Daemon (RPC):  http://127.0.0.1:${DAEMON_PORT}  — static dist; /rpc an
 echo ""
 
 # Start Vite dev server with DAEMON_PORT for proxy config (run via ./dev for nix env)
-./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' WEB_PUBLIC_URL='$WEB_PUBLIC_URL' VITE_URL='$VITE_URL' bunx vite --port '$VITE_PORT' --host '$WEB_HOST'" &
+./dev bash -c "cd packages/tddy-web && DAEMON_PORT='$DAEMON_PORT' WEB_PUBLIC_URL='$WEB_PUBLIC_URL' VITE_URL='$VITE_URL' bunx vite --port '$VITE_PORT' --strictPort --host '$WEB_HOST'" &
 vite_pid=$!
+dev_run_record_group "$RUN_RECORD" "$vite_pid"
 
-# Cleanup and exit. Kill by port (most reliable) since process groups may not
-# include all descendants (nix → daemon → spawn_worker).
-cleanup() {
-  kill -TERM -"$daemon_pid" -"$vite_pid" 2>/dev/null || true
-  sleep 2
-  kill -KILL -"$daemon_pid" -"$vite_pid" 2>/dev/null || true
-  sleep 1
-  fuser -k -9 -s "${DAEMON_PORT:-8899}/tcp" "${VITE_PORT:-5173}/tcp" 2>/dev/null || true
-  exit 0
-}
-trap cleanup INT TERM
-
-# Wait for either process to exit
-wait -n "$daemon_pid" "$vite_pid" 2>/dev/null || true
-if ! kill -0 "$daemon_pid" 2>/dev/null; then
+# Run until either exits (or Ctrl+C); on_exit stops the other and removes the LiveKit container.
+dev_wait_any "$daemon_pid" "$vite_pid"
+if [ "$DEV_EXITED_PID" = "$daemon_pid" ]; then
   echo "Daemon exited unexpectedly — stopping" >&2
-fi
-if ! kill -0 "$vite_pid" 2>/dev/null; then
+else
   echo "Vite exited unexpectedly — stopping" >&2
 fi
-cleanup
+exit 1

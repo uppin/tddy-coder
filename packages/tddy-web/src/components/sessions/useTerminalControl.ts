@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { Client } from "@connectrpc/connect";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { getScreenId } from "../../lib/screenId";
+import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
 import {
   type TerminalControlState,
   initialTerminalControlState,
@@ -49,8 +50,12 @@ export interface UseTerminalControlResult {
    *  Reactive state — the terminal re-renders when the claim resolves, so input gating and the
    *  flush of queued input are driven by this object, not a ref. */
   connected: ConnectedSession | null;
-  /** Steal control from the current holder (steal=true ClaimTerminalControl). */
+  /** Steal control from the current holder (steal=true ClaimTerminalControl). Never rejects: a
+   *  failure is {@link UseTerminalControlResult.claimError}. */
   claim(): Promise<void>;
+  /** Why the last manual {@link UseTerminalControlResult.claim} did not take control; `null` while
+   *  none has failed. Cleared when a claim is granted or the session changes. */
+  claimError: string | null;
   /** Reset state (call when detaching from a session). */
   reset(): void;
 }
@@ -131,6 +136,7 @@ export function useTerminalControl(
     initialTerminalControlState,
   );
   const [connected, setConnected] = useState<ConnectedSession | null>(null);
+  const [claimError, setClaimError] = useState<string | null>(null);
   const screenId = getScreenId();
 
   // On session attach (or when the owning client becomes available): drop any stale lease from a
@@ -141,6 +147,7 @@ export function useTerminalControl(
     if (!sessionId || !client) return;
     setConnected(null);
     setControlState(initialTerminalControlState);
+    setClaimError(null);
     let cancelled = false;
 
     void autoClaimControl(
@@ -152,7 +159,9 @@ export function useTerminalControl(
       setControlState,
       () => cancelled,
     ).catch(() => {
-      // network/auth error — the user can still steal-claim; leave state as-is
+      // Deliberately quiet: this claim is the page's own, not the operator's. It leaves this screen
+      // a watcher, which the "Claim terminal" overlay already shows — and a failure of *that* claim
+      // is said there (`claimError`).
     });
 
     return () => {
@@ -193,8 +202,9 @@ export function useTerminalControl(
     // Route the explicit steal-claim through the session participant when a session-scoped client
     // is available; otherwise fall back to the daemon participant.
     const claimClient = buildSessionClient?.() ?? client;
-    if (!claimClient) return;
+    setClaimError(null);
     try {
+      if (!claimClient) throw hostNotConnected(null);
       const resp = await claimClient.claimTerminalControl({
         sessionToken,
         sessionId,
@@ -204,16 +214,20 @@ export function useTerminalControl(
       if (resp.granted) {
         setConnected({ sessionId, controlToken: resp.controlToken });
         setControlState({ isController: true, holderScreenId: screenId });
+      } else {
+        setClaimError(`The daemon did not grant control${resp.currentHolderScreenId ? ` — ${resp.currentHolderScreenId} still holds it` : ""}.`);
       }
-    } catch {
-      // network/auth error — state remains isController:false, user may retry
+    } catch (err) {
+      // State remains isController:false and the overlay keeps its button, so the operator may retry.
+      setClaimError(rpcFailureText(err));
     }
   }, [sessionId, sessionToken, client, screenId, buildSessionClient]);
 
   const reset = useCallback(() => {
     setConnected(null);
     setControlState(initialTerminalControlState);
+    setClaimError(null);
   }, []);
 
-  return { controlState, connected, claim, reset };
+  return { controlState, connected, claim, claimError, reset };
 }

@@ -1,4 +1,5 @@
 import type { SessionEntry } from "../../gen/session_pb";
+import { InlineError } from "../ui/inline-error";
 import { inputClass, labelClass } from "./createSessionFormStyles";
 
 export interface CreateSessionStackParentSelectProps {
@@ -6,6 +7,9 @@ export interface CreateSessionStackParentSelectProps {
   stackParentOptions: SessionEntry[];
   stackParent: string;
   setStackParent: (stackParent: string) => void;
+  /** Why the session list could not be read. The stack-parent and stack-base pickers are both drawn
+   *  from that one list, so its failure is said here, under the first of them. */
+  sessionsError?: string | null;
 }
 
 /** PR stack parent picker — shown for both session types when orchestrators are available. */
@@ -13,6 +17,7 @@ export function CreateSessionStackParentSelect({
   stackParentOptions,
   stackParent,
   setStackParent,
+  sessionsError = null,
 }: CreateSessionStackParentSelectProps) {
   return (
     <>
@@ -37,6 +42,10 @@ export function CreateSessionStackParentSelect({
           </select>
         </div>
       )}
+      <InlineError
+        testId="create-session-sessions-load-error"
+        message={sessionsError && `Sessions unavailable: ${sessionsError}`}
+      />
     </>
   );
 }

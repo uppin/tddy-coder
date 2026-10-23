@@ -22,12 +22,12 @@ The repo root script **`./web-dev`** starts **`tddy-daemon`** (RPC backend) and 
 
 `./web-dev` runs **two HTTP servers**:
 
-| Port (defaults) | Process | What it serves |
-|-----------------|---------|----------------|
-| **`VITE_PORT`** (default **5173**) | Vite | Dev modules, **HMR**, proxies `/rpc` and `/api` to the daemon |
-| **`listen.web_port`** in daemon YAML (default **8899**) | `tddy-daemon` | **`web_bundle_path`** — usually `packages/tddy-web/dist` from the **last `bun run build`** |
+| Port | Process | What it serves |
+|------|---------|----------------|
+| **`VITE_PORT`** — the checkout's own port (see [Ports and cleanup](#ports-and-cleanup)) unless pinned by `VITE_PORT` or a port in `VITE_URL` | Vite | Dev modules, **HMR**, proxies `/rpc` and `/api` to the daemon |
+| **`DAEMON_PORT`** — the checkout's own port unless set; written into the daemon's temp config over `listen.web_port` | `tddy-daemon` | **`web_bundle_path`** — usually `packages/tddy-web/dist` from the **last `bun run build`** |
 
-**For live edits to React/TS in `packages/tddy-web`, open the Vite URL** (e.g. `http://127.0.0.1:5173`). If you open the daemon URL instead (e.g. `http://127.0.0.1:8899`), the browser loads the **production bundle** from `dist/`; changes to source files will not appear until you rebuild, and there is **no** Vite HMR.
+Both ports are printed at startup. **For live edits to React/TS in `packages/tddy-web`, open the Vite URL** (`=== VITE_URL=… ===`). If you open the daemon URL instead, the browser loads the **production bundle** from `dist/`; changes to source files will not appear until you rebuild, and there is **no** Vite HMR.
 
 The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client is active; if you never see it, you are not on the dev server.
 
@@ -36,8 +36,9 @@ The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client 
 1. **Daemon binary**: `target/debug/tddy-daemon` when present, otherwise `target/release/tddy-daemon`. Build with `cargo build -p tddy-daemon` when the binary is missing.
 2. **Config file**: `DAEMON_CONFIG` selects the YAML path; when unset, the script uses **`dev.daemon.yaml`** at the repo root. The script variable holding that path is named `CONFIG` in the shell; the generic `CONFIG` key from `.env` does **not** supply this path—set **`DAEMON_CONFIG`** for a custom file. That YAML defines **`allowed_tools`** (connection screen **Tool** dropdown via **`ListTools`**) and **`allowed_agents`** (connection screen **Backend** dropdown via **`ListAgents`**); see [Web terminal — Connection screen](web-terminal.md#daemon-mode-connection-screen-project-centric).
 3. **Temp config**: A copy of the YAML is written to a temp file with `CURRENT_USER` replaced by the login name (`sed` with `|` delimiters). The daemon receives `-c` pointing at that file.
-4. **Extra CLI**: Arguments after the script name pass through to `tddy-daemon`. If both the script and the user pass `-c`, the daemon receives two `-c` arguments; the effective config follows daemon rules. **`DAEMON_PORT`** for the Vite proxy comes from the YAML file selected in step 2 (the `grep`/`awk` port line), not from a second `-c` on the command line.
-5. **Vite**: After the daemon answers HTTP **200** on **`GET /api/config`** (not `GET /` — the static bundle under **`web_bundle_path`** may be missing until you run **`bun run build`**), the script starts Vite under `./dev` with `DAEMON_PORT` set for the proxy.
+4. **Extra CLI**: Arguments after the script name pass through to `tddy-daemon`. If both the script and the user pass `-c`, the daemon receives two `-c` arguments; the effective config follows daemon rules. The Vite proxy targets this run's **`DAEMON_PORT`** — the port written into the temp config in step 3 — not a port from a second `-c` on the command line.
+5. **LiveKit**: after the build and before the daemon, `web-dev` brings up this run's LiveKit (see [LiveKit](#livekit)) and exports its `LIVEKIT_*` overrides for the daemon. Its port block is drawn clear of this run's daemon and Vite ports.
+6. **Vite**: After the daemon answers HTTP **200** on **`GET /api/config`** (not `GET /` — the static bundle under **`web_bundle_path`** may be missing until you run **`bun run build`**), the script starts Vite under `./dev` with `DAEMON_PORT` set for the proxy. A daemon that exits before answering ends the wait at once, as an error; one that runs but never answers is an error after 90s.
 
 ## Environment (common)
 
@@ -45,13 +46,55 @@ The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client 
 |----------|------|
 | `DAEMON_CONFIG` | Path to daemon YAML (default `dev.daemon.yaml` at repo root) |
 | `WEB_HOST` | **Bind address** for Vite only (default `127.0.0.1`; `0.0.0.0` = all interfaces). Not the URL you type in the browser. |
-| `VITE_PORT` | Vite port (default `5173`) |
-| `VITE_URL` | **Public app origin** — OAuth, `import.meta.env.VITE_URL`, and what you open in the browser. Default `http://127.0.0.1:<VITE_PORT>`. For LAN: `VITE_URL=http://<your-lan-ip>:5173` (same host/port you use to load the app). `web-dev` sets `WEB_PUBLIC_URL=$VITE_URL` for `tddy-daemon`; do not point `WEB_PUBLIC_URL` at the daemon port (`:8899`) for frontend dev. |
-| LiveKit, GitHub, Telegram | See `web-dev` script header (`LIVEKIT_*`, `GITHUB_*`, `TDDY_TELEGRAM_*`); Telegram details in [telegram-notifications.md](../daemon/telegram-notifications.md) |
+| `VITE_PORT` | Vite port. Default: the checkout's own port in 49152–65535, unless `VITE_URL` names a port |
+| `DAEMON_PORT` | Daemon port. Default: the checkout's own port in 49152–65535 |
+| `VITE_URL` | **Public app origin** — OAuth, `import.meta.env.VITE_URL`, and what you open in the browser. Default `http://127.0.0.1:<VITE_PORT>`. For LAN: `VITE_URL=http://<your-lan-ip>:5173` (same host/port you use to load the app). `web-dev` sets `WEB_PUBLIC_URL=$VITE_URL` for `tddy-daemon`; do not point `WEB_PUBLIC_URL` at the daemon port for frontend dev. |
+| LiveKit | **Started by `web-dev` in Docker by default**; see [LiveKit](#livekit) |
+| GitHub, Telegram | See `web-dev` script header (`GITHUB_*`, `TDDY_TELEGRAM_*`); Telegram details in [telegram-notifications.md](../daemon/telegram-notifications.md) |
 
-## Port cleanup
+## LiveKit
 
-Before starting, the script sends **`fuser -k -9`** on the daemon and Vite TCP ports. On a machine where those ports are shared, free them first or expect processes listening there to be signalled.
+`web-dev` always decides which LiveKit the daemon uses; the daemon YAML does not.
+
+- **Default: its own container.** With no LiveKit credentials in `.env` or the environment,
+  `web-dev` starts a container of the pinned image (`.config/livekit-server.image`) in `--dev` mode,
+  on a random port block in 49152–65535 published 1:1 (LiveKit puts its ports in ICE candidates, so
+  a remapped port would be unreachable for media). A block Docker reports as taken is replaced by
+  another. The container is removed on every exit, error exits included.
+- **Reuse: only with complete credentials.** When `.env` (or the environment) sets all of
+  `LIVEKIT_URL` (or `LIVEKIT_PUBLIC_URL`), `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`, that server is
+  used and no container is started. It must answer at startup: an unreachable one is an error,
+  never a fall back to Docker. A partial set is an error naming the missing variables.
+- **A `livekit:` block in `DAEMON_CONFIG` is overridden.** The daemon reads the exported `LIVEKIT_*`
+  variables as overrides of its YAML, so with no credentials in `.env` the container's URL and
+  `--dev` credentials replace whatever server the YAML names. To run against that server, put its
+  URL, key and secret in `.env`.
+- **`--headless` follows the same rules**: it needs Docker running, or a complete LiveKit in `.env`.
+- A LiveKit `web-dev` did not start is never stopped. See `scripts/dev-livekit.sh`.
+
+Media is reachable from the machine running `web-dev` only: the container advertises `127.0.0.1`,
+so a browser on another machine (a LAN `VITE_URL`) reaches signalling but not media.
+
+## Ports and cleanup
+
+An unpinned daemon or Vite port is **this checkout's own**: derived from the checkout's absolute
+path, it lands in 49152–65535 and is the same on every run here. The browser keeps its session
+token and host-key pins per origin (`http://127.0.0.1:<VITE_PORT>`), so a restart keeps you signed
+in. Different worktrees get different ports, so their runs do not collide. While the checkout's
+port is held by something else, the run takes a random free port instead and says so on stderr;
+that run's origin differs, so the browser starts without its saved session there. Both ports are
+printed at startup.
+
+A **pinned** port (`DAEMON_PORT`, `VITE_PORT`, a port in `VITE_URL` — pin one
+when a real GitHub OAuth app needs a fixed redirect) that is already held is a startup error naming
+the holder's pid and command. **`web-dev` never kills a process it did not start.**
+
+What a run starts — the daemon and Vite (each in its own process group), its LiveKit container and
+temp config — is stopped on every exit: normal, Ctrl+C, the terminal closing, or an error. It is
+also written to **`tmp/web-dev.run`**, with each pid's start time: should a run die without cleaning
+up (`kill -9`, a crashed terminal), the next run in the checkout stops exactly what that record
+lists — never a pid since reused by another process — and refuses to start while the recorded run
+is still alive. See `scripts/dev-process.sh`. Works on macOS's `/bin/bash` 3.2.
 
 ## Browser DEBUG mask
 

@@ -11,6 +11,7 @@
  */
 
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionNotificationEventSchema, SessionNotificationKind, SessionNotificationSource, type SessionNotificationEvent } from "../../../src/gen/activity_pb";
 
 /** One notification, as a spec states it. */
@@ -34,6 +35,8 @@ export interface SessionNotificationFeed {
   readonly push: (frame: SessionNotificationFrame) => void;
   /** How many clients have opened the stream — pins "one subscription for the whole drawer". */
   readonly subscriptionCount: () => number;
+  /** End every open subscription with `Unavailable` and `message` — the daemon's feed dropping. */
+  readonly fail: (message: string) => void;
 }
 
 /** A session working: the agent reported a tool call or a running turn. */
@@ -68,6 +71,7 @@ export function anAttentionNotification(
 
 export function aSessionNotificationFeed(): SessionNotificationFeed {
   const deliverToSubscriber: Array<(event: SessionNotificationEvent) => void> = [];
+  const failSubscriber: Array<(error: ConnectError) => void> = [];
   let subscriptions = 0;
 
   return {
@@ -76,15 +80,21 @@ export function aSessionNotificationFeed(): SessionNotificationFeed {
         subscriptions += 1;
         const queued: SessionNotificationEvent[] = [];
         let wake: () => void = () => undefined;
+        let failure: ConnectError | null = null;
         deliverToSubscriber.push((event) => {
           queued.push(event);
           wake();
         });
-        // Never returns: the real feed lives as long as the screen does.
+        failSubscriber.push((error) => {
+          failure = error;
+          wake();
+        });
+        // Never returns: the real feed lives as long as the screen does — unless a spec fails it.
         for (;;) {
           while (queued.length > 0) {
             yield queued.shift() as SessionNotificationEvent;
           }
+          if (failure) throw failure;
           await new Promise<void>((resolve) => {
             wake = resolve;
           });
@@ -113,5 +123,9 @@ export function aSessionNotificationFeed(): SessionNotificationFeed {
     },
 
     subscriptionCount: () => subscriptions,
+
+    fail: (message: string) => {
+      failSubscriber.forEach((fail) => fail(new ConnectError(message, Code.Unavailable)));
+    },
   };
 }

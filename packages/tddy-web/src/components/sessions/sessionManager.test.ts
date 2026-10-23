@@ -26,6 +26,17 @@ function managerFor(fetched: SessionEntry[]) {
   return manager;
 }
 
+/** A selected host whose pulls fail while `failing` is set, and answer one session otherwise. */
+function aFlakyHost() {
+  const host = { failing: false, manager: new SessionManager() };
+  host.manager.setSelectedInstanceId(SELECTED);
+  host.manager.setFetcher(async () => {
+    if (host.failing) throw new Error("daemon is restarting");
+    return [aSession({ sessionId: SID_ON_SELECTED, daemonInstanceId: SELECTED })];
+  });
+  return host;
+}
+
 describe("SessionManager", () => {
   it("lists the selected host's sessions once a fetcher is set", async () => {
     const manager = managerFor([aSession({ sessionId: SID_ON_SELECTED, daemonInstanceId: SELECTED })]);
@@ -78,5 +89,40 @@ describe("SessionManager", () => {
 
     manager.addOptimisticSession(aSession({ sessionId: SID_ON_SELECTED, daemonInstanceId: SELECTED }));
     expect(manager.sessions).toHaveLength(1); // de-duplicated
+  });
+
+  it("keeps the last good list and says why when a later pull fails", async () => {
+    // Given a host whose first pull answered
+    const host = aFlakyHost();
+    await host.manager.refresh();
+
+    // When the next pull fails
+    host.failing = true;
+    await host.manager.refresh();
+
+    // Then
+    expect(host.manager.loadError).toBe("daemon is restarting");
+    expect(host.manager.sessions.map((s) => s.sessionId)).toEqual([SID_ON_SELECTED]);
+  });
+
+  it("clears the load error once a later pull succeeds", async () => {
+    // Given a host whose last pull failed
+    const host = aFlakyHost();
+    host.failing = true;
+    await host.manager.refresh();
+    expect(host.manager.loadError).toBe("daemon is restarting");
+
+    // When the next pull answers
+    host.failing = false;
+    await host.manager.refresh();
+
+    // Then
+    expect(host.manager.loadError).toBeNull();
+  });
+
+  it("says why there is no list when no fetcher can reach the host", () => {
+    const manager = new SessionManager();
+    manager.setFetcher(null, "Not connected to server-2");
+    expect(manager.loadError).toBe("Not connected to server-2");
   });
 });

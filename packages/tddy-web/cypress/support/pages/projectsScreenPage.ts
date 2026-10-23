@@ -21,6 +21,7 @@ import {
   projectHomeAgentSelect,
   projectHomeAgentError,
   projectHostGh,
+  projectCardError,
   TEST_IDS,
 } from "../testIds";
 
@@ -229,6 +230,27 @@ export const projectsScreenPage = {
   // ---------------------------------------------------------------------------
   // Create project
   // ---------------------------------------------------------------------------
+
+  /** The create-project form (absent once closed). */
+  createProjectForm: () => byTestId(TEST_IDS.projectsCreateProjectForm),
+
+  /** The create-project name input. */
+  newProjectNameInput: () => byTestId(TEST_IDS.projectsNewProjectName),
+
+  /** The create-project submit button. */
+  createProjectSubmit: () => byTestId(TEST_IDS.projectsCreateProjectSubmit),
+
+  /** Why the last create failed. */
+  createProjectError: () => byTestId(TEST_IDS.projectsCreateProjectError, { timeout: 5000 }),
+
+  /** Why the project list could not be loaded. */
+  loadError: () => byTestId(TEST_IDS.projectsLoadError, { timeout: 5000 }),
+
+  /** Why the assignable accounts could not be loaded. */
+  accountsLoadError: () => byTestId(TEST_IDS.projectsAccountsLoadError, { timeout: 5000 }),
+
+  /** Why a project card's last action or load failed. */
+  cardError: (projectId: string) => byTestId(projectCardError(projectId), { timeout: 5000 }),
 
   /** Opens the create-project form. */
   openCreateProjectForm() {

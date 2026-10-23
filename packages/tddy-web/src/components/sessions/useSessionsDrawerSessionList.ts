@@ -44,7 +44,12 @@ export function useSessionsDrawerSessionList({
   const selectedHost = useHostConnection(selectedInstanceId);
   const crossHostSessionsVisible =
     useCapabilityAvailability(selectedHost, "presence") !== "unavailable";
-  const { sessions: sortedSessions, addOptimisticSession, sessionMetadataBySessionId } = useSessionManager(
+  const {
+    sessions: sortedSessions,
+    addOptimisticSession,
+    sessionMetadataBySessionId,
+    loadError: listLoadError,
+  } = useSessionManager(
     client,
     sessionToken,
     participants,
@@ -89,6 +94,7 @@ export function useSessionsDrawerSessionList({
   return {
     crossHostSessionsVisible,
     sortedSessions,
+    listLoadError,
     addOptimisticSession,
     sessionMetadataBySessionId,
     selectedSession,

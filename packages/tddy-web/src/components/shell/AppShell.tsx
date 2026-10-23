@@ -2,6 +2,7 @@ import React from "react";
 import { useAuthContext } from "../../hooks/authProvider";
 import { DaemonNavMenu } from "./DaemonNavMenu";
 import { DaemonSelectorConnected } from "./DaemonSelector";
+import { HostConnectionGate } from "./HostConnectionGate";
 import { UserAvatar } from "../UserAvatar";
 
 const screenShellClassName =
@@ -21,6 +22,12 @@ export interface AppShellProps {
   headerRight?: React.ReactNode;
   /** Test id applied to the shell root element. */
   dataTestId?: string;
+  /**
+   * The screen is scoped to the selected host and can do nothing without an RPC client that
+   * reaches it: its body is blocked by {@link HostConnectionGate} while there is none. Screens that
+   * work without one (settings over the serving daemon, the LiveKit diagnostics) leave this off.
+   */
+  requiresHost?: boolean;
   children: React.ReactNode;
 }
 
@@ -35,6 +42,7 @@ export function AppShell({
   variant = "scroll",
   headerRight,
   dataTestId,
+  requiresHost = false,
   children,
 }: AppShellProps) {
   const { user, logout } = useAuthContext();
@@ -53,7 +61,13 @@ export function AppShell({
           <DaemonSelectorConnected />
           {user ? <UserAvatar user={user} onLogout={logout} /> : null}
         </div>
-        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">{children}</div>
+        {requiresHost ? (
+          <HostConnectionGate className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            {children}
+          </HostConnectionGate>
+        ) : (
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">{children}</div>
+        )}
       </div>
     );
   }
@@ -67,7 +81,7 @@ export function AppShell({
         <DaemonSelectorConnected />
         {user ? <UserAvatar user={user} onLogout={logout} /> : null}
       </div>
-      {children}
+      {requiresHost ? <HostConnectionGate className="min-h-[50svh]">{children}</HostConnectionGate> : children}
     </div>
   );
 }

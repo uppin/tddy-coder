@@ -9,6 +9,11 @@
  * worktree. `refresh()` re-triggers a single (re)calculation for this session's worktree via the
  * unary `CalculateWorktreeSize`; its result surfaces on the open stream.
  *
+ * A failed stream, a failed recalculation, and no client at all are each reported as `error` (the
+ * last good row stays in place beside it) — never left as a `loading` that does not end. The stream
+ * and the recalculation keep separate failures: a recalculation that succeeds clears only its own,
+ * so it cannot make a dead stream look live again.
+ *
  * Feature: docs/ft/web/worktree-disk-usage-streaming.md
  */
 
@@ -21,6 +26,7 @@ import {
   type WorktreeStatsEvent,
 } from "../gen/worktree_pb";
 import type { WorktreeSizeStatus as DomainSizeStatus } from "../lib/worktreeSize";
+import { hostNotConnectedText, rpcFailureText } from "./rpcFailure";
 
 export interface UseSessionWorktreeStatsResult {
   /** The session's own worktree row (matched by `repoPath`), or `null` when missing / not loaded. */
@@ -31,6 +37,11 @@ export interface UseSessionWorktreeStatsResult {
   missing: boolean;
   /** True until the first stream frame resolves. */
   loading: boolean;
+  /**
+   * Why the last recalculation failed, else why the stream failed or that no client reaches the
+   * host; `null` while neither has.
+   */
+  error: string | null;
   /** Re-trigger a size (re)calculation for this session's worktree via `CalculateWorktreeSize`. */
   refresh: () => void;
 }
@@ -77,13 +88,20 @@ export function useSessionWorktreeStats(
 ): UseSessionWorktreeStatsResult {
   const [rows, setRows] = useState<WorktreeRow[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!client) return;
+    setRefreshError(null);
+    if (!client) {
+      setStreamError(hostNotConnectedText(null));
+      return;
+    }
     let cancelled = false;
     // A fresh subscription starts empty — the daemon's first frame is a full snapshot.
     setRows([]);
     setLoaded(false);
+    setStreamError(null);
 
     (async () => {
       try {
@@ -98,10 +116,9 @@ export function useSessionWorktreeStats(
         }
       } catch (err) {
         // A stream aborted on unmount/re-subscribe surfaces as an AbortError; ignore it. Any other
-        // error while still mounted leaves the last-known rows in place (no fallback fabrication).
-        if (!cancelled) {
-          console.debug("[useSessionWorktreeStats] streamWorktreeStats error", err);
-        }
+        // error while still mounted leaves the last-known rows in place (no fallback fabrication)
+        // and is reported.
+        if (!cancelled) setStreamError(rpcFailureText(err));
       }
     })();
 
@@ -111,16 +128,21 @@ export function useSessionWorktreeStats(
   }, [client, sessionToken, projectId]);
 
   const refresh = useCallback(() => {
-    if (!client) return;
-    void client
+    if (!client) {
+      setRefreshError(hostNotConnectedText(null));
+      return;
+    }
+    client
       .calculateWorktreeSize({ sessionToken, projectId, worktreePath: repoPath })
-      .catch((err) => {
-        console.debug("[useSessionWorktreeStats] calculateWorktreeSize error", err);
-      });
+      .then(() => setRefreshError(null))
+      .catch((err: unknown) => setRefreshError(rpcFailureText(err)));
   }, [client, sessionToken, projectId, repoPath]);
 
   const row = rows.find((w) => w.path === repoPath) ?? null;
   const status = row ? domainStatus(row.sizeStatus) : "none";
 
-  return { row, status, missing: loaded && row === null, loading: !loaded, refresh };
+  // The recalculation the operator just asked for outranks the stream's standing failure.
+  const error = refreshError ?? streamError;
+
+  return { row, status, missing: loaded && row === null, loading: !loaded, error, refresh };
 }

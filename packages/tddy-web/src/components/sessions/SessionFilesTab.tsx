@@ -5,6 +5,9 @@ import { Button } from "../ui/button";
 import { formatBytes } from "./formatTraffic";
 import { copyToClipboard } from "../../lib/clipboard";
 import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
+import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
+import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
+import { InlineError } from "../ui/inline-error";
 
 export interface SessionFilesTabProps {
   client: Client<typeof SessionFilesService> | null;
@@ -34,11 +37,23 @@ export function SessionFilesTab({
   // Keyed per row (upload_id + file_name), not per upload_id: one drag gesture can upload several
   // files under the same upload_id, so keying by upload_id alone would arm every sibling's confirm.
   const [pendingDelete, setPendingDelete] = useState<Set<string>>(new Set());
+  // True once a list arrived: until then (or when no list ever did) there is no "no files" to show.
+  const [loaded, setLoaded] = useState(false);
+  // Why the last list failed — the last good list stays shown beside it.
+  const [listError, setListError] = useState<string | null>(null);
+  // Why each row's last delete failed, keyed like `pendingDelete`.
+  const deleteFailures = useKeyedActionFailure();
 
   const load = useCallback(async () => {
-    if (!client) return;
-    const res = await client.listSessionUploads({ sessionToken, sessionId });
-    setUploads(res.uploads);
+    try {
+      if (!client) throw hostNotConnected(null);
+      const res = await client.listSessionUploads({ sessionToken, sessionId });
+      setUploads(res.uploads);
+      setLoaded(true);
+      setListError(null);
+    } catch (e) {
+      setListError(rpcFailureText(e));
+    }
   }, [client, sessionToken, sessionId]);
 
   useEffect(() => {
@@ -48,13 +63,20 @@ export function SessionFilesTab({
   const rowKey = (entry: SessionUploadEntry) => entry.uploadId + "/" + entry.fileName;
 
   async function onConfirmDelete(entry: SessionUploadEntry) {
-    if (!client) return;
-    await client.deleteSessionUpload({
-      sessionToken,
-      sessionId,
-      uploadId: entry.uploadId,
-      fileName: entry.fileName,
-    });
+    const key = rowKey(entry);
+    deleteFailures.clear(key);
+    try {
+      if (!client) throw hostNotConnected(null);
+      await client.deleteSessionUpload({
+        sessionToken,
+        sessionId,
+        uploadId: entry.uploadId,
+        fileName: entry.fileName,
+      });
+    } catch (e) {
+      deleteFailures.report(key, e);
+      return;
+    }
     setPendingDelete((prev) => {
       const next = new Set(prev);
       next.delete(rowKey(entry));
@@ -78,7 +100,8 @@ export function SessionFilesTab({
       data-testid="session-files-panel"
       className="px-3 py-3 flex flex-col gap-2 text-xs text-muted-foreground"
     >
-      {uploads.length === 0 ? (
+      <InlineError testId="session-files-error" message={listError} className="text-xs" />
+      {!loaded ? null : uploads.length === 0 ? (
         <div data-testid="session-files-empty" className="flex flex-col gap-1">
           <p>No files uploaded to this session yet.</p>
           <p>Drop files on the terminal to upload them.</p>
@@ -151,6 +174,11 @@ export function SessionFilesTab({
                   </Button>
                 ) : null}
               </div>
+              <InlineError
+                testId={`session-upload-delete-error-${entry.fileName}`}
+                message={deleteFailures.errors[rowKey(entry)]}
+                className="text-xs"
+              />
             </div>
           );
         })
