@@ -987,6 +987,16 @@ export const livekitRoomParticipantMetadata = (room: string, identity: string) =
 /** `[data-testid="sessions-drawer-item-<sessionId>"]` — clickable drawer row */
 export const sessionsDrawerItem = (sessionId: string) => `sessions-drawer-item-${sessionId}`;
 
+/** `[data-testid="sessions-drawer-project-group-<projectId|other>"]` — one project's group in the
+ *  expanded drawer (`#project-home` 2/7); `other` is the trailing group of project-less sessions. */
+export const sessionsDrawerProjectGroup = (projectKey: string) =>
+  `sessions-drawer-project-group-${projectKey}`;
+
+/** `[data-testid="sessions-drawer-project-group-header-<projectId|other>"]` — the group's header:
+ *  project name and session count; clicking it collapses or expands the group. */
+export const sessionsDrawerProjectGroupHeader = (projectKey: string) =>
+  `sessions-drawer-project-group-header-${projectKey}`;
+
 /** `[data-testid="sessions-drawer-stack-<parentSessionId>"]` — collapsible <details> group */
 export const sessionsDrawerStackGroup = (parentSessionId: string) =>
   `sessions-drawer-stack-${parentSessionId}`;

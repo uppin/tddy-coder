@@ -48,6 +48,31 @@ the list is split into an **Active** and a **Remaining** partition (see
 [Active / Remaining Partition Separator](#active--remaining-partition-separator)); there is no
 per-session active-first re-sort (contrast with `sortSessionsForDisplay` used by `ConnectionScreen`).
 
+## Project Groups
+
+The open drawer groups its sessions per project. Each group is a collapsible header showing the
+project's name and the number of sessions in it, followed by the group's body.
+
+- **Order**: groups are ordered by project name, case-insensitive. Project names come from the
+  `ListProjects` rows the screen already loads (`SessionsDrawerScreen` passes them as `projects`).
+- **Other**: sessions with no project, or whose project the drawer does not know, form a trailing
+  **Other** group. It is absent when it would be empty.
+- **Body**: inside a group the drawer keeps the Active / Remaining partition and the stack-group
+  nesting below, computed over that group's sessions only. A group with sessions in only one
+  partition shows no separators.
+- **Collapse**: clicking a header collapses or expands the group; groups start expanded. The
+  collapsed set is remembered per viewer in browser storage (`tddy.sessionsDrawer.collapsedProjects`,
+  keyed by project id, `other` for the trailing group). Storage that cannot be read means every group
+  is expanded.
+- **Selection**: selecting a session expands the group that holds it, so a selected row is never
+  hidden; the viewer can collapse it again afterwards.
+
+The collapsed 12px strip, bulk selection and delete, cross-host badges and deep links are unchanged
+by grouping.
+
+Implementation: `groupSessionsByProject` (`src/utils/sessionProjectGroups.ts`),
+`SessionProjectGroup` and `projectGroupCollapse.ts` (`src/components/sessions/`).
+
 ## Indicator Token
 
 The row's dot (`SessionIndicatorDot`, shared by the expanded list and the collapsed strip) shows one
@@ -75,7 +100,7 @@ blind to activity: a row must not change partition because an agent ran a tool.
 
 ## Active / Remaining Partition Separator
 
-The open drawer splits its session list into two partitions with a collapsible separator header
+Inside each [project group](#project-groups), the open drawer splits its sessions into two partitions with a collapsible separator header
 between them, so live sessions stay at the top and finished ones tuck away:
 
 - **Active partition** — sessions whose status dot is **green or yellow**, i.e.
