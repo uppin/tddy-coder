@@ -50,3 +50,11 @@ finding is a lead, not an issue.
 
 **Regressed by one line:** 176 → 177 lines by brace matching (nesting 5, unchanged). A `CloneRequest` construction gained
 `env: Default::default()`, the field the forked worker now carries. Not claimed by any PR.
+
+## Measurement update 2026-10-23 — `#project-home` 1/7 (#696)
+
+**Better, not clean:** 175 → 153 lines (same brace-matching count, merge-base `origin/master` and HEAD).
+#696 adds `home_agent: None` to the project literal (+1) and replaces the inline peer-routing block
+(eligible ids, `classify_peer_route`, the common-room check) with the shared
+`ProjectRpcHandler::coordinate_route` in `project/coordinate_route.rs` (−23). Still over the 60-line
+ceiling: the validation, idempotent-return and clone legs remain inline. Not claimed by any PR.

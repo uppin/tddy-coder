@@ -2070,6 +2070,7 @@ mod tests {
             default_remote: String::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: String::new(),
         }
     }
 

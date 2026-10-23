@@ -8,7 +8,7 @@ this crate supplies the `H`.
 
 | Handler | Coordinate | Trait it implements (defined in) | RPCs |
 |---|---|---|---|
-| `ProjectRpcHandler` | `project.ProjectService` (family D) | `ProjectHandler` (`tddy-projects`) | `ListProjects`, `CreateProject`, `AddProjectToHost`, `ListProjectBranches`, `SetProjectDefaultBranch`, `SetProjectAccounts` |
+| `ProjectRpcHandler` | `project.ProjectService` (family D) | `ProjectHandler` (`tddy-projects`) | `ListProjects`, `CreateProject`, `AddProjectToHost`, `ListProjectBranches`, `SetProjectDefaultBranch`, `SetProjectAccounts`, `SetProjectHomeAgent` |
 | `CatalogRpcHandler` | `catalog.CatalogService` (family A) | `CatalogHandler` (`tddy-discovery`) | `ListTools`, `ListAgents`, `ListAgentModels`, `ListSubagents` |
 | `ExecToolRpcHandler` | `exec_tools.ExecToolService` (family L) | `ExecToolHandler` (`tddy-tool-engine`) | `ExecuteTool`, `StreamExecuteTool`, `ListExecTools`, `ListSessionToolCalls` |
 | `PrStackRpcHandler` | `pr_stack.PrStackService` (family P) | `PrStackHandler` (`tddy-pr-stack`) | `AddPlannedPr`, `GetPrStatus`, `QueryBranch`, `ResolveStackBase`, `LinkStackNode`, `RepointPlannedPr`, `ReorderPlannedPr`, `PullBaseIntoBranch` |
@@ -176,7 +176,7 @@ workspace jails, hosted clones, peer roster and token store the host does. **No 
 
 | Handler | Fields | Budget |
 |---|---|---:|
-| `ProjectRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `eligible_daemon_source`, `spawn_client`, `common_room_livekit_room` | 6 |
+| `ProjectRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `eligible_daemon_source`, `spawn_client`, `common_room_livekit_room`, `model_registry` (the home-agent catalog check) | 7 |
 | `CatalogRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `model_registry`, `rpc_activity` | 5 |
 | `ExecToolRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `peer_routing`, `rpc_activity`, `local_exec_tools` | 9 |
 | `PrStackRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `credential_vaults`, `rpc_activity`, `peer_routing` | 7 |
@@ -213,8 +213,8 @@ returns the storage refusal of a GitHub assignment together with it as `InvalidA
 
 | Module | Holds |
 |---|---|
-| `project` | the struct; `ports.rs` (`ProjectHandler`), `coordinate_handlers.rs` (the RPC bodies), `entries.rs` (project row → `ProjectEntry`, `merge_listed_projects_with_peers`, default-remote resolution), `clone_destination.rs` (where a clone under the caller's home lands) |
-| `catalog` | the struct; `ports.rs` (`CatalogHandler`), `agent_models.rs` (the `tddy-tools list-models` probe, its parse and the short-lived cache in front of it), `subagent_row.rs` (resolved agent def → `ListSubagents` row) |
+| `project` | the struct; `ports.rs` (`ProjectHandler`), `coordinate_handlers.rs` (the RPC bodies), `coordinate_route.rs` (`coordinate_route`: local or forwarded to the named peer — the one routing rule every per-host setter uses), `home_agent_handler.rs` (`SetProjectHomeAgent`: route, catalog check, write), `entries.rs` (project row → `ProjectEntry`, `merge_listed_projects_with_peers`, default-remote resolution), `clone_destination.rs` (where a clone under the caller's home lands) |
+| `catalog` | the struct; `ports.rs` (`CatalogHandler`), `agent_models.rs` (the `tddy-tools list-models` probe, its parse and the short-lived cache in front of it), `subagent_row.rs` (resolved agent def → `ListSubagents` row), `agent_rows.rs` (`listed_agents`: the `ListAgents` rows — allowlist, model-registry assistants, harness profiles — shared with the home-agent check) |
 | `exec_tool` | the struct; `ports.rs` (`ExecToolHandler`), `path_guard.rs` (the traversal check every path-bearing tool's arguments pass before any I/O), `result_frames.rs` (`StreamExecuteTool` framing, `EXEC_TOOL_FRAME_BYTES`) |
 | `pr_stack` | the struct; `ports.rs` (`PrStackHandler`), `guards.rs` (`require_pr_stack_orchestrator`, `validate_repoint_target` — the refusals a mutation runs before it touches an orchestrator's plan), `pr_status.rs` (the PR leg of a branch resolution, read with the calling operator's GitHub credential), `branch_legs.rs` (the base-sync and worktree legs `QueryBranch` / `PullBaseIntoBranch` report) |
 | `families` | `RpcHandlers` and its `DaemonRpcFamilies` implementation |

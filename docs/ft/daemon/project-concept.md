@@ -18,6 +18,7 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 | `main_branch_ref` | Optional. Remote-tracking ref (`origin/<path>`) used as the integration base for worktree fetch and checkout (e.g. `origin/main`, `origin/release/2025`). Set/updated from the Projects UI. Omitted (legacy) rows resolve live at resolution time (`origin/master` → `origin/main` → `origin/HEAD`); see [Git integration base ref](../coder/git-integration-base-ref.md). |
 | `accounts` | Optional. The accounts the project uses, as provider and account id pairs, at most one per provider. Ids are minted by the credential vault of the host that stored them. Empty means no account is assigned. Set from the Projects UI; see [Account assignment](#account-assignment). |
 | `local_gh` | Optional, off by default. The project's sessions take their GitHub identity from the host's own `gh` login instead of an account; see [Local gh](#local-gh). |
+| `home_agent` | Optional. The agent (a `CatalogService.ListAgents` id) the project's project-home session runs; see [Home agent](#home-agent). Absent means none is configured. |
 | `host_repo_paths` | Per-host (or per-daemon-instance) checkout paths keyed by host key; see multi-host daemon docs. |
 
 ## Account assignment
@@ -52,6 +53,21 @@ login rather than a vault account ([per-project GitHub identity](github-identity
   uses this host's row: Local gh when set, the vault assignment as before.
 - **Local gh needs a readable git URL**: its host decides which `gh` login is asked, and one that
   cannot be read is refused rather than assumed to be `github.com`.
+
+## Home agent
+
+A project can name the agent its **project-home session** runs, chosen from the Projects screen.
+
+- **Set with `SetProjectHomeAgent`** (`project_id`, `home_agent`, `daemon_instance_id`), routed to one
+  host exactly like `SetProjectDefaultBranch`. An empty `home_agent` clears the setting.
+- **Only a listed agent is stored.** A non-empty id the writing daemon's `ListAgents` does not list is
+  refused with `InvalidArgument` and nothing is written — a typo surfaces where it was entered, not
+  when the home session later fails to start. A forwarded write is checked against the peer's own
+  catalog.
+- **Rows written by older daemons** have no `home_agent` key and read as unset; clearing writes no key.
+- `ListProjects` reports it as `ProjectEntry.home_agent` (empty = unset).
+- Like the account list, the write reaches one host (see
+  [the open TODO](../../dev/todo/2026-10-14-project-account-assignment-reaches-one-host.md)).
 
 ## Storage
 

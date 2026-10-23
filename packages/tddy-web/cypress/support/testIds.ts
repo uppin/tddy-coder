@@ -1448,6 +1448,15 @@ export const projectAccountUnavailable = (projectId: string, provider: string) =
  *  its GitHub identity from each host's own `gh` login instead of a vault account. */
 export const projectLocalGhToggle = (projectId: string) => `project-local-gh-toggle-${projectId}`;
 
+/** `[data-testid="project-home-agent-select-<projectId>"]` — the agent the project's project-home
+ *  session runs (`#project-home` 1/7). */
+export const projectHomeAgentSelect = (projectId: string) =>
+  `project-home-agent-select-${projectId}`;
+
+/** `[data-testid="project-home-agent-error-<projectId>"]` — why the last home agent change was
+ *  refused, on that project's card. */
+export const projectHomeAgentError = (projectId: string) => `project-home-agent-error-${projectId}`;
+
 /** `[data-testid="project-host-gh-<projectId>-<daemonInstanceId>"]` — on a Local gh project's host
  *  row: whether that host's `gh` is logged in for the project's GitHub host, and as whom. */
 export const projectHostGh = (projectId: string, daemonInstanceId: string) =>
