@@ -4,14 +4,14 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { PARAM_HOST, PARAM_PROJECT } from "./appLocation";
-import { PROJECTS_ROUTE } from "./appRoutes";
+import { PARAM_FULL, PARAM_HOST, PARAM_INSPECTOR, PARAM_PROJECT } from "./appLocation";
+import { PROJECTS_ROUTE, SESSIONS_DRAWER_ROUTE } from "./appRoutes";
 import { projectSetupLocation } from "./projectSetupLocation";
 
 describe("projectSetupLocation", () => {
   it("names the project on the Projects screen", () => {
     // Given
-    const current = { path: "/sessions", params: {} };
+    const current = { path: SESSIONS_DRAWER_ROUTE, params: {} };
 
     // When
     const next = projectSetupLocation(current, "proj-beta");
@@ -22,7 +22,7 @@ describe("projectSetupLocation", () => {
 
   it("keeps the selected host", () => {
     // Given
-    const current = { path: "/sessions", params: { [PARAM_HOST]: "mac" } };
+    const current = { path: SESSIONS_DRAWER_ROUTE, params: { [PARAM_HOST]: "mac" } };
 
     // When
     const next = projectSetupLocation(current, "proj-beta");
@@ -31,9 +31,12 @@ describe("projectSetupLocation", () => {
     expect(next.params).toEqual({ [PARAM_HOST]: "mac", [PARAM_PROJECT]: "proj-beta" });
   });
 
-  it("drops the sessions screen's own selection, which names nothing on Projects", () => {
+  it("drops the selected session's inspector state, which names nothing on Projects", () => {
     // Given
-    const current = { path: "/sessions", params: { [PARAM_HOST]: "mac", session: "s1", inspector: "files" } };
+    const current = {
+      path: `${SESSIONS_DRAWER_ROUTE}/s1`,
+      params: { [PARAM_HOST]: "mac", [PARAM_INSPECTOR]: "files", [PARAM_FULL]: "1" },
+    };
 
     // When
     const next = projectSetupLocation(current, "proj-beta");

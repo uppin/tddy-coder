@@ -10,25 +10,16 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
 import { create } from "@bufbuild/protobuf";
-import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionEntrySchema, type SessionEntry } from "../../src/gen/session_pb";
 import { SessionDrawer, type ProjectHomeInfo } from "../../src/components/sessions/SessionDrawer";
-import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
 import { AgentInfoSchema, CatalogService } from "../../src/gen/catalog_pb";
-import { ProjectEntrySchema, ProjectService, type ProjectEntry } from "../../src/gen/project_pb";
-import { AccountsService } from "../../src/gen/accounts_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
+import { ProjectService } from "../../src/gen/project_pb";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { mountWithRpc } from "../support/rpc/inMemory";
+import { aProject, aProjectsBackend, projectsAppPage } from "../support/rpc/projectsAppPageFixtures";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
 import { byTestId, sessionsDrawerProjectHome } from "../support/testIds";
-
-const LOCAL_HOST = "workstation-1";
-const DAEMON_HOSTS: DaemonHost[] = [{ instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)" }];
 
 const ALPHA = { projectId: "proj-alpha", name: "alpha" };
 const BETA = { projectId: "proj-beta", name: "beta" };
@@ -69,35 +60,25 @@ function aDrawer(handlers: {
   );
 }
 
-function aProject(projectId: string, name: string): ProjectEntry {
-  return create(ProjectEntrySchema, {
-    projectId,
-    name,
-    gitUrl: `https://example.com/${name}.git`,
-    mainRepoPath: `/home/dev/repos/${name}`,
-    daemonInstanceId: LOCAL_HOST,
-    homeAgent: "",
-  });
-}
-
+/** The Projects page listing ALPHA and BETA, neither with a home agent, and one catalog agent to pick. */
 function theProjectsPage() {
-  const backend = anInMemoryRpcBackend()
-    .onUnary(ProjectService.method.listProjects, () => ({
-      projects: [aProject(ALPHA.projectId, ALPHA.name), aProject(BETA.projectId, BETA.name)],
-    }) as never)
-    .onUnary(ProjectService.method.listProjectBranches, () => ({ branches: [], defaultRemote: "origin" }) as never)
-    .onUnary(CatalogService.method.listAgents, () => ({
-      agents: [create(AgentInfoSchema, { id: "claude", label: "Claude" })],
-    }) as never)
-    .onUnary(AccountsService.method.listAccounts, () => ({ providers: [] }) as never);
-  mountWithRpc(
-    <AuthProvider>
-      <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-        <ProjectsAppPage onNavigate={cy.stub()} />
-      </SelectedDaemonProvider>
-    </AuthProvider>,
-    backend,
+  const projects = [ALPHA, BETA].map(({ projectId, name }) =>
+    aProject({
+      projectId,
+      name,
+      gitUrl: `https://example.com/${name}.git`,
+      mainRepoPath: `/home/dev/repos/${name}`,
+      homeAgent: "",
+    }),
   );
+  const backend = aProjectsBackend((b) =>
+    b
+      .onUnary(ProjectService.method.listProjects, () => ({ projects }))
+      .onUnary(CatalogService.method.listAgents, () => ({
+        agents: [create(AgentInfoSchema, { id: "claude", label: "Claude" })],
+      })),
+  );
+  mountWithRpc(projectsAppPage(), backend);
 }
 
 beforeEach(() => {

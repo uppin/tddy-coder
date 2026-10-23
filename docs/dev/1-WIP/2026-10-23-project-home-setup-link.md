@@ -77,3 +77,36 @@ screen:
 - [x] Projects: focus the picker named by `PARAM_PROJECT`
 - [x] The existing `SessionsDrawerProjectHomeAcceptance` specs stay green ("shows a hint instead of
       starting" keeps its hint and no-ensure assertions)
+
+## Validation Results
+
+**2026-10-23 — `/pr-wrap` steps 1–5** (range `origin/fix/web-dev-livekit-and-visible-errors..HEAD`, 2
+commits, `tddy-web` only)
+
+- **/validate-changes** — stack gate ✅ (range holds this PR's 2 commits only; no parent-owned file
+  deleted). Boundary ✅: every Scope item has code behind it; nothing from `## Dependencies`
+  implemented here; the has-a-home-agent path is unchanged. 0 critical, 1 warning, 2 info:
+  - ⚠️ Feature docs are stale and nothing in this changeset carries their delta to wrap:
+    `docs/ft/web/session-drawer.md` § Pinned main entry (line 85, "shows a hint … and starts
+    nothing" — the click now opens Projects) and `docs/ft/web/projects-screen-multi-host.md`
+    § Home agent (no mention of `#/projects?project=<id>` focusing the picker). Left for the wrap /
+    developer.
+  - ℹ `openProjectSetup` lives in `useSessionsDrawerInspector`, whose name no longer covers it; kept
+    there because `SessionsDrawerScreen.tsx` is at the 500-line budget (its split is the
+    developer's, see #706).
+  - ℹ A no-agent "main" keeps `text-muted-foreground` styling while now being an action.
+- **/validate-tests** — 7 tests (4 Cypress component, 3 bun). Fixed 2 warnings:
+  - `ProjectHomeSetupLinkAcceptance.cy.tsx` re-built the Projects page's providers, hosts and
+    backend inline (and cast answers `as never`); it now uses `projectsAppPage()` /
+    `aProjectsBackend()` / `aProject()` from `cypress/support/rpc/projectsAppPageFixtures.tsx`.
+  - `projectSetupLocation.test.ts` used literal `"/sessions"`, `session`, `inspector` — `session` is
+    not a param (selection is the path). Now `SESSIONS_DRAWER_ROUTE`, `/sessions/s1`,
+    `PARAM_INSPECTOR`, `PARAM_FULL`; the test name says what it drops.
+- **/validate-prod-ready** — ✅ Ready: no mocks, fallbacks, TODO/FIXME, debug output or dead code in
+  the 10 production files.
+- **/analyze-clean-code** — A. No new function over 40 lines; no touched file over 500
+  (`SessionsDrawerScreen.tsx` stays at exactly 500, +2 in this PR, split deferred to the developer).
+- **Re-validation** — `bun test src/routing/projectSetupLocation.test.ts` 3/3 ✅; Cypress component
+  (scoped) `ProjectHomeSetupLinkAcceptance` 4/4, `SessionsDrawerProjectHomeAcceptance` 7/7,
+  `ProjectsScreenHomeAgentAcceptance` 2/2 ✅; `tsc --noEmit` reports no error in a touched file.
+  Full Cypress is CI's.
