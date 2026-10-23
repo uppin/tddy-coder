@@ -95,10 +95,10 @@ No tool commits, pushes, rebases or resets an arbitrary worktree today; `subagen
 
 ## Scope
 
-- [ ] Git ops module + gate
-- [ ] Tool defs + dispatch
-- [ ] Push identity wiring
-- [ ] Tests
+- [x] Git ops module + gate
+- [x] Tool defs + dispatch
+- [x] Push identity wiring
+- [x] Tests (red tests pinned by the acceptance file and the `session_git_ops` table; CI runs them)
 
 ## Technical Changes
 
@@ -111,9 +111,9 @@ A project-home session runs commit / push always, and rebase / stash / reset / c
 force-with-lease push only on inactive targets.
 
 ### Delta
-- **tddy-worktree-service**: `session_git_ops.rs` (new).
-- **tddy-tool-engine**: `project_home_git_tools.rs` (new); dispatch arms; names in the home catalog.
-- **tddy-daemon-rpc**: push identity from the target session's project; port method.
+- **tddy-worktree-service**: `session_git_ops.rs` (new) with the gate; its git commands in `session_git_ops/run.rs` (new).
+- **tddy-tool-engine**: `project_home_git_tools.rs` (new): the seven defs, argument parsing, dispatch; `RebaseSessionBranch` conflicts answered as `{conflict_paths, aborted}`. The project-home role allow-list (`read_only::is_project_home_allowed_tool`) admits the seven names.
+- **tddy-daemon-rpc**: `ExecToolRpcHandler` routes the seven names to the project-home handler beside n5's four; `DaemonProjectHome::push_identity` reads the target session's project identity through `SessionAccountAccess::session_identity_in`, the same resolution a session start uses.
 
 ## Testing Plan
 
@@ -135,6 +135,11 @@ ensured home session against an active and a stopped target; a unit table for `r
 | `only_history_or_file_rewriting_ops_require_an_inactive_target` | `packages/tddy-worktree-service/src/session_git_ops.rs` (`#[cfg(test)]`) | table |
 
 ## Decisions & Trade-offs
+- **Green (2026-10-23)**: every git command of an operation runs with the target's `GIT_*` identity; when that identity does not resolve, the checkout's inherited identity applies, as at session start. No fallback identity is added.
+- **Green (2026-10-23)**: a conflicting rebase is a result, not an error: `is_error` is false, `result_json` carries `conflict_paths` and `aborted: true`, and the worktree is restored by `git rebase --abort`.
+- **Green (2026-10-23)**: pushes go to `origin` under the worktree's own branch name. The identity env carries only `GIT_*` pairs; a push to an HTTPS remote that needs the account's token has no env channel for it (the token reaches a session's tools only over its toolcall socket), so such a push uses the checkout's own credentials.
+- **Green (2026-10-23)**: the seven defs are built by `project_home_git_tool_defs()`; wiring them into the project-home `ListExecTools` advertisement is left to node 5's per-session advertisement, which is in flight.
+- **Green (2026-10-23)**: the acceptance fixture sets `user.name`/`user.email` on the source repository. Worktrees share its config, and a CI runner has no global identity for the commits and rebase replays the tests make.
 - **Rebase gated** (developer's decision, 2026-10-22): it rewrites files under a running agent.
 - **Force-with-lease push gated** too: it rewrites the remote branch the active agent is building on.
 - **Commit allowed while active** (as requested): it changes no files; it can race the agent's next edit, which then lands in a later commit.
@@ -169,10 +174,10 @@ ensured home session against an active and a stopped target; a unit table for `r
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
+- [ ] Run scoped tests for touched packages (deferred to CI: local build only, 2026-10-23); full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

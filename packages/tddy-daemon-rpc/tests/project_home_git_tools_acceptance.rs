@@ -37,6 +37,10 @@ fn git(cwd: &Path, args: &[&str]) -> String {
 fn a_repo_with_origin() -> tempfile::TempDir {
     let repo = tempfile::tempdir().unwrap();
     git(repo.path(), &["init", "-q", "-b", "main"]);
+    // The daemon commits and rebases in worktrees of this repository, which share its config; a
+    // CI runner has no global identity for them to fall back on.
+    git(repo.path(), &["config", "user.name", "Test"]);
+    git(repo.path(), &["config", "user.email", "t@t.com"]);
     git(
         repo.path(),
         &["commit", "-q", "--allow-empty", "-m", "init"],

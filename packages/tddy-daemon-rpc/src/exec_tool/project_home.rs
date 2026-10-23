@@ -24,13 +24,16 @@ use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{ListSessionsRequest, StartSessionRequest};
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
+use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
 use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 use tddy_tool_engine::catalog::ToolDef;
+use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
 use tddy_tool_engine::project_home_tools::{
     execute_project_home_tool, is_project_home_tool, session_offered_catalog, ListedSession,
     ProjectHomePort, StartProjectSessionArgs,
 };
-use tddy_worktree_service::session_target::{HomeCaller, TargetRecord};
+use tddy_worktree_service::session_git_ops::PushIdentity;
+use tddy_worktree_service::session_target::{HomeCaller, SessionTarget, TargetRecord};
 
 use super::ExecToolRpcHandler;
 
@@ -43,7 +46,7 @@ impl ExecToolRpcHandler {
         sessions_base: &Path,
         worktree_root: &Path,
     ) -> Result<ExecuteToolResponse, Status> {
-        if !is_project_home_tool(&req.tool_name) {
+        if !is_project_home_tool(&req.tool_name) && !is_project_home_git_tool(&req.tool_name) {
             return Ok(self
                 .local_exec_tools
                 .run_exec_tool_locally(req, sessions_base, worktree_root)
@@ -56,6 +59,12 @@ impl ExecToolRpcHandler {
             os_user: self.os_user_of(&req.session_token)?,
             sessions_base: sessions_base.to_path_buf(),
             tddy_data_dir: self.tddy_data_dir.clone(),
+            identity: SessionAccountAccess::new(
+                self.credential_vaults.clone(),
+                self.user_resolver.clone(),
+                &req.session_token,
+            )
+            .with_github_cli(self.github_cli.clone()),
         };
         let outcome = execute_project_home_tool(&port, &home, &req.tool_name, &req.args_json).await;
         let response = ExecuteToolResponse {
@@ -186,6 +195,8 @@ struct DaemonProjectHome {
     os_user: String,
     sessions_base: PathBuf,
     tddy_data_dir: PathBuf,
+    /// Reads the signed-in person's vault for a target's GitHub identity, as a session start does.
+    identity: SessionAccountAccess,
 }
 
 /// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the
@@ -315,6 +326,33 @@ impl ProjectHomePort for DaemonProjectHome {
         Ok(started.session_id)
     }
 
+    async fn push_identity(&self, target: &SessionTarget) -> anyhow::Result<PushIdentity> {
+        let identity = self.identity.clone();
+        let os_user = self.os_user.clone();
+        let sessions_base = self.sessions_base.clone();
+        let tddy_data_dir = self.tddy_data_dir.clone();
+        let session_id = target.session_id.clone();
+        let project_id = target.project_id.clone();
+        let env = tokio::task::spawn_blocking(move || {
+            let project = match registered_project(&tddy_data_dir, &os_user, &project_id) {
+                Ok(project) => Some(project),
+                Err(reason) => {
+                    log::warn!(
+                        "project-home git: target session {session_id} has no git identity: its project could not be read: {reason}"
+                    );
+                    None
+                }
+            };
+            let session_dir = unified_session_dir_path(&sessions_base, &session_id);
+            identity
+                .session_identity_in(&session_id, &os_user, &session_dir, project.as_ref())
+                .git_environment
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("reading the target's git identity failed: {e}"))?;
+        Ok(PushIdentity { env })
+    }
+
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>> {
         Ok(self
             .rows()
@@ -345,4 +383,17 @@ fn tag_orchestrator(
     changeset.orchestrator_session_id = Some(home_session_id.to_string());
     tddy_core::write_changeset(&session_dir, &changeset)?;
     Ok(())
+}
+
+/// The project `project_id` registered for `os_user`, or why it could not be read.
+fn registered_project(
+    tddy_data_dir: &Path,
+    os_user: &str,
+    project_id: &str,
+) -> Result<tddy_projects::project_storage::ProjectData, String> {
+    let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
+        .ok_or_else(|| "could not resolve projects path".to_string())?;
+    tddy_projects::project_storage::find_project(&projects_dir, project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "project not found".to_string())
 }

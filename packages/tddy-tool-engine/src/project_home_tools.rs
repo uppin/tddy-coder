@@ -20,6 +20,7 @@ use std::path::{Component, Path};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tddy_worktree_service::session_git_ops::PushIdentity;
 use tddy_worktree_service::session_target::{
     resolve_session_target, HomeCaller, SessionTarget, TargetRecord,
 };
@@ -30,6 +31,7 @@ use tddy_worktree_service::worktree_files::{
 use crate::catalog::{tool_catalog, ToolDef};
 use crate::project_home_diff::worktree_diff;
 use crate::read_only::is_project_home_allowed_tool;
+use crate::project_home_git_tools::{execute_project_home_git_tool, is_project_home_git_tool};
 use crate::ToolOutcome;
 
 pub const LIST_PROJECT_SESSIONS: &str = "ListProjectSessions";
@@ -121,6 +123,10 @@ pub trait ProjectHomePort: Send + Sync {
 
     /// Every session on this daemon, as [`tddy_worktree_service::session_target`] resolves them.
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>>;
+
+    /// The git environment `target`'s own commits and pushes run under, from its project's
+    /// identity (`#project-home` 7/7). Empty when that identity does not resolve.
+    async fn push_identity(&self, target: &SessionTarget) -> anyhow::Result<PushIdentity>;
 }
 
 /// The four tools' definitions, as advertised to a project-home session.
@@ -177,7 +183,7 @@ fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
     }
 }
 
-/// Run one of the four project-home tools for `home`.
+/// Run one of the project-home tools for `home`: the four here, or the seven git tools.
 ///
 /// A target or path refusal, and a failure of the port, come back as an `is_error` outcome whose
 /// message names what was refused. The role refusal is not here: it is the daemon's, and happens
@@ -188,6 +194,9 @@ pub async fn execute_project_home_tool(
     tool_name: &str,
     args_json: &str,
 ) -> ToolOutcome {
+    if is_project_home_git_tool(tool_name) {
+        return execute_project_home_git_tool(port, home, tool_name, args_json).await;
+    }
     let args: Value = match serde_json::from_str(args_json) {
         Ok(v) => v,
         Err(e) => return ToolOutcome::err(format!("invalid args_json: {e}")),
@@ -242,7 +251,7 @@ fn parse_target_args(tool_name: &str, args: Value) -> Result<TargetArgs, ToolOut
 }
 
 /// Resolve the target named in `session_id` for `home`, or the refusal as an outcome.
-async fn resolve_target(
+pub(crate) async fn resolve_target(
     port: &dyn ProjectHomePort,
     home: &HomeCaller,
     session_id: &str,

@@ -16,11 +16,14 @@ pub fn is_read_only_tool(name: &str) -> bool {
     READ_ONLY_TOOLS.contains(&name)
 }
 
-/// Whether a project-home session may run `name`: a read-only exec tool, or one of the four
-/// project-home session tools (`#project-home` 5/7). [`is_read_only_tool`] itself is unchanged, so
-/// the read-only catalog and every other answer it gives stay as they were.
+/// Whether a project-home session may run `name`: a read-only exec tool, one of the four
+/// project-home session tools (`#project-home` 5/7), or one of the seven project-home git tools
+/// (`#project-home` 7/7). [`is_read_only_tool`] itself is unchanged, so the read-only catalog and
+/// every other answer it gives stay as they were.
 pub fn is_project_home_allowed_tool(name: &str) -> bool {
-    is_read_only_tool(name) || crate::project_home_tools::is_project_home_tool(name)
+    is_read_only_tool(name)
+        || crate::project_home_tools::is_project_home_tool(name)
+        || crate::project_home_git_tools::is_project_home_git_tool(name)
 }
 
 /// The prefix `claude` gives a tool served by the `tddy-tools` MCP server.

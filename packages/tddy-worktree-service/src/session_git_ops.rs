@@ -15,6 +15,8 @@ use std::fmt;
 
 use crate::session_target::SessionTarget;
 
+mod run;
+
 /// `git reset` mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResetMode {
@@ -49,8 +51,9 @@ pub enum GitOp {
     Clean,
 }
 
-/// Credentials and environment a push runs with — the identity the target session itself pushes
-/// with (its project's account, or the host's own `gh`).
+/// The `GIT_*` environment every git command of an operation runs with — the identity the target
+/// session's own commits and pushes are made under (its project's account, or the host's `gh`).
+/// Empty when the target's identity does not resolve: the checkout's inherited identity applies.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PushIdentity {
     pub env: Vec<(String, String)>,
@@ -95,21 +98,36 @@ impl fmt::Display for GitOpError {
 impl std::error::Error for GitOpError {}
 
 /// Whether `op` may run only while the target session is inactive.
+///
+/// Commit and a plain push only add history or publish it, so they run beside an active agent. The
+/// rest rewrite the target's files or history under it, and a force-with-lease push rewrites the
+/// remote branch the agent builds on.
 pub fn requires_inactive_target(op: &GitOp) -> bool {
-    // TODO(home-git-tools): implement
-    let _ = op;
-    false
+    match op {
+        GitOp::Commit { .. } => false,
+        GitOp::Push { force_with_lease } => *force_with_lease,
+        GitOp::Rebase { .. }
+        | GitOp::Stash
+        | GitOp::Reset { .. }
+        | GitOp::Checkout { .. }
+        | GitOp::Clean => true,
+    }
 }
 
 /// Run `op` on `target`, applying the activity gate first.
+///
+/// The gate is checked before any git process starts, so a refused operation changes nothing.
 pub fn run_git_op(
     target: &SessionTarget,
     op: GitOp,
     push_identity: &PushIdentity,
 ) -> Result<GitOpOutcome, GitOpError> {
-    // TODO(home-git-tools): implement
-    let _ = (target, op, push_identity);
-    Err(GitOpError::Git("run_git_op is not implemented".to_string()))
+    if target.is_active && requires_inactive_target(&op) {
+        return Err(GitOpError::TargetActive {
+            session_id: target.session_id.clone(),
+        });
+    }
+    run::run(&target.worktree, &push_identity.env, op)
 }
 
 #[cfg(test)]
