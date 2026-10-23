@@ -10,7 +10,7 @@
 //! RPC families are installed on the host (see `DaemonRpcFamilies::attach_session_start`), so a
 //! project-home start is the same start any other caller gets, for every session type.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session-tools.md.
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

@@ -6,7 +6,7 @@
 **Metrics:** **147 lines** · **nesting 8** · 3 parameters · budget 60 / 4
 **Thresholds breached:** length 147 > 60; nesting 8 > 4 (**2× the ceiling**)
 **Restructure:** `extract_method --variant module`, one arm at a time
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-10-23 (+3 in #700) — **unclaimed**
 
 ## Measurement history
 
@@ -18,6 +18,7 @@
 | 2026-10-01 | 182 | 8 | **worse** by 3 (179 → 182, same fn-line-to-closing-brace count on `master` and HEAD; the 147 above predates growth that was not recorded) in PR #560 (`#agent-worktree` 1/4): one more arm, `(EXEC_TOOL_SERVICE, "ConversationWorktree")`, delegating to `conversation_worktree_from_jail`. Nesting unchanged |
 | 2026-10-03 | 185 | 8 | **worse** by 3 (182 → 185, fn line to closing brace on `0ce696aa` and `4f2a3b66`) in PR #576 (caller sync): the `ConversationWorktree` arm passes the jail's bound session, `conversation_worktree_from_jail(&self.bound, payload)`, which rustfmt wraps over four lines. The handler is per jail (`BoundJailSession`); no arm added, nesting unchanged |
 | 2026-10-09 | 185 | — | `#carve` 21/21 (#536): re-measured, **unchanged**: 185 (fn line to closing brace) on `origin/master` (`468b368f9`) and on HEAD, same file `connection_service/daemon_rpc_handler.rs:26`. It is wiring (the RPC dispatch table) and stays in lifecycle by the node's contract; the node moved nothing out of it. Still open, unclaimed |
+| 2026-10-23 | 188 | 8 | **worse** by 3 (185 → 188) in #700 (`#project-home` 5/7): one arm, `(EXEC_TOOL_SERVICE, "ListExecTools")`, delegating to `svc_list_exec_tools_wiring::list_exec_tools_from_jail`. Not split: `connection_service*` is shared with the rest of the `#project-home` stack. Measured by structural scan, fn line to closing brace on `origin/feature/project-home/home-session` (08cfc2a28) and HEAD; no coverage run |
 
 ## What the tool found
 

@@ -18,6 +18,7 @@
 | 2026-09-23 | 78 | 5 | 2 | 7 | moved to `tddy-daemon-rpc`; length from re-wrapped field paths, not new logic |
 | 2026-09-23 | 78 | 5 | 2 | 7 | re-measured at the #520 wrap: unchanged since the move; still at `exec_tool/ports.rs:182`, nesting and early exits identical to the lifecycle original |
 | 2026-09-24 | 78 | 5 | 2 | 7 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let _os_user = self` → `&self` (the live `users:` holder), same line count, nesting and exits. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD |
+| 2026-10-23 | 72 | 6 | — | — | **better** by 6 in #700 (`#project-home` 5/7): the auth and the per-session catalog choice moved into `ExecToolRpcHandler::offered_catalog` (`exec_tool/project_home.rs`); the routing block (the depth) is untouched. 78 → 72 by structural scan, fn line to closing brace on `origin/feature/project-home/home-session` (08cfc2a28) and HEAD; no coverage run (this scan counts brace depth from the impl, 6) |
 
 ## What the tool found
 

@@ -126,16 +126,28 @@ answers `{ session, outcome }`:
 | A running one (its pid is alive, or the daemon still serves its terminal) | returned unchanged → `running` |
 
 - **Role.** The session's `.session.yaml` carries `session_role: project-home`, and `ListSessions`
-  reports it as `SessionEntry.session_role` (empty for every other session).
+  reports it as `SessionEntry.session_role` (empty for every other session). The role is written into
+  the session's initial record **before its agent is spawned**, so no moment exists in which the agent
+  runs and the daemon reads the session as ordinary. Only the daemon grants it: a `StartSession` or
+  `StreamStartSession` that sets `StartSessionRequest.session_role` is refused with
+  `PERMISSION_DENIED` and starts nothing.
 - **Home worktree.** `<worktrees root>/<project_id>/home`, a linked worktree of the project's main
   repository, **detached** at `main_branch_ref` after fetching it. It is isolated from whatever
   branch the main checkout has, has no commits of its own, and is only ever fast-forwarded. A path
   there that is not that worktree is refused.
 - **Read-only.** The daemon's `ExecuteTool` and `StreamExecuteTool` refuse, with
-  `PERMISSION_DENIED`, every exec tool but `Read`, `Grep`, `Glob`, `ReadLints` and `SemanticSearch`
-  for a project-home session, so the guarantee does not rest on the agent's allowlist. The agent is
-  still offered the full catalog and learns of a refusal when it calls the tool
-  ([TODO](../../dev/todo/2026-10-23-project-home-read-only-catalog-not-advertised.md)).
+  `PERMISSION_DENIED`, every exec tool but `Read`, `Grep`, `Glob`, `ReadLints`, `SemanticSearch` and
+  the four [project-home tools](#project-home-tools) for a project-home session, so the guarantee does
+  not rest on the agent's allowlist.
+- **What the agent is offered.** `ExecToolService.ListExecTools` takes a `session_id` and answers the
+  set that session's agent is offered, read from the session's own record: the read-only tools plus
+  the project-home tools for a project-home session, the catalog without the project-home tools for
+  any other. `tddy-tools` asks it on every `tools/list` over every transport (the daemon's HTTP relay
+  and unix socket, the sandbox socket — the runner rebinds the question to the jail's own session —
+  and LiveKit) and advertises only what the daemon admits. A failed or timed-out ask (10 s) fails
+  `tools/list` with an error naming the reason, rather than offering a catalog of its own. The
+  co-located claude-cli home agent is also started (and resumed) with one `--allowedTools` per tool of
+  that set, which pre-approves them; it does not restrict — enforcement stays the daemon's.
 - **Hosts.** A request whose `daemon_instance_id` names another daemon is forwarded to it (as
   `GetWorktreeSnapshot` is); empty or the local instance is answered locally. Each host has its own
   home session for a project.
@@ -144,6 +156,27 @@ answers `{ session, outcome }`:
   activity sidebar.
 - The "running" decision is a heuristic with one known false positive — a live pid with no served
   terminal ([TODO](../../dev/todo/2026-10-23-project-home-running-heuristic.md)).
+
+### Project-home tools
+
+Four exec tools give the read-only home agent its reach over **its own project's** sessions. Only a
+session whose record carries the `project-home` role may run them; any other caller is refused with
+`PERMISSION_DENIED` naming the role.
+
+| Tool | Arguments | Answers |
+|---|---|---|
+| `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation}]}`: every other session of the project, with the status the web's session list shows |
+| `StartProjectSession` | `session_type` (required), `prompt`, `agent`, `new_branch_name` | `{"session_id"}`: a session of any type `StartSession` accepts, started in the project as the caller's user; its changeset records the home session as `orchestrator_session_id`. A role cannot be passed |
+| `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root) | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
+| `DiffSessionWorktree` | `session_id` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
+
+- **Targets.** A target is a session id on the same daemon and in the caller's project, with a
+  worktree. Another project's session, the home session itself, an unknown id and a session without a
+  worktree are refused as an `is_error` result naming why ("another project", …).
+- **Paths.** An absolute path, one climbing above the worktree, or one resolving through a symlink to
+  outside it is refused as an `is_error` result naming "outside the worktree". A base ref that git
+  would read as an option is refused too.
+- Every call is appended to the home session's tool-call log, as any exec tool is.
 
 ## Related
 

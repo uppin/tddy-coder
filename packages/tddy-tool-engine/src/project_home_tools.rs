@@ -13,7 +13,7 @@
 //! The role gate is the daemon's: it refuses these names for any session that is not a
 //! project-home one before anything here runs.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session-tools.md.
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 use std::path::{Component, Path};
 

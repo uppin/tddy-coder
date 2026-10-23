@@ -50,6 +50,16 @@ the chosen operation as a key of its own — `{"pull": {}}`, `{"remove": {}}`, `
 encoding is hand-written and not yet verified against a live daemon over HTTP; see the backlog entry
 *The `ConversationWorktree` call over HTTP is unverified*.
 
+## Which exec tools the session is offered
+
+`session_exec_tool_answer()` asks the session's daemon `ExecToolService/ListExecTools` with the
+session named, over the same transport its tool calls take — daemon HTTP, the daemon's unix socket,
+the sandbox socket (the request goes out empty; the runner rebinds it to the jail's own session) or
+the held LiveKit room connection (after the same present-peer check as `ExecuteTool`) — within a
+10-second deadline (`src/exec_catalog.rs`). It answers `Admitted(names)`, `NoTransport` (nothing is
+configured to ask) or `Failed(reason)`, including an incomplete LiveKit environment. It substitutes no
+catalog of its own; what each answer means is the caller's decision.
+
 ## Why it is its own crate
 
 Every message it sends is a `tddy-service` proto, so `tddy-service` is where this belonged — and it

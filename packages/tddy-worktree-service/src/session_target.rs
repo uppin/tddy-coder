@@ -8,7 +8,7 @@
 //! Pure over the records the daemon reads from `.session.yaml`, so the rules are testable without
 //! a daemon.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session-tools.md.
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 use std::fmt;
 use std::path::PathBuf;

@@ -1,7 +1,7 @@
 //! Acceptance: a project-home session lists, starts, reads and diffs its project's other sessions
 //! through four `ExecuteTool` tools — scoped to its own project, refused for any other session.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session-tools.md (`#project-home` 5/7).
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools (`#project-home` 5/7).
 
 use std::path::{Path, PathBuf};
 
