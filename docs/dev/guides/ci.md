@@ -63,7 +63,7 @@ The Rust suite is two checks, split by **what a test needs to run**, not by how 
 
 **`Rust tests` compiles its own test targets, a window at a time.** It restores the `test` cargo
 cache and runs the complement of the e2e set over the workspace in batches of packages
-(`scripts/nextest-windowed.ts --batches <n>`, balanced by test binaries; `ci.yml` sets the count, currently 1). Each batch builds, runs, then deletes the test
+(`scripts/nextest-windowed.ts --batches <n>`, balanced by test binaries; `ci.yml` sets the count, currently 2 — a single batch ran out of disk even with incremental off). Each batch builds, runs, then deletes the test
 binaries it built, as `cargo nextest list` names them, before the next batch starts. The shared
 dependency artifacts stay for later batches, and `Rust build`'s fixture binaries are never touched.
 
