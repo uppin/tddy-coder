@@ -312,6 +312,12 @@ fn commit(
         version: manifest.version.clone(),
         source,
         installed_at: now_secs(dir)?,
+        // R1: off for a fresh entry. An extension the user already opted in stays opted in when a
+        // new version replaces it — the opt-in is the user's trust in the extension, not in one
+        // version of its code.
+        wasm_enabled: previous
+            .as_ref()
+            .is_some_and(|previous| previous.wasm_enabled),
     };
     index.extensions.insert(manifest.id.clone(), entry.clone());
     swap_in(dir, staging, &manifest.id, || index.save(dir))?;

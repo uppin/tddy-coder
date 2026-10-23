@@ -26,6 +26,11 @@ pub struct IndexEntry {
     pub source: ExtensionSource,
     /// Seconds since the Unix epoch.
     pub installed_at: u64,
+    /// Whether the extension's `extension.wasm` may run (`#reshape` extension-wasm-command, R1):
+    /// set by `extensions enable-wasm <id>`, cleared by `disable-wasm`. Absent — every index
+    /// written before the field existed — is off.
+    #[serde(default)]
+    pub wasm_enabled: bool,
 }
 
 /// The whole index, keyed by extension id.
@@ -73,4 +78,48 @@ fn write_synced(path: &Path, text: &str) -> Result<(), ExtensionError> {
     file.write_all(text.as_bytes())
         .and_then(|()| file.sync_all())
         .map_err(|e| ExtensionError::io(path, e))
+}
+
+/// `extensions enable-wasm <id>` / `disable-wasm <id>` (R1): sets the installed extension `id`'s
+/// [`IndexEntry::wasm_enabled`] to `enabled` and saves the index; the entry as saved. An `id` the
+/// index does not hold is [`ExtensionError::NotInstalled`] and nothing is written.
+pub fn set_wasm_enabled(
+    dir: &ExtensionsDir,
+    id: &str,
+    enabled: bool,
+) -> Result<IndexEntry, ExtensionError> {
+    let mut index = Index::load(dir)?;
+    let entry = index
+        .extensions
+        .get_mut(id)
+        .ok_or_else(|| ExtensionError::NotInstalled {
+            extension: id.to_string(),
+        })?;
+    entry.wasm_enabled = enabled;
+    let saved = entry.clone();
+    index.save(dir)?;
+    Ok(saved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn an_index_written_before_wasm_enabled_existed_reads_as_not_opted_in() {
+        // Given an index entry as `extension-install` writes it, with no `wasm_enabled`
+        let text = r#"{ "extensions": { "toml": {
+            "id": "toml", "version": "1.0.3", "source": "registry", "installed_at": 1760000000
+        } } }"#;
+
+        // When it is read
+        let index: Index = serde_json::from_str(text).expect("the index parses");
+
+        // Then the extension is not opted in (R1's default)
+        assert_eq!(
+            index.extensions.get("toml").map(|entry| entry.wasm_enabled),
+            Some(false)
+        );
+    }
 }

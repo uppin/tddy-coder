@@ -44,6 +44,12 @@ toml = "0.9"
 # `wasmtime-c-api` (wasmtime 36 for tree-sitter 0.26.x) and re-exports it as
 # `tree_sitter::wasmtime`, so no second wasmtime is declared here.
 tree-sitter = { version = "0.26.13", features = ["wasm"] }
+# An opted-in extension's `extension.wasm` is a WASI preview 2 component, run through wasmtime's
+# component model (`#reshape` extension-wasm-command, R6). tree-sitter's `wasm` feature already
+# brings wasmtime 36 — this names the SAME crate to turn on `component-model` (which
+# `wasmtime-c-api` leaves off) and so `component::bindgen!`; cargo unifies it to one wasmtime, and
+# `cargo tree -p tddy-zed-extensions -i wasmtime` must keep showing exactly one version.
+wasmtime = { version = "36.0.19", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
 
 [features]
 # `testkit`: the `demo-toml` fixture builders dependents' suites share. Std only; enabled from

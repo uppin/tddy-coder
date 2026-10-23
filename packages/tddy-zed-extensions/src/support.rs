@@ -61,7 +61,7 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
             failures: Vec::new(),
         });
     }
-    let languages = crate::server::served(dir, languages)?;
+    let languages = crate::wasm::served(dir, languages)?;
     let store = GrammarStore::new().map_err(|error| ExtensionError::GrammarEngineUnavailable {
         message: error.message,
     })?;
