@@ -9,7 +9,7 @@
 //! The target comes from `session_target::resolve_session_target` (node 5) and carries its
 //! activity.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-git-tools.md.
+//! PRD: docs/ft/daemon/project-concept.md § Git tools.
 
 use std::fmt;
 

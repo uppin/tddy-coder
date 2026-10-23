@@ -14,7 +14,7 @@
 //!
 //! A rebase that conflicts is aborted and answered with `{"conflict_paths": [...]}`.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-git-tools.md.
+//! PRD: docs/ft/daemon/project-concept.md § Git tools.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -49,81 +49,68 @@ pub fn is_project_home_git_tool(name: &str) -> bool {
 
 /// The seven git tools' definitions, as advertised to a project-home session.
 pub fn project_home_git_tool_defs() -> Vec<ToolDef> {
-    let target = json!({ "session_id": { "type": "string" } });
+    let string = json!({ "type": "string" });
     vec![
         tool_def(
             COMMIT_SESSION_WORKTREE,
             "Commit the changes in a session's worktree of this project. Runs while the session is active.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "session_id": { "type": "string" },
-                    "message": { "type": "string" },
-                    "paths": { "type": "array", "items": { "type": "string" }, "description": "Worktree-relative paths; every change when empty." }
-                },
-                "required": ["session_id", "message"]
-            }),
+            target_schema(
+                json!({
+                    "message": string,
+                    "paths": { "type": "array", "items": string, "description": "Worktree-relative paths; every change when empty." }
+                }),
+                &["message"],
+            ),
         ),
         tool_def(
             PUSH_SESSION_BRANCH,
             "Push a session's branch to origin under its own name. A force-with-lease push needs the session to be inactive.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "session_id": { "type": "string" },
-                    "force_with_lease": { "type": "boolean" }
-                },
-                "required": ["session_id"]
-            }),
+            target_schema(json!({ "force_with_lease": { "type": "boolean" } }), &[]),
         ),
         tool_def(
             REBASE_SESSION_BRANCH,
             "Rebase a session's branch onto a ref. Needs the session to be inactive; a conflict is aborted and its paths are reported.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "session_id": { "type": "string" },
-                    "onto": { "type": "string" }
-                },
-                "required": ["session_id", "onto"]
-            }),
+            target_schema(json!({ "onto": string }), &["onto"]),
         ),
         tool_def(
             STASH_SESSION_WORKTREE,
             "Stash a session's uncommitted changes, untracked files included. Needs the session to be inactive.",
-            target.clone(),
+            target_schema(json!({}), &[]),
         ),
         tool_def(
             RESET_SESSION_WORKTREE,
             "Reset a session's branch to a ref. Needs the session to be inactive.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "session_id": { "type": "string" },
+            target_schema(
+                json!({
                     "mode": { "type": "string", "enum": ["soft", "mixed", "hard"] },
-                    "to": { "type": "string" }
-                },
-                "required": ["session_id", "mode", "to"]
-            }),
+                    "to": string
+                }),
+                &["mode", "to"],
+            ),
         ),
         tool_def(
             CHECKOUT_SESSION_WORKTREE,
             "Check out a branch, commit or tag in a session's worktree. Needs the session to be inactive.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "session_id": { "type": "string" },
-                    "to": { "type": "string" }
-                },
-                "required": ["session_id", "to"]
-            }),
+            target_schema(json!({ "to": string }), &["to"]),
         ),
         tool_def(
             CLEAN_SESSION_WORKTREE,
             "Delete a session's untracked files. Needs the session to be inactive.",
-            target,
+            target_schema(json!({}), &[]),
         ),
     ]
+}
+
+/// An object schema with a required `session_id` plus `properties`, of which `required` are too.
+fn target_schema(properties: Value, required: &[&str]) -> Value {
+    let mut all = json!({ "session_id": { "type": "string" } });
+    if let (Some(all), Value::Object(extra)) = (all.as_object_mut(), properties) {
+        all.extend(extra);
+    }
+    let required: Vec<&str> = std::iter::once("session_id")
+        .chain(required.iter().copied())
+        .collect();
+    json!({ "type": "object", "properties": all, "required": required })
 }
 
 fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {

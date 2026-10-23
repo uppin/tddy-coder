@@ -25,7 +25,10 @@ pub(super) fn run(
         }
         GitOp::Reset { mode, to } => {
             git.run(&["reset", reset_flag(mode), checked_ref(&to)?])?;
-            Ok(done(format!("reset {} to {to}", reset_name(mode))))
+            Ok(done(format!(
+                "reset {} to {to}",
+                reset_flag(mode).trim_start_matches("--")
+            )))
         }
         GitOp::Checkout { to } => {
             git.run(&["checkout", checked_ref(&to)?])?;
@@ -85,14 +88,6 @@ fn reset_flag(mode: ResetMode) -> &'static str {
         ResetMode::Soft => "--soft",
         ResetMode::Mixed => "--mixed",
         ResetMode::Hard => "--hard",
-    }
-}
-
-fn reset_name(mode: ResetMode) -> &'static str {
-    match mode {
-        ResetMode::Soft => "soft",
-        ResetMode::Mixed => "mixed",
-        ResetMode::Hard => "hard",
     }
 }
 

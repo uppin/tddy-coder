@@ -2,7 +2,7 @@
 //! rebases, stashes, resets, checks out, cleans or force-pushes only while that session is not
 //! active. A conflicting rebase is aborted with its paths; the home worktree is never a target.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-git-tools.md (`#project-home` 7/7).
+//! PRD: docs/ft/daemon/project-concept.md § Git tools (`#project-home` 7/7).
 
 use std::path::{Path, PathBuf};
 
@@ -17,7 +17,7 @@ const THIS_PROJECT: &str = "019d105b-ac0f-78d3-9a89-409731145a3d";
 const OTHER_PROJECT: &str = "019d105b-ac0f-78d3-9a89-409731145a3e";
 
 fn git(cwd: &Path, args: &[&str]) -> String {
-    let status = std::process::Command::new("git")
+    let output = std::process::Command::new("git")
         .args(args)
         .current_dir(cwd)
         .env("GIT_AUTHOR_NAME", "Test")
@@ -27,11 +27,11 @@ fn git(cwd: &Path, args: &[&str]) -> String {
         .output()
         .unwrap_or_else(|e| panic!("git {args:?} failed to run: {e}"));
     assert!(
-        status.status.success(),
+        output.status.success(),
         "git {args:?} must succeed in {cwd:?}: {}",
-        String::from_utf8_lossy(&status.stderr)
+        String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8_lossy(&status.stdout).trim().to_string()
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 fn a_repo_with_origin() -> tempfile::TempDir {
