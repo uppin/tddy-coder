@@ -94,6 +94,11 @@ pub async fn execute(
         ExtensionsCommand::Remove(remove_args) => {
             vec![format!("removed {}", remove(dir, &remove_args.id)?.id)]
         }
+        ExtensionsCommand::EnableWasm(wasm) | ExtensionsCommand::DisableWasm(wasm) => {
+            let _ = wasm;
+            // TODO(reshape-extension-wasm-command): implement — `set_wasm_enabled`, and the line it prints
+            todo!("extensions enable-wasm / disable-wasm")
+        }
     })
 }
 

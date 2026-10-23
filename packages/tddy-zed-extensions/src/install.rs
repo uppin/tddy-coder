@@ -312,6 +312,9 @@ fn commit(
         version: manifest.version.clone(),
         source,
         installed_at: now_secs(dir)?,
+        // TODO(reshape-extension-wasm-command): R1's default; whether a re-install keeps the
+        // previous opt-in is this node's to decide.
+        wasm_enabled: false,
     };
     index.extensions.insert(manifest.id.clone(), entry.clone());
     swap_in(dir, staging, &manifest.id, || index.save(dir))?;
