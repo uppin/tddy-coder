@@ -32,3 +32,28 @@ export function useIsMobile(): boolean {
 
   return isMobile;
 }
+
+/** Whether a viewport this wide is below the `md` breakpoint. */
+export function isNarrowWidth(innerWidth: number): boolean {
+  return innerWidth < MOBILE_MAX_WIDTH_PX;
+}
+
+/**
+ * Width-only variant of {@link useIsMobile}: true below the `md` breakpoint whatever the input
+ * device. For a layout that depends on room alone — a docked column — where a touch-capable
+ * desktop at full width must keep its column rather than take the mobile overlay.
+ */
+export function useIsNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== "undefined" && isNarrowWidth(window.innerWidth),
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setNarrow(isNarrowWidth(window.innerWidth));
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  return narrow;
+}

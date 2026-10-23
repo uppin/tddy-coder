@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { detectIsMobile, MOBILE_MAX_WIDTH_PX } from "./useIsMobile";
+import { detectIsMobile, isNarrowWidth, MOBILE_MAX_WIDTH_PX } from "./useIsMobile";
 
 const originalWindow = (globalThis as Record<string, unknown>).window;
 
@@ -42,5 +42,19 @@ describe("detectIsMobile", () => {
 
     // When / Then
     expect(detectIsMobile()).toBe(true);
+  });
+});
+
+describe("isNarrowWidth", () => {
+  it("treats a viewport narrower than the md breakpoint as narrow", () => {
+    // When / Then
+    expect(isNarrowWidth(MOBILE_MAX_WIDTH_PX - 1)).toBe(true);
+  });
+
+  it("does not treat a touch-capable desktop at full width as narrow", () => {
+    // Given — a 1280px viewport on a device that exposes touch support, which detectIsMobile calls mobile
+
+    // When / Then — the docked sidebar keeps its column there
+    expect(isNarrowWidth(1280)).toBe(false);
   });
 });

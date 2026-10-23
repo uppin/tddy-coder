@@ -100,10 +100,10 @@ The web has no way to tell a managed session; the transcript is the readable vie
 
 ## Scope
 
-- [ ] Persist + list `managed_codebase`
-- [ ] Sidebar component + state
-- [ ] Main-pane mount (net ≤ 0 lines in `SessionMainPane.tsx`)
-- [ ] Tests
+- [x] Persist + list `managed_codebase`
+- [x] Sidebar component + state
+- [x] Main-pane mount (net ≤ 0 lines in `SessionMainPane.tsx`)
+- [x] Tests
 
 ## Technical Changes
 
@@ -123,7 +123,7 @@ Managed starts write `managed_codebase: true`; `ListSessions` reports it; the he
 - **tddy-changeset**: field + `is_false` skip.
 - **tddy-session-activity**: reader field, enrichment copy.
 - **tddy-agent-launch**: set the field in the initial metadata write for managed starts (claude-cli, sandboxed, split, cursor-cli where accepted).
-- **tddy-web**: `SessionActivitySidebar.tsx`, `activitySidebarState.ts` (new); `SessionMainPane.tsx` swaps mount; `AgentActivityOverlay.tsx` reduced to the toggle button or removed (decide in green; record here).
+- **tddy-web**: `SessionWithActivitySidebar.tsx`, `SessionActivitySidebar.tsx`, `activitySidebarState.ts` (new); `SessionMainPane.tsx` swaps mount; `AgentActivityOverlay.tsx` kept, not reduced or removed: no production mount any more (decided in green, see Green-phase notes).
 
 ## Testing Plan
 
@@ -153,6 +153,22 @@ sidebar; existing `AgentActivity*.cy.tsx` specs re-pointed from popover to sideb
 - Adding the field touched every `SessionMetadata` / reader `SessionEntry` / proto `SessionEntry` literal (`managed_codebase: false`); `cargo check --all-targets` clean on tddy-changeset, -session-activity, -agent-launch, -session-lifecycle, -daemon-rpc, -daemon, -coder, -core, -session-agents, -session-files, -session-split, -telegram, -telegram-control, -testing-commons, -integration-tests, -coder-cli.
 - The record point is the initial metadata write of every managed start path (claude-cli co-located, sandboxed, split agent half, cursor-cli where accepted); the two read-side TODOs are `session_reader.rs` and `session_coordinate_handlers.rs`.
 
+## Green-phase notes
+
+Green, 2026-10-23. Scoped gates only; full-workspace result comes from CI.
+
+- **Recorded at start.** `managed_codebase` is written into the initial `.session.yaml` on every managed start path: co-located claude-cli (`claude_cli_spawn.rs`, a `managed_codebase` parameter threaded from `cli_branch_starts.rs`), sandboxed claude-cli (`write_jail_session_metadata`), the split agent half (`write_split_agent_metadata`, reads `req`), and co-located and sandboxed cursor-cli. Child and conversation spawns (`child_spawn_handler.rs`, `conversation_spawn_handler.rs`) record `false`. `start_session_core` gained no branch: the flag rides the existing `req.managed_codebase` path.
+- **Read and reported.** `session_reader.rs` and `session_coordinate_handlers.rs`, the two read-side TODOs.
+- **`AgentActivityOverlay.tsx`: kept, not reduced or removed.** `SessionMainPane` no longer mounts it. Eight component specs still mount it standalone (the seven `AgentActivity*.cy.tsx` specs and `ActivitiesTailScrollAcceptance.cy.tsx`), so removing it means removing or re-mounting those specs, which is beyond the placement re-point and needs the developer's go-ahead. Marked `FIXME(activity-sidebar)`. Developer call: delete it with those specs, or re-mount them on the sidebar.
+- **Placement re-points: none needed.** No AgentActivity spec asserts popover placement; they open the transcript through `agentActivityPage.open()` and assert its contents. `InactiveSessionActivitiesAcceptance` asserts only that the toggle exists, which the sidebar's toggle satisfies unchanged.
+- **Width, not `useIsMobile`.** `useIsMobile` counts any touch-capable device as mobile, and the Cypress Electron browser reports touch support, so the 1280px spec took the mobile overlay branch. The sidebar decides on width alone via the new `useIsNarrowViewport` (same `md` breakpoint, in `hooks/useIsMobile.ts`); the shared hook is unchanged.
+- **Inline layout.** The component specs do not apply the Tailwind flex classes (the sidebar rendered as block layout), so the root, row, content column and dock use inline styles, as the popover did.
+- **Toggle and sidebar appear once the session has transcript entries**, as the popover's icon did. A managed session with no activity yet shows no sidebar until its first entry arrives. Developer call: show an empty open sidebar instead?
+- **The replay hook stays mounted while `suppressed`.** A hook cannot unmount without remounting `children` (open agent conversations inside them would cancel). While suppressed it keeps the count feed open and marks counted activity seen, so the badge does not carry Activities-view entries into the next view. A subscription trade-off.
+- **`SessionMainPane.tsx`: 443 → 438 lines** (`wc -l`). The header row moved into `SessionWithActivitySidebar`'s `toolbar`; the picker and body became its children. The oversized-file record's 674 figure was stale (443 since `b2b9fd1d0`, #663); a measurement row was added and closing the record is left to the wrap.
+
+Verified (scoped): `./dev cargo test -p tddy-session-lifecycle --test list_sessions_managed_codebase_acceptance --test managed_codebase_workflow_acceptance` (2 + 5 passed); `./dev cargo test -p tddy-changeset -p tddy-session-activity` (all passed); `./dev cargo test -p tddy-agent-launch --lib` (127 passed); `./dev cargo clippy -p tddy-changeset -p tddy-session-activity -p tddy-session-lifecycle -p tddy-agent-launch --all-targets -- -D warnings` (clean); `cargo fmt --check` on the five touched Rust packages (clean). Web: `bun test activitySidebarState.test.ts` (2 pass); `SessionActivitySidebarAcceptance.cy.tsx` (3 pass); the AgentActivity regression, one spec at a time: `AgentActivityAcpReplay` 8, `ClientIdentity` 2, `DetailAbsentBody` 4, `DetailDialog` 6, `DetailLazyFetch` 7, `LazyCountPersist` 5, `SnapshotInFlight` 2, `ActivitiesTailScroll` 14, `InactiveSessionActivities` 18 (all pass; its first run failed to load on a Vite dependency-optimizer reload and passed on re-run). Not run locally: other `SessionMainPane` consumers; CI covers them.
+
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
@@ -177,10 +193,10 @@ sidebar; existing `AgentActivity*.cy.tsx` specs re-pointed from popover to sideb
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
+- [x] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -191,6 +207,6 @@ sidebar; existing `AgentActivity*.cy.tsx` specs re-pointed from popover to sideb
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-22-project-home-activity-sidebar-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps

@@ -8,7 +8,5 @@ import type { SessionEntry } from "../../gen/session_pb";
  * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-activity-sidebar.md.
  */
 export function defaultActivitySidebarOpen(session: Pick<SessionEntry, "managedCodebase">): boolean {
-  // TODO(activity-sidebar): implement
-  void session;
-  return false;
+  return session.managedCodebase;
 }

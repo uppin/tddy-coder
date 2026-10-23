@@ -81,6 +81,7 @@ pub(super) fn write_jail_session_metadata(
     managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
     started_agents: Vec<tddy_core::SessionAgentRecord>,
     pid: u32,
+    managed_codebase: bool,
 ) -> Result<(), Status> {
     let JailSession {
         session_id,
@@ -94,6 +95,7 @@ pub(super) fn write_jail_session_metadata(
         pid: Some(pid),
         model: Some(model.to_string()),
         sandbox: Some(true),
+        managed_codebase,
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         agents_rev: agent_roster::started_roster_rev(&started_agents),
         agents: started_agents,

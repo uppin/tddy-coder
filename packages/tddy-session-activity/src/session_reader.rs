@@ -92,8 +92,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             codebase_daemon_instance_id: metadata.codebase_daemon_instance_id.unwrap_or_default(),
             codebase_session_id: metadata.codebase_session_id.unwrap_or_default(),
             ssh_config_host: metadata.ssh_config_host.unwrap_or_default(),
-            // TODO(activity-sidebar): read `metadata.managed_codebase`
-            managed_codebase: false,
+            managed_codebase: metadata.managed_codebase,
         });
     }
 
