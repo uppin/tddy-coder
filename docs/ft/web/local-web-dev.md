@@ -22,12 +22,12 @@ The repo root script **`./web-dev`** starts **`tddy-daemon`** (RPC backend) and 
 
 `./web-dev` runs **two HTTP servers**:
 
-| Port (defaults) | Process | What it serves |
-|-----------------|---------|----------------|
-| **`VITE_PORT`** (default **5173**) | Vite | Dev modules, **HMR**, proxies `/rpc` and `/api` to the daemon |
-| **`listen.web_port`** in daemon YAML (default **8899**) | `tddy-daemon` | **`web_bundle_path`** — usually `packages/tddy-web/dist` from the **last `bun run build`** |
+| Port | Process | What it serves |
+|------|---------|----------------|
+| **`VITE_PORT`** — ephemeral unless pinned by `VITE_PORT` or a port in `VITE_URL` | Vite | Dev modules, **HMR**, proxies `/rpc` and `/api` to the daemon |
+| **`DAEMON_PORT`** — ephemeral unless set; written into the daemon's temp config over `listen.web_port` | `tddy-daemon` | **`web_bundle_path`** — usually `packages/tddy-web/dist` from the **last `bun run build`** |
 
-**For live edits to React/TS in `packages/tddy-web`, open the Vite URL** (e.g. `http://127.0.0.1:5173`). If you open the daemon URL instead (e.g. `http://127.0.0.1:8899`), the browser loads the **production bundle** from `dist/`; changes to source files will not appear until you rebuild, and there is **no** Vite HMR.
+Both ports are printed at startup. **For live edits to React/TS in `packages/tddy-web`, open the Vite URL** (`=== VITE_URL=… ===`). If you open the daemon URL instead, the browser loads the **production bundle** from `dist/`; changes to source files will not appear until you rebuild, and there is **no** Vite HMR.
 
 The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client is active; if you never see it, you are not on the dev server.
 
@@ -45,13 +45,25 @@ The dev overlay **`HMR: N`** (bottom-left) only increments when the Vite client 
 |----------|------|
 | `DAEMON_CONFIG` | Path to daemon YAML (default `dev.daemon.yaml` at repo root) |
 | `WEB_HOST` | **Bind address** for Vite only (default `127.0.0.1`; `0.0.0.0` = all interfaces). Not the URL you type in the browser. |
-| `VITE_PORT` | Vite port (default `5173`) |
+| `VITE_PORT` | Vite port. Default: ephemeral (49152–65535), unless `VITE_URL` names a port |
+| `DAEMON_PORT` | Daemon port. Default: ephemeral |
 | `VITE_URL` | **Public app origin** — OAuth, `import.meta.env.VITE_URL`, and what you open in the browser. Default `http://127.0.0.1:<VITE_PORT>`. For LAN: `VITE_URL=http://<your-lan-ip>:5173` (same host/port you use to load the app). `web-dev` sets `WEB_PUBLIC_URL=$VITE_URL` for `tddy-daemon`; do not point `WEB_PUBLIC_URL` at the daemon port (`:8899`) for frontend dev. |
-| LiveKit, GitHub, Telegram | See `web-dev` script header (`LIVEKIT_*`, `GITHUB_*`, `TDDY_TELEGRAM_*`); Telegram details in [telegram-notifications.md](../daemon/telegram-notifications.md) |
+| LiveKit | **Started by `web-dev` in Docker by default**, on ephemeral ports, and removed on exit (error exits included). Set all of `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` in `.env` to reuse a running server instead — it must answer at startup, and a partial set is an error. A LiveKit `web-dev` did not start is never stopped. See `scripts/dev-livekit.sh` |
+| GitHub, Telegram | See `web-dev` script header (`GITHUB_*`, `TDDY_TELEGRAM_*`); Telegram details in [telegram-notifications.md](../daemon/telegram-notifications.md) |
 
-## Port cleanup
+## Ports and cleanup
 
-Before starting, the script sends **`fuser -k -9`** on the daemon and Vite TCP ports. On a machine where those ports are shared, free them first or expect processes listening there to be signalled.
+Unpinned ports are ephemeral, so runs in different worktrees — and a run left behind by an earlier
+one — never collide. A **pinned** port (`DAEMON_PORT`, `VITE_PORT`, a port in `VITE_URL` — pin one
+when a real GitHub OAuth app needs a fixed redirect) that is already held is a startup error naming
+the holder's pid and command. **`web-dev` never kills a process it did not start.**
+
+What a run starts — the daemon and Vite (each in its own process group), its LiveKit container and
+temp config — is stopped on every exit: normal, Ctrl+C, the terminal closing, or an error. It is
+also written to **`tmp/web-dev.run`**, with each pid's start time: should a run die without cleaning
+up (`kill -9`, a crashed terminal), the next run in the checkout stops exactly what that record
+lists — never a pid since reused by another process — and refuses to start while the recorded run
+is still alive. See `scripts/dev-process.sh`. Works on macOS's `/bin/bash` 3.2.
 
 ## Browser DEBUG mask
 

@@ -20,6 +20,8 @@ import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { useEnqueuedInput } from "./useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
+import { rpcFailureText } from "../../rpc/rpcFailure";
+import { InlineError } from "../ui/inline-error";
 
 const dGrpc = tddyDebug("tddy:term:grpc");
 const dResize = tddyDebug("tddy:term:resize");
@@ -109,6 +111,11 @@ export function GrpcSessionTerminal({
   const ackRef = useRef(ack);
   ackRef.current = ack;
 
+  // Why the last keystroke, paste or resize did not reach the PTY — e.g. another screen took the
+  // lease. One indicator however many sends are refused (each failure writes the same string, which
+  // React does not re-render for), and the next delivered send clears it.
+  const [inputError, setInputError] = useState<string | null>(null);
+
   // Disconnect fires automatically when the terminal goes away — either the remote
   // stream ends or this component unmounts (e.g. the user switches sessions). Read
   // the latest callback via a ref and guard so it fires at most once. CRITICAL: a stream-end with
@@ -151,13 +158,17 @@ export function GrpcSessionTerminal({
           controlToken: conn.controlToken,
           inputOffset: BigInt(inputOffset),
         })
-        .catch((err) => {
-          dGrpc(
-            "sendTerminalInput failed sessionId=%s error=%o",
-            sessionId,
-            err instanceof Error ? err.message : err,
-          );
-        });
+        .then(
+          () => setInputError(null),
+          (err: unknown) => {
+            dGrpc(
+              "sendTerminalInput failed sessionId=%s error=%o",
+              sessionId,
+              err instanceof Error ? err.message : err,
+            );
+            setInputError(rpcFailureText(err));
+          },
+        );
     },
     [client, sessionId, sessionToken, terminalId, enqueue],
   );
@@ -364,6 +375,11 @@ export function GrpcSessionTerminal({
         />
       )}
       <EnqueuedInputOverlay model={enqueuedModel} visible={enqueuedVisible} />
+      <InlineError
+        testId="terminal-input-error"
+        message={inputError && `Input not delivered: ${inputError}`}
+        className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[90%] rounded border border-destructive/40 bg-background/90 px-2 py-1 text-xs"
+      />
     </div>
   );
 }

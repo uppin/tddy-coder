@@ -79,4 +79,32 @@ describe("SessionManager", () => {
     manager.addOptimisticSession(aSession({ sessionId: SID_ON_SELECTED, daemonInstanceId: SELECTED }));
     expect(manager.sessions).toHaveLength(1); // de-duplicated
   });
+
+  it("keeps the last good list and says why when a later pull fails", async () => {
+    let failing = false;
+    const manager = new SessionManager();
+    manager.setSelectedInstanceId(SELECTED);
+    manager.setFetcher(async () => {
+      if (failing) throw new Error("daemon is restarting");
+      return [aSession({ sessionId: SID_ON_SELECTED, daemonInstanceId: SELECTED })];
+    });
+    await Promise.resolve();
+
+    failing = true;
+    manager.refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(manager.loadError).toBe("daemon is restarting");
+    expect(manager.sessions.map((s) => s.sessionId)).toEqual([SID_ON_SELECTED]);
+
+    failing = false;
+    manager.refresh();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(manager.loadError).toBeNull();
+  });
+
+  it("says why there is no list when no fetcher can reach the host", () => {
+    const manager = new SessionManager();
+    manager.setFetcher(null, "Not connected to server-2");
+    expect(manager.loadError).toBe("Not connected to server-2");
+  });
 });

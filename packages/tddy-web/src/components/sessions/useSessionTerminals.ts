@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
+import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
 
 const dTerm = tddyDebug("tddy:term:tabs");
 
@@ -23,6 +24,8 @@ export interface SessionTerminalsController {
   close: (terminalId: string) => void;
   /** Drop a bash tab whose terminal has already ended (its output stream closed) — no Stop RPC. */
   dropEnded: (terminalId: string) => void;
+  /** Why the last list / open / close failed, ready to render; `null` once the next one succeeds. */
+  readonly error: string | null;
 }
 
 export interface UseSessionTerminalsParams {
@@ -42,6 +45,11 @@ export interface UseSessionTerminalsParams {
  * `StartTerminalSession`/`StopTerminalSession` RPCs and keep the local tab set consistent with an
  * optimistic remove (the tab disappears immediately, the Stop RPC fires in the background). The
  * reserved `main` terminal (the Agent tab) is implicit and is never part of `terminals`.
+ *
+ * A failed List/Start/Stop — or an open/close with no client to carry it — is reported as `error`
+ * rather than only logged. Listing alone waits for a `null` client instead of reporting it: the
+ * client is `null` while the session is still connecting, which the connection overlay already
+ * shows, and the list re-runs once it arrives.
  */
 export function useSessionTerminals({
   sessionId,
@@ -51,6 +59,7 @@ export function useSessionTerminals({
 }: UseSessionTerminalsParams): SessionTerminalsController {
   const [terminals, setTerminals] = useState<string[]>([]);
   const [activeTerminalId, setActiveTerminalId] = useState<string>(AGENT_TERMINAL_ID);
+  const [error, setError] = useState<string | null>(null);
 
   // Populate the bash-terminal tabs from the session's current terminals once a client is available.
   useEffect(() => {
@@ -69,12 +78,14 @@ export function useSessionTerminals({
           for (const id of prev) if (!merged.includes(id)) merged.push(id);
           return merged;
         });
+        setError(null);
       } catch (err) {
         dTerm(
           "listTerminalSessions failed sessionId=%s error=%o",
           sessionId,
           err instanceof Error ? err.message : err,
         );
+        if (!cancelled) setError(rpcFailureText(err));
       }
     })();
     return () => {
@@ -87,20 +98,25 @@ export function useSessionTerminals({
   }, []);
 
   const open = useCallback(() => {
-    if (!client) return;
+    if (!client) {
+      setError(rpcFailureText(hostNotConnected(null)));
+      return;
+    }
     void (async () => {
       try {
         const res = await client.startTerminalSession({ sessionToken, sessionId, controlToken });
         const id = res.terminalId;
-        if (!id) return;
+        if (!id) throw new Error("The host started no terminal — it answered without a terminal id.");
         setTerminals((prev) => (prev.includes(id) ? prev : [...prev, id]));
         setActiveTerminalId(id);
+        setError(null);
       } catch (err) {
         dTerm(
           "startTerminalSession failed sessionId=%s error=%o",
           sessionId,
           err instanceof Error ? err.message : err,
         );
+        setError(rpcFailureText(err));
       }
     })();
   }, [client, sessionId, sessionToken, controlToken]);
@@ -114,20 +130,26 @@ export function useSessionTerminals({
     (id: string) => {
       // Optimistic remove — the tab and its pane come down immediately; the Stop RPC follows.
       dropEnded(id);
-      if (!client) return;
-      void client
+      if (!client) {
+        setError(rpcFailureText(hostNotConnected(null)));
+        return;
+      }
+      client
         .stopTerminalSession({ sessionToken, sessionId, terminalId: id, controlToken })
-        .catch((err) => {
+        .then(() => setError(null))
+        .catch((err: unknown) => {
           dTerm(
             "stopTerminalSession failed sessionId=%s terminalId=%s error=%o",
             sessionId,
             id,
             err instanceof Error ? err.message : err,
           );
+          // The tab is already gone, so the reason names what may still be running on the host.
+          setError(`${id} may still be running — stopping it failed: ${rpcFailureText(err)}`);
         });
     },
     [client, sessionId, sessionToken, controlToken, dropEnded],
   );
 
-  return { terminals, activeTerminalId, setActive, open, close, dropEnded };
+  return { terminals, activeTerminalId, setActive, open, close, dropEnded, error };
 }

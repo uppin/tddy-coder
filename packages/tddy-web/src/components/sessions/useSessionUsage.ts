@@ -29,17 +29,30 @@ import {
   type ClientMessage,
 } from "../../gen/tddy/v1/remote_pb";
 import { emptyUsage, type ConversationUsage } from "./sessionUsage";
+import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
+
+/** The latest snapshot, and why the stream is not delivering (`null` while it is). */
+export interface SessionUsageStream {
+  usage: ConversationUsage[];
+  /**
+   * Why the stream stopped or could not open, ready to render; the last snapshot stays in `usage`.
+   * Cleared when a snapshot arrives on a new subscription.
+   */
+  error: string | null;
+}
 
 /**
  * Subscribes to the session's token-usage stream and returns the latest snapshot, one entry per
  * conversation. `room` / `serverIdentity` select the LiveKit transport target exactly as they do
- * for the presenter chat. Returns `emptyUsage()` until the first `tokenUsageUpdated` event arrives
- * (or forever, if the session never reports usage).
+ * for the presenter chat. `usage` is `emptyUsage()` until the first `tokenUsageUpdated` event
+ * arrives (or forever, if the session never reports usage); a stream that fails, or that cannot be
+ * opened because there is no room to reach the session through, is reported in `error` instead of
+ * looking like a session that reported nothing.
  */
 export function useSessionUsage(
   room: Room | null,
   serverIdentity: string,
-): ConversationUsage[] {
+): SessionUsageStream {
   const liveKitFactory = useLiveKitTransportFactory();
   const factoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
   const canBuildClient = room !== null || factoryIsOverridden;
@@ -55,14 +68,17 @@ export function useSessionUsage(
   }, [liveKitFactory, canBuildClient, room, serverIdentity]);
 
   const [usage, setUsage] = useState<ConversationUsage[]>(emptyUsage);
+  const [error, setError] = useState<string | null>(null);
   const queueRef = useRef<AsyncQueue<ClientMessage> | null>(null);
 
   useEffect(() => {
     setUsage(emptyUsage());
     if (!client) {
       queueRef.current = null;
+      setError(rpcFailureText(hostNotConnected("this session")));
       return;
     }
+    setError(null);
 
     const queue = new AsyncQueue<ClientMessage>();
     queueRef.current = queue;
@@ -79,6 +95,7 @@ export function useSessionUsage(
         for await (const serverMessage of client.stream(queue)) {
           if (cancelled) break;
           if (serverMessage.event.case === "tokenUsageUpdated") {
+            setError(null);
             setUsage(
               serverMessage.event.value.conversations.map((c) => ({
                 agent: c.agent,
@@ -93,9 +110,8 @@ export function useSessionUsage(
           }
         }
       } catch (err) {
-        if (!cancelled) {
-          console.debug("[useSessionUsage] stream error", err);
-        }
+        // The last snapshot stays shown; the tab says it is no longer live.
+        if (!cancelled) setError(rpcFailureText(err));
       }
     })();
 
@@ -108,5 +124,5 @@ export function useSessionUsage(
     };
   }, [client]);
 
-  return usage;
+  return { usage, error };
 }

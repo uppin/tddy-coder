@@ -1,6 +1,7 @@
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
 import { daemonCutsTheWorktree, type SessionType } from "./createSessionRequest";
 import { inputClass, labelClass } from "./createSessionFormStyles";
+import { InlineError } from "../ui/inline-error";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 
 type BranchIntent = BranchWorktreeIntent;
@@ -21,6 +22,8 @@ export interface CreateSessionBranchFieldsProps {
   createRemoteBranch: boolean;
   setCreateRemoteBranch: (createRemoteBranch: boolean) => void;
   remoteBranches: string[];
+  /** Why the branches could not be listed — shown under their picker; `null` while they could. */
+  remoteBranchesError: string | null;
   selectedBranchToWorkOn: string;
   setSelectedBranchToWorkOn: (branch: string) => void;
 }
@@ -44,6 +47,7 @@ export function CreateSessionBranchFields({
   createRemoteBranch,
   setCreateRemoteBranch,
   remoteBranches,
+  remoteBranchesError,
   selectedBranchToWorkOn,
   setSelectedBranchToWorkOn,
 }: CreateSessionBranchFieldsProps) {
@@ -140,6 +144,11 @@ export function CreateSessionBranchFields({
               </option>
             ))}
           </select>
+          <InlineError
+            testId="create-session-branches-load-error"
+            message={remoteBranchesError && `Branches unavailable: ${remoteBranchesError}`}
+            className="mt-1"
+          />
         </div>
       )}
     </>

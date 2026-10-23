@@ -297,6 +297,14 @@ export const TEST_IDS = {
   sessionsDrawerSelectCancel: "sessions-drawer-select-cancel",
   /** Single "delete selected" action button, enabled once ≥1 row checkbox is ticked. */
   sessionsDrawerBulkDelete: "sessions-drawer-bulk-delete",
+  /** Why the selected host's session list could not be loaded (the last good list stays shown). */
+  sessionsDrawerLoadError: "sessions-drawer-load-error",
+  /** Why the selected session's last pane action (attach, resume, delete, terminate) failed. */
+  sessionsPaneError: "sessions-pane-error",
+  /** Why a manual "Claim terminal" did not take control. */
+  terminalClaimError: "terminal-claim-error",
+  /** A terminal's input did not reach the daemon — one indicator, cleared by the next delivery. */
+  terminalInputError: "terminal-input-error",
 
   // Sessions drawer — active / remaining partition separators (collapsible headers)
   /** "Active (N)" partition header — expanded by default; toggles the active rows below it. */
@@ -349,6 +357,14 @@ export const TEST_IDS = {
   createSessionProviderError: "create-session-provider-error",
   /** Inline error shown when the model probe (ListAgentModels) fails for the selected agent. */
   createSessionModelError: "create-session-model-error",
+  /** Why the Project picker has nothing to offer: `ListProjects` failed. Never an empty list. */
+  createSessionProjectsLoadError: "create-session-projects-load-error",
+  /** Why no tool is selected for a tool session: `ListTools` failed. */
+  createSessionToolsLoadError: "create-session-tools-load-error",
+  /** Why the stack-parent and stack-base pickers have nothing to offer: `ListSessions` failed. */
+  createSessionSessionsLoadError: "create-session-sessions-load-error",
+  /** Why the "Branch to work on" picker has nothing to offer: `ListProjectBranches` failed. */
+  createSessionBranchesLoadError: "create-session-branches-load-error",
   createSessionPermissionModeSelect: "create-session-permission-mode-select",
   /** Checkbox that sets `StartSessionRequest.dangerously_skip_permissions = true` (claude-cli only).
    * Mutually exclusive with the permission-mode select, which it disables while checked. */
@@ -505,6 +521,12 @@ export const TEST_IDS = {
 
   // Shell navigation
   shellMenuButton: "shell-menu-button",
+  /** The overlay blocking a host-scoped screen's body while no viable RPC client reaches its host. */
+  hostConnectionGate: "host-connection-gate",
+  hostConnectionGateTitle: "host-connection-gate-title",
+  hostConnectionGateReason: "host-connection-gate-reason",
+  /** A host-scoped screen's body — `inert` while the gate covers it. */
+  hostConnectionGatedBody: "host-connection-gated-body",
   shellMenuSessions: "shell-menu-sessions",
   shellMenuLivekit: "shell-menu-livekit",
   shellMenuTasks: "shell-menu-tasks",
@@ -675,6 +697,14 @@ export const TEST_IDS = {
   sessionsUsageTotalInput: "sessions-usage-total-input",
   sessionsUsageTotalOutput: "sessions-usage-total-output",
   sessionsUsageTotalTotal: "sessions-usage-total-total",
+  /** Why the usage stream stopped (or never opened); the last snapshot stays shown beside it. */
+  sessionsUsageStreamError: "sessions-usage-stream-error",
+  /** Why the drawer's project registry could not be read (unscoped sessions cannot resolve one). */
+  sessionsDrawerProjectsLoadError: "sessions-drawer-projects-load-error",
+  /** Why the daemon's notification feed stopped — the row dots are no longer live. */
+  sessionsDrawerNotificationsError: "sessions-drawer-notifications-error",
+  /** Why an activity stream stopped, as `useSessionActivity` reports it. */
+  sessionActivityStreamError: "session-activity-stream-error",
 
   // Session inspector — VNC tab
   sessionsInspectorTabVnc: "sessions-inspector-tab-vnc",
@@ -709,6 +739,17 @@ export const TEST_IDS = {
   sessionsScreenSharingAddSubmit: "sessions-screen-sharing-add-submit",
   /** Shown when the credential store exists and this session's key does not open it. */
   sessionsScreenSharingVaultLocked: "sessions-screen-sharing-vault-locked",
+
+  // Session inspector tabs — why a load or an action failed, shown beside what failed
+  sessionsVncListError: "sessions-vnc-list-error",
+  sessionsVncAddError: "sessions-vnc-add-error",
+  sessionsScreenSharingListError: "sessions-screen-sharing-list-error",
+  sessionFilesError: "session-files-error",
+  sessionWorktreeError: "session-worktree-error",
+  sessionsToolListError: "sessions-tool-list-error",
+  sessionsToolCallLogError: "sessions-tool-call-log-error",
+  /** Why listing, opening or closing a bash terminal failed — under the terminal tab strip. */
+  sessionsTerminalError: "sessions-terminal-error",
 
   // Screen Sharing overlay
   screenSharingOverlay: "screen-sharing-overlay",
@@ -833,6 +874,12 @@ export const TEST_IDS = {
   projectsNewProjectGitUrl: "projects-new-project-git-url",
   projectsNewProjectUserRelativePath: "projects-new-project-user-relative-path",
   projectsCreateProjectSubmit: "projects-create-project-submit",
+  /** Why the last create failed — the daemon's reason, or that the host is not connected. */
+  projectsCreateProjectError: "projects-create-project-error",
+  /** Why the project list could not be loaded; never shown as an empty list. */
+  projectsLoadError: "projects-load-error",
+  /** Why the vault's accounts could not be read for the assignment pickers. */
+  projectsAccountsLoadError: "projects-accounts-load-error",
 
   // Daemon settings screen
   daemonSettingsScreen: "daemon-settings-screen",
@@ -1103,6 +1150,13 @@ export const sessionsChildTab = (sessionId: string) => `sessions-child-tab-${ses
 /** `[data-testid="sessions-child-pane-<sessionId>"]` — the mounted runtime pane for a spawned
  *  child conversation, shown when its tab is selected. */
 export const sessionsChildPane = (sessionId: string) => `sessions-child-pane-${sessionId}`;
+
+/** `[data-testid="sessions-child-attach-error-<sessionId>"]` — why a spawned child's attach failed. */
+export const sessionsChildAttachError = (sessionId: string) => `sessions-child-attach-error-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-bulk-delete-error-<sessionId>"]` — why one bulk-deleted row survived. */
+export const sessionsBulkDeleteError = (sessionId: string) =>
+  `sessions-drawer-bulk-delete-error-${sessionId}`;
 
 /** `[data-testid="sessions-agent-tab-<conversationId>"]` — a tab for an open conversation with an
  *  agent attached to this session. Keyed by the conversation id rather than the agent id: the
@@ -1490,6 +1544,20 @@ export const sessionUploadDelete = (fileName: string) => `session-upload-delete-
 export const sessionUploadDeleteConfirm = (fileName: string) =>
   `session-upload-delete-confirm-${fileName}`;
 
+/** `[data-testid="session-upload-delete-error-<fileName>"]` — why deleting that upload failed */
+export const sessionUploadDeleteError = (fileName: string) =>
+  `session-upload-delete-error-${fileName}`;
+
+/** `[data-testid="sessions-vnc-start-error-<targetId>"]` — why that VNC target's start failed */
+export const sessionsVncStartError = (targetId: string) => `sessions-vnc-start-error-${targetId}`;
+
+/** `[data-testid="sessions-vnc-remove-error-<targetId>"]` — why removing that VNC target failed */
+export const sessionsVncRemoveError = (targetId: string) => `sessions-vnc-remove-error-${targetId}`;
+
+/** `[data-testid="sessions-screen-sharing-remove-error-<targetId>"]` — why removing it failed */
+export const sessionsScreenSharingRemoveError = (targetId: string) =>
+  `sessions-screen-sharing-remove-error-${targetId}`;
+
 // ---------------------------------------------------------------------------
 // New-session attachment rows — one per document attached at creation time.
 // ---------------------------------------------------------------------------
@@ -1776,3 +1844,6 @@ export const createSessionAgentSelectOption = (optionValue: string) =>
 /** One error row for a host whose agent catalog (`ListAgents`) could not be read. */
 export const createSessionAgentSelectHostError = (daemonInstanceId: string) =>
   `create-session-agent-select-host-error-${safeTestIdPart(daemonInstanceId)}`;
+
+/** `[data-testid="project-card-error-<projectId>"]` — why the card's last action or load failed */
+export const projectCardError = (projectId: string) => `project-card-error-${projectId}`;

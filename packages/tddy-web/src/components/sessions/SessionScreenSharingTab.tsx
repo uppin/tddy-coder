@@ -13,6 +13,8 @@ import React, { useEffect, useReducer, useState } from "react";
 import type { Room } from "livekit-client";
 import { Protocol } from "../../gen/screen_sharing_pb";
 import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
+import { rpcFailureText } from "../../rpc/rpcFailure";
+import { InlineError } from "../ui/inline-error";
 import { ScreenSharingOverlay } from "./ScreenSharingOverlay";
 import { applyScreenSharingTabAction, initialScreenSharingTabState } from "./screenSharingTabState";
 
@@ -113,10 +115,15 @@ export function SessionScreenSharingTab({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // Why each target's last start failed, shown on that target's row.
   const [startErrors, setStartErrors] = useState<Record<string, string>>({});
+  // Why each target's last remove failed, shown on that target's row.
+  const [removeErrors, setRemoveErrors] = useState<Record<string, string>>({});
+  // Why the target list failed to load — never shown as an empty list.
+  const [listError, setListError] = useState<string | null>(null);
 
   useEffect(() => {
     onListTargets()
       .then(({ targets, vaultLocked }) => {
+        setListError(null);
         dispatch({ type: "set_vault_locked", locked: vaultLocked });
         dispatch({
           type: "set_targets",
@@ -126,7 +133,7 @@ export function SessionScreenSharingTab({
           })),
         });
       })
-      .catch(() => {/* ignore list errors — non-fatal */});
+      .catch((e: unknown) => setListError(rpcFailureText(e)));
   // onListTargets is a callback prop; the effect intentionally runs once on mount.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -206,9 +213,14 @@ export function SessionScreenSharingTab({
   };
 
   const handleRemove = (targetId: string) => {
+    setRemoveErrors((held) => {
+      const next = { ...held };
+      delete next[targetId];
+      return next;
+    });
     onRemoveTarget(targetId)
       .then(() => dispatch({ type: "remove_target", targetId }))
-      .catch(() => {/* errors handled silently for now */});
+      .catch((e: unknown) => setRemoveErrors((held) => ({ ...held, [targetId]: rpcFailureText(e) })));
   };
 
   return (
@@ -224,6 +236,11 @@ export function SessionScreenSharingTab({
             shown. Sign in again with the login that created it.
           </p>
         )}
+        <InlineError
+          testId="sessions-screen-sharing-list-error"
+          message={listError}
+          className="text-xs"
+        />
         <div data-testid="sessions-screen-sharing-target-list" className="flex flex-col gap-1">
           {state.targets.map((t) => (
             <div key={t.id} className="flex flex-col gap-1">
@@ -262,6 +279,11 @@ export function SessionScreenSharingTab({
                   {startErrors[t.id]}
                 </p>
               )}
+              <InlineError
+                testId={`sessions-screen-sharing-remove-error-${t.id}`}
+                message={removeErrors[t.id]}
+                className="text-xs px-1"
+              />
             </div>
           ))}
         </div>

@@ -2,6 +2,7 @@ import type { DaemonHost } from "../../lib/participantRole";
 import type { ProjectEntry } from "../../gen/project_pb";
 import type { projectSelectOptions } from "../../lib/projectSelectOptions";
 import { inputClass, labelClass } from "./createSessionFormStyles";
+import { InlineError } from "../ui/inline-error";
 
 export interface CreateSessionHostAndProjectFieldsProps {
   daemons: DaemonHost[];
@@ -9,6 +10,8 @@ export interface CreateSessionHostAndProjectFieldsProps {
   setDaemonInstanceId: (daemonInstanceId: string) => void;
   projects: ProjectEntry[];
   projectOptions: ReturnType<typeof projectSelectOptions>;
+  /** Why the projects could not be listed — shown under the picker; `null` while they could. */
+  projectsError: string | null;
   projectId: string;
   setProjectId: (projectId: string) => void;
 }
@@ -24,6 +27,7 @@ export function CreateSessionHostAndProjectFields({
   setDaemonInstanceId,
   projects,
   projectOptions,
+  projectsError,
   projectId,
   setProjectId,
 }: CreateSessionHostAndProjectFieldsProps) {
@@ -63,7 +67,11 @@ export function CreateSessionHostAndProjectFields({
           onChange={(e) => setProjectId(e.target.value)}
         >
           <option value="" disabled>
-            {projects.length === 0 ? "No projects available" : "Select a project…"}
+            {projects.length > 0
+              ? "Select a project…"
+              : projectsError
+                ? "Projects unavailable"
+                : "No projects available"}
           </option>
           {projectOptions.map((option) => (
             <option key={option.projectId} value={option.projectId}>
@@ -71,6 +79,11 @@ export function CreateSessionHostAndProjectFields({
             </option>
           ))}
         </select>
+        <InlineError
+          testId="create-session-projects-load-error"
+          message={projectsError && `Projects unavailable: ${projectsError}`}
+          className="mt-1"
+        />
       </div>
     </>
   );

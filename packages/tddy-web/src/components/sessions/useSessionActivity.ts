@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ActivityService, AgentActivityRecord } from "../../gen/activity_pb";
 import { StreamMode } from "../../gen/activity_pb";
+import { rpcFailureText } from "../../rpc/rpcFailure";
 
 export interface UseSessionActivityResult {
   /** All known tool-call records, coalesced by `callId`, in first-seen order. */
@@ -12,6 +13,11 @@ export interface UseSessionActivityResult {
   unreadCount: number;
   /** Mark every currently-known record as seen (clears the unread count for them). */
   markSeen: () => void;
+  /**
+   * Why the stream stopped, ready to render; `null` while it is live. The records already received
+   * stay in `records`. Cleared when a record arrives on a new subscription.
+   */
+  error: string | null;
 }
 
 /**
@@ -41,9 +47,11 @@ export function useSessionActivity(args: {
 
   const [records, setRecords] = useState<AgentActivityRecord[]>([]);
   const [seenCallIds, setSeenCallIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setRecords([]);
+    setError(null);
     let cancelled = false;
 
     const upsert = (record: AgentActivityRecord) => {
@@ -65,15 +73,14 @@ export function useSessionActivity(args: {
           mode,
         })) {
           if (cancelled) break;
+          setError(null);
           upsert(record);
         }
       } catch (err) {
         // A stream aborted on unmount surfaces as an AbortError; ignore it. Any other error while
-        // still mounted is left for the caller to observe via an empty/partial record set — the
-        // pane simply shows what it has (no fallback fabrication).
-        if (!cancelled) {
-          console.debug("[useSessionActivity] stream error", err);
-        }
+        // still mounted keeps the records received so far (no fallback fabrication) and is reported
+        // in `error`, so the pane can say it stopped rather than look merely quiet.
+        if (!cancelled) setError(rpcFailureText(err));
       }
     })();
 
@@ -96,5 +103,6 @@ export function useSessionActivity(args: {
     hasActivity: records.length > 0,
     unreadCount,
     markSeen,
+    error,
   };
 }

@@ -139,6 +139,15 @@ export interface TerminalOptions {
    * replaying a buffer at the wrong width re-wraps every line in it.
    */
   readonly initialGrid?: { readonly cols: number; readonly rows: number };
+
+  /**
+   * Told after each send whether it reached the PTY: the daemon's reason when it was refused (the
+   * lease moved, the session ended, the transport is down), `null` once one is delivered again.
+   *
+   * Input has no reply the terminal renders, so without this a refused keystroke is simply gone. A
+   * feed that cannot tell — one whose input rides a stream with no per-send answer — never calls it.
+   */
+  readonly onInputDelivery?: (failure: string | null) => void;
 }
 
 /**

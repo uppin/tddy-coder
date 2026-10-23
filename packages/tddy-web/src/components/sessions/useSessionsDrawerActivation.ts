@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { SessionEntry } from "../../gen/session_pb";
 import type { HostConnection } from "../../rpc/connections/types";
+import { hostNotConnected } from "../../rpc/rpcFailure";
 import { PARAM_CODE, PARAM_FULL, PARAM_INSPECTOR, type AppLocation } from "../../routing/appLocation";
 import type { UseAppLocationResult } from "../../routing/useAppLocation";
 import { owningHostForSession } from "../../utils/crossHostSessions";
@@ -31,6 +32,13 @@ export interface UseSessionsDrawerActivationArgs {
   connectHost: (hostId: string | null) => HostConnection | null;
   selectedInstanceId: string | null;
   sessionToken: string;
+  /** A daemon instance id's display label — names the host an attach could not reach. */
+  hostLabelForInstance: (instanceId: string) => string;
+  /**
+   * An attach owed to the selected session could not even be attempted: no wire reaches its owning
+   * host. Reported rather than skipped, which used to leave a live session on a blank pane.
+   */
+  reportAttachFailure: (error: unknown) => void;
 }
 
 /**
@@ -57,6 +65,8 @@ export function useSessionsDrawerActivation({
   connectHost,
   selectedInstanceId,
   sessionToken,
+  hostLabelForInstance,
+  reportAttachFailure,
 }: UseSessionsDrawerActivationArgs): void {
   const {
     attachClaimRef,
@@ -144,13 +154,18 @@ export function useSessionsDrawerActivation({
       ? { sessionId: selectedSessionId, listGeneration }
       : null;
     if (session.isActive) {
-      const owningHost = connectHost(owningHostForSession(session, selectedInstanceId ?? ""));
+      const owner = owningHostForSession(session, selectedInstanceId ?? "");
+      const owningHost = connectHost(owner);
       if (owningHost) {
-        connectSession(selectedSessionId, sessionToken, owningHost)
-          .then((attached) => settleAttach(selectedSessionId, attached))
-          .catch((err) => {
-            console.debug("[SessionsDrawerScreen] connectSession error", err);
-          });
+        // `connectSession` never rejects: a failed attach is its `error` state, settled here.
+        void connectSession(selectedSessionId, sessionToken, owningHost).then((attached) =>
+          settleAttach(selectedSessionId, attached),
+        );
+      } else {
+        // Nothing was attached, so nothing is claimed: the liveness effect below attaches once a
+        // wire to the owner registers (`connectHost` changes identity then).
+        attachClaimRef.current = null;
+        reportAttachFailure(hostNotConnected(hostLabelForInstance(owner)));
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,17 +204,18 @@ export function useSessionsDrawerActivation({
       case "attach":
         break;
     }
-    const owningHost = connectHost(
-      owningHostForSession(selectedSession, selectedInstanceId ?? ""),
-    );
-    if (!owningHost) return;
+    const owner = owningHostForSession(selectedSession, selectedInstanceId ?? "");
+    const owningHost = connectHost(owner);
+    if (!owningHost) {
+      // Unclaimed, as above — the next `connectHost` that reaches the owner re-runs this effect.
+      reportAttachFailure(hostNotConnected(hostLabelForInstance(owner)));
+      return;
+    }
     attachClaimRef.current = { sessionId: selectedSession.sessionId, listGeneration };
     const attachedId = selectedSession.sessionId;
-    connectSession(attachedId, sessionToken, owningHost)
-      .then((attached) => settleAttach(attachedId, attached))
-      .catch((err) => {
-        console.debug("[SessionsDrawerScreen] connectSession error", err);
-      });
+    void connectSession(attachedId, sessionToken, owningHost).then((attached) =>
+      settleAttach(attachedId, attached),
+    );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSession, selectedInstanceId, connectHost, listGeneration]);
 

@@ -4,6 +4,7 @@ import type { SessionService } from "../../gen/session_pb";
 import type { ProjectService } from "../../gen/project_pb";
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
 import { localBranchName } from "../../lib/branchNames";
+import { rpcFailureText } from "../../rpc/rpcFailure";
 
 export interface UseProjectBranchesArgs {
   /**
@@ -26,10 +27,17 @@ export interface UseProjectBranchesArgs {
   setSelectedBranchToWorkOn: (branch: string) => void;
 }
 
+/** The branches the picker offers, and why the last load failed (`null` while it has not). */
+export interface ProjectBranches {
+  remoteBranches: string[];
+  /** Ready to render beside the picker; cleared by the next successful load. */
+  error: string | null;
+}
+
 /**
  * The remote-tracking branches the "Work on existing branch" picker offers, loaded whenever the
- * project or the branch mode changes. Lifted out of `CreateSessionPane.tsx` with its state; the
- * effect body is unchanged.
+ * project or the branch mode changes. Lifted out of `CreateSessionPane.tsx` with its state. A failed
+ * load keeps the last good list and reports why, so the picker never reads as "no branches".
  */
 export function useProjectBranches({
   client,
@@ -40,8 +48,9 @@ export function useProjectBranches({
   daemonInstanceId,
   preFilledBranchToWorkOn,
   setSelectedBranchToWorkOn,
-}: UseProjectBranchesArgs): string[] {
+}: UseProjectBranchesArgs): ProjectBranches {
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
 
   // Load branches when projectId changes and intent is work_on_selected_branch
@@ -53,6 +62,7 @@ export function useProjectBranches({
       .then((resp) => {
         if (!cancelled) {
           setRemoteBranches(resp.branches);
+          setError(null);
           if (resp.branches.length > 0) {
             // A pre-filled branch wins over the default first entry, but only while the project
             // actually offers it — otherwise the <select> would hold a value none of its options
@@ -71,15 +81,13 @@ export function useProjectBranches({
           }
         }
       })
-      .catch((err) => {
-        if (!cancelled) {
-          console.debug("[CreateSessionPane] listProjectBranches error", err);
-        }
+      .catch((err: unknown) => {
+        if (!cancelled) setError(rpcFailureText(err));
       });
     return () => {
       cancelled = true;
     };
   }, [client, sessionToken, projectId, branchIntent, daemonInstanceId, preFilledBranchToWorkOn]);
 
-  return remoteBranches;
+  return { remoteBranches, error };
 }

@@ -11,6 +11,8 @@ import type { Room } from "livekit-client";
 import { VncPassphraseDialog } from "./VncPassphraseDialog";
 import { VncOverlay } from "./VncOverlay";
 import { applyVncTabAction, initialVncTabState } from "./vncTabState";
+import { rpcFailureText } from "../../rpc/rpcFailure";
+import { InlineError } from "../ui/inline-error";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -79,10 +81,19 @@ export function SessionVncTab({
   // Active stream result — stored when StartVncStream succeeds
   const [activeStreamResult, setActiveStreamResult] = useState<StartVncStreamResult | null>(null);
 
+  // Why the list, the Add form, or a row's Start / Remove last failed — each shown beside it.
+  const [listError, setListError] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [startErrors, setStartErrors] = useState<Record<string, string>>({});
+  const [removeErrors, setRemoveErrors] = useState<Record<string, string>>({});
+
   useEffect(() => {
     onListVncTargets()
-      .then((targets) => dispatch({ type: "set_targets", targets }))
-      .catch(() => {/* ignore errors in list — non-fatal */});
+      .then((targets) => {
+        dispatch({ type: "set_targets", targets });
+        setListError(null);
+      })
+      .catch((e: unknown) => setListError(rpcFailureText(e)));
   // onListVncTargets is a callback prop; the effect intentionally runs once on mount.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -96,21 +107,31 @@ export function SessionVncTab({
       password,
     };
 
+    setAddError(null);
     if (password) {
       // Vault unlock required before adding a target with a password
       setPendingAdd(req);
       setPassphraseOpen(true);
     } else {
       onAddVncTarget(req)
-        .then((target) => {
-          dispatch({ type: "add_target", target });
-          setLabel("");
-          setHost("");
-          setPort("5900");
-          setPassword("");
-        })
-        .catch(() => {/* errors handled silently for now */});
+        .then(addedTarget)
+        .catch((e: unknown) => setAddError(rpcFailureText(e)));
     }
+  };
+
+  /** A target the daemon accepted: list it and empty the form. A failure keeps what was typed. */
+  const addedTarget = (target: VncTargetInfo) => {
+    dispatch({ type: "add_target", target });
+    setLabel("");
+    setHost("");
+    setPort("5900");
+    setPassword("");
+  };
+
+  const clearRowError = (held: Record<string, string>, targetId: string) => {
+    const next = { ...held };
+    delete next[targetId];
+    return next;
   };
 
   const handlePassphraseConfirm = (passphrase: string) => {
@@ -121,14 +142,8 @@ export function SessionVncTab({
 
     onUnlockVncVault(passphrase)
       .then(() => onAddVncTarget(req))
-      .then((target) => {
-        dispatch({ type: "add_target", target });
-        setLabel("");
-        setHost("");
-        setPort("5900");
-        setPassword("");
-      })
-      .catch(() => {/* errors handled silently for now */});
+      .then(addedTarget)
+      .catch((e: unknown) => setAddError(rpcFailureText(e)));
   };
 
   const handlePassphraseCancel = () => {
@@ -137,6 +152,7 @@ export function SessionVncTab({
   };
 
   const handleStart = (targetId: string) => {
+    setStartErrors((held) => clearRowError(held, targetId));
     dispatch({ type: "set_stream_status", targetId, status: "starting" });
     onStartVncStream(targetId)
       .then((result) => {
@@ -144,8 +160,9 @@ export function SessionVncTab({
         dispatch({ type: "open_overlay", targetId });
         setActiveStreamResult(result);
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         dispatch({ type: "set_stream_status", targetId, status: "error" });
+        setStartErrors((held) => ({ ...held, [targetId]: rpcFailureText(e) }));
       });
   };
 
@@ -160,42 +177,55 @@ export function SessionVncTab({
   };
 
   const handleRemove = (targetId: string) => {
+    setRemoveErrors((held) => clearRowError(held, targetId));
     onRemoveVncTarget(targetId)
       .then(() => dispatch({ type: "remove_target", targetId }))
-      .catch(() => {/* errors handled silently for now */});
+      .catch((e: unknown) => setRemoveErrors((held) => ({ ...held, [targetId]: rpcFailureText(e) })));
   };
 
   return (
     <>
       <div data-testid="sessions-vnc-tab-panel" className="flex flex-col gap-3 px-3 py-3">
+        <InlineError testId="sessions-vnc-list-error" message={listError} className="text-xs" />
         <div data-testid="sessions-vnc-target-list" className="flex flex-col gap-1">
           {state.targets.map((t) => (
-            <div
-              key={t.id}
-              data-testid={`sessions-vnc-target-row-${t.id}`}
-              className="flex items-center justify-between border border-border rounded px-2 py-1 gap-2"
-            >
-              <span className="text-xs flex-1 truncate">
-                {t.label} — {t.host}:{t.port}
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  data-testid={`sessions-vnc-start-${t.id}`}
-                  type="button"
-                  className="px-2 py-0.5 text-xs bg-foreground text-background rounded hover:opacity-90"
-                  onClick={() => handleStart(t.id)}
-                >
-                  Start
-                </button>
-                <button
-                  data-testid={`sessions-vnc-remove-${t.id}`}
-                  type="button"
-                  className="px-2 py-0.5 text-xs border border-destructive text-destructive rounded hover:bg-destructive/10"
-                  onClick={() => handleRemove(t.id)}
-                >
-                  Remove
-                </button>
+            <div key={t.id} className="flex flex-col gap-1">
+              <div
+                data-testid={`sessions-vnc-target-row-${t.id}`}
+                className="flex items-center justify-between border border-border rounded px-2 py-1 gap-2"
+              >
+                <span className="text-xs flex-1 truncate">
+                  {t.label} — {t.host}:{t.port}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    data-testid={`sessions-vnc-start-${t.id}`}
+                    type="button"
+                    className="px-2 py-0.5 text-xs bg-foreground text-background rounded hover:opacity-90"
+                    onClick={() => handleStart(t.id)}
+                  >
+                    Start
+                  </button>
+                  <button
+                    data-testid={`sessions-vnc-remove-${t.id}`}
+                    type="button"
+                    className="px-2 py-0.5 text-xs border border-destructive text-destructive rounded hover:bg-destructive/10"
+                    onClick={() => handleRemove(t.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
+              <InlineError
+                testId={`sessions-vnc-start-error-${t.id}`}
+                message={startErrors[t.id]}
+                className="text-xs px-1"
+              />
+              <InlineError
+                testId={`sessions-vnc-remove-error-${t.id}`}
+                message={removeErrors[t.id]}
+                className="text-xs px-1"
+              />
             </div>
           ))}
         </div>
@@ -245,6 +275,7 @@ export function SessionVncTab({
             Add target
           </button>
         </form>
+        <InlineError testId="sessions-vnc-add-error" message={addError} className="text-xs px-1" />
 
         <VncPassphraseDialog
           open={passphraseOpen}

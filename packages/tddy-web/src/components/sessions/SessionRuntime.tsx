@@ -27,7 +27,10 @@ import {
   requestElementFullscreen,
 } from "../../lib/browserFullscreen";
 import { safeTestIdPart } from "../../lib/testId";
+import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
+import { useDaemons } from "../../rpc/selectedDaemon";
 import { cn } from "../../lib/utils";
+import { InlineError } from "../ui/inline-error";
 
 type SessionAgentClient = Client<typeof SessionAgentService>;
 type TerminalClient = Client<typeof TerminalSessionService>;
@@ -140,7 +143,7 @@ export function SessionRuntime({
   // `buildSessionTerminalClient`.
   const session: Session | null =
     terminalClient != null ? { sessionId: runtime.sessionId, client: terminalClient } : null;
-  const { controlState, connected, claim: claimControl } = useTerminalControl(
+  const { controlState, connected, claim: claimControl, claimError } = useTerminalControl(
     session,
     sessionToken,
     buildSessionTerminalClient,
@@ -155,7 +158,15 @@ export function SessionRuntime({
     [buildSessionTerminalClient],
   );
 
-  const { terminals, activeTerminalId, setActive, open, close, dropEnded } = useSessionTerminals({
+  const {
+    terminals,
+    activeTerminalId,
+    setActive,
+    open,
+    close,
+    dropEnded,
+    error: terminalsError,
+  } = useSessionTerminals({
     sessionId: runtime.sessionId,
     sessionToken,
     client: sessionTerminalClient,
@@ -230,11 +241,15 @@ export function SessionRuntime({
   // A host-served session renders `GrpcSessionTerminal` instead, which builds its stream itself so
   // it can also account the daemon's input acks — there is nowhere on a `TerminalFrame` to carry
   // one, so a feed cannot express them (see the changeset).
+  // Why the Agent terminal's last send did not reach the PTY, when its feed can say (see
+  // `TerminalOptions.onInputDelivery`); the direct stream below keeps its own indicator.
+  const [agentInputError, setAgentInputError] = useState<string | null>(null);
   const agentTerminalFeed = useSessionTerminalFeed({
     connection: carriesMedia ? connection : null,
     sessionToken,
     controlToken: () => connected?.controlToken ?? "",
     containerRef: agentPaneRef,
+    onInputDelivery: setAgentInputError,
   });
 
   // When this runtime becomes focused with the Agent pane active, return keyboard focus to its
@@ -365,6 +380,11 @@ export function SessionRuntime({
         fullscreenActive={fullscreenActive}
         onToggleFullscreen={toggleFullscreen}
       />
+      <InlineError
+        testId="sessions-terminal-error"
+        message={terminalsError}
+        className="flex-shrink-0 border-b border-border px-3 py-1 text-xs"
+      />
 
       {/* The pane stack. Its `position` is stated inline as well as in the utility class because
           every pane below is positioned against it, and the terminal panes carry their own inline
@@ -397,6 +417,13 @@ export function SessionRuntime({
               onRegisterFocus={registerAgentFocus}
               onRegisterInsertInput={registerInsertInput}
               onBytes={handleBytes}
+            />
+          )}
+          {carriesMedia && (
+            <InlineError
+              testId="terminal-input-error"
+              message={agentInputError && `Input not delivered: ${agentInputError}`}
+              className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[90%] rounded border border-destructive/40 bg-background/90 px-2 py-1 text-xs"
             />
           )}
           {connection && !carriesMedia && (
@@ -521,6 +548,7 @@ export function SessionRuntime({
                 isController={controlState.isController}
                 holderScreenId={controlState.holderScreenId}
                 onClaim={claimControl}
+                claimError={claimError}
               />
             )}
           </div>
@@ -595,10 +623,12 @@ function SessionChildRuntime({
   sessions = [],
 }: SessionChildRuntimeProps) {
   const { state: attachment, hint, connectSession } = useSessionAttachment();
+  const daemons = useDaemons();
 
   useEffect(() => {
     if (!host) return;
-    void connectSession(sessionId, sessionToken, host).catch(() => undefined);
+    // Never rejects: a refused attach is the attachment's `error` state, rendered below.
+    void connectSession(sessionId, sessionToken, host);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, sessionId, sessionToken]);
 
@@ -626,7 +656,25 @@ function SessionChildRuntime({
     [connection, hint, sessionId],
   );
 
-  if (!runtime) return null;
+  if (!runtime) {
+    // Nothing to render until the child attaches — but an attach that cannot be attempted (no wire to
+    // the child's host) or that the daemon refused is said here, on the child's own pane, rather
+    // than left as a blank one.
+    const owner = sessions.find((s) => s.sessionId === sessionId)?.daemonInstanceId.trim() ?? "";
+    const ownerLabel = daemons.find((d) => d.instanceId === owner)?.label ?? owner;
+    const error = !host
+      ? rpcFailureText(hostNotConnected(ownerLabel))
+      : attachment.status === "error"
+        ? attachment.error
+        : null;
+    return (
+      <InlineError
+        testId={`sessions-child-attach-error-${sessionId}`}
+        message={error}
+        className="p-4"
+      />
+    );
+  }
 
   return (
     <SessionRuntime

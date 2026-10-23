@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ProjectEntry } from "../../gen/session_pb";
 import type { DaemonHost } from "../../lib/participantRole";
+import { useActionFailure } from "../../hooks/useActionFailure";
+import { InlineError } from "../ui/inline-error";
 import {
   assignmentRowsFor,
   withAssignment,
@@ -19,24 +21,31 @@ export type { AssignableAccount };
  * Presentational Projects screen: lists projects grouped by logical `projectId` (a project may
  * live on multiple hosts) and exposes create-project + add-to-host actions. All RPC wiring lives
  * in the container (`ProjectsAppPage`); this component is pure props + local UI state.
+ *
+ * Every action prop returns a promise that rejects with why it failed, and the reason is shown
+ * where the action was taken: the create form, or the project's card. Nothing is swallowed.
  */
 
 export interface ProjectsScreenProps {
   projects: ProjectEntry[];
+  /** Why the project list could not be loaded; the last good list stays shown beside it. */
+  loadError?: string | null;
+  /** Why the vault's accounts could not be read, which leaves the assignment pickers empty. */
+  accountsLoadError?: string | null;
   daemons: DaemonHost[];
-  onCreateProject: (input: { name: string; gitUrl: string; userRelativePath: string }) => void;
+  onCreateProject: (input: { name: string; gitUrl: string; userRelativePath: string }) => Promise<void>;
   onAddProjectToHost: (input: {
     projectId: string;
     name: string;
     gitUrl: string;
     daemonInstanceId: string;
     userRelativePath: string;
-  }) => void;
+  }) => Promise<void>;
   onSetDefaultBranch: (input: {
     projectId: string;
     mainBranchRef: string;
     daemonInstanceId: string;
-  }) => void;
+  }) => Promise<void>;
   loadProjectBranches: (input: {
     projectId: string;
     daemonInstanceId: string;
@@ -58,7 +67,7 @@ export interface ProjectsScreenProps {
      *  assignment. */
     localGh: boolean;
     daemonInstanceId: string;
-  }) => void;
+  }) => Promise<void>;
   /**
    * What one host's `gh` says about the project's GitHub host (`GetHostTooling` with
    * `githubHostname`). Asked for each host of a Local gh project.
@@ -115,6 +124,8 @@ function defaultSelectedBranch(branches: string[], remote: string): string {
 
 export function ProjectsScreen({
   projects,
+  loadError,
+  accountsLoadError,
   daemons,
   onCreateProject,
   onAddProjectToHost,
@@ -131,12 +142,18 @@ export function ProjectsScreen({
   const [newGitUrl, setNewGitUrl] = useState("");
   const [newUserRelativePath, setNewUserRelativePath] = useState("");
 
-  const submitCreate = () => {
-    onCreateProject({
-      name: newName.trim(),
-      gitUrl: newGitUrl.trim(),
-      userRelativePath: newUserRelativePath.trim(),
-    });
+  const create = useActionFailure();
+
+  // The form keeps what was typed until the project exists, so a failure can be corrected in place.
+  const submitCreate = async () => {
+    const created = await create.run(() =>
+      onCreateProject({
+        name: newName.trim(),
+        gitUrl: newGitUrl.trim(),
+        userRelativePath: newUserRelativePath.trim(),
+      }),
+    );
+    if (!created) return;
     setNewName("");
     setNewGitUrl("");
     setNewUserRelativePath("");
@@ -184,13 +201,18 @@ export function ProjectsScreen({
               type="button"
               data-testid="projects-create-project-submit"
               className="self-start rounded-md border border-border px-3 py-2 text-sm font-medium"
-              onClick={submitCreate}
+              disabled={create.pending}
+              onClick={() => void submitCreate()}
             >
-              Create
+              {create.pending ? "Creating…" : "Create"}
             </button>
+            <InlineError testId="projects-create-project-error" message={create.error} />
           </div>
         ) : null}
       </div>
+
+      <InlineError testId="projects-load-error" message={loadError} className="mb-4" />
+      <InlineError testId="projects-accounts-load-error" message={accountsLoadError} className="mb-4" />
 
       <div data-testid="projects-list" className="flex flex-col gap-4">
         {groups.map((group) => (
@@ -238,6 +260,9 @@ function ProjectCard({
   // The default branch is a property of the logical project; load the branch list from — and
   // address the set-default RPC to — the project's first hosting daemon.
   const primaryHost = group.hosts[0]?.daemonInstanceId ?? "";
+  // The card's one failure slot: its branch load and every action taken on it.
+  const failure = useActionFailure();
+  const { report } = failure;
   const [branches, setBranches] = useState<string[]>([]);
   const [defaultRemote, setDefaultRemote] = useState<string>("");
   useEffect(() => {
@@ -249,11 +274,13 @@ function ProjectCard({
           setDefaultRemote(loaded.defaultRemote);
         }
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        if (!cancelled) report(e);
+      });
     return () => {
       cancelled = true;
     };
-  }, [loadProjectBranches, group.projectId, primaryHost]);
+  }, [loadProjectBranches, group.projectId, primaryHost, report]);
 
   const selectedDefaultBranch = group.mainBranchRef || defaultSelectedBranch(branches, defaultRemote);
   const targetDaemons = useMemo(
@@ -274,19 +301,23 @@ function ProjectCard({
     [group.accounts, group.localGh, accounts],
   );
   const assignAccount = (provider: string, accountId: string) =>
-    onSetProjectAccounts({
-      projectId: group.projectId,
-      accounts: withAssignment(group.accounts, provider, accountId),
-      localGh: group.localGh,
-      daemonInstanceId: primaryHost,
-    });
+    void failure.run(() =>
+      onSetProjectAccounts({
+        projectId: group.projectId,
+        accounts: withAssignment(group.accounts, provider, accountId),
+        localGh: group.localGh,
+        daemonInstanceId: primaryHost,
+      }),
+    );
   const setLocalGh = (localGh: boolean) =>
-    onSetProjectAccounts({
-      projectId: group.projectId,
-      accounts: localGh ? withAssignment(group.accounts, "github", "") : group.accounts,
-      localGh,
-      daemonInstanceId: primaryHost,
-    });
+    void failure.run(() =>
+      onSetProjectAccounts({
+        projectId: group.projectId,
+        accounts: localGh ? withAssignment(group.accounts, "github", "") : group.accounts,
+        localGh,
+        daemonInstanceId: primaryHost,
+      }),
+    );
   const githubHostname = githubHostnameOf(group.gitUrl);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -304,19 +335,23 @@ function ProjectCard({
     >
       <div className="mb-2 font-semibold">{group.name}</div>
       <div className="mb-3 text-sm text-muted-foreground">{group.gitUrl}</div>
+      <InlineError testId={`project-card-error-${group.projectId}`} message={failure.error} className="mb-3" />
 
       <div className="mb-3 flex items-center gap-2 text-sm">
         <span className="text-muted-foreground">Default branch</span>
         <select
           data-testid={`project-default-branch-select-${group.projectId}`}
           value={selectedDefaultBranch}
-          onChange={(e) =>
-            onSetDefaultBranch({
-              projectId: group.projectId,
-              mainBranchRef: e.target.value,
-              daemonInstanceId: primaryHost,
-            })
-          }
+          onChange={(e) => {
+            const mainBranchRef = e.target.value;
+            void failure.run(() =>
+              onSetDefaultBranch({
+                projectId: group.projectId,
+                mainBranchRef,
+                daemonInstanceId: primaryHost,
+              }),
+            );
+          }}
           className="rounded border border-border px-2 py-1"
         >
           {branches.map((branch) => (
@@ -438,17 +473,20 @@ function ProjectCard({
               type="button"
               data-testid={`project-add-to-host-submit-${group.projectId}`}
               className="rounded-md border border-border px-3 py-1 text-sm"
+              disabled={failure.pending}
               onClick={() =>
-                onAddProjectToHost({
-                  projectId: group.projectId,
-                  name: group.name,
-                  gitUrl: group.gitUrl,
-                  daemonInstanceId: effectiveSelection,
-                  userRelativePath: userRelativePath.trim(),
-                })
+                void failure.run(() =>
+                  onAddProjectToHost({
+                    projectId: group.projectId,
+                    name: group.name,
+                    gitUrl: group.gitUrl,
+                    daemonInstanceId: effectiveSelection,
+                    userRelativePath: userRelativePath.trim(),
+                  }),
+                )
               }
             >
-              Add
+              {failure.pending ? "Adding…" : "Add"}
             </button>
           </div>
         ) : null}

@@ -38,6 +38,9 @@ export interface SessionTerminalFeedDeps {
    * and better than stating a size measured off nothing.
    */
   readonly containerRef?: RefObject<HTMLElement | null>;
+
+  /** Told whether each send reached the PTY — see `TerminalOptions.onInputDelivery`. */
+  readonly onInputDelivery?: (failure: string | null) => void;
 }
 
 /**
@@ -54,12 +57,15 @@ export function useSessionTerminalFeed({
   terminalId = "",
   controlToken,
   containerRef,
+  onInputDelivery,
 }: SessionTerminalFeedDeps): TerminalFeed | null {
   const [feed, setFeed] = useState<TerminalFeed | null>(null);
   const controlTokenRef = useRef(controlToken);
   controlTokenRef.current = controlToken;
   const containerRefHolder = useRef(containerRef);
   containerRefHolder.current = containerRef;
+  const onInputDeliveryRef = useRef(onInputDelivery);
+  onInputDeliveryRef.current = onInputDelivery;
 
   useEffect(() => {
     if (!connection) {
@@ -73,6 +79,7 @@ export function useSessionTerminalFeed({
       terminalId,
       sessionToken,
       controlToken: () => controlTokenRef.current(),
+      onInputDelivery: (failure) => onInputDeliveryRef.current?.(failure),
       ...(grid.cols > 0 && grid.rows > 0 ? { initialGrid: { cols: grid.cols, rows: grid.rows } } : {}),
     });
     setFeed(opened);

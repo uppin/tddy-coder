@@ -2,16 +2,28 @@ import { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { SessionEntry, SessionService } from "../../gen/session_pb";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
+import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
 import { owningHostForSession } from "../../utils/crossHostSessions";
-import type { UseSessionAttachmentResult } from "./useSessionAttachment";
+import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
 
 export interface UseSessionsDrawerDeleteSelectionArgs {
   sortedSessions: SessionEntry[];
   selectedInstanceId: string | null;
   clientForHost: (instanceId: string) => Client<typeof SessionService> | null;
   client: Client<typeof SessionService> | null;
-  deleteSession: UseSessionAttachmentResult["deleteSession"];
   sessionToken: string;
+  /** A daemon instance id's display label — names the host a row could not be deleted on. */
+  hostLabelForInstance: (instanceId: string) => string;
+  /** Told of each session the bulk delete removed, so the screen can drop an attachment to it. */
+  onSessionDeleted?: (sessionId: string) => void;
+}
+
+/** One row a bulk delete left behind, and why. */
+export interface BulkDeleteFailure {
+  readonly sessionId: string;
+  /** The row's drawer label, so the failure names the session the operator ticked. */
+  readonly label: string;
+  readonly reason: string;
 }
 
 /**
@@ -23,8 +35,9 @@ export function useSessionsDrawerDeleteSelection({
   selectedInstanceId,
   clientForHost,
   client,
-  deleteSession,
   sessionToken,
+  hostLabelForInstance,
+  onSessionDeleted,
 }: UseSessionsDrawerDeleteSelectionArgs) {
   // Sessions ticked for bulk delete — a Set preserves insertion (selection) order, which the bulk
   // delete replays so sessions are removed in the order they were selected.
@@ -32,6 +45,10 @@ export function useSessionsDrawerDeleteSelection({
   // Bulk-selection mode: off by default so the drawer reads as a plain list. The bottom minibar
   // toggles it on, which is what reveals the per-row checkboxes and the Select-all / Delete actions.
   const [selectionMode, setSelectionMode] = useState(false);
+  // The rows the last bulk delete could not remove, each with its own reason. Held here — not in
+  // the selected session's attachment, where they used to land — because they are about the rows
+  // that were ticked, not about whichever session the pane happens to show.
+  const [bulkDeleteFailures, setBulkDeleteFailures] = useState<readonly BulkDeleteFailure[]>([]);
 
   const toggleSelectForDelete = useCallback((sessionId: string) => {
     setSelectedForDelete((prev) => {
@@ -42,7 +59,10 @@ export function useSessionsDrawerDeleteSelection({
     });
   }, []);
 
-  const enterSelectionMode = useCallback(() => setSelectionMode(true), []);
+  const enterSelectionMode = useCallback(() => {
+    setSelectionMode(true);
+    setBulkDeleteFailures([]);
+  }, []);
 
   // Leaving selection mode always clears the tick set — a stale selection must not survive into the
   // next time the operator opens the bar.
@@ -66,23 +86,39 @@ export function useSessionsDrawerDeleteSelection({
 
   const handleBulkDelete = useCallback(async () => {
     const ids = [...selectedForDelete];
+    const failures: BulkDeleteFailure[] = [];
+    setBulkDeleteFailures([]);
     for (const id of ids) {
       const session = sortedSessions.find((s) => s.sessionId === id);
       const owner = session
         ? owningHostForSession(session, selectedInstanceId ?? "")
         : (selectedInstanceId ?? "");
-      const targetClient = clientForHost(owner) ?? client;
-      if (!targetClient) continue;
+      const label = session ? sessionDrawerLabel(session) : id;
       try {
-        await deleteSession(id, sessionToken, targetClient);
+        // A row whose host no wire reaches is a failure of that row, said with the host named —
+        // never skipped, which used to leave it in the list with nothing to say why.
+        const targetClient = clientForHost(owner) ?? client;
+        if (!targetClient) throw hostNotConnected(hostLabelForInstance(owner));
+        await targetClient.deleteSession({ sessionToken, sessionId: id });
+        onSessionDeleted?.(id);
       } catch (err) {
-        console.debug("[SessionsDrawerScreen] bulk deleteSession error", err);
+        failures.push({ sessionId: id, label, reason: rpcFailureText(err) });
       }
     }
+    setBulkDeleteFailures(failures);
     setSelectedForDelete(new Set());
     setSelectionMode(false);
     requestSessionsRefresh();
-  }, [selectedForDelete, sortedSessions, selectedInstanceId, clientForHost, client, deleteSession, sessionToken]);
+  }, [
+    selectedForDelete,
+    sortedSessions,
+    selectedInstanceId,
+    clientForHost,
+    client,
+    sessionToken,
+    hostLabelForInstance,
+    onSessionDeleted,
+  ]);
 
   return {
     selectedForDelete,
@@ -92,5 +128,6 @@ export function useSessionsDrawerDeleteSelection({
     exitSelectionMode,
     toggleSelectAll,
     handleBulkDelete,
+    bulkDeleteFailures,
   };
 }

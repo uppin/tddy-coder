@@ -66,6 +66,11 @@ interface SessionDrawerProps {
   onSelectAll?: () => void;
   /** Delete the currently selected sessions. */
   onBulkDelete?: () => void;
+  /**
+   * Failures about the list itself — it could not be loaded, a bulk delete left rows behind —
+   * shown under the header, above the rows they are about. Rendered only while the list is open.
+   */
+  notices?: React.ReactNode;
 }
 
 interface StackGroup {
@@ -257,6 +262,7 @@ export function SessionDrawer({
   onExitSelectionMode,
   onSelectAll,
   onBulkDelete,
+  notices,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
@@ -354,6 +360,7 @@ export function SessionDrawer({
           <ChevronLeft className="h-4 w-4" />
         </button>
       </div>
+      {notices && <div className="px-3 py-2 border-b border-border space-y-1">{notices}</div>}
       <ScrollArea className="flex-1 min-h-0">
         <div className="py-1 px-2 space-y-0.5">
           {isPartitioned ? (

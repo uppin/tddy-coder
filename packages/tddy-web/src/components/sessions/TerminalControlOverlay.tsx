@@ -1,4 +1,5 @@
 import { Button } from "../ui/button";
+import { InlineError } from "../ui/inline-error";
 
 export interface TerminalControlOverlayProps {
   /** Whether THIS screen currently holds the terminal control lease for the session. */
@@ -7,6 +8,8 @@ export interface TerminalControlOverlayProps {
   holderScreenId: string;
   /** Steal control from the current holder (the "Claim terminal" action). */
   onClaim: () => void;
+  /** Why the last "Claim terminal" did not take control — shown under the button. */
+  claimError?: string | null;
 }
 
 /**
@@ -22,6 +25,7 @@ export function TerminalControlOverlay({
   isController,
   holderScreenId,
   onClaim,
+  claimError = null,
 }: TerminalControlOverlayProps) {
   if (isController) return null;
   return (
@@ -36,6 +40,7 @@ export function TerminalControlOverlay({
       <Button data-testid="terminal-claim-btn" onClick={onClaim}>
         Claim terminal
       </Button>
+      <InlineError testId="terminal-claim-error" message={claimError} className="mt-3 max-w-md text-center" />
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { CreateSessionAttachmentsSection } from "./CreateSessionAttachmentsSecti
 import { CreateSessionActions } from "./CreateSessionActions";
 import { CreateSessionStartPhase } from "./CreateSessionStartPhase";
 import { CreateSessionStackParentSelect } from "./CreateSessionStackParentSelect";
+import { InlineError } from "../ui/inline-error";
 import { useProjectBranches } from "./useProjectBranches";
 import { useCreateSessionCatalogs } from "./useCreateSessionCatalogs";
 import { useCreateSessionPlacement } from "./useCreateSessionPlacement";
@@ -96,7 +97,8 @@ export function CreateSessionPane({
   // The whole session list as the daemon reported it. Kept raw because two pickers draw different
   // views of it — the orchestrators that can parent this session, and the sessions that own a branch
   // a stack can be seeded from — and one fetch feeds both.
-  const { projects, sessions } = useCreateSessionCatalogs({
+  // A failed read is reported beside the picker it emptied, apart from the submit `error` below.
+  const { projects, sessions, projectsError, toolsError, sessionsError } = useCreateSessionCatalogs({
     client,
     projectClient,
     catalogClient,
@@ -206,7 +208,7 @@ export function CreateSessionPane({
     );
   };
 
-  const remoteBranches = useProjectBranches({
+  const { remoteBranches, error: remoteBranchesError } = useProjectBranches({
     client,
     projectClient,
     sessionToken,
@@ -331,6 +333,7 @@ export function CreateSessionPane({
         setDaemonInstanceId={setDaemonInstanceId}
         projects={projects}
         projectOptions={projectOptions}
+        projectsError={projectsError}
         projectId={projectId}
         setProjectId={setProjectId}
       />
@@ -343,6 +346,14 @@ export function CreateSessionPane({
           value={providerChoice ?? BUILT_IN_PROVIDER}
           onChange={setProviderChoice}
           error={providerRoutes.error}
+        />
+      )}
+
+      {/* A tool session cannot start without a tool, and the form has none to pick when this fails. */}
+      {sessionType === "tool" && (
+        <InlineError
+          testId="create-session-tools-load-error"
+          message={toolsError && `Tools unavailable: ${toolsError}`}
         />
       )}
 
@@ -429,6 +440,11 @@ export function CreateSessionPane({
         stackParent={stackParent}
         setStackParent={setStackParent}
       />
+      {/* The stack-parent and stack-base pickers are both drawn from this one list. */}
+      <InlineError
+        testId="create-session-sessions-load-error"
+        message={sessionsError && `Sessions unavailable: ${sessionsError}`}
+      />
 
       <CreateSessionBranchFields
         branchIntent={branchIntent}
@@ -444,6 +460,7 @@ export function CreateSessionPane({
         createRemoteBranch={createRemoteBranch}
         setCreateRemoteBranch={setCreateRemoteBranch}
         remoteBranches={remoteBranches}
+        remoteBranchesError={remoteBranchesError}
         selectedBranchToWorkOn={selectedBranchToWorkOn}
         setSelectedBranchToWorkOn={setSelectedBranchToWorkOn}
       />

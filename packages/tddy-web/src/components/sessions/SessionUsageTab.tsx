@@ -21,6 +21,7 @@ import {
 import { formatTokens } from "./formatTokens";
 import { usageTotals } from "./sessionUsage";
 import { useSessionUsage } from "./useSessionUsage";
+import { InlineError } from "../ui/inline-error";
 
 export interface SessionUsageTabProps {
   /** LiveKit room + daemon/presenter identity selecting the usage stream's transport target. */
@@ -34,8 +35,15 @@ export interface SessionUsageTabProps {
  * viewing Usage — instead of for the whole lifetime of the inspector drawer.
  */
 export function SessionUsageTab({ room, serverIdentity }: SessionUsageTabProps) {
-  const usage = useSessionUsage(room, serverIdentity);
-
+  const { usage, error } = useSessionUsage(room, serverIdentity);
+  // Quiet, beside the table: the last snapshot stays readable while the stream is down.
+  const streamError = (
+    <InlineError
+      testId="sessions-usage-stream-error"
+      message={error && `Usage unavailable: ${error}`}
+      className="text-xs"
+    />
+  );
 
   if (usage.length === 0) {
     return (
@@ -43,12 +51,17 @@ export function SessionUsageTab({ room, serverIdentity }: SessionUsageTabProps) 
         data-testid="sessions-usage-tab-panel"
         className="px-3 py-3 flex flex-col gap-4"
       >
-        <div
-          data-testid="sessions-usage-empty"
-          className="text-xs text-muted-foreground"
-        >
-          No token usage reported yet.
-        </div>
+        {/* A stream that failed says so, rather than claiming the session reported nothing. */}
+        {error ? (
+          streamError
+        ) : (
+          <div
+            data-testid="sessions-usage-empty"
+            className="text-xs text-muted-foreground"
+          >
+            No token usage reported yet.
+          </div>
+        )}
       </div>
     );
   }
@@ -60,6 +73,7 @@ export function SessionUsageTab({ room, serverIdentity }: SessionUsageTabProps) 
       data-testid="sessions-usage-tab-panel"
       className="px-3 py-3 flex flex-col gap-4"
     >
+      {streamError}
       <Table className="text-xs">
         <TableHeader>
           <TableRow>

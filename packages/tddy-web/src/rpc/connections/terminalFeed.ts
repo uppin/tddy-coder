@@ -17,6 +17,7 @@ import { tddyDebug } from "../../lib/debugMask";
 import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 import { TerminalStreamOffset } from "../../lib/terminalStreamOffset";
+import { rpcFailureText } from "../rpcFailure";
 import type { TerminalFeed, TerminalFrame, TerminalOptions, TerminalStream } from "./terminal";
 
 const dTerm = tddyDebug("tddy:term:feed");
@@ -95,14 +96,18 @@ export function openDaemonTerminalFeed({
           controlToken: options.controlToken(),
           inputOffset: BigInt(inputOffset),
         })
-        .catch((err) => {
-          dTerm(
-            "sendTerminalInput failed sessionId=%s terminalId=%s error=%o",
-            sessionId,
-            terminalId,
-            err instanceof Error ? err.message : err,
-          );
-        });
+        .then(
+          () => options.onInputDelivery?.(null),
+          (err: unknown) => {
+            dTerm(
+              "sendTerminalInput failed sessionId=%s terminalId=%s error=%o",
+              sessionId,
+              terminalId,
+              err instanceof Error ? err.message : err,
+            );
+            options.onInputDelivery?.(rpcFailureText(err));
+          },
+        );
     },
     onMessage(fn: (frame: TerminalFrame) => void): void {
       listeners.push(fn);
