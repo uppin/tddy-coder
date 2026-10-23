@@ -3,11 +3,6 @@
 //! extensions dir, and a worktree whose `PATH` holds `fake-ls` — `tddy-lsp`'s deterministic
 //! `fake_lsp`, never a real language server.
 
-#![allow(
-    dead_code,
-    reason = "each test binary uses a different subset of the helpers"
-)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
