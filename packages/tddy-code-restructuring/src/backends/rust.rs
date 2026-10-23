@@ -298,42 +298,9 @@ impl Placeholder {
 
 fn assist_for(kind: RefactorKind) -> Option<Assist> {
     match kind {
-        RefactorKind::ExtractMethod => Some(Assist {
-            title: "extract into function",
-            kinds: &["refactor.extract"],
-            at_caret: false,
-            placeholder: Some(Placeholder {
-                keyword: "fn",
-                name: None,
-            }),
-            multi_file: false,
-            needs_inference: true,
-            relocates_items: false,
-        }),
-        RefactorKind::ExtractVariable => Some(Assist {
-            title: "extract into variable",
-            kinds: &["refactor.extract"],
-            at_caret: false,
-            placeholder: Some(Placeholder {
-                keyword: "let",
-                name: None,
-            }),
-            multi_file: false,
-            needs_inference: true,
-            relocates_items: false,
-        }),
-        RefactorKind::ExtractModule => Some(Assist {
-            title: "extract module",
-            kinds: &["refactor.extract"],
-            at_caret: false,
-            placeholder: Some(Placeholder {
-                keyword: "mod",
-                name: Some("modname"),
-            }),
-            multi_file: false,
-            needs_inference: false,
-            relocates_items: true,
-        }),
+        RefactorKind::ExtractMethod => extract_method_assist(),
+        RefactorKind::ExtractVariable => extract_variable_assist(),
+        RefactorKind::ExtractModule => extract_module_assist(),
         RefactorKind::ExtractModuleToFile => Some(Assist {
             title: "extract module to file",
             kinds: &[],
@@ -388,6 +355,51 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
         }),
         _ => None,
     }
+}
+
+fn extract_module_assist() -> Option<Assist> {
+    Some(Assist {
+        title: "extract module",
+        kinds: &["refactor.extract"],
+        at_caret: false,
+        placeholder: Some(Placeholder {
+            keyword: "mod",
+            name: Some("modname"),
+        }),
+        multi_file: false,
+        needs_inference: false,
+        relocates_items: true,
+    })
+}
+
+fn extract_variable_assist() -> Option<Assist> {
+    Some(Assist {
+        title: "extract into variable",
+        kinds: &["refactor.extract"],
+        at_caret: false,
+        placeholder: Some(Placeholder {
+            keyword: "let",
+            name: None,
+        }),
+        multi_file: false,
+        needs_inference: true,
+        relocates_items: false,
+    })
+}
+
+fn extract_method_assist() -> Option<Assist> {
+    Some(Assist {
+        title: "extract into function",
+        kinds: &["refactor.extract"],
+        at_caret: false,
+        placeholder: Some(Placeholder {
+            keyword: "fn",
+            name: None,
+        }),
+        multi_file: false,
+        needs_inference: true,
+        relocates_items: false,
+    })
 }
 
 mod return_type;
@@ -818,24 +830,7 @@ impl RustBackend {
             .join(&toolchain)
             .join("bin");
 
-        let mut command = self.spawns.command(&self.binary);
-        command
-            .current_dir(root)
-            .env("CARGO_HOME", &self.cargo_home)
-            .env("RUSTUP_HOME", &self.rustup_home)
-            .env("RUSTUP_TOOLCHAIN", &toolchain)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-
-        // Point rust-analyzer straight at the real binaries so sysroot discovery and
-        // `cargo metadata` never go through a proxy at all.
-        for (key, name) in [("CARGO", "cargo"), ("RUSTC", "rustc")] {
-            let real = toolchain_bin.join(name);
-            if real.exists() {
-                command.env(key, real);
-            }
-        }
+        let mut command = self.spawn_command(root, &toolchain, &toolchain_bin);
         self.environment =
             server_process::describe_server_environment(&self.binary, &toolchain, &toolchain_bin);
         let mut process = self
@@ -851,6 +846,13 @@ impl RustBackend {
             stdout,
         });
 
+        let handshake = self.initialize_server(root)?;
+
+        self.unresolved_token = lsp_edits::token_type_index(&handshake, UNRESOLVED_TOKEN);
+        self.notify("initialized", json!({}))
+    }
+
+    fn initialize_server(&mut self, root: &Path) -> Result<Value> {
         let id = self.take_id();
         let handshake = self.request(
             id,
@@ -863,9 +865,34 @@ impl RustBackend {
             }),
         )?;
         refuse_foreign_encoding(negotiated_encoding(&handshake))?;
+        Ok(handshake)
+    }
 
-        self.unresolved_token = lsp_edits::token_type_index(&handshake, UNRESOLVED_TOKEN);
-        self.notify("initialized", json!({}))
+    fn spawn_command(
+        &mut self,
+        root: &Path,
+        toolchain: &str,
+        toolchain_bin: &Path,
+    ) -> std::process::Command {
+        let mut command = self.spawns.command(&self.binary);
+        command
+            .current_dir(root)
+            .env("CARGO_HOME", &self.cargo_home)
+            .env("RUSTUP_HOME", &self.rustup_home)
+            .env("RUSTUP_TOOLCHAIN", toolchain)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+
+        // Point rust-analyzer straight at the real binaries so sysroot discovery and
+        // `cargo metadata` never go through a proxy at all.
+        for (key, name) in [("CARGO", "cargo"), ("RUSTC", "rustc")] {
+            let real = toolchain_bin.join(name);
+            if real.exists() {
+                command.env(key, real);
+            }
+        }
+        command
     }
 
     fn request(&mut self, id: u64, method: &str, params: Value) -> Result<Value> {
@@ -1075,14 +1102,7 @@ impl RustBackend {
         probe: Position,
     ) -> Result<Value> {
         let wanted = assist.title;
-        let target = if assist.at_caret {
-            Range {
-                start: range.start,
-                end: range.start,
-            }
-        } else {
-            range
-        };
+        let target = target_range(range, assist);
         let started = Instant::now();
         let file = relative_to(uri, &self.workspace_root()?)?;
         let mut waiting = Waiting::begin(
@@ -1098,14 +1118,7 @@ impl RustBackend {
                 (self.progress)(&format!("waiting for assist `{wanted}`"));
                 reported_wait = true;
             }
-            let actions = self.request_settled(
-                "textDocument/codeAction",
-                json!({
-                    "textDocument": { "uri": uri },
-                    "range": lsp_range(target),
-                    "context": context_for(assist.kinds)
-                }),
-            )?;
+            let actions = self.settled_actions(uri, assist, target)?;
 
             if let Some(action) = titled(&actions, wanted) {
                 return Ok(action);
@@ -1137,6 +1150,31 @@ impl RustBackend {
                 ));
             }
         }
+    }
+
+    fn settled_actions(&mut self, uri: &str, assist: Assist, target: Range) -> Result<Value> {
+        let actions = self.request_settled(
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": lsp_range(target),
+                "context": context_for(assist.kinds)
+            }),
+        )?;
+        Ok(actions)
+    }
+}
+
+// TODO(reshape-sweep): consented hand edit (developer 2026-10-22): `extract_method` wrote this body as
+// `let target = ..; target`, which clippy's `let_and_return` rejects; engine todo section 13.
+fn target_range(range: Range, assist: Assist) -> Range {
+    if assist.at_caret {
+        Range {
+            start: range.start,
+            end: range.start,
+        }
+    } else {
+        range
     }
 }
 
@@ -1327,6 +1365,17 @@ impl RustBackend {
 
         // Rebinds the `self` a range reads to a local inserted before it, authored here and informed
         // by the server (field mode), and opens the document for itself.
+        self.fields_or_later(op, workspace, relative, uri, original)
+    }
+
+    fn fields_or_later(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         if op.op == RefactorKind::ReadFieldsThrough {
             return self.read_fields_through(op, workspace);
         }
@@ -1352,6 +1401,17 @@ impl RustBackend {
         // The same operation over a set, and one edit rather than one per member: a
         // mutually-referencing set has no order in which the tree compiles between moves, so every
         // member's callers are surveyed against where the whole set is going.
+        self.cluster_or_later(op, workspace, relative, uri, original)
+    }
+
+    fn cluster_or_later(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         if op.op == RefactorKind::MoveClusterToCrate {
             let cluster = crate_move::named_by(workspace, op)?;
             (self.progress)(&format!(
@@ -1379,6 +1439,17 @@ impl RustBackend {
         // The signature and call-site operations are edits this backend writes to the one
         // declaration or call the anchor names, so they are answered by reading the text — before a
         // server exists, like the refusals above.
+        self.signature_or_assisted(op, workspace, relative, uri, original)
+    }
+
+    fn signature_or_assisted(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         if let Some(edits) = Self::rewrite_signature(op, &original)? {
             return Ok(Resolution::of(WorkspaceEdit {
                 changes: vec![FileEdit::Change {
@@ -1403,6 +1474,17 @@ impl RustBackend {
             }));
         }
 
+        self.assisted_edit_resolution(op, workspace, relative, uri, original)
+    }
+
+    fn assisted_edit_resolution(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         self.start(workspace.root)?;
         self.did_open(&uri, &original)?;
         self.ensure_indexed(&uri)?;
@@ -1419,6 +1501,17 @@ impl RustBackend {
             return Ok(Resolution::of(self.rename_symbol(&uri, workspace, op)?));
         }
 
+        self.assisted_resolution(op, workspace, relative, uri, original)
+    }
+
+    fn assisted_resolution(
+        &mut self,
+        op: &RefactorOp,
+        workspace: &Workspace<'_>,
+        relative: String,
+        uri: String,
+        original: String,
+    ) -> Result<Resolution> {
         let (final_text, report, notes) = self.assisted_edit(&uri, &original, op)?;
 
         Ok(Resolution {
@@ -1614,20 +1707,7 @@ impl RustBackend {
             &module_text::module_bounds(&relocated, &name)?,
             &impl_members,
         ));
-        facade::refuse_mangled_rewrite(&preserved, &name, &moved)?;
-        let facade = facade::facade_lines(&name, &moved, reexport)?;
-        let notes = facade::empty_facade_note(&name, &facade, reexport)
-            .into_iter()
-            .chain(inline_paths::note(rerooted))
-            .collect();
-
-        Ok((
-            server_process::without_hollow_imports(&module_text::with_facade(
-                &preserved, &name, &facade,
-            )?),
-            report,
-            notes,
-        ))
+        finish_relocation(reexport, moved, name, report, preserved, rerooted)
     }
 
     /// What the extraction needs to know about every path-reached item the range would relocate.
@@ -2292,6 +2372,30 @@ impl RustBackend {
             lsp_edits::edits_for(&renamed, uri)?,
         ))
     }
+}
+
+fn finish_relocation(
+    reexport: Reexport,
+    moved: Vec<MovedItem>,
+    name: String,
+    report: Vec<VisibilityChange>,
+    preserved: String,
+    rerooted: usize,
+) -> Result<(String, Vec<VisibilityChange>, Vec<String>)> {
+    facade::refuse_mangled_rewrite(&preserved, &name, &moved)?;
+    let facade = facade::facade_lines(&name, &moved, reexport)?;
+    let notes = facade::empty_facade_note(&name, &facade, reexport)
+        .into_iter()
+        .chain(inline_paths::note(rerooted))
+        .collect();
+
+    Ok((
+        server_process::without_hollow_imports(&module_text::with_facade(
+            &preserved, &name, &facade,
+        )?),
+        report,
+        notes,
+    ))
 }
 
 /// What the seam survey saw, as one line.

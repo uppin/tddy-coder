@@ -98,12 +98,7 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         &mut notes,
     )?;
 
-    let moved_names: BTreeSet<String> = moving
-        .run
-        .items
-        .iter()
-        .map(|item| item.name.clone())
-        .collect();
+    let moved_names = names_of_items(moving);
     let moved = moved_text(
         moving,
         &region,
@@ -117,15 +112,7 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         edits.entry(path).or_default().push(edit);
     }
     let pairs = moved_paths(moving);
-    for (path, list) in doc_links::across_the_crate(
-        moving.workspace,
-        moving.package,
-        &pairs,
-        &mut texts,
-        Some((moving.source_file, region.clone())),
-    )? {
-        edits.entry(path).or_default().extend(list);
-    }
+    absorb_doc_links(moving, &mut texts, &region, &mut edits, pairs)?;
     edits
         .entry(moving.source_file.to_string())
         .or_default()
@@ -134,6 +121,48 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
     reach::reach_the_destination(moving, &mut texts, &region, facade, &mut edits)?;
 
     let mut files = BTreeMap::new();
+    changed_files(texts, edits, &mut files)?;
+    Ok(Assembled {
+        files,
+        report: landing.report,
+        notes,
+    })
+}
+
+fn names_of_items(moving: &Moving<'_>) -> BTreeSet<String> {
+    let moved_names: BTreeSet<String> = moving
+        .run
+        .items
+        .iter()
+        .map(|item| item.name.clone())
+        .collect();
+    moved_names
+}
+
+fn absorb_doc_links(
+    moving: &Moving<'_>,
+    texts: &mut BTreeMap<String, String>,
+    region: &Range<usize>,
+    edits: &mut BTreeMap<String, Vec<Edit>>,
+    pairs: Vec<(String, String)>,
+) -> Result<()> {
+    for (path, list) in doc_links::across_the_crate(
+        moving.workspace,
+        moving.package,
+        &pairs,
+        texts,
+        Some((moving.source_file, region.clone())),
+    )? {
+        edits.entry(path).or_default().extend(list);
+    }
+    Ok(())
+}
+
+fn changed_files(
+    texts: BTreeMap<String, String>,
+    edits: BTreeMap<String, Vec<Edit>>,
+    files: &mut BTreeMap<String, (String, String)>,
+) -> Result<()> {
     for (path, mut list) in edits {
         list.sort_by(|one, other| {
             (one.start, one.end, &one.text).cmp(&(other.start, other.end, &other.text))
@@ -145,11 +174,7 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
             files.insert(path, (old, new));
         }
     }
-    Ok(Assembled {
-        files,
-        report: landing.report,
-        notes,
-    })
+    Ok(())
 }
 
 fn original_texts(moving: &Moving<'_>) -> Result<BTreeMap<String, String>> {
@@ -487,19 +512,7 @@ fn into_destination(
 
     let mut edits: Vec<(String, Edit)> = widenings;
     let mut imports = None;
-    if !lines.is_empty() {
-        notes.push(format!(
-            "imports: {} `use` item(s) copied from the source module for the moved code; the ones \
-             it does not use are removed by the unused-import tidy at the end of a complete run",
-            lines.len()
-        ));
-        let (at, blank) = use_insertion(&text, scope.clone());
-        let mut block: String = lines.iter().map(|line| format!("{line}\n")).collect();
-        if blank {
-            block.push('\n');
-        }
-        imports = Some(Edit::insert(at, block));
-    }
+    imports_block(notes, &text, &scope, lines, &mut imports);
     let landed = placement::insertion(&text, &scope, moved)?;
     // Both land at one offset in a file with no items yet; as two edits their order would be the
     // order of their text, which writes the imports below the items.
@@ -518,4 +531,26 @@ fn into_destination(
         None => edits.push((file, landed)),
     }
     Ok(edits)
+}
+
+fn imports_block(
+    notes: &mut Vec<String>,
+    text: &str,
+    scope: &Range<usize>,
+    lines: Vec<String>,
+    imports: &mut Option<Edit>,
+) {
+    if !lines.is_empty() {
+        notes.push(format!(
+            "imports: {} `use` item(s) copied from the source module for the moved code; the ones \
+             it does not use are removed by the unused-import tidy at the end of a complete run",
+            lines.len()
+        ));
+        let (at, blank) = use_insertion(text, scope.clone());
+        let mut block: String = lines.iter().map(|line| format!("{line}\n")).collect();
+        if blank {
+            block.push('\n');
+        }
+        *imports = Some(Edit::insert(at, block));
+    }
 }

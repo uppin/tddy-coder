@@ -96,3 +96,117 @@ Developer decision 2026-10-22 ("one more cut each, then defer"). Both partial cu
 
 Wanted: `extract_method` keeps `mut` on a binding it moves into a returned tuple or a returned value, or `verify` accounts
 for a `mut` dropped only where the new function returns the binding.
+
+## 7. `choose_import`: `extract_method` drops the enclosing function's lifetime parameter from the new function (E0261)
+
+Found in `#reshape` 21/24 (`backend-fn-sizes`), plan `n21-01-choose-import` (the `by_crate` tier, lines 76–81 of the item,
+name `by_crate_tier`). Rolled back cleanly under the standing rule (compile gate, `git checkout HEAD --` of the one file,
+journal removed); deferred by the developer's standing rule of 2026-10-22.
+
+The engine writes the new function with the parameter the range reads, and drops the `<'a>` the enclosing `choose_import<'a>`
+declares:
+
+```
+fn by_crate_tier(offered: &[&'a str], in_scope: Vec<String>) -> Option<&str> {
+packages/tddy-code-restructuring/src/backends/rust/import_text.rs:79:30: error[E0261]: use of undeclared lifetime name `'a`
+```
+
+The apply's compile gate caught it (`1 of 1 operation(s) were applied, and the tree no longer compiles`). Every tier of
+`choose_import` that narrows `offered` reads `&[&'a str]`, so every such range hits the same defect; the one range that
+avoids `offered` (the `modules` binding) saves three lines, not the five the function needs.
+
+Wanted: `extract_method` declares every lifetime parameter of the enclosing function that the new function's signature
+mentions (here `<'a>`), and spells the return type with it (`Option<&'a str>`, not an elided `Option<&str>`).
+
+## 8. `request`: `extract_method` makes a read-only range a `&mut self` method, under a live borrow of a field (E0502)
+
+Found in `#reshape` 21/24 (`backend-fn-sizes`), plan `n21-06-request-waiting` (the `Waiting::begin(..)` statement inside
+the bridged branch of `request`, reading `self.wait_heartbeat`). Rolled back cleanly (HEAD restored for the one file, journal
+removed); deferred by the developer's standing rule of 2026-10-22.
+
+The engine writes `fn begin_wait(&mut self, method: &str, started: Instant) -> Waiting`, although the range only reads
+`self.wait_heartbeat`. The branch holds `bridge` borrowed from `self.bridge` for the whole block, so the `&mut self` call is
+refused by the borrow checker:
+
+```
+packages/tddy-code-restructuring/src/backends/rust.rs:893:31: error[E0502]: cannot borrow `*self` as mutable because it is also borrowed as immutable
+```
+
+Wanted: a range that reads `self` and writes nothing takes `&self`.
+
+## 9. `next_import`: a tuple return of two borrowed bindings gets an elided lifetime (E0106)
+
+Found in `#reshape` 21/24 (`backend-fn-sizes`), plan `n21-08-next-import-lost` (the `let lost = Lost { .. }; let inside = ..;`
+pair, lines 126–130 of the item). Rolled back under the standing rule; deferred 2026-10-22.
+
+The engine writes `fn lost_and_inside(unresolved: &[UnresolvedName], block: &ModuleBlock, name: &UnresolvedName) -> (Lost<'_>, bool)`.
+Two reference inputs make the `'_` ambiguous:
+
+```
+packages/tddy-code-restructuring/src/backends/rust/imports.rs:294:104: error[E0106]: missing lifetime specifier
+```
+
+Wanted: the return names the lifetime of the input it borrows (`Lost<'a>` with `name: &'a UnresolvedName`), as the enclosing
+`next_import` writes its own.
+
+## 10. `survey`: the tail range is refused, and the one cut that reaches 60 needs a nine-parameter helper
+
+Found in `#reshape` 21/24 (`backend-fn-sizes`), `detach_method/survey.rs`. Plan `n21-09-survey-tail` (the `Ok(Surveyed { .. })`
+tail, lines 162–168) was refused by `check --deep`:
+
+```
+this seam cannot be cut here: rust-analyzer offers no "extract into function" assist for the given range (it offered none)
+```
+
+The other range that brings the function under 60 (the `prefix`, `caller_module` and `sites.push` statements, lines 146–157,
+plan `n21-10-survey-site`) passes `check --deep`, but its helper `record_site` takes nine parameters, and
+`clippy::too_many_arguments` fires above seven. Not applied. Deferred 2026-10-22.
+
+Wanted: rust-analyzer's extract assist accepts a tail that builds a struct literal inside `Ok(..)`; and the extraction offers a
+way to pass the sites' context without one parameter per local (a struct, or a range that takes fewer locals).
+
+## 11. `assisted_edit`: the rename block rewrites `&format!(..)` and `&name` at its call (E0308)
+
+Found in `#reshape` 21/24 (`backend-fn-sizes`), plan `n21-28-assisted-rename` (lines 1665–1675 of the item: `let named = ..`,
+the residual-placeholder check, and the inferred-placeholder check). The helper took `name: &String` and
+`placeholder: Placeholder`; the call site lost the `&` in front of `format!(..)` and in front of `name`:
+
+```
+packages/tddy-code-restructuring/src/backends/rust.rs:1711:17: error[E0308]: mismatched types: expected `&str`, found `String`
+```
+
+Rolled back under the standing rule; deferred 2026-10-22. The function is still 110 lines after the earlier, verified cuts
+(`finish_relocation`), so it is exempted as a whole.
+
+Wanted: the call site keeps the borrow the extracted parameter takes (`&format!(..)` for a `&str` parameter, `&name` for a
+`&String` one) — a rewrite of the argument, not only of the signature.
+
+## 12. `extract_method` drops a `mut` from a caller's binding when the mutation moves into the new function
+
+Found in `#reshape` 21/24, plan `n21-26-assisted-finish` (`assisted_edit`, lines 1703–1722: the range started before
+`facade::refuse_mangled_rewrite`, after `report.extend(..)` had mutated `report`). The new function takes `mut report`, and the
+caller's `let (preserved, mut report) = ..` became `let (preserved, report) = ..`. `verify --against HEAD` reported the dropped
+`mut`; a dropped `mut` is not an accepted shape, so the cut was rolled back. The range that starts after the `extend` is
+accepted (commit `7f0a7a45f`), and keeps `mut` where it is mutated.
+
+Wanted: a `mut` stays on the caller's binding when the caller still needs it, or the new function borrows the value it mutates.
+
+## 13. `extract_method` of a `let` binding that is returned writes `let x = ..; x`, which clippy rejects (`let_and_return`)
+
+Found in `#reshape` 21/24 (`backend-fn-sizes`), commit `b9a290293` (`offered_assist`'s target choice, plan `n21-19-offered-target`,
+the `let target = if assist.at_caret { .. } else { range };` statement). The new function is written as
+`fn target_range(range: Range, assist: Assist) -> Range { let target = if assist.at_caret { .. } else { range }; target }`,
+which compiles and passes `verify`. `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` fails:
+
+```
+error: returning the result of a `let` binding from a block
+    --> packages/tddy-code-restructuring/src/backends/rust.rs:1177:5
+```
+
+Stopped for a decision, because a hand edit beyond a post-move build fix is a stop under the 2026-10-22 rules. The developer
+consented to the hand edit on 2026-10-22: `target_range` in `backends/rust.rs` now has the expression body
+(`if assist.at_caret { .. } else { range }`), marked `TODO(reshape-sweep)`. Remove that marker when the engine writes the
+tail expression itself.
+
+Wanted: when the range is a `let` whose binding is the function's returned value, `extract_method` writes the initialiser as the
+new function's tail expression, and not a binding followed by its name.

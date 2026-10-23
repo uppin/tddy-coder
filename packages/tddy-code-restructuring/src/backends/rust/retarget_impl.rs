@@ -81,13 +81,7 @@ impl RustBackend {
 
         // The field check is the first thing after the outline and before any edit is built, so a
         // `check --deep` names it and an `apply` refuses with the tree untouched.
-        let moved: Vec<(&str, &str)> = run
-            .moved()
-            .iter()
-            .map(|member| (member.name.as_str(), member_text(&text, member)))
-            .collect();
-        let declaration = fields::declaration(workspace, file, to_type)?;
-        fields::refuse(&moved, new_name, &declaration, file)?;
+        refuse_moved_fields(workspace, file, &text, to_type, new_name, &run)?;
 
         let layout = rewrite::Layout::of(&text, &run, new_self);
 
@@ -133,6 +127,24 @@ impl RustBackend {
             Anchor::Symbol { .. } => Err(unlowered_item_anchor(&op.anchor, "`retarget_impl`")),
         }
     }
+}
+
+fn refuse_moved_fields(
+    workspace: &Workspace<'_>,
+    file: &str,
+    text: &str,
+    to_type: &str,
+    new_name: &str,
+    run: &outline::Run,
+) -> Result<()> {
+    let moved: Vec<(&str, &str)> = run
+        .moved()
+        .iter()
+        .map(|member| (member.name.as_str(), member_text(text, member)))
+        .collect();
+    let declaration = fields::declaration(workspace, file, to_type)?;
+    fields::refuse(&moved, new_name, &declaration, file)?;
+    Ok(())
 }
 
 /// What [`the_replacement`] reads of the run besides the layout: the operation, the file's text and

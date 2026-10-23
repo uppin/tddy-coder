@@ -32,6 +32,20 @@ a `&mut` parameter in an `extract_method` cut is accepted by hand review of the 
 
 The `check_plan` rehearsal cut (`rehearse_op`, `check_entry_points.rs`) is the first use of the third rule.
 
+Developer decision, 2026-10-22 (`#reshape` 21/24, `backend-fn-sizes`; fourth): accept the `&T` family. When a local becomes a
+shared `&T` parameter of an `extract_method` cut, the same mechanical rewrites are accepted by hand review of the diff and
+listed in the cut's commit message:
+- `&x` → `x` (the moved call passes the `&T` parameter, not a fresh borrow of the local);
+- autoderef'd field or method reads left unchanged.
+
+The `retarget_impl` cut (`refuse_moved_fields`, `member_text(&text, …)` → `member_text(text, …)`) is the first use of the fourth
+rule.
+
+Developer decision, 2026-10-22 (fifth): accept the guard-lift tail. An extracted guard block that becomes
+`fn … -> Result<…>` ending in `Ok(())`, called with `?`, is accepted by hand review of the diff and listed in the cut's commit
+message. Beyond the new signature and call site, the only added text is the `Ok(())` the new function ends with and the `?`
+at the call.
+
 Any other unaccounted statement still stops the run.
 
 ## Wanted
