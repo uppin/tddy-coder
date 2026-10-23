@@ -15,6 +15,9 @@
 //! `exec_tools.ExecToolService/ExecuteTool` service hosted on a Unix socket in this test
 //! process (the same protocol `dispatch_via_sandbox_ipc` speaks to the sandbox runner relay).
 
+#[path = "support/exec_catalog.rs"]
+mod exec_catalog;
+
 use std::collections::BTreeSet;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -287,10 +290,11 @@ fn final_answer_response(answer: &str) -> Value {
 /// the whole of what they need.
 #[tokio::test]
 async fn a_session_whose_host_serves_the_action_surface_advertises_the_action_tools() {
-    // Given — a transport is configured (the socket needn't answer for tools/list) and the host
+    // Given — a transport whose host offers the daemon-wide exec catalog, and the host
     // has claimed the action surface
     let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("unused.sock");
+    let socket = dir.path().join("tool-ipc.sock");
+    let _host = exec_catalog::a_host_offering_the_catalog_at(&socket);
     let mut child = spawn_mcp_server(&[
         ("TDDY_SANDBOX_TOOL_IPC", socket.to_str().unwrap()),
         SERVES_ACTIONS,
@@ -322,9 +326,10 @@ async fn a_session_whose_host_serves_the_action_surface_advertises_the_action_to
 /// registered" is why the advertisement is a claim now rather than an inference.
 #[tokio::test]
 async fn a_transport_whose_host_does_not_serve_actions_advertises_no_action_tools() {
-    // Given — a transport, and no claim
+    // Given — a transport whose host offers the daemon-wide exec catalog, and no claim
     let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("unused.sock");
+    let socket = dir.path().join("tool-ipc.sock");
+    let _host = exec_catalog::a_host_offering_the_catalog_at(&socket);
     let mut child = spawn_mcp_server(&[("TDDY_SANDBOX_TOOL_IPC", socket.to_str().unwrap())]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -378,7 +383,8 @@ async fn a_session_without_a_host_tool_surface_advertises_no_action_tools() {
 async fn replacing_shell_withdraws_shell_and_changes_nothing_else() {
     // Given — the same agent twice, differing only in its `replaces` list
     let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("unused.sock");
+    let socket = dir.path().join("tool-ipc.sock");
+    let _host = exec_catalog::a_host_offering_the_catalog_at(&socket);
     let socket = socket.to_str().unwrap();
     let replaces_nothing = agent_defs_json("runner", "http://127.0.0.1:1", &[]);
     let replaces_shell = agent_defs_json("runner", "http://127.0.0.1:1", &["Shell"]);
@@ -413,7 +419,8 @@ async fn replacing_shell_withdraws_shell_and_changes_nothing_else() {
 async fn a_write_replacing_def_drops_mutation_tools_but_keeps_shell() {
     // Given — a coder def replacing the three mutation tools
     let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("unused.sock");
+    let socket = dir.path().join("tool-ipc.sock");
+    let _host = exec_catalog::a_host_offering_the_catalog_at(&socket);
     let defs = json!([{
         "name": "coder",
         "model": "some-coder-model",
