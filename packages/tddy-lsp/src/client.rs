@@ -30,8 +30,8 @@ use dispatch::{read_loop, Routes};
 use documents::DocumentVersions;
 use notifications::NotificationSink;
 
-use commands::ApplyEditCapture;
 pub use commands::ExecutedCommand;
+use commands::{ApplyEditCapture, CommandGate};
 pub use notifications::{NotificationEvent, NotificationStream};
 pub use types::{Diagnostic, Location, Position, Range, ResponseError, SymbolInfo};
 
@@ -100,6 +100,8 @@ pub struct LspClient {
     /// The edits the server has sent through `workspace/applyEdit` during the one
     /// `workspace/executeCommand` in flight; `None` while no command runs.
     apply_edits: ApplyEditCapture,
+    /// Held by the one `workspace/executeCommand` in flight, so [`Self::apply_edits`] belongs to it.
+    command_gate: CommandGate,
 }
 
 impl Drop for LspClient {
@@ -155,6 +157,7 @@ impl LspClient {
             documents: Mutex::new(HashMap::new()),
             activity: Mutex::new(None),
             apply_edits,
+            command_gate: CommandGate::default(),
         };
 
         let params = json!({

@@ -73,11 +73,13 @@
 //!   request per listed edit, one at a time, each sent only once the client answered the one
 //!   before, and answers the command (`null`) only after the client answered the last; a command
 //!   with no entry is answered `null` at once, having sent no edit. `tddy/applyEditAnswers`
-//!   replays what the client answered those requests, in order; `tddy/codeActionRequests` the
-//!   params of every `textDocument/codeAction` received.
+//!   replays what the client answered those requests, in order — each answer's `result`, or the
+//!   whole response when it carried none (an error); `tddy/codeActionRequests` returns the `params`
+//!   of each `textDocument/codeAction` request received, in arrival order.
 //! - `--diagnoses <marker>` — the diagnostics of a document are computed from the text the client
 //!   last announced for it: one error (`severity` 1, source `fake`, message `unexpected <marker>`)
-//!   per occurrence of `<marker>`, at its range. Published on every `didOpen` and `didChange`, and
+//!   per occurrence of `<marker>`, at its range in UTF-16 code units from the line start, as LSP
+//!   positions count by default. Published on every `didOpen` and `didChange`, and
 //!   the answer to a pull `textDocument/diagnostic`, instead of the one fixed diagnostic.
 //!
 //! Every mode above is off unless asked for, so adding one leaves a server started without it
@@ -240,10 +242,12 @@ const APPLY_EDIT_REQUEST_ID: &str = "fake-lsp-apply-edit-";
 /// A `workspace/executeCommand` waiting on the client's answers: its id and the edits still to send.
 static RUNNING_COMMAND: std::sync::Mutex<Option<(Value, Vec<Value>)>> = std::sync::Mutex::new(None);
 
-/// Every answer the client gave this server's `workspace/applyEdit` requests, in order.
+/// Every answer the client gave this server's `workspace/applyEdit` requests, in order: the
+/// response's `result`, or the whole response when it has none, so an error answer shows as one.
 static APPLY_EDIT_ANSWERS: std::sync::Mutex<Vec<Value>> = std::sync::Mutex::new(Vec::new());
 
-/// The params of every `textDocument/codeAction` received, in order.
+/// The `params` of each `textDocument/codeAction` request received, in arrival order — what
+/// `tddy/codeActionRequests` returns.
 static CODE_ACTION_REQUESTS: std::sync::Mutex<Vec<Value>> = std::sync::Mutex::new(Vec::new());
 
 /// Set by `--answers-rename`: `textDocument/rename` is answered with an edit.
@@ -742,10 +746,12 @@ fn record_client_response(message: &Value) {
         .and_then(Value::as_str)
         .is_some_and(|id| id.starts_with(APPLY_EDIT_REQUEST_ID))
     {
-        APPLY_EDIT_ANSWERS
-            .lock()
-            .unwrap()
-            .push(message.get("result").cloned().unwrap_or(Value::Null));
+        APPLY_EDIT_ANSWERS.lock().unwrap().push(
+            message
+                .get("result")
+                .cloned()
+                .unwrap_or_else(|| message.clone()),
+        );
         send_the_next_edit_or_answer_the_command();
         return;
     }
@@ -862,8 +868,10 @@ fn diagnosed(uri: &str, marker: &str) -> Vec<Value> {
     let mut found = Vec::new();
     for (line, source) in text.split('\n').enumerate() {
         for (at, _) in source.match_indices(marker) {
+            let start = utf16_len(&source[..at]);
+            let end = start + utf16_len(marker);
             found.push(json!({
-                "range": range(line as u32, at as u32, line as u32, (at + marker.len()) as u32),
+                "range": range(line as u32, start, line as u32, end),
                 "severity": 1,
                 "message": format!("unexpected {marker}"),
                 "source": "fake"
@@ -871,6 +879,11 @@ fn diagnosed(uri: &str, marker: &str) -> Vec<Value> {
         }
     }
     found
+}
+
+/// The length of `text` in UTF-16 code units — the unit an LSP `character` counts by default.
+fn utf16_len(text: &str) -> u32 {
+    text.encode_utf16().count() as u32
 }
 
 /// The diagnostics a document has: computed under `--diagnoses`, the one fixed one otherwise.
@@ -1041,7 +1054,7 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
         }
         // Replays what the client answered this server's `workspace/applyEdit` requests.
         "tddy/applyEditAnswers" => reply(id, json!(APPLY_EDIT_ANSWERS.lock().unwrap().clone())),
-        // Replays the params of every `textDocument/codeAction` received.
+        // Replays the `params` of each `textDocument/codeAction` request received, in order.
         "tddy/codeActionRequests" => reply(id, json!(CODE_ACTION_REQUESTS.lock().unwrap().clone())),
         "textDocument/codeAction" => reply_error(id, FAKE_CONTENT_MODIFIED, "content modified"),
         // Sends nothing back, so the only thing that ends the wait is the request timeout.

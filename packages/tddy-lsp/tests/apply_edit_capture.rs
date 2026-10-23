@@ -14,6 +14,9 @@ use tddy_task::TaskRegistry;
 /// The command the fake server implements by asking the client to apply two edits.
 const TWO_EDIT_COMMAND: &str = "fake.extract";
 
+/// The command the fake server implements by asking the client to apply one edit.
+const ONE_EDIT_COMMAND: &str = "fake.inline";
+
 /// An edit inserting `text` at the start of `file:///workspace/app.toml`.
 fn an_insertion_of(text: &str) -> Value {
     json!({ "changes": { "file:///workspace/app.toml": [{
@@ -22,18 +25,31 @@ fn an_insertion_of(text: &str) -> Value {
     }] } })
 }
 
-/// A `--code-actions` file in `dir` whose [`TWO_EDIT_COMMAND`] sends two edits.
+/// A `--code-actions` file in `dir` whose [`TWO_EDIT_COMMAND`] sends two edits and whose
+/// [`ONE_EDIT_COMMAND`] sends one.
 fn a_code_actions_file_in(dir: &Path) -> PathBuf {
     let path = dir.join("code-actions.json");
     std::fs::write(
         &path,
         json!({
-            "command_edits": { TWO_EDIT_COMMAND: [an_insertion_of("a = 1\n"), an_insertion_of("b = 2\n")] }
+            "command_edits": {
+                TWO_EDIT_COMMAND: [an_insertion_of("a = 1\n"), an_insertion_of("b = 2\n")],
+                ONE_EDIT_COMMAND: [an_insertion_of("c = 3\n")],
+            }
         })
         .to_string(),
     )
     .expect("write the code-actions file");
     path
+}
+
+/// What the client answered each of the fake server's `workspace/applyEdit` requests, in order.
+async fn the_apply_edit_answers(service: &LspService) -> Value {
+    service
+        .client
+        .request_raw("tddy/applyEditAnswers", Value::Null)
+        .await
+        .expect("the fake server replays the client's answers")
 }
 
 async fn a_server_answering_from(code_actions: &Path) -> Arc<LspService> {
@@ -66,11 +82,7 @@ async fn an_apply_edit_during_execute_command_reaches_the_caller() {
         .execute_command(TWO_EDIT_COMMAND, Vec::new())
         .await
         .expect("the command is answered");
-    let answers = service
-        .client
-        .request_raw("tddy/applyEditAnswers", Value::Null)
-        .await
-        .expect("the fake server replays the client's answers");
+    let answers = the_apply_edit_answers(&service).await;
 
     // Then both edits reach the caller in arrival order, and the server was told each was applied
     assert_eq!(
@@ -100,6 +112,31 @@ async fn a_command_that_sends_no_edit_reaches_the_caller_with_none() {
     assert_eq!(
         (executed.result, executed.applied_edits),
         (Value::Null, Vec::<Value>::new())
+    );
+}
+
+#[tokio::test]
+async fn two_concurrent_commands_on_one_client_each_get_their_own_edits() {
+    // Given a server whose two commands each apply their own edits
+    let dir = tempfile_dir();
+    let service = a_server_answering_from(&a_code_actions_file_in(dir.path())).await;
+
+    // When both commands are executed at once on the one shared client
+    let (two, one) = tokio::join!(
+        service.client.execute_command(TWO_EDIT_COMMAND, Vec::new()),
+        service.client.execute_command(ONE_EDIT_COMMAND, Vec::new()),
+    );
+
+    // Then each caller has exactly the edits its own command sent
+    assert_eq!(
+        (
+            two.expect("the two-edit command is answered").applied_edits,
+            one.expect("the one-edit command is answered").applied_edits
+        ),
+        (
+            vec![an_insertion_of("a = 1\n"), an_insertion_of("b = 2\n")],
+            vec![an_insertion_of("c = 3\n")]
+        )
     );
 }
 
