@@ -13,7 +13,7 @@ tests that failed.
 |-------|--------------|-----------------|
 | `Rust lint` | `cargo fmt --all --check`, then `cargo clippy --workspace --all-targets -- -D warnings` | ~8 min |
 | `Rust build` | `cargo build --workspace --bins --examples` | ~10 min |
-| `Rust tests` | `cargo nextest run --workspace --profile ci`, minus the e2e set | |
+| `Rust tests` | `cargo nextest run --profile ci`, minus the e2e set, over the workspace in a sliding window of package batches (`scripts/nextest-windowed.ts`) | |
 | `Rust e2e tests` | `cargo nextest run --archive-file … --profile ci`, restricted to the e2e set, run as 6 shards from an archive of just the e2e test targets — tests that need real infrastructure | |
 | `Generated code` | `bun install --frozen-lockfile`, then `scripts/generated-code.sh check` | ~3 min |
 | `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` + `tddy-livekit-web` Cypress component tests | ~10 min |
@@ -61,9 +61,31 @@ The Rust suite is two checks, split by **what a test needs to run**, not by how 
 | `Rust tests` | every test not in the e2e set | nothing outside the process, the files and the sockets it makes itself |
 | `Rust e2e tests` | the e2e set | real infrastructure: a **LiveKit server in Docker**, a **live rust-analyzer**, or a **real `tddy-supervisor`, index-daemon, daemon or `tddy-coder` process** |
 
-**`Rust tests` compiles its own test targets.** It restores the `test` cargo cache, builds every
-`--workspace` test target and runs the complement of the e2e set. It is the only job that saves that
-cache (master only): it builds the full set, and two writers on one key would race.
+**`Rust tests` compiles its own test targets, a window at a time.** It restores the `test` cargo
+cache and runs the complement of the e2e set over the workspace in batches of packages
+(`scripts/nextest-windowed.ts --batches <n>`, balanced by test binaries; `ci.yml` sets the count, currently 2 — a single batch ran out of disk even with incremental off). Each batch builds, runs, then deletes the test
+binaries it built, as `cargo nextest list` names them, before the next batch starts. The shared
+dependency artifacts stay for later batches, and `Rust build`'s fixture binaries are never touched.
+
+The window exists because the workspace has about 1,070 test binaries (2026-10-23), each statically
+linking its crate's dependency graph. Built all at once, they no longer fit the runner: `rustc` failed
+with `No space left on device` after 110 GB was free at the start. A filterset does not help, because
+nextest applies `-E` after building. Each batch keeps its JUnit report as
+`target/nextest/ci/junit-<n>.xml`, and the report step and the `junit-rust` artifact read
+`junit-*.xml`. A `Disk after the tests` step prints `df` and `du -sh target`, and every batch prints
+`df` after its deletion.
+
+To reproduce one batch locally:
+
+```sh
+./dev bun scripts/nextest-windowed.ts --batches 1 --packages a,b -- --profile ci --locked -E "not ($e2e)"
+```
+
+Every job builds with `CARGO_INCREMENTAL: 0`: incremental state is scratch a one-shot build never
+reuses, and it only costs disk and cache size.
+
+`Rust tests` is the only job that saves the `test` cache (master only). Two writers on one key would
+race.
 
 **The e2e targets are archived, and only they are.** The `Rust e2e test archive` job runs
 `cargo nextest archive -p <package>... --test <name>... --locked` as a step of its own — so the compile
