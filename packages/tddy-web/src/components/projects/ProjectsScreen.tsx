@@ -76,6 +76,8 @@ export interface ProjectsScreenProps {
     homeAgent: string;
     daemonInstanceId: string;
   }) => Promise<void>;
+  /** The project whose home-agent picker takes focus and is scrolled into view, once it is listed. */
+  focusedProjectId?: string | null;
 }
 
 
@@ -119,6 +121,7 @@ export function ProjectsScreen({
   loadHostGithubCli,
   agents = [],
   onSetHomeAgent,
+  focusedProjectId = null,
 }: ProjectsScreenProps) {
   const groups = useMemo(() => groupByProject(projects), [projects]);
 
@@ -213,6 +216,7 @@ export function ProjectsScreen({
             loadHostGithubCli={loadHostGithubCli}
             agents={agents}
             onSetHomeAgent={onSetHomeAgent}
+            focusHomeAgent={group.projectId === focusedProjectId}
           />
         ))}
       </div>

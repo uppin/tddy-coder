@@ -81,6 +81,8 @@ interface SessionDrawerProps {
   projectHomes?: ReadonlyArray<ProjectHomeInfo>;
   /** Start, resume or reach the project's home session. Rejects with the daemon's reason. */
   onEnsureProjectHome?: (projectId: string) => Promise<void>;
+  /** Take the operator to set a home agent for a project that has none — its pinned entry's click. */
+  onSetUpProjectHome?: (projectId: string) => void;
 }
 
 export type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
@@ -109,6 +111,7 @@ export function SessionDrawer({
   projects = [],
   projectHomes = [],
   onEnsureProjectHome,
+  onSetUpProjectHome,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
@@ -255,6 +258,7 @@ export function SessionDrawer({
                     homeSession={homeSession}
                     selected={homeSession !== null && homeSession.sessionId === selectedSessionId}
                     onEnsure={onEnsureProjectHome}
+                    onSetUpProjectHome={onSetUpProjectHome}
                   />
                 )}
                 <SessionGroupBody

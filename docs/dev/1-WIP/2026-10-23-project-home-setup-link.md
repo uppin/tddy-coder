@@ -1,7 +1,7 @@
 # 2026-10-23 — Clicking "main" with no home agent takes you to the project's home-agent picker
 
-**Type:** Bug fix · **Stack:** `#visible-failures` 2/2, on #706 · **Status:** 🚧 Draft (reproduction
-tests red)
+**Type:** Bug fix · **Stack:** `#visible-failures` 2/2, on #706 · **Status:** 🟢 Implemented (scoped
+specs green; full Cypress on CI)
 
 ## Summary
 
@@ -72,8 +72,8 @@ screen:
 ## Scope
 
 - [x] Reproduction tests (red; above)
-- [ ] `ProjectHomeEntry` / `SessionDrawer`: `onSetUpProjectHome`, no `aria-disabled`
-- [ ] `projectSetupLocation` + `SessionsDrawerScreen` wiring
-- [ ] Projects: focus the picker named by `PARAM_PROJECT`
-- [ ] The existing `SessionsDrawerProjectHomeAcceptance` specs stay green ("shows a hint instead of
+- [x] `ProjectHomeEntry` / `SessionDrawer`: `onSetUpProjectHome`, no `aria-disabled`
+- [x] `projectSetupLocation` + `SessionsDrawerScreen` wiring
+- [x] Projects: focus the picker named by `PARAM_PROJECT`
+- [x] The existing `SessionsDrawerProjectHomeAcceptance` specs stay green ("shows a hint instead of
       starting" keeps its hint and no-ensure assertions)
