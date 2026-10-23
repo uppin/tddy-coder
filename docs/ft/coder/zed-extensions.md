@@ -95,7 +95,7 @@ cold CLI (`tddy-tools restructure`) and the index daemon, so the two answer the 
   (non-adjacent items, a stale fingerprint, an absent or ambiguous name). None of them starts
   rust-analyzer for a file only an extension language claims.
 - **No server.** A language no `[language_servers.<id>]` serves refuses every operation on its files —
-  `rename_symbol`, code actions, references — with `UnsupportedOp { backend: "<language id>", op }`. A
+  `rename_symbol`, `apply_code_action`, references — with `UnsupportedOp { backend: "<language id>", op }`. A
   language with a server is described under [Language servers](#language-servers).
 - **A grammar that does not load** is reported once per run, however many languages share it —
   `extension <id>: grammar <g> did not load: <reason>` — and its languages claim nothing; every other
@@ -155,12 +155,22 @@ settings; one that does not parse fails the load, naming the file.
   it, is sent as `textDocument/rename`, and the returned `WorkspaceEdit` is applied as Rust's edits are — by the
   cold CLI and through the index daemon. A run starts one server per installed language a file of its plan
   belongs to, beside rust-analyzer.
+- **`apply_code_action`** — any code action the server offers over an anchor, chosen by title or kind
+  ([restructure § `apply_code_action`](rust-code-restructuring.md#apply_code_action)). The entry's
+  `code_action_kinds` is sent as the request's `context.only`; an entry that declares none asks for every kind.
+- **A verified run.** `restructure verify` hands each changed file of the language to its `ExtensionVerify`:
+  an error diagnostic the change introduced (read by pull from the server) or an `ERROR` / `MISSING` node in
+  the grammar's parse fails the verify
+  ([restructure § Files of other languages](rust-code-restructuring.md#files-of-other-languages-r5)). With no
+  server, or on the cold command, the parse alone is checked.
 - **Definition, references and hover** through the index daemon's code-index queries, answered by the server.
 - **An index.** A worktree with no `Cargo.toml` whose files an installed language with a configured server
   claims has a code index (`LOADING` / `READY`, never `NONE`), at the index daemon and at the session level.
 
 ## Not yet
 
-- No code action is run for an extension language, and its server is not told of files changed on disk
+- An extension language's server is not told of files changed on disk
   ([backlog](../../dev/todo/2026-10-22-extension-servers-are-not-told-of-tree-changes.md)).
+- A server that only publishes diagnostics cannot verify a run
+  ([backlog](../../dev/todo/2026-10-23-extension-verify-refuses-a-push-only-server.md)).
 - No `extension.wasm` is run; no grammar or extension is built.

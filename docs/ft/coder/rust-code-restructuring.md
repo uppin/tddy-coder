@@ -343,6 +343,7 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `change_call_arg` | Replace one argument of one call with `expr`, at `variant` |
 | `reorder_call_args` | Reorder one call's arguments. `order` names every argument position once |
 | `repoint_call` | Rewrite the part of a call **in front of** its arguments. Single form: one call's callee. Bulk form: insert hops after the receiver of every call of a method. See [`repoint_call`](#repoint_call) |
+| `apply_code_action` | Run one code action the file's language server offers over the anchor, chosen by `title` or `kind`, and apply its edit like any other operation's. Rust included (rust-analyzer's actions). See [`apply_code_action`](#apply_code_action) |
 | `repoint_facade_imports` | Re-point every path of one file (or of every file of one module) that goes through a `pub use` of **another crate** to the path where the item is **defined**. A `symbol` anchor names one file; an `items`/`item` anchor on a `mod` declaration names the module. See [`repoint_facade_imports`](#repoint_facade_imports) |
 | `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate, **with the directory of its children**: `git mv` the file and every file its `mod` declarations lead to (`x.rs` and `x/mod.rs` children, children of inline modules) to the same place relative to the module under the destination's `src/`, rewrite every path they name — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required; it is a crate that exists, or one the move creates when the line carries `name` (see [Crate creation](#crate-creation)). `reexport: "glob"` leaves one grouped `<visibility> use <dest_crate>::{a, b};` per destination and visibility in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff** — the facade has the visibility of the `mod` line it replaces (`pub(crate) mod x;` leaves `pub(crate) use dest::x;`, a private `mod x;` a private `use dest::x;`), so it never widens the origin's API; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item`. The origin's `mod <module>;`, written with any visibility (`pub`, `pub(crate)`, `pub(super)`, `pub(self)`, `pub(in …)` or none), is removed with the doc and plain comments directly above it, which are written above the `pub mod <module>;` the destination's root gains; a declaration carrying any attribute (`#[cfg]`, `#[path]`, `#[allow]`) is refused by `check` and `apply` before anything is written, naming the attribute. Removing it never joins two `use` runs: where it was the only line between them, one blank line stays (after the facade, when one takes its place) so `rustfmt` sorts each run as it was. A child the move cannot carry is a finding of plain `check` (see [Path survey](#path-survey)). A `#[cfg(test)] mod t;` declared beside the module that tests only moved code **moves too**, in the same edit (see [Known limitations](#known-limitations)) |
 | `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to`, `name` and `reexport` behave as above; a cluster creates its crate once. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate`. Each member's declaration is removed, and its comments travel, as for a single module. A member that is a directory child of another member (`a::b` beside `a`) is **folded** into it: it is carried at its nested position (`a/b.rs` lands at `<dest>/src/a/b.rs`), gets no root declaration and no facade, and its parent's `mod b;` line stays as written. A member whose parent does not move lands at the destination's root under its last segment. No file arriving in the destination is given a `use` that names the destination crate |
@@ -725,6 +726,39 @@ pass (the lowercase module qualifier is deleted on both sides), and a `use` — 
 is scaffolding. Behaviour and limits:
 [`docs/repoint-facade.md`](../../../packages/tddy-code-restructuring/docs/repoint-facade.md).
 
+### `apply_code_action`
+
+The way an editor exposes a server's refactors, for any language that has a server:
+
+```jsonl
+{"op":"apply_code_action","anchor":{"kind":"range","file":"config/app.toml","start":{"line":3,"col":1},"end":{"line":3,"col":12}},"action":{"title":"Rename to listen_port"}}
+{"op":"apply_code_action","anchor":{"kind":"item", …},"action":{"kind":"refactor.extract"}}
+```
+
+- **Plan line (R4).** `action` carries exactly one of `title` and `kind`; both or neither is refused as
+  malformed, and so is an anchor that is not a range, an `item` or an `items` anchor. A line of any other
+  operation that carries `action` is refused too.
+- **Selection (R1).** `textDocument/codeAction` over the anchor's range, with `context.only` set to the
+  kinds the language's server entry declares (an extension's `code_action_kinds`; none asks for every kind,
+  as Rust does). `title` matches an action's title exactly; `kind` matches an action whose kind is that kind
+  or a dotted child of it (`refactor.extract` matches `refactor.extract.function`). No match is refused
+  listing every offered title and kind; more than one is refused listing the matches
+  (`CodeActionRefused { NotOffered | Ambiguous }`, `FailedPrecondition` through the daemon).
+- **Resolution (R2).** The action's `edit` when it has one (a `null` edit is none). Else `codeAction/resolve`
+  when the server resolves actions, and the resolved `edit`. Else its `command` runs through
+  `workspace/executeCommand`, and every `workspace/applyEdit` the server sends **during that call** is
+  captured, answered `{applied: true}` and merged in arrival order. A command that sends no edit is refused
+  naming the action (`NoEdit`). An action that carries both an edit and a command takes the edit and does
+  not run the command.
+- **Nothing is written by the server (R3).** The captured edit goes through the run's apply path: journal,
+  tidy and, for Rust, the compile gate.
+- **Malformed answers are refused, not skipped.** A `codeAction` answer that is neither a list nor `null`, a
+  `changes` entry whose edits are not a list, a resource operation and a zero line or column are
+  `ServerDefect`s.
+- **Rust** resolves the operation through the same code on the shared client it was handed (the warm
+  daemon's). A Rust backend that started its own server refuses it: that transport cannot carry the
+  server's `workspace/applyEdit` requests.
+
 ## Languages
 
 A language is a **support** behind one tddy interface, `LanguageSupport`
@@ -756,8 +790,11 @@ by id: `UnsupportedOp { backend: "rust", .. }`.
 **Installed extension languages** come next: every language of every installed Zed extension, with
 the claims, outline and refusals described in [Zed extensions § Languages from an extension](zed-extensions.md#languages-from-an-extension).
 This crate cannot load them itself (the crate that does implements its interface), so a front end
-registers them and hands them in: `tddy-tools` through `restructure_cli::run_with_installed(args,
-installed)`, the index daemon through `WorkspaceIndex::with_supports`. A run holds them in
+registers them and hands them in: `tddy-tools` through `restructure_cli::run_with_extensions(args,
+installed, verifies)` (`run_with_installed` is the same with no verifies), the index daemon through
+`WorkspaceIndex::with_supports`. Both register them with
+`tddy_zed_extensions::InstalledExtensions::register_installed`, which also hands the loaded languages back
+for their verifies. A run holds them in
 `runner::Options::installed` (empty by default — the built-ins only). An `anchors`, or a static
 `check`, over a file only such a language claims needs no server and starts none: its item anchors
 resolve from the file's text through the language's outline backend, and a stale fingerprint is the
@@ -768,8 +805,8 @@ cold, or the index daemon — also starts the server of every installed language
 (`runner::installed_launches_for`) and hands the clients over as `Options::installed_clients`.
 `registry_for_waiting` builds the built-ins over rust-analyzer, then each installed support over its own server
 (`InstalledServers`), or over none when it has none. Such a language's server backend, `ServerBackend`,
-supports `rename_symbol`: the item's name position from its outline backend, `textDocument/rename`, and the
-returned `WorkspaceEdit` as the resolution. A language whose server cannot be started (no command, or a code
+supports `rename_symbol` — the item's name position from its outline backend, `textDocument/rename`, and the
+returned `WorkspaceEdit` as the resolution — and [`apply_code_action`](#apply_code_action). A language whose server cannot be started (no command, or a code
 extension's refusal) refuses every server operation with `ServerNotConfigured { language, reason }`
 (`FailedPrecondition` through the daemon) before any process starts.
 
@@ -1131,6 +1168,31 @@ qualifier is a type.
 under the re-point pass above (the lowercase module qualifier is deleted on both sides), and a `use` —
 a split group included — is scaffolding. A facade that renames an item used in a body is refused, so
 the operation never produces a change `verify` would report.
+
+### Files of other languages (R5)
+
+The statement comparison reads `.rs` files only. Every other changed file — tracked and changed against
+the ref, or untracked and not ignored, by paths relative to the run's root — is handed to the first
+`SourceVerify` in `runner::Options::verifies` that claims it, with its text at the ref (`<ref>:./<path>`,
+empty for a new file) and on disk (`runner::verify_sources`). `runner::verify_with_sources` pairs those
+findings with the comparison, reading the changed files once; the cold command and the index daemon
+both call it. An installed extension language's verify (`tddy_zed_extensions::ExtensionVerify`) finds:
+
+- **a new error diagnostic**: an error (severity 1) its server reports for the new text that no error of the
+  old text accounts for — same message, and a range carried through the lines the change left alone;
+- **a parse error**: an `ERROR` or `MISSING` node in the grammar's parse of the new text.
+
+Each finding is one line — `finding: <path>:<line>:<col>: new error diagnostic: <message>` or
+`finding: <path>:<line>:<col>: parse error: ERROR node` — and **any finding fails the verify**, whatever the
+statement comparison says (`console::verify_refusal`, the one rule all three front ends read). Through the
+daemon, `VerifyResponse.source_findings` (field 9) carries the lines and `holds` is false.
+
+Diagnostics are read by **pull** (`textDocument/diagnostic`) after each text is announced, never from the
+publish cache, and the document is closed again on every path. A server that offers no pull diagnostics
+fails the verify as a `ServerDefect` ([backlog](../../dev/todo/2026-10-23-extension-verify-refuses-a-push-only-server.md)).
+The cold command starts no server for a verify, so it judges by the parse alone; the index daemon verifies
+over each touched language's warm server, starting it if it holds none
+([backlog](../../dev/todo/2026-10-23-extension-verify-diagnostics-only-on-the-warm-daemon.md)).
 
 ## Workflow
 
