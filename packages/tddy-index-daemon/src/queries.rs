@@ -9,6 +9,7 @@
 //! concurrent apply is writing. Loading and listing plans do not: they read plan files and the
 //! store, never the tree.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use tddy_code_restructuring::item_anchor;
@@ -336,14 +337,12 @@ async fn comparison_against(
     };
 
     let _queued = index.hold(&root).await;
-    let options = with_extension_verifies(index, &root, options).await?;
-    let (comparison, findings) = tokio::task::spawn_blocking(move || {
-        let findings = runner::verify_sources(&root, &options)?;
-        runner::verify(&root, options).map(|comparison| (comparison, findings))
-    })
-    .await
-    .map_err(|failure| joined("verify", &failure))?
-    .map_err(|refusal| status_of(&refusal))?;
+    let (options, changed) = with_extension_verifies(index, &root, options).await?;
+    let (comparison, findings) =
+        tokio::task::spawn_blocking(move || runner::verify_with_sources(&root, options, &changed))
+            .await
+            .map_err(|failure| joined("verify", &failure))?
+            .map_err(|refusal| status_of(&refusal))?;
 
     // A comparison that does not hold is this answer with `holds` false, not an error: the
     // comparison *is* what was asked for, and a caller that receives the statements it lost and
@@ -367,14 +366,17 @@ async fn comparison_against(
 /// language — started if this process holds none — so its new error diagnostics can be read. A
 /// language with no server is verified by its grammar's parse alone; a server that will not start
 /// refuses the request.
+///
+/// The changed files come back with the options, so the verify reads them once: none when no
+/// extension language is installed, since there is then no verify to hand them to.
 async fn with_extension_verifies(
     index: &WorkspaceIndex,
     root: &std::path::Path,
     options: Options,
-) -> Result<Options, Status> {
+) -> Result<(Options, BTreeSet<String>), Status> {
     let languages = index.verifiable();
     if languages.is_empty() {
-        return Ok(options);
+        return Ok((options, BTreeSet::new()));
     }
     let (options, changed) = {
         let root = root.to_path_buf();
@@ -400,10 +402,11 @@ async fn with_extension_verifies(
         let served = index.client_for_route(root, &route).await?;
         servers.push((language.id().clone(), served.client));
     }
-    Ok(Options {
+    let options = Options {
         verifies: tddy_zed_extensions::ExtensionVerify::for_languages(&languages, &servers),
         ..options
-    })
+    };
+    Ok((options, changed))
 }
 
 /// A progress sink for the unary operations, which have no stream to report into.

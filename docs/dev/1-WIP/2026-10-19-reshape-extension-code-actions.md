@@ -21,7 +21,7 @@
   2026-10-23:** `Verify` builds `Options::verifies` and answers `VerifyResponse.source_findings` (proto field 9).
 - `packages/tddy-tools` / `packages/tddy-tools-cli`: **widened 2026-10-23** — the cold `restructure verify` builds
   `Options::verifies` and renders `SourceFinding`s; the warm client renders `source_findings`.
-- `.config/nextest.toml`, `.config/rust-e2e.filterset`: the live `apply_code_action_acceptance` suite.
+- `.config/nextest.toml`, `.config/rust-e2e.filterset`: the live `apply_code_action` suite.
 
 ## Related Feature Documentation
 
@@ -84,7 +84,7 @@ collides with the PR that owns it.
 then K22's `ServerBackend`, before any K23 body — they go red-for-this-node only once K20 and K22 are green. The tests
 attributable to this node alone today: `backends::code_action::tests` (double server), `code_action_fields::tests`,
 `verify::tests` (zed-extensions), `commands::tests` and `apply_edit_capture` (tddy-lsp), `verify_by_support`, and the
-live `apply_code_action_acceptance` (reaches `RustBackend::apply_code_action`'s `todo!`).
+live `apply_code_action` (reaches `RustBackend::apply_code_action`'s `todo!`).
 
 ## Draft PR contract
 
@@ -99,12 +99,12 @@ live `apply_code_action_acceptance` (reaches `RustBackend::apply_code_action`'s 
   `two_kind_matches_are_refused_with_both_titles`, `no_match_lists_what_the_server_offered`,
   `a_command_that_sends_no_edit_is_refused`, `verify_fails_on_a_new_error_diagnostic`,
   `verify_fails_on_a_parse_error_node`, `verify_holds_for_a_clean_action`.
-  `tddy-code-restructuring/tests/apply_code_action_acceptance.rs` (live rust-analyzer, 1 test, in the `rust-analyzer`
+  `tddy-code-restructuring/tests/apply_code_action.rs` (live rust-analyzer, 1 test, in the `rust-analyzer`
   nextest group and `rust-e2e.filterset`): `extract_function_by_title_on_a_rust_file`.
   `tddy-lsp/tests/apply_edit_capture.rs`: `an_apply_edit_during_execute_command_reaches_the_caller`,
   `a_command_that_sends_no_edit_reaches_the_caller_with_none`.
   `tddy-code-restructuring/tests/verify_by_support.rs`: `a_changed_extension_file_is_handed_to_its_languages_verify`
-  (and `with_no_verify_registered_nothing_is_handed_over`, green on purpose: today's behaviour).
+  (and `with_no_verify_registered_a_changed_extension_file_has_no_findings`, green on purpose: today's behaviour).
 - Unit tests: `plan::codec::code_action_fields::tests` (7 red + `a_line_without_an_action_writes_no_action_field`,
   green on purpose: old plans unchanged); `backends::code_action::tests` (9 red against a server double +
   `a_refusal_lists_what_was_offered_by_title_and_kind`, green on purpose: `Display` is real);

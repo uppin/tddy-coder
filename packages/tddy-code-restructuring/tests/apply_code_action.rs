@@ -17,6 +17,10 @@ use tddy_code_restructuring::RefactorOp;
 /// `self.clones.iter().copied().max().unwrap_or(0)`: line 9 of the fixture, columns 9 to 55.
 const THE_EXPRESSION_LINE: u32 = 9;
 
+/// What line 9 of the fixture reads once the expression is extracted: rust-analyzer extracts an
+/// expression that reads `self` into a method, and calls it in the expression's place.
+const THE_CALL_SITE: &str = "        self.fun_name()";
+
 /// `apply_code_action` of rust-analyzer's `Extract into function` over the whole expression.
 fn an_extract_into_function_by_title() -> RefactorOp {
     serde_json::from_value(serde_json::json!({
@@ -42,9 +46,20 @@ async fn extract_function_by_title_on_a_rust_file() {
 
     // Then the method calls a new function holding the expression, and the crate compiles
     let lib = workspace.read(ORIGIN_LIB);
-    assert!(
-        lib.contains("fn fun_name(") && lib.matches("fun_name(").count() == 2,
-        "the expression was not extracted into one function and one call:\n{lib}"
+    assert_eq!(
+        lib.matches("fn fun_name(").count(),
+        1,
+        "the expression was not extracted into exactly one function:\n{lib}"
+    );
+    assert_eq!(
+        lib.matches("fun_name(").count(),
+        2,
+        "the extracted function is not called exactly once:\n{lib}"
+    );
+    assert_eq!(
+        lib.lines().nth(THE_EXPRESSION_LINE as usize - 1),
+        Some(THE_CALL_SITE),
+        "the method's body is not the call:\n{lib}"
     );
     assert_compiles(&workspace);
 }

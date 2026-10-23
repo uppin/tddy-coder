@@ -305,6 +305,17 @@ pub fn source_findings_refusal(count: usize) -> String {
     format!("{count} finding(s) in the changed files of other languages — see above")
 }
 
+/// Why an answered verify is nonetheless a failed run, or `None` when it held: a comparison that
+/// does not hold first, else `findings` in the changed files of other languages — which fail a
+/// verify whatever the statement comparison says. The one ladder every front end reads, cold or
+/// warm.
+pub fn verify_refusal(comparison: &Comparison, findings: usize) -> Option<String> {
+    if !comparison.holds() {
+        return Some(comparison_refusal(comparison));
+    }
+    (findings > 0).then(|| source_findings_refusal(findings))
+}
+
 /// The anchor `restructure anchors` found, as the JSON document a plan carries it as.
 pub fn item_anchor(anchor: &crate::plan::Anchor) -> String {
     // An anchor is strings, numbers and maps of them, none of which `serde_json` can fail to write.

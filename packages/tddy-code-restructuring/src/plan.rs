@@ -288,6 +288,29 @@ pub struct ActionSelector {
     pub kind: Option<String>,
 }
 
+/// The one thing an [`ActionSelector`] asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wanted<'a> {
+    /// The action's title, matched exactly.
+    Title(&'a str),
+    /// A prefix of the action's LSP `kind`, matched as LSP kinds nest.
+    Kind(&'a str),
+}
+
+impl ActionSelector {
+    /// R4: what the selector asks for — exactly one of `title` and `kind`; naming both or neither is
+    /// [`crate::RestructureError::MalformedPlan`].
+    pub fn wanted(&self) -> crate::Result<Wanted<'_>> {
+        match (&self.title, &self.kind) {
+            (Some(title), None) => Ok(Wanted::Title(title)),
+            (None, Some(kind)) => Ok(Wanted::Kind(kind)),
+            _ => Err(malformed(
+                "`action` names exactly one of `title` and `kind`",
+            )),
+        }
+    }
+}
+
 /// One entry of an operation's `order`: a parameter's name, or an argument's one-based position.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]

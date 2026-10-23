@@ -1350,16 +1350,16 @@ impl RustBackend {
             }
         }
 
-        // rust-analyzer has no cross-crate move assist, so this operation is authored rather than
-        // delegated — every caller it re-points still comes from the server's own reference set,
-        // which is what this backend supplies it. It opens the module for itself, so the document
-        // is deliberately not opened here first.
         // Any code action rust-analyzer offers, through the path every server's takes; it opens
         // the document for itself.
         if op.op == RefactorKind::ApplyCodeAction {
             return self.apply_code_action(op, workspace);
         }
 
+        // rust-analyzer has no cross-crate move assist, so this operation is authored rather than
+        // delegated — every caller it re-points still comes from the server's own reference set,
+        // which is what this backend supplies it. It opens the module for itself, so the document
+        // is deliberately not opened here first.
         if op.op == RefactorKind::MoveModuleToCrate {
             (self.progress)("cross-crate move: surveying callers and building edits");
             return crate_move::resolution(self, workspace, op);
@@ -2257,9 +2257,7 @@ impl RustBackend {
             "rename: `{name}` — collecting edits from rust-analyzer"
         ));
         let position = match &op.anchor {
-            Anchor::Range { start, .. } => {
-                json!({ "line": start.line - 1, "character": start.col - 1 })
-            }
+            Anchor::Range { start, .. } => super::server::lsp_position(*start)?,
             Anchor::Symbol { path, .. } => self.locate_symbol(uri, path)?,
             Anchor::Item { .. } | Anchor::Items { .. } => {
                 return Err(unlowered_item_anchor(&op.anchor, &format!("{:?}", op.op)))

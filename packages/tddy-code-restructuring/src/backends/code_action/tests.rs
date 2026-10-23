@@ -17,13 +17,15 @@ const FILE: &str = "config/app.toml";
 const URI: &str = "file:///workspace/config/app.toml";
 
 /// A server that offers `actions`, resolves the titles in `resolved` to their edits, and answers
-/// each command in `command_edits` by sending those edits back.
+/// each command in `command_edits` by sending those edits back; `executed` names every command it
+/// was asked to run, in order.
 #[derive(Default)]
 struct AServer {
     actions: Vec<Value>,
     resolved: BTreeMap<String, Value>,
     command_edits: BTreeMap<String, Vec<Value>>,
     asked_for: RefCell<Vec<(String, Range, Vec<String>)>>,
+    executed: RefCell<Vec<String>>,
 }
 
 impl AServer {
@@ -69,6 +71,9 @@ impl CodeActionServer for AServer {
     }
 
     fn execute_command(&self, command: &Value) -> Result<Vec<Value>> {
+        self.executed
+            .borrow_mut()
+            .push(command["command"].as_str().unwrap_or_default().to_string());
         Ok(command["command"]
             .as_str()
             .and_then(|name| self.command_edits.get(name))
@@ -375,6 +380,47 @@ fn a_command_that_sends_no_edit_is_refused_naming_the_action() {
         }
         other => panic!("expected the edit-less action to be refused, got {other:?}"),
     }
+}
+
+#[test]
+fn a_bare_action_from_a_server_that_does_not_resolve_is_refused_naming_it() {
+    // Given an action offered with neither an edit nor a command, by a server that does not resolve
+    let server = AServer::offering(vec![an_action("Extract table", "refactor.extract.table")]);
+
+    // When it is applied
+    let refused = resolved_against(&server, by_title("Extract table"), &[]);
+
+    // Then it is refused naming the action, and no command was run to look for an edit
+    match refused {
+        Err(RestructureError::CodeActionRefused(CodeActionRefusal::NoEdit { title })) => {
+            assert_eq!(
+                (title, server.executed.borrow().clone()),
+                ("Extract table".to_string(), Vec::<String>::new())
+            )
+        }
+        other => panic!("expected the edit-less action to be refused, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_action_carrying_an_edit_and_a_command_resolves_to_its_edit_without_running_the_command() {
+    // Given an action carrying both an edit and a command whose run would send another edit
+    let mut action =
+        an_action_with_a_command("Extract table", "refactor.extract.table", "fake.extract");
+    action["edit"] = an_lsp_edit(2, 0, 4, "listen_port");
+    let server =
+        AServer::offering(vec![action]).running("fake.extract", vec![an_lsp_edit(0, 1, 7, "http")]);
+
+    // When it is applied
+    let resolution =
+        resolved_against(&server, by_title("Extract table"), &[]).expect("the action resolves");
+
+    // Then its edit is the resolution (R2: "an `edit` is the resolution; else its `command`"), and
+    // the command was never run
+    assert_eq!(
+        (resolution.edit.changes, server.executed.borrow().clone()),
+        (vec![a_change(2, 0, 4, "listen_port")], Vec::<String>::new())
+    );
 }
 
 #[test]

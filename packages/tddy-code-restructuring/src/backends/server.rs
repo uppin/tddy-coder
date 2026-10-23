@@ -37,19 +37,34 @@ pub struct ServerBackend {
     code_action_kinds: Vec<String>,
 }
 
-/// What a rename is put to.
+/// What a server operation is put to.
 enum Server {
     /// The language's running server.
-    Live {
-        client: Arc<LspClient>,
-        /// What ends a wait on the server; the caller's.
-        cancel: CancellationToken,
-        /// The LSP `languageId` a document is opened as — the launch's.
-        language_id: String,
-    },
+    Live(LiveLsp),
     /// The server cannot be started — it needs a command nobody configured, or its extension
     /// refused it: every server operation is refused with exactly this.
     NoCommand { reason: String },
+}
+
+/// The language's running server, as each operation reaches it.
+struct LiveLsp {
+    client: Arc<LspClient>,
+    /// What ends a wait on the server; the caller's.
+    cancel: CancellationToken,
+    /// The LSP `languageId` a document is opened as — the launch's.
+    language_id: String,
+}
+
+impl LiveLsp {
+    /// `file` opened on the server, once it is known to count positions in bytes; its uri.
+    fn open(&self, workspace: &Workspace<'_>, file: &str) -> Result<String> {
+        refuse_unless_bytes(&self.client)?;
+        open_document(&self.client, &self.language_id, workspace, file)
+    }
+
+    fn bridge(&self) -> LspClientBridge {
+        LspClientBridge::new(Arc::clone(&self.client), self.cancel.clone())
+    }
 }
 
 impl ServerBackend {
@@ -62,11 +77,11 @@ impl ServerBackend {
     ) -> Self {
         Self {
             outline,
-            server: Server::Live {
+            server: Server::Live(LiveLsp {
                 client: Arc::clone(server.client),
                 cancel: server.cancel.clone(),
                 language_id: language_id.into(),
-            },
+            }),
             code_action_kinds: Vec::new(),
         }
     }
@@ -114,61 +129,34 @@ impl LanguageBackend for ServerBackend {
         )
     }
 
-    /// R6: the anchor resolves to an item through the outline backend; the document is opened as
-    /// the launch's `languageId`, `textDocument/rename` is sent at the item's name with
-    /// `op.name`, and the returned `WorkspaceEdit` — paths relative to the root — is the
-    /// resolution. Without a command: [`crate::RestructureError::ServerNotConfigured`].
+    /// The operation over the language's running server, as [`resolve_code_action`] and
+    /// [`resolve_rename`] say. Without a command: [`crate::RestructureError::ServerNotConfigured`].
     fn resolve(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Resolution> {
-        let (client, cancel, language_id) = match &self.server {
+        let live = match &self.server {
             Server::NoCommand { reason } => {
                 return Err(RestructureError::ServerNotConfigured {
                     language: self.outline.language().to_string(),
                     reason: reason.clone(),
                 })
             }
-            Server::Live {
-                client,
-                cancel,
-                language_id,
-            } => (client, cancel, language_id),
+            Server::Live(live) => live,
         };
-        if !self.supports(op.op) {
-            return Err(RestructureError::UnsupportedOp {
+        match op.op {
+            RefactorKind::ApplyCodeAction => resolve_code_action(
+                self.outline.as_mut(),
+                live,
+                &self.code_action_kinds,
+                op,
+                workspace,
+            ),
+            RefactorKind::RenameSymbol => {
+                resolve_rename(self.outline.as_mut(), live, op, workspace)
+            }
+            _ => Err(RestructureError::UnsupportedOp {
                 backend: self.outline.language().to_string(),
                 op: format!("{:?}", op.op),
-            });
-        }
-        if op.op == RefactorKind::ApplyCodeAction {
-            let range = anchor_range(self.outline.as_mut(), &op.anchor, workspace)?;
-            refuse_unless_bytes(client)?;
-            open_document(client, language_id, workspace, op.anchor.file())?;
-            let bridge = LspClientBridge::new(Arc::clone(client), cancel.clone());
-            return super::code_action::resolve(
-                &bridge,
-                op,
-                range,
-                &self.code_action_kinds,
-                workspace,
-            );
-        }
-        let new_name = op.name.clone().ok_or_else(|| {
-            RestructureError::MalformedPlan("rename_symbol needs a name".to_string())
-        })?;
-        let at = name_position(self.outline.as_mut(), &op.anchor, workspace)?;
-        refuse_unless_bytes(client)?;
-
-        let uri = open_document(client, language_id, workspace, op.anchor.file())?;
-        let answer = LspClientBridge::new(Arc::clone(client), cancel.clone()).request(
-            "textDocument/rename",
-            json!({
-                "textDocument": { "uri": uri },
-                "position": { "line": at.line - 1, "character": at.col - 1 },
-                "newName": new_name,
             }),
-        )?;
-        Ok(Resolution::of(workspace_edit_of(
-            &answer, workspace, op, at,
-        )?))
+        }
     }
 
     /// The outline backend's.
@@ -180,6 +168,66 @@ impl LanguageBackend for ServerBackend {
     fn item_locator(&mut self) -> Option<&mut dyn ItemAtResolver> {
         self.outline.item_locator()
     }
+}
+
+/// `apply_code_action`: the anchor's range — a range anchor's own, an item's as the outline backend
+/// locates it — asked of the server for the code actions of `kinds`, and the chosen one resolved to
+/// an edit by the generic path every backend with a server takes.
+fn resolve_code_action(
+    outline: &mut dyn LanguageBackend,
+    live: &LiveLsp,
+    kinds: &[String],
+    op: &RefactorOp,
+    workspace: &Workspace<'_>,
+) -> Result<Resolution> {
+    let range = anchor_range(outline, &op.anchor, workspace)?;
+    live.open(workspace, op.anchor.file())?;
+    super::code_action::resolve(&live.bridge(), op, range, kinds, workspace)
+}
+
+/// R6: the anchor resolves to an item through the outline backend; the document is opened as the
+/// launch's `languageId`, `textDocument/rename` is sent at the item's name with `op.name`, and the
+/// returned `WorkspaceEdit` — paths relative to the root — is the resolution.
+fn resolve_rename(
+    outline: &mut dyn LanguageBackend,
+    live: &LiveLsp,
+    op: &RefactorOp,
+    workspace: &Workspace<'_>,
+) -> Result<Resolution> {
+    let new_name = op
+        .name
+        .clone()
+        .ok_or_else(|| RestructureError::MalformedPlan("rename_symbol needs a name".to_string()))?;
+    let at = name_position(outline, &op.anchor, workspace)?;
+    let uri = live.open(workspace, op.anchor.file())?;
+    let answer = live.bridge().request(
+        "textDocument/rename",
+        json!({
+            "textDocument": { "uri": uri },
+            "position": lsp_position(at)?,
+            "newName": new_name,
+        }),
+    )?;
+    Ok(Resolution::of(workspace_edit_of(
+        &answer, workspace, op, at,
+    )?))
+}
+
+/// `at` in LSP's zero-based coordinates. [`Position`] is one-based and nothing upstream of a server
+/// request rejects a zero, so a zero line or column is refused here rather than wrapped.
+pub(crate) fn lsp_position(at: Position) -> Result<Value> {
+    match (at.line.checked_sub(1), at.col.checked_sub(1)) {
+        (Some(line), Some(character)) => Ok(json!({ "line": line, "character": character })),
+        _ => Err(RestructureError::MalformedPlan(format!(
+            "positions are one-based: line {} column {} names no position",
+            at.line, at.col
+        ))),
+    }
+}
+
+/// `range` in LSP's zero-based coordinates, refused as [`lsp_position`] refuses either end.
+pub(crate) fn lsp_range(range: Range) -> Result<Value> {
+    Ok(json!({ "start": lsp_position(range.start)?, "end": lsp_position(range.end)? }))
 }
 
 /// Where the rename is asked: a range anchor's start, an item anchor's name as the outline backend

@@ -70,6 +70,8 @@ fn a_committed_worktree() -> tempfile::TempDir {
             "user.name=t",
             "-c",
             "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
             "commit",
             "--quiet",
             "-m",
@@ -105,8 +107,10 @@ fn a_changed_extension_file_is_handed_to_its_languages_verify() {
     let toml = Arc::new(ATomlVerify::default());
 
     // When the sources are verified against HEAD
-    let findings = runner::verify_sources(tree.path(), &a_verify_against_head_with(toml.clone()))
-        .expect("the tree is verified");
+    let options = a_verify_against_head_with(toml.clone());
+    let changed = runner::changed_sources(tree.path(), &options).expect("the changes are read");
+    let findings =
+        runner::verify_sources(tree.path(), &options, &changed).expect("the tree is verified");
 
     // Then the one changed TOML file — and neither the unchanged one nor the Rust file — was handed
     // over as it was and as it is, and what its verify found is the answer
@@ -124,7 +128,7 @@ fn a_changed_extension_file_is_handed_to_its_languages_verify() {
 }
 
 #[test]
-fn with_no_verify_registered_nothing_is_handed_over() {
+fn with_no_verify_registered_a_changed_extension_file_has_no_findings() {
     // Given a changed TOML file, and a run that registered no verify beyond Rust's
     let tree = a_committed_worktree();
     std::fs::write(
@@ -139,8 +143,37 @@ fn with_no_verify_registered_nothing_is_handed_over() {
     };
 
     // When the sources are verified
-    let findings = runner::verify_sources(tree.path(), &options).expect("the tree is verified");
+    let changed = runner::changed_sources(tree.path(), &options).expect("the changes are read");
+    let findings =
+        runner::verify_sources(tree.path(), &options, &changed).expect("the tree is verified");
 
     // Then there is nothing to report, as before extension verifies existed
     assert_eq!(findings, Vec::new());
+}
+
+#[test]
+fn a_root_below_the_repositorys_top_level_hands_over_its_files_relative_to_itself() {
+    // Given a worktree whose `config/` directory is the root, and whose TOML config there changed
+    let tree = a_committed_worktree();
+    let root = tree.path().join("config");
+    std::fs::write(root.join("app.toml"), "[server]\nport = BROKEN\n").expect("change the config");
+    let toml = Arc::new(ATomlVerify::default());
+    let options = a_verify_against_head_with(toml.clone());
+
+    // When the sources under that root are verified against HEAD
+    let changed = runner::changed_sources(&root, &options).expect("the changes are read");
+    let findings = runner::verify_sources(&root, &options, &changed).expect("the tree is verified");
+
+    // Then the file is named relative to the root, read from the ref and the tree at that path
+    assert_eq!(
+        (findings, toml.handed.lock().unwrap().clone()),
+        (
+            vec![a_finding_in("app.toml")],
+            vec![SourceChange {
+                path: "app.toml".to_string(),
+                before: "[server]\nport = 8080\n".to_string(),
+                after: "[server]\nport = BROKEN\n".to_string(),
+            }]
+        )
+    );
 }

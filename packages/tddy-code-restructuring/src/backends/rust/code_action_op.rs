@@ -20,6 +20,8 @@ impl RustBackend {
         op: &RefactorOp,
         workspace: &Workspace<'_>,
     ) -> Result<Resolution> {
+        // Refused before a server is started or a document opened. Not bound for the request
+        // below: the client borrows `self`, which `start` and `did_open` need mutably.
         self.shared_client()?;
         let relative = op.anchor.file();
         let uri = super::uri_of(&workspace.root.join(relative));

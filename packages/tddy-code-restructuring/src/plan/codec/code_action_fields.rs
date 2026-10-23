@@ -28,11 +28,7 @@ pub(super) fn rules(op: &RefactorOp) -> Result<()> {
                 .to_string(),
         ));
     };
-    if action.title.is_some() == action.kind.is_some() {
-        return Err(malformed(
-            "`action` names exactly one of `title` and `kind`".to_string(),
-        ));
-    }
+    action.wanted()?;
     match op.anchor {
         Anchor::Symbol { .. } => Err(malformed(
             "`apply_code_action` takes an anchor that is a range, or `items` / a single `item`: \
@@ -86,7 +82,7 @@ mod tests {
     }
 
     #[test]
-    fn an_action_chosen_by_kind_over_items_parses() {
+    fn an_action_chosen_by_kind_over_an_item_parses() {
         // Given an `apply_code_action` over an item, choosing its action by kind
         let line = r#"{"op":"apply_code_action","anchor":{"kind":"item","file":"config/app.toml","item":"config/app.toml::server","fingerprint":"sha256:00"},"action":{"kind":"refactor.extract"}}"#;
 
@@ -109,9 +105,9 @@ mod tests {
         let reason = the_refusal_of(&line);
 
         // Then the refusal names the missing field
-        assert!(
-            reason.contains("`apply_code_action` needs `action`"),
-            "unexpected refusal: {reason}"
+        assert_eq!(
+            reason,
+            "`apply_code_action` needs `action`, naming the code action by `title` or `kind`"
         );
     }
 
@@ -126,10 +122,7 @@ mod tests {
         let reason = the_refusal_of(&line);
 
         // Then the refusal says exactly one of the two is wanted
-        assert!(
-            reason.contains("exactly one of `title` and `kind`"),
-            "unexpected refusal: {reason}"
-        );
+        assert_eq!(reason, "`action` names exactly one of `title` and `kind`");
     }
 
     #[test]
@@ -141,10 +134,7 @@ mod tests {
         let reason = the_refusal_of(&line);
 
         // Then the refusal says exactly one of the two is wanted
-        assert!(
-            reason.contains("exactly one of `title` and `kind`"),
-            "unexpected refusal: {reason}"
-        );
+        assert_eq!(reason, "`action` names exactly one of `title` and `kind`");
     }
 
     #[test]
@@ -156,9 +146,10 @@ mod tests {
         let reason = the_refusal_of(line);
 
         // Then the refusal names the anchors it takes
-        assert!(
-            reason.contains("a range, or `items` / a single `item`"),
-            "unexpected refusal: {reason}"
+        assert_eq!(
+            reason,
+            "`apply_code_action` takes an anchor that is a range, or `items` / a single `item`: \
+             a `symbol` anchor names no range to ask for actions over"
         );
     }
 
@@ -173,9 +164,9 @@ mod tests {
         let reason = the_refusal_of(&line);
 
         // Then the refusal names the field and the one operation that takes it
-        assert!(
-            reason.contains("`action`") && reason.contains("`apply_code_action`"),
-            "unexpected refusal: {reason}"
+        assert_eq!(
+            reason,
+            "`action` names a code action, which only `apply_code_action` honours"
         );
     }
 
@@ -186,9 +177,9 @@ mod tests {
         let op = parsed(&line).expect("the line parses");
 
         // When it is written back
-        let written = serde_json::to_string(&op).expect("the op serializes");
+        let written = serde_json::to_value(&op).expect("the op serializes");
 
         // Then no `action` appears — a plan written before the field existed is unchanged
-        assert!(!written.contains("action"), "unexpected field in {written}");
+        assert_eq!(written.get("action"), None, "unexpected field in {written}");
     }
 }

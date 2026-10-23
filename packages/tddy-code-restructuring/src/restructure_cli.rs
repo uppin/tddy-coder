@@ -187,17 +187,17 @@ fn verdict_on(outcome: &Outcome) -> Result<()> {
         Outcome::Applied(summary) if summary.applied == 0 && !summary.stopped_early => Err(
             anyhow::anyhow!(console::nothing_applied_refusal(summary.total)),
         ),
-        Outcome::Verified(comparison) | Outcome::VerifiedWithFindings(comparison, _)
-            if !comparison.holds() =>
-        {
-            Err(anyhow::anyhow!(console::comparison_refusal(comparison)))
-        }
-        // A comparison that held, beside findings in the other languages' files, is still a
-        // verify that did not.
-        Outcome::VerifiedWithFindings(_, found) => Err(anyhow::anyhow!(
-            console::source_findings_refusal(found.len())
-        )),
+        Outcome::Verified(comparison) => refused_verify(comparison, 0),
+        Outcome::VerifiedWithFindings(comparison, found) => refused_verify(comparison, found.len()),
         _ => Ok(()),
+    }
+}
+
+/// [`console::verify_refusal`] as this front end's failed run.
+fn refused_verify(comparison: &crate::verify::Comparison, findings: usize) -> Result<()> {
+    match console::verify_refusal(comparison, findings) {
+        Some(refusal) => Err(anyhow::anyhow!(refusal)),
+        None => Ok(()),
     }
 }
 

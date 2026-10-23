@@ -191,18 +191,8 @@ pub(crate) fn verify(response: &VerifyResponse) {
     for line in &response.source_findings {
         log::info!(target: crate::MAIN, "{line}");
     }
-    if !comparison.holds() {
-        log::error!(
-            target: crate::MAIN,
-            "{}",
-            console::comparison_refusal(&comparison)
-        );
-    } else if !response.source_findings.is_empty() {
-        log::error!(
-            target: crate::MAIN,
-            "{}",
-            console::source_findings_refusal(response.source_findings.len())
-        );
+    if let Some(refusal) = console::verify_refusal(&comparison, response.source_findings.len()) {
+        log::error!(target: crate::MAIN, "{refusal}");
     }
 }
 
