@@ -304,6 +304,8 @@ pub fn repo_root_for_session(session_dir: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::fs;
 
     #[test]
     fn a_session_yaml_without_the_key_reads_as_not_managed() {
@@ -316,9 +318,6 @@ mod tests {
         // Then the session is not managed
         assert!(!metadata.managed_codebase);
     }
-
-    use super::*;
-    use std::fs;
 
     #[test]
     fn write_initial_tool_session_metadata_uses_dir_basename_as_session_id() {

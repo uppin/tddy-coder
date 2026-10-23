@@ -49,7 +49,7 @@ const COLUMN_STYLE: CSSProperties = {
  * `children` always sit in the same slot of the tree, so opening or closing the sidebar never
  * remounts them (an open agent conversation inside them would otherwise cancel itself).
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-activity-sidebar.md.
+ * Feature: docs/ft/web/agent-activity-pane.md § Right sidebar.
  */
 export function SessionWithActivitySidebar(props: {
   session: SessionEntry;

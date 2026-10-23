@@ -21,16 +21,7 @@ export function detectIsMobile(): boolean {
  * (e.g. window resizing or orientation changes).
  */
 export function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(detectIsMobile);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const update = () => setIsMobile(detectIsMobile());
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
-
-  return isMobile;
+  return useViewportFlag(detectIsMobile);
 }
 
 /** Whether a viewport this wide is below the `md` breakpoint. */
@@ -44,16 +35,23 @@ export function isNarrowWidth(innerWidth: number): boolean {
  * desktop at full width must keep its column rather than take the mobile overlay.
  */
 export function useIsNarrowViewport(): boolean {
-  const [narrow, setNarrow] = useState(
-    () => typeof window !== "undefined" && isNarrowWidth(window.innerWidth),
-  );
+  return useViewportFlag(detectIsNarrowViewport);
+}
+
+function detectIsNarrowViewport(): boolean {
+  return typeof window !== "undefined" && isNarrowWidth(window.innerWidth);
+}
+
+/** `detect()` now, re-evaluated on every viewport resize (window resizing, orientation changes). */
+function useViewportFlag(detect: () => boolean): boolean {
+  const [flag, setFlag] = useState(detect);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const update = () => setNarrow(isNarrowWidth(window.innerWidth));
+    const update = () => setFlag(detect());
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
-  }, []);
+  }, [detect]);
 
-  return narrow;
+  return flag;
 }

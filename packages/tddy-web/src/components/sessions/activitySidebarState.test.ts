@@ -1,7 +1,7 @@
 /**
  * Unit tests for the Agent Activity sidebar's default open state.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-activity-sidebar.md (`#project-home` 3/7).
+ * Feature: docs/ft/web/agent-activity-pane.md § Right sidebar (`#project-home` 3/7).
  */
 
 import { describe, it, expect } from "bun:test";

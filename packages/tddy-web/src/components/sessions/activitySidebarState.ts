@@ -5,7 +5,7 @@ import type { SessionEntry } from "../../gen/session_pb";
  * open for a managed-codebase session — its agent works through daemon tools, so the transcript is
  * the readable view of what it does — closed for every other session.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-activity-sidebar.md.
+ * Feature: docs/ft/web/agent-activity-pane.md § Right sidebar.
  */
 export function defaultActivitySidebarOpen(session: Pick<SessionEntry, "managedCodebase">): boolean {
   return session.managedCodebase;

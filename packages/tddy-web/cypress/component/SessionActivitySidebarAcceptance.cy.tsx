@@ -3,7 +3,7 @@
  * default for a managed-codebase session, closed until toggled for any other, and absent while
  * the main pane already shows the Activities view.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-activity-sidebar.md (`#project-home` 3/7).
+ * Feature: docs/ft/web/agent-activity-pane.md § Right sidebar (`#project-home` 3/7).
  */
 
 import React from "react";
