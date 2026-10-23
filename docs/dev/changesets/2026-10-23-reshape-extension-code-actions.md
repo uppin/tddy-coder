@@ -90,6 +90,22 @@ for. The comment-line multiset of `tddy-index-daemon/src` was equal before and a
 measurement above) and its backlog entry `2026-10-06-split-tddy-index-daemon-index-rs.md`
 ("`tddy-index-daemon/src/index.rs` crossed the file-length budget"), both deleted.
 
+## CRAP pass (`tddy-tools analyze coverage` + `report`, per touched crate)
+
+Functions this PR added or made worse were fixed in place:
+
+- `tddy-index-daemon` `render::verify`: 20 at the merge base, 30 here (complexity 5, unexecuted).
+- `tddy-tools` `index_console::verify`: 12 at the base, 20 here.
+- Both now emit what a pure `verify_report` decides, and that function is tested for a finding and for a clean hold.
+- `tddy-code-restructuring` `plan::codec::parse_op`: complexity 50 → 51 from the `code_action_fields::rules` call. An engine `extract_method` (`operation_rules`) takes the three operation-rule calls out of it.
+
+These stay as they were at the base and are not this PR's to fix:
+
+- `backends::server::workspace_edit_of` (56) and `restructure_cli::run_with_extensions` (42) carry the base's numbers. The second is the base's `run_with_installed` body, moved.
+- Their low coverage is the per-crate capture's blind spot: they are exercised from `tddy-zed-extensions` and `tddy-tools-cli`.
+
+No code-issue record was written.
+
 ## Left open (backlog)
 
 - [Extension verify reads new error diagnostics only on the warm daemon](../todo/2026-10-23-extension-verify-diagnostics-only-on-the-warm-daemon.md)

@@ -271,9 +271,7 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 
     // Before the generic field rules, so a member move or a detach names the operation in every
     // refusal it makes.
-    impl_move_fields::rules(&op)?;
-    detach_fields::rules(&op)?;
-    code_action_fields::rules(&op)?;
+    operation_rules(&op)?;
 
     // Silently ignoring the field would be worse than refusing it: the plan author asked for a
     // facade, would not get one, and would read the resulting stranded-reference refusal as the
@@ -453,6 +451,15 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     rebind_fields::refuse_a_rebind_it_cannot_honour(&op)?;
 
     Ok(op)
+}
+
+/// The rules of the operations that name themselves in their refusals: a member move, a detach and
+/// a code action.
+fn operation_rules(op: &RefactorOp) -> Result<()> {
+    impl_move_fields::rules(op)?;
+    detach_fields::rules(op)?;
+    code_action_fields::rules(op)?;
+    Ok(())
 }
 
 mod canonical_paths;
