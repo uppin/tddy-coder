@@ -243,6 +243,8 @@ pub fn build_action_runner_plan(
         mounts,
         recipe: Some(recipe),
         host_home: std::env::var_os("HOME").map(PathBuf::from),
+        // The jail runs an action's command and hosts no agent, so it takes no provider route.
+        route: None,
     })?;
 
     Ok(ActionRunnerArtifacts {

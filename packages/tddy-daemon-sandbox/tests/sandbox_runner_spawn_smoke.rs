@@ -147,6 +147,7 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
             mounts: vec![],
             host_home: None,
             cgroup: Default::default(),
+            route: None,
         })
         .expect("spawn sandbox-runner"),
     );
@@ -245,6 +246,7 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
             mounts: vec![],
             host_home: None,
             cgroup: Default::default(),
+            route: None,
         })
         .expect("spawn generic pty sandbox-runner"),
     );
@@ -343,6 +345,7 @@ async fn generic_pty_host_relay_streams_command_output() {
             mounts: vec![],
             host_home: None,
             cgroup: Default::default(),
+            route: None,
         })
         .expect("spawn generic pty sandbox-runner"),
     );

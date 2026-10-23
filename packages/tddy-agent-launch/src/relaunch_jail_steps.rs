@@ -1,3 +1,4 @@
+use crate::cli_harness_jail::canonical_exec_path;
 use crate::launch_ports::LaunchSessions;
 use crate::session_acting_identity::SessionIdentity;
 use std::sync::Mutex as StdMutex;
@@ -62,18 +63,10 @@ impl LaunchSessions {
         &self,
         tddy_tools_path: String,
     ) -> (String, String, String, PathBuf) {
-        let canonicalize_exec = |p: &str| -> String {
-            if p.contains('/') {
-                std::fs::canonicalize(p)
-                    .map(|c| c.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| p.to_string())
-            } else {
-                p.to_string()
-            }
-        };
-        let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
-        let sandbox_runner_path =
-            canonicalize_exec(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path());
+        let tddy_tools_path = canonical_exec_path(&tddy_tools_path);
+        let sandbox_runner_path = canonical_exec_path(
+            &tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path(),
+        );
         // See the sibling call site above: resolve the real `claude` (overridable via
         // TDDY_CLAUDE_BINARY / `claude_cli.binary_path`); a bare name breaks the sandbox profile.
         let claude_binary = tddy_daemon_kernel::config::resolve_claude_binary_path(&self.config);
@@ -137,6 +130,7 @@ impl LaunchSessions {
             loopback_allow_ports,
             runner_argv,
             env,
+            route,
         } = launch;
         let mut handle = tddy_daemon_sandbox::sandbox_session::spawn_sandbox_runner(
             tddy_daemon_sandbox::sandbox_session::SandboxRunnerSpawn {
@@ -154,6 +148,7 @@ impl LaunchSessions {
                 // per-session credential copy so it can't overwrite a refreshed jail token.
                 host_home: None,
                 cgroup: self.config.sandbox_cgroup_config(),
+                route,
             },
         )
         .map_err(|e| {

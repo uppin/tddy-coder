@@ -42,7 +42,7 @@ steps are in sibling modules:
 | `provider_account_lookup.rs` | `find_provider_account`, behind `SessionAccountAccess::provider_account`: an id first, then a unique label; none is `NOT_FOUND`, a label on two accounts `SessionIdentityRefusal::AmbiguousLabel` (`INVALID_ARGUMENT`), never a guess |
 | `start_request_checks.rs` | `forward_start_session` (a start owned by a peer, waiting `start_forward_deadline(config)` — the split-start budget, not the 30 s forward deadline), `provision_project_for_start` (keeps a streamed start alive while it waits), `validate_stack_seed_against_project` |
 | `workspace_branch_start.rs` | `seed_and_start_workspace_session` |
-| `cli_branch_starts.rs` | the claude-cli and cursor-cli branches and the start of every other registered CLI harness: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`); `start_cli_harness(harness, …)` (the sandbox and managed-codebase refusals, the prelude, the seeded roster, the person's default as a route source, the spawn) |
+| `cli_branch_starts.rs` | the claude-cli and cursor-cli branches and the start of every other registered CLI harness: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`); `start_cli_harness(harness, …)` (the managed-codebase refusal, the prelude, then the jailed start when `sandbox` is set and the PTY start otherwise); `sandboxed_claude_route` (the route a sandboxed claude-cli start runs on, the person's default included) |
 | `cli_session_worktree.rs` | what a daemon-cut CLI session's worktree needs, shared by cursor-cli and opencode-cli: `provision_cli_worktree(&CliWorktreeStart, …) -> CliWorktree { path, project }` (cut or adopt the worktree, push the new branch when asked) and `semantic_index_env` |
 | `opencode_cli_spawn.rs` | a registered CLI harness cut a worktree of its own — the [OpenCode](../../../docs/ft/daemon/opencode-cli-session.md) and [Muse Code](../../../docs/ft/daemon/muse-cli-session.md) sessions: `start_cli_harness_session(CliHarnessStart)` (route first, then worktree on `BranchIntentPolicy::cli_harness(session_type)`, seeded clones, commit identity, spawn, `.session.yaml`) and `LaunchSessions::resume_cli_harness` (the descriptor's resume argv, route re-resolved; refused when the worktree is gone). The binary is `DaemonConfig::cli_harness_binary` for the descriptor. `start_session_core` and `resume_session_at_session_coordinate` reach it through a registry lookup (`cli_harness(session_type)`) after their claude-cli and cursor-cli branches, so a further harness needs no dispatch arm |
 | `tool_session_spawn.rs` | `spawn_tool_session` and `spawn_tddy_coder`: the one `tddy-coder` spawn, for both a start and a resume |
@@ -89,9 +89,12 @@ build, whose SSH clones are given no helper). Behaviour:
 | `svc_relaunch_sandboxed_runner.rs` | `relaunch_sandboxed_runner`, with `RelaunchJailEnv`, `RelaunchedRunnerSpawn`, `RelaunchedJailBridge`, `type RelaunchManagedEnv` |
 | `relaunch_jail_dirs.rs`, `relaunch_jail_steps.rs`, `jail_relaunch.rs` | `prepare_relaunch_dirs`, `refresh_relaunch_context_dir`; `relaunch_managed_workflow`, `resolve_relaunch_binaries`, `relaunch_jail_env`, `spawn_relaunched_runner`, `bridge_relaunched_jail` |
 | `svc_start_sandboxed_cursor_cli_session.rs` | `start_sandboxed_cursor_cli_session`, in one function |
+| `svc_start_sandboxed_cli_harness_session.rs` | `start_sandboxed_cli_harness_from_request` (first prompt and provider account refused first, then the route) and `start_sandboxed_cli_harness_session` for `opencode-cli` / `muse-cli`, with `bridge_and_register_cli_harness_jail` |
+| `svc_resume_sandboxed_cli_harness_session.rs` | `resume_sandboxed_cli_harness`, `relaunch_sandboxed_cli_harness` — the jail relaunched with `--resume` on the re-resolved route |
+| `cli_harness_jail.rs` | the pure parts both use: `sandboxed_agent_kind`, `sandboxed_runner_model`, `refuse_first_prompt`, `require_provider_route`, `resolve_jail_agent_binary`, `resolve_cli_jail_binaries`, `cli_harness_runner_argv`, `canonical_exec_path` (also used by the claude start and the relaunch) |
 | `jail_env_builders.rs` | `specialized_subagent_env`, `jail_daemon_identity_env`, `lsp_tools_env`, which all three paths use |
 
-The Claude and relaunch paths are cut into matching steps; the three paths remain separate copies of one
+The Claude and relaunch paths are cut into matching steps; the four start paths remain separate copies of one
 launch sequence, and merging them waits on test coverage
 ([`docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md`](../../../docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md)).
 
@@ -144,7 +147,7 @@ to a claude-cli session (behaviour:
   account and no "built in". `default_provider_account` is `Ok(None)` without vaults or with an
   uninitialized vault, and any other vault refusal (locked, no such session) is returned and mapped
   like `provider_account`'s. The unsandboxed claude-cli and opencode-cli starts in
-  `cli_branch_starts.rs` use it, and so does the sandboxed claude-cli start's `refuse_route_in_sandbox`.
+  `cli_branch_starts.rs` use it, and so do the sandboxed claude-cli, opencode-cli and muse-cli starts.
 - `resolve_session_route(access, harness, sources, model)` applies `choose_route` and, for an
   account, refuses an empty model (`INVALID_ARGUMENT`), reads the account and resolves the route.
   Vault refusals map to `FAILED_PRECONDITION` (no vaults, locked, uninitialized), `UNAUTHENTICATED`
@@ -160,9 +163,11 @@ to a claude-cli session (behaviour:
   the record and re-resolve it against the vault; `LaunchSessions::resumed_agent_env` in
   `svc_resume_claude_cli_session.rs` assembles the resumed agent's environment (commit identity
   unless split, split wiring, route env) in one place.
-- `refuse_route_in_sandbox(sources)` is the sandboxed claude-cli start's guard in
-  `cli_branch_starts.rs`: a chosen account is `FAILED_PRECONDITION` "not yet supported in a sandbox"
-  (`TODO(provider-route-jail)`, lifted by `#provider-route` 9/9).
+- `sandboxed_start_route(access, harness, sources, model, session_dir)` is the sandboxed starts'
+  route: `None` when nothing was chosen, else the account's route, resolved before anything is cut
+  and recorded in `provider-account.yaml` (never the key). `resume_route(access, harness, session_dir)`
+  re-resolves that record for a jail relaunch; `resume_route_env` flattens it for a PTY. The jail
+  receives the route through `SandboxRunnerSpawn.route`.
 - `cli_route_launch.rs` applies a route to any [CLI harness](../../tddy-agent-backend/docs/architecture.md#cli-harnesses-cli_harness):
   `cli_route_launch(harness, route, session_dir) -> CliRouteLaunch { env, args }` writes the route's
   files `0600` (`write_atomic_with_mode`) into the session directory and points the harness's

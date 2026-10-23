@@ -8,6 +8,8 @@ use tddy_rpc::Status;
 
 use std::sync::Arc;
 
+use tddy_core::provider_route::HarnessRoute;
+
 use crate::launch_ports::LaunchSessions;
 use crate::session_acting_identity::SessionIdentity;
 
@@ -34,6 +36,8 @@ pub struct RelaunchedRunnerSpawn<'a> {
     pub loopback_allow_ports: Vec<u16>,
     pub runner_argv: Vec<String>,
     pub env: std::collections::BTreeMap<String, String>,
+    /// The provider route the agent runs on, re-resolved for the resume; `None` for its vendor.
+    pub route: Option<HarnessRoute>,
 }
 
 /// What bridging a relaunched jail into this daemon, and registering it, needs.
@@ -80,6 +84,9 @@ impl LaunchSessions {
         // The project's account identity the relaunched jail's host-side commands and tools run
         // under, resolved by the caller from the session's own start token.
         identity: SessionIdentity,
+        // The provider route the session's start recorded, re-resolved by the caller from the
+        // owner's vault as it stands now; `None` for a session on its vendor.
+        route: Option<HarnessRoute>,
     ) -> Result<u32, Status> {
         // The defs are re-resolved for what the jail's *seed* and the warm-up need — an endpoint to
         // wake and a registry to start from. What the main agent loses comes from the roster below,
@@ -103,7 +110,13 @@ impl LaunchSessions {
         let (sandbox_root, egress_dir, scratch_dir, scratch_tmp, context_dir) =
             relaunch_jail_dirs::prepare_relaunch_dirs(session_dir)?;
 
-        relaunch_jail_dirs::refresh_relaunch_context_dir(worktree_path, agents, &context_dir)?;
+        // This relaunch serves `claude-cli` alone, so the agent's allow-list is Claude Code's.
+        relaunch_jail_dirs::refresh_relaunch_context_dir(
+            worktree_path,
+            agents,
+            &context_dir,
+            "claude-cli",
+        )?;
 
         let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
             self.config
@@ -197,6 +210,7 @@ impl LaunchSessions {
                 loopback_allow_ports,
                 runner_argv,
                 env,
+                route,
             })
             .await?;
 

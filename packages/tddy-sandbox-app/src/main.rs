@@ -60,7 +60,8 @@ struct Args {
     #[arg(long, env = "TDDY_SESSION_BASE")]
     session_base: Option<PathBuf>,
 
-    /// Agent kind: `claude` (default) or `cursor` (`agent` binary).
+    /// Agent kind: `claude` (default), `cursor` (`agent` binary), or `opencode` / `muse`, which this
+    /// app parses but does not start yet (a jailed session of either needs a provider account).
     #[arg(long, default_value = "claude")]
     agent_kind: String,
 
@@ -311,6 +312,8 @@ fn agent_home_banner(
     let (home, flag) = match agent_kind {
         AgentKind::Claude => (claude_home_dir, "claude_home_dir"),
         AgentKind::Cursor => (cursor_home_dir, "cursor_home_dir"),
+        // This app names no persistent home for a kind it does not start (see `spawn`).
+        AgentKind::OpenCode | AgentKind::Muse => return Vec::new(),
     };
     vec![
         format!(

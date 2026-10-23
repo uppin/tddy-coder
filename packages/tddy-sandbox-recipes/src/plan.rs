@@ -14,6 +14,9 @@ use crate::claude_cli::{
 use crate::cursor_cli::{
     cursor_credentials_copies, cursor_interactive_policy, process_cursor_exec_reads,
 };
+use crate::muse_cli::muse_interactive_policy;
+use crate::opencode_cli::{opencode_interactive_policy, process_opencode_exec_reads};
+use crate::route_files::{materialise_route_files, route_config_env};
 
 /// Named sandbox recipe overlay applied on top of generic exec/read detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,16 +31,21 @@ pub enum SandboxRecipe {
     Shell,
     /// `tddy-sandbox-runner` hosting a generic `--pty-command` action.
     RunnerPty,
+    /// OpenCode's TUI (`opencode`) in the runner's PTY.
+    OpenCodeCli,
+    /// Muse Code's TUI (`muse`) in the runner's PTY.
+    MuseCli,
 }
 
 /// Infer recipe from sandbox-runner argv (`--claude-binary` → Claude CLI; `--pty-command` → Shell).
 pub fn detect_recipe_from_argv(argv: &[String]) -> SandboxRecipe {
-    if argv.iter().any(|a| a == "--agent-kind") {
-        let idx = argv.iter().position(|a| a == "--agent-kind").unwrap();
-        if argv.get(idx + 1).is_some_and(|k| k == "cursor") {
-            return SandboxRecipe::CursorCli;
-        }
-        return SandboxRecipe::ClaudeCli;
+    if let Some(idx) = argv.iter().position(|a| a == "--agent-kind") {
+        return match argv.get(idx + 1).map(String::as_str) {
+            Some("cursor") => SandboxRecipe::CursorCli,
+            Some("opencode") => SandboxRecipe::OpenCodeCli,
+            Some("muse") => SandboxRecipe::MuseCli,
+            _ => SandboxRecipe::ClaudeCli,
+        };
     }
     if argv.iter().any(|a| a == "--claude-binary") {
         SandboxRecipe::ClaudeCli
@@ -55,6 +63,8 @@ fn parse_recipe_name(name: &str) -> SandboxRecipe {
     match name {
         "claude-cli" | "claude_cli" => SandboxRecipe::ClaudeCli,
         "cursor-cli" | "cursor_cli" => SandboxRecipe::CursorCli,
+        "opencode-cli" | "opencode_cli" => SandboxRecipe::OpenCodeCli,
+        "muse-cli" | "muse_cli" => SandboxRecipe::MuseCli,
         "bash" | "shell" => SandboxRecipe::Shell,
         "generic" => SandboxRecipe::Generic,
         _ => SandboxRecipe::Generic,
@@ -74,6 +84,9 @@ pub struct RunnerPlanRequest {
     pub mounts: Vec<MountSpec>,
     pub recipe: Option<SandboxRecipe>,
     pub host_home: Option<PathBuf>,
+    /// The session's provider route, when it runs on one: its secrets become jail secrets
+    /// (`TDDY_SECRET_<NAME>`), and no host OAuth token is injected beside them.
+    pub route: Option<tddy_core::provider_route::HarnessRoute>,
 }
 
 /// Request to build a plan that runs an arbitrary command directly inside the jail.
@@ -96,12 +109,17 @@ fn primary_binary_from_command(command: &[String]) -> Option<PathBuf> {
     command.first().map(PathBuf::from)
 }
 
-fn claude_binary_from_runner_argv(argv: &[String]) -> Option<PathBuf> {
+/// The in-jail agent's binary the runner argv names: `--claude-binary`, or `--agent-binary` for the
+/// kinds that take one (`cursor`, `opencode`, `muse`).
+fn agent_binary_from_runner_argv(argv: &[String]) -> Option<PathBuf> {
     if let Some(idx) = argv.iter().position(|a| a == "--claude-binary") {
         return argv.get(idx + 1).map(PathBuf::from);
     }
     if let Some(idx) = argv.iter().position(|a| a == "--agent-kind") {
-        if argv.get(idx + 1).is_some_and(|k| k == "cursor") {
+        if argv
+            .get(idx + 1)
+            .is_some_and(|k| matches!(k.as_str(), "cursor" | "opencode" | "muse"))
+        {
             if let Some(bidx) = argv.iter().position(|a| a == "--agent-binary") {
                 return argv.get(bidx + 1).map(PathBuf::from);
             }
@@ -121,12 +139,30 @@ fn canonical_binary_path(path: &str) -> Option<PathBuf> {
 fn collect_reads(
     recipe: SandboxRecipe,
     runner_binary: Option<&Path>,
-    claude_binary: Option<&Path>,
+    agent_binary: Option<&Path>,
 ) -> Vec<tddy_sandbox::ReadSpec> {
     let mut reads = Vec::new();
     match recipe {
+        SandboxRecipe::OpenCodeCli => {
+            if let Some(opencode) = agent_binary {
+                let canon = canonical_binary_path(&opencode.to_string_lossy())
+                    .unwrap_or_else(|| opencode.to_path_buf());
+                reads.extend(process_opencode_exec_reads(&canon));
+            } else {
+                reads.extend(system_baseline_reads());
+            }
+        }
+        // A native binary: the OS baseline and the binary's own dependencies, nothing toolchain.
+        SandboxRecipe::MuseCli => {
+            reads.extend(system_baseline_reads());
+            if let Some(muse) = agent_binary {
+                let canon = canonical_binary_path(&muse.to_string_lossy())
+                    .unwrap_or_else(|| muse.to_path_buf());
+                reads.extend(binary_exec_reads(&canon));
+            }
+        }
         SandboxRecipe::ClaudeCli => {
-            if let Some(claude) = claude_binary {
+            if let Some(claude) = agent_binary {
                 let canon = canonical_binary_path(&claude.to_string_lossy())
                     .unwrap_or_else(|| claude.to_path_buf());
                 reads.extend(process_claude_exec_reads(&canon));
@@ -135,7 +171,7 @@ fn collect_reads(
             }
         }
         SandboxRecipe::CursorCli => {
-            if let Some(cursor) = claude_binary {
+            if let Some(cursor) = agent_binary {
                 let canon = canonical_binary_path(&cursor.to_string_lossy())
                     .unwrap_or_else(|| cursor.to_path_buf());
                 reads.extend(process_cursor_exec_reads(&canon));
@@ -189,6 +225,8 @@ fn policy_for_recipe(recipe: SandboxRecipe) -> PolicySpec {
         SandboxRecipe::Shell => shell_interactive_policy(),
         SandboxRecipe::RunnerPty => runner_pty_policy(),
         SandboxRecipe::Generic => generic_exec_policy(),
+        SandboxRecipe::OpenCodeCli => opencode_interactive_policy(),
+        SandboxRecipe::MuseCli => muse_interactive_policy(),
     }
 }
 
@@ -226,6 +264,8 @@ fn copies_for_recipe(
             .map(|home| cursor_credentials_copies(home, scratch_home))
             .unwrap_or_default(),
         SandboxRecipe::Generic | SandboxRecipe::Shell | SandboxRecipe::RunnerPty => Vec::new(),
+        // A routed OpenCode or Muse session is handed its key by the route; nothing is copied.
+        SandboxRecipe::OpenCodeCli | SandboxRecipe::MuseCli => Vec::new(),
     }
 }
 
@@ -234,12 +274,14 @@ fn finish_builder(
     recipe: SandboxRecipe,
     host_home: Option<PathBuf>,
     scratch_dir: &Path,
+    routed: bool,
 ) -> Result<SandboxPlan, SandboxError> {
     let scratch_home = scratch_dir.join("home");
     let copies = copies_for_recipe(recipe, host_home.as_deref(), &scratch_home);
     builder = builder.copies(copies).policy(policy_for_recipe(recipe));
 
-    if recipe == SandboxRecipe::ClaudeCli {
+    // A routed session's key comes from its route, so no host OAuth token is injected beside it.
+    if recipe == SandboxRecipe::ClaudeCli && !routed {
         if let Some(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN")
             .ok()
             .filter(|t| !t.trim().is_empty())
@@ -251,17 +293,52 @@ fn finish_builder(
     builder.build()
 }
 
+/// Add `route`'s secret environment to `builder` as jail secrets — delivered to the agent child by
+/// the runner from owner-only files, never in the jail's environment map or on argv.
+pub fn route_secrets(
+    builder: SandboxBuilder,
+    route: &tddy_core::provider_route::HarnessRoute,
+) -> SandboxBuilder {
+    route
+        .secret_env
+        .iter()
+        .fold(builder, |builder, (name, secret)| {
+            builder.secret(
+                name.as_str(),
+                SecretSource::Value(secret.expose().to_string()),
+            )
+        })
+}
+
 /// Build a [`SandboxPlan`] for `tddy-sandbox-runner` inside the jail.
 pub fn build_runner_plan(params: RunnerPlanRequest) -> Result<SandboxPlan, SandboxError> {
     let recipe = params
         .recipe
         .unwrap_or_else(|| detect_recipe_from_argv(&params.runner_argv));
-    let claude_bin = claude_binary_from_runner_argv(&params.runner_argv);
+    let agent_bin = agent_binary_from_runner_argv(&params.runner_argv);
     let runner = params.runner_argv.first().map(Path::new);
-    let reads = collect_reads(recipe, runner, claude_bin.as_deref());
+    let reads = collect_reads(recipe, runner, agent_bin.as_deref());
     let scratch_dir = params.scratch_dir.clone();
 
-    let builder = SandboxBuilder::new(
+    // A routed session's non-secret environment joins the jail's, and the route's value wins a
+    // clash. Its files are written owner-only into the scratch, and the harness's configuration
+    // variable names the first of them.
+    let routed = params.route.is_some();
+    let mut env = params.env;
+    if let Some(route) = &params.route {
+        env.extend(route.env.iter().cloned());
+        if let (Some(config_env), Some(config)) = (
+            route_config_env(recipe),
+            materialise_route_files(&scratch_dir, route)?,
+        ) {
+            let config_text = config.to_str().ok_or_else(|| {
+                SandboxError::InvalidSpec(format!("{} is not valid UTF-8", config.display()))
+            })?;
+            env.insert(config_env.to_string(), config_text.to_string());
+        }
+    }
+
+    let mut builder = SandboxBuilder::new(
         params.project_root,
         params.scratch_dir,
         params.egress_dir,
@@ -273,11 +350,16 @@ pub fn build_runner_plan(params: RunnerPlanRequest) -> Result<SandboxPlan, Sandb
     .mounts(params.mounts)
     .network(NetworkSpec {
         loopback_allow_ports: params.loopback_allow_ports,
-        allow_oauth_inbound: matches!(recipe, SandboxRecipe::ClaudeCli | SandboxRecipe::CursorCli),
+        // A routed session's key is its route's; the host's own OAuth exchange is not opened beside it.
+        allow_oauth_inbound: !routed
+            && matches!(recipe, SandboxRecipe::ClaudeCli | SandboxRecipe::CursorCli),
     })
-    .env_map(params.env);
+    .env_map(env);
+    if let Some(route) = &params.route {
+        builder = route_secrets(builder, route);
+    }
 
-    finish_builder(builder, recipe, params.host_home, &scratch_dir)
+    finish_builder(builder, recipe, params.host_home, &scratch_dir, routed)
 }
 
 /// Build a [`SandboxPlan`] for running a command directly inside the jail (action orchestration).
@@ -300,7 +382,13 @@ pub fn build_process_plan(params: ProcessPlanRequest) -> Result<SandboxPlan, San
     .cwd(params.cwd)
     .stdin(params.stdin);
 
-    finish_builder(builder, params.recipe, params.host_home, &scratch_dir)
+    finish_builder(
+        builder,
+        params.recipe,
+        params.host_home,
+        &scratch_dir,
+        false,
+    )
 }
 
 /// Parse an optional recipe name string (from action params).
@@ -333,7 +421,7 @@ mod tests {
             "/tmp/stub_agent.sh".into(),
         ];
         assert_eq!(detect_recipe_from_argv(&argv), SandboxRecipe::CursorCli);
-        let bin = claude_binary_from_runner_argv(&argv).expect("agent binary");
+        let bin = agent_binary_from_runner_argv(&argv).expect("agent binary");
         assert_eq!(bin, PathBuf::from("/tmp/stub_agent.sh"));
         let reads = collect_reads(
             SandboxRecipe::CursorCli,
@@ -356,6 +444,103 @@ mod tests {
             "/bin/claude".into(),
         ];
         assert_eq!(detect_recipe_from_argv(&argv), SandboxRecipe::ClaudeCli);
+    }
+
+    #[test]
+    fn detect_recipe_from_argv_finds_opencode_agent_kind() {
+        // Given
+        let argv = vec!["runner".into(), "--agent-kind".into(), "opencode".into()];
+
+        // When / Then
+        assert_eq!(detect_recipe_from_argv(&argv), SandboxRecipe::OpenCodeCli);
+    }
+
+    #[test]
+    fn detect_recipe_from_argv_finds_muse_agent_kind() {
+        // Given
+        let argv = vec!["runner".into(), "--agent-kind".into(), "muse".into()];
+
+        // When / Then
+        assert_eq!(detect_recipe_from_argv(&argv), SandboxRecipe::MuseCli);
+    }
+
+    #[test]
+    fn recipe_from_name_resolves_the_opencode_session_type() {
+        // When / Then
+        assert_eq!(
+            recipe_from_name(Some("opencode-cli")),
+            SandboxRecipe::OpenCodeCli
+        );
+    }
+
+    #[test]
+    fn recipe_from_name_resolves_the_muse_session_type() {
+        // When / Then
+        assert_eq!(recipe_from_name(Some("muse-cli")), SandboxRecipe::MuseCli);
+    }
+
+    #[test]
+    fn opencode_reads_grant_the_directory_of_its_binary() {
+        // Given
+        let binary = Path::new("/opt/opencode/bin/opencode");
+
+        // When
+        let reads = collect_reads(
+            SandboxRecipe::OpenCodeCli,
+            Some(Path::new("/usr/bin/runner")),
+            Some(binary),
+        );
+
+        // Then
+        assert!(
+            reads
+                .iter()
+                .any(|r| r.host == Path::new("/opt/opencode/bin")),
+            "opencode reads must include its binary's directory: {reads:?}"
+        );
+    }
+
+    #[test]
+    fn muse_reads_grant_the_directory_of_its_binary() {
+        // Given
+        let binary = Path::new("/opt/muse/bin/muse");
+
+        // When
+        let reads = collect_reads(
+            SandboxRecipe::MuseCli,
+            Some(Path::new("/usr/bin/runner")),
+            Some(binary),
+        );
+
+        // Then
+        assert!(
+            reads.iter().any(|r| r.host == Path::new("/opt/muse/bin")),
+            "muse reads must include its binary's directory: {reads:?}"
+        );
+    }
+
+    #[test]
+    fn opencode_policy_allows_the_run_time_code_generation_bun_needs() {
+        // When / Then
+        assert!(policy_for_recipe(SandboxRecipe::OpenCodeCli).allow_dynamic_code_generation);
+    }
+
+    #[test]
+    fn opencode_policy_keeps_the_pty_its_tui_draws_on() {
+        // When / Then
+        assert!(policy_for_recipe(SandboxRecipe::OpenCodeCli).pseudo_tty);
+    }
+
+    #[test]
+    fn muse_policy_forbids_run_time_code_generation_as_a_native_binary() {
+        // When / Then
+        assert!(!policy_for_recipe(SandboxRecipe::MuseCli).allow_dynamic_code_generation);
+    }
+
+    #[test]
+    fn muse_policy_keeps_the_pty_its_tui_draws_on() {
+        // When / Then
+        assert!(policy_for_recipe(SandboxRecipe::MuseCli).pseudo_tty);
     }
 
     #[test]

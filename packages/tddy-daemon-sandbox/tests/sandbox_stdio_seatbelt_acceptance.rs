@@ -162,6 +162,7 @@ async fn round_trips_an_echo_over_stdio_through_a_real_seatbelt_jail() {
             mounts: vec![],
             host_home: None,
             cgroup: Default::default(),
+            route: None,
         })
         .expect("spawn sandbox-runner"),
     );
@@ -313,6 +314,7 @@ async fn dispatches_a_tool_call_through_run_host_relay_over_stdio_through_a_real
             mounts: vec![],
             host_home: None,
             cgroup: Default::default(),
+            route: None,
         })
         .expect("spawn sandbox-runner"),
     );

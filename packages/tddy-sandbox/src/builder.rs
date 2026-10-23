@@ -180,12 +180,23 @@ pub struct SecretSpec {
 }
 
 /// Where a secret's value comes from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum SecretSource {
     /// A literal value supplied by the caller.
     Value(String),
     /// A host file whose contents are the secret.
     HostFile(PathBuf),
+}
+
+/// A plan is logged and compared in tests, so a literal secret never reaches a `Debug` line: only
+/// the fact that one is held does.
+impl std::fmt::Debug for SecretSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Value(_) => f.write_str("Value(<redacted>)"),
+            Self::HostFile(path) => f.debug_tuple("HostFile").field(path).finish(),
+        }
+    }
 }
 
 /// Environment for the inner process: a plain var map plus out-of-band secrets.

@@ -13,6 +13,7 @@ name = "tddy-sandbox-runner"
 path = "src/main.rs"
 
 [dependencies]
+tddy-agent-backend = { path = "../tddy-agent-backend" }
 tddy-core = { path = "../tddy-core" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-rpc = { path = "../tddy-rpc" }

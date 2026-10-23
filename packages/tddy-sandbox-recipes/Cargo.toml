@@ -16,4 +16,6 @@ tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 
 [dev-dependencies]
+# `route_secrets` holds the process environment while it sets CLAUDE_CODE_OAUTH_TOKEN. Workspace-internal.
+tddy-testing-commons = { path = "../tddy-testing-commons" }
 tempfile = "3"

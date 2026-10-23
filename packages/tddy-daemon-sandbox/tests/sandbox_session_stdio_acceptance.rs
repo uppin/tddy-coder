@@ -75,6 +75,18 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
     assert!(runner.exists(), "build tddy-sandbox-runner first");
     assert!(tools.exists(), "build tddy-tools first");
 
+    // The agent must outlive the tool call below: the host stops collecting the jail's queued
+    // frames once the pty command has exited (`SessionEnded`), because a dead agent has no tool
+    // calls left to make. `/bin/sleep` handed claude's argv rejects it and exits at once, so the
+    // fake agent is a script that ignores its arguments and stays alive until the test kills the
+    // jail.
+    let fake_agent = project.join("fake-agent.sh");
+    std::fs::write(&fake_agent, "#!/bin/sh\nexec /bin/sleep 600\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake_agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
     let ready_marker = project.join("sandbox.ready");
     let tool_ipc_socket = project.join("tool_ipc.sock");
     let session_id = "daemon-stdio-session";
@@ -91,7 +103,7 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         "--ready-marker".into(),
         ready_marker.to_string_lossy().to_string(),
         "--claude-binary".into(),
-        "/bin/sleep".into(),
+        fake_agent.to_string_lossy().to_string(),
         "--model".into(),
         "claude-opus-4-8".into(),
         "--permission-mode".into(),
@@ -126,8 +138,12 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         mounts: vec![],
         host_home: None,
         cgroup: Default::default(),
+        route: None,
     })
     .expect("spawn sandbox-runner");
+    // The jail's whole process group goes when the test ends, on a failed assertion or a timeout
+    // as much as on a pass: a runner left behind keeps its fake agent's ten-minute sleep alive.
+    let _jail = TerminateJailOnDrop(handle.pid());
 
     let deadline = Duration::from_secs(15);
     let start = std::time::Instant::now();
@@ -191,9 +207,15 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
         Some("hello from the real worktree\n"),
         "expected the real worktree file content to round-trip through dial_and_bridge: {parsed}"
     );
+}
 
-    handle.child_mut().kill().ok();
-    handle.child_mut().wait().ok();
+/// Terminates a jail's process group — the runner and everything it started — when dropped.
+struct TerminateJailOnDrop(u32);
+
+impl Drop for TerminateJailOnDrop {
+    fn drop(&mut self) {
+        tddy_daemon_sandbox::sandbox_session::terminate_sandbox_process(self.0);
+    }
 }
 
 /// **sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags**: family-C spawn modules in

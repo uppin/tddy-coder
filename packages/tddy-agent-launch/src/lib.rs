@@ -48,10 +48,12 @@ pub mod svc_pr_status_for_caller;
 pub mod svc_relaunch_sandboxed_runner;
 pub mod svc_resume_claude_cli_session;
 pub mod svc_resume_sandboxed_claude_cli_session;
+pub mod svc_resume_sandboxed_cli_harness_session;
 pub mod svc_resume_session;
 pub mod svc_signal_delete_session;
 pub mod svc_start_claude_cli_session;
 pub mod svc_start_sandboxed_claude_cli_session;
+pub mod svc_start_sandboxed_cli_harness_session;
 pub mod svc_start_sandboxed_cursor_cli_session;
 pub mod svc_start_session_core;
 pub mod tool_session_route;
@@ -60,6 +62,7 @@ pub mod tool_spawn_plan;
 pub mod workspace_branch_start;
 pub mod worktree_source;
 
+mod cli_harness_jail;
 #[cfg(test)]
 mod cli_route_launch_tests;
 #[cfg(test)]
@@ -75,6 +78,8 @@ mod harness_profile_start_tests;
 mod host_session_socket_tests;
 #[cfg(test)]
 mod provider_account_lookup_tests;
+#[cfg(test)]
+mod sandboxed_cli_harness_tests;
 #[cfg(test)]
 mod session_acting_identity_tests;
 #[cfg(test)]

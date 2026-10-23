@@ -31,11 +31,16 @@ pub(crate) fn spawn_trace_quietly(session_dir: &Path, message: &str) {
     let _ = append_line(&trace, message);
 }
 
-/// Agent kind for the in-jail CLI: `claude` (default) or `cursor`.
+/// Agent kind for the in-jail CLI: `claude` (default), `cursor`, `opencode` or `muse`.
+///
+/// The runner hosts `opencode` and `muse`, but this app does not start them yet — see
+/// [`unstarted_agent_kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentKind {
     Claude,
     Cursor,
+    OpenCode,
+    Muse,
 }
 
 impl AgentKind {
@@ -43,11 +48,25 @@ impl AgentKind {
         match s.trim() {
             "claude" => Ok(Self::Claude),
             "cursor" => Ok(Self::Cursor),
+            "opencode" => Ok(Self::OpenCode),
+            "muse" => Ok(Self::Muse),
             other => Err(format!(
-                "unrecognized --agent-kind {other:?}; expected \"claude\" or \"cursor\""
+                "unrecognized --agent-kind {other:?}; expected \"claude\", \"cursor\", \"opencode\" or \"muse\""
             )),
         }
     }
+}
+
+/// Refusal for an agent kind this app does not start yet. A jailed OpenCode or Muse session runs on
+/// a provider account, and this app passes none: the route is the daemon's to supply. This app also
+/// has no persistent home or binary flag for either kind, so there is nothing honest to start with.
+// TODO(sandboxed-routes): start OpenCode and Muse here once this app carries a provider route —
+// docs/dev/todo/2026-10-22-sandbox-app-cannot-start-opencode-or-muse.md.
+fn unstarted_agent_kind(kind: AgentKind) -> anyhow::Error {
+    anyhow::anyhow!(
+        "--agent-kind {kind:?} is not started by tddy-sandbox-app yet: a jailed {kind:?} session \
+         runs on a provider account, and this app passes none"
+    )
 }
 
 /// Parameters for a local sandboxed Claude or Cursor session.
@@ -496,6 +515,10 @@ async fn wait_for_runner_failure_or_settle(egress_dir: &Path) -> Result<()> {
 /// Prepare sandbox dirs, context, and spawn `sandbox-exec` → `tddy-sandbox-runner`.
 #[cfg(target_os = "macos")]
 pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox> {
+    // Refused before anything is created, so a refused kind leaves no session directory behind.
+    if matches!(params.agent_kind, AgentKind::OpenCode | AgentKind::Muse) {
+        return Err(unstarted_agent_kind(params.agent_kind));
+    }
     let repo = params
         .repo
         .canonicalize()
@@ -516,10 +539,16 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     let scratch_home_dir = match params.agent_kind {
         AgentKind::Claude => &params.claude_home_dir,
         AgentKind::Cursor => &params.cursor_home_dir,
+        AgentKind::OpenCode | AgentKind::Muse => {
+            return Err(unstarted_agent_kind(params.agent_kind))
+        }
     };
     match params.agent_kind {
         AgentKind::Claude => seed_claude_credentials(scratch_home_dir)?,
         AgentKind::Cursor => seed_cursor_credentials(scratch_home_dir)?,
+        AgentKind::OpenCode | AgentKind::Muse => {
+            return Err(unstarted_agent_kind(params.agent_kind))
+        }
     }
 
     let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
@@ -541,6 +570,8 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     let context_globs = tddy_core::backend::context_globs_for_agent(match params.agent_kind {
         AgentKind::Claude => "claude",
         AgentKind::Cursor => "cursor",
+        AgentKind::OpenCode => "opencode",
+        AgentKind::Muse => "muse",
     });
     let specialized_defs = params.specialized_defs;
     let replacement_pairs = specialized_agent_replacement_pairs(&specialized_defs);
@@ -667,6 +698,9 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
                 runner_argv.push(agent_arg.clone());
             }
         }
+        AgentKind::OpenCode | AgentKind::Muse => {
+            return Err(unstarted_agent_kind(params.agent_kind))
+        }
     }
     if let Some(level) = &params.mcp_log_level {
         runner_argv.push("--mcp-log-level".into());
@@ -722,6 +756,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         // Standalone app path has no daemon config; empty config lets the cgroups backend derive
         // the delegated base at runtime (ignored by the macOS/QEMU backends).
         cgroup: tddy_sandbox::CgroupConfig::default(),
+        route: None,
     })
     .map_err(|e| {
         let logs = tddy_sandbox::format_egress_logs(&egress_dir);
@@ -790,6 +825,33 @@ pub fn log_spawn_diagnostics(egress_dir: &Path, session_dir: &Path) {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    #[test]
+    fn the_agent_kind_flag_parses_opencode() {
+        // When / Then
+        assert_eq!(AgentKind::parse("opencode"), Ok(AgentKind::OpenCode));
+    }
+
+    #[test]
+    fn the_agent_kind_flag_parses_muse() {
+        // When / Then
+        assert_eq!(AgentKind::parse("muse"), Ok(AgentKind::Muse));
+    }
+
+    #[test]
+    fn an_unknown_agent_kind_names_every_kind_the_flag_accepts() {
+        // When
+        let err = AgentKind::parse("vim");
+
+        // Then
+        assert_eq!(
+            err,
+            Err(
+                "unrecognized --agent-kind \"vim\"; expected \"claude\", \"cursor\", \"opencode\" or \"muse\""
+                    .to_string()
+            )
+        );
+    }
 
     // ─── The session's own record, once the terminal is somebody else's ─────────
 

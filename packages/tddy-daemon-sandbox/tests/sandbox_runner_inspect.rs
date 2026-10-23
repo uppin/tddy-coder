@@ -103,6 +103,7 @@ fn sandbox_runner_inspect_seatbelt_spawn() {
         mounts: vec![],
         host_home: None,
         cgroup: Default::default(),
+        route: None,
     };
 
     let plan = build_sandbox_plan(make_params()).expect("build plan");

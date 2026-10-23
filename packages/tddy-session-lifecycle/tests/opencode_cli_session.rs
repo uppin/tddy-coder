@@ -297,18 +297,29 @@ async fn an_opencode_session_started_without_an_account_generates_no_config() {
 }
 
 #[tokio::test]
-async fn a_sandboxed_opencode_session_is_refused_until_it_can_be_jailed() {
-    // Given
+async fn a_sandboxed_opencode_session_without_a_provider_account_is_refused() {
+    // Given — a jail's $HOME is the session's own scratch, so the person's own OpenCode setup is
+    // not there: without an account the harness would start with no credentials at all
     let daemon = an_opencode_daemon();
     let mut req = an_opencode_start_request();
     req.sandbox = true;
 
     // When
-    let refusal = daemon.start(req).await.expect_err("no jailed OpenCode yet");
+    let refusal = daemon
+        .start(req)
+        .await
+        .expect_err("a jailed OpenCode needs an account");
 
-    // Then it is refused, not run unsandboxed
+    // Then it is refused up front, naming what it needs, and nothing is spawned
     assert_eq!(refusal.code, Code::FailedPrecondition);
-    assert!(refusal.message.contains("sandbox"), "{}", refusal.message);
+    assert!(
+        refusal
+            .message
+            .contains("a sandboxed opencode-cli session needs a provider account"),
+        "{}",
+        refusal.message
+    );
+    assert!(!daemon.argv_log.exists(), "opencode was spawned");
 }
 
 #[tokio::test]
@@ -528,8 +539,8 @@ async fn a_muse_session_records_its_type_model_and_worktree() {
 }
 
 #[tokio::test]
-async fn a_sandboxed_muse_session_is_refused() {
-    // Given
+async fn a_sandboxed_muse_session_without_a_provider_account_is_refused() {
+    // Given — no account, so the jail would hold no Meta key for Muse Code to run on
     let daemon = a_muse_daemon();
     let mut req = a_muse_start_request();
     req.sandbox = true;
@@ -538,11 +549,17 @@ async fn a_sandboxed_muse_session_is_refused() {
     let refusal = daemon
         .start(req)
         .await
-        .expect_err("no jailed Muse Code yet");
+        .expect_err("a jailed Muse Code needs an account");
 
-    // Then it is refused, not run unsandboxed
+    // Then it is refused up front, naming what it needs, and nothing is spawned
     assert_eq!(refusal.code, Code::FailedPrecondition);
-    assert!(refusal.message.contains("sandbox"), "{}", refusal.message);
+    assert!(
+        refusal
+            .message
+            .contains("a sandboxed muse-cli session needs a provider account"),
+        "{}",
+        refusal.message
+    );
     assert!(!daemon.argv_log.exists(), "muse was spawned");
 }
 

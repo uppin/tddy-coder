@@ -29,6 +29,37 @@ frames strictly in order and stops as soon as it sees `SessionEnded`, so deliver
 still-queued terminal output would drop the tail of the PTY's output and, if no `HostPoll` had arrived
 yet, could stall the sandboxed process waiting on a stream that never closes.
 
+**Attach acknowledgement:** the host relay (`run_host_relay_inner`) treats the channel as attached
+on the first frame the jail sends, and gives up after ten seconds. A jail with nothing to say —
+`--workspace-tools` spawns no PTY — therefore looked exactly like a channel that never attached. The
+runner now answers a host's `SubscribeTerminal` for its session with one empty `TerminalOutput` frame
+on the main terminal (`SandboxSessionRelay::acknowledge_attach`, on both the tonic and the stdio
+`SessionChannel`). The host ignores empty chunks, so a PTY jail's output is unchanged.
+
+**Channel release:** both halves of a finished `SessionChannel` let go of it, so a runner exits once
+its PTY command has.
+
+- **Host side.** The relay's reader answers tool, egress and RPC requests and opens tunnels over the
+  host's sender, but holds it only as a `WeakSender`. It upgrades it per answer (`send_if_open`), and
+  does nothing once every strong sender is gone. A strong clone there kept the host's half of the
+  stream open forever: the reader ends only when the stream does.
+- **Jail side.** The runner keeps a clone of the response-stream sender so tunnel frames can bypass the
+  poll cadence. When the host closes its half, `SandboxSessionRelay::release_outbound` drops that clone,
+  compared by channel so a newer attach is never torn down by an older stream ending. Without it the
+  response stream, and the server's graceful shutdown with it, never ended.
+
+These three relay defects (the missing acknowledgement and the two held senders) predate the
+`#provider-route` stack. They came in with the stdio transport (#481), and were fixed in #670
+(`#provider-route` 9/9) at the developer's request, because the jail acceptance suites that node adds
+could not finish without them.
+
+**Agent kinds:** `--agent-kind` is `claude` (default), `cursor`, `opencode` or `muse`. `opencode` and
+`muse` run in the same PTY as Claude Code (`harness_pty.rs`). Their argv comes from the CLI harness
+descriptors the host uses (`tddy_agent_backend::cli_harness`), so a jailed session starts exactly as
+an unsandboxed one does; both refuse a blank `--model`. `--resume` continues the harness's own last
+session. A provider route's secrets reach the agent child through the `TDDY_SECRET_<NAME>` files, and
+its files are written owner-only into the scratch (`tddy-sandbox-recipes`, `route_files.rs`).
+
 ### Control-channel transport
 
 **stdio is the transport for the daemon's real sandboxed-session lifecycle** (macOS proven
@@ -49,6 +80,15 @@ RpcService codegen passes). `connection_service.rs`'s spawn/dial orchestration a
 `sandbox_session::dial_and_bridge` dial exclusively over stdio now — the
 `--grpc-socket`/`--grpc-listen-port`/`--grpc-uds` flags and the port/ready-marker handshake for
 this call site were deleted outright (no dual-path fallback, per this repo's convention).
+
+`tddy-daemon-sandbox`'s `sandbox_session_stdio_acceptance` drives this path through a real Seatbelt
+jail. Its fake agent is a script that ignores its argv and runs `exec /bin/sleep 600`. Plain
+`/bin/sleep` handed claude's argv rejected it and exited at once, and the host stops collecting frames
+after `SessionEnded`, so the tool call the test makes never came back. The jail's process group is
+terminated when the test ends, on a failure as much as on a pass, so no runner outlives it. `tddy-daemon-rpc`'s
+`in_jail_conversation_acceptance` had the same fixture (`--claude-binary /bin/sleep`), failed the same
+way and left a runner behind; it now uses the same script and arms the same guard right after the
+spawn.
 
 The sandbox-runner's own tonic gRPC server is retained as an independent transport (unaffected by
 the above) for `tddy-sandbox-app`'s standalone demo path and `sandbox_action.rs`'s separate

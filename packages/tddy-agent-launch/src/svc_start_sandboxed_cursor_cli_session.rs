@@ -366,6 +366,7 @@ impl LaunchSessions {
                 mounts: vec![tddy_sandbox::MountSpec::read_write(scratch_home.clone())],
                 host_home: None,
                 cgroup: self.config.sandbox_cgroup_config(),
+                route: None,
             },
         )
         .map_err(|e| {

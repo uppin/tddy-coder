@@ -7,6 +7,7 @@
 //! it.
 
 mod conversation_root;
+pub mod harness_pty;
 pub mod host_relay;
 pub mod runner;
 

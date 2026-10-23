@@ -546,7 +546,12 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
 
     let session_id = config.session_id.clone();
     let terminal_sink = config.terminal_sink;
-    let host_tx_reader = host_tx.clone();
+    // Weak, deliberately: the reader answers the jail over this channel, but it must not be what
+    // keeps the channel open. The poller (and the dispatcher, where a caller keeps one) hold the
+    // strong senders; once they are gone the host's half of the stream closes, the jail's server
+    // finishes and the runner exits. A strong clone here would outlive `SessionEnded` forever —
+    // the reader only ends when the stream does, and the stream only ends when this clone drops.
+    let host_tx_reader = host_tx.downgrade();
     let end_signal = Arc::new(EndSignal::new());
     let in_jail_tools = Arc::new(InJailToolExchange::default());
     let (attached_tx, attached_rx) = oneshot::channel();
@@ -579,19 +584,23 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
                                 &req.args_json,
                             )
                             .await;
-                        let _ = host_tx_reader
-                            .send(SessionFrame {
+                        send_if_open(
+                            &host_tx_reader,
+                            SessionFrame {
                                 payload: Some(SessionPayload::ToolResponse(resp)),
-                            })
-                            .await;
+                            },
+                        )
+                        .await;
                     }
                     Some(SessionPayload::EgressRequest(req)) => {
                         let resp = relay_egress_request(req).await;
-                        let _ = host_tx_reader
-                            .send(SessionFrame {
+                        send_if_open(
+                            &host_tx_reader,
+                            SessionFrame {
                                 payload: Some(SessionPayload::EgressResponse(resp)),
-                            })
-                            .await;
+                            },
+                        )
+                        .await;
                     }
                     Some(SessionPayload::RpcRequest(req)) => {
                         // An RPC the in-jail `tddy-tools` asked the host to dispatch to its
@@ -602,7 +611,9 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
                         // frames are, so a lifetime-long `StreamSessionAgents` does not occupy the
                         // single `awaiting_tool` slot the poll path uses.
                         let request_id = req.request_id;
-                        let tx = host_tx_reader.clone();
+                        let Some(tx) = host_tx_reader.upgrade() else {
+                            continue;
+                        };
                         match rpc_handler
                             .handle_rpc(&req.service, &req.method, &req.payload)
                             .await
@@ -698,9 +709,12 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
                     }
                     Some(SessionPayload::TunnelOpen(open)) => {
                         // Agent issued CONNECT host:port — the host owns the real outbound socket.
+                        let Some(tx) = host_tx_reader.upgrade() else {
+                            continue;
+                        };
                         let (tcp_in_tx, tcp_in_rx) = mpsc::unbounded_channel::<Bytes>();
                         tunnels.insert(open.tunnel_id.clone(), tcp_in_tx);
-                        spawn_tunnel(open, tcp_in_rx, host_tx_reader.clone());
+                        spawn_tunnel(open, tcp_in_rx, tx);
                     }
                     Some(SessionPayload::TunnelData(data)) => {
                         // Agent→host bytes: feed into the outbound socket for this tunnel.
@@ -787,6 +801,14 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
             answer_timeout: IN_JAIL_TOOL_TIMEOUT,
         },
     ))
+}
+
+/// Send one frame to the jail if the host's half of the channel is still open. A channel whose
+/// senders are all gone is closing — the jail will not read an answer, so there is nobody to tell.
+async fn send_if_open(host_tx: &mpsc::WeakSender<SessionFrame>, frame: SessionFrame) {
+    if let Some(tx) = host_tx.upgrade() {
+        let _ = tx.send(frame).await;
+    }
 }
 
 /// Open the real outbound TCP connection for a relayed `CONNECT` tunnel and pump bytes both ways

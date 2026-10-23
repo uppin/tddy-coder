@@ -14,6 +14,7 @@
 | Run | Params | Note |
 |---|---|---|
 | 2026-09-19 | 12 | first detection; signature unchanged by PR #518 |
+| 2026-10-22 | 12 | unchanged; PR #670 adds a fourth caller (`svc_start_sandboxed_cli_harness_session`), so an options struct now pays off at four sites |
 
 ## What the tool found
 

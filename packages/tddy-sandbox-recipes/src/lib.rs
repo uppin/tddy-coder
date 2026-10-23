@@ -7,7 +7,10 @@
 
 pub mod claude_cli;
 pub mod cursor_cli;
+pub mod muse_cli;
+pub mod opencode_cli;
 pub mod plan;
+mod route_files;
 
 #[cfg(unix)]
 pub use claude_cli::seed_claude_local_install;
@@ -26,7 +29,9 @@ pub use cursor_cli::{
     prepare_cursor_mcp_config, process_cursor_exec_reads, seed_cursor_credentials,
     write_cursor_mcp_config,
 };
+pub use muse_cli::muse_interactive_policy;
+pub use opencode_cli::{opencode_interactive_policy, process_opencode_exec_reads};
 pub use plan::{
     build_process_plan, build_runner_plan, detect_recipe_from_argv, recipe_from_name,
-    shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,
+    route_secrets, shell_interactive_policy, ProcessPlanRequest, RunnerPlanRequest, SandboxRecipe,
 };

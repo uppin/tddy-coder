@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 263 | 12 | 14 | 5 | first detection |
+| 2026-10-22 | 282 | 12 | — | — | PR #670 (`#provider-route` 9/9): +19 (fn line to closing brace) — the reader's sender is a `WeakSender`, upgraded at the RPC and tunnel arms (two `let … else { continue }`), the two answer sends through `send_if_open`. Nesting unchanged; branches and exits not re-derived |
 
 ## What the tool found
 
