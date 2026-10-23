@@ -19,6 +19,9 @@
 //! sets and the daemon path does not. The surface is therefore **47** where they are served and
 //! **44** where they are not, differing in exactly those three.
 
+#[path = "support/exec_catalog.rs"]
+mod exec_catalog;
+
 use std::collections::BTreeSet;
 use std::process::Stdio;
 use std::time::Duration;
@@ -122,8 +125,9 @@ const ADVERTISEMENT_ENV_KEYS: [&str; 11] = [
 /// transport (the exec catalog), an agent on its roster (the conversation tools), and a language
 /// server (the `Lsp*` tools).
 ///
-/// The socket is never connected to and the subagent's `base_url` never answers — advertisement is
-/// decided by what the environment declares, not by what replies, which is what makes this audit a
+/// The socket is answered only for the exec-catalog question (`ListExecTools`, asked on every
+/// `tools/list`), with the daemon-wide catalog; the subagent's `base_url` never answers. Everything
+/// else advertised is decided by what the environment declares, which is what makes this audit a
 /// deterministic enumeration rather than an integration test.
 struct FullyConfiguredSession {
     env: Vec<(&'static str, String)>,
@@ -140,7 +144,6 @@ fn a_fully_configured_session() -> FullyConfiguredSession {
     }]);
     FullyConfiguredSession {
         env: vec![
-            ("TDDY_SANDBOX_TOOL_IPC", unconnected_socket_path()),
             ("TDDY_SUBAGENTS_JSON", explorer.to_string()),
             ("TDDY_SUBAGENT_ROSTER_STATIC", "1".to_string()),
             ("TDDY_LSP_TOOLS", "1".to_string()),
@@ -163,7 +166,17 @@ impl FullyConfiguredSession {
         self
     }
 
-    async fn advertised_tool_names(self) -> BTreeSet<String> {
+    async fn advertised_tool_names(mut self) -> BTreeSet<String> {
+        let socket_dir = tempfile::tempdir().expect("a directory for the session-tool socket");
+        let socket_path = socket_dir.path().join("tool-ipc.sock");
+        let host = exec_catalog::a_host_offering_the_catalog_at(&socket_path);
+        self.env.push((
+            "TDDY_SANDBOX_TOOL_IPC",
+            socket_path
+                .to_str()
+                .expect("socket path must be utf8")
+                .to_string(),
+        ));
         let mut child = self.spawn();
         let mut stdin = child.stdin.take().expect("child stdin");
         let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -175,6 +188,7 @@ impl FullyConfiguredSession {
         .await;
         let response = read_json_line(&mut stdout).await;
         let _ = child.kill().await;
+        host.abort();
         response["result"]["tools"]
             .as_array()
             .unwrap_or_else(|| panic!("tools/list must return a tools array, got: {response}"))
@@ -202,15 +216,6 @@ impl FullyConfiguredSession {
         }
         cmd.spawn().expect("spawn tddy-tools --mcp")
     }
-}
-
-/// A socket path nothing listens on. `detect_session_tool_transport` reads the variable and never
-/// connects, so this is enough to give the session a transport for advertisement purposes.
-fn unconnected_socket_path() -> String {
-    tddy_sandbox::SandboxSpec::short_ipc_socket_path("mcpaudit")
-        .to_str()
-        .expect("socket path must be utf8")
-        .to_string()
 }
 
 fn names(of: &[&str]) -> BTreeSet<String> {

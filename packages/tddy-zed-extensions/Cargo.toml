@@ -33,6 +33,10 @@ serde_json = "1"
 tddy-code-restructuring = { path = "../tddy-code-restructuring" }
 tddy-lsp = { path = "../tddy-lsp" }
 thiserror = "2"
+# `ExtensionVerify` blocks on the caller's runtime (`Handle::current`), as the restructuring
+# backends do. Already a dev-dependency here and a dependency of tddy-lsp: no new crate enters the
+# tree, and the lock file is unchanged.
+tokio = { version = "1", features = ["rt"] }
 # `extension.toml` and `languages/<x>/config.toml`; the version tddy-daemon-kernel already uses.
 toml = "0.9"
 # An installed extension's grammar is a `grammars/<name>.wasm`, loaded through tree-sitter's WASM
@@ -40,6 +44,17 @@ toml = "0.9"
 # `wasmtime-c-api` (wasmtime 36 for tree-sitter 0.26.x) and re-exports it as
 # `tree_sitter::wasmtime`, so no second wasmtime is declared here.
 tree-sitter = { version = "0.26.13", features = ["wasm"] }
+# An opted-in extension's `extension.wasm` is a WASI preview 2 component, run through wasmtime's
+# component model (`#reshape` extension-wasm-command, R6). tree-sitter's `wasm` feature already
+# brings wasmtime 36 — this names the SAME crate to turn on `component-model` (which
+# `wasmtime-c-api` leaves off) and so `component::bindgen!`; cargo unifies it to one wasmtime, and
+# `cargo tree -p tddy-zed-extensions -i wasmtime` must keep showing exactly one version.
+wasmtime = { version = "36.0.19", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
+
+[features]
+# `testkit`: the `demo-toml` fixture builders dependents' suites share. Std only; enabled from
+# dev-dependencies, never by a production build.
+testkit = []
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

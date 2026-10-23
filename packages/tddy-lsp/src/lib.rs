@@ -18,8 +18,8 @@ pub mod spawn_observer;
 
 pub use allowlist::{language_for_target_type, LanguageId, LaunchSpec, LspAllowList};
 pub use client::{
-    ActivityHook, Diagnostic, Location, LspClient, NotificationEvent, NotificationStream, Position,
-    Range, ResponseError, SymbolInfo,
+    ActivityHook, Diagnostic, ExecutedCommand, Location, LspClient, NotificationEvent,
+    NotificationStream, Position, Range, ResponseError, SymbolInfo,
 };
 pub use error::LspError;
 pub use registry::{DocumentSource, LspKey, LspRegistry, LspService};

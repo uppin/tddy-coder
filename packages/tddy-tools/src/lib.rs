@@ -13,6 +13,7 @@
 
 pub mod action_tools;
 pub mod cli;
+pub mod exec_tool_admission;
 mod github_credential;
 pub mod index_client;
 pub mod index_console;

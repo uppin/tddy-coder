@@ -920,6 +920,7 @@ pub fn a_cluster_move_of(modules: &[&str], reexport: Option<Reexport>) -> Refact
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 
@@ -950,6 +951,7 @@ pub fn a_move_of(
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 
@@ -1007,6 +1009,7 @@ pub fn a_move_of_the_host_registry(
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 
@@ -1038,6 +1041,7 @@ pub fn a_rename_in(file: &str, symbol: &str, to: &str) -> RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 
@@ -2072,6 +2076,7 @@ fn an_extraction(op: RefactorKind, anchor: Anchor, name: &str) -> RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

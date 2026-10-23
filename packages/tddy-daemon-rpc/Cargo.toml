@@ -12,6 +12,9 @@ description = "The daemon's RPC-family handlers, above the session lifecycle the
 
 [dependencies]
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+# The project-home tools resolve targets from the same `.session.yaml` store the ListSessions RPC reads
+# (`#project-home` 5/7).
+tddy-session-activity = { path = "../tddy-session-activity" }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }

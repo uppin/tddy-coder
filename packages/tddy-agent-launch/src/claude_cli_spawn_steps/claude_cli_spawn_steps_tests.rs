@@ -196,3 +196,72 @@ fn on_a_regular_host_the_tool_use_hook_names_no_daemon_socket() {
         "a regular host's PostToolUse hook must name no daemon socket, got: {command}"
     );
 }
+
+/// The values `--allowedTools` is given in `argv`, in order.
+fn allowed_tools_in(argv: &[String]) -> Vec<&str> {
+    argv.windows(2)
+        .filter(|pair| pair[0] == "--allowedTools")
+        .map(|pair| pair[1].as_str())
+        .collect()
+}
+
+#[test]
+fn a_project_home_spawn_is_pre_approved_exactly_the_project_home_tool_set() {
+    // Given the argument a project-home claude-cli spawn adds to its command line
+    let argv = role_allowed_tools_args(Some("project-home"));
+
+    // Then each tool of the set is its own --allowedTools value, and nothing else is added
+    let expected = tddy_tool_engine::read_only::project_home_allowed_tools();
+    assert_eq!(
+        allowed_tools_in(&argv),
+        expected.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    assert_eq!(argv.len(), expected.len() * 2);
+    assert!(!allowed_tools_in(&argv).contains(&"mcp__tddy-tools__Write"));
+}
+
+#[test]
+fn an_ordinary_spawn_adds_no_allowed_tools() {
+    // Given an ordinary session, and a role the daemon gives no tool set
+    // Then neither adds an argument, so the spawn's argv is what it always was
+    assert!(role_allowed_tools_args(None).is_empty());
+    assert!(role_allowed_tools_args(Some("")).is_empty());
+    assert!(role_allowed_tools_args(Some("some-other-role")).is_empty());
+}
+
+#[test]
+fn a_role_is_on_disk_before_the_agent_is_spawned() {
+    // Given a session directory a start has just created
+    let dir = tempfile::tempdir().expect("a temporary session dir");
+
+    // When the role is recorded ahead of the spawn
+    record_role_before_spawn(
+        dir.path(),
+        "home-1",
+        "p-1",
+        "project-home",
+        Path::new("/work/home"),
+        true,
+    )
+    .expect("recorded");
+
+    // Then the record names the role, the project and the worktree, with no pid yet
+    let record = tddy_core::read_session_metadata(dir.path()).expect("the record is readable");
+    assert_eq!(record.session_role.as_deref(), Some("project-home"));
+    assert_eq!(record.project_id, "p-1");
+    assert_eq!(record.repo_path.as_deref(), Some("/work/home"));
+    assert_eq!(record.pid, None);
+}
+
+#[test]
+fn an_ordinary_session_writes_nothing_before_the_spawn() {
+    // Given a session directory a start has just created
+    let dir = tempfile::tempdir().expect("a temporary session dir");
+
+    // When a session with no role has its role recorded ahead of the spawn
+    record_role_before_spawn(dir.path(), "s-1", "p-1", "", Path::new("/work"), false)
+        .expect("nothing to record is not a failure");
+
+    // Then no record exists yet: the spawn writes the first one, as it always did
+    assert!(tddy_core::read_session_metadata(dir.path()).is_err());
+}

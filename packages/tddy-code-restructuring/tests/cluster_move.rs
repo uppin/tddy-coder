@@ -91,6 +91,7 @@ fn a_move_of(module: &str) -> RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

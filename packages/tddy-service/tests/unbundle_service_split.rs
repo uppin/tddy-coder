@@ -555,13 +555,15 @@ const PR_STACK_METHODS: [&str; 8] = [
 /// The list is **closed**, which is the point: a method the `#unbundle` stack forgot to move and a
 /// method somebody adds afterwards both fail here rather than surviving quietly. A genuinely new
 /// method on one of these four services joins the list deliberately, in the change that adds it —
-/// `SetProjectAccounts` (`#keyring` 5/9) is the first to do so.
-const RESIDUAL_METHODS: [&str; 18] = [
+/// `SetProjectAccounts` (`#keyring` 5/9) is the first to do so, `SetProjectHomeAgent`
+/// (`#project-home` 1/7) the second, `EnsureProjectHomeSession` (`#project-home` 4/7) the third.
+const RESIDUAL_METHODS: [&str; 20] = [
     "ListSessions",
     "StartSession",
     "StreamStartSession",
     "ConnectSession",
     "ResumeSession",
+    "EnsureProjectHomeSession",
     "SignalSession",
     "DeleteSession",
     "GetWorktreeSnapshot",
@@ -571,6 +573,7 @@ const RESIDUAL_METHODS: [&str; 18] = [
     "ListProjectBranches",
     "SetProjectDefaultBranch",
     "SetProjectAccounts",
+    "SetProjectHomeAgent",
     "StartDemoVm",
     "StopDemoVm",
     "GetDemoVmStatus",

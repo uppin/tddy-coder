@@ -130,6 +130,7 @@ fn a_rename_of_foo_at_its_declaration() -> RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

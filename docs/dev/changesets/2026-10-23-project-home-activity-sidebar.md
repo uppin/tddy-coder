@@ -1,0 +1,11 @@
+# 2026-10-23 — Activity sidebar, managed_codebase recorded at start (#project-home 3/7)
+
+**PR:** #698 · **Packages:** tddy-service, tddy-changeset, tddy-session-activity, tddy-agent-launch, tddy-web (plus `managed_codebase: false` at struct-literal sites across the workspace's tests)
+
+A session's managed-codebase placement is recorded in `.session.yaml` at start and reported as `SessionEntry.managed_codebase` (proto field 34); the web docks the Agent Activity transcript as a right sidebar, open by default for managed sessions. Package entries: [tddy-web](../../../packages/tddy-web/docs/changesets/2026-10-23-agent-activity-sidebar.md), [tddy-agent-launch](../../../packages/tddy-agent-launch/docs/changesets/2026-10-23-managed-codebase-recorded-at-start.md), [tddy-changeset](../../../packages/tddy-changeset/docs/changesets/2026-10-23-session-metadata-managed-codebase.md), [tddy-session-activity](../../../packages/tddy-session-activity/docs/changesets/2026-10-23-session-entry-managed-codebase.md), [tddy-service](../../../packages/tddy-service/docs/changesets/2026-10-23-session-entry-managed-codebase.md).
+
+Closed: `tddy-web` code issue `oversized-file-session-main-pane`, final measurement **438 lines** (budget 500). Opened: backlog entry `2026-10-23-agent-activity-overlay-has-no-production-mount.md`.
+
+Validation at wrap: stack rebase onto the wrapped n2 (`--onto`, leak-free); the inherited `schema-manifest.json` key reorder dropped from the diff; cleanups — legacy-metadata test moved under the `tests` module's imports, the two viewport hooks share one resize helper, a test renamed to match its body. File-length gate: no non-test, non-generated file this PR touched is at or over 500 production lines. Not split: `SessionMainPane.tsx`, `session.proto`, `session_metadata.rs`, `testIds.ts` and the `SessionMetadata`/`SessionEntry` literal sites are shared with #699, none over budget.
+
+Verified (scoped): `cargo test -p tddy-changeset -p tddy-session-activity` all pass; `tddy-session-lifecycle` `list_sessions_managed_codebase_acceptance` 2/2 and `managed_codebase_workflow_acceptance` 5/5; `tddy-agent-launch --lib` 145/145; clippy `-D warnings` on tddy-changeset, -session-activity, -session-lifecycle, -agent-launch, -session-split, -telegram-control clean; fmt clean. Web as in the tddy-web entry. Full workspace: CI.

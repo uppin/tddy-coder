@@ -37,6 +37,7 @@ async fn list_exec_tools_returns_non_empty_catalog_with_valid_schemas() {
         .list_exec_tools(Request::direct(ListExecToolsRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: String::new(),
+            ..Default::default()
         }))
         .await
         .expect("ListExecTools must not fail");
@@ -278,6 +279,8 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
+        session_role: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
     let service = test_service(sessions_tmp.path().to_path_buf());

@@ -20,6 +20,10 @@ provider_account: meta             # an account label or id in the starter's vau
 model: muse-wonder-1.0
 ```
 
+`provider_account` may be omitted (it reads as empty), so a profile that only names a harness and
+a model loads and is listed. A [project-home session](project-concept.md#project-home-session) runs
+such a profile on the harness's own vendor; a profile meant for an account names it.
+
 Unknown fields are refused, so a profile cannot carry `base_url` or `api_key` — it is a harness on an
 account, not an endpoint. Profiles are edited as YAML only; there is no UI editor.
 

@@ -1,6 +1,6 @@
 # Zed extensions
 
-**Status:** 🚧 Install, list and remove delivered (`#reshape` 19/24, [#678](https://github.com/uppin/tddy-coder/pull/678)); an installed extension's languages get anchors and outlines from their grammar (`#reshape` 20/24, [#679](https://github.com/uppin/tddy-coder/pull/679)); an extension language's server starts from tddy settings, with rename and references (`#reshape` 22/24, [#681](https://github.com/uppin/tddy-coder/pull/681)).
+**Status:** 🚧 Install, list and remove delivered (`#reshape` 19/24, [#678](https://github.com/uppin/tddy-coder/pull/678)); an installed extension's languages get anchors and outlines from their grammar (`#reshape` 20/24, [#679](https://github.com/uppin/tddy-coder/pull/679)); an extension language's server starts from tddy settings, with rename and references (`#reshape` 22/24, [#681](https://github.com/uppin/tddy-coder/pull/681)); an opted-in extension's WASM names its language server's command (`#reshape` 24/24, [#683](https://github.com/uppin/tddy-coder/pull/683)).
 
 tddy reuses Zed editor extensions — their languages, tree-sitter grammars (already compiled to WASM)
 and language-server declarations — to understand languages it has no built-in support for. This
@@ -20,11 +20,12 @@ checkout's `tmp/.tddy`). It is per user.
     extension.toml
     languages/<language>/config.toml
     grammars/<grammar>.wasm
-    extension.wasm                 optional; never run by this feature
+    extension.wasm                 optional; run only for an opted-in extension
 ```
 
 The layout is Zed's, so a directory Zed installed can be copied in unchanged. `index.json` records
-`id`, `version`, `source` (`registry` or `path`) and `installed_at` (Unix seconds) per extension.
+`id`, `version`, `source` (`registry` or `path`), `installed_at` (Unix seconds) and `wasm_enabled` per
+extension; an entry without `wasm_enabled` is not opted in.
 
 ## The `extensions` CLI
 
@@ -34,9 +35,12 @@ The layout is Zed's, so a directory Zed installed can be copied in unchanged. `i
 | `tddy-tools extensions install --path <dir>` | Copies a local extension directory (a dev extension) in, under its manifest's id; symlinks in the source are followed |
 | `tddy-tools extensions list` | One line per extension: `<id> <version> <source> — languages: …; grammars: …; language servers: …; wasm: yes\|no` (`none` for an empty list) |
 | `tddy-tools extensions remove <id>` | Deletes the extension and its index entry; an unknown id is an error naming it |
+| `tddy-tools extensions enable-wasm <id>` | Opts the installed extension in: its `extension.wasm` may name its language servers' commands ([Extensions with code](#extensions-with-code-opt-in)); an unknown id is an error naming it |
+| `tddy-tools extensions disable-wasm <id>` | Opts it out again — the default |
 
 Re-installing the version already installed changes nothing and says so; a different version
-replaces it and names the version it replaced.
+replaces it and names the version it replaced; an opted-in extension stays opted in across the
+replacement — the opt-in is trust in the extension, so a new version's code runs under it.
 
 ### Registry
 
@@ -95,7 +99,7 @@ cold CLI (`tddy-tools restructure`) and the index daemon, so the two answer the 
   (non-adjacent items, a stale fingerprint, an absent or ambiguous name). None of them starts
   rust-analyzer for a file only an extension language claims.
 - **No server.** A language no `[language_servers.<id>]` serves refuses every operation on its files —
-  `rename_symbol`, code actions, references — with `UnsupportedOp { backend: "<language id>", op }`. A
+  `rename_symbol`, `apply_code_action`, references — with `UnsupportedOp { backend: "<language id>", op }`. A
   language with a server is described under [Language servers](#language-servers).
 - **A grammar that does not load** is reported once per run, however many languages share it —
   `extension <id>: grammar <g> did not load: <reason>` — and its languages claim nothing; every other
@@ -110,8 +114,9 @@ is 11 MB. The release sizes of `tddy-tools` and `tddy-index-daemon` are not meas
 ## Language servers
 
 An extension's `[language_servers.<id>]` entries say **which** server serves which of its languages. Zed takes
-the server's **command** from the extension's WASM; tddy runs no WASM, so it takes the command from its own
-settings, in the shape of Zed's `lsp` setting — a block copied from Zed's `settings.json` works unchanged.
+the server's **command** from the extension's WASM; tddy takes it from its own settings, in the shape of Zed's
+`lsp` setting — a block copied from Zed's `settings.json` works unchanged — and asks the WASM only of an
+extension the user opted in ([Extensions with code](#extensions-with-code-opt-in)).
 
 **Settings file.** `<extensions dir>/settings.json`. Unknown keys are ignored; a file that is not there is no
 settings; one that does not parse fails the load, naming the file.
@@ -136,7 +141,7 @@ settings; one that does not parse fails the load, naming the file.
   decision: [backlog](../../dev/todo/2026-10-22-extension-language-several-qualifying-servers-tie-break.md)).
 - **Command.** Only `lsp.<id>.binary.path`, with its `arguments` and `env`. A server id is never looked up on
   `PATH`.
-- **No command.** Every operation that needs the server is refused before any process starts:
+- **No command.** With no `binary.path` and no opted-in WASM to name one, every operation that needs the server is refused before any process starts:
   `language server <id> (extension <ext>) has no command: set lsp.<id>.binary.path in <file>`. Item anchors
   still answer from the outline.
 - **Configuration.** `initialization_options` is sent at `initialize`. A `workspace/configuration` request is
@@ -155,12 +160,78 @@ settings; one that does not parse fails the load, naming the file.
   it, is sent as `textDocument/rename`, and the returned `WorkspaceEdit` is applied as Rust's edits are — by the
   cold CLI and through the index daemon. A run starts one server per installed language a file of its plan
   belongs to, beside rust-analyzer.
+- **`apply_code_action`** — any code action the server offers over an anchor, chosen by title or kind
+  ([restructure § `apply_code_action`](rust-code-restructuring.md#apply_code_action)). The entry's
+  `code_action_kinds` is sent as the request's `context.only`; an entry that declares none asks for every kind.
+- **A verified run.** `restructure verify` hands each changed file of the language to its `ExtensionVerify`:
+  an error diagnostic the change introduced (read by pull from the server) or an `ERROR` / `MISSING` node in
+  the grammar's parse fails the verify
+  ([restructure § Files of other languages](rust-code-restructuring.md#files-of-other-languages-r5)). With no
+  server, or on the cold command, the parse alone is checked.
 - **Definition, references and hover** through the index daemon's code-index queries, answered by the server.
 - **An index.** A worktree with no `Cargo.toml` whose files an installed language with a configured server
   claims has a code index (`LOADING` / `READY`, never `NONE`), at the index daemon and at the session level.
 
+## Extensions with code (opt-in)
+
+By default tddy runs **no** extension code. `tddy-tools extensions enable-wasm <id>` opts an installed extension
+in (`wasm_enabled` in `index.json`); `disable-wasm` opts it out.
+
+For an opted-in extension that ships `extension.wasm`, a language server with no `lsp.<id>.binary.path` is asked
+of its WASM, as Zed asks it. A configured `binary.path` always wins, and the WASM is not called for that server.
+The extension is loaded once per load of the installed extensions, only when one of its servers needs it, and
+three exports are called:
+
+- `language_server_command(server, worktree)` → the launch's program, arguments and environment;
+- `language_server_initialization_options` → what is sent at `initialize`;
+- `language_server_workspace_configuration` → what `workspace/configuration` is answered from.
+
+The launch carries tddy's client capabilities and the manifest's `language_ids` entry, as a configured server's
+does; its code-action kinds are the manifest entry's.
+
+**Supported API.** `zed_extension_api` 0.6.x — Zed's WIT `since_v0.6.0`, vendored unmodified from Zed
+(Apache-2.0, with its licence) under `packages/tddy-zed-extensions/wit/`. An extension whose `lib.version` is
+outside it, or absent, is refused before its file is read:
+`extension <id>: built for zed_extension_api <version>; tddy supports 0.6.0..<0.7.0`.
+
+**The worktree.** The one worktree an extension is asked about is the directory tddy was run in (id `1`), and its
+`shell-env` is tddy's own process environment — the CLI is run from the user's shell (narrowing it is an open
+decision: [backlog](../../dev/todo/2026-10-23-code-extension-shell-env-is-the-whole-process-environment.md)). `which` searches that
+environment's `PATH`; `read-text-file` reads only inside the worktree root once symlinks are resolved.
+
+**What the host answers.** The worktree's `id`, `root-path`, `read-text-file`, `which` and `shell-env`;
+`get-settings` for category `language_servers` keyed by a server id (that server's `lsp.<id>` from
+`settings.json`, in the shape of Zed's `LspSettings`; any other category is an error); `current-platform`.
+`set-language-server-installation-status` is accepted and ignored.
+
+**What it refuses.** Everything that downloads, installs, reaches the network or starts a process —
+`download-file`, `latest-github-release`, `github-release-by-tag-name`, `npm-*`, `node-binary-path`,
+`make-file-executable`, `http-client.fetch` / `fetch-stream`, `process.run-command` — returns to the extension:
+
+```
+tddy does not download language servers; install <server> and set lsp.<server>.binary.path
+```
+
+No debug adapter, context server or slash command is ever called.
+
+**WASI.** An extension built for `wasm32-wasip2` is given a minimal WASI 0.2.6 subset, answered by tddy itself:
+the environment is `PWD=/` only (nothing of tddy's environment), one preopened directory `/` that is empty and
+read-only, stdout and stderr that discard what is written, an empty stdin, no terminals, and an `exit` that stops
+the call.
+
+**Limits.** Each export call, `init-extension` included, is stopped after **10 seconds** and reported.
+
+**Refusals.** A WASM that does not load, is refused, returns an error, traps or runs past its deadline refuses
+the server it would have served, and every operation that needs that server is refused with its words, e.g.
+`extension <id>: language server <server>: tddy does not download language servers; …` or
+`extension <id>: language-server-command for <server> did not return within 10s and was stopped`.
+
 ## Not yet
 
-- No code action is run for an extension language, and its server is not told of files changed on disk
+- An extension language's server is not told of files changed on disk
   ([backlog](../../dev/todo/2026-10-22-extension-servers-are-not-told-of-tree-changes.md)).
-- No `extension.wasm` is run; no grammar or extension is built.
+- A server that only publishes diagnostics cannot verify a run
+  ([backlog](../../dev/todo/2026-10-23-extension-verify-refuses-a-push-only-server.md)).
+- No grammar or extension is built. An extension's WASM is asked only for its language servers' commands and
+  configuration; no other export (debug adapters, context servers, slash commands) is run, and only
+  `zed_extension_api` 0.6.x is supported.

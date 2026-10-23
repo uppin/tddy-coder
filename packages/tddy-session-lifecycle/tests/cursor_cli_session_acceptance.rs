@@ -355,6 +355,8 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
+        session_role: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta).unwrap();
 

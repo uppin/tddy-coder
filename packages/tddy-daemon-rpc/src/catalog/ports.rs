@@ -4,20 +4,18 @@
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::catalog::{
-    AgentInfo as CatalogAgentInfo, ListAgentModelsRequest, ListAgentModelsResponse,
-    ListAgentsRequest, ListAgentsResponse, ListSubagentsRequest, ListSubagentsResponse,
-    ListToolsRequest, ListToolsResponse, SubagentInfo as CatalogSubagentInfo,
-    ToolInfo as CatalogToolInfo,
+    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
+    ListSubagentsRequest, ListSubagentsResponse, ListToolsRequest, ListToolsResponse,
+    SubagentInfo as CatalogSubagentInfo, ToolInfo as CatalogToolInfo,
 };
 
 use super::agent_models::{
     agent_models_cache, list_models_probe_args, parse_agent_models_json, AGENT_MODELS_CACHE_TTL,
 };
+use super::agent_rows::listed_agents;
 use super::subagent_row::subagent_info;
 use super::CatalogRpcHandler;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
-use tddy_discovery::harness_profile::{harness_profile_rows, load_harness_profiles};
-use tddy_session_lifecycle::agent_list_mapping::agent_allowlist_rows;
 use tddy_session_lifecycle::connection_service::{
     resolvable_agent_defs, resolve_tddy_tools_path, wire_same,
 };
@@ -54,22 +52,12 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         _request: Request<ListAgentsRequest>,
     ) -> Result<Response<ListAgentsResponse>, Status> {
         log::debug!("list_agents RPC: mapping config allowlist to AgentInfo");
-        // A registry this daemon has but cannot read is an error, not "there are no assistants" —
-        // a session started against a missing agent id fails much later and much less clearly.
-        let assistants = match &self.model_registry {
-            Some(registry) => registry
-                .list_assistants()
-                .await
-                .map_err(tddy_rpc::Status::from)?,
-            None => Vec::new(),
-        };
-        let profiles = load_harness_profiles(&self.tddy_data_dir.join("agents"));
-        let agents: Vec<CatalogAgentInfo> = agent_allowlist_rows(&self.config, &assistants)
-            .into_iter()
-            .map(|row| (row.id, row.display_label))
-            .chain(harness_profile_rows(&profiles))
-            .map(|(id, label)| CatalogAgentInfo { id, label })
-            .collect();
+        let agents = listed_agents(
+            &self.config,
+            &self.tddy_data_dir,
+            self.model_registry.as_deref(),
+        )
+        .await?;
         log::info!("list_agents RPC: returning {} agent(s)", agents.len());
         Ok(Response::new(ListAgentsResponse { agents }))
     }

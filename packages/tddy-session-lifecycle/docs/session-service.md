@@ -104,6 +104,7 @@ defines (`rpc_families.rs`, re-exported as `tddy_session_lifecycle::DaemonRpcFam
 |---|---|
 | `pr_stack_handler() -> Arc<dyn PrStackHandler>` | session start, when its stack parent is owned by a peer (`resolve_chain_base_ref_status` → `resolve_stack_base`) or it names a stack node (`record_spawn_on_stack_node` → `link_stack_node`) — the same path, peer routing and refusals included, as a client's `ResolveStackBase` / `LinkStackNode` |
 | `service_entries() -> Vec<ServiceEntry>` | `session_room_roster()`, which serves them beside this crate's own six family entries in every session room |
+| `attach_session_start(LaunchSessions)` (default: nothing) | called once by `with_rpc_families` with a launch snapshot of the host, for a family that answers a session start (the project-home tools). The snapshot holds its families through `WeakRpcFamilies`, a `Weak` forwarder, so families → snapshot → families forms no `Arc` cycle |
 
 - `DaemonSessionHost::with_rpc_families(Arc<dyn DaemonRpcFamilies>)` installs it. The composition
   root calls it **last**, after every other `with_*`, through `tddy_daemon_rpc::RpcHandlers::install`:

@@ -77,6 +77,12 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             // Child conversations are spawned by the orchestrator, never pushing a remote branch.
             false,
             "",
+            // A spawned child conversation is never a managed-codebase session.
+            false,
+            // A spawned child conversation has no standing role.
+            "",
+            // A child conversation cuts its own worktree.
+            "",
             // The orchestrator's owner's vault: a child is the same owner's, on the same project.
             &self.account_access,
             // A child conversation runs on its vendor: the orchestrator's account is not inherited.

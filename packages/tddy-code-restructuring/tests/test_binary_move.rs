@@ -126,6 +126,7 @@ fn refuses_an_anchor_that_is_not_a_test_binary() {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     };
 
     // When the move is read
@@ -250,6 +251,7 @@ fn a_move_of(source: &str, to: &str) -> tddy_code_restructuring::RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

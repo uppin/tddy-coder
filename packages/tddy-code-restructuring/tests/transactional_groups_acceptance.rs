@@ -106,6 +106,7 @@ fn moving_the_test_binary(group: Option<&str>) -> RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

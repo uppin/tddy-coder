@@ -359,6 +359,7 @@ fn a_project_under(data_dir: &Path) -> AProject {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         },
     )
     .expect("register the project");

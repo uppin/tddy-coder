@@ -36,6 +36,11 @@ service SessionService {
   rpc StreamStartSession(StartSessionRequest) returns (stream StartSessionEvent);
   rpc ConnectSession(ConnectSessionRequest) returns (ConnectSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
+  // Start, resume, or return the project's project-home session: one managed, read-only session
+  // per project on a dedicated home worktree at the project's main branch ref, running the
+  // project's home agent. Refused (failed_precondition) when the project has no home agent or its
+  // harness cannot enforce managed-codebase mode. See `#project-home` 4/7.
+  rpc EnsureProjectHomeSession(EnsureProjectHomeSessionRequest) returns (EnsureProjectHomeSessionResponse);
   rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
   // One measurement of a session's checkout, for the daemon hosting that session's room.
@@ -342,6 +347,28 @@ message SessionEntry {
   // `~/.ssh/config`. Empty = LocalShell (today's host filesystem). When set, `repo_path` is the
   // worktree on that SSH target. See docs/ft/web/1-WIP/PRD-2026-09-14-ssh-exec.md.
   string ssh_config_host = 33;
+  // The session was started in managed-codebase mode (its agent reaches the code only through
+  // daemon tools). Recorded at start; `false` for sessions started before it was recorded. See
+  // `#project-home` 3/7.
+  bool managed_codebase = 34;
+  // The session's standing role, empty for an ordinary session. "project-home" is the one
+  // per-project, read-only managed session pinned at the top of its project's group. See
+  // `#project-home` 4/7.
+  string session_role = 35;
+}
+
+message EnsureProjectHomeSessionRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Host whose home session this is. Empty or matching the local instance = local.
+  string daemon_instance_id = 3;
+}
+
+message EnsureProjectHomeSessionResponse {
+  SessionEntry session = 1;
+  // "started" (created now), "resumed" (was stopped; worktree fast-forwarded, same
+  // conversation) or "running" (returned unchanged).
+  string outcome = 2;
 }
 
 enum Signal {
@@ -605,6 +632,12 @@ message StartSessionRequest {
   // Explicitly the harness's own vendor ("Anthropic (built in)"), overriding an agent definition's
   // or the person's default account. Exclusive with `provider_account_id`.
   bool provider_built_in = 42;
+  // The session's standing role, recorded in its initial `.session.yaml` before its agent is spawned
+  // (so no window exists in which the role is unrecorded), and, for "project-home", the role the
+  // agent is pre-approved the project-home tool set for. Empty = an ordinary session. Set only by
+  // the daemon's own `EnsureProjectHomeSession`: a `StartSession` or `StreamStartSession` that names
+  // a role is refused with PERMISSION_DENIED, since the role reaches the project's other sessions.
+  string session_role = 43;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

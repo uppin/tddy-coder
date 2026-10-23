@@ -3,6 +3,7 @@
 
 use super::path_guard::reject_exec_tool_path_traversal;
 use super::result_frames::exec_tool_result_frames;
+use super::role_guard::reject_refused_local_exec_tool;
 use super::ExecToolRpcHandler;
 use async_trait::async_trait;
 use prost::Message as _;
@@ -25,7 +26,6 @@ use tddy_service::proto::exec_tools::{
 use tddy_session_lifecycle::connection_service::{
     authorize_exec_tool_caller, resolve_exec_tool_worktree, run_conversation_worktree_op, wire_same,
 };
-use tddy_session_lifecycle::tool_engine;
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::stream::MpscResultStream;
 
@@ -79,11 +79,10 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
             &self.tddy_data_dir,
             &req_conn,
         )?;
-        reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
+        reject_refused_local_exec_tool(&sessions_base, &req)?;
         let response = self
-            .local_exec_tools
-            .run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
-            .await;
+            .run_locally(&req_conn, &sessions_base, &worktree_root)
+            .await?;
         Ok(Response::new(wire_same::<
             ConnExecuteToolResponse,
             ExecuteToolResponse,
@@ -157,10 +156,9 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                     &self.tddy_data_dir,
                     &req_conn,
                 )?;
-                reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-                self.local_exec_tools
-                    .run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
-                    .await
+                reject_refused_local_exec_tool(&sessions_base, &req)?;
+                self.run_locally(&req_conn, &sessions_base, &worktree_root)
+                    .await?
             }
         };
 
@@ -239,16 +237,10 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
             }
         }
 
-        // Minimal auth — verify caller is a known user.
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let _os_user = &self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
+        // Minimal auth, then the set a session-scoped caller's agent is offered.
+        let tools = self.offered_catalog(&req.session_token, &req.session_id)?;
         Ok(Response::new(ListExecToolsResponse {
-            tools: tool_engine::tool_catalog()
+            tools: tools
                 .into_iter()
                 .map(|t| ExecToolDef {
                     name: t.name,

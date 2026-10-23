@@ -185,6 +185,7 @@ fn acceptance_project_storage_roundtrip() {
         host_repo_paths: std::collections::HashMap::new(),
         accounts: Vec::new(),
         local_gh: false,
+        home_agent: None,
     };
 
     // When

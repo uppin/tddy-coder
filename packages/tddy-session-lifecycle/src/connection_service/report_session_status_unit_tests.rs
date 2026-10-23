@@ -79,6 +79,8 @@ fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
+        session_role: None,
     };
     tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
 }
@@ -198,6 +200,8 @@ async fn report_session_status_rejects_non_claude_cli_session() {
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
+        session_role: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 

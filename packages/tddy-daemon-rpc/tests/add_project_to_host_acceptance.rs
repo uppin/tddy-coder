@@ -178,6 +178,7 @@ async fn add_project_to_host_is_idempotent_when_the_project_id_already_exists_on
             host_repo_paths: std::collections::HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         },
     )
     .expect("seed existing project");

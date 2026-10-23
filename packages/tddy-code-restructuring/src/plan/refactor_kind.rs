@@ -181,6 +181,13 @@ pub enum RefactorKind {
     /// empties is removed. Anchored by `items` (or a single `item`) on the members; `name` is the
     /// parameter.
     DetachMethod,
+    /// Runs one code action the language's server offers over the anchor's range, chosen by
+    /// `action` — `{ "title": … }` (the exact title) or `{ "kind": … }` (a prefix of the action's
+    /// kind) — the way Zed exposes refactors (`#reshape` extension-code-actions, R1–R4). Any
+    /// language with a server, Rust included. The action's `edit`, or the edits its `command` sends
+    /// back through `workspace/applyEdit`, is the resolution; nothing is written by the server.
+    /// Anchored by a range, or by `items` / a single `item`.
+    ApplyCodeAction,
 }
 
 impl RefactorKind {

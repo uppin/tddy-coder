@@ -346,6 +346,10 @@ message VerifyResponse {
   uint32          repointed             = 6;  // pairs equal once module qualifiers are deleted
   uint32          visibility_normalised = 7;  // pairs equal once a leading `pub…` is deleted
   uint32          cfg_test_gates        = 8;  // `#[cfg(test)]` lines directly above a `use`
+  // What the verifies of the languages beyond Rust (an installed extension's) found wrong in the
+  // changed files they claim, one rendered line each (`finding: <path>:<line>:<col>: …`). Any
+  // finding makes `holds` false: a verify that found something did not hold.
+  repeated string source_findings       = 9;
 }
 
 // ---------------------------------------------------------------------------------------------

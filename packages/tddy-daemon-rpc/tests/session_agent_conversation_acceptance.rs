@@ -179,6 +179,8 @@ fn a_managed_session(session_id: &str) -> SessionMetadata {
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
+        session_role: None,
     }
 }
 

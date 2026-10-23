@@ -61,7 +61,7 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
             failures: Vec::new(),
         });
     }
-    let languages = crate::server::served(dir, languages)?;
+    let languages = crate::wasm::served(dir, languages)?;
     let store = GrammarStore::new().map_err(|error| ExtensionError::GrammarEngineUnavailable {
         message: error.message,
     })?;
@@ -97,13 +97,13 @@ fn read_installed_manifest(extension_dir: &Path) -> Result<ExtensionManifest, Ex
 /// share it. A language's own failure — an `outline.scm` that does not compile — fails that
 /// language alone: a sibling on the same grammar still loads.
 fn supports_of(
-    languages: Vec<(ExtensionLanguage, ServerChoice)>,
+    languages: Vec<crate::server::Served>,
     store: Arc<Mutex<GrammarStore>>,
 ) -> InstalledLanguages {
     let mut supports = Vec::new();
     let mut failures: Vec<GrammarLoadError> = Vec::new();
     let mut failed_grammars: BTreeSet<(String, String)> = BTreeSet::new();
-    for (language, server) in languages {
+    for (language, server, kinds) in languages {
         let grammar = (language.extension.clone(), language.grammar.clone());
         if failed_grammars.contains(&grammar) {
             continue;
@@ -118,7 +118,7 @@ fn supports_of(
             );
         let support = match loaded {
             Ok(_) => ExtensionSupport::new(language, Arc::clone(&store))
-                .map(|support| support.with_server(server)),
+                .map(|support| support.with_server(server).with_code_action_kinds(kinds)),
             Err(failure) => {
                 failed_grammars.insert(grammar);
                 Err(failure)
@@ -163,23 +163,37 @@ pub trait InstalledExtensions {
     fn with_installed_extensions(
         &mut self,
         dir: &ExtensionsDir,
-    ) -> Result<Vec<GrammarLoadError>, ExtensionError>;
+    ) -> Result<Vec<GrammarLoadError>, ExtensionError> {
+        self.register_installed(dir)
+            .map(|installed| installed.failures)
+    }
+
+    /// [`InstalledExtensions::with_installed_extensions`], handing back the loaded languages too: a
+    /// front end that also verifies them keeps these clones, sharing the registry's grammar store.
+    fn register_installed(
+        &mut self,
+        dir: &ExtensionsDir,
+    ) -> Result<InstalledLanguages, ExtensionError>;
 }
 
 impl InstalledExtensions for SupportRegistry {
-    fn with_installed_extensions(
+    fn register_installed(
         &mut self,
         dir: &ExtensionsDir,
-    ) -> Result<Vec<GrammarLoadError>, ExtensionError> {
+    ) -> Result<InstalledLanguages, ExtensionError> {
         let installed = load_installed(dir)?;
-        for support in installed.supports {
-            self.register(Box::new(support));
+        for support in &installed.supports {
+            self.register(Box::new(support.clone()));
         }
-        Ok(installed.failures)
+        Ok(installed)
     }
 }
 
 /// One installed extension language as a [`LanguageSupport`].
+///
+/// Cloned cheaply — the grammar, the compiled outline and the store are shared — so a front end can
+/// register one in the run's [`SupportRegistry`] and keep another for its [`crate::ExtensionVerify`].
+#[derive(Clone)]
 pub struct ExtensionSupport {
     id: LanguageId,
     language: ExtensionLanguage,
@@ -191,6 +205,8 @@ pub struct ExtensionSupport {
     /// What serves the language (`#reshape` extension-language-server, R1–R3):
     /// [`ServerChoice::Undeclared`] until [`ExtensionSupport::with_server`] says otherwise.
     server: ServerChoice,
+    /// The kinds `apply_code_action` asks the language's server for; empty asks for every kind.
+    code_action_kinds: Vec<String>,
 }
 
 impl ExtensionSupport {
@@ -233,7 +249,17 @@ impl ExtensionSupport {
             outline,
             store,
             server: ServerChoice::Undeclared,
+            code_action_kinds: Vec::new(),
         })
+    }
+
+    /// This support, whose server is asked for code actions of `kinds` only (`context.only`) —
+    /// the manifest's `code_action_kinds` for the server; none asks for every kind.
+    pub fn with_code_action_kinds(self, kinds: Vec<String>) -> Self {
+        Self {
+            code_action_kinds: kinds,
+            ..self
+        }
     }
 
     /// This support, served as `server` says ([`load_installed`] gives every support its
@@ -308,14 +334,33 @@ impl LanguageSupport for ExtensionSupport {
         let outline = Box::new(self.outline_backend(root));
         match (&self.server, self.server.refusal(), server.server()) {
             (_, Some(reason), _) => Box::new(ServerBackend::without_command(outline, reason)),
-            (ServerChoice::Configured { launch, .. }, None, Some(live)) => {
-                let language_id = match launch.language_id.as_str() {
-                    "" => self.id.as_str(),
-                    declared => declared,
-                };
-                Box::new(ServerBackend::over(outline, live, language_id))
-            }
+            (ServerChoice::Configured { .. }, None, Some(live)) => Box::new(
+                ServerBackend::over(outline, live, self.document_language_id())
+                    .with_code_action_kinds(self.code_action_kinds.clone()),
+            ),
             _ => outline,
+        }
+    }
+}
+
+/// The parse a verify reads (`#reshape` extension-code-actions, R5): owned by that node, beside
+/// the support whose private grammar and store it parses with.
+impl ExtensionSupport {
+    /// `text` parsed with this language's grammar, through the process's one store; `None` only
+    /// when tree-sitter gives up on the text altogether.
+    pub fn parse(&self, text: &str) -> Option<tree_sitter::Tree> {
+        self.store
+            .lock()
+            .expect("the grammar store is not poisoned")
+            .parse(&self.grammar, text)
+    }
+
+    /// The `languageId` a document of this language is announced to its server as: the launch's
+    /// own, else the language's id.
+    pub fn document_language_id(&self) -> &str {
+        match self.server.launch() {
+            Some(launch) if !launch.language_id.is_empty() => &launch.language_id,
+            _ => self.id.as_str(),
         }
     }
 }

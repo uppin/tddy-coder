@@ -8,6 +8,9 @@
 //! static tools while `tddy-sandbox-app --remote-codebase` was running, because
 //! `run_mcp_server()` never consulted the dynamic catalog.
 
+#[path = "support/exec_catalog.rs"]
+mod exec_catalog;
+
 use async_trait::async_trait;
 use prost::Message;
 use serde_json::{json, Value};
@@ -80,8 +83,9 @@ async fn initialize_mcp_session(stdin: &mut ChildStdin, stdout: &mut BufReader<C
 /// `tddy-sandbox-app --remote-codebase` only ever showed 3 static MCP tools to Claude.
 #[tokio::test]
 async fn mcp_tools_list_over_stdio_includes_dynamic_tools_when_sandbox_ipc_configured() {
-    // Given
+    // Given — a host on the socket that offers the session the daemon-wide catalog
     let socket_path = tddy_sandbox::SandboxSpec::short_ipc_socket_path("mcplistred");
+    let host = exec_catalog::a_host_offering_the_catalog_at(&socket_path);
     let mut child = spawn_mcp_server(&[(
         "TDDY_SANDBOX_TOOL_IPC",
         socket_path.to_str().expect("socket path must be utf8"),
@@ -98,6 +102,7 @@ async fn mcp_tools_list_over_stdio_includes_dynamic_tools_when_sandbox_ipc_confi
     .await;
     let response = read_json_line(&mut stdout).await;
     let _ = child.kill().await;
+    host.abort();
 
     // Then
     let names: Vec<String> = response["result"]["tools"]

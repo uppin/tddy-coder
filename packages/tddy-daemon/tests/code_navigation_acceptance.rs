@@ -107,6 +107,7 @@ fn a_project_with_a_worktree() -> AProjectWithAWorktree {
             host_repo_paths: std::collections::HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         },
     )
     .expect("the project is registered");

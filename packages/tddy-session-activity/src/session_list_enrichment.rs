@@ -509,6 +509,8 @@ state:
             agent_status: 0,
             last_activity: None,
             ssh_config_host: String::new(),
+            managed_codebase: false,
+            session_role: String::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -608,6 +610,8 @@ state:
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions never have one.
@@ -673,6 +677,8 @@ state:
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -723,6 +729,8 @@ state:
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -773,6 +781,8 @@ state:
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -843,6 +853,8 @@ sessions:
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -880,6 +892,8 @@ sessions:
             agent_status: 0,
             last_activity: None,
             ssh_config_host: String::new(),
+            managed_codebase: false,
+            session_role: String::new(),
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(
@@ -924,6 +938,8 @@ sessions:
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

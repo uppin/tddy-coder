@@ -1,7 +1,7 @@
 # Agent Activity Pane — Real-time view of the agent's tool calls
 
-**Component:** `AgentActivityOverlay` (new) in `packages/tddy-web/src/components/sessions/`, mounted in the `SessionMainPane` top bar
-**Updated:** 2026-07-24
+**Component:** `SessionWithActivitySidebar` + `SessionActivitySidebar` in `packages/tddy-web/src/components/sessions/`, wrapping the `SessionMainPane` body (the transcript is a right sidebar since 2026-10-23 — see [§ Right sidebar](#right-sidebar-open-by-default-for-managed-sessions); `AgentActivityOverlay` has no production mount)
+**Updated:** 2026-10-23
 **Status:** Implemented (single-host; cross-host stream peer-forward is a tracked follow-up — see below). **Evolving** — the overlay body is being replaced by a read-only ACP transcript (see [§ Read-only ACP transcript](#read-only-acp-transcript-evolution)).
 
 ## Overview
@@ -158,6 +158,33 @@ streaming peer-forward primitive is a follow-up. Single-host, the common case, w
 ```
 
 The `•` on the icon is the unread badge. With zero records, no icon renders at all.
+
+## Right sidebar, open by default for managed sessions
+
+Since `#project-home` 3/7 the transcript is a **right sidebar** docked beside the session view, not
+a top-bar popover. The layout diagram above shows the popover it replaced.
+
+- **Toggle.** The top-bar activity control (`agent-activity-button`, with its unread badge) opens and
+  closes the sidebar (`agent-activity-sidebar`). Like the popover's icon, the control — and the
+  sidebar — appear only once the session has at least one transcript entry: a managed session with
+  no activity yet shows nothing until its first entry arrives, rather than an empty open column.
+- **Default.** On selecting a session the sidebar is open when `SessionEntry.managed_codebase` is
+  true (`defaultActivitySidebarOpen`) — a managed agent works through `mcp__tddy-tools__*` calls, so
+  the transcript is its readable view — and closed otherwise. A toggle applies to that session until
+  another is selected; it is not persisted.
+- **One transcript per pane.** While the main pane shows the Activities view, neither toggle nor
+  sidebar renders. The replay subscription stays open meanwhile (unmounting it would remount the
+  session view and cancel an open agent conversation), and activity counted while the Activities
+  view is up is marked seen, so it does not reappear as unread.
+- **Layout.** Width alone decides: below the `md` breakpoint (`useIsNarrowViewport`) the sidebar is a
+  full-width overlay, otherwise a 360px docked column. Touch support does not count, unlike
+  `useIsMobile`. The inspector drawer overlays the session view, to the sidebar's left. Opening or
+  closing the sidebar never remounts the session view.
+- **Same content.** Same `useAcpReplay` source, paging and tool-detail dialog as before.
+
+`managed_codebase` comes from `ListSessions`: a session started in managed-codebase mode records it
+in its `.session.yaml` ([remote managed worktree](../daemon/remote-managed-worktree.md)). Sessions
+started before that read as not managed.
 
 ## Read-only ACP transcript (evolution)
 

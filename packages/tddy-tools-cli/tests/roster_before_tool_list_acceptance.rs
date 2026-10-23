@@ -13,6 +13,9 @@
 //! The stub daemon here delays its snapshot on purpose, so the test fails deterministically when
 //! the server answers first rather than depending on how fast a real daemon happens to be.
 
+#[path = "support/exec_catalog.rs"]
+mod exec_catalog;
+
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -36,12 +39,16 @@ const THE_AGENT: &str = "Gemma Local Coder@a-daemon";
 
 /// A stub of the facilitating daemon's `SessionAgentService`: `StreamSessionAgents` answers with
 /// one snapshot attaching [`THE_AGENT`] after [`SNAPSHOT_DELAY`], then holds the stream open the
-/// way the daemon does. Every other call is refused.
+/// way the daemon does; `ListExecTools` is answered with the daemon-wide catalog. Every other call is
+/// refused.
 struct DaemonServingOneAgentLate;
 
 #[async_trait]
 impl RpcService for DaemonServingOneAgentLate {
     async fn handle_rpc(&self, service: &str, method: &str, _message: &RpcMessage) -> RpcResult {
+        if exec_catalog::is_list_exec_tools(service, method) {
+            return exec_catalog::the_daemon_wide_catalog();
+        }
         if method != "StreamSessionAgents" {
             return RpcResult::Unary(Err(Status::not_found(format!(
                 "unknown {service}/{method}"
@@ -78,6 +85,9 @@ struct DaemonThatNeverAnswers;
 #[async_trait]
 impl RpcService for DaemonThatNeverAnswers {
     async fn handle_rpc(&self, service: &str, method: &str, _message: &RpcMessage) -> RpcResult {
+        if exec_catalog::is_list_exec_tools(service, method) {
+            return exec_catalog::the_daemon_wide_catalog();
+        }
         if method != "StreamSessionAgents" {
             return RpcResult::Unary(Err(Status::not_found(format!(
                 "unknown {service}/{method}"

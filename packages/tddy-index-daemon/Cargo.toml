@@ -62,6 +62,8 @@ tddy-codegen = { path = "../tddy-codegen", features = ["tonic"] }
 tonic-build = "0.12"
 
 [dev-dependencies]
+# The `demo-toml` fixture builders the extension-verify suite shares with the other dependents.
+tddy-zed-extensions = { path = "../tddy-zed-extensions", features = ["testkit"] }
 # tddy-lsp's deterministic fake server, so the suites exercise a warm index without a real
 # rust-analyzer. It compiles against `tddy_lsp::protocol`, which is a dependency here.
 tempfile = "3"

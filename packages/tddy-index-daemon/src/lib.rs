@@ -158,14 +158,35 @@ pub fn host_supports() -> anyhow::Result<SupportRegistry> {
 pub fn host_supports_launching(
     rust: tddy_code_restructuring::backends::rust::RustSupport,
 ) -> anyhow::Result<SupportRegistry> {
-    let dir = tddy_zed_extensions::ExtensionsDir::resolve()?;
+    host_languages_launching(rust).map(|host| host.supports)
+}
+
+/// The languages a host routes, and the installed extension languages among them that `verify`
+/// judges beyond Rust.
+pub struct HostLanguages {
+    /// The built-in Rust support, then every installed extension's languages.
+    pub supports: SupportRegistry,
+    /// The installed extension languages, sharing `supports`' grammar store.
+    pub extensions: Vec<tddy_zed_extensions::ExtensionSupport>,
+}
+
+/// [`host_supports_launching`], and the installed extension languages themselves beside the
+/// registry that holds them: what [`CodeIndexServiceImpl::with_verified_languages`] verifies the
+/// changed files of (`#reshape` extension-code-actions, R5). Loaded once, so the registry and the
+/// verifies share one grammar store.
+pub fn host_languages_launching(
+    rust: tddy_code_restructuring::backends::rust::RustSupport,
+) -> anyhow::Result<HostLanguages> {
+    use tddy_zed_extensions::InstalledExtensions;
     let mut supports = SupportRegistry::with_builtin_rust(rust);
-    for failure in
-        tddy_zed_extensions::InstalledExtensions::with_installed_extensions(&mut supports, &dir)?
-    {
+    let loaded = supports.register_installed(&tddy_zed_extensions::ExtensionsDir::resolve()?)?;
+    for failure in &loaded.failures {
         log::error!(target: "tddy_index_daemon::supports", "{failure}");
     }
-    Ok(supports)
+    Ok(HostLanguages {
+        supports,
+        extensions: loaded.supports,
+    })
 }
 
 /// The proto's file-descriptor set, so a host can merge this service into gRPC reflection without

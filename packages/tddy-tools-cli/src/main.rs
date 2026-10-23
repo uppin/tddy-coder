@@ -132,17 +132,21 @@ fn room_connector() -> Arc<dyn RoomConnector> {
 }
 
 /// The installed Zed extensions' languages, registered after the built-ins for a cold
-/// `restructure`. A grammar that does not load is said once on stderr, naming its extension and
-/// grammar, and leaves every other language working (`#reshape` extension-outline, R8).
-fn installed_languages() -> Result<tddy_code_restructuring::SupportRegistry> {
+/// `restructure`, and the verifies of the same languages for a `verify`. A grammar that does not
+/// load is said once on stderr, naming its extension and grammar, and leaves every other language
+/// working (`#reshape` extension-outline, R8).
+///
+/// A cold run starts no language server for a verify, so these verifies judge by the grammar's parse
+/// alone; the warm index daemon also compares the servers' diagnostics.
+fn installed_languages() -> Result<index_client::ColdLanguages> {
     use tddy_zed_extensions::InstalledExtensions;
-
-    let dir = tddy_zed_extensions::ExtensionsDir::resolve()?;
-    let mut installed = tddy_code_restructuring::SupportRegistry::new();
-    for failure in installed.with_installed_extensions(&dir)? {
+    let mut supports = tddy_code_restructuring::SupportRegistry::new();
+    let loaded = supports.register_installed(&tddy_zed_extensions::ExtensionsDir::resolve()?)?;
+    for failure in &loaded.failures {
         eprintln!("restructure: {failure}");
     }
-    Ok(installed)
+    let verifies = tddy_zed_extensions::ExtensionVerify::for_languages(&loaded.supports, &[]);
+    Ok(index_client::ColdLanguages { supports, verifies })
 }
 
 #[tokio::main]

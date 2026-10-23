@@ -16,6 +16,7 @@
 //! and no longer depend on `tddy-tools` at all.
 
 mod conversation;
+mod exec_catalog;
 mod room_transport;
 mod rpc_transports;
 
@@ -24,6 +25,7 @@ pub use conversation::{
     pull_conversation_range, reset_conversation_worktree, sync_conversation_worktree,
     ConversationWorktreeOp,
 };
+pub use exec_catalog::{session_exec_tool_answer, SessionExecToolAnswer};
 
 use std::path::PathBuf;
 
@@ -331,15 +333,20 @@ pub fn format_tool_dispatch_result(body: &serde_json::Value) -> String {
 /// instead of at the environment the agent was spawned with.
 fn incomplete_livekit_error(missing: &[&str]) -> String {
     serde_json::json!({
-        "error": format!(
-            "remote worktree dispatch is misconfigured: a LiveKit environment is set but {} \
-             {} empty or unset",
-            missing.join(", "),
-            if missing.len() == 1 { "is" } else { "are" }
-        ),
+        "error": incomplete_livekit_reason(missing),
         "is_error": true
     })
     .to_string()
+}
+
+/// The sentence [`incomplete_livekit_error`] carries, for a caller that wants the reason itself.
+pub(crate) fn incomplete_livekit_reason(missing: &[&str]) -> String {
+    format!(
+        "remote worktree dispatch is misconfigured: a LiveKit environment is set but {} \
+         {} empty or unset",
+        missing.join(", "),
+        if missing.len() == 1 { "is" } else { "are" }
+    )
 }
 
 fn not_configured_error() -> String {

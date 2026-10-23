@@ -85,6 +85,19 @@ gh](../daemon/project-concept.md#local-gh)).
   names no GitHub host is said so, not guessed. See
 [Project concept § Account assignment](../daemon/project-concept.md#account-assignment).
 
+## Home agent
+
+Each project card has a **Home agent** picker ([project concept § Home
+agent](../daemon/project-concept.md#home-agent)): **Not set** plus one option per agent the selected
+daemon's catalog lists (`ListAgents`, harness profiles included), labelled by the agent's label.
+
+- Choosing sends **`SetProjectHomeAgent`** to the project's first host; choosing **Not set** clears it.
+- A refused change shows the daemon's reason on that card, and the picker keeps showing the stored
+  value.
+- A stored id the catalog no longer lists is shown as its own option, *`<id>` (not listed by this
+  daemon)*, so the card never reads **Not set** while a value is stored.
+- With no agents listed and nothing stored the picker is not shown.
+
 ## Adding a project to a host
 
 **`AddProjectToHost`** makes an existing project available on a target host while

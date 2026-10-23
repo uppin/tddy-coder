@@ -604,6 +604,7 @@ fn a_project_at(repo: &Path) -> ProjectData {
         host_repo_paths: Default::default(),
         accounts: Vec::new(),
         local_gh: false,
+        home_agent: None,
     }
 }
 

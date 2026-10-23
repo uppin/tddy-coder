@@ -16,7 +16,7 @@ use std::time::Duration;
 use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
-use super::comparison::verify;
+use super::comparison::verified;
 use super::installed_servers::InstalledServers;
 use super::options::usage;
 use super::{parse_options, Command, Options, Outcome, RunSummary};
@@ -65,7 +65,7 @@ pub fn dispatch(
         }
         Command::Anchors => anchor_entry_points::item_anchors(root, options, client, cancel)
             .map(Outcome::ItemAnchored),
-        Command::Verify => verify(root, options).map(Outcome::Verified),
+        Command::Verify => verified(root, options),
         Command::Snapshot => check_entry_points::snapshot_resolving(root, options, client, cancel)
             .map(Outcome::Snapshotted),
         // Held across requests, so only a process that outlives one has anything to load into: a

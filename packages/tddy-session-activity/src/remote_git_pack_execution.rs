@@ -136,6 +136,8 @@ mod tests {
                 agent_daemon_instance_id: None,
                 agent_session_id: None,
                 ssh_config_host: Some(ssh_host.to_string()),
+                managed_codebase: false,
+                session_role: None,
             },
         )
         .expect("write session metadata");
@@ -161,6 +163,7 @@ mod tests {
                 host_repo_paths: HashMap::new(),
                 accounts: Vec::new(),
                 local_gh: false,
+                home_agent: None,
             }],
         )
         .expect("projects");
@@ -210,6 +213,7 @@ mod tests {
                 host_repo_paths: HashMap::new(),
                 accounts: Vec::new(),
                 local_gh: false,
+                home_agent: None,
             }],
         )
         .expect("projects");

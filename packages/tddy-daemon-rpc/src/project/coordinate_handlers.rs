@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use super::clone_destination::project_path_under_home_from_user_relative;
+use super::coordinate_route::CoordinateRoute;
 use super::entries::{self, merge_listed_projects_with_peers};
 use super::ProjectRpcHandler;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
@@ -166,6 +167,7 @@ impl ProjectRpcHandler {
             host_repo_paths: std::collections::HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
         let default_remote = entries::resolve_default_remote_or_empty(
@@ -215,44 +217,21 @@ impl ProjectRpcHandler {
         }
 
         // Route to the requested host: local (empty / matching id) or forward to a peer daemon.
-        let requested_daemon = req.daemon_instance_id.trim();
-        let local_id = local_instance_id_for_config(&self.config);
-        let eligible_ids: Vec<String> = self
-            .eligible_daemon_source
-            .list_eligible_daemons()
-            .iter()
-            .map(|e| e.instance_id.0.clone())
-            .collect();
-        let route = tddy_daemon_kernel::peer_forwarding::classify_peer_route(
-            &local_id,
-            requested_daemon,
-            &eligible_ids,
-        )
-        .map_err(|msg| {
-            log::info!("AddProjectToHost: rejected daemon routing: {}", msg);
-            Status::failed_precondition(msg)
-        })?;
-
-        if let tddy_daemon_kernel::peer_forwarding::PeerRoute::Forward { peer_instance_id } = route
-        {
-            log::info!(
-                "AddProjectToHost: forwarding RPC to remote daemon_instance_id={}",
-                peer_instance_id
-            );
-            let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                Status::failed_precondition(
-                    "cannot forward AddProjectToHost: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
+        let local_id = match self.coordinate_route("AddProjectToHost", &req.daemon_instance_id)? {
+            CoordinateRoute::Local { local_id } => local_id,
+            CoordinateRoute::Forward {
+                room,
+                peer_instance_id,
+            } => {
+                let inner = tddy_daemon_kernel::peer_calls::forward_add_project_to_host(
+                    room,
+                    &peer_instance_id,
+                    &wire_same(&req)?,
                 )
-            })?;
-            let conn_req: tddy_service::proto::project::AddProjectToHostRequest = wire_same(&req)?;
-            let inner = tddy_daemon_kernel::peer_calls::forward_add_project_to_host(
-                slot,
-                &peer_instance_id,
-                &conn_req,
-            )
-            .await?;
-            return Ok(Response::new(wire_same(&inner)?));
-        }
+                .await?;
+                return Ok(Response::new(wire_same(&inner)?));
+            }
+        };
 
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
@@ -346,6 +325,7 @@ impl ProjectRpcHandler {
             host_repo_paths: std::collections::HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         };
         let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -380,45 +360,22 @@ impl ProjectRpcHandler {
         }
 
         // Route to the requested host: local (empty / matching id) or forward to a peer daemon.
-        let requested_daemon = req.daemon_instance_id.trim();
-        let local_id = local_instance_id_for_config(&self.config);
-        let eligible_ids: Vec<String> = self
-            .eligible_daemon_source
-            .list_eligible_daemons()
-            .iter()
-            .map(|e| e.instance_id.0.clone())
-            .collect();
-        let route = tddy_daemon_kernel::peer_forwarding::classify_peer_route(
-            &local_id,
-            requested_daemon,
-            &eligible_ids,
-        )
-        .map_err(|msg| {
-            log::info!("SetProjectDefaultBranch: rejected daemon routing: {}", msg);
-            Status::failed_precondition(msg)
-        })?;
-
-        if let tddy_daemon_kernel::peer_forwarding::PeerRoute::Forward { peer_instance_id } = route
-        {
-            log::info!(
-                "SetProjectDefaultBranch: forwarding RPC to remote daemon_instance_id={}",
-                peer_instance_id
-            );
-            let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                Status::failed_precondition(
-                    "cannot forward SetProjectDefaultBranch: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
-                )
-            })?;
-            let conn_req: tddy_service::proto::project::SetProjectDefaultBranchRequest =
-                wire_same(&req)?;
-            let inner = tddy_daemon_kernel::peer_calls::forward_set_project_default_branch(
-                slot,
-                &peer_instance_id,
-                &conn_req,
-            )
-            .await?;
-            return Ok(Response::new(wire_same(&inner)?));
-        }
+        let local_id =
+            match self.coordinate_route("SetProjectDefaultBranch", &req.daemon_instance_id)? {
+                CoordinateRoute::Local { local_id } => local_id,
+                CoordinateRoute::Forward {
+                    room,
+                    peer_instance_id,
+                } => {
+                    let inner = tddy_daemon_kernel::peer_calls::forward_set_project_default_branch(
+                        room,
+                        &peer_instance_id,
+                        &wire_same(&req)?,
+                    )
+                    .await?;
+                    return Ok(Response::new(wire_same(&inner)?));
+                }
+            };
 
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
@@ -483,45 +440,22 @@ impl ProjectRpcHandler {
             return Err(Status::invalid_argument("project_id is required"));
         }
 
-        let requested_daemon = req.daemon_instance_id.trim();
-        let local_id = local_instance_id_for_config(&self.config);
-        let eligible_ids: Vec<String> = self
-            .eligible_daemon_source
-            .list_eligible_daemons()
-            .iter()
-            .map(|e| e.instance_id.0.clone())
-            .collect();
-        let route = tddy_daemon_kernel::peer_forwarding::classify_peer_route(
-            &local_id,
-            requested_daemon,
-            &eligible_ids,
-        )
-        .map_err(|msg| {
-            log::info!("SetProjectAccounts: rejected daemon routing: {}", msg);
-            Status::failed_precondition(msg)
-        })?;
-
-        if let tddy_daemon_kernel::peer_forwarding::PeerRoute::Forward { peer_instance_id } = route
-        {
-            log::info!(
-                "SetProjectAccounts: forwarding RPC to remote daemon_instance_id={}",
-                peer_instance_id
-            );
-            let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                Status::failed_precondition(
-                    "cannot forward SetProjectAccounts: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
+        // Route to the requested host: local (empty / matching id) or forward to a peer daemon.
+        let local_id = match self.coordinate_route("SetProjectAccounts", &req.daemon_instance_id)? {
+            CoordinateRoute::Local { local_id } => local_id,
+            CoordinateRoute::Forward {
+                room,
+                peer_instance_id,
+            } => {
+                let inner = tddy_daemon_kernel::peer_calls::forward_set_project_accounts(
+                    room,
+                    &peer_instance_id,
+                    &wire_same(&req)?,
                 )
-            })?;
-            let conn_req: tddy_service::proto::project::SetProjectAccountsRequest =
-                wire_same(&req)?;
-            let inner = tddy_daemon_kernel::peer_calls::forward_set_project_accounts(
-                slot,
-                &peer_instance_id,
-                &conn_req,
-            )
-            .await?;
-            return Ok(Response::new(wire_same(&inner)?));
-        }
+                .await?;
+                return Ok(Response::new(wire_same(&inner)?));
+            }
+        };
 
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;

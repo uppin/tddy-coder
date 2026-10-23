@@ -48,6 +48,52 @@ the list is split into an **Active** and a **Remaining** partition (see
 [Active / Remaining Partition Separator](#active--remaining-partition-separator)); there is no
 per-session active-first re-sort (contrast with `sortSessionsForDisplay` used by `ConnectionScreen`).
 
+## Project Groups
+
+The open drawer groups its sessions per project. Each group is a collapsible header showing the
+project's name and the number of sessions in it, followed by the group's body.
+
+- **Order**: groups are ordered by project name, case-insensitive. Project names come from the
+  `ListProjects` rows the screen already loads (`SessionsDrawerScreen` passes them as `projects`).
+- **Other**: sessions with no project, or whose project the drawer does not know, form a trailing
+  **Other** group. It is absent when it would be empty.
+- **Body**: inside a group the drawer keeps the Active / Remaining partition and the stack-group
+  nesting below, computed over that group's sessions only. A group with sessions in only one
+  partition shows no separators.
+- **Collapse**: clicking a header collapses or expands the group; groups start expanded. The
+  collapsed set is remembered per viewer in browser storage (`tddy.sessionsDrawer.collapsedProjects`,
+  keyed by project id, `other` for the trailing group). Storage that cannot be read means every group
+  is expanded.
+- **Selection**: selecting a session expands the group that holds it, so a selected row is never
+  hidden; the viewer can collapse it again afterwards.
+
+The collapsed 12px strip, bulk selection and delete, cross-host badges and deep links are unchanged
+by grouping.
+
+Implementation: `groupSessionsByProject` (`src/utils/sessionProjectGroups.ts`),
+`SessionProjectGroup` and `projectGroupCollapse.ts` (`src/components/sessions/`).
+
+### Pinned main entry
+
+Each **project** group starts with a pinned **main** entry for the project's
+[project-home session](../daemon/project-concept.md#project-home-session): the label `main`, the
+project's main branch ref, the home agent's label (from `ListAgents`, else its id) and, once the
+session exists, its status dot.
+
+- **Click** calls `EnsureProjectHomeSession` for the project on the selected host and selects the
+  session it answers — started, resumed or already running. A refusal is shown under the entry.
+- **No home agent**: the entry shows a hint pointing at the Projects screen and starts nothing.
+- **Not repeated**: the project-home session (`sessionRole === "project-home"`) is not listed again
+  among the group's rows.
+- **A project with no session yet** still gets its group when it has a home agent, so the pinned
+  entry is how its first session starts; it is placed among the others by the same name order. A
+  project with neither a session nor a home agent gets no group.
+- The **Other** group has no pinned entry.
+
+Implementation: `ProjectHomeEntry`, `useEnsureProjectHome`, `useSessionsDrawerProjectHomes`
+(`src/components/sessions/`), `projectHomeSlot` and `withProjectHomeGroups`
+(`src/utils/projectHomeGroups.ts`).
+
 ## Indicator Token
 
 The row's dot (`SessionIndicatorDot`, shared by the expanded list and the collapsed strip) shows one
@@ -75,7 +121,7 @@ blind to activity: a row must not change partition because an agent ran a tool.
 
 ## Active / Remaining Partition Separator
 
-The open drawer splits its session list into two partitions with a collapsible separator header
+Inside each [project group](#project-groups), the open drawer splits its sessions into two partitions with a collapsible separator header
 between them, so live sessions stay at the top and finished ones tuck away:
 
 - **Active partition** — sessions whose status dot is **green or yellow**, i.e.
@@ -372,6 +418,7 @@ Adds to `src/components/ui/`:
 
 - `ListSessions` — session list with `isActive`, `createdAt`, `repoPath`, `workflowGoal`, `pendingElicitation`; fanned out per-host and merged (see [Cross-Host Active Sessions](#cross-host-active-sessions); liveness is derived client-side from common-room participants, not from this RPC)
 - `ConnectSession` / `ResumeSession` — attach to a running or paused session
+- `EnsureProjectHomeSession` — the pinned **main** entry: start, resume or reach the project's home session (see [Pinned main entry](#pinned-main-entry)); `ListAgents` labels its home agent
 - `StreamTerminalOutput` / `SendTerminalInput` (`terminal_session.TerminalSessionService`) — gRPC
   terminal stream (claude-cli path)
 - `DeleteSession` — delete session (two-click confirm)

@@ -625,6 +625,7 @@ fn write_project_registry(tddy_data_dir: &Path, repo_path: &Path) {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
+            home_agent: None,
         }],
     )
     .expect("write projects registry");
@@ -705,6 +706,8 @@ fn a_managed_session(session_id: &str, repo_path: &Path) -> SessionMetadata {
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
+        session_role: None,
     }
 }
 

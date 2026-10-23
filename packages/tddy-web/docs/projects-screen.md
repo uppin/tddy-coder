@@ -74,6 +74,21 @@ page-object helpers `localGhToggle`, `turnLocalGhOn`, `hostGhState`. Acceptance:
 `cypress/component/ProjectLocalGh.cy.tsx`. The card is the first production caller of
 `GetHostTooling`.
 
+## Home agent
+
+`components/projects/ProjectHomeAgent.tsx` is the card's **Home agent** `<select>`: `Not set` plus one
+option per `agents` entry. `ProjectsAppPage` loads the agents with `CatalogService.ListAgents` on the
+selected daemon (`useListedAgents`; a failed load leaves the list empty, as the account list does)
+and wires `onSetHomeAgent` to `SetProjectHomeAgent` on `group.hosts[0]`, then reloads the projects.
+Unlike the other setters, that callback **rejects** with the daemon's error, which the picker shows
+inline (`ConnectError.rawMessage`) while keeping the stored value selected. A stored id missing from
+`agents` gets its own *(not listed by this daemon)* option. Both `agents` and `onSetHomeAgent` are
+optional `ProjectsScreen` props; without `onSetHomeAgent` the picker is not rendered.
+
+Test IDs: `project-home-agent-select-<projectId>`, `project-home-agent-error-<projectId>`; page-object
+helpers `homeAgentValue`, `homeAgentOptionLabels`, `setHomeAgent`, `homeAgentError`. Acceptance:
+`cypress/component/ProjectsScreenHomeAgentAcceptance.cy.tsx`.
+
 ## Role derivation
 
 Both this screen's host list and the presence table's Role column classify a common-room participant

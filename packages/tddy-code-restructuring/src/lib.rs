@@ -36,8 +36,8 @@ pub use language::{LanguageSupport, LiveServer, ServerHandle, SupportRegistry};
 pub use ledger::{LedgerCheckpoint, PositionLedger};
 pub use overlay::Overlay;
 pub use plan::{
-    Anchor, FileHint, Fingerprint, ItemPath, ItemSegment, OpId, OrderKey, Plan, Reexport,
-    RefactorKind, RefactorOp,
+    ActionSelector, Anchor, FileHint, Fingerprint, ItemPath, ItemSegment, OpId, OrderKey, Plan,
+    Reexport, RefactorKind, RefactorOp,
 };
 pub use registry::{BackendRegistry, LanguageBackend};
 pub use runner::{production_lines_of_file, state_directory_for_plan};
@@ -91,6 +91,11 @@ pub enum RestructureError {
     /// for a refusal, the extension's message.
     #[error("{reason}")]
     ServerNotConfigured { language: String, reason: String },
+    /// The server answered an `apply_code_action`, and no single action with an edit came of it:
+    /// none matched, several did, or the one chosen made no edit (`#reshape`
+    /// extension-code-actions, R1–R2). The refusal lists what the server offered.
+    #[error("{0}")]
+    CodeActionRefused(crate::backends::code_action::CodeActionRefusal),
     #[error("{path} is not inside a git worktree — `git mv` is required to preserve history")]
     NotAGitWorktree { path: String },
     #[error("journal is indeterminate at op {op}: files match neither the pre- nor post-operation state")]

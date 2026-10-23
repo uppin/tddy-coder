@@ -7,6 +7,7 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 
 use crate::dir::ExtensionsDir;
+use crate::index::set_wasm_enabled;
 use crate::install::{install_from_path, install_from_registry, list, remove, InstallOutcome};
 use crate::registry::Registry;
 
@@ -25,6 +26,10 @@ pub enum ExtensionsCommand {
     List,
     /// Remove an installed extension.
     Remove(RemoveArgs),
+    /// Let an installed extension's `extension.wasm` name its language servers' commands.
+    EnableWasm(WasmArgs),
+    /// Stop running an installed extension's `extension.wasm` (the default).
+    DisableWasm(WasmArgs),
 }
 
 #[derive(Args)]
@@ -40,6 +45,12 @@ pub struct InstallArgs {
 
 #[derive(Args)]
 pub struct RemoveArgs {
+    /// The extension id.
+    pub id: String,
+}
+
+#[derive(Args)]
+pub struct WasmArgs {
     /// The extension id.
     pub id: String,
 }
@@ -84,6 +95,14 @@ pub async fn execute(
         ExtensionsCommand::Remove(remove_args) => {
             vec![format!("removed {}", remove(dir, &remove_args.id)?.id)]
         }
+        ExtensionsCommand::EnableWasm(wasm) => {
+            let entry = set_wasm_enabled(dir, &wasm.id, true)?;
+            vec![format!("{}: extension.wasm enabled", entry.id)]
+        }
+        ExtensionsCommand::DisableWasm(wasm) => {
+            let entry = set_wasm_enabled(dir, &wasm.id, false)?;
+            vec![format!("{}: extension.wasm disabled", entry.id)]
+        }
     })
 }
 
@@ -110,5 +129,38 @@ fn describe_outcome(outcome: &InstallOutcome) -> String {
             "{} {} is already installed; nothing changed",
             entry.id, entry.version
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    fn the_wasm_command_of(argv: &[&str]) -> Option<(&'static str, String)> {
+        match ExtensionsArgs::try_parse_from(argv).ok()?.command {
+            ExtensionsCommand::EnableWasm(args) => Some(("enable", args.id)),
+            ExtensionsCommand::DisableWasm(args) => Some(("disable", args.id)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn enable_wasm_and_disable_wasm_take_the_extension_id() {
+        // Given the two opt-in commands as a user types them
+        let enable = ["extensions", "enable-wasm", "elixir"];
+        let disable = ["extensions", "disable-wasm", "elixir"];
+
+        // When they are parsed
+        let parsed = (the_wasm_command_of(&enable), the_wasm_command_of(&disable));
+
+        // Then each names its extension
+        assert_eq!(
+            parsed,
+            (
+                Some(("enable", "elixir".to_string())),
+                Some(("disable", "elixir".to_string()))
+            )
+        );
     }
 }

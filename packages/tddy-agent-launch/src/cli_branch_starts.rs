@@ -121,6 +121,9 @@ impl LaunchSessions {
             req.semantic_index,
             req.create_remote_branch,
             req.ssh_config_host.trim(),
+            req.managed_codebase,
+            req.session_role.trim(),
+            req.repo_path.trim(),
             &route_sources,
             progress,
         )

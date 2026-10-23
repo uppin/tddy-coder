@@ -7,16 +7,17 @@ use futures_util::stream::Stream;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
-    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
-    ListSessionsResponse, ResumeSessionRequest, ResumeSessionResponse, SignalSessionRequest,
-    SignalSessionResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
+    EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
+    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SignalSessionRequest, SignalSessionResponse, StartSessionEvent,
+    StartSessionRequest, StartSessionResponse,
 };
 
 /// Server-streaming output for [`SessionHandler::stream_start_session`].
 pub type SessionStartEventStream =
     Pin<Box<dyn Stream<Item = Result<StartSessionEvent, Status>> + Send>>;
 
-/// What the eight session-lifecycle RPCs need from the host process.
+/// What the nine session-lifecycle RPCs need from the host process.
 #[async_trait]
 pub trait SessionHandler: Send + Sync {
     async fn list_sessions(
@@ -43,6 +44,12 @@ pub trait SessionHandler: Send + Sync {
         &self,
         request: Request<ResumeSessionRequest>,
     ) -> Result<Response<ResumeSessionResponse>, Status>;
+
+    /// Start, resume, or return the project's project-home session (`#project-home` 4/7).
+    async fn ensure_project_home_session(
+        &self,
+        request: Request<EnsureProjectHomeSessionRequest>,
+    ) -> Result<Response<EnsureProjectHomeSessionResponse>, Status>;
 
     async fn signal_session(
         &self,

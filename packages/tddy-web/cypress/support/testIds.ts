@@ -805,6 +805,8 @@ export const TEST_IDS = {
   agentActivityUnreadBadge: "agent-activity-unread-badge",
   /** The in-pane overlay listing one-line records. */
   agentActivityOverlay: "agent-activity-overlay",
+  /** The Agent Activity transcript docked as the session view's right sidebar (`#project-home` 3/7). */
+  agentActivitySidebar: "agent-activity-sidebar",
   /** Close control on the overlay. */
   agentActivityOverlayClose: "agent-activity-overlay-close",
   /** Tool-call detail dialog opened by clicking a tool entry in the transcript. */
@@ -1033,6 +1035,30 @@ export const livekitRoomParticipantMetadata = (room: string, identity: string) =
 
 /** `[data-testid="sessions-drawer-item-<sessionId>"]` — clickable drawer row */
 export const sessionsDrawerItem = (sessionId: string) => `sessions-drawer-item-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-project-group-<projectId|other>"]` — one project's group in the
+ *  expanded drawer (`#project-home` 2/7); `other` is the trailing group of project-less sessions. */
+export const sessionsDrawerProjectGroup = (projectKey: string) =>
+  `sessions-drawer-project-group-${projectKey}`;
+
+/** `[data-testid="sessions-drawer-project-group-header-<projectId|other>"]` — the group's header:
+ *  project name and session count; clicking it collapses or expands the group. */
+export const sessionsDrawerProjectGroupHeader = (projectKey: string) =>
+  `sessions-drawer-project-group-header-${projectKey}`;
+
+/** `[data-testid="sessions-drawer-project-home-<projectId>"]` — the pinned **main** entry first in a
+ *  project group; clicking it ensures and selects the project-home session (`#project-home` 4/7). */
+export const sessionsDrawerProjectHome = (projectId: string) =>
+  `sessions-drawer-project-home-${projectId}`;
+
+/** `[data-testid="sessions-drawer-project-home-hint-<projectId>"]` — shown instead of starting when
+ *  the project has no home agent. */
+export const sessionsDrawerProjectHomeHint = (projectId: string) =>
+  `sessions-drawer-project-home-hint-${projectId}`;
+
+/** `[data-testid="sessions-drawer-project-home-error-<projectId>"]` — why the last ensure failed. */
+export const sessionsDrawerProjectHomeError = (projectId: string) =>
+  `sessions-drawer-project-home-error-${projectId}`;
 
 /** `[data-testid="sessions-drawer-stack-<parentSessionId>"]` — collapsible <details> group */
 export const sessionsDrawerStackGroup = (parentSessionId: string) =>
@@ -1501,6 +1527,15 @@ export const projectAccountUnavailable = (projectId: string, provider: string) =
 /** `[data-testid="project-local-gh-toggle-<projectId>"]` — the checkbox that sets a project to take
  *  its GitHub identity from each host's own `gh` login instead of a vault account. */
 export const projectLocalGhToggle = (projectId: string) => `project-local-gh-toggle-${projectId}`;
+
+/** `[data-testid="project-home-agent-select-<projectId>"]` — the agent the project's project-home
+ *  session runs (`#project-home` 1/7). */
+export const projectHomeAgentSelect = (projectId: string) =>
+  `project-home-agent-select-${projectId}`;
+
+/** `[data-testid="project-home-agent-error-<projectId>"]` — why the last home agent change was
+ *  refused, on that project's card. */
+export const projectHomeAgentError = (projectId: string) => `project-home-agent-error-${projectId}`;
 
 /** `[data-testid="project-host-gh-<projectId>-<daemonInstanceId>"]` — on a Local gh project's host
  *  row: whether that host's `gh` is logged in for the project's GitHub host, and as whom. */

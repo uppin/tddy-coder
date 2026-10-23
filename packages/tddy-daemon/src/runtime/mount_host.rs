@@ -256,6 +256,8 @@ impl BuildContext {
         let connection_arc = Arc::new(connection_impl);
         connection_arc.install_sandbox_rpc_bridge();
         self.session_host = Some(Arc::clone(&connection_arc));
+        // The periodic project-home auto-stop reaps through the same host the sessions run on.
+        self.tasks.project_home_reaper = Some(Arc::clone(&connection_arc));
         // Get the shared TaskRegistry before handing the impl to the servers.
         let task_registry = connection_arc.task_registry();
         // The admission registry is shared with the SessionAdmissionService served on the

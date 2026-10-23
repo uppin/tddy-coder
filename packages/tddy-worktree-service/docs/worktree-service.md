@@ -81,7 +81,49 @@ The rule itself is unchanged and still has one home: scan for a `Changeset.branc
 **active** session, tie-break on the most recent `updated_at`, skip a session whose changeset cannot
 be read. It is synchronous, so async callers wrap it in `spawn_blocking_with_timeout`.
 
-## How it is served
+## The home worktree (`home_worktree.rs`)
+
+A project's [project-home session](../../../docs/ft/daemon/project-concept.md#project-home-session)
+runs on a dedicated checkout, not a per-session branch worktree:
+
+- `home_worktree_path(worktrees_root, project_id)` → `<worktrees_root>/<project_id>/home`.
+- `ensure_home_worktree(main_repo, worktrees_root, project_id, main_branch_ref)` returns it when it
+  is already one of `main_repo`'s linked worktrees (`git worktree list --porcelain`, compared
+  canonicalized); otherwise fetches the ref, checks it resolves to a commit, and runs
+  `git worktree add --detach <path> <ref>`. A path there that is not that worktree is
+  `HomeWorktreeError::PathTaken`; an unresolvable ref is `UnknownRef`; any failing git command is
+  `Git` with git's stderr.
+- `fast_forward_home_worktree(home, main_branch_ref)` fetches and `git merge --ff-only`s — the home
+  worktree has no commits of its own, so anything but a fast-forward is an error, never a reset.
+- A ref is fetched only when its first segment names one of the repository's remotes
+  (`origin/main` → `git fetch origin main`); a local branch has nothing to fetch.
+
+## Session targets (`session_target.rs`)
+
+`resolve_session_target(records, home, target_session_id)` is the one resolver from a session id a
+project-home session names to a `SessionTarget` (`session_id`, `project_id`, `worktree`, `branch`,
+`base_ref`, `is_active`). It is pure: the daemon builds the `TargetRecord`s from `.session.yaml` and
+each session's changeset. The rules, as `SessionTargetError`: an unknown id is `NotFound`, a session
+of another project `OtherProject`, the home session itself `IsHome`, and one with no worktree
+`NoWorktree`. The project-home read and git tools resolve every target through it; see
+[project-home tools](../../../docs/ft/daemon/project-concept.md#project-home-tools).
+
+## Session git operations (`session_git_ops.rs`)
+
+The [project-home git tools](../../../docs/ft/daemon/project-concept.md#git-tools) run here, on a
+`session_target::SessionTarget`:
+
+- `GitOp` — `Commit { message, paths }`, `Push { force_with_lease }`, `Rebase { onto }`, `Stash`,
+  `Reset { mode, to }`, `Checkout { to }`, `Clean`.
+- `requires_inactive_target(op)` — false for commit and a plain push, true for everything else.
+- `run_git_op(target, op, &PushIdentity)` checks that gate **before** any git process starts
+  (`GitOpError::TargetActive { session_id }`), then runs the commands in `session_git_ops/run.rs` in
+  the target's worktree with `PushIdentity.env` and `GIT_TERMINAL_PROMPT=0`. A failing command is
+  `GitOpError::Git` with its stderr.
+- A rebase that leaves unmerged paths is aborted and answered `GitOpOutcome::RebaseConflict { paths }`;
+  a rebase that fails without conflicts is the error.
+- Push is `git push [--force-with-lease] origin HEAD:refs/heads/<branch>`.
+
 
 `tddy-daemon`'s `runtime.rs` builds one `WorktreeServiceImpl` and registers it from the same `Arc`
 on all three transports: a `ServiceEntry` from `tddy_service::WorktreeServiceServer::from_arc` for

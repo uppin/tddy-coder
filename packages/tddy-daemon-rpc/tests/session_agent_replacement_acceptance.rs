@@ -163,6 +163,8 @@ fn a_split_sessions_codebase_half_with_agents_available(
             agent_daemon_instance_id: Some("workstation-b".to_string()),
             agent_session_id: Some("1780828020299-agent".to_string()),
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
             ..a_session(session_id, "claude-cli", false)
         },
         agents,
@@ -268,6 +270,8 @@ fn a_session(session_id: &str, session_type: &str, managed: bool) -> SessionMeta
         agent_daemon_instance_id: None,
         agent_session_id: None,
         ssh_config_host: None,
+        managed_codebase: false,
+        session_role: None,
     }
 }
 

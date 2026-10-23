@@ -34,6 +34,8 @@ import { isCliTerminalSession } from "../../constants/claudeCliModels";
 import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
 import { useSessionsDrawerAttachClaims } from "./useSessionsDrawerAttachClaims";
 import { useSessionsDrawerProjects } from "./useSessionsDrawerProjects";
+import { useSessionsDrawerProjectHomes } from "./useSessionsDrawerProjectHomes";
+import { useEnsureProjectHome } from "./useEnsureProjectHome";
 import { useSessionsDrawerRuntimeRegistry } from "./useSessionsDrawerRuntimeRegistry";
 import { useSessionsDrawerSessionList } from "./useSessionsDrawerSessionList";
 import { useSessionsDrawerRuntimeAttachment } from "./useSessionsDrawerRuntimeAttachment";
@@ -139,6 +141,7 @@ export function SessionsDrawerScreen({
     claims;
 
   const { projects, error: projectsError } = useSessionsDrawerProjects(projectClient, sessionToken);
+  const projectHomes = useSessionsDrawerProjectHomes(catalogClient, projects);
 
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
@@ -270,6 +273,13 @@ export function SessionsDrawerScreen({
     navigate(sessionsDrawerPathForSession(sessionId));
   };
 
+  // The pinned main entry: ensure the project's home session on the selected host, then select it.
+  const { ensure: ensureProjectHome } = useEnsureProjectHome(
+    client,
+    sessionToken,
+    handleSelectSession,
+  );
+
   const {
     selectedForDelete,
     selectionMode,
@@ -384,6 +394,11 @@ export function SessionsDrawerScreen({
               void handleBulkDelete();
             }}
             notices={sessionsDrawerListNotices(listLoadError, bulkDeleteFailures)}
+            projects={projects}
+            projectHomes={projectHomes}
+            onEnsureProjectHome={(projectId) =>
+              ensureProjectHome(projectId, selectedInstanceId ?? "")
+            }
           />
           {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list

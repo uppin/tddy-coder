@@ -32,6 +32,7 @@ tddy-session-activity = { path = "../tddy-session-activity" }
 tddy-session-agents = { path = "../tddy-session-agents" }
 tddy-session-files = { path = "../tddy-session-files" }
 tddy-session-split = { path = "../tddy-session-split" }
+tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-spawn = { path = "../tddy-spawn" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }

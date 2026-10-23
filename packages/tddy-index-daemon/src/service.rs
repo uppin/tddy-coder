@@ -27,6 +27,7 @@ use crate::proto::code_index::{
     VerifyResponse, WarmRequest, WatchRootRequest, WorkspacesRequest, WorkspacesResponse,
 };
 use crate::queries;
+use crate::queries::verify;
 use crate::symbols;
 use crate::CODE_INDEX_SERVICE;
 
@@ -77,6 +78,19 @@ impl CodeIndexServiceImpl {
             index: WorkspaceIndex::new(ports.servers)
                 .with_wait_heartbeat(ports.wait_heartbeat)
                 .with_supports(supports),
+        }
+    }
+
+    /// This service, also verifying the changed files of `languages` — the installed extension
+    /// languages a host registered with [`CodeIndexServiceImpl::with_supports`] — by their servers'
+    /// new error diagnostics and their grammars' parse (`#reshape` extension-code-actions, R5).
+    #[must_use]
+    pub fn with_verified_languages(
+        self,
+        languages: Vec<tddy_zed_extensions::ExtensionSupport>,
+    ) -> Self {
+        Self {
+            index: self.index.with_verified_languages(languages),
         }
     }
 
@@ -206,7 +220,7 @@ impl CodeIndexService for CodeIndexServiceImpl {
         &self,
         request: tddy_rpc::Request<VerifyRequest>,
     ) -> Result<tddy_rpc::Response<VerifyResponse>, tddy_rpc::Status> {
-        queries::serve_verify(&self.index, request.into_inner())
+        verify::serve_verify(&self.index, request.into_inner())
             .await
             .map(tddy_rpc::Response::new)
     }

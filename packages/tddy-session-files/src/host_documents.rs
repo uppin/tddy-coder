@@ -539,6 +539,8 @@ mod tests {
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
             cursor_chat_id: None,
         };
         tddy_core::write_session_metadata(session_dir, &meta).unwrap();
@@ -609,6 +611,7 @@ mod tests {
                 host_repo_paths: std::collections::HashMap::new(),
                 accounts: Vec::new(),
                 local_gh: false,
+                home_agent: None,
             }],
         )
         .unwrap();

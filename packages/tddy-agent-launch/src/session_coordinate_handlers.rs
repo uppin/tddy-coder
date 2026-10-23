@@ -30,7 +30,7 @@ use tddy_spawn::spawner;
 use tddy_worktree_service::stream::MpscResultStream;
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
-const SESSION_SERVICE: &str = "session.SessionService";
+pub(crate) const SESSION_SERVICE: &str = "session.SessionService";
 
 pub use crate::facilitation::{facilitated_checkout, FacilitatedCheckout};
 
@@ -441,6 +441,8 @@ fn session_entry_from_listing(
         codebase_daemon_instance_id: s.codebase_daemon_instance_id,
         codebase_session_id: s.codebase_session_id,
         ssh_config_host: s.ssh_config_host,
+        managed_codebase: s.managed_codebase,
+        session_role: s.session_role,
         // Inferred below from the session's own conversation
         // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is
         // the honest value for a session nothing has been observed on, and stays the

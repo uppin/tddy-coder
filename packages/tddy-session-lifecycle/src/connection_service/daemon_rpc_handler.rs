@@ -203,6 +203,9 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                         .await,
                 )
             }
+            (tddy_tool_engine::EXEC_TOOL_SERVICE, "ListExecTools") => tddy_rpc::RpcResult::Unary(
+                super::svc_list_exec_tools_wiring::list_exec_tools_from_jail(&self.bound, payload),
+            ),
             _ => tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
                 "DaemonRpcHandler does not serve {service}/{method}"
             )))),

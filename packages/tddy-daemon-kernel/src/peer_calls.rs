@@ -11,6 +11,7 @@ use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, SetProjectAccountsRequest,
     SetProjectAccountsResponse, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SetProjectHomeAgentRequest, SetProjectHomeAgentResponse,
 };
 use tddy_service::proto::session::{
     DeleteSessionRequest, DeleteSessionResponse, StartSessionEvent, StartSessionRequest,
@@ -199,6 +200,24 @@ pub async fn forward_set_project_accounts(
         peer_instance_id,
         "project.ProjectService",
         "SetProjectAccounts",
+        request,
+    )
+    .await
+}
+
+/// Forward **SetProjectHomeAgent** to another daemon in the common room.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
+pub async fn forward_set_project_home_agent(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &SetProjectHomeAgentRequest,
+) -> Result<SetProjectHomeAgentResponse, Status> {
+    forward_unary(
+        room,
+        peer_instance_id,
+        "project.ProjectService",
+        "SetProjectHomeAgent",
         request,
     )
     .await

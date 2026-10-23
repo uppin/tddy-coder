@@ -494,6 +494,8 @@ mod tests {
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
@@ -654,6 +656,8 @@ mod tests {
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 
@@ -711,6 +715,8 @@ mod tests {
             agent_daemon_instance_id: None,
             agent_session_id: None,
             ssh_config_host: None,
+            managed_codebase: false,
+            session_role: None,
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 
