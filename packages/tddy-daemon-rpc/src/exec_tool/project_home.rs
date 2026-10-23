@@ -80,10 +80,25 @@ impl ExecToolRpcHandler {
         })
     }
 
+    /// The exec tools a `ListExecTools` caller is answered, once `session_token` is verified to map
+    /// to an OS user: the set `session_id`'s agent is offered, or the daemon-wide catalog when the
+    /// caller names no session.
+    pub(super) fn offered_catalog(
+        &self,
+        session_token: &str,
+        session_id: &str,
+    ) -> Result<Vec<ToolDef>, Status> {
+        let os_user = self.os_user_of(session_token)?;
+        if session_id.trim().is_empty() {
+            return Ok(tddy_tool_engine::tool_catalog());
+        }
+        self.session_tool_catalog(&os_user, session_id)
+    }
+
     /// The exec tools `session_id`'s agent is offered. The role is read from the session's own record:
     /// a project-home session is offered the project-home catalog, and any other session the daemon-wide
     /// catalog without the project-home tools.
-    pub(super) fn session_tool_catalog(
+    fn session_tool_catalog(
         &self,
         os_user: &str,
         session_id: &str,

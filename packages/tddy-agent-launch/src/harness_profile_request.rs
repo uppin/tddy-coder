@@ -19,7 +19,24 @@ use crate::session_provider_route::{session_route_sources, status_of_refusal};
 impl LaunchSessions {
     /// Start the session `req` asks for — through the harness profile its `agent` names, if any:
     /// a profile is not a def, it stands for a session type or agent on an account.
+    ///
+    /// This is the start every caller-facing path takes (`StartSession`, `StreamStartSession`, a
+    /// split's workspace start, a project-home `StartProjectSession`), so a request naming a
+    /// `session_role` is refused here: a role is granted by the daemon, never asked for, since a
+    /// project-home role reaches the project's other sessions. Only
+    /// [`Self::start_session_with_role`] starts a session with one.
     pub async fn start_session_core(
+        &self,
+        req: StartSessionRequest,
+        progress: &AttachmentProgressSink,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        refuse_a_requested_role(&req)?;
+        self.start_session_with_role(req, progress).await
+    }
+
+    /// Start `req` with the standing role it carries. Reached only from inside the daemon —
+    /// `EnsureProjectHomeSession` is the one caller — never from a request a client sent.
+    pub(crate) async fn start_session_with_role(
         &self,
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
@@ -81,6 +98,18 @@ pub fn request_on_profile(
         provider_account_id,
         ..req
     })
+}
+
+/// A caller-sent start may not name a standing role; see [`LaunchSessions::start_session_core`].
+fn refuse_a_requested_role(req: &StartSessionRequest) -> Result<(), Status> {
+    if req.session_role.trim().is_empty() {
+        return Ok(());
+    }
+    Err(Status::permission_denied(format!(
+        "a session's role is granted by the daemon, not requested: StartSession may not set \
+         session_role (got {:?})",
+        req.session_role
+    )))
 }
 
 /// `status`, with the profile and the account it was asked for named in its message.

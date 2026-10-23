@@ -1578,8 +1578,9 @@ export type StartSessionRequest = Message<"session.StartSessionRequest"> & {
   /**
    * The session's standing role, recorded in its initial `.session.yaml` before its agent is spawned
    * (so no window exists in which the role is unrecorded), and, for "project-home", the role the
-   * agent is pre-approved the project-home tool set for. Empty = an ordinary session. Set by
-   * `EnsureProjectHomeSession`; see `#project-home` 5/7.
+   * agent is pre-approved the project-home tool set for. Empty = an ordinary session. Set only by
+   * the daemon's own `EnsureProjectHomeSession`: a `StartSession` or `StreamStartSession` that names
+   * a role is refused with PERMISSION_DENIED, since the role reaches the project's other sessions.
    *
    * @generated from field: string session_role = 43;
    */

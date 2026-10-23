@@ -10,6 +10,7 @@ use tddy_rpc::Response;
 
 use std::path::PathBuf;
 
+use crate::claude_cli_spawn_steps::role_allowed_tools_args;
 use crate::hooks_and_urls;
 
 use crate::launch_ports::LaunchSessions;
@@ -66,9 +67,8 @@ impl LaunchSessions {
             Some(w) => (w.extra_args, w.env),
             None => (Vec::new(), Vec::new()),
         };
-        // A role's pre-approved tool set is not persisted in the argv, so a resumed agent is given it
-        // again from the session's own record.
-        split_args.extend(crate::claude_cli_spawn_steps::role_allowed_tools_args(
+        // A role's tool set is not in a persisted argv, so a resumed agent is given it again.
+        split_args.extend(role_allowed_tools_args(
             meta.session_role.as_deref().unwrap_or_default(),
         ));
 

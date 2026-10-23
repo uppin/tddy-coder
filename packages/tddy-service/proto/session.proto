@@ -634,8 +634,9 @@ message StartSessionRequest {
   bool provider_built_in = 42;
   // The session's standing role, recorded in its initial `.session.yaml` before its agent is spawned
   // (so no window exists in which the role is unrecorded), and, for "project-home", the role the
-  // agent is pre-approved the project-home tool set for. Empty = an ordinary session. Set by
-  // `EnsureProjectHomeSession`; see `#project-home` 5/7.
+  // agent is pre-approved the project-home tool set for. Empty = an ordinary session. Set only by
+  // the daemon's own `EnsureProjectHomeSession`: a `StartSession` or `StreamStartSession` that names
+  // a role is refused with PERMISSION_DENIED, since the role reaches the project's other sessions.
   string session_role = 43;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,

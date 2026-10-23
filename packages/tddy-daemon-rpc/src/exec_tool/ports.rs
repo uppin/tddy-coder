@@ -26,7 +26,6 @@ use tddy_service::proto::exec_tools::{
 use tddy_session_lifecycle::connection_service::{
     authorize_exec_tool_caller, resolve_exec_tool_worktree, run_conversation_worktree_op, wire_same,
 };
-use tddy_session_lifecycle::tool_engine;
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
 use tddy_worktree_service::stream::MpscResultStream;
 
@@ -238,21 +237,8 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
             }
         }
 
-        // Minimal auth — verify caller is a known user.
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        // A session-scoped answer is the set that session's agent is offered; the daemon-wide catalog
-        // is what an unscoped caller gets.
-        let tools = if req.session_id.trim().is_empty() {
-            tool_engine::tool_catalog()
-        } else {
-            self.session_tool_catalog(&os_user, &req.session_id)?
-        };
+        // Minimal auth, then the set a session-scoped caller's agent is offered.
+        let tools = self.offered_catalog(&req.session_token, &req.session_id)?;
         Ok(Response::new(ListExecToolsResponse {
             tools: tools
                 .into_iter()

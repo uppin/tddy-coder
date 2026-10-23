@@ -11,7 +11,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 
 /// The worktree's diff against `base_ref`, including its uncommitted and untracked files.
+///
+/// `base_ref` comes from the target session's own records, so one that git would read as an option
+/// (a leading `-`) is refused rather than passed on.
 pub(crate) async fn worktree_diff(worktree: &Path, base_ref: &str) -> Result<String, String> {
+    if base_ref.starts_with('-') {
+        return Err(format!("base ref {base_ref:?} is not a ref"));
+    }
     let index = temp_index_path();
     let diff = diff_over_index(worktree, base_ref, &index).await;
     let _ = std::fs::remove_file(&index);
@@ -57,4 +63,20 @@ fn temp_index_path() -> PathBuf {
         "tddy-home-diff-{}-{nanos}.index",
         std::process::id()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_base_ref_git_would_read_as_an_option_is_refused() {
+        // Given a base ref a target session's record could carry
+        let refused = worktree_diff(Path::new("."), "--output=/tmp/x")
+            .await
+            .expect_err("an option-shaped base ref is refused");
+
+        // Then git is never asked, and the refusal names the ref
+        assert!(refused.contains("--output=/tmp/x"), "{refused}");
+    }
 }

@@ -15,6 +15,9 @@
 //! the question to the host daemon) and LiveKit (the remote daemon's `ExecToolService`). With no transport
 //! configured there is no daemon to ask, and no exec tool is registered to admit.
 
+use std::collections::HashSet;
+use std::sync::LazyLock;
+
 use tddy_session_tool_client::SessionExecToolAnswer;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
 
@@ -62,17 +65,18 @@ pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
         .collect()
 }
 
-/// Every name in the exec catalog: the static catalog and the project-home tools.
-fn exec_catalog_names() -> Vec<String> {
-    let mut names = static_exec_tool_names();
-    names.extend(project_home_tool_defs().into_iter().map(|tool| tool.name));
-    names
-}
+/// Every name in the exec catalog: the static catalog and the project-home tools. Built once, since
+/// `tools/list` asks it for every tool of every listing.
+static EXEC_CATALOG_NAMES: LazyLock<HashSet<String>> = LazyLock::new(|| {
+    static_exec_tool_names()
+        .into_iter()
+        .chain(project_home_tool_defs().into_iter().map(|tool| tool.name))
+        .collect()
+});
 
 /// Whether the tool `name` is advertised, given the exec tool names the daemon admits.
 pub fn is_advertised(name: &str, admitted: &[String]) -> bool {
-    let in_exec_catalog = exec_catalog_names().iter().any(|exec| exec == name);
-    !in_exec_catalog || admitted.iter().any(|admitted| admitted == name)
+    !EXEC_CATALOG_NAMES.contains(name) || admitted.iter().any(|admitted| admitted == name)
 }
 
 #[cfg(test)]
@@ -81,9 +85,10 @@ mod tests {
     use tddy_tool_engine::project_home_tools::project_home_offered_catalog;
 
     fn advertised_exec_names(admitted: &[String]) -> Vec<String> {
-        let mut names: Vec<String> = exec_catalog_names()
-            .into_iter()
+        let mut names: Vec<String> = EXEC_CATALOG_NAMES
+            .iter()
             .filter(|name| is_advertised(name, admitted))
+            .cloned()
             .collect();
         names.sort();
         names

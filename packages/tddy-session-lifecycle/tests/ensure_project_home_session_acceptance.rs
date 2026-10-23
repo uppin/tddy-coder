@@ -13,7 +13,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, ListSessionsRequest,
-    SessionService as SessionServiceTrait,
+    SessionService as SessionServiceTrait, StartSessionRequest,
 };
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
@@ -363,4 +363,54 @@ async fn a_project_home_session_is_listed_with_its_role() {
 
     // Then
     assert_eq!(listed.session_role, PROJECT_HOME_ROLE);
+}
+
+#[tokio::test]
+async fn an_ensured_project_home_agent_is_pre_approved_the_project_home_tool_set() {
+    // Given a project-home session the ensure has started
+    let world = a_daemon_with_a_project(Some(HOME_AGENT));
+    let home = world.ensure().await.expect("ensure").session.unwrap();
+
+    let handle = world
+        .manager
+        .get(&home.session_id)
+        .await
+        .expect("the home agent is running");
+
+    // Then the command line the stub `claude` echoes pre-approves the role's tool set, a
+    // cross-session tool among it (the wait panics with what the agent did print)
+    a_capture_showing(
+        &handle.capture,
+        "--allowedTools mcp__tddy-tools__ListProjectSessions",
+        PTY_STUB_OUTPUT,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_start_session_naming_a_role_is_refused_and_starts_nothing() {
+    // Given a daemon a client can start sessions on
+    let world = a_daemon_with_a_project(Some(HOME_AGENT));
+
+    // When a client asks StartSession for the project-home role itself
+    let refusal = world
+        .service
+        .start_session(Request::direct(StartSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            project_id: PROJECT_ID.to_string(),
+            session_type: "claude-cli".to_string(),
+            session_role: PROJECT_HOME_ROLE.to_string(),
+            ..Default::default()
+        }))
+        .await
+        .expect_err("a requested role is refused");
+
+    // Then the role is refused as not the caller's to grant, and no session exists
+    assert_eq!(refusal.code(), Code::PermissionDenied);
+    assert!(
+        refusal.message().contains("session_role"),
+        "names the refused field: {}",
+        refusal.message()
+    );
+    assert_eq!(world.session_dirs(), 0);
 }

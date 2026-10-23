@@ -226,7 +226,7 @@ impl LaunchSessions {
             request_on_profile(start, profile, &access)?
         };
         let started = self
-            .start_session_core(start, &AttachmentProgressSink::discarding())
+            .start_session_with_role(start, &AttachmentProgressSink::discarding())
             .await?
             .into_inner();
         log::info!(
