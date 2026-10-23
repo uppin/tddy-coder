@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use tddy_daemon_rpc::test_util::{test_service, TestDaemon};
 use tddy_projects::project_storage::{write_projects, ProjectData};
 use tddy_rpc::{Code, Request};
-use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::exec_tools::{
+    ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+    ListExecToolsResponse,
+};
 use tddy_service::proto::session::{
     ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
@@ -340,4 +343,71 @@ async fn a_session_without_the_project_home_role_cannot_call_the_tools() {
 
     // Then
     assert_eq!(refusal.code(), Code::PermissionDenied);
+}
+
+/// The tool names `ListExecTools` offers `session_id`, sorted.
+async fn offered_tool_names(world: &World, session_id: &str) -> Vec<String> {
+    let listed: ListExecToolsResponse = world
+        .service
+        .list_exec_tools(Request::direct(ListExecToolsRequest {
+            session_token: TEST_TOKEN.to_string(),
+            daemon_instance_id: String::new(),
+            session_id: session_id.to_string(),
+        }))
+        .await
+        .expect("the session's tools are listed")
+        .into_inner();
+    let mut names: Vec<String> = listed.tools.into_iter().map(|tool| tool.name).collect();
+    names.sort();
+    names
+}
+
+fn sorted_names(names: &[&str]) -> Vec<String> {
+    let mut names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+    names.sort();
+    names
+}
+
+#[tokio::test]
+async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_home_tools() {
+    // Given
+    let world = a_project_home_world().await;
+
+    // When
+    let offered = offered_tool_names(&world, &world.home).await;
+
+    // Then exactly the read-only tools and the four project-home tools
+    assert_eq!(
+        offered,
+        sorted_names(&[
+            "Read",
+            "Grep",
+            "Glob",
+            "ReadLints",
+            "SemanticSearch",
+            "ListProjectSessions",
+            "StartProjectSession",
+            "ReadSessionWorktree",
+            "DiffSessionWorktree",
+        ])
+    );
+}
+
+#[tokio::test]
+async fn an_ordinary_session_is_offered_the_catalog_without_the_project_home_tools() {
+    // Given
+    let world = a_project_home_world().await;
+    let catalog: Vec<String> = tddy_tool_engine::tool_catalog()
+        .into_iter()
+        .map(|tool| tool.name)
+        .collect();
+
+    // When
+    let offered = offered_tool_names(&world, &world.sibling).await;
+
+    // Then the whole catalog, and none of the project-home tools
+    let mut expected = catalog;
+    expected.sort();
+    assert_eq!(offered, expected);
+    assert!(!offered.iter().any(|name| name == "ListProjectSessions"));
 }

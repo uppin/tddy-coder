@@ -6,11 +6,12 @@
 //! replace a value these handlers still hold. The host then keeps a clone of the bundle, which holds
 //! handlers and never the host, so there is no `Arc` cycle to leak it.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use tddy_discovery::CatalogServiceImpl;
 use tddy_projects::ProjectServiceImpl;
 use tddy_rpc::ServiceEntry;
+use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::{DaemonRpcFamilies, PrStackHandler, PrStackServiceImpl};
 use tddy_tool_engine::ExecToolServiceImpl;
@@ -26,17 +27,23 @@ pub struct RpcHandlers {
     catalog: Arc<CatalogRpcHandler>,
     exec_tool: Arc<ExecToolRpcHandler>,
     pr_stack: Arc<PrStackRpcHandler>,
+    /// The launch snapshot the exec-tool handler late-binds to, set by
+    /// [`DaemonRpcFamilies::attach_session_start`] when the host is given these families.
+    session_launch: Arc<OnceLock<LaunchSessions>>,
 }
 
 impl RpcHandlers {
     /// Build every family's handler from `host`'s state.
     #[must_use]
     pub fn from_host(host: &DaemonSessionHost) -> Self {
+        let exec_tool = Arc::new(ExecToolRpcHandler::from_host(host));
+        let session_launch = exec_tool.session_launch_cell();
         Self {
             project: Arc::new(ProjectRpcHandler::from_host(host)),
             catalog: Arc::new(CatalogRpcHandler::from_host(host)),
-            exec_tool: Arc::new(ExecToolRpcHandler::from_host(host)),
+            exec_tool,
             pr_stack: Arc::new(PrStackRpcHandler::from_host(host)),
+            session_launch,
         }
     }
 
@@ -93,5 +100,13 @@ impl DaemonRpcFamilies for RpcHandlers {
 
     fn service_entries(&self) -> Vec<ServiceEntry> {
         self.entries()
+    }
+
+    /// The project-home session start and list read the host through this snapshot. A second
+    /// attach keeps the first, which is the one the families were wired to.
+    fn attach_session_start(&self, launch: LaunchSessions) {
+        if self.session_launch.set(launch).is_err() {
+            log::error!("the session launch was attached twice; keeping the first attachment");
+        }
     }
 }

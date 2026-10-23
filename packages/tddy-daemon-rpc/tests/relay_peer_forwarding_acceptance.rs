@@ -255,6 +255,7 @@ async fn list_exec_tools_with_known_remote_instance_id_returns_failed_preconditi
         .list_exec_tools(Request::direct(ListExecToolsRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: REMOTE_PEER_ID.to_string(), // known peer, no room
+            ..Default::default()
         }))
         .await
         .expect_err(
@@ -295,6 +296,7 @@ async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
         .list_exec_tools(Request::direct(ListExecToolsRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: "totally-unknown-daemon".to_string(),
+            ..Default::default()
         }))
         .await
         .expect_err("list_exec_tools must fail for unknown daemon_instance_id");

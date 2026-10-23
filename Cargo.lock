@@ -12762,7 +12762,6 @@ dependencies = [
  "tddy-session-activity",
  "tddy-session-files",
  "tddy-session-lifecycle",
- "tddy-session-split",
  "tddy-session-tool-client",
  "tddy-spawn",
  "tddy-task",

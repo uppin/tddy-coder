@@ -137,6 +137,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
             ListExecToolsRequest {
                 session_token: "fake-token".to_string(),
                 daemon_instance_id: "local".to_string(),
+                ..Default::default()
             }
             .encode_to_vec(),
         ),
@@ -277,6 +278,7 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
             ListExecToolsRequest {
                 session_token: "fake-token".to_string(),
                 daemon_instance_id: "local".to_string(),
+                ..Default::default()
             }
             .encode_to_vec(),
         ),

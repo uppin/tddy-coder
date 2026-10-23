@@ -27,8 +27,9 @@ use tddy_worktree_service::worktree_files::{
     list_worktree_directory_entries, read_worktree_file_utf8,
 };
 
-use crate::catalog::ToolDef;
+use crate::catalog::{tool_catalog, ToolDef};
 use crate::project_home_diff::worktree_diff;
+use crate::read_only::is_project_home_allowed_tool;
 use crate::ToolOutcome;
 
 pub const LIST_PROJECT_SESSIONS: &str = "ListProjectSessions";
@@ -40,11 +41,20 @@ pub const DIFF_SESSION_WORKTREE: &str = "DiffSessionWorktree";
 pub fn is_project_home_tool(name: &str) -> bool {
     matches!(
         name,
-        LIST_PROJECT_SESSIONS
-            | START_PROJECT_SESSION
-            | READ_SESSION_WORKTREE
-            | DIFF_SESSION_WORKTREE
+        LIST_PROJECT_SESSIONS | START_PROJECT_SESSION | READ_SESSION_WORKTREE | DIFF_SESSION_WORKTREE
     )
+}
+
+/// The exec tools a project-home session's agent is offered: exactly the tools
+/// [`is_project_home_allowed_tool`] lets it run, in catalog order, then the four project-home tools.
+/// The same predicate the daemon's role guard applies at call time, so what is advertised and what
+/// is executed cannot disagree.
+pub fn project_home_offered_catalog() -> Vec<ToolDef> {
+    tool_catalog()
+        .into_iter()
+        .filter(|tool| is_project_home_allowed_tool(&tool.name))
+        .chain(project_home_tool_defs())
+        .collect()
 }
 
 /// One session as `ListProjectSessions` reports it.
