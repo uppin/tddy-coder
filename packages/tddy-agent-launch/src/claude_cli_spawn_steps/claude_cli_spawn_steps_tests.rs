@@ -208,7 +208,7 @@ fn allowed_tools_in(argv: &[String]) -> Vec<&str> {
 #[test]
 fn a_project_home_spawn_is_pre_approved_exactly_the_project_home_tool_set() {
     // Given the argument a project-home claude-cli spawn adds to its command line
-    let argv = role_allowed_tools_args("project-home");
+    let argv = role_allowed_tools_args(Some("project-home"));
 
     // Then each tool of the set is its own --allowedTools value, and nothing else is added
     let expected = tddy_tool_engine::read_only::project_home_allowed_tools();
@@ -224,8 +224,9 @@ fn a_project_home_spawn_is_pre_approved_exactly_the_project_home_tool_set() {
 fn an_ordinary_spawn_adds_no_allowed_tools() {
     // Given an ordinary session, and a role the daemon gives no tool set
     // Then neither adds an argument, so the spawn's argv is what it always was
-    assert!(role_allowed_tools_args("").is_empty());
-    assert!(role_allowed_tools_args("some-other-role").is_empty());
+    assert!(role_allowed_tools_args(None).is_empty());
+    assert!(role_allowed_tools_args(Some("")).is_empty());
+    assert!(role_allowed_tools_args(Some("some-other-role")).is_empty());
 }
 
 #[test]

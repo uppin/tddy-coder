@@ -275,8 +275,8 @@ pub(super) async fn managed_claude_cli_launch(
 /// What the session's role pre-approves its `claude` to call, as `--allowedTools` arguments. A
 /// project-home session is given exactly [`tddy_tool_engine::read_only::project_home_allowed_tools`];
 /// every other role, and no role at all, adds nothing, so an ordinary session's argv is unchanged.
-pub(crate) fn role_allowed_tools_args(session_role: &str) -> Vec<String> {
-    if session_role != tddy_core::session_metadata::PROJECT_HOME_ROLE {
+pub(crate) fn role_allowed_tools_args(session_role: Option<&str>) -> Vec<String> {
+    if session_role != Some(tddy_core::session_metadata::PROJECT_HOME_ROLE) {
         return Vec::new();
     }
     tddy_tool_engine::read_only::project_home_allowed_tools()
@@ -359,7 +359,7 @@ pub(super) async fn spawn_claude_cli_process(
             dangerously_skip_permissions,
             false,
             append_system_prompt_file.as_deref(),
-            role_allowed_tools_args(session_role),
+            role_allowed_tools_args(Some(session_role)),
             env_extra,
             Some(os_user),
         )

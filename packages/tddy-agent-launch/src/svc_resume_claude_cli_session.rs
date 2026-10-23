@@ -68,9 +68,7 @@ impl LaunchSessions {
             None => (Vec::new(), Vec::new()),
         };
         // A role's tool set is not in a persisted argv, so a resumed agent is given it again.
-        split_args.extend(role_allowed_tools_args(
-            meta.session_role.as_deref().unwrap_or_default(),
-        ));
+        split_args.extend(role_allowed_tools_args(meta.session_role.as_deref()));
 
         let manager = Arc::clone(&self.claude_cli_manager);
         let session_id_owned = session_id.to_string();

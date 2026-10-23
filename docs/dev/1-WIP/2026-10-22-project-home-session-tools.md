@@ -20,6 +20,7 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 | [`packages/tddy-tool-engine/docs/code-issues/oversized-file-lib.md`](../../../packages/tddy-tool-engine/docs/code-issues/oversized-file-lib.md) | ⚠ DURING | New tools in `project_home_tools.rs`; `lib.rs` gains dispatch arms only. |
 | [`packages/tddy-tools/docs/code-issues/oversized-file-server.md`](../../../packages/tddy-tools/docs/code-issues/oversized-file-server.md) | ⚠ DURING | No new static `#[tool]`s in `server.rs` — the tools arrive through the dynamic exec catalog. |
 | [`packages/tddy-daemon-rpc/docs/code-issues/complexity-exec-tool-ports-stream-execute-tool.md`](../../../packages/tddy-daemon-rpc/docs/code-issues/complexity-exec-tool-ports-stream-execute-tool.md) | ⚠ DURING | Route the new tools through a port method; no new branches in `stream_execute_tool`. |
+| [`docs/dev/todo/2026-10-23-project-home-read-only-catalog-not-advertised.md`](../todo/2026-10-23-project-home-read-only-catalog-not-advertised.md) | ✅ RESOLVED HERE | `ListExecTools` answers per session on every transport; the role is recorded before the spawn and only the daemon grants it; the claude-cli home agent is started with the role's `--allowedTools`. |
 
 ## Responsibility
 
@@ -106,10 +107,10 @@ worktree today (`subagent_*` cover only a session's own roster).
 
 ## Scope
 
-- [ ] `session_target` resolver
-- [ ] Four tools + role gate
-- [ ] `ExecuteTool` port wiring
-- [ ] Tests
+- [x] `session_target` resolver
+- [x] Four tools + role gate
+- [x] `ExecuteTool` port wiring
+- [x] Tests
 
 ## Technical Changes
 
@@ -202,9 +203,21 @@ session; unit tests for the resolver's rules.
 
 ## Validation Results
 ### /validate-changes
+- Stack gate: base `feature/project-home/home-session` (08cfc2a28) already current; `origin/<base>..HEAD` is this PR's six commits only. No parent-owned file deleted.
+- **[CRITICAL → fixed]** Any `StartSession` / `StreamStartSession` caller could set `session_role: "project-home"` on its own claude-cli session and receive the cross-session tools. `start_session_core` (every caller-facing start) now refuses a non-empty role with `PERMISSION_DENIED`; `EnsureProjectHomeSession` starts through the crate-private `start_session_with_role`. Acceptance: `a_start_session_naming_a_role_is_refused_and_starts_nothing`.
+- **[WARNING → fixed]** Role → argv had no end-to-end test: `an_ensured_project_home_agent_is_pre_approved_the_project_home_tool_set` (stub `claude` echoes its argv).
+- **[WARNING → fixed]** `DiffSessionWorktree` passed a recorded base ref to git unchecked; an option-shaped ref (leading `-`) is refused (unit test in `project_home_diff`).
+- **[INFO, recorded]** The other start paths (cursor-cli, tool sessions, workspace, …) ignore `session_role`; harmless now that only ensure can set it, and ensure only starts claude-cli.
+- **[INFO, recorded]** `DiffSessionWorktree`'s `add -A` writes blob objects into the target's object store (no ref or index change) and has no deadline on a very large worktree.
+- **[INFO, recorded]** `WeakRpcFamilies::installed` panics if a snapshot outlives its host's families; a snapshot is reached only through those families, so this is an invariant, not an input.
 ### /validate-tests
+- New tests are Given/When/Then, assert behaviour (codes, names, argv), no sleeps. `role_allowed_tools_args` now takes `Option<&str>`; its unit test covers `None`, empty and an unknown role.
 ### /validate-prod-ready
+- No `TODO`/`FIXME`/`println!`/`dbg!`/`unwrap()` added outside tests; no suppression attribute added.
 ### /analyze-clean-code
+- Structural scan (fn line to closing brace, brace nesting; no instrumented coverage build — Rust tests run in CI), base → HEAD: `list_exec_tools` 78 → 72 (auth + catalog choice moved to `offered_catalog`); `stream_execute_tool` 81 → 80; `resume_claude_cli_session` 142 → 144; `handle_rpc` 185 → 188 (one arm); `spawn_claude_cli_session_inner` 295 → 309, `start_claude_cli_session` 116 → 119, `spawn_child` 125 → 127, `spawn_conversation` 82 → 84 (the `session_role` argument and the early role write threaded through already-long, stack-shared functions). Every new function ≤ 60 lines.
+- tddy-tools: the exec-catalog name set is built once (`LazyLock`) instead of per tool per listing.
+- File length: only `tddy-tool-engine/src/lib.rs` is over 500 (874 → 876, two module lines); stack-shared, not split.
 
 ## TODO
 
