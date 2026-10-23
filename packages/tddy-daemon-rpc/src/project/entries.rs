@@ -74,7 +74,6 @@ pub(super) fn project_entry_from(
             })
             .collect(),
         local_gh: p.local_gh,
-        // TODO(home-agent-setting): report the stored `p.home_agent`
-        home_agent: String::new(),
+        home_agent: p.home_agent.clone().unwrap_or_default(),
     }
 }

@@ -343,9 +343,18 @@ pub fn set_project_home_agent(
     project_id: &str,
     home_agent: Option<&str>,
 ) -> anyhow::Result<()> {
-    // TODO(home-agent-setting): implement
-    let _ = (projects_dir, project_id, home_agent);
-    anyhow::bail!("set_project_home_agent is not implemented")
+    log::info!(
+        "set_project_home_agent: project_id={} home_agent={}",
+        project_id,
+        home_agent.unwrap_or_default()
+    );
+    let mut projects = read_projects(projects_dir)?;
+    let project = projects
+        .iter_mut()
+        .find(|p| p.project_id == project_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
+    project.home_agent = home_agent.map(str::to_string);
+    write_projects(projects_dir, &projects)
 }
 
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).

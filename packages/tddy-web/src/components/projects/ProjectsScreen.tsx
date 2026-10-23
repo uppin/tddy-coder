@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ProjectEntry } from "../../gen/session_pb";
+import type { ProjectEntry } from "../../gen/project_pb";
 import type { DaemonHost } from "../../lib/participantRole";
 import {
   assignmentRowsFor,
@@ -12,6 +12,7 @@ import {
   LocalGhToggle,
   type LoadHostGithubCli,
 } from "./ProjectLocalGh";
+import { ProjectHomeAgent } from "./ProjectHomeAgent";
 
 export type { AssignableAccount };
 
@@ -84,6 +85,7 @@ interface ProjectGroup {
   mainBranchRef: string;
   accounts: { provider: string; accountId: string }[];
   localGh: boolean;
+  homeAgent: string;
   hosts: { daemonInstanceId: string; mainRepoPath: string }[];
 }
 
@@ -101,6 +103,7 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
         mainBranchRef: p.mainBranchRef,
         accounts: p.accounts.map((a) => ({ provider: a.provider, accountId: a.accountId })),
         localGh: p.localGh,
+        homeAgent: p.homeAgent,
         hosts: [],
       };
       byId.set(p.projectId, group);
@@ -134,6 +137,8 @@ export function ProjectsScreen({
   accounts,
   onSetProjectAccounts,
   loadHostGithubCli,
+  agents = [],
+  onSetHomeAgent,
 }: ProjectsScreenProps) {
   const groups = useMemo(() => groupByProject(projects), [projects]);
 
@@ -215,6 +220,8 @@ export function ProjectsScreen({
             accounts={accounts}
             onSetProjectAccounts={onSetProjectAccounts}
             loadHostGithubCli={loadHostGithubCli}
+            agents={agents}
+            onSetHomeAgent={onSetHomeAgent}
           />
         ))}
       </div>
@@ -231,6 +238,8 @@ function ProjectCard({
   accounts,
   onSetProjectAccounts,
   loadHostGithubCli,
+  agents,
+  onSetHomeAgent,
 }: {
   group: ProjectGroup;
   daemons: DaemonHost[];
@@ -240,6 +249,8 @@ function ProjectCard({
   accounts: ProjectsScreenProps["accounts"];
   onSetProjectAccounts: ProjectsScreenProps["onSetProjectAccounts"];
   loadHostGithubCli: LoadHostGithubCli;
+  agents: { id: string; label: string }[];
+  onSetHomeAgent: ProjectsScreenProps["onSetHomeAgent"];
 }) {
   const hostingIds = useMemo(
     () => new Set(group.hosts.map((h) => h.daemonInstanceId)),
@@ -337,6 +348,20 @@ function ProjectCard({
           ))}
         </select>
       </div>
+
+      {onSetHomeAgent ? (
+        <ProjectHomeAgent
+          project={{ projectId: group.projectId, homeAgent: group.homeAgent }}
+          agents={agents}
+          onChange={(agentId) =>
+            onSetHomeAgent({
+              projectId: group.projectId,
+              homeAgent: agentId,
+              daemonInstanceId: primaryHost,
+            })
+          }
+        />
+      ) : null}
 
       <LocalGhToggle projectId={group.projectId} checked={group.localGh} onChange={setLocalGh} />
 

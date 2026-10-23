@@ -109,11 +109,11 @@ setting chosen ahead of time.
 
 ## Scope
 
-- [ ] Proto field + RPC
-- [ ] Storage + setter with catalog validation
-- [ ] Daemon routing (new module)
-- [ ] Projects screen picker
-- [ ] Tests
+- [x] Proto field + RPC
+- [x] Storage + setter with catalog validation
+- [x] Daemon routing (new module)
+- [x] Projects screen picker
+- [x] Tests
 
 ## Technical Changes
 
@@ -167,6 +167,14 @@ a storage unit test for the optional key, and a Cypress component spec with `mou
 - No separate pre-surface baseline was captured (the first baseline build raced the surface edits); master was green at 75878eb82.
 - The catalog check needs the model registry (`list_assistants`), which `ProjectRpcHandler` does not hold today — green adds it from `DaemonSessionHost` or extracts the `list_agents` row assembly into a shared helper.
 
+## Green-phase notes
+
+- Rebased onto `origin/master` (1cbdff00c) before implementing; the two node commits are the whole range.
+- Catalog check: the `ListAgents` row assembly moved unchanged into `catalog/agent_rows.rs` (`listed_agents`). `ListAgents` and the project handler both call it, so the picker and the check read the same rows. `ProjectRpcHandler` takes the model registry from the host.
+- Verified (scoped, 2026-10-23): `tddy-projects` 44 passed across 7 targets; `set_project_home_agent_acceptance` 3/3 (re-run); `project_home_agent_storage` 4/4 (re-run); `set_project_default_branch_acceptance` 4/4 and `set_project_accounts_acceptance` 7/7; `unbundle_service_split` 28 passed; clippy `-D warnings` clean per crate (`tddy-projects`, `tddy-daemon-rpc`, `tddy-daemon-kernel`); rustfmt check clean on `tddy-projects` and `tddy-daemon-rpc`; Cypress `ProjectsScreenHomeAgentAcceptance` 2/2 (re-run) and regression `ProjectsScreenAcceptance` 13/13 (re-run).
+- Judgment calls for review: (1) a stored id the catalog no longer lists gets its own "(not listed by this daemon)" option, so the select never shows "Not set" over a stored value. The PRD describes only "Not set" plus the listed agents. (2) A failed `listAgents` leaves the list empty without a message, matching the accounts loader. (3) `ProjectsScreen.tsx` imported `ProjectEntry` from `session_pb`, which does not export it; it now imports from `project_pb`. (4) The coordinate routing block now appears four times (default branch, accounts, add-to-host, home agent); extraction is a backlog candidate.
+- Open for CI: the full-workspace run.
+
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
@@ -191,8 +199,8 @@ a storage unit test for the optional key, and a Cypress component spec with `mou
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
@@ -205,6 +213,6 @@ a storage unit test for the optional key, and a Cypress component spec with `mou
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-22-project-home-agent-setting-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps

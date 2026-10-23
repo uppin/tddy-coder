@@ -1,8 +1,11 @@
 //! Family A — `catalog.CatalogService`.
 
 mod agent_models;
+mod agent_rows;
 mod ports;
 mod subagent_row;
+
+pub(crate) use agent_rows::listed_agents;
 
 use std::path::PathBuf;
 use std::sync::Arc;

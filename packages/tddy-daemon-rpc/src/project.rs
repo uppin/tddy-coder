@@ -13,11 +13,13 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_host_service::multi_host::EligibleDaemonSource;
+use tddy_model_registry::ModelRegistryStore;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_spawn::spawn_worker::SpawnClient;
 
-/// The five project RPCs, holding only what they read: the caller's identity, the projects store
-/// under `tddy_data_dir`, the peers a listing fans out to, and the spawn client a clone runs through.
+/// The project RPCs, holding only what they read: the caller's identity, the projects store under
+/// `tddy_data_dir`, the peers a listing fans out to, the spawn client a clone runs through, and the
+/// model registry the agent catalog a home agent is checked against is built from.
 pub struct ProjectRpcHandler {
     config: DaemonConfig,
     user_resolver: SessionUserResolver,
@@ -25,6 +27,7 @@ pub struct ProjectRpcHandler {
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     spawn_client: Option<Arc<SpawnClient>>,
     common_room_livekit_room: Option<CommonRoom>,
+    model_registry: Option<Arc<ModelRegistryStore>>,
 }
 
 impl ProjectRpcHandler {
@@ -38,6 +41,7 @@ impl ProjectRpcHandler {
             eligible_daemon_source: host.eligible_daemon_source(),
             spawn_client: host.spawn_client(),
             common_room_livekit_room: host.common_room_livekit_room(),
+            model_registry: host.model_registry(),
         }
     }
 }
