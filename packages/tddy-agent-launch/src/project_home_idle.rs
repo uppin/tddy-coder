@@ -7,7 +7,7 @@
 //! `.session.yaml` keeps what resume needs, so `EnsureProjectHomeSession` resumes the same
 //! conversation. Sessions without the `project-home` role are never touched; `0` disables it.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-auto-stop.md.
+//! Feature: docs/ft/daemon/project-concept.md § Project-home auto-stop.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -16,6 +16,7 @@ use std::time::{Duration, SystemTime};
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
+use tddy_daemon_kernel::config::ProjectHomeConfig;
 use tddy_daemon_kernel::user_paths::sessions_base_for_user;
 use tddy_session_activity::session_reader;
 
@@ -63,13 +64,10 @@ impl LaunchSessions {
     /// Stop every running project-home session idle for at least the configured time at `now`.
     /// Returns the ids it stopped.
     pub async fn reap_idle_project_home_sessions(&self, now: SystemTime) -> Vec<String> {
-        let idle_stop = Duration::from_secs(
-            self.config
-                .project_home
-                .clone()
-                .unwrap_or_default()
-                .idle_stop_secs,
-        );
+        let idle_stop = Duration::from_secs(self.config.project_home.as_ref().map_or_else(
+            || ProjectHomeConfig::default().idle_stop_secs,
+            |c| c.idle_stop_secs,
+        ));
         if idle_stop.is_zero() {
             return Vec::new();
         }
@@ -163,10 +161,12 @@ async fn exits_within(pid: u32, within: Duration) -> bool {
 
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
-    // Signal 0 sends nothing; it only asks whether the pid exists.
+    // SAFETY: `kill` with signal 0 sends nothing and touches no memory; it only asks whether the
+    // pid exists (and is ours to signal).
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
+/// The daemon runs sessions on unix only; elsewhere there is no process to wait for.
 #[cfg(not(unix))]
 fn process_alive(_pid: u32) -> bool {
     false

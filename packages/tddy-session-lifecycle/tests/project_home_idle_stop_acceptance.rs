@@ -5,7 +5,7 @@
 //! "Idle" is the hook-reported `activity_status` other than `Running`, since the metadata's
 //! `updated_at` — which every status report bumps.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-auto-stop.md (`#project-home` 6/7).
+//! Feature: docs/ft/daemon/project-concept.md § Project-home auto-stop (`#project-home` 6/7).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -89,13 +89,15 @@ fn minimal_service_with_manager(
     )
 }
 
-/// Executable stub that dumps both its argv and `TDDY_SOCKET` (for asserting a resumed managed
-/// session is re-wired with the orchestration prompt and per-session socket).
+/// Executable stub that dumps both its argv and `TDDY_SOCKET`, then stays alive like a real agent
+/// waiting for input — the reaper only considers sessions whose process is running, so a stub that
+/// exited at once would make every assertion here race the process exit. `cat` ends when the
+/// session is stopped (SIGTERM) or its terminal closes.
 fn write_argv_and_env_script(dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = dir.join("stub_claude_argv_env.sh");
     std::fs::write(
         &script_path,
-        "#!/bin/sh\necho \"ARGV: $@\"\necho \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\n",
+        "#!/bin/sh\necho \"ARGV: $@\"\necho \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\nexec cat >/dev/null\n",
     )
     .unwrap();
     make_executable(&script_path);

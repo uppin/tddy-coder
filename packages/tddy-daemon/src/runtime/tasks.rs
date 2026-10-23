@@ -6,6 +6,9 @@ use tddy_daemon_livekit::common_room_supervisor::CommonRoomSupervisorTask;
 use teloxide::prelude::Bot;
 use tokio::sync::Mutex;
 
+/// How often idle project-home sessions are checked — the granularity of their auto-stop.
+const PROJECT_HOME_REAP_PERIOD: Duration = Duration::from_secs(30);
+
 /// Everything a running daemon spawned that must not outlive it.
 ///
 /// Named rather than left inline in the signal handler because a shutdown that reaches only some
@@ -288,7 +291,7 @@ impl RuntimeTasks {
         // ensure, so the period is only the granularity of the stop.
         if let Some(host) = self.project_home_reaper {
             handles.push(tokio::spawn(async move {
-                let mut ticker = tokio::time::interval(Duration::from_secs(30));
+                let mut ticker = tokio::time::interval(PROJECT_HOME_REAP_PERIOD);
                 ticker.tick().await; // consume the immediate first tick
                 loop {
                     ticker.tick().await;
