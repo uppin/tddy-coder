@@ -6,14 +6,16 @@ import {
   type InspectorTabName,
 } from "../../routing/appRoutes";
 import { PARAM_FULL, PARAM_INSPECTOR } from "../../routing/appLocation";
-import { useAppLocation } from "../../routing/useAppLocation";
+import { navigateAppLocation, useAppLocation } from "../../routing/useAppLocation";
+import { projectSetupLocation } from "../../routing/projectSetupLocation";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { nextInspectorState } from "./inspectorState";
 
 /**
  * The sessions drawer's URL-derived state: which session is selected, whether the screen is
  * creating one, and the inspector's tab and open/expanded state — plus the writer that puts an
- * inspector state back into the URL and the toggle/close/expand/restore handlers built on it.
+ * inspector state back into the URL and the toggle/close/expand/restore handlers built on it —
+ * and the one move off the screen the drawer makes itself: to Projects, to set up a home agent.
  */
 export function useSessionsDrawerInspector() {
   // Selection is derived from the URL, not held in state: that is what makes Back, Forward, a
@@ -69,6 +71,10 @@ export function useSessionsDrawerInspector() {
   const handleInspectorExpand = () => applyInspectorState("expanded");
   const handleInspectorRestore = () => applyInspectorState("open");
 
+  // A pushed entry: the operator clicked "main", so Back returns them to the drawer.
+  const openProjectSetup = (projectId: string) =>
+    navigateAppLocation(projectSetupLocation(location, projectId));
+
   return {
     location,
     navigate,
@@ -82,5 +88,6 @@ export function useSessionsDrawerInspector() {
     handleInspectorClose,
     handleInspectorExpand,
     handleInspectorRestore,
+    openProjectSetup,
   };
 }

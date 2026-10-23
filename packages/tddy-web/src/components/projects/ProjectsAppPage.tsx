@@ -7,6 +7,8 @@ import { CatalogService, type AgentInfo } from "../../gen/catalog_pb";
 import { HostService } from "../../gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
+import { PARAM_PROJECT } from "../../routing/appLocation";
+import { useAppLocation } from "../../routing/useAppLocation";
 import { useDaemonClient, useDaemons, useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import {
   hostNotConnected,
@@ -254,6 +256,9 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
     [connectHost],
   );
   const { selectedInstanceId } = useSelectedDaemon();
+  // The project the address names — where the sessions drawer sends an operator to set a home agent.
+  const { location } = useAppLocation();
+  const focusedProjectId = location.params[PARAM_PROJECT] ?? null;
   // A host's display name — what a "not connected" error names. Stable across directory updates,
   // so the project poll is not restarted on every participant event.
   const hostLabel = useHostLabel();
@@ -303,6 +308,7 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         loadHostGithubCli={loadHostGithubCli}
         agents={agents}
         onSetHomeAgent={setProjectHomeAgent}
+        focusedProjectId={focusedProjectId}
       />
     </AppShell>
   );

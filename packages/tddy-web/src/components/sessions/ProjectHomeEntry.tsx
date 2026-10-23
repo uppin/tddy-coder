@@ -8,7 +8,8 @@ import type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
  * The pinned **main** entry first in a project group (`#project-home` 4/7): label `main`, the
  * project's main branch ref, the home agent's label, and the home session's status dot once it
  * exists. Clicking it ensures the project-home session; a refusal is shown on the entry. With no
- * home agent it shows a hint pointing at the Projects screen and starts nothing.
+ * home agent it shows a hint pointing at the Projects screen and starts nothing: a click asks to set
+ * one up (`onSetUpProjectHome`), and without that handler the entry is disabled.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
  */
@@ -17,14 +18,20 @@ export function ProjectHomeEntry(props: {
   homeSession: SessionEntry | null;
   selected: boolean;
   onEnsure: (projectId: string) => Promise<void>;
+  /** Called instead of `onEnsure` when the project has no home agent to start. */
+  onSetUpProjectHome?: (projectId: string) => void;
 }): React.ReactElement | null {
-  const { home, homeSession, selected, onEnsure } = props;
+  const { home, homeSession, selected, onEnsure, onSetUpProjectHome } = props;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const hasHomeAgent = home.homeAgentLabel !== null;
 
   const activate = () => {
-    if (!hasHomeAgent || pending) return;
+    if (!hasHomeAgent) {
+      onSetUpProjectHome?.(home.projectId);
+      return;
+    }
+    if (pending) return;
     setError(null);
     setPending(true);
     onEnsure(home.projectId)
@@ -38,7 +45,7 @@ export function ProjectHomeEntry(props: {
         type="button"
         data-testid={`sessions-drawer-project-home-${home.projectId}`}
         aria-current={selected ? "true" : undefined}
-        aria-disabled={!hasHomeAgent}
+        aria-disabled={!hasHomeAgent && !onSetUpProjectHome}
         onClick={activate}
         className={cn(
           "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",

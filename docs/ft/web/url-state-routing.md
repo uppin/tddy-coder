@@ -60,7 +60,7 @@ with a real session.
 | `full` | `#/sessions/:id` with `inspector` | `1` | Inspector expanded rather than docked |
 | `code` | `#/sessions/:id` | `1` | Worktree Code split pane open |
 | `channel` | `#/tasks/:taskId` | channel id | Selected task-output channel tab |
-| `project` | `#/worktrees` | project id | Worktrees project filter |
+| `project` | `#/worktrees` · `#/projects` | project id | Worktrees: project filter. Projects: the project whose **Home agent** picker takes focus |
 | `participant` `service` `method` | `#/rpc-playground` | identity / name / name | Playground selection |
 
 A **screen change** (a different first path segment) drops every screen-scoped param and keeps only
@@ -101,6 +101,7 @@ A history entry records **something the operator did**.
 | Open create-session pane | push |
 | Inspector tab click, inspector toggle, Code toggle, channel tab | push |
 | Host change; worktrees project change; playground service/method select | push |
+| Drawer **main** entry with no home agent → `#/projects?project=<id>` | push |
 | Inspector **auto**-open (idle/error) and **auto**-close (on connect) | replace |
 | `#/` → `#/sessions` canonicalisation | replace |
 | Writing back a resolved default (`host`, `project`, `participant`) | replace |

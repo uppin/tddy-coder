@@ -53,6 +53,7 @@ export function ProjectCard({
   loadHostGithubCli,
   agents,
   onSetHomeAgent,
+  focusHomeAgent = false,
 }: {
   group: ProjectGroup;
   daemons: DaemonHost[];
@@ -64,6 +65,8 @@ export function ProjectCard({
   loadHostGithubCli: LoadHostGithubCli;
   agents: { id: string; label: string }[];
   onSetHomeAgent: ProjectsScreenProps["onSetHomeAgent"];
+  /** Focus this card's home-agent picker and scroll it into view. */
+  focusHomeAgent?: boolean;
 }) {
   const hostingIds = useMemo(
     () => new Set(group.hosts.map((h) => h.daemonInstanceId)),
@@ -179,6 +182,7 @@ export function ProjectCard({
         <ProjectHomeAgent
           project={{ projectId: group.projectId, homeAgent: group.homeAgent }}
           agents={agents}
+          focused={focusHomeAgent}
           onChange={(agentId) =>
             onSetHomeAgent({
               projectId: group.projectId,

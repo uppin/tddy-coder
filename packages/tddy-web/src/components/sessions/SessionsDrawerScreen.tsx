@@ -134,6 +134,7 @@ export function SessionsDrawerScreen({
     handleInspectorClose,
     handleInspectorExpand,
     handleInspectorRestore,
+    openProjectSetup,
   } = useSessionsDrawerInspector();
 
   const claims = useSessionsDrawerAttachClaims();
@@ -399,6 +400,7 @@ export function SessionsDrawerScreen({
             onEnsureProjectHome={(projectId) =>
               ensureProjectHome(projectId, selectedInstanceId ?? "")
             }
+            onSetUpProjectHome={openProjectSetup}
           />
           {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
