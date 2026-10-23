@@ -15,8 +15,10 @@
  * nextest's non-test binaries and are never deleted. Within a batch cargo and nextest stay as
  * parallel as ever: the window bounds disk, not concurrency.
  *
- * Usage: `bun scripts/nextest-windowed.ts --max-binaries <n> [--packages a,b] [-- <nextest run args>...]`,
- * from the repo root inside the dev shell. `--packages` limits the run to the named packages (one
+ * Usage: `bun scripts/nextest-windowed.ts (--batches <n> | --max-binaries <n>) [--packages a,b]
+ * [-- <nextest run args>...]`, from the repo root inside the dev shell. `--batches` splits the
+ * workspace into that many batches balanced by test binaries; `--max-binaries` caps each batch
+ * instead. `--packages` limits the run to the named packages (one
  * batch's worth, to reproduce it locally). Each batch's JUnit report is kept as
  * `target/nextest/<profile>/junit-<batch>.xml`. Exits non-zero if any batch did.
  */
@@ -57,6 +59,32 @@ export function windowBatches(packages: WindowPackage[], cap: number): string[][
 }
 
 /**
+ * The packages in exactly `count` contiguous batches (fewer only when there are fewer packages),
+ * balanced by test binaries rather than by package count: a batch closes once the running total
+ * reaches its share of the whole. Workspace order is kept, so a batch's packages build together the
+ * way they did before.
+ */
+export function balancedBatches(packages: WindowPackage[], count: number): string[][] {
+  if (!(count >= 1)) throw new Error(`the batch count must be at least 1, got ${count}`);
+  const withTests = packages.filter((pkg) => pkg.binaries > 0);
+  const total = withTests.reduce((sum, pkg) => sum + pkg.binaries, 0);
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let running = 0;
+  for (const pkg of withTests) {
+    current.push(pkg.name);
+    running += pkg.binaries;
+    const isLastBatch = batches.length === count - 1;
+    if (!isLastBatch && running >= ((batches.length + 1) * total) / count) {
+      batches.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+/**
  * The test binaries in a `cargo nextest list --list-type binaries-only --message-format json`
  * listing. The dev shell prints a banner line on stdout first, so the JSON starts at the first `{`.
  * Only `rust-binaries` are test binaries; `rust-build-meta.non-test-binaries` are fixtures.
@@ -84,27 +112,30 @@ function group<T>(title: string, body: () => T): T {
 }
 
 function parseArgs(argv: string[]): {
-  cap: number;
+  split: { batches: number } | { cap: number };
   only: string[] | null;
   profile: string;
   nextestArgs: string[];
 } {
-  const split = argv.indexOf("--");
-  const own = split < 0 ? argv : argv.slice(0, split);
-  const nextestArgs = split < 0 ? [] : argv.slice(split + 1);
+  const separator = argv.indexOf("--");
+  const own = separator < 0 ? argv : argv.slice(0, separator);
+  const nextestArgs = separator < 0 ? [] : argv.slice(separator + 1);
   const capAt = own.indexOf("--max-binaries");
-  if (capAt < 0 || own[capAt + 1] === undefined) {
-    throw new Error("usage: nextest-windowed.ts --max-binaries <n> [-- <nextest run args>...]");
-  }
+  const batchesAt = own.indexOf("--batches");
+  const usage = "usage: nextest-windowed.ts (--batches <n> | --max-binaries <n>) [--packages a,b] [-- <nextest run args>...]";
+  if ((capAt < 0) === (batchesAt < 0)) throw new Error(usage);
+  const value = own[(capAt >= 0 ? capAt : batchesAt) + 1];
+  if (value === undefined) throw new Error(usage);
+  const split = capAt >= 0 ? { cap: Number(value) } : { batches: Number(value) };
   const onlyAt = own.indexOf("--packages");
   const only = onlyAt >= 0 ? (own[onlyAt + 1] ?? "").split(",").filter(Boolean) : null;
   const profileAt = nextestArgs.indexOf("--profile");
   const profile = profileAt >= 0 ? nextestArgs[profileAt + 1] : "default";
-  return { cap: Number(own[capAt + 1]), only, profile, nextestArgs };
+  return { split, only, profile, nextestArgs };
 }
 
 function main(): number {
-  const { cap, only, profile, nextestArgs } = parseArgs(process.argv.slice(2));
+  const { split, only, profile, nextestArgs } = parseArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
   const targets = testBinaries(repoRoot);
   // One binary per integration-test target, plus the package's own unit-test binary.
@@ -115,9 +146,13 @@ function main(): number {
     name: pkg.name,
     binaries: targets.filter((target) => target.package === pkg.name).length + 1,
   }));
-  const batches = windowBatches(packages, cap);
+  const batches = "cap" in split ? windowBatches(packages, split.cap) : balancedBatches(packages, split.batches);
   const reportDir = join(repoRoot, "target", "nextest", profile);
-  console.log(`${packages.length} packages in ${batches.length} batches of at most ${cap} test binaries`);
+  console.log(
+    `${packages.length} packages in ${batches.length} batches: ${batches
+      .map((batch) => batch.reduce((sum, name) => sum + (packages.find((pkg) => pkg.name === name)?.binaries ?? 0), 0))
+      .join(" + ")} test binaries`,
+  );
 
   const failed: number[] = [];
   batches.forEach((batch, index) => {

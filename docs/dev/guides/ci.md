@@ -63,7 +63,7 @@ The Rust suite is two checks, split by **what a test needs to run**, not by how 
 
 **`Rust tests` compiles its own test targets, a window at a time.** It restores the `test` cargo
 cache and runs the complement of the e2e set over the workspace in batches of packages
-(`scripts/nextest-windowed.ts --max-binaries 120`). Each batch builds, runs, then deletes the test
+(`scripts/nextest-windowed.ts --batches 2`, balanced by test binaries). Each batch builds, runs, then deletes the test
 binaries it built, as `cargo nextest list` names them, before the next batch starts. The shared
 dependency artifacts stay for later batches, and `Rust build`'s fixture binaries are never touched.
 
@@ -78,8 +78,11 @@ nextest applies `-E` after building. Each batch keeps its JUnit report as
 To reproduce one batch locally:
 
 ```sh
-./dev bun scripts/nextest-windowed.ts --max-binaries 120 --packages a,b -- --profile ci --locked -E "not ($e2e)"
+./dev bun scripts/nextest-windowed.ts --batches 1 --packages a,b -- --profile ci --locked -E "not ($e2e)"
 ```
+
+Every job builds with `CARGO_INCREMENTAL: 0`: incremental state is scratch a one-shot build never
+reuses, and it only costs disk and cache size.
 
 `Rust tests` is the only job that saves the `test` cache (master only). Two writers on one key would
 race.

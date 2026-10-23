@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type WindowPackage, testBinaryPaths, windowBatches } from "./nextest-windowed";
+import { type WindowPackage, balancedBatches, testBinaryPaths, windowBatches } from "./nextest-windowed";
 
 function aPackage(name: string, binaries: number): WindowPackage {
   return { name, binaries };
@@ -52,6 +52,50 @@ describe("the window batches", () => {
 
   test("a_cap_below_one_is_refused", () => {
     expect(() => windowBatches([aPackage("a", 1)], 0)).toThrow(/cap/);
+  });
+});
+
+describe("a fixed number of batches", () => {
+  test("splits_the_packages_into_that_many_contiguous_batches_of_about_equal_binaries", () => {
+    // Given
+    const packages = [aPackage("a", 10), aPackage("b", 10), aPackage("c", 10), aPackage("d", 10)];
+
+    // When
+    const batches = balancedBatches(packages, 2);
+
+    // Then
+    expect(batches).toEqual([["a", "b"], ["c", "d"]]);
+  });
+
+  test("never_makes_more_batches_than_asked_and_keeps_every_package_once", () => {
+    // Given
+    const packages = Array.from({ length: 109 }, (_, i) => aPackage(`p${i}`, (i * 13) % 31 + 1));
+
+    // When
+    const batches = balancedBatches(packages, 2);
+
+    // Then
+    expect(batches).toHaveLength(2);
+    expect(batches.flat()).toEqual(packages.map((p) => p.name));
+  });
+
+  test("balances_by_binaries_not_by_package_count", () => {
+    // Given one heavy package up front
+    const packages = [aPackage("heavy", 90), aPackage("x", 5), aPackage("y", 5), aPackage("z", 100)];
+
+    // When
+    const batches = balancedBatches(packages, 2);
+
+    // Then the first batch closes once it holds half the binaries
+    expect(batches).toEqual([["heavy", "x", "y"], ["z"]]);
+  });
+
+  test("fewer_packages_than_batches_gives_one_batch_per_package", () => {
+    expect(balancedBatches([aPackage("a", 3), aPackage("b", 4)], 5)).toEqual([["a"], ["b"]]);
+  });
+
+  test("a_batch_count_below_one_is_refused", () => {
+    expect(() => balancedBatches([aPackage("a", 1)], 0)).toThrow(/batch count/);
   });
 });
 

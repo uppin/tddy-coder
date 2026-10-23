@@ -46,6 +46,9 @@ env:
   # the size.
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  # Incremental state is per-crate scratch a one-shot CI build never reuses — it only costs disk and
+  # cache size. Off for every job (Swatinem/rust-cache also defaults it off; this says so for all).
+  CARGO_INCREMENTAL: 0
 
 jobs:
   gate:
@@ -245,8 +248,8 @@ jobs:
       # binaries deleted before the next. `cargo nextest run --workspace` builds all ~1,070 test
       # binaries first — each statically linking its crate's dependency graph — and that no longer
       # fits the runner's disk (`rustc`: "No space left on device", 110 GB free at the start). A
-      # filterset does not help: nextest applies `-E` after building. The cap bounds how many test
-      # binaries exist at once; see scripts/nextest-windowed.ts.
+      # filterset does not help: nextest applies `-E` after building. Two batches, balanced by test
+      # binaries, halve the peak; see scripts/nextest-windowed.ts.
       - name: cargo nextest
         id: nextest
         # Keep going on failure so the JUnit reports still publish; the report
@@ -256,7 +259,7 @@ jobs:
         # .config/nextest.toml apply to every leg.
         run: |
           e2e="$(cat .config/rust-e2e.filterset)"
-          ./dev bun scripts/nextest-windowed.ts --max-binaries 120 -- --profile ci --locked -E "not ($e2e)"
+          ./dev bun scripts/nextest-windowed.ts --batches 2 -- --profile ci --locked -E "not ($e2e)"
 
       - name: Disk after the tests
         if: always()
