@@ -241,17 +241,21 @@ pub(crate) fn plan_status(response: &PlanStatusResponse) {
 
 /// What holding the tree against a git ref found, and whether it held.
 pub(crate) fn verify(response: &VerifyResponse) -> Result<()> {
-    let comparison = a_comparison(response);
-    for line in console::comparison(&comparison) {
-        say(&line);
-    }
-    for line in &response.source_findings {
+    let (lines, refusal) = verify_report(response);
+    for line in &lines {
         say(line);
     }
-    match console::verify_refusal(&comparison, response.source_findings.len()) {
-        Some(refusal) => Err(anyhow::anyhow!(refusal)),
-        None => Ok(()),
-    }
+    refusal.map_or(Ok(()), |refusal| Err(anyhow::anyhow!(refusal)))
+}
+
+/// [`verify`]'s output: the comparison's lines, then each finding in another language's changed
+/// files, and why the verify failed, if it did.
+fn verify_report(response: &VerifyResponse) -> (Vec<String>, Option<String>) {
+    let comparison = a_comparison(response);
+    let mut lines = console::comparison(&comparison);
+    lines.extend(response.source_findings.iter().cloned());
+    let refusal = console::verify_refusal(&comparison, response.source_findings.len());
+    (lines, refusal)
 }
 
 /// The anchor the daemon found, as the JSON document a plan carries it as.
@@ -556,5 +560,40 @@ mod tests {
                 detail: detail.to_string(),
             })),
         }
+    }
+
+    #[test]
+    fn a_held_comparison_with_a_finding_shows_the_finding_and_fails() {
+        // Given a comparison that holds, and one parse error in a TOML file it changed
+        let finding = "finding: config/app.toml:1:7: parse error: ERROR node".to_string();
+        let response = VerifyResponse {
+            before: 3,
+            after: 3,
+            source_findings: vec![finding.clone()],
+            ..VerifyResponse::default()
+        };
+
+        // When it is rendered
+        let (lines, refusal) = verify_report(&response);
+
+        // Then the finding follows the comparison's lines, and the verify fails on it
+        assert_eq!(lines.last(), Some(&finding));
+        assert_eq!(refusal, Some(console::source_findings_refusal(1)));
+    }
+
+    #[test]
+    fn a_held_comparison_with_no_finding_holds() {
+        // Given a comparison that holds and nothing found in other languages' files
+        let response = VerifyResponse {
+            before: 3,
+            after: 3,
+            ..VerifyResponse::default()
+        };
+
+        // When it is rendered
+        let (_, refusal) = verify_report(&response);
+
+        // Then nothing refuses it
+        assert_eq!(refusal, None);
     }
 }

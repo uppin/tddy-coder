@@ -174,7 +174,28 @@ pub(crate) fn plans(response: &PlansResponse) {
 /// service's judgement of its own answer, and a renderer that trusted it while printing the lists
 /// could state a verdict its own output contradicts.
 pub(crate) fn verify(response: &VerifyResponse) {
-    let comparison = Comparison {
+    let (lines, refusal) = verify_report(response);
+    for line in lines {
+        log::info!(target: crate::MAIN, "{line}");
+    }
+    if let Some(refusal) = refusal {
+        log::error!(target: crate::MAIN, "{refusal}");
+    }
+}
+
+/// [`verify`]'s output: the comparison's lines, then each finding in another language's changed
+/// files, and why the verify failed, if it did.
+fn verify_report(response: &VerifyResponse) -> (Vec<String>, Option<String>) {
+    let comparison = comparison_of(response);
+    let mut lines = console::comparison(&comparison);
+    lines.extend(response.source_findings.iter().cloned());
+    let refusal = console::verify_refusal(&comparison, response.source_findings.len());
+    (lines, refusal)
+}
+
+/// The comparison `response` carries, as the library states it.
+fn comparison_of(response: &VerifyResponse) -> Comparison {
+    Comparison {
         before: response.before as usize,
         after: response.after as usize,
         missing: response.missing.clone(),
@@ -184,15 +205,6 @@ pub(crate) fn verify(response: &VerifyResponse) {
             visibility: response.visibility_normalised as usize,
             cfg_test_gates: response.cfg_test_gates as usize,
         },
-    };
-    for line in console::comparison(&comparison) {
-        log::info!(target: crate::MAIN, "{line}");
-    }
-    for line in &response.source_findings {
-        log::info!(target: crate::MAIN, "{line}");
-    }
-    if let Some(refusal) = console::verify_refusal(&comparison, response.source_findings.len()) {
-        log::error!(target: crate::MAIN, "{refusal}");
     }
 }
 
@@ -383,5 +395,42 @@ mod tests {
 
         // Then it was
         assert!(rendered);
+    }
+
+    #[test]
+    fn a_held_comparison_with_a_finding_shows_the_finding_and_fails() {
+        // Given a comparison that holds, and one parse error in a TOML file it changed
+        let finding = "finding: config/app.toml:1:7: parse error: ERROR node".to_string();
+        let response = VerifyResponse {
+            before: 3,
+            after: 3,
+            holds: false,
+            source_findings: vec![finding.clone()],
+            ..VerifyResponse::default()
+        };
+
+        // When it is rendered
+        let (lines, refusal) = verify_report(&response);
+
+        // Then the finding follows the comparison's lines, and the verify fails on it
+        assert_eq!(lines.last(), Some(&finding));
+        assert_eq!(refusal, Some(console::source_findings_refusal(1)));
+    }
+
+    #[test]
+    fn a_held_comparison_with_no_finding_holds() {
+        // Given a comparison that holds and nothing found in other languages' files
+        let response = VerifyResponse {
+            before: 3,
+            after: 3,
+            holds: true,
+            ..VerifyResponse::default()
+        };
+
+        // When it is rendered
+        let (_, refusal) = verify_report(&response);
+
+        // Then nothing refuses it
+        assert_eq!(refusal, None);
     }
 }
