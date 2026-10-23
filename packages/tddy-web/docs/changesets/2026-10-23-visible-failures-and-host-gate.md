@@ -30,6 +30,11 @@ Cross-package entry: [2026-10-23-web-dev-livekit-and-visible-failures.md](../../
   - `SessionsDrawerScreen.tsx`: 483 lines, with `useSessionsDrawerPaneActions.ts` and
     `SessionsDrawerNotices.tsx` split out
   - `CreateSessionPane.tsx`: 484 lines, with `useCreateSessionAgentSelection.ts` split out
-- **Closed code issues:** `oversized-file-create-session-pane` (484) and
-  `oversized-file-session-runtime` (440).
+  - `ProjectsScreen.tsx`: 221 lines, with `ProjectCard.tsx` (323) split out
+  - `SessionDrawer.tsx`: 335 lines, with `SessionDrawerGroups.tsx` (253) split out
+- **Closed code issues**, re-measured at wrap with `wc -l`:
+  - `oversized-file-create-session-pane`: 484
+  - `oversized-file-session-runtime`: 440
+  - `oversized-file-session-drawer`: 335, from 567 when `#project-home` 2/7 detected it
+  - `oversized-file-sessions-drawer-screen`: 498, from 511 when `#project-home` 4/7 detected it
 - **`test:unit`** also covers `src/components/shell`.

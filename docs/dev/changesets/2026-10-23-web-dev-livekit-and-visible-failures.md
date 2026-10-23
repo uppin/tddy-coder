@@ -44,8 +44,13 @@ Code issues closed in `tddy-web`, measured with `wc -l` at wrap:
   `SessionChildRuntime.tsx` 131, `sessionRuntimeProps.ts` 58, `useSessionPaneFullscreen.ts` 76 and
   `useAgentTerminalFocus.ts` 80.
 
-`SessionsDrawerScreen.tsx` went from 582 lines mid-change to 483. `useSessionsDrawerPaneActions.ts`
-(134) and `SessionsDrawerNotices.tsx` (70) were split out of it.
+- `oversized-file-session-drawer`: 335 lines, from 567 at detection. The group rows moved to
+  `SessionDrawerGroups.tsx`.
+- `oversized-file-sessions-drawer-screen`: 498 lines, from 511 at detection. It was 582 mid-change,
+  before `useSessionsDrawerPaneActions.ts` (134) and `SessionsDrawerNotices.tsx` (70) were split out.
+
+`ProjectsScreen.tsx` is 221 lines after `ProjectCard.tsx` (323) was split out of it, which keeps it
+under budget alongside `#project-home`'s home-agent picker.
 
 Deferred to the backlog, all developer-approved:
 - `2026-10-23-web-dev-livekit-lan-media`
