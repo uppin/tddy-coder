@@ -83,12 +83,14 @@ fn minimal_service_with_manager(
 }
 
 /// Executable stub that dumps both its argv and `TDDY_SOCKET` (for asserting a resumed managed
-/// session is re-wired with the orchestration prompt and per-session socket).
+/// session is re-wired with the orchestration prompt and per-session socket), then stays alive
+/// like an agent waiting for input, so a started home session is still running when it is ensured
+/// again.
 fn write_argv_and_env_script(dir: &std::path::Path) -> std::path::PathBuf {
     let script_path = dir.join("stub_claude_argv_env.sh");
     std::fs::write(
         &script_path,
-        "#!/bin/sh\necho \"ARGV: $@\"\necho \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\n",
+        "#!/bin/sh\necho \"ARGV: $@\"\necho \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\nexec cat >/dev/null\n",
     )
     .unwrap();
     make_executable(&script_path);
@@ -168,8 +170,10 @@ impl World {
             .unwrap_or(0)
     }
 
-    /// Mark a started home session stopped, as the daemon leaves it after its process exits.
-    fn stop(&self, session_id: &str) {
+    /// Stop a started home session: end its agent's terminal and record it stopped, as the daemon
+    /// leaves it after its process exits.
+    async fn stop(&self, session_id: &str) {
+        self.manager.stop_session(session_id).await;
         let dir = self.data.path().join("sessions").join(session_id);
         let mut meta = read_session_metadata(&dir).unwrap();
         meta.status = "inactive".to_string();
@@ -283,7 +287,7 @@ async fn ensuring_a_stopped_home_session_fast_forwards_and_resumes_the_same_conv
     // Given a home session that has stopped, and a main branch that moved on since
     let world = a_daemon_with_a_project(Some(HOME_AGENT));
     let first = world.ensure().await.expect("first ensure").session.unwrap();
-    world.stop(&first.session_id);
+    world.stop(&first.session_id).await;
     let moved_to = world.advance_origin_main();
 
     // When
