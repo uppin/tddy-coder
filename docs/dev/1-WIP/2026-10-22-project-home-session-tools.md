@@ -157,6 +157,24 @@ session; unit tests for the resolver's rules.
 ## Red-phase notes
 
 - Verified failing (2026-10-23): 7/7 `project_home_session_tools_acceptance` (tools not in the catalog / no role gate), 4/5 `session_target` unit tests (`resolving_an_unknown_session_is_not_found` passes already — the stub's only answer — and stays as a guard).
+
+## Green status
+
+- Local, scoped builds (developer instruction 2026-10-23: build only, Rust tests run in CI): `./dev cargo check -p tddy-worktree-service -p tddy-tool-engine -p tddy-daemon-rpc --all-targets` exits 0 with no warnings. Clippy per crate: see the result line in the commit message.
+- Tests: deferred to CI (`project_home_session_tools_acceptance` 7, `session_target` unit tests 5).
+- Implemented:
+  - `tddy_worktree_service::session_target::resolve_session_target`.
+  - `tddy_tool_engine::project_home_tools` (new): the four tool defs, the executor, the target and path refusals. A refused path is an `is_error` result naming "outside the worktree"; a refused target names "another project" or the other `SessionTargetError` text.
+  - `tddy_tool_engine::project_home_diff` (new): the diff over a temporary `GIT_INDEX_FILE` (`read-tree HEAD`, `add -A`, `diff --cached <base>`), so untracked files appear and the worktree's index is never written.
+  - `tddy_daemon_rpc::exec_tool::project_home` (new): the role gate (`PermissionDenied` unless the caller's `.session.yaml` role is `project-home`), the `ProjectHomePort` over the session store and the workspace start, the orchestrator tag written to the new changeset, and the call record.
+  - `read_only::is_project_home_allowed_tool` adds the four names to the project-home allow-list. `is_read_only_tool` and `read_only_catalog` are unchanged. `role_guard` uses the new check. `ports.rs` gains only `?` at the two call sites, no new branch in `stream_execute_tool`.
+- Deviations from the Draft PR contract:
+  - `ProjectHomePort` methods are `async` (`async_trait`), since the daemon reads the store and starts a session on disk.
+  - A third port method, `target_records`, was added. The resolver needs every session's project and worktree, which `list_sessions` (the caller's project only) does not give.
+- Open limitations, a planned-scope deferral for a human decision:
+  - `StartProjectSession` serves `session_type = "workspace"` only; other types return an error. The full start path lives on `DaemonSessionHost`. A `LaunchSessions` handle captured in `ExecToolRpcHandler::from_host` is a snapshot taken before `with_rpc_families`, so starts that need `rpc_families` (session rooms, peer stack parents) would refuse. Options: a late-bound family handle, or a host-free start port in the lifecycle crate.
+  - `ListProjectSessions` reports the `.session.yaml` status as `agent_status`, and `pending_elicitation` is always `false` because the listing does not carry it.
+  - `project_home_tool_defs()` is not wired into `ListExecTools`, so the home agent cannot discover the four tools yet.
 - The acceptance world uses `workspace` sessions and marks one `project-home` in its metadata, so these tests need node 4's role field and `ExecuteTool` role path but not its ensure behaviour; node 4's read-only filter must let these four names through for the role.
 - `StartProjectSession` from a daemon-hosted session goes through the daemon's start path (not the `TDDY_SOCKET` relay `spawn_conversation` uses), with `orchestrator_session_id` = the home session.
 
@@ -184,10 +202,10 @@ session; unit tests for the resolver's rules.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code (start deferred to workspace sessions; see Green status)
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
+- [ ] Run scoped tests for touched packages; full-workspace result from CI (tests deferred to CI)
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

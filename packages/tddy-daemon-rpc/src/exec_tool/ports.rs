@@ -82,9 +82,8 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
         )?;
         reject_refused_local_exec_tool(&sessions_base, &req)?;
         let response = self
-            .local_exec_tools
-            .run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
-            .await;
+            .run_locally(&req_conn, &sessions_base, &worktree_root)
+            .await?;
         Ok(Response::new(wire_same::<
             ConnExecuteToolResponse,
             ExecuteToolResponse,
@@ -159,9 +158,8 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                     &req_conn,
                 )?;
                 reject_refused_local_exec_tool(&sessions_base, &req)?;
-                self.local_exec_tools
-                    .run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
-                    .await
+                self.run_locally(&req_conn, &sessions_base, &worktree_root)
+                    .await?
             }
         };
 

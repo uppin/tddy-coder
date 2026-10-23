@@ -71,9 +71,30 @@ pub fn resolve_session_target(
     home: &HomeCaller,
     target_session_id: &str,
 ) -> Result<SessionTarget, SessionTargetError> {
-    // TODO(home-session-tools): implement
-    let _ = (records, home);
-    Err(SessionTargetError::NotFound(target_session_id.to_string()))
+    if target_session_id == home.session_id {
+        return Err(SessionTargetError::IsHome);
+    }
+    let record = records
+        .iter()
+        .find(|r| r.session_id == target_session_id)
+        .ok_or_else(|| SessionTargetError::NotFound(target_session_id.to_string()))?;
+    if record.project_id != home.project_id {
+        return Err(SessionTargetError::OtherProject(
+            target_session_id.to_string(),
+        ));
+    }
+    let worktree = record
+        .worktree
+        .clone()
+        .ok_or_else(|| SessionTargetError::NoWorktree(target_session_id.to_string()))?;
+    Ok(SessionTarget {
+        session_id: record.session_id.clone(),
+        project_id: record.project_id.clone(),
+        worktree,
+        branch: record.branch.clone(),
+        base_ref: record.base_ref.clone(),
+        is_active: record.is_active,
+    })
 }
 
 #[cfg(test)]

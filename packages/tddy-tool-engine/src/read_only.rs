@@ -16,6 +16,13 @@ pub fn is_read_only_tool(name: &str) -> bool {
     READ_ONLY_TOOLS.contains(&name)
 }
 
+/// Whether a project-home session may run `name`: a read-only exec tool, or one of the four
+/// project-home session tools (`#project-home` 5/7). [`is_read_only_tool`] itself is unchanged, so
+/// the read-only catalog and every other answer it gives stay as they were.
+pub fn is_project_home_allowed_tool(name: &str) -> bool {
+    is_read_only_tool(name) || crate::project_home_tools::is_project_home_tool(name)
+}
+
 /// The subset of [`crate::tool_catalog`] a project-home session is offered.
 pub fn read_only_catalog() -> Vec<ToolDef> {
     crate::tool_catalog()

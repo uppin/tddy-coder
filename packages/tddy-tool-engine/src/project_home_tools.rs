@@ -10,15 +10,42 @@
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
+//! The role gate is the daemon's: it refuses these names for any session that is not a
+//! project-home one before anything here runs.
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session-tools.md.
 
+use std::path::{Component, Path};
+
+use async_trait::async_trait;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use tddy_worktree_service::session_target::{
+    resolve_session_target, HomeCaller, SessionTarget, TargetRecord,
+};
+use tddy_worktree_service::worktree_files::{
+    list_worktree_directory_entries, read_worktree_file_utf8,
+};
+
 use crate::catalog::ToolDef;
+use crate::project_home_diff::worktree_diff;
+use crate::ToolOutcome;
 
 pub const LIST_PROJECT_SESSIONS: &str = "ListProjectSessions";
 pub const START_PROJECT_SESSION: &str = "StartProjectSession";
 pub const READ_SESSION_WORKTREE: &str = "ReadSessionWorktree";
 pub const DIFF_SESSION_WORKTREE: &str = "DiffSessionWorktree";
+
+/// Whether `name` is one of the four project-home tools.
+pub fn is_project_home_tool(name: &str) -> bool {
+    matches!(
+        name,
+        LIST_PROJECT_SESSIONS
+            | START_PROJECT_SESSION
+            | READ_SESSION_WORKTREE
+            | DIFF_SESSION_WORKTREE
+    )
+}
 
 /// One session as `ListProjectSessions` reports it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -47,24 +74,262 @@ pub struct StartProjectSessionArgs {
 }
 
 /// What the tools need from the daemon.
+///
+/// Async because the daemon's answers read the session store and start a session on disk. The
+/// target records are every session of every project: the resolver, not the port, decides which
+/// project a target may be in.
+#[async_trait]
 pub trait ProjectHomePort: Send + Sync {
     /// Every session of `project_id` except `home_session_id`.
-    fn list_sessions(
+    async fn list_sessions(
         &self,
         project_id: &str,
         home_session_id: &str,
     ) -> anyhow::Result<Vec<ListedSession>>;
+
     /// Start a session in `project_id` with `home_session_id` as its orchestrator; its id.
-    fn start_session(
+    async fn start_session(
         &self,
         project_id: &str,
         home_session_id: &str,
         args: StartProjectSessionArgs,
     ) -> anyhow::Result<String>;
+
+    /// Every session on this daemon, as [`tddy_worktree_service::session_target`] resolves them.
+    async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>>;
 }
 
 /// The four tools' definitions, as advertised to a project-home session.
 pub fn project_home_tool_defs() -> Vec<ToolDef> {
-    // TODO(home-session-tools): implement
-    Vec::new()
+    vec![
+        tool_def(
+            LIST_PROJECT_SESSIONS,
+            "List the other sessions of this project with their worktree, activity and status.",
+            json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        ),
+        tool_def(
+            START_PROJECT_SESSION,
+            "Start a session in this project. It is recorded as started by this project-home session.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "session_type": { "type": "string" },
+                    "prompt": { "type": "string" },
+                    "agent": { "type": "string" },
+                    "new_branch_name": { "type": "string" }
+                },
+                "required": ["session_type"]
+            }),
+        ),
+        tool_def(
+            READ_SESSION_WORKTREE,
+            "Read a file, or list a directory, in another session's worktree of this project.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "path": { "type": "string", "description": "Relative to the worktree root; empty for the root." }
+                },
+                "required": ["session_id"]
+            }),
+        ),
+        tool_def(
+            DIFF_SESSION_WORKTREE,
+            "Diff another session's worktree of this project against its base, including uncommitted and untracked files.",
+            json!({
+                "type": "object",
+                "properties": { "session_id": { "type": "string" } },
+                "required": ["session_id"]
+            }),
+        ),
+    ]
+}
+
+fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
+    ToolDef {
+        name: name.to_string(),
+        description: description.to_string(),
+        input_schema_json: schema.to_string(),
+    }
+}
+
+/// Run one of the four project-home tools for `home`.
+///
+/// A target or path refusal, and a failure of the port, come back as an `is_error` outcome whose
+/// message names what was refused. The role refusal is not here: it is the daemon's, and happens
+/// before this is called.
+pub async fn execute_project_home_tool(
+    port: &dyn ProjectHomePort,
+    home: &HomeCaller,
+    tool_name: &str,
+    args_json: &str,
+) -> ToolOutcome {
+    let args: Value = match serde_json::from_str(args_json) {
+        Ok(v) => v,
+        Err(e) => return ToolOutcome::err(format!("invalid args_json: {e}")),
+    };
+    match tool_name {
+        LIST_PROJECT_SESSIONS => list_project_sessions(port, home).await,
+        START_PROJECT_SESSION => start_project_session(port, home, args).await,
+        READ_SESSION_WORKTREE => read_session_worktree(port, home, args).await,
+        DIFF_SESSION_WORKTREE => diff_session_worktree(port, home, args).await,
+        other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
+    }
+}
+
+async fn list_project_sessions(port: &dyn ProjectHomePort, home: &HomeCaller) -> ToolOutcome {
+    match port.list_sessions(&home.project_id, &home.session_id).await {
+        Ok(sessions) => ToolOutcome::ok(json!({ "sessions": sessions }).to_string()),
+        Err(e) => ToolOutcome::err(format!("{LIST_PROJECT_SESSIONS}: {e:#}")),
+    }
+}
+
+async fn start_project_session(
+    port: &dyn ProjectHomePort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args: StartProjectSessionArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return ToolOutcome::err(format!("{START_PROJECT_SESSION}: invalid arguments: {e}"))
+        }
+    };
+    match port
+        .start_session(&home.project_id, &home.session_id, args)
+        .await
+    {
+        Ok(session_id) => ToolOutcome::ok(json!({ "session_id": session_id }).to_string()),
+        Err(e) => ToolOutcome::err(format!("{START_PROJECT_SESSION}: {e:#}")),
+    }
+}
+
+/// The arguments of the two tools that name a target session.
+#[derive(Deserialize)]
+struct TargetArgs {
+    session_id: String,
+    #[serde(default)]
+    path: String,
+}
+
+fn parse_target_args(tool_name: &str, args: Value) -> Result<TargetArgs, ToolOutcome> {
+    serde_json::from_value(args)
+        .map_err(|e| ToolOutcome::err(format!("{tool_name}: invalid arguments: {e}")))
+}
+
+/// Resolve the target named in `session_id` for `home`, or the refusal as an outcome.
+async fn resolve_target(
+    port: &dyn ProjectHomePort,
+    home: &HomeCaller,
+    session_id: &str,
+) -> Result<SessionTarget, ToolOutcome> {
+    let records = port
+        .target_records()
+        .await
+        .map_err(|e| ToolOutcome::err(format!("cannot read the daemon's sessions: {e:#}")))?;
+    resolve_session_target(&records, home, session_id).map_err(|e| ToolOutcome::err(e.to_string()))
+}
+
+async fn read_session_worktree(
+    port: &dyn ProjectHomePort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args = match parse_target_args(READ_SESSION_WORKTREE, args) {
+        Ok(a) => a,
+        Err(outcome) => return outcome,
+    };
+    let target = match resolve_target(port, home, &args.session_id).await {
+        Ok(t) => t,
+        Err(outcome) => return outcome,
+    };
+    let rel = match contained_rel_path(&target.worktree, &args.path) {
+        Ok(rel) => rel,
+        Err(message) => return ToolOutcome::err(message),
+    };
+    let root = target.worktree;
+    let read = tokio::task::spawn_blocking(move || read_or_list(&root, &rel)).await;
+    match read {
+        Ok(Ok(value)) => ToolOutcome::ok(value.to_string()),
+        Ok(Err(message)) => ToolOutcome::err(format!("{READ_SESSION_WORKTREE}: {message}")),
+        Err(e) => ToolOutcome::err(format!("{READ_SESSION_WORKTREE}: read task failed: {e}")),
+    }
+}
+
+/// A directory listing when `rel` is a directory, otherwise the file's text. Both go through the
+/// worktree reader that the Code pane uses, so a git-ignored or `.git` path is not readable here.
+fn read_or_list(root: &Path, rel: &str) -> Result<Value, String> {
+    if rel.is_empty() || root.join(rel).is_dir() {
+        let entries =
+            list_worktree_directory_entries(root, rel).map_err(|s| s.message().to_string())?;
+        return Ok(
+            json!({ "path": rel, "entries": entries.iter().map(|e| json!({
+            "name": e.name, "is_dir": e.is_dir, "size_bytes": e.size_bytes
+        })).collect::<Vec<_>>() }),
+        );
+    }
+    let file = read_worktree_file_utf8(root, rel).map_err(|s| s.message().to_string())?;
+    Ok(json!({
+        "path": rel,
+        "content": file.content_utf8,
+        "truncated": file.truncated,
+        "byte_size": file.byte_size,
+    }))
+}
+
+/// `path` as a worktree-relative path with no `.` segments, or the refusal when it leaves the
+/// worktree: absolute, climbing above the root, or resolving through a symlink to outside it.
+fn contained_rel_path(worktree: &Path, path: &str) -> Result<String, String> {
+    let outside = || format!("path {path:?} is outside the worktree");
+    let as_path = Path::new(path);
+    if as_path.is_absolute() {
+        return Err(outside());
+    }
+    let mut segments: Vec<String> = Vec::new();
+    for component in as_path.components() {
+        match component {
+            Component::Normal(segment) => segments.push(segment.to_string_lossy().into_owned()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if segments.pop().is_none() {
+                    return Err(outside());
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => return Err(outside()),
+        }
+    }
+    let rel = segments.join("/");
+    if let (Ok(root), Ok(full)) = (worktree.canonicalize(), worktree.join(&rel).canonicalize()) {
+        if !full.starts_with(&root) {
+            return Err(outside());
+        }
+    }
+    Ok(rel)
+}
+
+async fn diff_session_worktree(
+    port: &dyn ProjectHomePort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args = match parse_target_args(DIFF_SESSION_WORKTREE, args) {
+        Ok(a) => a,
+        Err(outcome) => return outcome,
+    };
+    let target = match resolve_target(port, home, &args.session_id).await {
+        Ok(t) => t,
+        Err(outcome) => return outcome,
+    };
+    let base_ref = if target.base_ref.is_empty() {
+        "HEAD".to_string()
+    } else {
+        target.base_ref.clone()
+    };
+    match worktree_diff(&target.worktree, &base_ref).await {
+        Ok(diff) => ToolOutcome::ok(
+            json!({ "session_id": target.session_id, "base_ref": base_ref, "diff": diff })
+                .to_string(),
+        ),
+        Err(e) => ToolOutcome::err(format!("{DIFF_SESSION_WORKTREE}: {e}")),
+    }
 }
