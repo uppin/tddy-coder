@@ -20,10 +20,8 @@ use tddy_index_daemon::proto::code_index::{CodeIndexService, VerifyRequest, Veri
 use tddy_index_daemon::{CodeIndexPorts, CodeIndexServiceImpl};
 use tddy_lsp::LspRegistry;
 use tddy_task::TaskRegistry;
-use tddy_zed_extensions::{load_installed, testkit, ExtensionsDir};
-
-const APP: &str = "config/app.toml";
-const APP_TOML: &str = "[server]\nhost = \"localhost\"\nport = 8080\n";
+use tddy_zed_extensions::testkit::{self, APP, APP_TOML};
+use tddy_zed_extensions::{ExtensionsDir, InstalledExtensions};
 
 /// A tddy data dir with `demo-toml` installed, `fake-ls` declared as its language's server and
 /// `settings.json` running the fake server with `--diagnoses BROKEN`.
@@ -55,17 +53,16 @@ fn a_committed_worktree_holding_the_app_config() -> tempfile::TempDir {
 
 /// The service a host builds over the extensions installed under `data`.
 fn a_service_over(data: &Path) -> CodeIndexServiceImpl {
-    let loaded = load_installed(&ExtensionsDir::under_data_dir(data)).expect("the extensions load");
+    let mut supports =
+        SupportRegistry::with_builtin_rust(RustSupport::launching(env!("CARGO_BIN_EXE_fake_lsp")));
+    let loaded = supports
+        .register_installed(&ExtensionsDir::under_data_dir(data))
+        .expect("the extensions load");
     assert!(
         loaded.failures.is_empty(),
         "a grammar failed to load: {:?}",
         loaded.failures
     );
-    let mut supports =
-        SupportRegistry::with_builtin_rust(RustSupport::launching(env!("CARGO_BIN_EXE_fake_lsp")));
-    for support in &loaded.supports {
-        supports.register(Box::new(support.clone()));
-    }
     let servers = LspRegistry::new(
         supports.allow_list(),
         TaskRegistry::new(),

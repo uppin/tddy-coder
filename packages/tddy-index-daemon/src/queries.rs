@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use tddy_code_restructuring::item_anchor;
 use tddy_code_restructuring::plan_store::{OpStaleness, PlanStore};
 use tddy_code_restructuring::runner::{self, Command, Options};
-use tddy_code_restructuring::{Anchor, LanguageSupport};
+use tddy_code_restructuring::Anchor;
 use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
 

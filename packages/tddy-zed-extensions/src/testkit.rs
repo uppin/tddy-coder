@@ -9,6 +9,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The workspace file a `demo-toml` suite changes, relative to the workspace root.
+pub const APP: &str = "config/app.toml";
+
+/// [`APP`]'s committed text: three tables, `port = 8080` on line 3. The same text this crate's own
+/// suites hold in `tests/outline_support`.
+pub const APP_TOML: &str = "[server]\nhost = \"localhost\"\nport = 8080\n\n[database]\nurl = \"postgres://localhost/app\"\npool = 4\n\n[logging]\nlevel = \"info\"\n";
+
 /// The extension `demo-toml` installs under, inside a data dir.
 const DEMO_TOML: &str = "extensions/installed/demo-toml";
 

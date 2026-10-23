@@ -10,10 +10,7 @@ use std::path::Path;
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use tddy_zed_extensions::testkit;
-
-const APP: &str = "config/app.toml";
-const APP_TOML: &str = "[server]\nhost = \"localhost\"\nport = 8080\n";
+use tddy_zed_extensions::testkit::{self, APP, APP_TOML};
 
 /// A tddy data dir with `demo-toml` installed: the fixture extension plus the vendored grammar.
 fn a_data_dir_with_demo_toml_installed() -> tempfile::TempDir {
