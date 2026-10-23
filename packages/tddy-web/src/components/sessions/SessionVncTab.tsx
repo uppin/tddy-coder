@@ -12,6 +12,7 @@ import { VncPassphraseDialog } from "./VncPassphraseDialog";
 import { VncOverlay } from "./VncOverlay";
 import { applyVncTabAction, initialVncTabState } from "./vncTabState";
 import { rpcFailureText } from "../../rpc/rpcFailure";
+import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
 import { InlineError } from "../ui/inline-error";
 
 // ---------------------------------------------------------------------------
@@ -84,8 +85,8 @@ export function SessionVncTab({
   // Why the list, the Add form, or a row's Start / Remove last failed — each shown beside it.
   const [listError, setListError] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
-  const [startErrors, setStartErrors] = useState<Record<string, string>>({});
-  const [removeErrors, setRemoveErrors] = useState<Record<string, string>>({});
+  const startFailures = useKeyedActionFailure();
+  const removeFailures = useKeyedActionFailure();
 
   useEffect(() => {
     onListVncTargets()
@@ -128,12 +129,6 @@ export function SessionVncTab({
     setPassword("");
   };
 
-  const clearRowError = (held: Record<string, string>, targetId: string) => {
-    const next = { ...held };
-    delete next[targetId];
-    return next;
-  };
-
   const handlePassphraseConfirm = (passphrase: string) => {
     setPassphraseOpen(false);
     if (!pendingAdd) return;
@@ -152,7 +147,7 @@ export function SessionVncTab({
   };
 
   const handleStart = (targetId: string) => {
-    setStartErrors((held) => clearRowError(held, targetId));
+    startFailures.clear(targetId);
     dispatch({ type: "set_stream_status", targetId, status: "starting" });
     onStartVncStream(targetId)
       .then((result) => {
@@ -162,7 +157,7 @@ export function SessionVncTab({
       })
       .catch((e: unknown) => {
         dispatch({ type: "set_stream_status", targetId, status: "error" });
-        setStartErrors((held) => ({ ...held, [targetId]: rpcFailureText(e) }));
+        startFailures.report(targetId, e);
       });
   };
 
@@ -172,15 +167,17 @@ export function SessionVncTab({
     setActiveStreamResult(null);
     if (targetId) {
       dispatch({ type: "set_stream_status", targetId, status: "stopped" });
-      onStopVncStream(targetId).catch(() => {/* ignore */});
+      // The overlay is already gone and the row reads "stopped": there is no surface left to say a
+      // failed stop on, and the daemon ends an unwatched stream on its own.
+      onStopVncStream(targetId).catch(() => undefined);
     }
   };
 
   const handleRemove = (targetId: string) => {
-    setRemoveErrors((held) => clearRowError(held, targetId));
+    removeFailures.clear(targetId);
     onRemoveVncTarget(targetId)
       .then(() => dispatch({ type: "remove_target", targetId }))
-      .catch((e: unknown) => setRemoveErrors((held) => ({ ...held, [targetId]: rpcFailureText(e) })));
+      .catch((e: unknown) => removeFailures.report(targetId, e));
   };
 
   return (
@@ -218,12 +215,12 @@ export function SessionVncTab({
               </div>
               <InlineError
                 testId={`sessions-vnc-start-error-${t.id}`}
-                message={startErrors[t.id]}
+                message={startFailures.errors[t.id]}
                 className="text-xs px-1"
               />
               <InlineError
                 testId={`sessions-vnc-remove-error-${t.id}`}
-                message={removeErrors[t.id]}
+                message={removeFailures.errors[t.id]}
                 className="text-xs px-1"
               />
             </div>

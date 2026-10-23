@@ -27,10 +27,13 @@
 # Environment variables:
 #   WEB_HOST        — Address Vite listens on (default: 127.0.0.1). Use 0.0.0.0 for LAN. Separate from
 #                     the URL you open in the browser — set VITE_URL for that.
-#   VITE_PORT       — Port for Vite dev server. Default: ephemeral (a free port in 49152-65535,
-#                     printed at startup), unless VITE_URL names one. A pinned port already in use
-#                     is an error — ./web-dev never kills what it did not start.
-#   DAEMON_PORT     — Port tddy-daemon listens on (written into its temp config). Default: ephemeral.
+#   VITE_PORT       — Port for Vite dev server. Default: this checkout's own port in 49152-65535,
+#                     derived from its path so the browser origin (and the session it keeps) survives
+#                     a restart; a random free one, with a notice, while that is held. Printed at
+#                     startup. VITE_URL naming a port pins it. A pinned port already in use is an
+#                     error — ./web-dev never kills what it did not start.
+#   DAEMON_PORT     — Port tddy-daemon listens on (written into its temp config). Default: this
+#                     checkout's own port, chosen the same way.
 #   VITE_URL        — **Only env you need for “where is the app?”** Browser-facing origin (OAuth,
 #                     import.meta.env.VITE_URL). Default: http://127.0.0.1:<VITE_PORT>. A port in it
 #                     pins VITE_PORT — set one when a real GitHub OAuth app needs a fixed redirect. LAN example:
@@ -96,7 +99,9 @@ stop_children() {
     [ "$alive" = "true" ] || return 0
     sleep 1
   done
-  for pid in "${pids[@]}"; do kill -KILL -- "-$pid" 2>/dev/null || true; done
+  # Only what is still alive: a pid that exited during the grace period may since have been handed
+  # to another process.
+  for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null && kill -KILL -- "-$pid" 2>/dev/null || true; done
 }
 
 # Runs on every exit — normal, Ctrl+C and error alike — so neither the processes nor the LiveKit
@@ -243,7 +248,9 @@ if [ ! -x "$DAEMON_BIN" ]; then
 fi
 
 # After the build (a failed build starts nothing) and before the daemon, which reads the
-# LIVEKIT_* overrides this exports. on_exit removes the container again.
+# LIVEKIT_* overrides this exports. on_exit removes the container again. The daemon and Vite ports
+# are chosen but not yet bound, so the container's port block must be kept off them explicitly.
+DEV_LIVEKIT_AVOID_PORTS="${DAEMON_PORT} ${VITE_PORT}"
 dev_livekit_up
 [ -n "$DEV_LIVEKIT_CONTAINER" ] && dev_run_record_container "$RUN_RECORD" "$DEV_LIVEKIT_CONTAINER"
 echo "=== LiveKit: ${LIVEKIT_URL:-${LIVEKIT_PUBLIC_URL:-}} ==="
@@ -260,23 +267,9 @@ mkdir -p tmp/buildroot/disks tmp/buildroot/dl
 daemon_pid=$!
 dev_run_record_group "$RUN_RECORD" "$daemon_pid"
 
-# Wait for daemon to be ready (HTTP 200 on /api/config, verified twice to avoid race)
-# nix + daemon can take 10–15s on first run; allow 90s
-daemon_ready=false
-for i in $(seq 1 180); do
-  code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/api/config" 2>/dev/null || echo "000")
-  if [ "$code" = "200" ]; then
-    sleep 1
-    code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 5 "http://127.0.0.1:${DAEMON_PORT}/api/config" 2>/dev/null || echo "000")
-    if [ "$code" = "200" ]; then
-      daemon_ready=true
-      break
-    fi
-  fi
-  sleep 0.5
-done
-if [ "$daemon_ready" != "true" ]; then
-  echo "Error: daemon did not respond with HTTP 200 on http://127.0.0.1:${DAEMON_PORT}/api/config within 90s." >&2
+# Wait for the daemon to answer HTTP 200 on /api/config. nix + daemon can take 10–15s on a first
+# run, so allow 90s — but stop the moment the daemon exits instead of waiting that out.
+if ! dev_wait_http_ready "http://127.0.0.1:${DAEMON_PORT}/api/config" "$daemon_pid" 90 tddy-daemon; then
   echo "Check tmp/logs/daemon for errors." >&2
   exit 1
 fi

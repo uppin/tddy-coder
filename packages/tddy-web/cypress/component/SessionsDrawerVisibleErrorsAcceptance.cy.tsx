@@ -26,6 +26,7 @@ import {
   TerminalSessionService,
 } from "../../src/gen/terminal_session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { REFRESH_INTERVAL_MS } from "../../src/components/sessions/sessionManager";
 import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { TerminalControlOverlay } from "../../src/components/sessions/TerminalControlOverlay";
@@ -111,6 +112,7 @@ describe("the session list", () => {
 
   it("keeps the last good list beside the error when a later poll fails", () => {
     // Given a list that answers once, then fails
+    cy.clock(Date.now(), ["setInterval", "clearInterval"]);
     let calls = 0;
     const backend = aSessionServiceBackend({ sessions: [DORMANT] }).onUnary(
       SessionService.method.listSessions,
@@ -121,8 +123,11 @@ describe("the session list", () => {
       },
     );
 
-    // When
     mountDrawer(backend);
+    sessionsDrawerPage.drawerItem(DORMANT.sessionId).should("exist");
+
+    // When the next poll runs
+    cy.tick(REFRESH_INTERVAL_MS);
 
     // Then
     errors.listLoadError().should("contain.text", "daemon is restarting");
@@ -131,6 +136,7 @@ describe("the session list", () => {
 
   it("clears the list error once a later poll succeeds", () => {
     // Given a list that fails once, then answers
+    cy.clock(Date.now(), ["setInterval", "clearInterval"]);
     let calls = 0;
     const backend = aSessionServiceBackend({ sessions: [DORMANT] }).onUnary(
       SessionService.method.listSessions,
@@ -143,7 +149,8 @@ describe("the session list", () => {
     mountDrawer(backend);
     errors.listLoadError().should("contain.text", "daemon is busy");
 
-    // When the next poll runs (every 2s)
+    // When the next poll runs
+    cy.tick(REFRESH_INTERVAL_MS);
 
     // Then
     sessionsDrawerPage.drawerItem(DORMANT.sessionId).should("exist");
@@ -232,8 +239,8 @@ describe("the selected session's actions", () => {
     // When
     sessionsDrawerPage.inspectorResumeBtn(DORMANT.sessionId).click();
 
-    // Then
-    errors.paneError().should("contain.text", "the session's worktree was removed");
+    // Then — the daemon's words, without the transport's `[code]`
+    errors.paneError().should("have.text", "the session's worktree was removed");
   });
 
   it("shows the daemon's reason when a delete fails", () => {
@@ -250,8 +257,8 @@ describe("the selected session's actions", () => {
     sessionsDrawerPage.inspectorDeleteBtn(DORMANT.sessionId).click();
     sessionsDrawerPage.inspectorDeleteConfirm(DORMANT.sessionId).click();
 
-    // Then
-    errors.paneError().should("contain.text", "only the session's owner may delete it");
+    // Then — the daemon's words, without the transport's `[code]`
+    errors.paneError().should("have.text", "Permission denied — only the session's owner may delete it");
   });
 });
 
@@ -281,29 +288,24 @@ describe("bulk delete", () => {
     errors.bulkDeleteError(SESSION_A.sessionId).should("not.exist");
   });
 
-  it("names a failed row and still deletes the rows after it", () => {
-    // Given a row on a host no wire reaches: its delete falls back to the selected daemon, which
-    // does not own that session
+  it("names a row whose host no wire reaches, sends its delete nowhere, and still deletes the rows after it", () => {
+    // Given a row on a host no wire reaches, ticked before a row on the selected host
+    const deleteRequests: string[] = [];
     const backend = aSessionServiceBackend({ sessions: [SESSION_A, DORMANT_ELSEWHERE] }).onUnary(
       SessionService.method.deleteSession,
       (req) => {
-        if (req.sessionId === DORMANT_ELSEWHERE.sessionId) {
-          throw new ConnectError("no such session on this daemon", Code.NotFound);
-        }
-        backend.deletedSessionIds.push(req.sessionId);
+        deleteRequests.push(req.sessionId);
         return create(DeleteSessionResponseSchema, {});
       },
     );
     mountDrawer(backend);
 
-    // When the failing row is ticked first
+    // When
     errors.bulkDelete([DORMANT_ELSEWHERE.sessionId, SESSION_A.sessionId]);
 
-    // Then
-    errors.bulkDeleteError(DORMANT_ELSEWHERE.sessionId).should("contain.text", "no such session on this daemon");
-    cy.wrap(backend).should((b: SessionServiceBackend) => {
-      expect(b.deletedSessionIds).to.deep.equal([SESSION_A.sessionId]);
-    });
+    // Then the unreachable row says why, and only the reachable row's delete was sent
+    errors.bulkDeleteError(DORMANT_ELSEWHERE.sessionId).should("contain.text", `Not connected to ${UNREACHABLE_HOST}`);
+    cy.wrap(deleteRequests).should("deep.equal", [SESSION_A.sessionId]);
   });
 
   it("does not report a row's failure as the selected session's", () => {
@@ -365,8 +367,8 @@ describe("a spawned child conversation", () => {
     // When
     tabs.childTab(CHILD.sessionId).click();
 
-    // Then
-    errors.childAttachError(CHILD.sessionId).should("contain.text", "child worktree is locked");
+    // Then — the daemon's words, without the transport's `[code]`
+    errors.childAttachError(CHILD.sessionId).should("have.text", "child worktree is locked");
   });
 
   it("says the host is not connected when there is none to attach the child on", () => {
@@ -487,10 +489,11 @@ describe("claiming the terminal", () => {
 
 const TERMINAL_SESSION = "visible-errors-terminal-0000-0000-0000-000000000000";
 
-/** A terminal whose input the daemon refuses while `refusing()` says so. */
-function aTerminalBackend(refusing: () => boolean) {
+/** A terminal whose input the daemon refuses while `refusing()` says so; `sends` counts the inputs. */
+function aTerminalBackend(refusing: () => boolean, sends = { count: 0 }) {
   return anInMemoryRpcBackend()
     .onUnary(TerminalSessionService.method.sendTerminalInput, () => {
+      sends.count += 1;
       if (refusing()) throw new ConnectError("terminal controlled by another screen", Code.FailedPrecondition);
       return create(SendTerminalInputResponseSchema, {});
     })
@@ -522,12 +525,14 @@ function mountTerminal(backend: ReturnType<typeof anInMemoryRpcBackend>) {
 describe("typing into the terminal", () => {
   it("shows one indicator when input is not delivered, however many keys were refused", () => {
     // Given
-    mountTerminal(aTerminalBackend(() => true));
+    const sends = { count: 0 };
+    mountTerminal(aTerminalBackend(() => true, sends));
 
     // When
     errors.typeIntoTerminal("abc");
 
-    // Then
+    // Then every key was sent and refused, and they share one indicator
+    cy.wrap(sends).its("count").should("be.gte", 3);
     errors.inputError()
       .should("have.length", 1)
       .and("contain.text", "Input not delivered")

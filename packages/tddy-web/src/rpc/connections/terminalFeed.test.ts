@@ -450,4 +450,32 @@ describe("a daemon-served terminal feed", () => {
     // Then the pane was told the daemon's reason, then that input flows again
     expect(deliveries).toEqual(["terminal controlled by another screen", null]);
   });
+
+  it("never lets a late refusal overwrite a later delivery", async () => {
+    // Given a daemon whose answers to two sends arrive out of order
+    const answers: Array<{ resolve: () => void; reject: (err: unknown) => void }> = [];
+    const client = {
+      async *streamTerminalOutput() {},
+      sendTerminalInput: () =>
+        new Promise<object>((resolve, reject) => answers.push({ resolve: () => resolve({}), reject })),
+    } as unknown as Client<typeof TerminalSessionService>;
+    const deliveries: Array<string | null> = [];
+    const feed = openDaemonTerminalFeed({
+      client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: { ...terminalOptions(), onInputDelivery: (failure) => deliveries.push(failure) },
+    });
+    feed.stream.send(bytesOf("a"));
+    feed.stream.send(bytesOf("b"));
+
+    // When the second send is delivered first, and the first is refused after it
+    answers[1].resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    answers[0].reject(new ConnectError("terminal controlled by another screen", Code.FailedPrecondition));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Then the pane still reads the latest send's outcome: delivered
+    expect(deliveries).toEqual([null]);
+  });
 });

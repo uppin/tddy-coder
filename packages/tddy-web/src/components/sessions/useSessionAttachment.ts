@@ -21,6 +21,7 @@ import { SessionService } from "../../gen/session_pb";
 import { attachmentHintFromReply } from "../../rpc/connections/sessionAttachment";
 import type { SessionAttachmentHint, SessionAttachmentState } from "../../rpc/connections/session";
 import type { HostConnection } from "../../rpc/connections/types";
+import { rpcFailureText } from "../../rpc/rpcFailure";
 
 export type { SessionAttachmentState } from "../../rpc/connections/session";
 
@@ -116,8 +117,8 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
         setAttachment({ state: { status: "connected", connection }, hint });
         return true;
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setAttachment({ state: { status: "error", error: message }, hint: null });
+        // The daemon's own words, without the transport's `[code]` (see `rpcFailureText`).
+        setAttachment({ state: { status: "error", error: rpcFailureText(err) }, hint: null });
         return false;
       }
     },
@@ -142,8 +143,7 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
         await client.deleteSession({ sessionToken, sessionId });
         setAttachment(NOT_ATTACHED);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setAttachment({ state: { status: "error", error: message }, hint: null });
+        setAttachment({ state: { status: "error", error: rpcFailureText(err) }, hint: null });
       }
     },
     [],
@@ -154,8 +154,7 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
       try {
         await client.signalSession({ sessionToken, sessionId, signal });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setAttachment({ state: { status: "error", error: message }, hint: null });
+        setAttachment({ state: { status: "error", error: rpcFailureText(err) }, hint: null });
       }
     },
     [],

@@ -11,36 +11,16 @@
 
 import React from "react";
 import { Room } from "livekit-client";
-import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
-import { ProjectService } from "../../src/gen/project_pb";
-import { AccountsService } from "../../src/gen/accounts_pb";
-import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
+import { daemonRpcIdentity } from "../../src/lib/participantRole";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { aJoinedCommonRoom } from "../support/rpc/withSelectedDaemon";
+import {
+  aProjectsBackend,
+  PROJECTS_LOCAL_HOST as LOCAL_HOST,
+  projectsAppPage,
+} from "../support/rpc/projectsAppPageFixtures";
 import { hostConnectionGatePage } from "../support/pages/hostConnectionGatePage";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
-
-const LOCAL_HOST = "workstation-1";
-const DAEMON_HOSTS: DaemonHost[] = [{ instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)" }];
-
-function aProjectsBackend() {
-  return anInMemoryRpcBackend()
-    .onUnary(ProjectService.method.listProjects, () => ({ projects: [] }) as never)
-    .onUnary(AccountsService.method.listAccounts, () => ({ providers: [] }) as never);
-}
-
-function projectsAppPage(room: Room | null) {
-  return (
-    <AuthProvider>
-      <SelectedDaemonProvider room={room} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-        <ProjectsAppPage onNavigate={cy.stub()} />
-      </SelectedDaemonProvider>
-    </AuthProvider>
-  );
-}
 
 beforeEach(() => {
   cy.viewport(1280, 800);

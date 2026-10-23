@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { type ProjectEntry } from "../../gen/project_pb";
 import { ProjectService } from "../../gen/project_pb";
@@ -6,12 +6,29 @@ import { AccountsService } from "../../gen/accounts_pb";
 import { HostService } from "../../gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
-import { useDaemonClient, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
-import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
+import { useDaemonClient, useDaemons, useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import {
+  hostNotConnected,
+  hostNotConnectedText,
+  rpcFailureText,
+  unservedService,
+} from "../../rpc/rpcFailure";
 import { AppShell } from "../shell/AppShell";
 import { ProjectsScreen, type AssignableAccount } from "./ProjectsScreen";
 
-const POLL_INTERVAL_MS = 5000;
+/** How often the Projects screen re-reads the registry. */
+export const POLL_INTERVAL_MS = 5000;
+
+interface ProjectsRpcOptions {
+  /** The selected daemon's `ProjectService` client; `null` when no wire reaches it. */
+  client: Client<typeof ProjectService> | null;
+  /** A client addressed to a chosen target host, resolved when the operator submits. */
+  clientForHost: (instanceId: string) => Client<typeof ProjectService> | null;
+  sessionToken: string;
+  /** A host's display name — what a "not connected" error names (see `useHostLabel`). */
+  hostLabel: (instanceId: string) => string;
+  selectedInstanceId: string | null;
+}
 
 /**
  * Polls the project registry over the selected-daemon `client` (list/create), and wires the
@@ -23,24 +40,24 @@ const POLL_INTERVAL_MS = 5000;
  * the screen can say why next to the control that was used. A failed poll is kept in `loadError`
  * rather than leaving the list looking empty; the last good list stays shown beside it.
  */
-function useProjectsRpc(
-  client: Client<typeof ProjectService> | null,
-  clientForHost: (instanceId: string) => Client<typeof ProjectService> | null,
-  sessionToken: string,
-  hostLabelOf: (instanceId: string | null) => string | null,
-  selectedInstanceId: string | null,
-) {
+function useProjectsRpc({
+  client,
+  clientForHost,
+  sessionToken,
+  hostLabel,
+  selectedInstanceId,
+}: ProjectsRpcOptions) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const connected = useCallback((): Client<typeof ProjectService> => {
-    if (!client) throw hostNotConnected(hostLabelOf(selectedInstanceId));
+    if (!client) throw hostNotConnected(hostLabel(selectedInstanceId ?? ""));
     return client;
-  }, [client, hostLabelOf, selectedInstanceId]);
+  }, [client, hostLabel, selectedInstanceId]);
 
   const loadProjects = useCallback(() => {
     if (!client) {
-      setLoadError(rpcFailureText(hostNotConnected(hostLabelOf(selectedInstanceId))));
+      setLoadError(hostNotConnectedText(hostLabel(selectedInstanceId ?? "")));
       return;
     }
     client
@@ -50,7 +67,7 @@ function useProjectsRpc(
         setLoadError(null);
       })
       .catch((e: unknown) => setLoadError(rpcFailureText(e)));
-  }, [client, sessionToken, hostLabelOf, selectedInstanceId]);
+  }, [client, sessionToken, hostLabel, selectedInstanceId]);
 
   useEffect(() => {
     loadProjects();
@@ -75,11 +92,11 @@ function useProjectsRpc(
       userRelativePath: string;
     }) => {
       const target = clientForHost(input.daemonInstanceId);
-      if (!target) throw hostNotConnected(hostLabelOf(input.daemonInstanceId));
+      if (!target) throw hostNotConnected(hostLabel(input.daemonInstanceId));
       await target.addProjectToHost({ sessionToken, mainBranchRef: "", ...input });
       loadProjects();
     },
-    [clientForHost, hostLabelOf, sessionToken, loadProjects],
+    [clientForHost, hostLabel, sessionToken, loadProjects],
   );
 
   const setDefaultBranch = useCallback(
@@ -123,15 +140,32 @@ function useProjectsRpc(
 }
 
 /**
+ * Why the vault's accounts could not be read. A daemon with no `auth_storage` registers no
+ * AccountsService at all, so its router's "Unknown service" is said as the config that is missing.
+ */
+function accountsFailureText(error: unknown): string {
+  if (unservedService(error) === AccountsService.typeName) {
+    return "Accounts are not enabled on this host — its daemon config sets no auth_storage, so there is no credential vault to assign accounts from.";
+  }
+  return rpcFailureText(error);
+}
+
+/**
  * The accounts the caller's vault holds, flattened from `ListAccounts`' provider groups. A locked or
  * absent vault yields no assignable accounts — the Accounts screen is where those states are
  * explained — but a failed read is returned as `error`, so empty pickers say why. No client is not
- * reported here: the project list already says the host is not connected.
+ * reported here: the project list already says the host is not connected. What one client read is
+ * dropped when the client changes or goes away: it is another host's answer, or a stale one.
  */
 function useAssignableAccounts(sessionToken: string): { accounts: AssignableAccount[]; error: string | null } {
   const client = useDaemonClient(AccountsService);
   const [accounts, setAccounts] = useState<AssignableAccount[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAccounts([]);
+    setError(null);
+  }, [client]);
 
   useEffect(() => {
     if (!client) return;
@@ -152,7 +186,7 @@ function useAssignableAccounts(sessionToken: string): { accounts: AssignableAcco
         );
       })
       .catch((e: unknown) => {
-        if (current) setError(rpcFailureText(e));
+        if (current) setError(accountsFailureText(e));
       });
     return () => {
       current = false;
@@ -182,18 +216,10 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       connectHost(instanceId)?.clientFor(ProjectService) ?? null,
     [connectHost],
   );
-  const { selectedInstanceId, selectedLabel } = useSelectedDaemon();
-  // A host's label when it is listed, else its instance id — what a "not connected" error names.
-  // Read through a ref: the daemon list is rebuilt on every participant event, and a callback that
-  // changed with it would restart the project poll each time.
-  const labelSourceRef = useRef({ daemons, selectedInstanceId, selectedLabel });
-  labelSourceRef.current = { daemons, selectedInstanceId, selectedLabel };
-  const hostLabelOf = useCallback((instanceId: string | null): string | null => {
-    if (!instanceId) return null;
-    const source = labelSourceRef.current;
-    if (instanceId === source.selectedInstanceId && source.selectedLabel) return source.selectedLabel;
-    return source.daemons.find((d) => d.instanceId === instanceId)?.label || instanceId;
-  }, []);
+  const { selectedInstanceId } = useSelectedDaemon();
+  // A host's display name — what a "not connected" error names. Stable across directory updates,
+  // so the project poll is not restarted on every participant event.
+  const hostLabel = useHostLabel();
   const { accounts, error: accountsLoadError } = useAssignableAccounts(sessionToken ?? "");
   const hostClient = useDaemonClient(HostService);
   // Each host is asked about its own `gh`: the serving daemon relays to `daemonInstanceId`.
@@ -214,7 +240,13 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
     setDefaultBranch,
     loadProjectBranches,
     setProjectAccounts,
-  } = useProjectsRpc(client, clientForHost, sessionToken ?? "", hostLabelOf, selectedInstanceId);
+  } = useProjectsRpc({
+    client,
+    clientForHost,
+    sessionToken: sessionToken ?? "",
+    hostLabel,
+    selectedInstanceId,
+  });
 
   return (
     <AppShell title="Projects" onNavigate={onNavigate} variant="scroll" requiresHost>

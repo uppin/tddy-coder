@@ -61,7 +61,11 @@ export interface HostConnection {
   /** The host this reaches, as the host directory names it (a daemon instance id). */
   readonly hostId: string;
 
-  /** The provider that issued this connection (`"livekit"`, later `"ipc"`). Diagnostics only. */
+  /**
+   * The provider that issued this connection (`"livekit"`, later `"ipc"`). Read by the layout's
+   * host gate (`components/shell/hostGate.ts`), which blocks a LiveKit connection whose common room
+   * failed; otherwise diagnostics.
+   */
   readonly providerId: string;
 
   readonly status: ConnectionStatus;

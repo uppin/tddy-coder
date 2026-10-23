@@ -36,6 +36,11 @@ listen:
 daemon_instance_id: dev
 daemon_instance_id_append_startup_timestamp: false
 
+# Where each login's credential vault is kept (relative to the daemon's cwd, the repo root). The
+# daemon creates it owner-only at startup. Without it no AccountsService is registered, so the
+# Accounts screen and the Projects account pickers have nothing to read.
+auth_storage: tmp/auth
+
 # Production web bundle (used when hitting the daemon port directly). For live dev + HMR use
 # ./web-dev and open the Vite port (default 5173), not this port — see docs/ft/web/local-web-dev.md.
 web_bundle_path: packages/tddy-web/dist

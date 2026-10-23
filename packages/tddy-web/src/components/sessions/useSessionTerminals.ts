@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
-import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
+import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
 
 const dTerm = tddyDebug("tddy:term:tabs");
 
@@ -99,7 +99,7 @@ export function useSessionTerminals({
 
   const open = useCallback(() => {
     if (!client) {
-      setError(rpcFailureText(hostNotConnected(null)));
+      setError(hostNotConnectedText(null));
       return;
     }
     void (async () => {
@@ -131,7 +131,7 @@ export function useSessionTerminals({
       // Optimistic remove — the tab and its pane come down immediately; the Stop RPC follows.
       dropEnded(id);
       if (!client) {
-        setError(rpcFailureText(hostNotConnected(null)));
+        setError(hostNotConnectedText(null));
         return;
       }
       client

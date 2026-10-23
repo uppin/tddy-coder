@@ -197,6 +197,10 @@ export function useConnectionProviders(): ConnectionProviderRegistry {
  * in those callers' dependency arrays, and it re-runs their reads for the same reasons those did.
  */
 export function useHostConnector(): (hostId: string | null) => HostConnection | null {
+  // Not compiled: the memo below is keyed on `revision`, which the resolver never reads. The React
+  // Compiler memoises on what a body reads, so it would drop `revision`, keep the resolver from before
+  // the common room joined, and leave every `useHostConnection` returning `null` for the page's life.
+  "use no memo";
   const registry = useConnectionProviders();
   const isReady = useContext(HostReadinessContext);
   const subscribe = useCallback((listener: () => void) => registry.subscribe(listener), [registry]);

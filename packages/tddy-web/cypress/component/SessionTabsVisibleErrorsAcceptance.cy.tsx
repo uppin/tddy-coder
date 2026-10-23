@@ -10,18 +10,28 @@
  */
 
 import React from "react";
+import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionVncTab } from "../../src/components/sessions/SessionVncTab";
 import { SessionScreenSharingTab } from "../../src/components/sessions/SessionScreenSharingTab";
 import { SessionFilesTab } from "../../src/components/sessions/SessionFilesTab";
 import { SessionWorktreeTab } from "../../src/components/sessions/SessionWorktreeTab";
 import { SessionToolsTab } from "../../src/components/sessions/SessionToolsTab";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
+import { SessionRuntime } from "../../src/components/sessions/SessionRuntime";
 import { Protocol } from "../../src/gen/screen_sharing_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
-import { WorktreeService, WorktreeSizeStatus } from "../../src/gen/worktree_pb";
+import {
+  CalculateWorktreeSizeResponseSchema,
+  WorktreeRowSchema,
+  WorktreeService,
+  WorktreeSizeStatus,
+  WorktreeStatsEventSchema,
+} from "../../src/gen/worktree_pb";
 import { TerminalSessionService } from "../../src/gen/terminal_session_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
+import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionFilesServiceBackend } from "../support/rpc/sessionFilesServiceBackend";
 import {
@@ -358,6 +368,42 @@ describe("Worktree tab", () => {
     errors.worktreeError().should("contain.text", "branch is gone");
   });
 
+  it("a successful recalculation does not hide a dropped stats stream", () => {
+    // Given a stream that delivers the row and then drops, and a recalculation that fails once
+    let recalculations = 0;
+    const backend = anInMemoryRpcBackend().implement(WorktreeService, {
+      streamWorktreeStats: async function* () {
+        yield create(WorktreeStatsEventSchema, { snapshot: [create(WorktreeRowSchema, CACHED_ROW)] });
+        throw refusal("stats walker crashed", Code.Internal);
+      },
+      calculateWorktreeSize: async () => {
+        recalculations += 1;
+        if (recalculations === 1) throw refusal("size queue is full", Code.ResourceExhausted);
+        return create(CalculateWorktreeSizeResponseSchema, {});
+      },
+    });
+    const client = createClient(WorktreeService, backend.transport());
+    mountWithRpc(
+      <SessionWorktreeTab
+        client={client}
+        sessionToken={SESSION_TOKEN}
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+        repoPath={REPO_PATH}
+      />,
+      backend,
+    );
+    errors.worktreeError().should("contain.text", "stats walker crashed");
+    worktree.refresh().click();
+    errors.worktreeError().should("contain.text", "size queue is full");
+
+    // When the next recalculation succeeds
+    worktree.refresh().click();
+
+    // Then the stream is still reported dead
+    errors.worktreeError().should("contain.text", "stats walker crashed");
+  });
+
   it("says the host is not connected when no client reaches it", () => {
     // Given / When
     mountWorktreeTab(null);
@@ -488,5 +534,32 @@ describe("Terminal tab strip", () => {
 
     // Then
     errors.terminalError().should("contain.text", "terminal is held by another tab");
+  });
+
+  it("says the host is not connected when a terminal is opened with no client to start it", () => {
+    // Given a runtime whose session has no connection yet, so no terminal client exists
+    cy.mount(
+      <UploadProgressProvider>
+        <div style={{ width: 900, height: 500, position: "relative" }}>
+          <SessionRuntime
+            runtime={{
+              sessionId: SESSION_ID,
+              attached: true,
+              bytesIn: 0,
+              bytesOut: 0,
+              lastDataReceivedAt: null,
+            }}
+            focused
+            sessionToken={SESSION_TOKEN}
+          />
+        </div>
+      </UploadProgressProvider>,
+    );
+
+    // When
+    terminals.newTab().click();
+
+    // Then
+    errors.terminalError().should("contain.text", "Not connected to the selected host");
   });
 });

@@ -21,6 +21,9 @@
 #
 # Environment:
 #   DEV_LIVEKIT_READY_TIMEOUT_S — seconds to wait for the container to answer (default: 30)
+#   DEV_LIVEKIT_AVOID_PORTS     — space-separated ports no drawn block may cover. ./web-dev passes
+#                                 its daemon and Vite ports: both are chosen before LiveKit starts but
+#                                 bound only after, so Docker cannot report them as taken.
 #
 # Sets DEV_LIVEKIT_CONTAINER to the container this run started ("" when reusing a server).
 
@@ -71,6 +74,26 @@ dev_livekit_check_external() {
   echo "=== Reusing LiveKit at ${url} (credentials from .env / environment) ===" >&2
 }
 
+# Set DEV_LIVEKIT_BLOCK to the signal port of a random block (signal, +1, +2) in the ephemeral range
+# that covers none of the space-separated ports in $1. Drawn rather than probed: Docker reports a
+# held port when it starts the container, and these are ports the caller binds later, which no probe
+# can see yet. Sets a variable instead of printing: a $(...) subshell reseeds $RANDOM.
+_dev_livekit_draw_block() {
+  local avoid="$1" port taken tries
+  local span=$((DEV_LIVEKIT_EPHEMERAL_LAST - DEV_LIVEKIT_EPHEMERAL_FIRST - 1))
+  for ((tries = 0; tries < 100; tries++)); do
+    # Two $RANDOMs: one alone tops out at 32767, short of the range's 16382-port span.
+    port=$((DEV_LIVEKIT_EPHEMERAL_FIRST + (RANDOM * 32768 + RANDOM) % span))
+    for taken in $avoid; do
+      [ "$taken" -ge "$port" ] && [ "$taken" -le $((port + 2)) ] && continue 2
+    done
+    DEV_LIVEKIT_BLOCK="$port"
+    return 0
+  done
+  echo "Error: no LiveKit port block clear of ${avoid} after 100 draws." >&2
+  return 1
+}
+
 dev_livekit_start_container() {
   if ! command -v docker >/dev/null 2>&1; then
     echo "Error: docker not found — ./web-dev starts LiveKit in Docker unless .env names a running server" >&2
@@ -84,13 +107,14 @@ dev_livekit_start_container() {
   fi
 
   local image name attempt port tcp_port udp_port err
-  local span=$((DEV_LIVEKIT_EPHEMERAL_LAST - DEV_LIVEKIT_EPHEMERAL_FIRST - 1))
+  # Blocks found taken join the avoided ports, so a retry never redraws one of them.
+  local avoid="${DEV_LIVEKIT_AVOID_PORTS:-}"
   image="$(tr -d '[:space:]' <"$(dirname "${BASH_SOURCE[0]}")/../.config/livekit-server.image")"
   name="tddy-web-dev-livekit-$$"
 
   for ((attempt = 0; attempt < DEV_LIVEKIT_PORT_ATTEMPTS; attempt++)); do
-    # Two $RANDOMs: one alone tops out at 32767, short of the range's 16382-port span.
-    port=$((DEV_LIVEKIT_EPHEMERAL_FIRST + (RANDOM * 32768 + RANDOM) % span))
+    _dev_livekit_draw_block "$avoid" || return 1
+    port="$DEV_LIVEKIT_BLOCK"
     tcp_port=$((port + 1))
     udp_port=$((port + 2))
     # Each port is published on the same number inside and outside: LiveKit embeds its container
@@ -113,6 +137,7 @@ dev_livekit_start_container() {
     case "$err" in
       *"port is already allocated"* | *"address already in use"*)
         echo "=== LiveKit ports ${port}-${udp_port} are taken; drawing another block ===" >&2
+        avoid="${avoid} ${port} ${tcp_port} ${udp_port}"
         ;;
       *)
         echo "Error: could not start the LiveKit container (${image}):" >&2

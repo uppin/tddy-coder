@@ -37,7 +37,13 @@ answered the new run's readiness check.
   - the daemon port is written into its temp config;
   - leftovers recorded by an earlier run are reaped, but only pids whose start time still matches;
   - the run refuses to start while the recorded run is alive.
-- [ ] ⚠️ TODO: media over a LAN `VITE_URL` — the container uses `--node-ip 127.0.0.1`.
+- [x] Ports stable per checkout: derived from the checkout path within the ephemeral range, falling
+      back to a random free port with a notice. That keeps the browser origin, and with it
+      `localStorage` (session token, host-key pins), across restarts. The LiveKit block avoids the
+      daemon and Vite ports. KILL is sent only to a pid whose start time still matches. The readiness
+      wait fails as soon as the daemon exits.
+- [~] Deferred (developer-approved): media over a LAN `VITE_URL` —
+      [2026-10-23-web-dev-livekit-lan-media.md](../todo/2026-10-23-web-dev-livekit-lan-media.md).
 
 ### Web UI — visible errors (Projects + sessions)
 - [x] Shared: `src/rpc/rpcFailure.ts` (`rpcFailureText`, `hostNotConnected`),
@@ -56,6 +62,21 @@ answered the new run's readiness check.
   - undelivered terminal input shows a single indicator.
 - [x] Create-session pickers (projects, tools, stack parents, branches) and session streams
       (notifications, usage, activity).
+- [x] Root-cause fix, also present on master: the React Compiler (on in dev and prod, off in
+      Cypress) dropped the unread `revision` dependency of `useHostConnector` and the unread
+      `listedCount` of `SelectedDaemonScope`'s `isReady`. Every `useDaemonClient` therefore stayed
+      `null` once the common room joined after the first render. Both opt out with `"use no memo"`.
+      Verified in Chromium against a live `./web-dev`.
+- [x] Bulk delete has no fallback: an unreachable owner fails that row with "Not connected to <host>".
+- [x] Attach / delete / signal errors carry no transport `[code]` prefix.
+- [x] Splits under the 500-line budget: `SessionRuntime.tsx` 694→440, `SessionsDrawerScreen.tsx`
+      582→483, `CreateSessionPane.tsx` 516→484.
+- [x] Shared helpers: `hostNotConnectedText`, `actionFailed`, `useHostLabel`, `useKeyedActionFailure`.
+- [~] Deferred (developer-approved):
+  - session status streams reconnect —
+    [2026-10-23-session-status-streams-do-not-reconnect.md](../todo/2026-10-23-session-status-streams-do-not-reconnect.md)
+  - gating Accounts / Worktrees / VMs —
+    [2026-10-23-host-gate-other-screens.md](../todo/2026-10-23-host-gate-other-screens.md)
 - [x] Layout gate: `AppShell requiresHost` → `HostConnectionGate`.
   - Blocks the body, with the host and reason, when no viable RPC client reaches the selected host:
     no host selected, no connection, or a LiveKit connection whose room failed.
@@ -63,30 +84,31 @@ answered the new run's readiness check.
   - Opted in: Projects and Sessions.
 
 ## Open decisions / known gaps
-- ⚠️ Bulk delete keeps a pre-existing fallback, `clientForHost(owner) ?? client`, so a row on an
-  unreachable host is sent to the selected daemon instead. That breaks the no-fallbacks rule;
-  removing it needs a decision.
-- ⚠️ The activity, usage and notifications streams do not reconnect. Their error stays shown until
-  a new subscription starts.
-- ⚠️ Not tested: connect-after-create (unreachable in practice), opening a terminal with no
-  client, and input failures on the LiveKit terminal path (`roomTerminalFeed.ts` gets no per-send
-  answer).
-- `useSessionActivity` has no production consumer, so its error is covered only by a test harness.
-- Session attach errors still show the transport's `[code]` prefix (`useSessionAttachment.ts`).
-- Accounts / Worktrees / VMs are not gated yet; each needs one prop.
-- ⚠️ Not verified: Ctrl+C typed in a real terminal. TERM, HUP and `kill -9` + reap were run for
-  real.
+- ⚠️ Cypress runs with the React Compiler off, so the compiler-only bug class above is invisible to
+  every component test. Only a real-browser run caught it.
+- `useSessionActivity` has no production consumer, which was already true before this change. Its
+  error is covered through a harness.
+- "Unknown service: accounts.AccountsService" shows on Projects when the daemon has no credential
+  vault (`dev.daemon.yaml`). This is accurate: `AccountsService` is mounted only with vaults. Wording
+  is open.
+- ⚠️ Not tested: connect-after-create (unreachable in practice) and input failures on the LiveKit
+  terminal path (`roomTerminalFeed.ts` gets no per-send answer).
 
 ## Verification (scoped, local; CI not run)
 - `tddy-e2e`:
-  - `dev_livekit_script` 13/13
-  - `dev_process_script` 19/19
+  - `dev_livekit_script` 19/19
+  - `dev_process_script` 39/39
   - `web_dev_script` 6/6
-- `tddy-web` unit (`src/components/shell src/components/sessions src/rpc`): 656/656.
-- `tddy-web` Cypress component, scoped:
-  - 96 specs covering every spec that mounts a gated screen, plus the five new specs: 627/627.
-  - The agents' earlier per-area runs also passed.
+  - lib `shell_code_lines` 1/1
+  - clippy and fmt clean
+- `tddy-web` unit (`test:unit`): 1249/1249.
+- `tddy-web` Cypress component, scoped: 173 specs, 1073/1073. These are every spec that mounts a
+  touched file, plus the five new specs.
 - Real runs on macOS `/bin/bash` 3.2:
-  - ephemeral ports served (Vite 200, `/api/config` via proxy 200);
+  - `./web-dev` served on ephemeral ports;
   - TERM left nothing behind;
-  - `kill -9` of `web-dev`, then a second run, stopped the first run's daemon, Vite and container.
+  - after a `kill -9`, the next run stopped the dead run's daemon, Vite and container;
+  - Ctrl+C runs `on_exit`, checked under a pty with bash 3.2 and 5.3.
+- Chromium (Playwright) against a live `./web-dev`:
+  - Projects loads, with `ListProjects` reaching the daemon over LiveKit;
+  - before the compiler fix, the gate showed "mac is not in the common room".

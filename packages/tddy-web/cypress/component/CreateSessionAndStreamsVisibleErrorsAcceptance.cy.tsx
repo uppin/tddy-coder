@@ -247,7 +247,7 @@ describe("CreateSessionPane — picker loads that fail say why", () => {
       .and("have.text", "Branches unavailable: git fetch failed");
   });
 
-  it("clears the branch failure once a later branch load succeeds", () => {
+  it("switching project clears the previous project's branch failure", () => {
     // Given — two projects; the first one's branches cannot be listed, the second one's can
     const OTHER_PROJECT = { ...ONLY_PROJECT, projectId: "proj-other", name: "other" };
     mountCreatePane(
@@ -370,14 +370,26 @@ describe("Session streams — a dropped stream is reported beside what it fed", 
     sessionsDrawerPage.usageEmpty().should("not.exist");
   });
 
-  it("says the usage stream is not connected when there is no session room", () => {
-    // Given — no room and no transport override, so no client can be built
+  it("reports no failure for a session with no room, where no usage stream is possible", () => {
+    // Given — a host reached without LiveKit: no room and no transport override
 
     // When
     cy.mount(<SessionUsageTab room={null} serverIdentity="presenter" />);
 
-    // Then
-    errors.usageStreamError().should("be.visible").and("contain.text", "Not connected to");
+    // Then — the tab shows its empty state; nothing failed
+    sessionsDrawerPage.usageEmpty().should("be.visible");
+    errors.usageStreamError().should("not.exist");
+  });
+
+  it("reports no failure while the session's room is still joining", () => {
+    // Given — a room that has not connected yet, and no transport override
+
+    // When
+    cy.mount(<SessionUsageTab room={new Room()} serverIdentity="presenter" />);
+
+    // Then — the tab waits in its empty state rather than claiming the stream failed
+    sessionsDrawerPage.usageEmpty().should("be.visible");
+    errors.usageStreamError().should("not.exist");
   });
 
   it("reports a dropped activity stream and keeps the records it delivered", () => {

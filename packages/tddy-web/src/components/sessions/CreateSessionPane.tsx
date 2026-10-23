@@ -19,7 +19,6 @@ import { CreateSessionAttachmentsSection } from "./CreateSessionAttachmentsSecti
 import { CreateSessionActions } from "./CreateSessionActions";
 import { CreateSessionStartPhase } from "./CreateSessionStartPhase";
 import { CreateSessionStackParentSelect } from "./CreateSessionStackParentSelect";
-import { InlineError } from "../ui/inline-error";
 import { useProjectBranches } from "./useProjectBranches";
 import { useCreateSessionCatalogs } from "./useCreateSessionCatalogs";
 import { useCreateSessionPlacement } from "./useCreateSessionPlacement";
@@ -27,8 +26,7 @@ import { useCreateSessionModel } from "./useCreateSessionModel";
 import { useCreateSessionSubmit } from "./useCreateSessionSubmit";
 import { useCreateSessionStack } from "./useCreateSessionStack";
 import type { CreateSessionPaneProps } from "./createSessionPaneProps";
-import { useSelectableAgents } from "./useSelectableAgents";
-import { agentForHost, hostRunningSession, selectableAgentValue } from "./selectableAgentOptions";
+import { useCreateSessionAgentSelection } from "./useCreateSessionAgentSelection";
 import { BranchConflictDialog } from "./BranchConflictDialog";
 import { StartPassphrasePrompt } from "./StartPassphrasePrompt";
 
@@ -123,22 +121,22 @@ export function CreateSessionPane({
    */
   const connectedInstanceId = selectedInstanceId ?? "";
 
-  // Every common-room daemon's agents — the thing a tool session is started *as*. `ListAgents`
-  // answers for the responding daemon only, so without this fan-out an assistant created on another
-  // host is absent from the form rather than merely hard to find.
-  const selectableAgents = useSelectableAgents(catalogClient, connectedInstanceId);
-
-  // Whether there is a host to name at all. The same condition the Host select is rendered on: with
-  // no common room there is one host, so nothing to disambiguate and nothing to caption.
-  const hostsAdvertised = daemons.length > 0;
-
-  /**
-   * The host whose agents the session can actually be started as — the host the form will ask for, in
-   * the spelling the fan-out stamps its rows with. See `hostRunningSession` for why an empty
-   * `daemon_instance_id` names a host rather than lacking one. The request is unaffected: it keeps
-   * sending `daemonInstanceId` exactly as the form holds it.
-   */
-  const agentHostInstanceId = hostRunningSession(daemonInstanceId, connectedInstanceId);
+  // `agent` holds the *name* the operator last picked; which agent that is on the host taking the
+  // session is derived, never stored (see `useCreateSessionAgentSelection`).
+  const {
+    offeredAgents,
+    offeredHostFailures,
+    hostsAdvertised,
+    agentHostInstanceId,
+    selectedAgentId,
+    selectedAgentValue,
+  } = useCreateSessionAgentSelection({
+    catalogClient,
+    connectedInstanceId,
+    daemons,
+    daemonInstanceId,
+    agent,
+  });
 
   const {
     sandbox,
@@ -158,25 +156,6 @@ export function CreateSessionPane({
     applyPlacement,
     sshListDaemonId,
   } = useCreateSessionPlacement({ sessionType, daemons, daemonInstanceId, agentHostInstanceId });
-
-  /** The agents this form may offer, and the hosts whose silence it may report. */
-  const offeredAgents = selectableAgents.agents;
-  const offeredHostFailures = selectableAgents.failures;
-
-  /**
-   * The agent the session will actually start as: the picked name, as the host taking the session
-   * offers it. Derived from `(agent, agentHostInstanceId)` rather than stored beside them, so neither
-   * the control nor the request can carry a pair the host does not have — that is what makes a Host
-   * change re-point the selection (same name on the new host, else that host's first, else none) and
-   * what makes the opening selection the home host's first agent without any effect correcting state
-   * after the fact.
-   *
-   * `agent` therefore holds the *name* the operator last picked, kept across host changes.
-   */
-  const selectedAgent = agentForHost(offeredAgents, agentHostInstanceId, agent);
-  const selectedAgentId = selectedAgent?.id ?? "";
-  const selectedAgentValue =
-    selectedAgent === null ? "" : selectableAgentValue(selectedAgent, hostsAdvertised);
 
   const {
     model,
@@ -349,14 +328,6 @@ export function CreateSessionPane({
         />
       )}
 
-      {/* A tool session cannot start without a tool, and the form has none to pick when this fails. */}
-      {sessionType === "tool" && (
-        <InlineError
-          testId="create-session-tools-load-error"
-          message={toolsError && `Tools unavailable: ${toolsError}`}
-        />
-      )}
-
       {/* Tool session fields */}
       {sessionType === "tool" && (
         <CreateSessionToolFields
@@ -372,6 +343,7 @@ export function CreateSessionPane({
           setPrStackBaseSessionId={setPrStackBaseSessionId}
           stackBaseSessionOptions={stackBaseSessionOptions}
           modelField={modelField}
+          toolsError={toolsError}
         />
       )}
 
@@ -439,11 +411,7 @@ export function CreateSessionPane({
         stackParentOptions={stackParentOptions}
         stackParent={stackParent}
         setStackParent={setStackParent}
-      />
-      {/* The stack-parent and stack-base pickers are both drawn from this one list. */}
-      <InlineError
-        testId="create-session-sessions-load-error"
-        message={sessionsError && `Sessions unavailable: ${sessionsError}`}
+        sessionsError={sessionsError}
       />
 
       <CreateSessionBranchFields

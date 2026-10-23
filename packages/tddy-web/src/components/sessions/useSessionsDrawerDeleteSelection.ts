@@ -9,8 +9,8 @@ import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
 export interface UseSessionsDrawerDeleteSelectionArgs {
   sortedSessions: SessionEntry[];
   selectedInstanceId: string | null;
+  /** The owning host's `SessionService` client; `null` when no wire reaches that host. */
   clientForHost: (instanceId: string) => Client<typeof SessionService> | null;
-  client: Client<typeof SessionService> | null;
   sessionToken: string;
   /** A daemon instance id's display label — names the host a row could not be deleted on. */
   hostLabelForInstance: (instanceId: string) => string;
@@ -34,7 +34,6 @@ export function useSessionsDrawerDeleteSelection({
   sortedSessions,
   selectedInstanceId,
   clientForHost,
-  client,
   sessionToken,
   hostLabelForInstance,
   onSessionDeleted,
@@ -96,8 +95,9 @@ export function useSessionsDrawerDeleteSelection({
       const label = session ? sessionDrawerLabel(session) : id;
       try {
         // A row whose host no wire reaches is a failure of that row, said with the host named —
-        // never skipped, which used to leave it in the list with nothing to say why.
-        const targetClient = clientForHost(owner) ?? client;
+        // never skipped, which used to leave it in the list with nothing to say why, and never sent
+        // to the selected daemon instead, which does not own it.
+        const targetClient = clientForHost(owner);
         if (!targetClient) throw hostNotConnected(hostLabelForInstance(owner));
         await targetClient.deleteSession({ sessionToken, sessionId: id });
         onSessionDeleted?.(id);
@@ -114,7 +114,6 @@ export function useSessionsDrawerDeleteSelection({
     sortedSessions,
     selectedInstanceId,
     clientForHost,
-    client,
     sessionToken,
     hostLabelForInstance,
     onSessionDeleted,

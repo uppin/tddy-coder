@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { useHostConnection } from "../../rpc/connections/registry";
 import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
 import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { hostGateOf } from "./hostGate";
 
 /**
@@ -20,10 +20,16 @@ export function HostConnectionGate({
   className?: string;
   children: React.ReactNode;
 }) {
-  const { selectedInstanceId, selectedLabel } = useSelectedDaemon();
+  const { selectedInstanceId } = useSelectedDaemon();
+  const hostLabel = useHostLabel();
   const connection = useHostConnection(selectedInstanceId);
   const liveKit = useHostDirectorySource(LIVEKIT_SOURCE_ID);
-  const gate = hostGateOf({ selectedInstanceId, hostLabel: selectedLabel, connection, liveKit });
+  const gate = hostGateOf({
+    selectedInstanceId,
+    hostLabel: selectedInstanceId ? hostLabel(selectedInstanceId) : null,
+    connection,
+    liveKit,
+  });
   const blocked = gate.kind === "blocked";
 
   return (

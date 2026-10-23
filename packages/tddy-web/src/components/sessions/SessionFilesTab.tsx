@@ -6,6 +6,7 @@ import { formatBytes } from "./formatTraffic";
 import { copyToClipboard } from "../../lib/clipboard";
 import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
 import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
+import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
 import { InlineError } from "../ui/inline-error";
 
 export interface SessionFilesTabProps {
@@ -41,7 +42,7 @@ export function SessionFilesTab({
   // Why the last list failed — the last good list stays shown beside it.
   const [listError, setListError] = useState<string | null>(null);
   // Why each row's last delete failed, keyed like `pendingDelete`.
-  const [deleteErrors, setDeleteErrors] = useState<Record<string, string>>({});
+  const deleteFailures = useKeyedActionFailure();
 
   const load = useCallback(async () => {
     try {
@@ -63,11 +64,7 @@ export function SessionFilesTab({
 
   async function onConfirmDelete(entry: SessionUploadEntry) {
     const key = rowKey(entry);
-    setDeleteErrors((held) => {
-      const next = { ...held };
-      delete next[key];
-      return next;
-    });
+    deleteFailures.clear(key);
     try {
       if (!client) throw hostNotConnected(null);
       await client.deleteSessionUpload({
@@ -77,7 +74,7 @@ export function SessionFilesTab({
         fileName: entry.fileName,
       });
     } catch (e) {
-      setDeleteErrors((held) => ({ ...held, [key]: rpcFailureText(e) }));
+      deleteFailures.report(key, e);
       return;
     }
     setPendingDelete((prev) => {
@@ -179,7 +176,7 @@ export function SessionFilesTab({
               </div>
               <InlineError
                 testId={`session-upload-delete-error-${entry.fileName}`}
-                message={deleteErrors[rowKey(entry)]}
+                message={deleteFailures.errors[rowKey(entry)]}
                 className="text-xs"
               />
             </div>

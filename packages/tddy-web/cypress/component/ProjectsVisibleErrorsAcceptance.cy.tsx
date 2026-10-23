@@ -10,72 +10,23 @@
 import React from "react";
 import { Room } from "livekit-client";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { POLL_INTERVAL_MS } from "../../src/components/projects/ProjectsAppPage";
 import { ProjectsScreen } from "../../src/components/projects/ProjectsScreen";
-import { ProjectService, type ProjectEntry } from "../../src/gen/project_pb";
+import { ProjectService } from "../../src/gen/project_pb";
 import { AccountsService } from "../../src/gen/accounts_pb";
-import type { DaemonHost } from "../../src/lib/participantRole";
-import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
 import { mountWithRpc } from "../support/rpc/inMemory";
+import {
+  aProject,
+  aProjectsBackend,
+  PROJECTS_DAEMON_HOSTS as DAEMON_HOSTS,
+  PROJECTS_REMOTE_HOST as REMOTE_HOST,
+  projectsAppPage,
+} from "../support/rpc/projectsAppPageFixtures";
 import { projectsScreenPage } from "../support/pages/projectsScreenPage";
-
-const LOCAL_HOST = "workstation-1";
-const REMOTE_HOST = "server-2";
-
-const DAEMON_HOSTS: DaemonHost[] = [
-  { instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)" },
-  { instanceId: REMOTE_HOST, label: "server-2" },
-];
-
-function aProject(overrides: Partial<ProjectEntry> = {}): ProjectEntry {
-  return {
-    projectId: "proj-alpha",
-    name: "alpha",
-    gitUrl: "https://example.com/alpha.git",
-    mainRepoPath: "/home/dev/repos/alpha",
-    daemonInstanceId: LOCAL_HOST,
-    mainBranchRef: "",
-    defaultRemote: "",
-    accounts: [],
-    ...overrides,
-  } as ProjectEntry;
-}
 
 const noBranches = () =>
   Promise.resolve<{ branches: string[]; defaultRemote: string }>({ branches: [], defaultRemote: "" });
-
-/**
- * The Projects RPCs answering normally, with `configure` applied last: a method registered twice is
- * answered by its last registration, so a failure set there replaces the default.
- */
-function aProjectsBackend(configure: (b: InMemoryRpcBackend) => InMemoryRpcBackend = (b) => b) {
-  const projects = [aProject()];
-  const backend = anInMemoryRpcBackend()
-    .onUnary(ProjectService.method.listProjects, () => ({ projects }))
-    .onUnary(ProjectService.method.listProjectBranches, () => ({
-      branches: ["origin/main"],
-      defaultRemote: "origin",
-    }))
-    .onUnary(ProjectService.method.createProject, (req) => {
-      const project = aProject({ projectId: "proj-new", name: req.name });
-      projects.push(project);
-      return { project };
-    });
-  return configure(backend);
-}
-
-/** `room: null` mounts no LiveKit wire at all, so no client reaches any host. */
-function projectsAppPage(room: Room | null = new Room()) {
-  return (
-    <AuthProvider>
-      <SelectedDaemonProvider room={room} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
-        <ProjectsAppPage onNavigate={cy.stub()} />
-      </SelectedDaemonProvider>
-    </AuthProvider>
-  );
-}
 
 function aProjectsScreen(overrides: Partial<React.ComponentProps<typeof ProjectsScreen>> = {}) {
   return (
@@ -169,8 +120,20 @@ it("says the host is not connected instead of showing an empty list", () => {
   projectsScreenPage.loadError().should("contain.text", "Not connected to workstation-1");
 });
 
-it("shows the transport's reason, naming the host, when the common room never connected", () => {
-  // Given a wire over a room that is not connected — the LiveKit-server-down case
+// A wire over a room that is not connected — the LiveKit-server-down case. Each surface says the
+// transport's own reason, which names the daemon participant the request was addressed to.
+const ROOM_NOT_CONNECTED_REASON = "could not send request to daemon-workstation-1: PC manager is closed";
+
+it("shows the transport's reason on the list when the common room never connected", () => {
+  // Given / When
+  cy.mount(projectsAppPage(new Room()));
+
+  // Then
+  projectsScreenPage.loadError().should("have.text", ROOM_NOT_CONNECTED_REASON);
+});
+
+it("shows the transport's reason on the create form when the common room never connected", () => {
+  // Given
   cy.mount(projectsAppPage(new Room()));
 
   // When
@@ -178,8 +141,7 @@ it("shows the transport's reason, naming the host, when the common room never co
   projectsScreenPage.fillAndSubmitCreateProjectForm({ name: "beta", gitUrl: "https://example.com/beta.git" });
 
   // Then
-  projectsScreenPage.loadError().should("contain.text", "workstation-1");
-  projectsScreenPage.createProjectError().should("contain.text", "workstation-1");
+  projectsScreenPage.createProjectError().should("have.text", ROOM_NOT_CONNECTED_REASON);
 });
 
 // ---------------------------------------------------------------------------
@@ -214,7 +176,7 @@ it("clears the list error once a later poll succeeds", () => {
   projectsScreenPage.loadError().should("contain.text", "registry busy");
 
   // When the next poll runs
-  cy.tick(5000);
+  cy.tick(POLL_INTERVAL_MS);
 
   // Then
   projectsScreenPage.card("proj-alpha").should("exist");
@@ -290,4 +252,26 @@ it("shows why the assignable accounts could not be loaded", () => {
   // Then the projects still list; the account pickers say why they are empty
   projectsScreenPage.card("proj-alpha").should("exist");
   projectsScreenPage.accountsLoadError().should("contain.text", "the vault file is truncated");
+});
+
+it("says accounts are not enabled when the host's daemon serves no accounts service", () => {
+  // Given a daemon with no `auth_storage`, which never registers AccountsService
+  const backend = aProjectsBackend((b) =>
+    b.failWith(
+      AccountsService.method.listAccounts,
+      Code.NotFound,
+      "Unknown service: accounts.AccountsService",
+    ),
+  );
+
+  // When
+  mountWithRpc(projectsAppPage(), backend);
+
+  // Then the reason names the config that turns accounts on, not the router's words
+  projectsScreenPage.card("proj-alpha").should("exist");
+  projectsScreenPage
+    .accountsLoadError()
+    .should("contain.text", "Accounts are not enabled on this host")
+    .and("contain.text", "auth_storage")
+    .and("not.contain.text", "Unknown service");
 });

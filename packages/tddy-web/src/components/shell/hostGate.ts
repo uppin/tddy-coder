@@ -13,11 +13,12 @@
  * (see `ConnectionStatus`), and the single calls made on it report their own failures inline.
  */
 
+import { LIVEKIT_PROVIDER_ID } from "../../rpc/connections/liveKit";
 import type { ConnectionStatus } from "../../rpc/connections/types";
 
 export interface HostGateInput {
   selectedInstanceId: string | null;
-  /** The selected host's listed label; its instance id stands in when it has none. */
+  /** The selected host's display name (`useHostLabel`); its instance id stands in when it has none. */
   hostLabel: string | null;
   /** The selected host's connection, or `null` when no provider reaches it. */
   connection: { providerId: string } | null;
@@ -34,8 +35,6 @@ export type HostGate =
       title: string;
       reason: string | null;
     };
-
-const LIVEKIT_PROVIDER_ID = "livekit";
 
 export function hostGateOf({ selectedInstanceId, hostLabel, connection, liveKit }: HostGateInput): HostGate {
   if (!selectedInstanceId) {

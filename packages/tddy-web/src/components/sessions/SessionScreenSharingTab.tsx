@@ -14,6 +14,7 @@ import type { Room } from "livekit-client";
 import { Protocol } from "../../gen/screen_sharing_pb";
 import { screenSharingStartFailureText } from "../../lib/screenSharingStartFailure";
 import { rpcFailureText } from "../../rpc/rpcFailure";
+import { useKeyedActionFailure } from "../../hooks/useKeyedActionFailure";
 import { InlineError } from "../ui/inline-error";
 import { ScreenSharingOverlay } from "./ScreenSharingOverlay";
 import { applyScreenSharingTabAction, initialScreenSharingTabState } from "./screenSharingTabState";
@@ -114,9 +115,9 @@ export function SessionScreenSharingTab({
   // Transient error message shown below the form.
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // Why each target's last start failed, shown on that target's row.
-  const [startErrors, setStartErrors] = useState<Record<string, string>>({});
+  const startFailures = useKeyedActionFailure();
   // Why each target's last remove failed, shown on that target's row.
-  const [removeErrors, setRemoveErrors] = useState<Record<string, string>>({});
+  const removeFailures = useKeyedActionFailure();
   // Why the target list failed to load — never shown as an empty list.
   const [listError, setListError] = useState<string | null>(null);
 
@@ -183,11 +184,7 @@ export function SessionScreenSharingTab({
 
   const handleStart = (targetId: string) => {
     setErrorMsg(null);
-    setStartErrors((held) => {
-      const next = { ...held };
-      delete next[targetId];
-      return next;
-    });
+    startFailures.clear(targetId);
     dispatch({ type: "set_stream_status", targetId, status: "starting" });
     onStartStream(targetId)
       .then((result) => {
@@ -198,7 +195,7 @@ export function SessionScreenSharingTab({
       .catch((e: unknown) => {
         dispatch({ type: "set_stream_status", targetId, status: "error" });
         // On the row that was asked to start: the reason belongs beside the desktop it is about.
-        setStartErrors((held) => ({ ...held, [targetId]: screenSharingStartFailureText(e) }));
+        startFailures.report(targetId, e, screenSharingStartFailureText);
       });
   };
 
@@ -208,19 +205,17 @@ export function SessionScreenSharingTab({
     setActiveStreamResult(null);
     if (targetId) {
       dispatch({ type: "set_stream_status", targetId, status: "stopped" });
-      onStopStream(targetId).catch(() => {/* ignore */});
+      // The overlay is already gone and the row reads "stopped": there is no surface left to say a
+      // failed stop on, and the daemon ends an unwatched stream on its own.
+      onStopStream(targetId).catch(() => undefined);
     }
   };
 
   const handleRemove = (targetId: string) => {
-    setRemoveErrors((held) => {
-      const next = { ...held };
-      delete next[targetId];
-      return next;
-    });
+    removeFailures.clear(targetId);
     onRemoveTarget(targetId)
       .then(() => dispatch({ type: "remove_target", targetId }))
-      .catch((e: unknown) => setRemoveErrors((held) => ({ ...held, [targetId]: rpcFailureText(e) })));
+      .catch((e: unknown) => removeFailures.report(targetId, e));
   };
 
   return (
@@ -270,18 +265,18 @@ export function SessionScreenSharingTab({
                   </button>
                 </div>
               </div>
-              {startErrors[t.id] && (
+              {startFailures.errors[t.id] && (
                 <p
                   data-testid={`sessions-screen-sharing-start-error-${t.id}`}
                   role="alert"
                   className="text-xs text-destructive px-1"
                 >
-                  {startErrors[t.id]}
+                  {startFailures.errors[t.id]}
                 </p>
               )}
               <InlineError
                 testId={`sessions-screen-sharing-remove-error-${t.id}`}
-                message={removeErrors[t.id]}
+                message={removeFailures.errors[t.id]}
                 className="text-xs px-1"
               />
             </div>

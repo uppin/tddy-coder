@@ -11,7 +11,8 @@
  * state is not returned — it is the registry write, and a row that wants it reads it from there
  * rather than through a prop drilled down the drawer. What is returned is whether the feed is live:
  * `error` says why it stopped, so the drawer can tell the operator its dots are no longer updating.
- * It clears when a frame arrives on a new subscription.
+ * It clears when a frame arrives on a new subscription, and when the client changes or goes away —
+ * a failure is about the subscription it happened on.
  *
  * PRD: docs/ft/daemon/session-notifications.md (FR3, NFR1).
  */
@@ -35,6 +36,7 @@ export function useSessionNotifications(): SessionNotificationsFeed {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setError(null);
     // No client means no daemon is reachable: the drawer's own reads already say "not connected"
     // for the selected host, so the feed adds no second copy of that message.
     if (!client) return;

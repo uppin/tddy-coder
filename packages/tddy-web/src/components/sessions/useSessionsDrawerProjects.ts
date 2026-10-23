@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ProjectService, type ProjectEntry } from "../../gen/project_pb";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
-import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
+import { useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
 
 /** The registry the drawer read, and why the last read failed (`null` while it has not). */
 export interface SessionsDrawerProjects {
@@ -21,12 +21,14 @@ export function useSessionsDrawerProjects(
   projectClient: Client<typeof ProjectService> | null,
   sessionToken: string,
 ): SessionsDrawerProjects {
-  const { selectedInstanceId, selectedLabel } = useSelectedDaemon();
+  const { selectedInstanceId } = useSelectedDaemon();
+  const hostLabel = useHostLabel();
+  const selectedHost = hostLabel(selectedInstanceId ?? "");
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!projectClient) {
-      setError(rpcFailureText(hostNotConnected(selectedLabel ?? selectedInstanceId)));
+      setError(hostNotConnectedText(selectedHost));
       return;
     }
     let cancelled = false;
@@ -43,6 +45,6 @@ export function useSessionsDrawerProjects(
     return () => {
       cancelled = true;
     };
-  }, [projectClient, sessionToken, selectedLabel, selectedInstanceId]);
+  }, [projectClient, sessionToken, selectedHost]);
   return { projects, error };
 }

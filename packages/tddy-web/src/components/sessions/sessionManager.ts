@@ -22,8 +22,8 @@ import {
   type SessionParticipant,
 } from "../../utils/crossHostSessions";
 import { subscribeSessionsRefresh } from "../../lib/sessionsRefreshBridge";
-import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
+import { useHostLabel } from "../../rpc/selectedDaemon";
 
 /** Pulls the selected host's sessions (typically `client.listSessions(...)`). */
 export type SessionFetcher = () => Promise<SessionEntry[]>;
@@ -33,7 +33,7 @@ export type SessionFetcher = () => Promise<SessionEntry[]>;
  * changes (a session's PID dying, or a session ended from another client) surface without a reload.
  * Short enough to feel real-time for a status indicator, cheap enough for a background poll.
  */
-const REFRESH_INTERVAL_MS = 2000;
+export const REFRESH_INTERVAL_MS = 2000;
 
 export class SessionManager {
   private selectedHostSessions: SessionEntry[] = [];
@@ -44,7 +44,6 @@ export class SessionManager {
   private cached: SessionEntry[] = [];
   private cachedSessionMetadata: ReadonlyMap<string, SessionMetadata> = new Map();
   private cachedLoadError: string | null = null;
-  private unavailableReason: string | null = null;
   private readonly listeners = new Set<() => void>();
   private unsubscribeBridge: (() => void) | null = null;
   private refreshIntervalId: ReturnType<typeof window.setInterval> | null = null;
@@ -73,9 +72,8 @@ export class SessionManager {
    */
   setFetcher(fetcher: SessionFetcher | null, unavailableReason: string | null = null): void {
     this.fetcher = fetcher;
-    this.unavailableReason = fetcher ? null : unavailableReason;
-    if (!fetcher) this.setLoadError(this.unavailableReason);
-    this.refresh();
+    if (!fetcher) this.setLoadError(unavailableReason);
+    void this.refresh();
   }
 
   setActiveParticipants(participants: SessionParticipant[]): void {
@@ -100,12 +98,12 @@ export class SessionManager {
    * Re-pull the selected host's sessions. No-op until a fetcher is set.
    *
    * A failed pull keeps the last good list and records why in {@link loadError}; the next pull that
-   * succeeds clears it.
+   * succeeds clears it. Resolves once this pull has settled into the store; never rejects.
    */
-  refresh(): void {
+  refresh(): Promise<void> {
     const fetcher = this.fetcher;
-    if (!fetcher) return;
-    fetcher()
+    if (!fetcher) return Promise.resolve();
+    return fetcher()
       .then((sessions) => {
         if (this.fetcher !== fetcher) return;
         this.selectedHostSessions = sessions;
@@ -194,8 +192,8 @@ export function useSessionManager(
   useEffect(() => manager.start(), [manager]);
 
   // No client is no wire to the selected host — said as such, naming it, rather than an empty list.
-  const { selectedLabel } = useSelectedDaemon();
-  const unavailableReason = rpcFailureText(hostNotConnected(selectedLabel ?? selectedInstanceId));
+  const hostLabel = useHostLabel();
+  const unavailableReason = hostNotConnectedText(hostLabel(selectedInstanceId));
   useEffect(() => {
     manager.setFetcher(
       client

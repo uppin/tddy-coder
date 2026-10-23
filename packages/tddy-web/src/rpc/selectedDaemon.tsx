@@ -58,6 +58,7 @@ import { useServingHostDirectorySource } from "./hostDirectory/servingSource";
 import { HostDirectorySources, useHostDirectory } from "./hostDirectory/useHostDirectory";
 import type { HostDirectorySource } from "./hostDirectory/types";
 import { useSelectedDaemonLabel } from "./useSelectedDaemonLabel";
+import { hostLabelOf } from "./hostLabel";
 
 // ---------------------------------------------------------------------------
 // Context
@@ -330,6 +331,10 @@ function SelectedDaemonScope({
   servingInstanceId: string | undefined;
   children: ReactNode;
 }) {
+  // Not compiled: `isReady` below is keyed on `listedCount`, which its body never reads. The React
+  // Compiler memoises on what a body reads, so it would drop `listedCount` and never admit a host
+  // listed after the first render.
+  "use no memo";
   const directory = useHostDirectory();
   // The screens speak `DaemonHost`; the directory speaks `HostDescriptor`. See `hostDirectory/daemonHost`.
   const daemons = useMemo(() => directory.hosts.map(daemonHostOf), [directory.hosts]);
@@ -420,6 +425,21 @@ export function useSelectedDaemon(): SelectedDaemonContextValue {
 /** Convenience for `useSelectedDaemon().daemons`. */
 export function useDaemons(): DaemonHost[] {
   return useSelectedDaemon().daemons;
+}
+
+/**
+ * Name a host in text — an error, a badge, a gate title — by the one rule in `./hostLabel`.
+ *
+ * The callback's identity is stable for the component's lifetime and always reads the current
+ * directory: the daemon list is rebuilt on every participant event, and a callback that changed with
+ * it would re-run every effect keyed on it (a poll, a stream). Call it during render to key an
+ * effect on the label itself.
+ */
+export function useHostLabel(): (instanceId: string) => string {
+  const { daemons, selectedInstanceId, selectedLabel } = useSelectedDaemon();
+  const sourceRef = useRef({ daemons, selectedInstanceId, selectedLabel });
+  sourceRef.current = { daemons, selectedInstanceId, selectedLabel };
+  return useCallback((instanceId: string) => hostLabelOf(sourceRef.current, instanceId), []);
 }
 
 /**

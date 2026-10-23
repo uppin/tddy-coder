@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Process handling for ./web-dev that works on the bash a developer's shell actually runs — on macOS
-# that is /bin/bash 3.2 (#!/usr/bin/env bash finds it before any nix bash). Sourced; it declares two
+# that is /bin/bash 3.2 (#!/usr/bin/env bash finds it before any nix bash). Sourced; it declares
 # functions and runs nothing.
 #
 # Why these exist: ./web-dev used `wait -n` and `fuser -k`. bash 3.2 rejects `wait -n` as an invalid
@@ -61,6 +61,39 @@ dev_free_port() {
   return 1
 }
 
+# This checkout's own port for <role> (daemon, vite): derived from the checkout's absolute path, so
+# every run here gets the same one. The browser keeps its session token and host-key pins per origin,
+# and a port that moved on each restart would sign the developer out every time. Used when free and
+# not among the remaining arguments; otherwise a random free port, with a notice that this run's
+# origin differs. Only the port choice is stable — a held pinned port is still an error elsewhere.
+dev_checkout_port() {
+  local role="$1" what="$2" crc port taken
+  shift 2
+  # cksum is POSIX, and the same CRC on macOS and Linux; the path is hashed as bytes.
+  crc=$(printf '%s:%s' "$PWD" "$role" | cksum | cut -d ' ' -f 1)
+  port=$((49152 + crc % 16384))
+  for taken in "$@"; do
+    if [ "$port" = "$taken" ]; then
+      dev_checkout_port_moved "$port" "$what" "$@"
+      return
+    fi
+  done
+  if (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null; then
+    dev_checkout_port_moved "$port" "$what" "$@"
+    return
+  fi
+  echo "$port"
+}
+
+# dev_checkout_port's fallback: a random free port other than the checkout's own and the avoided.
+dev_checkout_port_moved() {
+  local preferred="$1" what="$2" port
+  shift 2
+  port=$(dev_free_port "$preferred" "$@") || return 1
+  echo "=== ${what}: this checkout's port ${preferred} is in use; using ${port} for this run ===" >&2
+  echo "$port"
+}
+
 # The explicit port in a URL (`http://host:5173/x` → 5173), or nothing when it names none.
 dev_port_of_url() {
   local authority="${1#*://}"
@@ -71,15 +104,16 @@ dev_port_of_url() {
   return 0
 }
 
-# Resolve DAEMON_PORT, VITE_PORT and VITE_URL for a run. A port is ephemeral unless pinned —
-# DAEMON_PORT, or VITE_PORT / a port in VITE_URL (the OAuth redirect base, which Vite must serve
-# exactly) — so runs in different worktrees, and one left from an earlier run, never collide. A
-# pinned port cannot move, so a held one is an error (dev_require_free_port).
+# Resolve DAEMON_PORT, VITE_PORT and VITE_URL for a run. A port is this checkout's own ephemeral one
+# (dev_checkout_port) unless pinned — DAEMON_PORT, or VITE_PORT / a port in VITE_URL (the OAuth
+# redirect base, which Vite must serve exactly) — so runs in different worktrees never collide, and
+# one checkout keeps its browser origin across restarts. A pinned port cannot move, so a held one is
+# an error (dev_require_free_port).
 dev_resolve_ports() {
   if [ -n "${DAEMON_PORT:-}" ]; then
     dev_require_free_port "$DAEMON_PORT" "tddy-daemon (DAEMON_PORT)" || return 1
   else
-    DAEMON_PORT=$(dev_free_port) || return 1
+    DAEMON_PORT=$(dev_checkout_port daemon "tddy-daemon") || return 1
   fi
 
   local url_port pinned=true
@@ -93,13 +127,37 @@ dev_resolve_ports() {
   VITE_PORT="${VITE_PORT:-$url_port}"
   if [ -z "$VITE_PORT" ]; then
     pinned=false
-    VITE_PORT=$(dev_free_port "$DAEMON_PORT") || return 1
+    VITE_PORT=$(dev_checkout_port vite "Vite dev server" "$DAEMON_PORT") || return 1
   fi
   if [ "$pinned" = "true" ] && [ "${HEADLESS:-false}" != "true" ]; then
     dev_require_free_port "$VITE_PORT" "Vite dev server (VITE_PORT / VITE_URL)" || return 1
   fi
   [ -n "$VITE_URL" ] || VITE_URL="http://127.0.0.1:${VITE_PORT}"
   export DAEMON_PORT VITE_PORT VITE_URL
+}
+
+# Wait until <url> answers HTTP 200 twice, a second apart (one 200 can come from a server still
+# coming up), for at most <timeout_s> seconds. Fails at once when <pid> has exited: a daemon that
+# died on its config or lost its port never answers, and running out the timeout only delays the
+# error that says why. <what> names the process in the errors.
+dev_wait_http_ready() {
+  local url="$1" pid="$2" timeout_s="$3" what="$4" deadline code
+  deadline=$((SECONDS + timeout_s))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "Error: ${what} exited before answering on ${url}." >&2
+      return 1
+    fi
+    code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 "$url" 2>/dev/null || true)
+    if [ "$code" = "200" ]; then
+      sleep 1
+      code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 "$url" 2>/dev/null || true)
+      [ "$code" = "200" ] && return 0
+    fi
+    sleep 0.5
+  done
+  echo "Error: ${what} did not respond with HTTP 200 on ${url} within ${timeout_s}s." >&2
+  return 1
 }
 
 # --- Run record --------------------------------------------------------------------------------
@@ -142,7 +200,8 @@ dev_reap_previous_run() {
     fi
   done <"$file"
 
-  local stopped=()
+  # Parallel arrays: each stopped pid and the start time it was recorded with.
+  local stopped=() stopped_at=()
   while read -r kind id started; do
     case "$kind" in
       group)
@@ -150,6 +209,7 @@ dev_reap_previous_run() {
         echo "=== Stopping pid ${id} ($(ps -o command= -p "$id" 2>/dev/null || true)), left by an earlier ./web-dev ===" >&2
         kill -TERM -- "-$id" 2>/dev/null || kill -TERM "$id" 2>/dev/null || true
         stopped+=("$id")
+        stopped_at+=("$started")
         ;;
       container)
         case "$id" in
@@ -163,14 +223,20 @@ dev_reap_previous_run() {
   done <"$file"
 
   if [ "${#stopped[@]}" -gt 0 ]; then
-    local pid _
+    local pid i _
     for _ in 1 2 3 4 5; do
       local alive=false
       for pid in "${stopped[@]}"; do kill -0 "$pid" 2>/dev/null && alive=true; done
       [ "$alive" = "true" ] || break
       sleep 1
     done
-    for pid in "${stopped[@]}"; do kill -KILL -- "-$pid" 2>/dev/null || true; done
+    # Checked again before KILL: a pid that exited during the grace period may already belong to
+    # another process.
+    for ((i = 0; i < ${#stopped[@]}; i++)); do
+      pid="${stopped[$i]}"
+      [ "$(_dev_started_at "$pid")" = "${stopped_at[$i]}" ] || continue
+      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+    done
   fi
   rm -f "$file"
 }

@@ -8,21 +8,30 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { hostGateOf, type HostGateInput } from "./hostGate";
+import { hostGateOf, type HostGate, type HostGateInput } from "./hostGate";
 
 function anInput(overrides: Partial<HostGateInput> = {}): HostGateInput {
   return {
     selectedInstanceId: "workstation-1",
-    hostLabel: "workstation-1 (this daemon)",
+    hostLabel: "workstation-1",
     connection: { providerId: "livekit" },
     liveKit: { status: "connected", error: null },
     ...overrides,
   };
 }
 
+/** Why a blocked gate blocks; `null` for an open gate or a blocked one that gives no reason. */
+function blockedReasonOf(gate: HostGate): string | null {
+  return gate.kind === "blocked" ? gate.reason : null;
+}
+
 describe("hostGateOf", () => {
   it("is open when a connection reaches the selected host over a joined common room", () => {
-    expect(hostGateOf(anInput())).toEqual({ kind: "open" });
+    // Given a LiveKit connection over a joined room
+    const input = anInput();
+
+    // When / Then
+    expect(hostGateOf(input)).toEqual({ kind: "open" });
   });
 
   it("is open while a connection exists but the room is still settling", () => {
@@ -69,9 +78,9 @@ describe("hostGateOf", () => {
     expect(gate).toMatchObject({
       kind: "blocked",
       tone: "error",
-      title: "Not connected to workstation-1 (this daemon)",
+      title: "Not connected to workstation-1",
     });
-    expect(gate.kind === "blocked" && gate.reason).toContain("could not establish signal connection");
+    expect(blockedReasonOf(gate)).toContain("could not establish signal connection");
   });
 
   it("blocks with the room's failure when a joined room dropped under a LiveKit connection", () => {
@@ -83,7 +92,7 @@ describe("hostGateOf", () => {
 
     // Then
     expect(gate).toMatchObject({ kind: "blocked", tone: "error" });
-    expect(gate.kind === "blocked" && gate.reason).toContain("LiveKit disconnected (reason=SIGNAL_CLOSE).");
+    expect(blockedReasonOf(gate)).toContain("LiveKit disconnected (reason=SIGNAL_CLOSE).");
   });
 
   it("says it is connecting, not failing, while the common room is still being joined", () => {
@@ -97,7 +106,7 @@ describe("hostGateOf", () => {
     expect(gate).toMatchObject({
       kind: "blocked",
       tone: "connecting",
-      title: "Connecting to workstation-1 (this daemon)…",
+      title: "Connecting to workstation-1…",
     });
   });
 
@@ -110,7 +119,7 @@ describe("hostGateOf", () => {
 
     // Then
     expect(gate).toMatchObject({ kind: "blocked", tone: "error" });
-    expect(gate.kind === "blocked" && gate.reason).toContain("not in the common room");
+    expect(blockedReasonOf(gate)).toContain("not in the common room");
   });
 
   it("says no connection is configured when there is no common room and no other wire", () => {
@@ -122,7 +131,7 @@ describe("hostGateOf", () => {
 
     // Then
     expect(gate).toMatchObject({ kind: "blocked", tone: "error" });
-    expect(gate.kind === "blocked" && gate.reason).toContain("LiveKit is not configured");
+    expect(blockedReasonOf(gate)).toContain("LiveKit is not configured");
   });
 
   it("falls back to the instance id when the host has no label", () => {

@@ -21,6 +21,7 @@ import { useEnqueuedInput } from "./useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 import { rpcFailureText } from "../../rpc/rpcFailure";
+import { inputDeliverySequence } from "../../rpc/connections/inputDelivery";
 import { InlineError } from "../ui/inline-error";
 
 const dGrpc = tddyDebug("tddy:term:grpc");
@@ -113,8 +114,10 @@ export function GrpcSessionTerminal({
 
   // Why the last keystroke, paste or resize did not reach the PTY — e.g. another screen took the
   // lease. One indicator however many sends are refused (each failure writes the same string, which
-  // React does not re-render for), and the next delivered send clears it.
+  // React does not re-render for), and the next delivered send clears it. Answers can land out of
+  // order, so only the newest settled send is reported (see `inputDeliverySequence`).
   const [inputError, setInputError] = useState<string | null>(null);
+  const [nextDelivery] = useState(() => inputDeliverySequence(setInputError));
 
   // Disconnect fires automatically when the terminal goes away — either the remote
   // stream ends or this component unmounts (e.g. the user switches sessions). Read
@@ -149,6 +152,7 @@ export function GrpcSessionTerminal({
       // Assign this chunk its cumulative byte offset (also tracked for the enqueued-input overlay)
       // and send it so the daemon can ack the applied offset back on the output stream.
       const inputOffset = enqueue(data);
+      const settle = nextDelivery();
       cli
         .sendTerminalInput({
           sessionToken,
@@ -159,18 +163,18 @@ export function GrpcSessionTerminal({
           inputOffset: BigInt(inputOffset),
         })
         .then(
-          () => setInputError(null),
+          () => settle(null),
           (err: unknown) => {
             dGrpc(
               "sendTerminalInput failed sessionId=%s error=%o",
               sessionId,
               err instanceof Error ? err.message : err,
             );
-            setInputError(rpcFailureText(err));
+            settle(rpcFailureText(err));
           },
         );
     },
-    [client, sessionId, sessionToken, terminalId, enqueue],
+    [client, sessionId, sessionToken, terminalId, enqueue, nextDelivery],
   );
   const sendInputRequestRef = useRef(sendInputRequest);
   sendInputRequestRef.current = sendInputRequest;

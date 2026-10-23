@@ -9,6 +9,8 @@
  * The transport-selection and stream-open mechanics mirror `usePresenterChat`: a client is only
  * built when there is a genuinely connected `Room`, or when a test double has overridden the
  * LiveKit transport factory (those are free to ignore `room` and route to an in-memory backend).
+ * Without one there is no stream to fail — a host reached without LiveKit has no usage stream at
+ * all, and a room still joining has not opened one yet — so nothing is reported.
  *
  * Changeset: `session-usage-inspector`
  * PRD: `docs/ft/web/session-usage-inspector.md`
@@ -17,7 +19,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
+import { ConnectionState, RoomEvent, type Room } from "livekit-client";
 import { AsyncQueue } from "tddy-livekit-web";
 import {
   useLiveKitTransportFactory,
@@ -29,25 +31,42 @@ import {
   type ClientMessage,
 } from "../../gen/tddy/v1/remote_pb";
 import { emptyUsage, type ConversationUsage } from "./sessionUsage";
-import { hostNotConnected, rpcFailureText } from "../../rpc/rpcFailure";
+import { rpcFailureText } from "../../rpc/rpcFailure";
 
 /** The latest snapshot, and why the stream is not delivering (`null` while it is). */
 export interface SessionUsageStream {
   usage: ConversationUsage[];
   /**
-   * Why the stream stopped or could not open, ready to render; the last snapshot stays in `usage`.
-   * Cleared when a snapshot arrives on a new subscription.
+   * Why the stream stopped, ready to render; the last snapshot stays in `usage`. Cleared when a
+   * snapshot arrives on a new subscription. `null` while there is no stream to fail.
    */
   error: string | null;
+}
+
+/** Whether `room` has joined, kept current across its connection-state changes. */
+function useRoomConnected(room: Room | null): boolean {
+  const [connected, setConnected] = useState(() => room?.state === ConnectionState.Connected);
+  useEffect(() => {
+    if (!room) {
+      setConnected(false);
+      return;
+    }
+    const sync = () => setConnected(room.state === ConnectionState.Connected);
+    sync();
+    room.on(RoomEvent.ConnectionStateChanged, sync);
+    return () => {
+      room.off(RoomEvent.ConnectionStateChanged, sync);
+    };
+  }, [room]);
+  return connected;
 }
 
 /**
  * Subscribes to the session's token-usage stream and returns the latest snapshot, one entry per
  * conversation. `room` / `serverIdentity` select the LiveKit transport target exactly as they do
  * for the presenter chat. `usage` is `emptyUsage()` until the first `tokenUsageUpdated` event
- * arrives (or forever, if the session never reports usage); a stream that fails, or that cannot be
- * opened because there is no room to reach the session through, is reported in `error` instead of
- * looking like a session that reported nothing.
+ * arrives (or forever, if the session never reports usage); a stream that fails is reported in
+ * `error` instead of looking like a session that reported nothing.
  */
 export function useSessionUsage(
   room: Room | null,
@@ -55,7 +74,8 @@ export function useSessionUsage(
 ): SessionUsageStream {
   const liveKitFactory = useLiveKitTransportFactory();
   const factoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
-  const canBuildClient = room !== null || factoryIsOverridden;
+  const roomConnected = useRoomConnected(room);
+  const canBuildClient = roomConnected || factoryIsOverridden;
 
   // Stable client for the lifetime of this room/identity pair — a new room or identity tears
   // down the old stream and opens a fresh one. `null` when there is no room yet and no test
@@ -73,12 +93,11 @@ export function useSessionUsage(
 
   useEffect(() => {
     setUsage(emptyUsage());
+    setError(null);
     if (!client) {
       queueRef.current = null;
-      setError(rpcFailureText(hostNotConnected("this session")));
       return;
     }
-    setError(null);
 
     const queue = new AsyncQueue<ClientMessage>();
     queueRef.current = queue;
