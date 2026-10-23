@@ -17,15 +17,15 @@
 //! - **R6** — one wasmtime: the version tree-sitter's `wasm` feature pins (see `Cargo.toml`).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::dir::ExtensionsDir;
 use crate::error::ExtensionError;
-use crate::index::Index;
+use crate::index::{Index, IndexEntry};
 use crate::language::ExtensionLanguage;
-use crate::manifest::ExtensionManifest;
-use crate::server::{client_capabilities, ServerChoice, ServerRefusal};
+use crate::manifest::{ExtensionManifest, LibEntry};
+use crate::server::{client_capabilities, Served, ServerChoice, ServerRefusal};
 use crate::settings::ExtensionSettings;
 use tddy_lsp::LaunchSpec;
 
@@ -179,75 +179,287 @@ fn the_process_worktree() -> Result<WasmWorktree, ExtensionError> {
     })
 }
 
-/// [`choose_server`] for each of `languages` — `(manifest, language, K22's choice)` — whose server
+/// Each of `languages` — an installed extension's, beside its manifest — with what serves it: K22's
+/// choice from the settings ([`crate::server::served`]), then the opted-in extension's WASM for a
+/// server K22 left unconfigured ([`served_by_wasm`]).
+pub(crate) fn served(
+    dir: &ExtensionsDir,
+    languages: Vec<(ExtensionManifest, ExtensionLanguage)>,
+) -> Result<Vec<Served>, ExtensionError> {
+    let manifests: Vec<ExtensionManifest> = languages
+        .iter()
+        .map(|(manifest, _)| manifest.clone())
+        .collect();
+    let served = crate::server::served(dir, languages)?;
+    served_by_wasm(dir, manifests.into_iter().zip(served).collect())
+}
+
+/// [`choose_server`] for each of `languages` — K22's [`Served`] beside its manifest — whose server
 /// K22 left [`ServerChoice::Unconfigured`] and whose extension is opted in and ships code; every
 /// other language keeps its choice, and nothing is read or started for it (R1, R2). A WASM that
 /// cannot be loaded or gives no command refuses the languages it would have served, in its own
 /// words ([`ServerChoice::Refused`]).
+///
+/// The code-action kinds are kept as K22's step found them: they are the manifest entry's for the
+/// server, and the WASM names only that server's command.
 pub(crate) fn served_by_wasm(
     dir: &ExtensionsDir,
-    languages: Vec<(ExtensionManifest, ExtensionLanguage, ServerChoice)>,
-) -> Result<Vec<(ExtensionLanguage, ServerChoice)>, ExtensionError> {
+    languages: Vec<(ExtensionManifest, Served)>,
+) -> Result<Vec<Served>, ExtensionError> {
     let any_unconfigured = languages
         .iter()
-        .any(|(_, _, choice)| matches!(choice, ServerChoice::Unconfigured(_)));
+        .any(|(_, (_, choice, _))| matches!(choice, ServerChoice::Unconfigured(_)));
     if !any_unconfigured {
-        return Ok(languages
-            .into_iter()
-            .map(|(_, language, choice)| (language, choice))
-            .collect());
+        return Ok(languages.into_iter().map(|(_, served)| served).collect());
     }
-    let index = Index::load(dir)?;
-    let settings = ExtensionSettings::load(dir)?;
-    let worktree = the_process_worktree()?;
-    // Started by the first extension that needs it: no opted-in extension, no engine.
-    let mut host: Option<Result<WasmHost, String>> = None;
-    let mut loaded: BTreeMap<String, Result<Option<WasmExtension>, WasmCommandError>> =
-        BTreeMap::new();
-    let mut served = Vec::with_capacity(languages.len());
-    for (manifest, language, choice) in languages {
-        let unconfigured = match &choice {
-            ServerChoice::Unconfigured(no_command) => Some(no_command.server.clone()),
-            _ => None,
+    let mut opted_in = OptedInWasm::load(dir)?;
+    Ok(languages
+        .into_iter()
+        .map(|(manifest, (language, choice, kinds))| {
+            let choice = opted_in.serve(&manifest, &language, choice);
+            (language, choice, kinds)
+        })
+        .collect())
+}
+
+/// What [`served_by_wasm`] asks the opted-in extensions with: the index that says who is opted in,
+/// the worktree every call is about, and the extensions loaded so far.
+struct OptedInWasm {
+    index: Index,
+    worktree: WasmWorktree,
+    loader: WasmLoader,
+}
+
+impl OptedInWasm {
+    fn load(dir: &ExtensionsDir) -> Result<Self, ExtensionError> {
+        Ok(Self {
+            index: Index::load(dir)?,
+            worktree: the_process_worktree()?,
+            loader: WasmLoader {
+                settings: ExtensionSettings::load(dir)?,
+                host: None,
+                loaded: BTreeMap::new(),
+            },
+        })
+    }
+
+    /// `choice` for `language` once its extension's WASM has been asked — only when the server is
+    /// unconfigured and the extension opted in. A [`WasmCommandError`] refuses the server with its
+    /// text.
+    fn serve(
+        &mut self,
+        manifest: &ExtensionManifest,
+        language: &ExtensionLanguage,
+        choice: ServerChoice,
+    ) -> ServerChoice {
+        let ServerChoice::Unconfigured(no_command) = &choice else {
+            return choice;
         };
-        let entry = index
+        let Some(entry) = self
+            .index
             .extensions
             .get(&manifest.id)
-            .filter(|entry| entry.wasm_enabled);
-        let (Some(server), Some(entry)) = (unconfigured, entry) else {
-            served.push((language, choice));
-            continue;
+            .filter(|entry| entry.wasm_enabled)
+        else {
+            return choice;
         };
-        let wasm = loaded.entry(manifest.id.clone()).or_insert_with(|| {
+        let server = no_command.server.clone();
+        self.loader
+            .extension(entry, &language.extension_dir, &manifest.lib)
+            .and_then(|wasm| choose_server(manifest, language, choice, wasm, &self.worktree))
+            .unwrap_or_else(|error| {
+                ServerChoice::Refused(ServerRefusal {
+                    server,
+                    reason: error.to_string(),
+                })
+            })
+    }
+}
+
+/// Each opted-in extension loaded at most once, through one host started by the first that needs
+/// it: no opted-in extension, no engine.
+struct WasmLoader {
+    /// K22's settings, which every loaded extension's `get-settings` answers from.
+    settings: ExtensionSettings,
+    host: Option<Result<WasmHost, String>>,
+    loaded: BTreeMap<String, Result<Option<WasmExtension>, WasmCommandError>>,
+}
+
+impl WasmLoader {
+    /// [`WasmHost::load_opted_in`] for `entry`'s extension on the first ask, the same outcome after.
+    fn extension(
+        &mut self,
+        entry: &IndexEntry,
+        extension_dir: &Path,
+        lib: &LibEntry,
+    ) -> Result<Option<&mut WasmExtension>, WasmCommandError> {
+        let Self {
+            settings,
+            host,
+            loaded,
+        } = self;
+        let outcome = loaded.entry(entry.id.clone()).or_insert_with(|| {
             match host.get_or_insert_with(|| WasmHost::new().map_err(|error| error.to_string())) {
-                Ok(host) => {
-                    host.load_opted_in(entry, &language.extension_dir, &manifest.lib, &settings)
-                }
+                Ok(host) => host.load_opted_in(entry, extension_dir, lib, settings),
                 Err(reason) => Err(WasmCommandError::Load {
-                    extension: manifest.id.clone(),
+                    extension: entry.id.clone(),
                     reason: format!("the WASM host did not start: {reason}"),
                 }),
             }
         });
-        let chosen = match wasm {
-            Ok(wasm) => choose_server(&manifest, &language, choice, wasm.as_mut(), &worktree),
+        match outcome {
+            Ok(wasm) => Ok(wasm.as_mut()),
             Err(error) => Err(error.clone()),
-        };
-        let chosen = chosen.unwrap_or_else(|error| {
-            ServerChoice::Refused(ServerRefusal {
-                server,
-                reason: error.to_string(),
-            })
-        });
-        served.push((language, chosen));
+        }
     }
-    Ok(served)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::index::ExtensionSource;
+    use crate::server::NoServerCommand;
     use pretty_assertions::assert_eq;
+
+    const FIXTURE: &str = "wasm-fixture";
+
+    /// An extensions dir holding the fixture code extension (`tests/fixtures/wasm-ext`) installed
+    /// with `wasm` as its `extension.wasm`, and an index that opts it in or not.
+    struct InstalledFixture {
+        _data: tempfile::TempDir,
+        dir: ExtensionsDir,
+    }
+
+    impl InstalledFixture {
+        fn new(wasm: &[u8], wasm_enabled: bool) -> Self {
+            let data = tempfile::TempDir::new().expect("temp data dir");
+            let dir = ExtensionsDir::under_data_dir(data.path());
+            let installed = dir.extension(FIXTURE);
+            std::fs::create_dir_all(&installed).expect("the installed extension dir");
+            std::fs::copy(
+                Self::source().join("extension.toml"),
+                installed.join("extension.toml"),
+            )
+            .expect("copy extension.toml");
+            std::fs::write(installed.join(EXTENSION_WASM), wasm).expect("write extension.wasm");
+            let entry = IndexEntry {
+                id: FIXTURE.to_string(),
+                version: "0.1.0".to_string(),
+                source: ExtensionSource::Path,
+                installed_at: 1_760_000_000,
+                wasm_enabled,
+            };
+            let index = Index {
+                extensions: [(FIXTURE.to_string(), entry)].into_iter().collect(),
+            };
+            std::fs::write(
+                dir.index(),
+                serde_json::to_string(&index).expect("serialise the index"),
+            )
+            .expect("write index.json");
+            Self { _data: data, dir }
+        }
+
+        fn source() -> PathBuf {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wasm-ext")
+        }
+
+        fn built_wasm() -> Vec<u8> {
+            std::fs::read(Self::source().join(EXTENSION_WASM)).expect("read the fixture's wasm")
+        }
+
+        /// One language of the fixture, served as `choice`, its server asked for `kinds`.
+        fn language(&self, choice: ServerChoice, kinds: &[&str]) -> (ExtensionManifest, Served) {
+            let installed = self.dir.extension(FIXTURE);
+            let manifest = ExtensionManifest::parse(
+                &std::fs::read_to_string(installed.join("extension.toml")).expect("read manifest"),
+            )
+            .expect("the fixture manifest parses");
+            let language = ExtensionLanguage {
+                extension: FIXTURE.to_string(),
+                extension_dir: installed,
+                name: "Demo TOML".to_string(),
+                grammar: "toml".to_string(),
+                path_suffixes: vec!["toml".to_string()],
+                outline_query: None,
+            };
+            let kinds = kinds.iter().map(|kind| kind.to_string()).collect();
+            (manifest, (language, choice, kinds))
+        }
+
+        fn unconfigured(&self, server: &str) -> ServerChoice {
+            ServerChoice::Unconfigured(NoServerCommand {
+                server: server.to_string(),
+                extension: FIXTURE.to_string(),
+                settings_file: ExtensionSettings::file(&self.dir),
+            })
+        }
+    }
+
+    /// The choice and kinds of each served language.
+    fn choices_and_kinds(served: Vec<Served>) -> Vec<(ServerChoice, Vec<String>)> {
+        served
+            .into_iter()
+            .map(|(_, choice, kinds)| (choice, kinds))
+            .collect()
+    }
+
+    #[test]
+    fn a_wasm_refusal_refuses_the_server_in_its_words_and_keeps_its_code_action_kinds() {
+        // Given the fixture opted in, and downloading-ls — whose WASM calls download_file —
+        // unconfigured and asked for source.fixAll actions
+        let fixture = InstalledFixture::new(&InstalledFixture::built_wasm(), true);
+        let language = fixture.language(fixture.unconfigured("downloading-ls"), &["source.fixAll"]);
+
+        // When the installed languages are served
+        let served = served_by_wasm(&fixture.dir, vec![language]).expect("served");
+
+        // Then the run refuses the server with the WASM's refusal, and its kinds ride along
+        assert_eq!(
+            choices_and_kinds(served),
+            vec![(
+                ServerChoice::Refused(ServerRefusal {
+                    server: "downloading-ls".to_string(),
+                    reason: format!(
+                        "extension {FIXTURE}: language server downloading-ls: {}",
+                        download_refusal("downloading-ls")
+                    ),
+                }),
+                vec!["source.fixAll".to_string()]
+            )]
+        );
+    }
+
+    #[test]
+    fn a_server_of_an_extension_not_opted_in_stays_unconfigured() {
+        // Given the fixture not opted in, with an extension.wasm that would refuse to load
+        let fixture = InstalledFixture::new(b"not a component", false);
+        let unconfigured = fixture.unconfigured("fake-ls");
+        let language = fixture.language(unconfigured.clone(), &[]);
+
+        // When the installed languages are served
+        let served = served_by_wasm(&fixture.dir, vec![language]).expect("served");
+
+        // Then K22's refusal stands and the WASM was never read (R1)
+        assert_eq!(choices_and_kinds(served), vec![(unconfigured, vec![])]);
+    }
+
+    #[test]
+    fn with_no_unconfigured_server_not_even_the_index_is_read() {
+        // Given the fixture with an index no parser accepts, and a language with no server
+        let fixture = InstalledFixture::new(b"not a component", true);
+        std::fs::write(fixture.dir.index(), "not json").expect("break index.json");
+        let language = fixture.language(ServerChoice::Undeclared, &[]);
+
+        // When the installed languages are served
+        let served = served_by_wasm(&fixture.dir, vec![language]);
+
+        // Then nothing was read: the language keeps its choice
+        assert_eq!(
+            served.map(choices_and_kinds),
+            Ok(vec![(ServerChoice::Undeclared, vec![])])
+        );
+    }
 
     #[test]
     fn only_zed_extension_api_0_6_is_supported() {

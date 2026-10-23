@@ -126,10 +126,20 @@ impl WasmHost {
                 version: lib.version.clone(),
             });
         }
-        let load_error = |reason: String| WasmCommandError::Load {
-            extension: extension.to_string(),
-            reason,
-        };
+        let mut loaded = self.instantiate(extension, extension_dir, settings)?;
+        loaded.init()?;
+        Ok(loaded)
+    }
+
+    /// `extension.wasm` under `extension_dir` compiled and instantiated against this host's linker,
+    /// in a store of its own; its `init-extension` not yet called.
+    fn instantiate(
+        &self,
+        extension: &str,
+        extension_dir: &Path,
+        settings: &ExtensionSettings,
+    ) -> Result<WasmExtension, WasmCommandError> {
+        let load_error = |reason: String| load_error(extension, reason);
         let file = extension_dir.join(EXTENSION_WASM);
         let bytes =
             fs::read(&file).map_err(|error| load_error(format!("{}: {error}", file.display())))?;
@@ -138,27 +148,13 @@ impl WasmHost {
         let mut store = Store::new(&self.engine, HostState::new(extension, settings.clone()));
         let instance = bindings::Extension::instantiate(&mut store, &component, &self.linker)
             .map_err(|error| load_error(format!("{error:#}")))?;
-        let mut loaded = WasmExtension {
+        Ok(WasmExtension {
             extension: extension.to_string(),
             store,
             instance,
             deadline: self.deadline,
             _ticker: Arc::clone(&self.ticker),
-        };
-        loaded.arm_deadline();
-        loaded
-            .instance
-            .call_init_extension(&mut loaded.store)
-            .map_err(|error| {
-                load_error(match error.downcast_ref::<Trap>() {
-                    Some(Trap::Interrupt) => format!(
-                        "init-extension did not return within {:?} and was stopped",
-                        self.deadline
-                    ),
-                    _ => format!("init-extension failed: {error:#}"),
-                })
-            })?;
-        Ok(loaded)
+        })
     }
 
     /// R1: [`WasmHost::load`] for an extension whose index entry is opted in and whose
@@ -177,10 +173,10 @@ impl WasmHost {
         match fs::metadata(&file) {
             Ok(_) => self.load(&entry.id, extension_dir, lib, settings).map(Some),
             Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(WasmCommandError::Load {
-                extension: entry.id.clone(),
-                reason: format!("{}: {error}", file.display()),
-            }),
+            Err(error) => Err(load_error(
+                &entry.id,
+                format!("{}: {error}", file.display()),
+            )),
         }
     }
 }
@@ -258,6 +254,25 @@ impl WasmExtension {
         self.parsed(server, call, json)
     }
 
+    /// `init-extension`, under the deadline: what [`WasmHost::load`] calls once the instance exists.
+    fn init(&mut self) -> Result<(), WasmCommandError> {
+        self.arm_deadline();
+        let deadline = self.deadline;
+        self.instance
+            .call_init_extension(&mut self.store)
+            .map_err(|error| {
+                load_error(
+                    &self.extension,
+                    match error.downcast_ref::<Trap>() {
+                        Some(Trap::Interrupt) => format!(
+                            "init-extension did not return within {deadline:?} and was stopped"
+                        ),
+                        _ => format!("init-extension failed: {error:#}"),
+                    },
+                )
+            })
+    }
+
     /// Epoch deadline for the call about to start: trap once [`Self::deadline`] has passed.
     fn arm_deadline(&mut self) {
         let ticks = self.deadline.as_millis().div_ceil(EPOCH_TICK.as_millis()) + 1;
@@ -278,30 +293,40 @@ impl WasmExtension {
             Resource<WasmWorktree>,
         ) -> wasmtime::Result<Result<T, String>>,
     ) -> Result<T, WasmCommandError> {
-        let extension = self.extension.clone();
-        let trapped = |reason: String| WasmCommandError::Trapped {
-            extension: extension.clone(),
-            server: server.to_string(),
-            call: call.to_string(),
-            reason,
-        };
         let handle = self
             .store
             .data_mut()
             .table
             .push(worktree.clone())
-            .map_err(|error| trapped(error.to_string()))?;
+            .map_err(|error| self.trapped(server, call, error.to_string()))?;
         let rep = handle.rep();
         self.store.data_mut().server = Some(server.to_string());
         self.arm_deadline();
         let result = export(&self.instance, &mut self.store, handle);
         let state = self.store.data_mut();
         state.server = None;
-        let released = state.table.delete(Resource::<WasmWorktree>::new_own(rep));
+        let released = state
+            .table
+            .delete(Resource::<WasmWorktree>::new_own(rep))
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        self.outcome(server, call, result, released)
+    }
+
+    /// What one export call about `server` came to: its value once the worktree handed to it was
+    /// released, the extension's own `Err` as [`WasmCommandError::Refused`], or its trap — the
+    /// deadline's as [`WasmCommandError::DeadlineExceeded`].
+    fn outcome<T>(
+        &self,
+        server: &str,
+        call: &str,
+        result: wasmtime::Result<Result<T, String>>,
+        released: Result<(), String>,
+    ) -> Result<T, WasmCommandError> {
         match result {
             Ok(Ok(value)) => released
-                .map(|_| value)
-                .map_err(|error| trapped(error.to_string())),
+                .map(|()| value)
+                .map_err(|reason| self.trapped(server, call, reason)),
             Ok(Err(message)) => Err(WasmCommandError::Refused {
                 extension: self.extension.clone(),
                 server: server.to_string(),
@@ -314,8 +339,17 @@ impl WasmExtension {
                     call: call.to_string(),
                     deadline: self.deadline,
                 },
-                _ => trapped(format!("{error:#}")),
+                _ => self.trapped(server, call, format!("{error:#}")),
             }),
+        }
+    }
+
+    fn trapped(&self, server: &str, call: &str, reason: String) -> WasmCommandError {
+        WasmCommandError::Trapped {
+            extension: self.extension.clone(),
+            server: server.to_string(),
+            call: call.to_string(),
+            reason,
         }
     }
 
@@ -334,6 +368,14 @@ impl WasmExtension {
                 message: format!("{call} returned text that is not JSON: {error}"),
             }),
         }
+    }
+}
+
+/// [`WasmCommandError::Load`] for `extension`.
+fn load_error(extension: &str, reason: String) -> WasmCommandError {
+    WasmCommandError::Load {
+        extension: extension.to_string(),
+        reason,
     }
 }
 

@@ -17,12 +17,13 @@ use tddy_lsp::LaunchSpec;
 use tddy_zed_extensions::server::client_capabilities;
 use tddy_zed_extensions::wasm::download_refusal;
 use tddy_zed_extensions::{
-    choose_server, set_wasm_enabled, ExtensionError, ExtensionSettings, Index, ServerChoice,
-    WasmCommandError, WasmHost,
+    choose_server, install_from_path, set_wasm_enabled, ExtensionError, ExtensionSettings,
+    ExtensionsDir, Index, InstallOutcome, ServerChoice, WasmCommandError, WasmHost,
 };
 use wasm_support::{
-    a_rust_lib_built_for, demo_toml_of, the_index_entry, the_server_started_by, AWorktree,
-    AnInstalledWasmExtension, DOWNLOADING_LS, FAKE_LS, LOOPING_LS, WASM_FIXTURE,
+    a_rust_lib_built_for, demo_toml_of, the_fixture_source_at_version, the_index_entry,
+    the_server_started_by, AWorktree, AnInstalledWasmExtension, DOWNLOADING_LS, FAKE_LS,
+    LOOPING_LS, WASM_FIXTURE,
 };
 
 /// A deadline short enough that the looping server does not hold the suite up.
@@ -259,4 +260,27 @@ fn enable_and_disable_wasm_flip_the_index_entry() {
             })
         )
     );
+}
+
+#[test]
+fn a_new_version_of_an_opted_in_extension_stays_opted_in() {
+    // Given the fixture installed from its source and opted in
+    let data = tempfile::TempDir::new().expect("temp data dir");
+    let extensions = ExtensionsDir::under_data_dir(data.path());
+    let first = the_fixture_source_at_version("0.1.0");
+    let fresh = install_from_path(&extensions, first.path()).map(|outcome| match outcome {
+        InstallOutcome::Installed(entry) => entry.wasm_enabled,
+        other => panic!("a first install is Installed, got {other:?}"),
+    });
+    set_wasm_enabled(&extensions, WASM_FIXTURE, true).expect("opt the fixture in");
+
+    // When a new version of it is installed over it
+    let second = the_fixture_source_at_version("0.2.0");
+    let replaced = install_from_path(&extensions, second.path()).map(|outcome| match outcome {
+        InstallOutcome::Replaced { entry, .. } => entry.wasm_enabled,
+        other => panic!("a new version is Replaced, got {other:?}"),
+    });
+
+    // Then a fresh install is not opted in (R1), and the new version keeps the user's opt-in
+    assert_eq!((fresh, replaced), (Ok(false), Ok(true)));
 }

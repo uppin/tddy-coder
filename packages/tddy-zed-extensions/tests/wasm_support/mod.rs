@@ -123,6 +123,26 @@ impl AnInstalledWasmExtension {
     }
 }
 
+/// A temp copy of the fixture's source tree — its `extension.toml` claiming `version`, its
+/// `extension.wasm` beside it — to install from.
+pub fn the_fixture_source_at_version(version: &str) -> tempfile::TempDir {
+    let source = tempfile::TempDir::new().expect("temp extension source");
+    let manifest = fs::read_to_string(the_fixture_dir().join("extension.toml"))
+        .expect("read the fixture's extension.toml");
+    let manifest = manifest.replacen(
+        "version = \"0.1.0\"",
+        &format!("version = \"{version}\""),
+        1,
+    );
+    fs::write(source.path().join("extension.toml"), manifest).expect("write extension.toml");
+    fs::copy(
+        the_fixture_dir().join("extension.wasm"),
+        source.path().join("extension.wasm"),
+    )
+    .expect("copy the fixture's extension.wasm");
+    source
+}
+
 /// The fixture's index entry.
 pub fn the_index_entry(wasm_enabled: bool) -> IndexEntry {
     IndexEntry {
