@@ -80,6 +80,16 @@ impl CodeIndexServiceImpl {
         }
     }
 
+    /// This service, also verifying the changed files of `languages` — the installed extension
+    /// languages a host registered with [`CodeIndexServiceImpl::with_supports`] — by their servers'
+    /// new error diagnostics and their grammars' parse (`#reshape` extension-code-actions, R5).
+    #[must_use]
+    pub fn with_verifiable(self, languages: Vec<tddy_zed_extensions::ExtensionSupport>) -> Self {
+        Self {
+            index: self.index.with_verifiable(languages),
+        }
+    }
+
     /// Write every plan any root holds back to disk now, for a process about to stop.
     ///
     /// Plans are written back shortly after they change, but "shortly" is a delay, and a process

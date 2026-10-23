@@ -25,7 +25,7 @@ mod resume;
 mod tidy;
 
 pub use budget::production_lines_of_file;
-pub use comparison::{verify, verify_sources};
+pub use comparison::{changed_sources, verify, verify_sources};
 pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, AppliedRun};
 pub use entry_points::{
     apply, apply_from_store, check, check_plan, dispatch, item_anchors, open_plan_run,

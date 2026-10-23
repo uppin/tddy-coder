@@ -188,14 +188,22 @@ pub(crate) fn verify(response: &VerifyResponse) {
     for line in console::comparison(&comparison) {
         log::info!(target: crate::MAIN, "{line}");
     }
-    if comparison.holds() {
-        return;
+    for line in &response.source_findings {
+        log::info!(target: crate::MAIN, "{line}");
     }
-    log::error!(
-        target: crate::MAIN,
-        "{}",
-        console::comparison_refusal(&comparison)
-    );
+    if !comparison.holds() {
+        log::error!(
+            target: crate::MAIN,
+            "{}",
+            console::comparison_refusal(&comparison)
+        );
+    } else if !response.source_findings.is_empty() {
+        log::error!(
+            target: crate::MAIN,
+            "{}",
+            console::source_findings_refusal(response.source_findings.len())
+        );
+    }
 }
 
 /// One event a running analysis reported.

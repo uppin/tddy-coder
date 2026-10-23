@@ -919,6 +919,7 @@ async fn holds_a_tree_against_the_ref_it_was_committed_as() {
             repointed: 0,
             visibility_normalised: 0,
             cfg_test_gates: 0,
+            source_findings: Vec::new(),
         }
     );
 }

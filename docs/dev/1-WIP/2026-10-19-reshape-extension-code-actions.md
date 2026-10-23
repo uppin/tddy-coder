@@ -17,7 +17,10 @@
 - `packages/tddy-code-restructuring`: `RefactorKind::ApplyCodeAction`, `RefactorOp.action`, codec + static check,
   `ServerBackend` and `RustBackend` dispatch, `runner/comparison.rs` verify by support.
 - `packages/tddy-zed-extensions`: the extension-language verify (diagnostics + parse).
-- `packages/tddy-index-daemon`: `status.rs` maps `CodeActionRefused` (exhaustive match).
+- `packages/tddy-index-daemon`: `status.rs` maps `CodeActionRefused` (exhaustive match). **Widened
+  2026-10-23:** `Verify` builds `Options::verifies` and answers `VerifyResponse.source_findings` (proto field 9).
+- `packages/tddy-tools` / `packages/tddy-tools-cli`: **widened 2026-10-23** — the cold `restructure verify` builds
+  `Options::verifies` and renders `SourceFinding`s; the warm client renders `source_findings`.
 - `.config/nextest.toml`, `.config/rust-e2e.filterset`: the live `apply_code_action_acceptance` suite.
 
 ## Related Feature Documentation
@@ -129,10 +132,17 @@ The contract's open questions, resolved conservatively:
   before / after text is announced, never from the publish cache, which says nothing about the text last sent.
   A server that advertises no `diagnosticProvider` is refused (`ServerDefect`), not silently verified by parse
   alone.
-- **Where `verify_sources`' findings surface.** **Not done here**: `restructure verify` and the daemon's
-  `VerifyResponse` still carry only the Rust `Comparison`, and no front end builds `Options::verifies`. That
-  needs `tddy-tools` / `tddy-index-daemon` rendering and wiring outside this node's owned crates and
-  Boundaries; the library seam (`verify_sources`, `ExtensionVerify`) is complete and tested.
+- **Where `verify_sources`' findings surface.** **Resolved 2026-10-23 (developer decision: widen the scope to
+  wire it).** `Outcome::VerifiedWithFindings(Comparison, Vec<SourceFinding>)` (only when a verify found
+  something; otherwise the unchanged `Verified`); `console::source_findings` renders each as
+  `finding: <path>:<line>:<col>: new error diagnostic: <message>` / `…: parse error: ERROR node`. **Findings make
+  verify not hold**: the cold command exits non-zero (`console::source_findings_refusal`) and the daemon answers
+  `holds: false` with `source_findings` (rendered lines, `repeated string`, field 9; a new field, no new RPC).
+  The cold CLI (`tddy-tools-cli`'s `installed_languages`, one `load_installed`, `ExtensionVerify::for_languages`)
+  starts **no language server for a verify**, so it judges by the grammar's parse alone — new error diagnostics
+  surface through the warm index daemon, which verifies over each touched language's warm server
+  (`WorkspaceIndex::with_verifiable`, `runner::changed_sources` picks the languages). Not wired: `tddy-daemon`'s
+  hosted code-index service does not call `with_verifiable`, so it still verifies Rust only.
 - **Several command edits.** Kept as separate `FileEdit::Change`s in arrival order.
 - **`workspace/applyEdit` outside a command** keeps the `null` answer.
 - **A Rust backend that spawned its own server** (no shared client) refuses `apply_code_action`: the
@@ -170,6 +180,10 @@ dependency of `tddy-lsp`.
 - [x] Operation (R1–R4), Rust and extension dispatch
 - [x] Verify by support (R5)
 - [x] Docs: `apply_code_action` and `## Verify` in rust-code-restructuring.md; zed-extensions.md (deltas below, applied to `packages/*/docs` at wrap)
+- [x] Widened 2026-10-23 (developer decision): build `Options::verifies` in the cold CLI and the index daemon
+- [x] Widened: render `SourceFinding`s in `restructure verify`; carry them in `VerifyResponse.source_findings`
+- [x] Widened: acceptance tests — `tddy-tools-cli/tests/restructure_verify_extension_acceptance.rs`,
+  `tddy-index-daemon/tests/extension_verify.rs`
 - [ ] Code Quality
 
 ## Testing plan

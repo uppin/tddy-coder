@@ -24,7 +24,7 @@
 
 use crate::edit::VisibilityChange;
 use crate::runner::{FileLines, Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
-use crate::verify::{token_difference, Comparison, Excused};
+use crate::verify::{token_difference, Comparison, Excused, ParseNode, SourceFinding};
 
 /// Every line a whole run's result amounts to, in the order a reader reads them.
 ///
@@ -38,6 +38,11 @@ pub fn outcome(outcome: &Outcome, rehearsal: bool) -> Vec<String> {
         Outcome::Checked(found) => findings(found),
         Outcome::ItemAnchored(found) => vec![item_anchor(found)],
         Outcome::Verified(comparison) => self::comparison(comparison),
+        Outcome::VerifiedWithFindings(comparison, found) => {
+            let mut lines = self::comparison(comparison);
+            lines.extend(source_findings(found));
+            lines
+        }
         Outcome::Snapshotted(rewrite) => snapshot_rewrite(rewrite),
         Outcome::Measured(measured) => file_lines(measured),
     }
@@ -265,6 +270,39 @@ pub fn comparison_refusal(comparison: &Comparison) -> String {
         comparison.missing.len(),
         comparison.added.len()
     )
+}
+
+/// One line per thing a language's verify found wrong in a changed file beyond Rust, in the order
+/// the verifies found them (`#reshape` extension-code-actions, R5).
+pub fn source_findings(found: &[SourceFinding]) -> Vec<String> {
+    found.iter().map(source_finding).collect()
+}
+
+/// One finding as a line: `finding: <path>:<line>:<col>: <what>`.
+pub fn source_finding(found: &SourceFinding) -> String {
+    match found {
+        SourceFinding::NewErrorDiagnostic { path, at, message } => {
+            format!(
+                "finding: {path}:{}:{}: new error diagnostic: {message}",
+                at.line, at.col
+            )
+        }
+        SourceFinding::ParseError { path, node, at } => {
+            let node = match node {
+                ParseNode::Error => "ERROR",
+                ParseNode::Missing => "MISSING",
+            };
+            format!(
+                "finding: {path}:{}:{}: parse error: {node} node",
+                at.line, at.col
+            )
+        }
+    }
+}
+
+/// The refusal for a verify whose comparison held but whose changed files beyond Rust did not.
+pub fn source_findings_refusal(count: usize) -> String {
+    format!("{count} finding(s) in the changed files of other languages — see above")
 }
 
 /// The anchor `restructure anchors` found, as the JSON document a plan carries it as.

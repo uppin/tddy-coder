@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::options::usage;
-use super::Options;
+use super::{Options, Outcome};
 
 /// Hold the working tree's statements against a git ref's, as multisets.
 ///
@@ -33,6 +33,31 @@ pub fn verify(root: &Path, options: Options) -> Result<crate::verify::Comparison
             .and_then(|declared| declared.with_detaches(&options.detaches))
             .map_err(usage)?;
     Ok(crate::verify::compare_with(&before, &after, &declared))
+}
+
+/// [`verify`] and [`verify_sources`] as one answer: [`Outcome::Verified`] when no verify of a language
+/// beyond Rust found anything, [`Outcome::VerifiedWithFindings`] when one did. The sources are read
+/// first, because [`verify`] consumes the options.
+pub fn verified(root: &Path, options: Options) -> Result<Outcome> {
+    let findings = verify_sources(root, &options)?;
+    let comparison = verify(root, options)?;
+    Ok(if findings.is_empty() {
+        Outcome::Verified(comparison)
+    } else {
+        Outcome::VerifiedWithFindings(comparison, findings)
+    })
+}
+
+/// The non-Rust files the working tree differs from `--against` in — changed, added, deleted or not
+/// yet tracked — by path relative to the root: the files [`verify_sources`] offers to the verifies,
+/// for a front end that starts a language's server only when one of its files is among them.
+pub fn changed_sources(root: &Path, options: &Options) -> Result<BTreeSet<String>> {
+    let against = options
+        .against
+        .as_deref()
+        .ok_or_else(|| usage("verify needs --against <git-ref>"))?;
+    ensure_git_worktree(root, &options.spawns)?;
+    changed_paths(root, against, &options.spawns)
 }
 
 /// R5: every file the working tree changed against `--against` that one of `options.verifies`

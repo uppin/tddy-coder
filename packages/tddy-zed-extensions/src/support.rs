@@ -180,6 +180,10 @@ impl InstalledExtensions for SupportRegistry {
 }
 
 /// One installed extension language as a [`LanguageSupport`].
+///
+/// Cloned cheaply — the grammar, the compiled outline and the store are shared — so a front end can
+/// register one in the run's [`SupportRegistry`] and keep another for its [`crate::ExtensionVerify`].
+#[derive(Clone)]
 pub struct ExtensionSupport {
     id: LanguageId,
     language: ExtensionLanguage,

@@ -245,10 +245,20 @@ pub(crate) fn verify(response: &VerifyResponse) -> Result<()> {
     for line in console::comparison(&comparison) {
         say(&line);
     }
-    if comparison.holds() {
-        return Ok(());
+    for line in &response.source_findings {
+        say(line);
     }
-    Err(anyhow::anyhow!(console::comparison_refusal(&comparison)))
+    if !comparison.holds() {
+        return Err(anyhow::anyhow!(console::comparison_refusal(&comparison)));
+    }
+    // Findings in the changed files of other languages are a verify that did not hold, whatever
+    // the statement comparison says.
+    if !response.source_findings.is_empty() {
+        return Err(anyhow::anyhow!(console::source_findings_refusal(
+            response.source_findings.len()
+        )));
+    }
+    Ok(())
 }
 
 /// The anchor the daemon found, as the JSON document a plan carries it as.

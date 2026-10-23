@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tddy_code_restructuring::verify::{ParseNode, SourceChange, SourceFinding, SourceVerify};
 use tddy_code_restructuring::{LanguageSupport, Position, RestructureError};
-use tddy_lsp::{Diagnostic, LspClient, Range};
+use tddy_lsp::{Diagnostic, LanguageId, LspClient, Range};
 use tree_sitter::{Node, Tree};
 
 use crate::support::ExtensionSupport;
@@ -27,6 +27,26 @@ impl ExtensionVerify {
     /// The verify of `support`'s language, comparing the diagnostics of `server` when it runs one.
     pub fn new(support: ExtensionSupport, server: Option<Arc<LspClient>>) -> Self {
         Self { support, server }
+    }
+}
+
+impl ExtensionVerify {
+    /// One verify per support, each comparing the diagnostics of the server `servers` holds for its
+    /// language and judging by the parse alone when it holds none.
+    pub fn for_languages(
+        supports: &[ExtensionSupport],
+        servers: &[(LanguageId, Arc<LspClient>)],
+    ) -> Vec<Arc<dyn SourceVerify>> {
+        supports
+            .iter()
+            .map(|support| {
+                let server = servers
+                    .iter()
+                    .find(|(language, _)| language == support.id())
+                    .map(|(_, client)| Arc::clone(client));
+                Arc::new(Self::new(support.clone(), server)) as Arc<dyn SourceVerify>
+            })
+            .collect()
     }
 }
 
