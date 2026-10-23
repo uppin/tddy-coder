@@ -83,6 +83,11 @@ session exists, its status dot.
 - **Click** calls `EnsureProjectHomeSession` for the project on the selected host and selects the
   session it answers — started, resumed or already running. A refusal is shown under the entry.
 - **No home agent**: the entry shows a hint pointing at the Projects screen and starts nothing.
+  Clicking it opens **Projects** at `#/projects?project=<id>` on the same host, with that project's
+  **Home agent** picker focused and scrolled into view
+  ([Projects § Home agent](projects-screen-multi-host.md#home-agent)). It is a pushed history entry,
+  so Back returns to the drawer. The entry is `aria-disabled` only where no such navigation is wired
+  (`onSetUpProjectHome` absent).
 - **Not repeated**: the project-home session (`sessionRole === "project-home"`) is not listed again
   among the group's rows.
 - **A project with no session yet** still gets its group when it has a home agent, so the pinned
@@ -92,7 +97,7 @@ session exists, its status dot.
 
 Implementation: `ProjectHomeEntry`, `useEnsureProjectHome`, `useSessionsDrawerProjectHomes`
 (`src/components/sessions/`), `projectHomeSlot` and `withProjectHomeGroups`
-(`src/utils/projectHomeGroups.ts`).
+(`src/utils/projectHomeGroups.ts`), `projectSetupLocation` (`src/routing/projectSetupLocation.ts`).
 
 ## Indicator Token
 
