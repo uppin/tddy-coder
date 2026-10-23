@@ -375,3 +375,215 @@ impl process::Host for HostState {
         Ok(Err(self.refusal()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bindings::ExtensionImports;
+    use bindings::HostWorktree;
+    use pretty_assertions::assert_eq;
+    use std::os::unix::fs::symlink;
+
+    /// A temp worktree root holding `notes.txt`, a `bin/` with an executable `tool` and a plain
+    /// `data`, and a file outside the root reachable through a symlink `escape`.
+    struct AWorktreeOnDisk {
+        _outside: tempfile::TempDir,
+        root: tempfile::TempDir,
+    }
+
+    impl AWorktreeOnDisk {
+        fn new() -> Self {
+            let root = tempfile::TempDir::new().expect("temp root");
+            let outside = tempfile::TempDir::new().expect("temp outside");
+            fs::write(root.path().join("notes.txt"), "inside").expect("write notes.txt");
+            fs::write(outside.path().join("secret.txt"), "outside").expect("write secret.txt");
+            symlink(
+                outside.path().join("secret.txt"),
+                root.path().join("escape"),
+            )
+            .expect("link escape");
+            let bin = root.path().join("bin");
+            fs::create_dir_all(&bin).expect("bin dir");
+            fs::write(bin.join("tool"), "#!/bin/sh\n").expect("write tool");
+            fs::set_permissions(bin.join("tool"), fs::Permissions::from_mode(0o755))
+                .expect("make tool executable");
+            fs::write(bin.join("data"), "").expect("write data");
+            Self {
+                _outside: outside,
+                root,
+            }
+        }
+
+        fn worktree(&self) -> WasmWorktree {
+            WasmWorktree {
+                id: 7,
+                root: self.root.path().to_path_buf(),
+                shell_env: vec![(
+                    "PATH".to_string(),
+                    self.root.path().join("bin").display().to_string(),
+                )],
+            }
+        }
+    }
+
+    fn a_host_state() -> HostState {
+        HostState::new("an-extension", ExtensionSettings::default())
+    }
+
+    #[test]
+    fn read_text_file_reads_inside_the_root_and_nothing_outside_it() {
+        // Given a worktree with a file inside and a symlink and a `..` path leading out of it
+        let disk = AWorktreeOnDisk::new();
+        let mut state = a_host_state();
+        let worktree = state.table.push(disk.worktree()).expect("push");
+        let rep = worktree.rep();
+        let mut read = |path: &str| {
+            state
+                .read_text_file(Resource::new_borrow(rep), path.to_string())
+                .expect("no trap")
+                .map_err(|error| error.ends_with("is outside the worktree"))
+        };
+
+        // When each is read
+        let reads = (read("notes.txt"), read("escape"), read("../notes.txt"));
+
+        // Then only the file inside is read; both ways out are refused as outside
+        assert_eq!(reads.0, Ok("inside".to_string()));
+        assert_eq!(reads.1, Err(true));
+        assert!(reads.2.is_err(), "a `..` path out of the root was read");
+    }
+
+    #[test]
+    fn which_finds_only_executables_on_the_worktrees_path() {
+        // Given a worktree whose PATH holds an executable `tool` and a plain file `data`
+        let disk = AWorktreeOnDisk::new();
+        let mut state = a_host_state();
+        let rep = state.table.push(disk.worktree()).expect("push").rep();
+        let mut which = |name: &str| {
+            state
+                .which(Resource::new_borrow(rep), name.to_string())
+                .expect("no trap")
+        };
+
+        // When names are looked up
+        let found = [
+            which("tool"),
+            which("data"),
+            which("missing"),
+            which("bin/tool"),
+        ];
+
+        // Then only the executable is found, and a path is never searched for
+        assert_eq!(
+            found,
+            [
+                Some(disk.root.path().join("bin/tool").display().to_string()),
+                None,
+                None,
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn the_worktree_answers_its_id_root_and_shell_env() {
+        // Given a worktree handed to a call
+        let disk = AWorktreeOnDisk::new();
+        let mut state = a_host_state();
+        let rep = state.table.push(disk.worktree()).expect("push").rep();
+
+        // When the extension asks for its id, root and shell env
+        let id = state.id(Resource::new_borrow(rep)).expect("id");
+        let root = state.root_path(Resource::new_borrow(rep)).expect("root");
+        let env = state.shell_env(Resource::new_borrow(rep)).expect("env");
+
+        // Then each is the worktree's own
+        assert_eq!((id, root, env), {
+            let worktree = disk.worktree();
+            (7, worktree.root.display().to_string(), worktree.shell_env)
+        });
+    }
+
+    #[test]
+    fn get_settings_answers_a_language_servers_lsp_block_in_zeds_shape() {
+        // Given settings configuring elixir-ls
+        let settings: ExtensionSettings = serde_json::from_value(json!({
+            "lsp": { "elixir-ls": {
+                "binary": { "path": "/opt/elixir-ls", "arguments": ["--stdio"] },
+                "initialization_options": { "a": 1 },
+                "settings": { "b": 2 }
+            } }
+        }))
+        .expect("settings parse");
+        let mut state = HostState::new("an-extension", settings);
+
+        // When the extension asks for elixir-ls, for no key, and for another category
+        let mut ask = |category: &str, key: Option<&str>| {
+            state
+                .get_settings(None, category.to_string(), key.map(str::to_string))
+                .expect("no trap")
+                .map(|text| serde_json::from_str::<serde_json::Value>(&text).expect("JSON"))
+        };
+        let answers = (
+            ask(LANGUAGE_SERVERS_CATEGORY, Some("elixir-ls")),
+            ask(LANGUAGE_SERVERS_CATEGORY, None).is_err(),
+            ask("editor", Some("tab_size")),
+        );
+
+        // Then the server's block comes back as Zed's LspSettings; the others are errors
+        assert_eq!(
+            answers,
+            (
+                Ok(json!({
+                    "binary": { "path": "/opt/elixir-ls", "arguments": ["--stdio"], "env": {} },
+                    "initialization_options": { "a": 1 },
+                    "settings": { "b": 2 }
+                })),
+                true,
+                Err("unknown settings category: editor".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn a_download_outside_a_server_call_is_refused_without_a_server_name() {
+        // Given no server being computed — the extension is in init-extension
+        let mut state = a_host_state();
+
+        // When it asks to download a file
+        let refused = state
+            .download_file(
+                "https://example.invalid/ls.tgz".to_string(),
+                "ls".to_string(),
+                bindings::DownloadedFileType::GzipTar,
+            )
+            .expect("no trap");
+
+        // Then it is refused, naming no particular server
+        assert_eq!(refused, Err(download_refusal(UNNAMED_SERVER)));
+    }
+
+    #[test]
+    fn the_current_platform_is_the_one_this_test_runs_on() {
+        // Given a host state, and the platform this test was built for
+        let mut state = a_host_state();
+        let os = match std::env::consts::OS {
+            "macos" => Some(platform::Os::Mac),
+            "linux" => Some(platform::Os::Linux),
+            _ => None,
+        };
+        let architecture = match std::env::consts::ARCH {
+            "aarch64" => Some(platform::Architecture::Aarch64),
+            "x86_64" => Some(platform::Architecture::X8664),
+            _ => None,
+        };
+
+        // When the extension asks for its platform
+        let platform = platform::Host::current_platform(&mut state)
+            .map(|(os, architecture)| (Some(os), Some(architecture)))
+            .map_err(|error| error.to_string());
+
+        // Then it is that platform
+        assert_eq!(platform, Ok((os, architecture)));
+    }
+}
