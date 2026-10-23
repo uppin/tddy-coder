@@ -7,6 +7,7 @@ use anyhow::{bail, Context};
 use clap::{Args, Parser, Subcommand};
 
 use crate::dir::ExtensionsDir;
+use crate::index::set_wasm_enabled;
 use crate::install::{install_from_path, install_from_registry, list, remove, InstallOutcome};
 use crate::registry::Registry;
 
@@ -94,10 +95,13 @@ pub async fn execute(
         ExtensionsCommand::Remove(remove_args) => {
             vec![format!("removed {}", remove(dir, &remove_args.id)?.id)]
         }
-        ExtensionsCommand::EnableWasm(wasm) | ExtensionsCommand::DisableWasm(wasm) => {
-            let _ = wasm;
-            // TODO(reshape-extension-wasm-command): implement — `set_wasm_enabled`, and the line it prints
-            todo!("extensions enable-wasm / disable-wasm")
+        ExtensionsCommand::EnableWasm(wasm) => {
+            let entry = set_wasm_enabled(dir, &wasm.id, true)?;
+            vec![format!("{}: extension.wasm enabled", entry.id)]
+        }
+        ExtensionsCommand::DisableWasm(wasm) => {
+            let entry = set_wasm_enabled(dir, &wasm.id, false)?;
+            vec![format!("{}: extension.wasm disabled", entry.id)]
         }
     })
 }

@@ -16,15 +16,22 @@
 //! - **R5** — each export call has a [`CALL_DEADLINE`] epoch deadline.
 //! - **R6** — one wasmtime: the version tree-sitter's `wasm` feature pins (see `Cargo.toml`).
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::dir::ExtensionsDir;
+use crate::error::ExtensionError;
+use crate::index::Index;
 use crate::language::ExtensionLanguage;
 use crate::manifest::ExtensionManifest;
-use crate::server::ServerChoice;
+use crate::server::{client_capabilities, ServerChoice, ServerRefusal};
+use crate::settings::ExtensionSettings;
+use tddy_lsp::LaunchSpec;
 
 pub mod host;
 pub mod imports;
+mod wasi;
 
 pub use host::{WasmCommand, WasmExtension, WasmHost};
 
@@ -41,18 +48,22 @@ pub const CALL_DEADLINE: Duration = Duration::from_secs(10);
 /// Whether `version` — an extension's `lib.version` — is in [`SUPPORTED_API_VERSIONS`]: a
 /// `major.minor.patch` with major 0 and minor 6. Anything that does not parse is unsupported.
 pub fn supports_api_version(version: &str) -> bool {
-    let _ = version;
-    // TODO(reshape-extension-wasm-command): implement
-    todo!("supports_api_version")
+    let mut parts = version.split('.');
+    let numbers: Option<Vec<u64>> = parts
+        .by_ref()
+        .take(3)
+        .map(|part| part.parse().ok())
+        .collect();
+    matches!((numbers.as_deref(), parts.next()), (Some([0, 6, _]), None))
 }
 
 /// What every refusing import returns to the extension while it computes `server`'s command (R4),
 /// and what the run's refusal then carries:
 /// `tddy does not download language servers; install <server> and set lsp.<server>.binary.path`.
 pub fn download_refusal(server: &str) -> String {
-    let _ = server;
-    // TODO(reshape-extension-wasm-command): implement
-    todo!("download_refusal")
+    format!(
+        "tddy does not download language servers; install {server} and set lsp.{server}.binary.path"
+    )
 }
 
 /// The worktree an export call is asked about — Zed's `worktree` resource, as tddy answers it.
@@ -130,9 +141,107 @@ pub fn choose_server(
     wasm: Option<&mut WasmExtension>,
     worktree: &WasmWorktree,
 ) -> Result<ServerChoice, WasmCommandError> {
-    let _ = (manifest, language, choice, wasm, worktree);
-    // TODO(reshape-extension-wasm-command): implement
-    todo!("choose_server")
+    let (ServerChoice::Unconfigured(no_command), Some(wasm)) = (&choice, wasm) else {
+        return Ok(choice);
+    };
+    let server = no_command.server.clone();
+    let command = wasm.language_server_command(&server, worktree)?;
+    let initialization_options = wasm.language_server_initialization_options(&server, worktree)?;
+    let workspace_configuration =
+        wasm.language_server_workspace_configuration(&server, worktree)?;
+    let language_id = manifest
+        .language_servers
+        .get(&server)
+        .and_then(|entry| entry.language_ids.get(&language.name))
+        .cloned()
+        .unwrap_or_default();
+    let mut launch = LaunchSpec::new(command.command)
+        .with_capabilities(client_capabilities())
+        .with_initialization_options(initialization_options)
+        .with_workspace_configuration(workspace_configuration)
+        .with_language_id(language_id);
+    launch.args = command.args;
+    launch.env = command.env;
+    Ok(ServerChoice::Configured { server, launch })
+}
+
+/// The worktree every extension is asked about when the installed extensions load: the process's
+/// working directory — the workspace the CLI was run in; the support interface hands a language no
+/// root before its files are resolved — with this process's own environment as `shell-env`, the
+/// CLI being run from the user's shell. Id 1: there is one worktree.
+fn the_process_worktree() -> Result<WasmWorktree, ExtensionError> {
+    let root = std::env::current_dir()
+        .map_err(|error| ExtensionError::io(std::path::Path::new("."), error))?;
+    Ok(WasmWorktree {
+        id: 1,
+        root,
+        shell_env: std::env::vars().collect(),
+    })
+}
+
+/// [`choose_server`] for each of `languages` — `(manifest, language, K22's choice)` — whose server
+/// K22 left [`ServerChoice::Unconfigured`] and whose extension is opted in and ships code; every
+/// other language keeps its choice, and nothing is read or started for it (R1, R2). A WASM that
+/// cannot be loaded or gives no command refuses the languages it would have served, in its own
+/// words ([`ServerChoice::Refused`]).
+pub(crate) fn served_by_wasm(
+    dir: &ExtensionsDir,
+    languages: Vec<(ExtensionManifest, ExtensionLanguage, ServerChoice)>,
+) -> Result<Vec<(ExtensionLanguage, ServerChoice)>, ExtensionError> {
+    let any_unconfigured = languages
+        .iter()
+        .any(|(_, _, choice)| matches!(choice, ServerChoice::Unconfigured(_)));
+    if !any_unconfigured {
+        return Ok(languages
+            .into_iter()
+            .map(|(_, language, choice)| (language, choice))
+            .collect());
+    }
+    let index = Index::load(dir)?;
+    let settings = ExtensionSettings::load(dir)?;
+    let worktree = the_process_worktree()?;
+    // Started by the first extension that needs it: no opted-in extension, no engine.
+    let mut host: Option<Result<WasmHost, String>> = None;
+    let mut loaded: BTreeMap<String, Result<Option<WasmExtension>, WasmCommandError>> =
+        BTreeMap::new();
+    let mut served = Vec::with_capacity(languages.len());
+    for (manifest, language, choice) in languages {
+        let unconfigured = match &choice {
+            ServerChoice::Unconfigured(no_command) => Some(no_command.server.clone()),
+            _ => None,
+        };
+        let entry = index
+            .extensions
+            .get(&manifest.id)
+            .filter(|entry| entry.wasm_enabled);
+        let (Some(server), Some(entry)) = (unconfigured, entry) else {
+            served.push((language, choice));
+            continue;
+        };
+        let wasm = loaded.entry(manifest.id.clone()).or_insert_with(|| {
+            match host.get_or_insert_with(|| WasmHost::new().map_err(|error| error.to_string())) {
+                Ok(host) => {
+                    host.load_opted_in(entry, &language.extension_dir, &manifest.lib, &settings)
+                }
+                Err(reason) => Err(WasmCommandError::Load {
+                    extension: manifest.id.clone(),
+                    reason: format!("the WASM host did not start: {reason}"),
+                }),
+            }
+        });
+        let chosen = match wasm {
+            Ok(wasm) => choose_server(&manifest, &language, choice, wasm.as_mut(), &worktree),
+            Err(error) => Err(error.clone()),
+        };
+        let chosen = chosen.unwrap_or_else(|error| {
+            ServerChoice::Refused(ServerRefusal {
+                server,
+                reason: error.to_string(),
+            })
+        });
+        served.push((language, chosen));
+    }
+    Ok(served)
 }
 
 #[cfg(test)]

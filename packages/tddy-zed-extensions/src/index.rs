@@ -88,9 +88,17 @@ pub fn set_wasm_enabled(
     id: &str,
     enabled: bool,
 ) -> Result<IndexEntry, ExtensionError> {
-    let _ = (dir, id, enabled);
-    // TODO(reshape-extension-wasm-command): implement
-    todo!("set_wasm_enabled")
+    let mut index = Index::load(dir)?;
+    let entry = index
+        .extensions
+        .get_mut(id)
+        .ok_or_else(|| ExtensionError::NotInstalled {
+            extension: id.to_string(),
+        })?;
+    entry.wasm_enabled = enabled;
+    let saved = entry.clone();
+    index.save(dir)?;
+    Ok(saved)
 }
 
 #[cfg(test)]

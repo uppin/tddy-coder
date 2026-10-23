@@ -1,7 +1,7 @@
 # Changeset: an opted-in extension's WASM says how to start its language server
 
 **Date**: 2026-10-19
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — implemented; verification and docs pending
 **Type**: New feature (minimal Zed extension WASM host)
 **Stack**: `#reshape` 24/24, branch `feature/reshape/extension-wasm-command`, base `feature/reshape/extension-code-actions`, green wave 4.
 **PR**: [#683](https://github.com/uppin/tddy-coder/pull/683) (draft)
@@ -132,6 +132,28 @@ Green on purpose (they pin wording and shapes the reds rely on): `the_unsupporte
    workspace root and `LanguageSupport::launch()` takes none. Green must pick the root and the `shell_env` (process
    env?) it passes; the contract takes a `WasmWorktree` explicitly.
 
+### As implemented (green)
+
+- **WASI (open item 2): hand-written subset, no new crate.** `wit/wasi-0.2.6-subset/` is WIT for exactly the
+  `wasi:{io,cli,clocks,filesystem}@0.2.6` functions and types the fixture component imports (read off its import types
+  with `Component::component_type()`), bound by a second `bindgen!` in `src/wasm/wasi.rs` and added to the same
+  `Linker`. Environment is `PWD=/` only; one preopened directory `/` that is empty and read-only (`set_current_dir`
+  needs it: with no preopen `init-extension` panics with ENOTSUP); stdout/stderr accept and discard; stdin is empty; no
+  terminals; `exit` traps. Replace with `wasmtime-wasi` if that dependency is ever consented.
+- **Deadline (R5):** the host owns one engine with epoch interruption and a 10 ms ticker thread (stopped when the host
+  and every extension loaded through it are dropped); each call sets `ceil(deadline / 10 ms) + 1` ticks.
+- **The worktree (open item 3):** `load_installed` asks every extension about the process's working directory
+  (`id` 1, `root` = `current_dir()`, `shell_env` = this process's environment — the CLI runs from the user's shell).
+  `which` searches that env's `PATH`; `read-text-file` stays inside the root once symlinks are resolved.
+- **The run's refusal (open item 1) needed no K22 change:** K22 already ships `ServerChoice::Refused(ServerRefusal)`.
+  `wasm::served_by_wasm` (called from `load_installed`) turns a `WasmCommandError` into that variant with
+  `error.to_string()` as the reason; only an `Unconfigured` server of an opted-in extension with a `[lib]` is ever
+  handed to the WASM, and no engine starts unless one is.
+- **Re-install keeps the opt-in:** `install::commit` carries `wasm_enabled` over from the previous entry (R1's default
+  `false` applies to a fresh entry). Note the trade-off: a new version's code runs with the old version's opt-in.
+- `get-settings` answers category `language_servers` with a server id key in the shape of Zed's `LspSettings`; any other
+  category is an `Err`.
+
 ## Green wave
 
 **Wave:** 4 of 4.
@@ -145,10 +167,10 @@ None (top of the stack).
 
 ## Scope
 
-- [ ] USER REVIEW (ticked at `/green` start)
-- [ ] Host, bindings, imports (R1–R6)
-- [ ] CLI opt-in
-- [ ] Fixture extension (source + wasm)
+- [x] USER REVIEW (ticked at `/green` start)
+- [x] Host, bindings, imports (R1–R6)
+- [x] CLI opt-in
+- [x] Fixture extension (source + wasm)
 - [ ] Docs: `## Extensions with code (opt-in)` in zed-extensions.md
 - [ ] Code Quality
 
