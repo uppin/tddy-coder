@@ -4,7 +4,7 @@
 //! `ListExecTools` answers per session when it is given one: a project-home session is offered its
 //! read-only tools and the project-home tools, and any other session the catalog without them. This
 //! asks that question over the two transports that carry a session identity to the daemon. The
-//! sandbox socket and LiveKit carry none, so they answer `None` and the caller keeps its static set.
+//! sandbox socket and LiveKit cannot carry the question today, and say so rather than guess.
 
 use std::path::Path;
 use std::time::Duration;
@@ -15,53 +15,62 @@ use tddy_service::proto::exec_tools::{ListExecToolsRequest, ListExecToolsRespons
 use crate::rpc_transports::connect_sandbox_ipc;
 use crate::{detect_session_tool_transport, SessionToolTransport};
 
-/// How long the daemon's answer may take before the caller advertises its static set.
+/// How long the daemon's answer may take before the question is reported as failed.
 const ANSWER_DEADLINE: Duration = Duration::from_secs(10);
 
-/// The names of the exec tools the daemon offers this session.
+/// What the session's configured transport said to the question "which exec tools may this session
+/// use".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionExecToolAnswer {
+    /// The daemon's answer: the exec tool names this session may be offered.
+    Admitted(Vec<String>),
+    /// The configured transport cannot carry the question. Names the transport.
+    CannotAsk(&'static str),
+    /// The daemon was asked and did not answer usefully, or did not answer within the deadline.
+    Failed(String),
+}
+
+/// Ask the daemon which exec tools this session may use.
 ///
-/// `None` when no session-scoped answer is available: the configured transport cannot carry the
-/// question, or the answer fails or misses [`ANSWER_DEADLINE`]. The failure is logged, and the caller
-/// advertises the static exec catalog. A tool call is still refused by the daemon when the session may
-/// not run it, so this only shapes what the agent is offered.
-pub async fn session_exec_tool_names() -> Option<Vec<String>> {
-    let asked = match detect_session_tool_transport()? {
-        SessionToolTransport::DaemonUds {
+/// Only the two transports that carry a session identity can ask: `DaemonHttp` and `DaemonUds`. The
+/// caller decides what each answer means; this crate does not substitute a catalog of its own.
+pub async fn session_exec_tool_answer() -> SessionExecToolAnswer {
+    let asked = match detect_session_tool_transport() {
+        None => return SessionExecToolAnswer::CannotAsk("no session-tool transport"),
+        Some(SessionToolTransport::SandboxIpc { .. }) => {
+            return SessionExecToolAnswer::CannotAsk("sandbox socket")
+        }
+        Some(SessionToolTransport::LiveKit { .. }) => {
+            return SessionExecToolAnswer::CannotAsk("LiveKit")
+        }
+        Some(SessionToolTransport::IncompleteLiveKit { .. }) => {
+            return SessionExecToolAnswer::CannotAsk("incomplete LiveKit configuration")
+        }
+        Some(SessionToolTransport::DaemonUds {
             socket_path,
             session_id,
             session_token,
             daemon_instance_id,
-        } => {
+        }) => {
             let request = scoped_request(session_id, session_token, daemon_instance_id);
             tokio::time::timeout(ANSWER_DEADLINE, list_via_uds(&socket_path, request)).await
         }
-        SessionToolTransport::DaemonHttp {
+        Some(SessionToolTransport::DaemonHttp {
             session_id,
             daemon_url,
             session_token,
             daemon_instance_id,
-        } => {
+        }) => {
             let request = scoped_request(session_id, session_token, daemon_instance_id);
             tokio::time::timeout(ANSWER_DEADLINE, list_via_http(&daemon_url, request)).await
         }
-        _ => return None,
     };
     match asked {
-        Ok(Ok(names)) => Some(names),
-        Ok(Err(e)) => {
-            log::warn!(
-                target: "tddy_session_tool_client",
-                "ListExecTools for this session failed ({e}); advertising the static exec catalog"
-            );
-            None
-        }
-        Err(_) => {
-            log::warn!(
-                target: "tddy_session_tool_client",
-                "ListExecTools for this session did not answer within {ANSWER_DEADLINE:?}; advertising the static exec catalog"
-            );
-            None
-        }
+        Ok(Ok(names)) => SessionExecToolAnswer::Admitted(names),
+        Ok(Err(e)) => SessionExecToolAnswer::Failed(format!("ListExecTools failed: {e}")),
+        Err(_) => SessionExecToolAnswer::Failed(format!(
+            "ListExecTools did not answer within {ANSWER_DEADLINE:?}"
+        )),
     }
 }
 
@@ -95,7 +104,10 @@ async fn list_via_uds(
     Ok(response.tools.into_iter().map(|tool| tool.name).collect())
 }
 
-async fn list_via_http(daemon_url: &str, request: ListExecToolsRequest) -> Result<Vec<String>, String> {
+async fn list_via_http(
+    daemon_url: &str,
+    request: ListExecToolsRequest,
+) -> Result<Vec<String>, String> {
     let body = serde_json::json!({
         "session_token": request.session_token,
         "session_id": request.session_id,

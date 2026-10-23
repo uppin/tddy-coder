@@ -6,15 +6,22 @@
 //! not this module's concern and is always advertised.
 //!
 //! The daemon's answer is the single source. It is the set `ListExecTools` returns for the session, and
-//! for a project-home session that is its read-only tools and the project-home tools. With no answer, the
-//! static exec catalog is admitted, which is what every session was offered before the daemon answered
-//! per session; the project-home tools are then not admitted, since only a project-home session is.
+//! for a project-home session that is its read-only tools and the project-home tools.
+//!
+//! A failed ask is a refusal: `tools/list` returns an error that names the failure, and no exec tool is
+//! offered. There is no catalog of this crate's own to fall back to.
+//!
+//! The one exception is a transport that cannot carry the question at all (the sandbox socket, LiveKit):
+//! it keeps the static exec catalog, as every session did before the daemon answered per session. That
+//! exception is pending a developer decision, because refusing it would remove every exec tool from those
+//! sessions (see the changeset, `#project-home` 5/7, "Open").
 
+use tddy_session_tool_client::SessionExecToolAnswer;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
 
 use crate::mcp_primitives::RemoteToolDef;
 
-/// The exec tool names admitted when the daemon gives no session-scoped answer: the static catalog.
+/// The exec tool names of the static catalog, which is what a transport that cannot ask admits.
 pub fn static_exec_tool_names() -> Vec<String> {
     tddy_tool_engine::tool_catalog()
         .into_iter()
@@ -22,14 +29,25 @@ pub fn static_exec_tool_names() -> Vec<String> {
         .collect()
 }
 
-/// The exec tool names the daemon admits this session, or the static catalog when it gives no answer.
-pub async fn admitted_exec_tool_names() -> Vec<String> {
-    match crate::session_tool_client::session_exec_tool_names().await {
-        Some(names) => names,
-        // No session-scoped answer (the transport cannot ask, or the ask failed and was logged): the
-        // static catalog, as before the daemon answered per session.
-        None => static_exec_tool_names(),
+/// The exec tool names this session may be offered, from the daemon's answer.
+///
+/// `Err` carries the reason the exec tools are refused. The caller surfaces it; this does not offer
+/// anything in its place.
+pub fn admission_from_answer(answer: SessionExecToolAnswer) -> Result<Vec<String>, String> {
+    match answer {
+        SessionExecToolAnswer::Admitted(names) => Ok(names),
+        SessionExecToolAnswer::Failed(reason) => Err(format!(
+            "tddy-tools cannot list this session's exec tools: {reason}. No exec tool is offered until \
+             the daemon answers."
+        )),
+        // PENDING DECISION (`#project-home` 5/7 "Open"): these transports cannot ask today.
+        SessionExecToolAnswer::CannotAsk(_) => Ok(static_exec_tool_names()),
     }
+}
+
+/// The exec tool names this session may be offered, asked of the daemon now (see [`admission_from_answer`]).
+pub async fn admitted_exec_tool_names() -> Result<Vec<String>, String> {
+    admission_from_answer(crate::session_tool_client::session_exec_tool_answer().await)
 }
 
 /// The project-home tools, as MCP tool definitions. Registered at construction so a project-home
@@ -115,18 +133,62 @@ mod tests {
         let advertised = advertised_exec_names(&admitted);
 
         // Then every catalog tool and none of the project-home tools
-        assert_eq!(advertised, sorted(&static_exec_tool_names().iter().map(String::as_str).collect::<Vec<_>>()));
+        assert_eq!(
+            advertised,
+            sorted(
+                &static_exec_tool_names()
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+            )
+        );
         assert!(!advertised.iter().any(|name| name == "ListProjectSessions"));
         assert!(!advertised.iter().any(|name| name == "DiffSessionWorktree"));
     }
 
     #[test]
-    fn without_an_answer_the_static_catalog_is_advertised_and_no_project_home_tool() {
-        // Given no session-scoped answer, so the static catalog is admitted
-        let admitted = static_exec_tool_names();
+    fn a_failed_ask_refuses_the_exec_tools_and_names_the_failure() {
+        // Given the daemon was asked and did not answer usefully
+        let answer =
+            SessionExecToolAnswer::Failed("ListExecTools did not answer within 10s".into());
 
-        // When a project-home tool and a catalog tool are checked
-        // Then the project-home tool is withheld and the catalog tool is advertised
+        // When the admission is read
+        let admission = admission_from_answer(answer);
+
+        // Then it is a refusal naming the failure, and nothing is offered in its place
+        let reason = admission.expect_err("a failed ask refuses the exec tools");
+        assert!(reason.contains("did not answer within 10s"), "{reason}");
+        assert!(reason.contains("No exec tool is offered"), "{reason}");
+    }
+
+    #[test]
+    fn an_admitted_answer_is_advertised_exactly_as_the_daemon_gave_it() {
+        // Given the daemon's answer for a project-home session
+        let names: Vec<String> = project_home_offered_catalog()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+
+        // When the admission is read
+        let admitted = admission_from_answer(SessionExecToolAnswer::Admitted(names.clone()))
+            .expect("an admitted answer is not refused");
+
+        // Then the advertised set is that answer
+        assert_eq!(admitted, names);
+        assert!(!is_advertised("ReadSessionWorktree", &[]));
+        assert!(is_advertised("ReadSessionWorktree", &admitted));
+    }
+
+    #[test]
+    fn a_transport_that_cannot_ask_keeps_the_static_catalog_until_decided() {
+        // Given a transport that cannot carry the question (pending a developer decision)
+        let answer = SessionExecToolAnswer::CannotAsk("sandbox socket");
+
+        // When the admission is read
+        let admitted = admission_from_answer(answer).expect("pending: not refused yet");
+
+        // Then the static catalog, and never a project-home tool
+        assert_eq!(admitted, static_exec_tool_names());
         assert!(!is_advertised("ReadSessionWorktree", &admitted));
         assert!(is_advertised("Write", &admitted));
     }

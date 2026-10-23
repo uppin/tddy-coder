@@ -20,7 +20,7 @@ mod exec_catalog;
 mod room_transport;
 mod rpc_transports;
 
-pub use exec_catalog::session_exec_tool_names;
+pub use exec_catalog::{session_exec_tool_answer, SessionExecToolAnswer};
 pub use conversation::{
     conversation_worktree, diff_conversation_worktree, dispatch_conversation_tool,
     pull_conversation_range, reset_conversation_worktree, sync_conversation_worktree,

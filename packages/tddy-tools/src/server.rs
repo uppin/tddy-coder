@@ -1532,8 +1532,15 @@ impl rmcp::ServerHandler for PermissionServer {
         _context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
         // Asked per listing, not once: a project-home session's role is recorded as the session starts,
-        // and the daemon's answer is the one the session's agent is offered.
-        let admitted = admitted_exec_tool_names().await;
+        // and the daemon's answer is the one the session's agent is offered. A failed ask is refused
+        // here, as an MCP error the operator sees, rather than answered with a catalog of this crate's own.
+        let admitted = match admitted_exec_tool_names().await {
+            Ok(names) => names,
+            Err(reason) => {
+                log::error!(target: "tddy_tools::server", "{reason}");
+                return Err(rmcp::ErrorData::internal_error(reason, None));
+            }
+        };
         Ok(rmcp::model::ListToolsResult {
             tools: self.advertised_tools_admitting(&admitted),
             meta: None,
