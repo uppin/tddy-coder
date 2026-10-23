@@ -6,14 +6,13 @@
 
 use std::path::PathBuf;
 
-use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
-use tddy_daemon_kernel::peer_forwarding::{classify_peer_route, PeerRoute};
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_projects::project_storage;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::project::{SetProjectHomeAgentRequest, SetProjectHomeAgentResponse};
 use tddy_session_lifecycle::connection_service::wire_same;
 
+use super::coordinate_route::CoordinateRoute;
 use super::entries;
 use super::ProjectRpcHandler;
 use crate::catalog::listed_agents;
@@ -42,65 +41,28 @@ impl ProjectRpcHandler {
         // Route to the requested host: local (empty / matching id) or forward to a peer daemon. The
         // catalog check runs on the daemon that writes, so a forwarded call is checked against the
         // peer's own agents.
-        let requested_daemon = req.daemon_instance_id.trim();
-        let local_id = local_instance_id_for_config(&self.config);
-        let eligible_ids: Vec<String> = self
-            .eligible_daemon_source
-            .list_eligible_daemons()
-            .iter()
-            .map(|e| e.instance_id.0.clone())
-            .collect();
-        let route =
-            classify_peer_route(&local_id, requested_daemon, &eligible_ids).map_err(|msg| {
-                log::info!("SetProjectHomeAgent: rejected daemon routing: {}", msg);
-                Status::failed_precondition(msg)
-            })?;
-
-        if let PeerRoute::Forward { peer_instance_id } = route {
-            log::info!(
-                "SetProjectHomeAgent: forwarding RPC to remote daemon_instance_id={}",
-                peer_instance_id
-            );
-            let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                Status::failed_precondition(
-                    "cannot forward SetProjectHomeAgent: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
-                )
-            })?;
-            let inner = tddy_daemon_kernel::peer_calls::forward_set_project_home_agent(
-                slot,
-                &peer_instance_id,
-                &req,
-            )
-            .await?;
-            return Ok(Response::new(inner));
-        }
+        let local_id =
+            match self.coordinate_route("SetProjectHomeAgent", &req.daemon_instance_id)? {
+                CoordinateRoute::Local { local_id } => local_id,
+                CoordinateRoute::Forward {
+                    room,
+                    peer_instance_id,
+                } => {
+                    let inner = tddy_daemon_kernel::peer_calls::forward_set_project_home_agent(
+                        room,
+                        &peer_instance_id,
+                        &req,
+                    )
+                    .await?;
+                    return Ok(Response::new(inner));
+                }
+            };
 
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
 
-        // Check the id before the registry is touched. An empty id clears the setting and needs no
-        // catalog check.
-        let home_agent = req.home_agent.trim();
-        let stored_agent = if home_agent.is_empty() {
-            None
-        } else {
-            let listed = listed_agents(
-                &self.config,
-                &self.tddy_data_dir,
-                self.model_registry.as_deref(),
-            )
-            .await?;
-            if !listed.iter().any(|agent| agent.id == home_agent) {
-                log::info!(
-                    "SetProjectHomeAgent: refused home_agent={} not listed by this daemon",
-                    home_agent
-                );
-                return Err(Status::invalid_argument(format!(
-                    "home agent {home_agent} is not listed by this daemon's agent catalog"
-                )));
-            }
-            Some(home_agent)
-        };
+        // Check the id before the registry is touched.
+        let stored_agent = self.checked_home_agent(req.home_agent.trim()).await?;
 
         if project_storage::find_project(&projects_dir, project_id)
             .map_err(|e| Status::internal(e.to_string()))?
@@ -130,5 +92,29 @@ impl ProjectRpcHandler {
                 default_remote,
             ))?),
         }))
+    }
+
+    /// The value to store for `home_agent`: `None` for an empty id (clearing needs no catalog
+    /// check), the id itself when this daemon's agent catalog lists it, `invalid_argument` otherwise.
+    async fn checked_home_agent<'a>(&self, home_agent: &'a str) -> Result<Option<&'a str>, Status> {
+        if home_agent.is_empty() {
+            return Ok(None);
+        }
+        let listed = listed_agents(
+            &self.config,
+            &self.tddy_data_dir,
+            self.model_registry.as_deref(),
+        )
+        .await?;
+        if listed.iter().any(|agent| agent.id == home_agent) {
+            return Ok(Some(home_agent));
+        }
+        log::info!(
+            "SetProjectHomeAgent: refused home_agent={} not listed by this daemon",
+            home_agent
+        );
+        Err(Status::invalid_argument(format!(
+            "home agent {home_agent} is not listed by this daemon's agent catalog"
+        )))
     }
 }

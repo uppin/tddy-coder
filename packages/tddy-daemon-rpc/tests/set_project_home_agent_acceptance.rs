@@ -2,7 +2,7 @@
 //! `ListProjects` reports it, an empty id clears it, and an id the agent catalog does not list is
 //! refused without touching the registry.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-agent-setting.md (`#project-home` 1/7).
+//! Spec: docs/ft/web/projects-screen-multi-host.md (§ Home agent) (`#project-home` 1/7).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

@@ -16,6 +16,7 @@ the project uses. The proto is
 | `ListProjectBranches` | Branches visible on the project's main checkout |
 | `SetProjectDefaultBranch` | Set the integration base ref (forwarded for logical-project scope) |
 | `SetProjectAccounts` | Replace the project's account assignments (forwarded for logical-project scope) |
+| `SetProjectHomeAgent` | Set or clear the agent the project-home session runs (forwarded for logical-project scope) |
 
 The handlers that serve these RPCs live in
 [`tddy-daemon-rpc`](../../tddy-daemon-rpc/docs/architecture.md) (`src/project/`); this crate owns the
@@ -74,6 +75,16 @@ This crate **stores** the assignment and does not depend on `tddy-credentials`. 
 against a vault is
 [`resolve_account`](../../tddy-accounts/docs/accounts-service.md#resolving-a-projects-account) in
 `tddy-accounts`.
+
+## Home agent
+
+`ProjectData.home_agent: Option<String>` is serialized `#[serde(default, skip_serializing_if =
+"Option::is_none")]`: an unset project writes no key, and a legacy row reads as `None`.
+`project_storage::set_project_home_agent(dir, id, Option<&str>)` stores the id as given (`None`
+clears) and errors on an unknown project. Whether the catalog lists the id is the **caller's** check,
+made before the write — the daemon-rpc handler checks it against the same rows `ListAgents` returns, so
+a refused id never touches `projects.yaml`. `ProjectEntry.home_agent` (field 10) carries it, empty when
+unset.
 
 ## Transports
 

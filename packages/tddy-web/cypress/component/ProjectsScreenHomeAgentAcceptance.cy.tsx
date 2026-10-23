@@ -3,16 +3,17 @@
  * agent its project-home session runs — and changes it through `SetProjectHomeAgent`. A refused
  * change is shown on that card.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-agent-setting.md (`#project-home` 1/7).
+ * Spec: docs/ft/web/projects-screen-multi-host.md (§ Home agent) (`#project-home` 1/7).
  */
 
 import React from "react";
 import { Room } from "livekit-client";
+import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ProjectsAppPage } from "../../src/components/projects/ProjectsAppPage";
-import { CatalogService } from "../../src/gen/catalog_pb";
-import { ProjectService, type ProjectEntry } from "../../src/gen/project_pb";
+import { AgentInfoSchema, CatalogService } from "../../src/gen/catalog_pb";
+import { ProjectEntrySchema, ProjectService, type ProjectEntry } from "../../src/gen/project_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
@@ -22,11 +23,11 @@ import { projectsScreenPage } from "../support/pages/projectsScreenPage";
 const LOCAL_HOST = "workstation-1";
 const DAEMON_HOSTS: DaemonHost[] = [{ instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)" }];
 
-const CLAUDE = { id: "claude", label: "Claude" };
-const CLAUDE_ON_META = { id: "claude-on-meta", label: "Claude Code · Meta" };
+const CLAUDE = create(AgentInfoSchema, { id: "claude", label: "Claude" });
+const CLAUDE_ON_META = create(AgentInfoSchema, { id: "claude-on-meta", label: "Claude Code · Meta" });
 
 function aProject(overrides: Partial<ProjectEntry>): ProjectEntry {
-  return {
+  return create(ProjectEntrySchema, {
     projectId: "proj-alpha",
     name: "alpha",
     gitUrl: "https://example.com/alpha.git",
@@ -38,7 +39,7 @@ function aProject(overrides: Partial<ProjectEntry>): ProjectEntry {
     localGh: false,
     homeAgent: "",
     ...overrides,
-  } as ProjectEntry;
+  });
 }
 
 /** A daemon listing `projects` and the two catalog agents, storing a home agent it is sent. */

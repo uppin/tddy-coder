@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-daemon-rpc/src/project/coordinate_handlers.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-24 — `/pr-wrap` step 3.5 file-length gate on #509 (`#keyring` 2/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **650 production lines** of 650 total (no `#[cfg(test)]`; 0 test lines; 2026-10-04) · budget 500 · **1.3× over** (528 at detection)
+**Metrics:** **586 production lines** (no `#[cfg(test)]`; 2026-10-23) · budget 500 · **1.3× over** (528 at detection)
 **Thresholds breached:** length 650 > 500
 **Restructure:** not designed
 **Status:** Open — **unclaimed** — regressed 2026-10-04 (+122, #512); split deferred with the developer's consent, see [`docs/dev/todo/2026-10-04-keyring-assignments-grew-project-coordinate-handlers.md`](../../../../docs/dev/todo/2026-10-04-keyring-assignments-grew-project-coordinate-handlers.md)
@@ -47,3 +47,11 @@ Deferred in `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring
 ## Measurement update 2026-10-20 — `#satellite` 10/13 (#632)
 
 660 → 652 production lines (same `awk` count on base and HEAD): the three forwards name `tddy_daemon_kernel::peer_forwarding` / `peer_calls` instead of the LiveKit plugin, and the shorter paths rustfmt onto fewer lines. Import rewrites only; still over budget, split still not designed.
+
+## Measurement update 2026-10-23 — `#project-home` 1/7 (#696)
+
+**Better, not clean:** 652 → 586 production lines (same `awk` count on merge-base and HEAD). #696
+adds `home_agent: None` to two `ProjectData` literals (+2) and moves the peer-routing block the three
+per-host RPCs each carried into `project/coordinate_route.rs` (`coordinate_route`, −68); its own RPC
+lives in the new `project/home_agent_handler.rs`. Still 86 over budget; Seam A
+(`add_project_to_host_at_project_coordinate`, now 153 lines) alone would close it. Not claimed by any PR.

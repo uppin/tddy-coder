@@ -8,7 +8,7 @@ import type { ProjectEntry } from "../../gen/project_pb";
  * the catalog lists. Changing it stores the choice through `SetProjectHomeAgent`; a refusal is shown
  * on the card, and the select keeps showing the stored value.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-agent-setting.md.
+ * Spec: docs/ft/web/projects-screen-multi-host.md (§ Home agent).
  */
 export function ProjectHomeAgent(props: {
   project: Pick<ProjectEntry, "projectId" | "homeAgent">;
