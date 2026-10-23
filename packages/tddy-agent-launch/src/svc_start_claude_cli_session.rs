@@ -63,6 +63,8 @@ impl LaunchSessions {
         ssh_config_host: &str,
         // Whether the session is started in managed-codebase mode; recorded at start.
         managed_codebase: bool,
+        // The session's standing role, recorded before its agent is spawned; empty for an ordinary one.
+        session_role: &str,
         // A checkout to run in directly instead of cutting a session worktree; empty cuts one.
         repo_path: &str,
         // Where the session's provider account is chosen; see `session_route_sources`.
@@ -139,6 +141,7 @@ impl LaunchSessions {
             create_remote_branch,
             ssh_config_host,
             managed_codebase,
+            session_role,
             repo_path,
             &self.host.session_account_access(session_token),
             route_sources,

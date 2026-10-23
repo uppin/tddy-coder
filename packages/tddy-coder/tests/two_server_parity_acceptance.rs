@@ -988,5 +988,6 @@ fn a_list_exec_tools_request() -> tddy_service::proto::exec_tools::ListExecTools
     tddy_service::proto::exec_tools::ListExecToolsRequest {
         session_token: SESSION_TOKEN.to_string(),
         daemon_instance_id: "local".to_string(),
+        ..Default::default()
     }
 }

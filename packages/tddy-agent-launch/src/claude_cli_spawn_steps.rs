@@ -272,6 +272,44 @@ pub(super) async fn managed_claude_cli_launch(
     Ok((managed, append_system_prompt_file, env_extra))
 }
 
+/// What the session's role pre-approves its `claude` to call, as `--allowedTools` arguments. A
+/// project-home session is given exactly [`tddy_tool_engine::read_only::project_home_allowed_tools`];
+/// every other role, and no role at all, adds nothing, so an ordinary session's argv is unchanged.
+pub(crate) fn role_allowed_tools_args(session_role: Option<&str>) -> Vec<String> {
+    if session_role != Some(tddy_core::session_metadata::PROJECT_HOME_ROLE) {
+        return Vec::new();
+    }
+    tddy_tool_engine::read_only::project_home_allowed_tools()
+        .into_iter()
+        .flat_map(|tool| ["--allowedTools".to_string(), tool])
+        .collect()
+}
+
+/// Record a session's standing role in its `.session.yaml` before its agent is spawned, so there is
+/// no moment in which the agent runs and the daemon reads the session as ordinary. The record is
+/// complete as far as a spawn-less session can be, and the spawn's own write replaces it with the pid.
+/// A session without a role has nothing to record early.
+pub(super) fn record_role_before_spawn(
+    session_dir: &Path,
+    session_id: &str,
+    project_id: &str,
+    session_role: &str,
+    worktree_path: &Path,
+    managed_codebase: bool,
+) -> Result<(), Status> {
+    if session_role.is_empty() {
+        return Ok(());
+    }
+    let meta = tddy_core::SessionMetadata {
+        repo_path: Some(worktree_path.to_string_lossy().to_string()),
+        managed_codebase,
+        session_role: Some(session_role.to_string()),
+        ..service_util::starting_session_metadata(session_id, project_id, "claude-cli")
+    };
+    tddy_core::write_session_metadata(session_dir, &meta)
+        .map_err(|e| Status::internal(format!("failed to record the session's role: {e}")))
+}
+
 /// What the claude-cli process is spawned with, and the managed workflow it is handed.
 pub(super) struct ClaudeCliProcess<'a> {
     pub(super) os_user: &'a str,
@@ -287,6 +325,8 @@ pub(super) struct ClaudeCliProcess<'a> {
     pub(super) managed: Option<tddy_cli_sessions::session_toolcall::ManagedWorkflow>,
     pub(super) append_system_prompt_file: Option<PathBuf>,
     pub(super) env_extra: Vec<(String, String)>,
+    /// The session's standing role; see [`role_allowed_tools_args`].
+    pub(super) session_role: &'a str,
 }
 
 pub(super) async fn spawn_claude_cli_process(
@@ -306,6 +346,7 @@ pub(super) async fn spawn_claude_cli_process(
         managed,
         append_system_prompt_file,
         env_extra,
+        session_role,
     } = launch;
     let handle = manager
         .start_with_options(
@@ -318,7 +359,7 @@ pub(super) async fn spawn_claude_cli_process(
             dangerously_skip_permissions,
             false,
             append_system_prompt_file.as_deref(),
-            Vec::new(),
+            role_allowed_tools_args(Some(session_role)),
             env_extra,
             Some(os_user),
         )

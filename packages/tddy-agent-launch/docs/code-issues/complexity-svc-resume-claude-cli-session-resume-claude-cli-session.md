@@ -6,7 +6,7 @@
 **Metrics:** **119 lines** · nesting 4 · **9 parameters** · budget 60 / 4 / 5
 **Thresholds breached:** length 119 > 60; parameters 9 > 5
 **Restructure:** an options struct for the parameters; `extract_method --variant module` for the length
-**Status:** Open — **regressed 2026-09-19**
+**Status:** Open — **regressed 2026-10-23** (+2 in #700)
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_resume_claude_cli_session.rs:21`
 
 ## Measurement history
@@ -20,6 +20,7 @@
 | 2026-10-08 | 120 | 7 incl. `&self` | `#carve` 20/21: converted to `impl LaunchSessions` (Recipe B). 121 -> 120 against `origin/master` (fn line to closing brace); the signature (`&self` + 6) is identical at `origin/master` and `HEAD`, so **the converted node did not add parameters**. The record's 9 is not reproduced by a parameter count of the signature (7 incl. `&self`); the count method is unclear. Still over the 60-line and 5-parameter budgets: **kept open, unchanged** |
 | 2026-10-09 | unchanged | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 | 2026-10-22 | unchanged | — | touched by #663 (`#provider-route` 2/9): the resumed agent's environment (identity pairs, split wiring, the recorded provider route) is assembled in the new `LaunchSessions::resumed_agent_env`, so the body gained the route without growing — same length by brace matching on `origin/feature/provider-route/accounts` and HEAD; `tddy-tools analyze` measures complexity 13, CRAP 182 (never executed). Still open, unclaimed |
+| 2026-10-23 | 144 | — | **worse** by 2 (142 → 144) in #700 (`#project-home` 5/7): the resumed agent is given its role's `--allowedTools` again (`split_args.extend(role_allowed_tools_args(meta.session_role.as_deref()))`). Measured by structural scan, fn line to closing brace on `origin/feature/project-home/home-session` (08cfc2a28) and HEAD; no coverage run. Still open, unclaimed |
 
 ## What grew it
 

@@ -8,7 +8,7 @@ subagent turn-control changeset
 **5.4× over**
 **Thresholds breached:** length 2,677 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
-**Status:** Open — regressed 2026-10-08 (+23 in #516, `#keyring` 9/9) — unclaimed
+**Status:** Open — regressed 2026-10-23 (+24 in #700, `#project-home` 5/7) — unclaimed
 
 ## Measurement history
 
@@ -25,6 +25,7 @@ subagent turn-control changeset
 | 2026-10-03 | 2,800 → 2,810 | **worse** by 10 in the caller-sync change (`2026-10-03-agent-worktree-caller-sync`): the two `with_sync_worktree_choice` calls (`subagent_prompt`, `subagent_resume`) and the two `syncWorktree` schema entries. Parser, property and `SYNC_WORKTREE_ARG` live in `sync_worktree_choice.rs`, the port in `worktree_sync_port.rs`, the shared daemon-answer parsing in `worktree_answer.rs`. Deferred with consent (2026-10-03) — see `docs/dev/todo/2026-10-03-caller-sync-grew-over-budget-files.md` |
 | 2026-10-04 | — | **touched** by #573 (`#live-plan` 14/15): +5 lines by total file length (3,799 → 3,804) — the gated merge of the `restructure_tools` router in `PermissionServer::new`, whose six tool definitions live in the new `restructure_tools.rs`. The record's production-line count was not re-derived. Not split: the tool module is the shape the record asks for |
 | 2026-10-08 | — | **worse** by 23 in #516 (`#keyring` 9/9): 2,808 → 2,831 production lines by the inline-test-block rule on `origin/master` and on the branch (the earlier rows were taken by other counts and are not comparable). The `github-token` request in the two PR tools and `real_gh` / `pr_search_impl`; the client itself is its own module (`github_credential.rs`). Deferred with consent — the file is the subject of the split already deferred above |
+| 2026-10-23 | 2,832 → 2,856 | **worse** by 24 in #700 (`#project-home` 5/7), by the inline-test-block rule on `origin/feature/project-home/home-session` and HEAD: the project-home tool defs chained into the registered catalog, `advertised_tools_admitting`, and `list_tools` asking the daemon per listing (refusing on a failed ask). The admission logic is its own module (`exec_tool_admission.rs`, 77 production lines). Not split: stack-shared |
 
 ## What the tool found
 

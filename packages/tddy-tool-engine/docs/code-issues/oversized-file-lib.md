@@ -7,7 +7,7 @@ subagent turn-control changeset
 **Metrics:** **816 production lines** · budget 500 · **1.6× over**
 **Thresholds breached:** length 816 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
-**Status:** Open — unclaimed
+**Status:** Open — unclaimed (876 production lines, 2026-10-23)
 
 ## Measurement history
 
@@ -21,6 +21,7 @@ subagent turn-control changeset
 | 2026-09-27 | 816 | +11 for the edited region `StrReplace` now returns. The windowing itself went to a new sibling, `edited_region.rs` (52 production lines); what stayed is `tool_str_replace` taking the match offset from `find` and adding the two fields |
 | 2026-10-04 | 873 | **touched by #573** (`#live-plan` 14/15): 869 → 873 (+4) — the `mod restructure_tools;` declaration and the one dispatch arm that routes the six `restructure_*` names to it; the handler itself lives in the new `restructure_tools.rs` (26 lines). No parent in the stack touches this file. The split was **not** done in #573 — deferred with the developer's consent (`docs/dev/todo/2026-10-04-session-restructure-tools-grew-two-oversized-files.md`) |
 | 2026-10-23 | 874 | **touched by #699** (`#project-home` 4/7): 873 → 874 (+1) — the `pub mod read_only;` declaration; the read-only filter lives in the new `read_only.rs` (25 production lines). Not split: `#project-home` 5/7 also edits this crate's module list, and a split mid-stack conflicts every later node |
+| 2026-10-23 | 876 | **touched by #700** (`#project-home` 5/7): 874 → 876 (+2) — `pub mod project_home_tools;` and `mod project_home_diff;`; the tools live in those modules (359 and 60 production lines). Not split: stack-shared with `#project-home` 6/7 and 7/7 |
 
 ## What the tool found
 

@@ -304,6 +304,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         .list_exec_tools(Request::direct(ListExecToolsRequest {
             session_token: "valid-token".to_string(),
             daemon_instance_id: RELAY_PEER_ID.to_string(), // relay to B
+            ..Default::default()
         }))
         .await
         .unwrap_or_else(|e| {

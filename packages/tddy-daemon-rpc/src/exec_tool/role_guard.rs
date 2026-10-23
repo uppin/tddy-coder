@@ -12,7 +12,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
-use tddy_tool_engine::read_only::is_read_only_tool;
+use tddy_tool_engine::read_only::is_project_home_allowed_tool;
 
 use super::path_guard::reject_exec_tool_path_traversal;
 
@@ -27,7 +27,8 @@ pub(super) fn reject_refused_local_exec_tool(
 }
 
 /// Refuse `tool_name` with `PermissionDenied` when `session_id` is a project-home session and the
-/// tool is not a read-only one. A session whose metadata cannot be read is refused too: the role
+/// tool is neither a read-only one nor one of the four project-home session tools (their own role
+/// gate is in `project_home`). A session whose metadata cannot be read is refused too: the role
 /// cannot be known, so the read-only rule cannot be ruled out.
 fn reject_non_read_only_tool_for_project_home(
     sessions_base: &Path,
@@ -40,7 +41,8 @@ fn reject_non_read_only_tool_for_project_home(
             "tool {tool_name} is refused: session {session_id}'s metadata cannot be read ({e})"
         ))
     })?;
-    if metadata.session_role.as_deref() == Some(PROJECT_HOME_ROLE) && !is_read_only_tool(tool_name)
+    if metadata.session_role.as_deref() == Some(PROJECT_HOME_ROLE)
+        && !is_project_home_allowed_tool(tool_name)
     {
         return Err(Status::permission_denied(format!(
             "tool {tool_name} is refused: a project-home session is read-only"

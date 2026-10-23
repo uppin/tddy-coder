@@ -34,6 +34,23 @@ long-running background jobs (e.g. `Shell` with `block_until_ms = 0`).
 read or search — `Read`, `Grep`, `Glob`, `ReadLints`, `SemanticSearch`, in catalog order. The daemon
 uses it to refuse every other tool for a read-only (project-home) session in `ExecuteTool`; see
 [project-home session](../../docs/ft/daemon/project-concept.md#project-home-session).
+`is_project_home_allowed_tool` is that subset plus the four project-home tools, and
+`project_home_allowed_tools()` names them as `mcp__tddy-tools__*` for a claude-cli `--allowedTools`.
+
+## Project-home tools
+
+`project_home_tools` defines `ListProjectSessions`, `StartProjectSession`, `ReadSessionWorktree` and
+`DiffSessionWorktree` (`project_home_tool_defs`) and runs them (`execute_project_home_tool`) over a
+`ProjectHomePort` the daemon implements: `list_sessions`, `start_session` and `target_records` (every
+session's project, worktree, branch, base ref and activity, which
+`tddy_worktree_service::session_target` resolves). Target and path refusals are `is_error` outcomes
+naming the reason; the role gate is the daemon's. `session_offered_catalog(is_project_home)` is the
+one answer to "which exec tools is this session offered" (`project_home_offered_catalog()` for a
+project-home session, `tool_catalog()` otherwise). `project_home_diff` takes the worktree's diff
+against its base over a temporary `GIT_INDEX_FILE` (`read-tree HEAD`, `add -A`, `diff --cached`), so
+untracked files appear and the worktree's own index is never written; an option-shaped base ref is
+refused. `ListExecTools` is in `IN_JAIL_RELAYABLE_EXEC_TOOLS`. See
+[project-home tools](../../docs/ft/daemon/project-concept.md#project-home-tools).
 
 ## One catalog
 

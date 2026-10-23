@@ -72,6 +72,14 @@ tell them apart from the socket. Only the host knows, so only the host says.
 and pins the difference as a difference. A tool added to both paths keeps it green; one added to only
 the claiming path fails.
 
+Exec-catalog tools (the daemon's `tool_catalog()` and the four project-home tools) are registered at
+construction, so any of them dispatches by name, but `tools/list` advertises one only when the daemon
+admits it for this session: each listing asks `session_exec_tool_answer()`
+(`src/exec_tool_admission.rs`) and keeps the exec tools in the answer. A failed ask fails `tools/list`
+with an MCP error naming the reason (logged at error level), withholding every tool rather than
+offering a catalog of this crate's own; with no transport configured no exec tool is admitted. Tools
+outside the exec catalog are unaffected. `advertised_tools()` keeps the static answer.
+
 ## Conversation worktrees
 
 With Managed access each conversation's subagent loop is built with its own dispatch closure, which

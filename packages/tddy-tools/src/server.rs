@@ -1,5 +1,8 @@
 //! Permission server implementing the approval_prompt MCP tool and GitHub PR REST tools.
 
+use crate::exec_tool_admission::{
+    admitted_exec_tool_names, is_advertised, project_home_remote_tool_defs, static_exec_tool_names,
+};
 use crate::mcp_primitives::{
     cancel_remote_conversation, open_remote_agent_session, schema_object,
     subagent_config_for_conversation, subagent_route, RemoteToolDef,
@@ -315,8 +318,11 @@ impl PermissionServer {
             // advertise it — a direct call must be impossible at the tool server too, not only
             // gated by Claude's allow/disallow lists. Empty when no subagent replaces anything.
             let replaced = resolve_replaced_tools_for_defs(&seed_defs);
+            // The project-home tools are registered too, so a project-home session's call to one of
+            // them dispatches; `tools/list` withholds them unless the daemon admits them for the session.
             let catalog: Vec<RemoteToolDef> = exec_tool_catalog()
                 .into_iter()
+                .chain(project_home_remote_tool_defs())
                 .filter(|tool| !replaced.contains(&tool.name))
                 .collect();
             tool_router.merge(dynamic_tool_router(&catalog));
@@ -387,6 +393,12 @@ impl PermissionServer {
     /// a direct call meets — both are
     /// [`LiveAgentRoster::withdrawn_exec_tools`](crate::session_agents::LiveAgentRoster::withdrawn_exec_tools).
     pub fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
+        self.advertised_tools_admitting(&static_exec_tool_names())
+    }
+
+    /// [`Self::advertised_tools`], with the exec catalog narrowed to the names the daemon admits for
+    /// this session (see [`crate::exec_tool_admission`]). A tool outside the exec catalog is untouched.
+    pub fn advertised_tools_admitting(&self, admitted: &[String]) -> Vec<rmcp::model::Tool> {
         let visible = crate::session_agents::session_agent_roster().catalog_visibility();
         let mut tools = self.tool_router.list_all();
         if !visible.has_an_agent_to_address() {
@@ -406,6 +418,7 @@ impl PermissionServer {
                 tool.input_schema = subagent_new_session_schema(&visible.addressable_agents);
             }
         }
+        tools.retain(|tool| is_advertised(tool.name.as_ref(), admitted));
         tools
     }
 
@@ -1518,8 +1531,18 @@ impl rmcp::ServerHandler for PermissionServer {
         _request: Option<rmcp::model::PaginatedRequestParams>,
         _context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+        // Asked per listing, not once: a project-home session's role is recorded as the session starts,
+        // and the daemon's answer is the one the session's agent is offered. A failed ask is refused
+        // here, as an MCP error the operator sees, rather than answered with a catalog of this crate's own.
+        let admitted = match admitted_exec_tool_names().await {
+            Ok(names) => names,
+            Err(reason) => {
+                log::error!(target: "tddy_tools::server", "{reason}");
+                return Err(rmcp::ErrorData::internal_error(reason, None));
+            }
+        };
         Ok(rmcp::model::ListToolsResult {
-            tools: self.advertised_tools(),
+            tools: self.advertised_tools_admitting(&admitted),
             meta: None,
             next_cursor: None,
         })
@@ -1604,9 +1627,10 @@ pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> 
 /// `tddy_lsp_executor`'s. Until `#unbundle` node 5 the ten entries were hand-copied here and kept
 /// in step by a guard test on each side; the copy is gone, so the names cannot drift.
 ///
-/// TODO: both transport variants still advertise this static catalog rather than live-fetching the
-/// remote host's over the transport — there is no such message type over SandboxIpc, and it was
-/// deliberately scoped out for DaemonHttp too for now.
+/// The per-session answer is narrowed onto this catalog at `tools/list` time (see
+/// [`crate::exec_tool_admission`]). The daemon's session-scoped `ListExecTools` answer is asked over
+/// every transport (HTTP, unix socket, the sandbox socket and LiveKit), and a failed ask refuses
+/// `tools/list`.
 pub fn exec_tool_catalog() -> Vec<RemoteToolDef> {
     tddy_tool_engine::tool_catalog()
         .into_iter()

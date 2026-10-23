@@ -98,6 +98,16 @@ runs on a dedicated checkout, not a per-session branch worktree:
 - A ref is fetched only when its first segment names one of the repository's remotes
   (`origin/main` → `git fetch origin main`); a local branch has nothing to fetch.
 
+## Session targets (`session_target.rs`)
+
+`resolve_session_target(records, home, target_session_id)` is the one resolver from a session id a
+project-home session names to a `SessionTarget` (`session_id`, `project_id`, `worktree`, `branch`,
+`base_ref`, `is_active`). It is pure: the daemon builds the `TargetRecord`s from `.session.yaml` and
+each session's changeset. The rules, as `SessionTargetError`: an unknown id is `NotFound`, a session
+of another project `OtherProject`, the home session itself `IsHome`, and one with no worktree
+`NoWorktree`. The project-home read and git tools resolve every target through it; see
+[project-home tools](../../../docs/ft/daemon/project-concept.md#project-home-tools).
+
 
 `tddy-daemon`'s `runtime.rs` builds one `WorktreeServiceImpl` and registers it from the same `Arc`
 on all three transports: a `ServiceEntry` from `tddy_service::WorktreeServiceServer::from_arc` for

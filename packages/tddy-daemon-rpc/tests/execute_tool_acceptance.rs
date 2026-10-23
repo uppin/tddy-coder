@@ -37,6 +37,7 @@ async fn list_exec_tools_returns_non_empty_catalog_with_valid_schemas() {
         .list_exec_tools(Request::direct(ListExecToolsRequest {
             session_token: TEST_TOKEN.to_string(),
             daemon_instance_id: String::new(),
+            ..Default::default()
         }))
         .await
         .expect("ListExecTools must not fail");
