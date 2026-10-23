@@ -9,6 +9,8 @@
 //! concurrent apply is writing. Loading and listing plans do not: they read plan files and the
 //! store, never the tree.
 
+pub(crate) mod verify;
+
 use std::path::PathBuf;
 
 use tddy_code_restructuring::item_anchor;
@@ -24,7 +26,7 @@ use crate::operations::{joined, plan_path};
 use crate::proto::code_index::{
     AnchorsRequest, AnchorsResponse, ListPlansRequest, LoadPlansRequest, LoadedPlan,
     PlanStatusRequest, PlanStatusResponse, PlansResponse, SnapshotRequest, SnapshotResponse,
-    SourcePosition, SourceRange, StaleOp, UnloadPlansRequest, VerifyRequest, VerifyResponse,
+    SourcePosition, SourceRange, StaleOp, UnloadPlansRequest,
 };
 use crate::status::status_of;
 
@@ -303,58 +305,6 @@ fn stale_on_the_wire(stale: &[OpStaleness]) -> Vec<StaleOp> {
             reason: found.reason.to_string(),
         })
         .collect()
-}
-
-/// Hold the working tree's statements against a git ref's, as multisets.
-pub(crate) async fn serve_verify(
-    index: &WorkspaceIndex,
-    request: VerifyRequest,
-) -> Result<VerifyResponse, Status> {
-    let (activity, root) = Activity::arrived("verify", index, &request.workspace_root).await?;
-    activity.recorded(comparison_against(index, root, request).await)
-}
-
-/// The comparison itself, with the root already resolved and its arrival already recorded.
-async fn comparison_against(
-    index: &WorkspaceIndex,
-    root: PathBuf,
-    request: VerifyRequest,
-) -> Result<VerifyResponse, Status> {
-    if request.against.trim().is_empty() {
-        return Err(Status::invalid_argument(
-            "the request names no git ref to verify against",
-        ));
-    }
-    let options = Options {
-        command: Command::Verify,
-        against: Some(request.against),
-        retargets: request.retargets,
-        repoints: request.repoints,
-        rebinds: request.rebinds,
-        detaches: request.detaches,
-        ..Options::default()
-    };
-
-    let _queued = index.hold(&root).await;
-    let comparison = tokio::task::spawn_blocking(move || runner::verify(&root, options))
-        .await
-        .map_err(|failure| joined("verify", &failure))?
-        .map_err(|refusal| status_of(&refusal))?;
-
-    // A comparison that does not hold is this answer with `holds` false, not an error: the
-    // comparison *is* what was asked for, and a caller that receives the statements it lost and
-    // gained decides for itself what they mean. Only a tree that could not be compared at all —
-    // one that is not a git worktree, or a ref git will not read — refuses the request.
-    Ok(VerifyResponse {
-        holds: comparison.holds(),
-        before: comparison.before as u32,
-        after: comparison.after as u32,
-        missing: comparison.missing,
-        added: comparison.added,
-        repointed: comparison.excused.repointed as u32,
-        visibility_normalised: comparison.excused.visibility as u32,
-        cfg_test_gates: comparison.excused.cfg_test_gates as u32,
-    })
 }
 
 /// A progress sink for the unary operations, which have no stream to report into.

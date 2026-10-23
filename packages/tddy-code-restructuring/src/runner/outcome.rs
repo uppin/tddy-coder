@@ -71,6 +71,10 @@ pub enum Outcome {
     /// The anchor a plan would carry: `items` for named items, `item` for a position.
     ItemAnchored(crate::plan::Anchor),
     Verified(crate::verify::Comparison),
+    /// [`Outcome::Verified`] for a run whose changed files beyond Rust also had findings (`#reshape`
+    /// extension-code-actions, R5): the comparison, and what each language's verify found wrong.
+    /// Never empty of findings — a run that found none is a plain `Verified`.
+    VerifiedWithFindings(crate::verify::Comparison, Vec<crate::verify::SourceFinding>),
     Snapshotted(SnapshotRewrite),
     /// The production lines of each file `lines` named, in the order it named them.
     Measured(Vec<FileLines>),

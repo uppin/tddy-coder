@@ -207,6 +207,7 @@ mod tests {
             canonical_paths: false,
             to_type: None,
             callee: None,
+            action: None,
         };
         fill(&mut op);
         op

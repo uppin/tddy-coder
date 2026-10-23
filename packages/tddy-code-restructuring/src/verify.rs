@@ -92,6 +92,8 @@ mod repoint;
 pub use repoint::Repoint;
 mod retarget;
 pub use retarget::{Declared, Retarget};
+pub mod source;
+pub use source::{ParseNode, SourceChange, SourceFinding, SourceVerify};
 
 /// Last resort for what the exact and 1:1 passes left: when the leftover lost statements and the
 /// leftover gained ones carry the same token multiset, they differ only in layout and qualifiers.

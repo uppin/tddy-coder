@@ -31,6 +31,7 @@ use crate::language::SupportRegistry;
 use crate::restructure_args::options_for;
 use crate::runner::{Command, Options, Outcome};
 use crate::spawn_record::{ColdRunSpawnRecord, SpawnRecorder};
+use crate::verify::SourceVerify;
 
 pub use crate::restructure_args::parse_position_range;
 pub use crate::restructure_args::{
@@ -51,8 +52,20 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
 /// An `anchors`, or a static `check`, whose files a support with no server claims starts no
 /// rust-analyzer (`#reshape` extension-outline, R5–R7).
 pub async fn run_with_installed(args: RestructureArgs, installed: SupportRegistry) -> Result<()> {
+    run_with_extensions(args, installed, Vec::new()).await
+}
+
+/// [`run_with_installed`], also handing a `verify`'s changed files of those languages to `verifies`
+/// ([`Options::verifies`], `#reshape` extension-code-actions, R5). The cold path starts no server
+/// for a verify, so a verify built here judges by what it can without one.
+pub async fn run_with_extensions(
+    args: RestructureArgs,
+    installed: SupportRegistry,
+    verifies: Vec<Arc<dyn SourceVerify>>,
+) -> Result<()> {
     let mut options = options_for(args);
     options.installed = Arc::new(installed);
+    options.verifies = verifies;
 
     // The one place the process directory becomes a workspace root. The library takes the root as a
     // parameter and reads the process directory nowhere, so that one process can serve several
@@ -174,10 +187,17 @@ fn verdict_on(outcome: &Outcome) -> Result<()> {
         Outcome::Applied(summary) if summary.applied == 0 && !summary.stopped_early => Err(
             anyhow::anyhow!(console::nothing_applied_refusal(summary.total)),
         ),
-        Outcome::Verified(comparison) if !comparison.holds() => {
-            Err(anyhow::anyhow!(console::comparison_refusal(comparison)))
-        }
+        Outcome::Verified(comparison) => refused_verify(comparison, 0),
+        Outcome::VerifiedWithFindings(comparison, found) => refused_verify(comparison, found.len()),
         _ => Ok(()),
+    }
+}
+
+/// [`console::verify_refusal`] as this front end's failed run.
+fn refused_verify(comparison: &crate::verify::Comparison, findings: usize) -> Result<()> {
+    match console::verify_refusal(comparison, findings) {
+        Some(refusal) => Err(anyhow::anyhow!(refusal)),
+        None => Ok(()),
     }
 }
 

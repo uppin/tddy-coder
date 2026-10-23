@@ -6,19 +6,22 @@ use bytes::Bytes;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
 
+use super::commands::{apply_edit_answer, ApplyEditCapture};
 use super::parse::parse_diagnostics;
 use super::{DiagnosticsCache, Notifications, Pending, Response, ResponseError};
 use crate::protocol::{encode_message, FrameReader};
 
 /// Where [`read_loop`] routes what the server sends: the client's pending requests, its
-/// diagnostics cache and notification sink, the channel replies go back on, and the settings a
-/// `workspace/configuration` request is answered from.
+/// diagnostics cache and notification sink, the channel replies go back on, the settings a
+/// `workspace/configuration` request is answered from, and the capture a `workspace/applyEdit`
+/// request is answered into while a command runs.
 pub(super) struct Routes {
     pub(super) pending: Pending,
     pub(super) diagnostics: DiagnosticsCache,
     pub(super) notifications: Notifications,
     pub(super) stdin: mpsc::UnboundedSender<Bytes>,
     pub(super) workspace_configuration: Value,
+    pub(super) apply_edits: ApplyEditCapture,
 }
 
 /// Drain the server's stdout: correlate responses to pending requests and cache
@@ -34,6 +37,10 @@ pub(super) async fn read_loop(mut stdout: broadcast::Receiver<Bytes>, routes: Ro
         frames.push(&bytes);
         while let Some(message) = frames.next_message() {
             if let Some(reply) = configuration_reply(&message, &routes.workspace_configuration) {
+                let _ = routes.stdin.send(Bytes::from(encode_message(&reply)));
+                continue;
+            }
+            if let Some(reply) = apply_edit_reply(&message, &routes.apply_edits) {
                 let _ = routes.stdin.send(Bytes::from(encode_message(&reply)));
                 continue;
             }
@@ -107,6 +114,17 @@ fn configuration_reply(message: &Value, settings: &Value) -> Option<Value> {
     let id = message.get("id").cloned()?;
     (method == "workspace/configuration").then(|| {
         let result = configuration_answer(settings, message.get("params"));
+        json!({ "jsonrpc": "2.0", "id": id, "result": result })
+    })
+}
+
+/// The reply to a `workspace/applyEdit` request: captured and answered applied while a command runs,
+/// `null` otherwise; `None` for any other message, which [`dispatch`] handles.
+fn apply_edit_reply(message: &Value, capture: &ApplyEditCapture) -> Option<Value> {
+    let method = message.get("method").and_then(Value::as_str)?;
+    let id = message.get("id").cloned()?;
+    (method == "workspace/applyEdit").then(|| {
+        let result = apply_edit_answer(capture, message.get("params"));
         json!({ "jsonrpc": "2.0", "id": id, "result": result })
     })
 }

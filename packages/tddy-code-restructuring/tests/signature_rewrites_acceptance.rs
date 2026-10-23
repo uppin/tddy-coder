@@ -112,6 +112,7 @@ fn an_op(kind: RefactorKind, anchor: Anchor, group: Option<&str>) -> RefactorOp 
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

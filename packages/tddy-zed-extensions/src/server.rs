@@ -90,12 +90,7 @@ impl ServerChoice {
         settings: &ExtensionSettings,
         settings_file: &Path,
     ) -> Self {
-        // The multi-server tie-break is open: the first qualifying server, by id, serves it.
-        let Some((id, entry)) = manifest
-            .language_servers
-            .iter()
-            .find(|(id, entry)| serves(entry, id, language, settings))
-        else {
+        let Some((id, entry)) = serving_entry(manifest, language, settings) else {
             return ServerChoice::Undeclared;
         };
         let configured = settings.server(id).and_then(|server| {
@@ -156,12 +151,40 @@ impl ServerChoice {
     }
 }
 
+/// The manifest entry that serves `language`. The multi-server tie-break is open: the first
+/// qualifying server, by id, serves it.
+fn serving_entry<'a>(
+    manifest: &'a ExtensionManifest,
+    language: &ExtensionLanguage,
+    settings: &ExtensionSettings,
+) -> Option<(&'a String, &'a LanguageServerEntry)> {
+    manifest
+        .language_servers
+        .iter()
+        .find(|(id, entry)| serves(entry, id, language, settings))
+}
+
+/// The code-action kinds the server serving `language` is asked for (`context.only`): its entry's
+/// `code_action_kinds`, empty — every kind — when it declares none or no server serves the language.
+pub(crate) fn code_action_kinds(
+    manifest: &ExtensionManifest,
+    language: &ExtensionLanguage,
+    settings: &ExtensionSettings,
+) -> Vec<String> {
+    serving_entry(manifest, language, settings)
+        .and_then(|(_, entry)| entry.code_action_kinds.clone())
+        .unwrap_or_default()
+}
+
+/// What serves one extension language, and the code-action kinds its server is asked for.
+pub(crate) type Served = (ExtensionLanguage, ServerChoice, Vec<String>);
+
 /// Each of `languages` — an installed extension's, beside its manifest — with what serves it, from
 /// the settings under `dir`, read once ([`ExtensionSettings::load`]).
 pub(crate) fn served(
     dir: &ExtensionsDir,
     languages: Vec<(ExtensionManifest, ExtensionLanguage)>,
-) -> Result<Vec<(ExtensionLanguage, ServerChoice)>, ExtensionError> {
+) -> Result<Vec<Served>, ExtensionError> {
     let settings = ExtensionSettings::load(dir)?;
     let settings_file = ExtensionSettings::file(dir);
     Ok(languages
@@ -169,7 +192,8 @@ pub(crate) fn served(
         .map(|(manifest, language)| {
             let server =
                 ServerChoice::for_language(&manifest, &language, &settings, &settings_file);
-            (language, server)
+            let kinds = code_action_kinds(&manifest, &language, &settings);
+            (language, server, kinds)
         })
         .collect())
 }

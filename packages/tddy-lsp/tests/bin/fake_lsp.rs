@@ -63,6 +63,24 @@
 //!   identifier under the requested position (letters, digits, `_` and `-`, in the text the client
 //!   last announced for that document) with `newName`. Without it a rename is answered `null`, as
 //!   every unknown request is.
+//! - `--code-actions <path>` — answer `textDocument/codeAction` from the JSON file at `<path>`,
+//!   `{ "actions": [CodeAction…], "resolved": { <title>: WorkspaceEdit }, "command_edits":
+//!   { <command>: [WorkspaceEdit…] } }` (every key optional), instead of the `ContentModified`
+//!   error: every action, whatever range or `context.only` was asked. With `resolved` non-empty the
+//!   server advertises `codeActionProvider.resolveProvider` and answers `codeAction/resolve` with the
+//!   action given that title's `edit`. With `command_edits` it advertises `executeCommandProvider`,
+//!   and a `workspace/executeCommand` naming a command there sends one `workspace/applyEdit`
+//!   request per listed edit, one at a time, each sent only once the client answered the one
+//!   before, and answers the command (`null`) only after the client answered the last; a command
+//!   with no entry is answered `null` at once, having sent no edit. `tddy/applyEditAnswers`
+//!   replays what the client answered those requests, in order — each answer's `result`, or the
+//!   whole response when it carried none (an error); `tddy/codeActionRequests` returns the `params`
+//!   of each `textDocument/codeAction` request received, in arrival order.
+//! - `--diagnoses <marker>` — the diagnostics of a document are computed from the text the client
+//!   last announced for it: one error (`severity` 1, source `fake`, message `unexpected <marker>`)
+//!   per occurrence of `<marker>`, at its range in UTF-16 code units from the line start, as LSP
+//!   positions count by default. Published on every `didOpen` and `didChange`, and
+//!   the answer to a pull `textDocument/diagnostic`, instead of the one fixed diagnostic.
 //!
 //! Every mode above is off unless asked for, so adding one leaves a server started without it
 //! byte-identical to what it was.
@@ -160,6 +178,20 @@ fn main() {
         args.iter().any(|a| a == "--answers-rename"),
         std::sync::atomic::Ordering::SeqCst,
     );
+    if let Some(path) = args
+        .iter()
+        .position(|a| a == "--code-actions")
+        .and_then(|at| args.get(at + 1))
+    {
+        let text = std::fs::read_to_string(path).expect("--code-actions names a readable file");
+        *CODE_ACTIONS.lock().unwrap() =
+            Some(serde_json::from_str(&text).expect("--code-actions names a JSON file"));
+    }
+    *DIAGNOSES.lock().unwrap() = args
+        .iter()
+        .position(|a| a == "--diagnoses")
+        .and_then(|at| args.get(at + 1))
+        .cloned();
     let cold_hovers = args
         .iter()
         .position(|a| a == "--cold-hovers")
@@ -197,6 +229,26 @@ static CONFIGURATION_ANSWERS: std::sync::Mutex<Option<Vec<Value>>> = std::sync::
 /// A `tddy/configurationAnswers` that arrived before the client's answer did, to reply to once it
 /// arrives.
 static PENDING_CONFIGURATION_REPLAY: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+
+/// Set by `--code-actions <path>`: the file's `{ actions, resolved, command_edits }`.
+static CODE_ACTIONS: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+
+/// Set by `--diagnoses <marker>`: the text whose every occurrence is an error.
+static DIAGNOSES: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// The prefix of the ids of the `workspace/applyEdit` requests this server sends the client.
+const APPLY_EDIT_REQUEST_ID: &str = "fake-lsp-apply-edit-";
+
+/// A `workspace/executeCommand` waiting on the client's answers: its id and the edits still to send.
+static RUNNING_COMMAND: std::sync::Mutex<Option<(Value, Vec<Value>)>> = std::sync::Mutex::new(None);
+
+/// Every answer the client gave this server's `workspace/applyEdit` requests, in order: the
+/// response's `result`, or the whole response when it has none, so an error answer shows as one.
+static APPLY_EDIT_ANSWERS: std::sync::Mutex<Vec<Value>> = std::sync::Mutex::new(Vec::new());
+
+/// The `params` of each `textDocument/codeAction` request received, in arrival order — what
+/// `tddy/codeActionRequests` returns.
+static CODE_ACTION_REQUESTS: std::sync::Mutex<Vec<Value>> = std::sync::Mutex::new(Vec::new());
 
 /// Set by `--answers-rename`: `textDocument/rename` is answered with an edit.
 static ANSWERS_RENAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -689,6 +741,20 @@ fn request_configuration() {
 /// A response from the client: the answer to this server's `workspace/configuration` request is
 /// kept, and replayed to a `tddy/configurationAnswers` that was waiting for it.
 fn record_client_response(message: &Value) {
+    if message
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| id.starts_with(APPLY_EDIT_REQUEST_ID))
+    {
+        APPLY_EDIT_ANSWERS.lock().unwrap().push(
+            message
+                .get("result")
+                .cloned()
+                .unwrap_or_else(|| message.clone()),
+        );
+        send_the_next_edit_or_answer_the_command();
+        return;
+    }
     if message.get("id").and_then(Value::as_str) != Some(CONFIGURATION_REQUEST_ID) {
         return;
     }
@@ -709,6 +775,122 @@ fn replay_configuration_answers(id: Option<Value>) {
     match answers {
         Some(answers) => reply(id, json!(answers)),
         None => *PENDING_CONFIGURATION_REPLAY.lock().unwrap() = id,
+    }
+}
+
+/// The `--code-actions` file's value at `key`, or null.
+fn code_actions_entry(key: &str) -> Value {
+    CODE_ACTIONS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|file| file.get(key).cloned())
+        .unwrap_or(Value::Null)
+}
+
+/// `textDocument/codeAction` under `--code-actions`: every action the file lists.
+fn code_action_result(message: &Value) -> Value {
+    CODE_ACTION_REQUESTS
+        .lock()
+        .unwrap()
+        .push(message.get("params").cloned().unwrap_or(Value::Null));
+    match code_actions_entry("actions") {
+        Value::Null => json!([]),
+        actions => actions,
+    }
+}
+
+/// `codeAction/resolve` under `--code-actions`: the action, given the `resolved` edit of its title.
+fn resolved_code_action(message: &Value) -> Value {
+    let mut action = message.get("params").cloned().unwrap_or(Value::Null);
+    let title = action
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if let Some(edit) = title.and_then(|title| code_actions_entry("resolved").get(&title).cloned())
+    {
+        action["edit"] = edit;
+    }
+    action
+}
+
+/// `workspace/executeCommand` under `--code-actions`: start sending the command's edits, or answer
+/// at once when it has none.
+fn run_command(id: Option<Value>, message: &Value) {
+    let command = message
+        .pointer("/params/command")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let edits = code_actions_entry("command_edits")
+        .get(&command)
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let Some(id) = id else { return };
+    *RUNNING_COMMAND.lock().unwrap() = Some((id, edits.into_iter().rev().collect()));
+    send_the_next_edit_or_answer_the_command();
+}
+
+/// Send the running command's next `workspace/applyEdit`, or answer the command when none is left.
+fn send_the_next_edit_or_answer_the_command() {
+    let mut running = RUNNING_COMMAND.lock().unwrap();
+    let Some((id, remaining)) = running.as_mut() else {
+        return;
+    };
+    match remaining.pop() {
+        Some(edit) => {
+            let sent = APPLY_EDIT_ANSWERS.lock().unwrap().len();
+            send(&json!({
+                "jsonrpc": "2.0",
+                "id": format!("{APPLY_EDIT_REQUEST_ID}{sent}"),
+                "method": "workspace/applyEdit",
+                "params": { "label": "fake command", "edit": edit }
+            }));
+        }
+        None => {
+            let id = id.clone();
+            *running = None;
+            drop(running);
+            reply(Some(id), Value::Null);
+        }
+    }
+}
+
+/// The diagnostics `--diagnoses <marker>` computes for `uri`: one error per occurrence of the
+/// marker in the text last announced for it.
+fn diagnosed(uri: &str, marker: &str) -> Vec<Value> {
+    let text = recorded_document_texts()
+        .get(uri)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_default();
+    let mut found = Vec::new();
+    for (line, source) in text.split('\n').enumerate() {
+        for (at, _) in source.match_indices(marker) {
+            let start = utf16_len(&source[..at]);
+            let end = start + utf16_len(marker);
+            found.push(json!({
+                "range": range(line as u32, start, line as u32, end),
+                "severity": 1,
+                "message": format!("unexpected {marker}"),
+                "source": "fake"
+            }));
+        }
+    }
+    found
+}
+
+/// The length of `text` in UTF-16 code units — the unit an LSP `character` counts by default.
+fn utf16_len(text: &str) -> u32 {
+    text.encode_utf16().count() as u32
+}
+
+/// The diagnostics a document has: computed under `--diagnoses`, the one fixed one otherwise.
+fn diagnostics_of(uri: &str) -> Vec<Value> {
+    match DIAGNOSES.lock().unwrap().clone() {
+        Some(marker) => diagnosed(uri, &marker),
+        None => vec![one_diagnostic()],
     }
 }
 
@@ -805,6 +987,10 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
             record_document_sync(message, method);
             send(&publish_diagnostics_notification(&notified_uri(message)));
         }
+        "textDocument/didChange" if DIAGNOSES.lock().unwrap().is_some() => {
+            record_document_sync(message, method);
+            send(&publish_diagnostics_notification(&notified_uri(message)));
+        }
         "textDocument/didChange" | "textDocument/didClose" => record_document_sync(message, method),
         // Records which request the client asked to stop working on.
         "$/cancelRequest" => record_cancellation(message),
@@ -854,9 +1040,22 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
             }
         }
         "textDocument/documentSymbol" => reply(id, document_symbol_result()),
-        "textDocument/diagnostic" => reply(id, pull_diagnostic_result()),
+        "textDocument/diagnostic" => reply(id, pull_diagnostic_result(&notified_uri(message))),
         // rust-analyzer answers a request issued against a document it has since seen change
         // with `ContentModified` rather than a result. The client must surface it as an error.
+        "textDocument/codeAction" if CODE_ACTIONS.lock().unwrap().is_some() => {
+            reply(id, code_action_result(message))
+        }
+        "codeAction/resolve" if CODE_ACTIONS.lock().unwrap().is_some() => {
+            reply(id, resolved_code_action(message))
+        }
+        "workspace/executeCommand" if CODE_ACTIONS.lock().unwrap().is_some() => {
+            run_command(id, message)
+        }
+        // Replays what the client answered this server's `workspace/applyEdit` requests.
+        "tddy/applyEditAnswers" => reply(id, json!(APPLY_EDIT_ANSWERS.lock().unwrap().clone())),
+        // Replays the `params` of each `textDocument/codeAction` request received, in order.
+        "tddy/codeActionRequests" => reply(id, json!(CODE_ACTION_REQUESTS.lock().unwrap().clone())),
         "textDocument/codeAction" => reply_error(id, FAKE_CONTENT_MODIFIED, "content modified"),
         // Sends nothing back, so the only thing that ends the wait is the request timeout.
         "tddy/neverAnswers" => {}
@@ -901,6 +1100,24 @@ fn range(sl: u32, sc: u32, el: u32, ec: u32) -> Value {
 }
 
 fn initialize_result() -> Value {
+    let mut result = fixed_initialize_result();
+    if CODE_ACTIONS.lock().unwrap().is_some() {
+        let resolves = code_actions_entry("resolved")
+            .as_object()
+            .is_some_and(|resolved| !resolved.is_empty());
+        result["capabilities"]["codeActionProvider"] = json!({ "resolveProvider": resolves });
+        let commands: Vec<String> = code_actions_entry("command_edits")
+            .as_object()
+            .map(|edits| edits.keys().cloned().collect())
+            .unwrap_or_default();
+        if !commands.is_empty() {
+            result["capabilities"]["executeCommandProvider"] = json!({ "commands": commands });
+        }
+    }
+    result
+}
+
+fn fixed_initialize_result() -> Value {
     json!({
         "capabilities": {
             // Honour what the client asked for in `general.positionEncodings`. A consumer that
@@ -970,8 +1187,8 @@ fn one_diagnostic() -> Value {
     })
 }
 
-fn pull_diagnostic_result() -> Value {
-    json!({ "kind": "full", "items": [one_diagnostic()] })
+fn pull_diagnostic_result(uri: &str) -> Value {
+    json!({ "kind": "full", "items": diagnostics_of(uri) })
 }
 
 fn workspace_diagnostic_result() -> Value {
@@ -989,7 +1206,7 @@ fn publish_diagnostics_notification(uri: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
         "method": "textDocument/publishDiagnostics",
-        "params": { "uri": uri, "diagnostics": [one_diagnostic()] }
+        "params": { "uri": uri, "diagnostics": diagnostics_of(uri) }
     })
 }
 

@@ -29,7 +29,8 @@ use tddy_lsp::client::LspClient;
 use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
 
-use crate::index::{Route, WorkspaceIndex};
+use crate::index::routing::Route;
+use crate::index::WorkspaceIndex;
 
 use crate::operations::{note_event, EventSender};
 use crate::plan_flush::SharedPlanStore;

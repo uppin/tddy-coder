@@ -187,6 +187,7 @@ fn a_rename_of_foo() -> RefactorOp {
         canonical_paths: false,
         to_type: None,
         callee: None,
+        action: None,
     }
 }
 

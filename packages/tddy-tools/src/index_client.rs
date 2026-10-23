@@ -39,18 +39,31 @@ const TDDY_INDEX_SOCKET: &str = "TDDY_INDEX_SOCKET";
 /// Run `args` against the warm daemon if one has been named, else against today's cold path.
 ///
 /// `installed` loads the languages registered after the built-ins — the installed Zed extensions',
-/// which this crate cannot load itself (the front end that links `tddy-zed-extensions` does). Only
-/// the cold path calls it: a warm daemon registers its own.
+/// which this crate cannot load itself (the front end that links `tddy-zed-extensions` does), with
+/// the verifies of those languages that a `verify` hands its changed files to. Only the cold path
+/// calls it: a warm daemon registers its own.
 pub async fn run_restructure(
     args: RestructureArgs,
-    installed: impl FnOnce() -> Result<SupportRegistry>,
+    installed: impl FnOnce() -> Result<ColdLanguages>,
 ) -> Result<()> {
     match warm_index_socket(std::env::var(TDDY_INDEX_SOCKET).ok().as_deref()) {
         Some(socket) if !answered_without_an_index(&args.command) => {
             restructure_at(&socket, args).await
         }
-        _ => tddy_code_restructuring::restructure_cli::run_with_installed(args, installed()?).await,
+        _ => {
+            let ColdLanguages { supports, verifies } = installed()?;
+            tddy_code_restructuring::restructure_cli::run_with_extensions(args, supports, verifies)
+                .await
+        }
     }
+}
+
+/// The languages a cold run registers after the built-ins, and the verifies of the same languages.
+pub struct ColdLanguages {
+    /// The registry the run routes files through.
+    pub supports: SupportRegistry,
+    /// What a `verify` hands the changed files of those languages to.
+    pub verifies: Vec<std::sync::Arc<dyn tddy_code_restructuring::verify::SourceVerify>>,
 }
 
 /// Whether this process answers a command itself, whatever the environment names.

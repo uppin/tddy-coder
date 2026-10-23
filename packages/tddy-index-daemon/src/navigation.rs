@@ -13,7 +13,9 @@ use tddy_lsp::{Location, LspClient, Position};
 use tddy_rpc::Status;
 
 use crate::activity::Activity;
-use crate::index::{Route, ServedFile, WorkspaceIndex};
+use crate::index::routing::Route;
+use crate::index::routing::ServedFile;
+use crate::index::WorkspaceIndex;
 use crate::proto::code_index::{
     CodeLocation, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, IndexState,
     ReferencesRequest, ReferencesResponse, SourcePosition, SourceRange,

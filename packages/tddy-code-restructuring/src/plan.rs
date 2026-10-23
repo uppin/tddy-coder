@@ -266,6 +266,49 @@ pub struct RefactorOp {
     /// [`rust_syntax::one_receiver_template`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee: Option<String>,
+    /// Which offered code action `apply_code_action` runs (`#reshape` extension-code-actions, R1,
+    /// R4): exactly one of `title` and `kind`. Refused on every other operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<ActionSelector>,
+}
+
+/// How `apply_code_action` picks one of the code actions a server offers (R1).
+///
+/// Both fields are optional in the line's shape so that the static check (R4) can refuse a line
+/// naming both or neither in its own words, rather than as a deserialization error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionSelector {
+    /// The action's title, matched exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// A prefix of the action's LSP `kind`, matched as LSP kinds nest: `refactor.extract` selects
+    /// `refactor.extract.function`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// The one thing an [`ActionSelector`] asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wanted<'a> {
+    /// The action's title, matched exactly.
+    Title(&'a str),
+    /// A prefix of the action's LSP `kind`, matched as LSP kinds nest.
+    Kind(&'a str),
+}
+
+impl ActionSelector {
+    /// R4: what the selector asks for — exactly one of `title` and `kind`; naming both or neither is
+    /// [`crate::RestructureError::MalformedPlan`].
+    pub fn wanted(&self) -> crate::Result<Wanted<'_>> {
+        match (&self.title, &self.kind) {
+            (Some(title), None) => Ok(Wanted::Title(title)),
+            (None, Some(kind)) => Ok(Wanted::Kind(kind)),
+            _ => Err(malformed(
+                "`action` names exactly one of `title` and `kind`",
+            )),
+        }
+    }
 }
 
 /// One entry of an operation's `order`: a parameter's name, or an argument's one-based position.
