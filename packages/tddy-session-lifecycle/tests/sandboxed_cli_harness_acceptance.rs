@@ -369,7 +369,7 @@ fn session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHo
         Arc::new(|token| (token == VALID_TOKEN).then(|| OWNER.to_string())),
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
 }
