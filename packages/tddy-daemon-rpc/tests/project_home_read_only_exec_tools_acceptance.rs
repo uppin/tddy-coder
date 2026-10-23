@@ -2,7 +2,7 @@
 //! `ExecuteTool` itself — a write, an edit, a delete or a shell command is refused for that role
 //! whatever the agent's allowlist says, while reading still works.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md (`#project-home` 4/7).
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home session (`#project-home` 4/7).
 
 use std::path::Path;
 

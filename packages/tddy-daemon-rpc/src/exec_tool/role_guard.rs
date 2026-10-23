@@ -4,7 +4,7 @@
 //! else. The rule is applied here, on the daemon, rather than left to the agent's spawn-time
 //! allowlist, which is harness-specific and which a harness that cannot enforce it ignores.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md.
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home session.
 
 use std::path::Path;
 

@@ -3,7 +3,7 @@
 //! It is isolated from whatever branch the project's main checkout has, and is fast-forwarded to
 //! the fetched ref before the home session resumes.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md.
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home session.
 
 use std::fmt;
 use std::path::{Path, PathBuf};

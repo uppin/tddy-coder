@@ -108,6 +108,43 @@ passphrase when the key is protected; see [cloning over SSH](clone-ssh-passphras
 
 The **`tddy-daemon`** binary is the multi-user orchestrator: serves the web bundle, exposes **AuthService** (GitHub OAuth via Connect-RPC), maps authenticated GitHub users to OS users, lists allowed tools and sessions, and spawns **`tddy-coder`** with LiveKit credentials and **`--project-id`** when applicable. **`tddy-coder --daemon`** remains for single-user local use. Service install and paths: [systemd-install.md](systemd-install.md). Connection UX: [Web terminal](../web/web-terminal.md).
 
+## Project-home session
+
+A project has at most one **project-home session** per host: a standing, **read-only**,
+managed-codebase session running the project's **home agent**, pinned first in the project's group in
+the session drawer ([Session drawer § Pinned main entry](../web/session-drawer.md#pinned-main-entry)).
+
+`SessionService.EnsureProjectHomeSession(project_id, daemon_instance_id)` owns its lifecycle and
+answers `{ session, outcome }`:
+
+| What exists for the project on that host | Outcome |
+|---|---|
+| No home agent set | refused, `FAILED_PRECONDITION` ("set one on the Projects screen"); nothing starts |
+| A home agent that is not a harness profile, or whose harness cannot enforce managed-codebase mode (anything but `claude-cli`; see [the cursor-cli TODO](../../dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md)) | refused, `FAILED_PRECONDITION` naming the harness; nothing starts |
+| No project-home session | the **home worktree** is created and a managed session is started on it with the home agent → `started` |
+| A stopped one | the home worktree is fast-forwarded to the fetched main branch ref, then the session is resumed — same conversation → `resumed` |
+| A running one (its pid is alive, or the daemon still serves its terminal) | returned unchanged → `running` |
+
+- **Role.** The session's `.session.yaml` carries `session_role: project-home`, and `ListSessions`
+  reports it as `SessionEntry.session_role` (empty for every other session).
+- **Home worktree.** `<worktrees root>/<project_id>/home`, a linked worktree of the project's main
+  repository, **detached** at `main_branch_ref` after fetching it. It is isolated from whatever
+  branch the main checkout has, has no commits of its own, and is only ever fast-forwarded. A path
+  there that is not that worktree is refused.
+- **Read-only.** The daemon's `ExecuteTool` and `StreamExecuteTool` refuse, with
+  `PERMISSION_DENIED`, every exec tool but `Read`, `Grep`, `Glob`, `ReadLints` and `SemanticSearch`
+  for a project-home session, so the guarantee does not rest on the agent's allowlist. The agent is
+  still offered the full catalog and learns of a refusal when it calls the tool
+  ([TODO](../../dev/todo/2026-10-23-project-home-read-only-catalog-not-advertised.md)).
+- **Hosts.** A request whose `daemon_instance_id` names another daemon is forwarded to it (as
+  `GetWorktreeSnapshot` is); empty or the local instance is answered locally. Each host has its own
+  home session for a project.
+- Ensures are serialized on a daemon, so two clicks never start two home sessions. Deleting the
+  home session is allowed; the next ensure starts a new one. Because it is managed, it opens with the
+  activity sidebar.
+- The "running" decision is a heuristic with one known false positive — a live pid with no served
+  terminal ([TODO](../../dev/todo/2026-10-23-project-home-running-heuristic.md)).
+
 ## Related
 
 - [Cloning over SSH](clone-ssh-passphrase.md) — the passphrase question a clone asks.

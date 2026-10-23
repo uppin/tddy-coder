@@ -4,7 +4,7 @@
 //! run a process there. The same rule answers both questions the daemon asks — what to advertise
 //! and what to execute — so the guarantee never rests on the agent's allowlist alone.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md.
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home session.
 
 use crate::catalog::ToolDef;
 

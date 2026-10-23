@@ -3,7 +3,7 @@
 //! ref, running the project's home agent — and refuses when there is no home agent or its harness
 //! cannot enforce managed-codebase mode.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md (`#project-home` 4/7).
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home session (`#project-home` 4/7).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

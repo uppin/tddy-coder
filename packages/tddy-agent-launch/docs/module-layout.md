@@ -49,8 +49,9 @@ steps are in sibling modules:
 | `tool_session_route.rs` | a tool session's provider route as route-file JSON: `tool_session_route_json`, `resumed_tool_session_route_json`; see [Provider route of a session](#provider-route-of-a-session) |
 | `tool_spawn_plan.rs` | `ToolSpawnPlan` (what the child is spawned with, including `provider_route_json`) and `ToolSpawnPurpose` (`Start` / `Resume`) |
 | `svc_ensure_project_available_for_start.rs`, `svc_index_workspace_worktree.rs` | project provisioning for a start; the semantic index over a workspace worktree |
+| `svc_ensure_project_home.rs` | `EnsureProjectHomeSession`: forwards a request naming another daemon; `caller_home_scope` (OS user, sessions base, registered project); `home_agent_profile` (the project's home agent as a harness profile, refused unless its harness is `claude-cli`); `ensure_on_this_host`, under a process-wide lock — running (pid alive or terminal served) → unchanged, stopped → `fast_forward_home_worktree` + `resume_session_at_session_coordinate`, none → `ensure_home_worktree` + a managed `start_session_core` with `repo_path` = the home worktree, then `session_role: project-home` written to the new session's metadata |
 | `clone_planner.rs`, `clone_backend.rs`, `clone_ssh_env.rs`, `start_keepalive.rs` | how a clone reaches its remote and runs; see [Cloning a project](#cloning-a-project-for-a-start) |
-| `svc_start_claude_cli_session.rs` | the non-sandboxed Claude CLI start; holds `SessionStdioEndpoint` (the reverse stdio endpoint to a spawned `tddy-coder`) |
+| `svc_start_claude_cli_session.rs` | the non-sandboxed Claude CLI start; holds `SessionStdioEndpoint` (the reverse stdio endpoint to a spawned `tddy-coder`). A non-empty `repo_path` is run in directly (`claude_cli_spawn_steps::claude_cli_checkout` adopts it, canonicalized, and never removes it) instead of cutting a session worktree — how the project-home session runs on its home worktree |
 | `svc_resume_claude_cli_session.rs`, `svc_resume_sandboxed_claude_cli_session.rs` | the resume paths; the sandboxed one relaunches through `relaunch_sandboxed_runner` |
 
 ## Cloning a project for a start

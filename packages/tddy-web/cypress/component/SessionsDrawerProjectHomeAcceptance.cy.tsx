@@ -5,7 +5,7 @@
  * a hint instead; the **Other** group has no pinned entry; a project with a home agent and no
  * session yet still gets its group, so the pinned entry is how its first session starts.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md (`#project-home` 4/7).
+ * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry (`#project-home` 4/7).
  */
 
 import React from "react";

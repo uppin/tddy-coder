@@ -10,7 +10,7 @@ import type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
  * exists. Clicking it ensures the project-home session; a refusal is shown on the entry. With no
  * home agent it shows a hint pointing at the Projects screen and starts nothing.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md.
+ * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
  */
 export function ProjectHomeEntry(props: {
   home: ProjectHomeInfo;

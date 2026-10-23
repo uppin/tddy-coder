@@ -12,7 +12,7 @@
 //! It builds a `StartSessionRequest` and calls the existing start and resume paths; it adds no
 //! branch to `start_session_core` (`docs/code-issues/complexity-svc-start-session-core-*`).
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md.
+//! Feature doc: docs/ft/daemon/project-concept.md § Project-home session.
 
 use std::path::{Path, PathBuf};
 

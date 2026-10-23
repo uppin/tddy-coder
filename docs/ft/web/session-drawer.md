@@ -73,6 +73,27 @@ by grouping.
 Implementation: `groupSessionsByProject` (`src/utils/sessionProjectGroups.ts`),
 `SessionProjectGroup` and `projectGroupCollapse.ts` (`src/components/sessions/`).
 
+### Pinned main entry
+
+Each **project** group starts with a pinned **main** entry for the project's
+[project-home session](../daemon/project-concept.md#project-home-session): the label `main`, the
+project's main branch ref, the home agent's label (from `ListAgents`, else its id) and, once the
+session exists, its status dot.
+
+- **Click** calls `EnsureProjectHomeSession` for the project on the selected host and selects the
+  session it answers — started, resumed or already running. A refusal is shown under the entry.
+- **No home agent**: the entry shows a hint pointing at the Projects screen and starts nothing.
+- **Not repeated**: the project-home session (`sessionRole === "project-home"`) is not listed again
+  among the group's rows.
+- **A project with no session yet** still gets its group when it has a home agent, so the pinned
+  entry is how its first session starts; it is placed among the others by the same name order. A
+  project with neither a session nor a home agent gets no group.
+- The **Other** group has no pinned entry.
+
+Implementation: `ProjectHomeEntry`, `useEnsureProjectHome`, `useSessionsDrawerProjectHomes`
+(`src/components/sessions/`), `projectHomeSlot` and `withProjectHomeGroups`
+(`src/utils/projectHomeGroups.ts`).
+
 ## Indicator Token
 
 The row's dot (`SessionIndicatorDot`, shared by the expanded list and the collapsed strip) shows one
@@ -397,6 +418,7 @@ Adds to `src/components/ui/`:
 
 - `ListSessions` — session list with `isActive`, `createdAt`, `repoPath`, `workflowGoal`, `pendingElicitation`; fanned out per-host and merged (see [Cross-Host Active Sessions](#cross-host-active-sessions); liveness is derived client-side from common-room participants, not from this RPC)
 - `ConnectSession` / `ResumeSession` — attach to a running or paused session
+- `EnsureProjectHomeSession` — the pinned **main** entry: start, resume or reach the project's home session (see [Pinned main entry](#pinned-main-entry)); `ListAgents` labels its home agent
 - `StreamTerminalOutput` / `SendTerminalInput` (`terminal_session.TerminalSessionService`) — gRPC
   terminal stream (claude-cli path)
 - `DeleteSession` — delete session (two-click confirm)

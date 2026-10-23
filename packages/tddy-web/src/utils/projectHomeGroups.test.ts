@@ -2,7 +2,7 @@
  * Unit tests for the drawer's project-home slotting: which groups exist for a pinned **main**
  * entry, and which sessions a group still lists as rows.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md (`#project-home` 4/7).
+ * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry (`#project-home` 4/7).
  */
 
 import { describe, expect, it } from "bun:test";
