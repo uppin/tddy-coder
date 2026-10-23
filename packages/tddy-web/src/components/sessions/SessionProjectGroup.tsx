@@ -15,7 +15,7 @@ export function projectGroupKey(group: ProjectSessionGroup): string {
  * A collapsed body stays mounted and is hidden with `display: none`, the same way the drawer's
  * partition separators hide theirs.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-project-groups.md.
+ * PRD: docs/ft/web/session-drawer.md.
  */
 export function SessionProjectGroup(props: {
   group: ProjectSessionGroup;

@@ -1,7 +1,7 @@
 /**
  * Unit tests for per-project grouping of the sessions drawer.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-project-groups.md (`#project-home` 2/7).
+ * PRD: docs/ft/web/session-drawer.md (`#project-home` 2/7).
  */
 
 import { describe, it, expect } from "bun:test";

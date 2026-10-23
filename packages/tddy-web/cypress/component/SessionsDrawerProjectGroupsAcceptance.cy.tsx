@@ -3,7 +3,7 @@
  * project ordered by name, a trailing **Other** group, today's Active/Remaining split inside each
  * group, a collapsed set that survives a remount, and a selected session's group expanding.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-22-project-home-project-groups.md (`#project-home` 2/7).
+ * PRD: docs/ft/web/session-drawer.md (`#project-home` 2/7).
  */
 
 import React from "react";
