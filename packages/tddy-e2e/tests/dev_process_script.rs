@@ -838,7 +838,10 @@ fn a_recorded_group_whose_leader_exited_still_has_its_members_killed() {
     // Then the leader went on TERM, and the member it left behind is killed
     assert!(next.succeeded, "stderr:\n{}", next.stderr);
     assert!(!alive(leftover.pid()), "the leader exited");
-    assert!(!alive(&member), "member {member} of the recorded group is killed");
+    assert!(
+        !alive(&member),
+        "member {member} of the recorded group is killed"
+    );
 }
 
 /// A recorded pid now held by a different process (started at another time) is not ours: untouched.
