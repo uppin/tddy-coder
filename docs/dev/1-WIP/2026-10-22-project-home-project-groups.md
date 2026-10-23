@@ -130,6 +130,12 @@ existing drawer specs (`SessionsDrawerAcceptance`, `SessionsDrawerActiveSeparato
 - Existing drawer specs (`SessionDrawer.cy.tsx`, `SessionsDrawer*Acceptance.cy.tsx`) mount without `projects`; once grouping lands their sessions fall into **Other**. Green re-runs them and adds `projects` where an assertion depends on position.
 - `SessionsDrawerScreen` must pass the `ListProjects` rows it already loads (`useSessionsDrawerProjects.ts`) into `projects`.
 
+## Green-phase notes
+
+- Implemented: `groupSessionsByProject` (named groups, trailing Other), `SessionProjectGroup` (header with name and count, collapsible body hidden with `display: none`), `projectGroupCollapse` (localStorage wrapped in try/catch), `SessionDrawer` renders one group per project and expands the group of the selected session; `SessionsDrawerScreen` passes `projects`.
+- Verified (scoped): `bun test src/utils/sessionProjectGroups.test.ts` 3/3; `bun test src/utils` 150/150; Cypress component `SessionsDrawerProjectGroupsAcceptance` 4/4; regression `SessionDrawer` 7/7, `SessionsDrawerAcceptance` 23/23 (one first run hit a dev-server dependency re-optimization, `useId` on null inside react-resizable-panels, and passed on re-run), `SessionsDrawerActiveSeparator` 8/8, `SessionsDrawerBulkDeleteAcceptance` 2/2, `SessionsDrawerCrossHostAcceptance` 8/8.
+- No existing spec was edited: sessions mounted without `projects` fall into the Other group, and every spec still passes.
+
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
@@ -154,7 +160,7 @@ existing drawer specs (`SessionsDrawerAcceptance`, `SessionsDrawerActiveSeparato
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

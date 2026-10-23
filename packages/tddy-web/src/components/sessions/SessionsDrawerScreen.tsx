@@ -398,6 +398,7 @@ export function SessionsDrawerScreen({
             onBulkDelete={() => {
               void handleBulkDelete();
             }}
+            projects={projects}
           />
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}

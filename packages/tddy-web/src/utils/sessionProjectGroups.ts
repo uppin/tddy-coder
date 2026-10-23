@@ -32,8 +32,34 @@ export function groupSessionsByProject(
   sessions: SessionEntry[],
   projects: ReadonlyArray<KnownProject>,
 ): ProjectSessionGroup[] {
-  // TODO(project-groups): implement
-  void sessions;
-  void projects;
-  return [];
+  const knownNames = new Map(projects.map((p) => [p.projectId, p.name]));
+  const byProject = new Map<string, SessionEntry[]>();
+  const other: SessionEntry[] = [];
+
+  for (const session of sessions) {
+    if (session.projectId && knownNames.has(session.projectId)) {
+      const bucket = byProject.get(session.projectId) ?? [];
+      bucket.push(session);
+      byProject.set(session.projectId, bucket);
+    } else {
+      other.push(session);
+    }
+  }
+
+  const groups: ProjectSessionGroup[] = [...byProject.entries()]
+    .map(([projectId, groupSessions]) => ({
+      projectId,
+      label: knownNames.get(projectId) ?? projectId,
+      sessions: groupSessions,
+    }))
+    .sort(
+      (a, b) =>
+        a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) ||
+        a.projectId.localeCompare(b.projectId),
+    );
+
+  if (other.length > 0) {
+    groups.push({ projectId: null, label: "Other", sessions: other });
+  }
+  return groups;
 }

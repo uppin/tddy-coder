@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionEntry } from "../../gen/session_pb";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
@@ -6,6 +6,12 @@ import {
   partitionSessionsByActivity,
   type SessionStackGroupResult,
 } from "../../utils/sessionStackGroups";
+import {
+  groupSessionsByProject,
+  type ProjectSessionGroup,
+} from "../../utils/sessionProjectGroups";
+import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
+import { readCollapsedProjects, writeCollapsedProjects } from "./projectGroupCollapse";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { SessionDrawerItem } from "./SessionDrawerItem";
@@ -242,6 +248,61 @@ function SessionPartitionBody({
   );
 }
 
+/** One project group's body: today's Active/Remaining partition and stack nesting over its sessions. */
+function SessionGroupBody({
+  sessions,
+  selectionMode,
+  partitionBodyProps,
+}: {
+  sessions: SessionEntry[];
+  selectionMode: boolean;
+  partitionBodyProps: Omit<React.ComponentProps<typeof SessionPartitionBody>, "partition">;
+}) {
+  const { active, remaining, activeCount, remainingCount } = partitionSessionsByActivity(sessions);
+  const isPartitioned = activeCount > 0 && remainingCount > 0;
+
+  if (!isPartitioned) {
+    return (
+      <SessionPartitionBody
+        partition={activeCount > 0 ? active : remaining}
+        {...partitionBodyProps}
+      />
+    );
+  }
+  return (
+    <>
+      <SessionDrawerSeparator
+        testId="sessions-drawer-separator-active"
+        label="Active"
+        count={activeCount}
+        defaultOpen
+        forceOpen={selectionMode}
+      >
+        <SessionPartitionBody partition={active} {...partitionBodyProps} />
+      </SessionDrawerSeparator>
+      <SessionDrawerSeparator
+        testId="sessions-drawer-separator-remaining"
+        label="Remaining"
+        count={remainingCount}
+        defaultOpen={false}
+        forceOpen={selectionMode}
+      >
+        <SessionPartitionBody partition={remaining} {...partitionBodyProps} />
+      </SessionDrawerSeparator>
+    </>
+  );
+}
+
+/** The key of the project group that holds `sessionId`, or `null` when no group does. */
+function projectGroupKeyContaining(
+  groups: ProjectSessionGroup[],
+  sessionId: string | null,
+): string | null {
+  if (sessionId === null) return null;
+  const group = groups.find((g) => g.sessions.some((s) => s.sessionId === sessionId));
+  return group ? projectGroupKey(group) : null;
+}
+
 export function SessionDrawer({
   sessions,
   selectedSessionId,
@@ -262,10 +323,38 @@ export function SessionDrawer({
   onExitSelectionMode,
   onSelectAll,
   onBulkDelete,
+  projects = [],
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
     hostLabelForInstance,
+  };
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(readCollapsedProjects);
+  const projectGroups = groupSessionsByProject(sessions, projects);
+  const selectedGroupKey = projectGroupKeyContaining(projectGroups, selectedSessionId);
+
+  // Selecting a session expands its project group; the viewer can still collapse it afterwards.
+  useEffect(() => {
+    if (selectedGroupKey === null) return;
+    setCollapsedProjects((prev) => {
+      if (!prev.has(selectedGroupKey)) return prev;
+      const next = new Set(prev);
+      next.delete(selectedGroupKey);
+      return next;
+    });
+  }, [selectedGroupKey]);
+
+  useEffect(() => {
+    writeCollapsedProjects(collapsedProjects);
+  }, [collapsedProjects]);
+
+  const toggleProjectGroup = (key: string) => {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
   if (!isOpen) {
     // Strip mode on desktop; hidden on mobile (mobile uses the floating overlay
@@ -305,9 +394,6 @@ export function SessionDrawer({
     );
   }
 
-  const { active, remaining, activeCount, remainingCount } =
-    partitionSessionsByActivity(sessions);
-  const isPartitioned = activeCount > 0 && remainingCount > 0;
   const partitionBodyProps = {
     selectedSessionId,
     onSelectSession,
@@ -361,33 +447,23 @@ export function SessionDrawer({
       </div>
       <ScrollArea className="flex-1 min-h-0">
         <div className="py-1 px-2 space-y-0.5">
-          {isPartitioned ? (
-            <>
-              <SessionDrawerSeparator
-                testId="sessions-drawer-separator-active"
-                label="Active"
-                count={activeCount}
-                defaultOpen
-                forceOpen={selectionMode}
+          {projectGroups.map((group) => {
+            const key = projectGroupKey(group);
+            return (
+              <SessionProjectGroup
+                key={key}
+                group={group}
+                collapsed={collapsedProjects.has(key)}
+                onToggle={() => toggleProjectGroup(key)}
               >
-                <SessionPartitionBody partition={active} {...partitionBodyProps} />
-              </SessionDrawerSeparator>
-              <SessionDrawerSeparator
-                testId="sessions-drawer-separator-remaining"
-                label="Remaining"
-                count={remainingCount}
-                defaultOpen={false}
-                forceOpen={selectionMode}
-              >
-                <SessionPartitionBody partition={remaining} {...partitionBodyProps} />
-              </SessionDrawerSeparator>
-            </>
-          ) : (
-            <SessionPartitionBody
-              partition={activeCount > 0 ? active : remaining}
-              {...partitionBodyProps}
-            />
-          )}
+                <SessionGroupBody
+                  sessions={group.sessions}
+                  selectionMode={selectionMode}
+                  partitionBodyProps={partitionBodyProps}
+                />
+              </SessionProjectGroup>
+            );
+          })}
           {sessions.length === 0 && (
             <div className="px-3 py-4 text-sm text-muted-foreground text-center">
               No sessions
