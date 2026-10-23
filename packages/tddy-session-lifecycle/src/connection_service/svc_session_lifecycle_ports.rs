@@ -4,9 +4,10 @@ use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
-    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
-    ListSessionsResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
-    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+    EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
+    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SessionService, SignalSessionRequest, SignalSessionResponse,
+    StartSessionRequest, StartSessionResponse,
 };
 
 use crate::SessionHandler;
@@ -72,6 +73,15 @@ impl SessionHandler for DaemonSessionHost {
     ) -> Result<Response<tddy_service::proto::session::ResumeSessionResponse>, Status> {
         self.launch_sessions()
             .resume_session_at_session_coordinate(request)
+            .await
+    }
+
+    async fn ensure_project_home_session(
+        &self,
+        request: Request<EnsureProjectHomeSessionRequest>,
+    ) -> Result<Response<EnsureProjectHomeSessionResponse>, Status> {
+        self.launch_sessions()
+            .ensure_project_home_session_at_session_coordinate(request)
             .await
     }
 
@@ -141,6 +151,13 @@ impl SessionService for DaemonSessionHost {
         request: Request<ResumeSessionRequest>,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
         SessionHandler::resume_session(self, request).await
+    }
+
+    async fn ensure_project_home_session(
+        &self,
+        request: Request<EnsureProjectHomeSessionRequest>,
+    ) -> Result<Response<EnsureProjectHomeSessionResponse>, Status> {
+        SessionHandler::ensure_project_home_session(self, request).await
     }
 
     async fn signal_session(

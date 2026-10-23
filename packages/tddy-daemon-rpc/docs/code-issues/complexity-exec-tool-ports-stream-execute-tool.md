@@ -17,6 +17,7 @@
 | 2026-09-18 | 73 | 5 | 6 | 8 | first detection |
 | 2026-09-23 | 82 | 5 | 6 | 8 | moved to `tddy-daemon-rpc`; length from re-wrapped field paths, not new logic |
 | 2026-09-23 | 82 | 5 | 6 | 8 | re-measured at the #520 wrap: unchanged since the move; still at `exec_tool/ports.rs:99`, nesting and early exits identical to the lifecycle original |
+| 2026-10-23 | 81 | 4 | — | — | touched by #699 (`#project-home` 4/7), **unchanged in length**: the project-home read-only refusal joined the path-traversal check in one call (`role_guard::reject_refused_local_exec_tool`), so the call site stayed one line. Measured by the brace-depth structural scan (fn span 81 lines, body nesting 4 — this scan counts depth from the fn body, one less than the 2026-09-18 tool) |
 
 ## What the tool found
 

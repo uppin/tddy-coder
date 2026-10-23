@@ -28,7 +28,9 @@ pub struct HarnessProfile {
     pub label: Option<String>,
     /// A tool-session agent id or a CLI session type.
     pub harness: String,
-    /// The provider account, by id or label, in the starting person's vault.
+    /// The provider account, by id or label, in the starting person's vault. Absent (empty) runs
+    /// the harness on its own vendor.
+    #[serde(default)]
     pub provider_account: String,
     pub model: String,
 }

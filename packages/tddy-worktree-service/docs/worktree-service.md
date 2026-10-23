@@ -81,7 +81,23 @@ The rule itself is unchanged and still has one home: scan for a `Changeset.branc
 **active** session, tie-break on the most recent `updated_at`, skip a session whose changeset cannot
 be read. It is synchronous, so async callers wrap it in `spawn_blocking_with_timeout`.
 
-## How it is served
+## The home worktree (`home_worktree.rs`)
+
+A project's [project-home session](../../../docs/ft/daemon/project-concept.md#project-home-session)
+runs on a dedicated checkout, not a per-session branch worktree:
+
+- `home_worktree_path(worktrees_root, project_id)` → `<worktrees_root>/<project_id>/home`.
+- `ensure_home_worktree(main_repo, worktrees_root, project_id, main_branch_ref)` returns it when it
+  is already one of `main_repo`'s linked worktrees (`git worktree list --porcelain`, compared
+  canonicalized); otherwise fetches the ref, checks it resolves to a commit, and runs
+  `git worktree add --detach <path> <ref>`. A path there that is not that worktree is
+  `HomeWorktreeError::PathTaken`; an unresolvable ref is `UnknownRef`; any failing git command is
+  `Git` with git's stderr.
+- `fast_forward_home_worktree(home, main_branch_ref)` fetches and `git merge --ff-only`s — the home
+  worktree has no commits of its own, so anything but a fast-forward is an error, never a reset.
+- A ref is fetched only when its first segment names one of the repository's remotes
+  (`origin/main` → `git fetch origin main`); a local branch has nothing to fetch.
+
 
 `tddy-daemon`'s `runtime.rs` builds one `WorktreeServiceImpl` and registers it from the same `Arc`
 on all three transports: a `ServiceEntry` from `tddy_service::WorktreeServiceServer::from_arc` for

@@ -13,9 +13,10 @@ use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
-    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, ListSessionsRequest,
-    ListSessionsResponse, ResumeSessionRequest, ResumeSessionResponse, SessionService,
-    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
+    EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
+    GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SessionService, SignalSessionRequest, SignalSessionResponse,
+    StartSessionRequest, StartSessionResponse,
 };
 
 use crate::cli_session_manager::CliSessionManager;
@@ -216,6 +217,16 @@ impl SessionService for TestDaemon {
         self.inner
             .session_lifecycle_service()
             .resume_session(request)
+            .await
+    }
+
+    async fn ensure_project_home_session(
+        &self,
+        request: Request<EnsureProjectHomeSessionRequest>,
+    ) -> Result<Response<EnsureProjectHomeSessionResponse>, Status> {
+        self.inner
+            .session_lifecycle_service()
+            .ensure_project_home_session(request)
             .await
     }
 

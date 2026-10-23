@@ -3,6 +3,7 @@
 
 use super::path_guard::reject_exec_tool_path_traversal;
 use super::result_frames::exec_tool_result_frames;
+use super::role_guard::reject_refused_local_exec_tool;
 use super::ExecToolRpcHandler;
 use async_trait::async_trait;
 use prost::Message as _;
@@ -79,7 +80,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
             &self.tddy_data_dir,
             &req_conn,
         )?;
-        reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
+        reject_refused_local_exec_tool(&sessions_base, &req)?;
         let response = self
             .local_exec_tools
             .run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
@@ -157,7 +158,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                     &self.tddy_data_dir,
                     &req_conn,
                 )?;
-                reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
+                reject_refused_local_exec_tool(&sessions_base, &req)?;
                 self.local_exec_tools
                     .run_exec_tool_locally(&req_conn, &sessions_base, &worktree_root)
                     .await

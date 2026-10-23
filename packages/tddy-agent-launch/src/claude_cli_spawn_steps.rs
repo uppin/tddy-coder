@@ -89,6 +89,33 @@ pub(super) async fn cut_claude_cli_worktree(
     Ok(worktree_path)
 }
 
+/// The session's checkout: the one the caller named in `repo_path` (a project's home worktree),
+/// adopted as it is, or — when that is empty — a session worktree cut for it.
+pub(super) async fn claude_cli_checkout(
+    repo_path: &str,
+    cut: ClaudeCliWorktreeCut<'_>,
+) -> Result<PathBuf, Status> {
+    match repo_path.trim() {
+        "" => cut_claude_cli_worktree(cut).await,
+        adopted => adopt_checkout(adopted),
+    }
+}
+
+/// A checkout the caller named, run in directly: canonicalized, and required to be a directory. It
+/// is not daemon-managed, so nothing removes it when the session ends.
+fn adopt_checkout(path: &str) -> Result<PathBuf, Status> {
+    let canonical = std::fs::canonicalize(path).map_err(|e| {
+        Status::invalid_argument(format!("repo_path {path} is not accessible: {e}"))
+    })?;
+    if !canonical.is_dir() {
+        return Err(Status::invalid_argument(format!(
+            "repo_path {} is not a directory",
+            canonical.display()
+        )));
+    }
+    Ok(canonical)
+}
+
 pub(super) fn spawned_claude_cli_branch(
     branch_worktree_intent: &str,
     new_branch_name: &str,

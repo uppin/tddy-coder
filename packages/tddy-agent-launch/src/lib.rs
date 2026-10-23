@@ -43,6 +43,7 @@ pub mod stack_seed_validation;
 pub mod start_keepalive;
 pub mod start_request_checks;
 pub mod svc_ensure_project_available_for_start;
+pub mod svc_ensure_project_home;
 pub mod svc_index_workspace_worktree;
 pub mod svc_pr_status_for_caller;
 pub mod svc_relaunch_sandboxed_runner;

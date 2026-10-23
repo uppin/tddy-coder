@@ -137,6 +137,7 @@ mod tests {
                 agent_session_id: None,
                 ssh_config_host: Some(ssh_host.to_string()),
                 managed_codebase: false,
+                session_role: None,
             },
         )
         .expect("write session metadata");

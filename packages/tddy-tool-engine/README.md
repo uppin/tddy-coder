@@ -28,6 +28,13 @@ long-running background jobs (e.g. `Shell` with `block_until_ms = 0`).
   denial rather than an absence: the agent needs to be told it was refused, and the replacement is
   this crate's own `Write` against the real worktree.
 
+## Read-only subset
+
+`read_only::is_read_only_tool(name)` and `read_only::read_only_catalog()` name the tools that only
+read or search — `Read`, `Grep`, `Glob`, `ReadLints`, `SemanticSearch`, in catalog order. The daemon
+uses it to refuse every other tool for a read-only (project-home) session in `ExecuteTool`; see
+[project-home session](../../docs/ft/daemon/project-concept.md#project-home-session).
+
 ## One catalog
 
 `tool_catalog()` is the only exec-tool catalog in the workspace. `tddy-tools` used to hold a

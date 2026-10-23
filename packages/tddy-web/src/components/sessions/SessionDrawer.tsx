@@ -10,7 +10,13 @@ import {
   groupSessionsByProject,
   type ProjectSessionGroup,
 } from "../../utils/sessionProjectGroups";
+import {
+  projectHomeSlot,
+  withProjectHomeGroups,
+  type ProjectHomeInfo,
+} from "../../utils/projectHomeGroups";
 import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
+import { ProjectHomeEntry } from "./ProjectHomeEntry";
 import { readCollapsedProjects, writeCollapsedProjects } from "./projectGroupCollapse";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
@@ -77,7 +83,17 @@ interface SessionDrawerProps {
    * 2/7). A session whose project is not here lands in the trailing **Other** group.
    */
   projects?: ReadonlyArray<{ projectId: string; name: string }>;
+  /**
+   * What each project group's pinned **main** entry shows (`#project-home` 4/7): the project's main
+   * branch ref and its home agent's label (`null` when no home agent is set — the entry then shows
+   * a hint instead of starting anything). A project absent here gets no pinned entry.
+   */
+  projectHomes?: ReadonlyArray<ProjectHomeInfo>;
+  /** Start, resume or reach the project's home session. Rejects with the daemon's reason. */
+  onEnsureProjectHome?: (projectId: string) => Promise<void>;
 }
+
+export type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
 
 interface StackGroup {
   parent: SessionEntry;
@@ -324,13 +340,21 @@ export function SessionDrawer({
   onSelectAll,
   onBulkDelete,
   projects = [],
+  projectHomes = [],
+  onEnsureProjectHome,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
     hostLabelForInstance,
   };
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(readCollapsedProjects);
-  const projectGroups = groupSessionsByProject(sessions, projects);
+  // A project with a home agent but no session yet still gets its group, so its pinned entry is
+  // reachable; only when the pinned entry can act at all.
+  const projectGroups = withProjectHomeGroups(
+    groupSessionsByProject(sessions, projects),
+    projects,
+    onEnsureProjectHome ? projectHomes : [],
+  );
   const selectedGroupKey = projectGroupKeyContaining(projectGroups, selectedSessionId);
 
   // Selecting a session expands its project group; the viewer can still collapse it afterwards.
@@ -449,6 +473,7 @@ export function SessionDrawer({
         <div className="py-1 px-2 space-y-0.5">
           {projectGroups.map((group) => {
             const key = projectGroupKey(group);
+            const { home, homeSession, rows } = projectHomeSlot(group, projectHomes);
             return (
               <SessionProjectGroup
                 key={key}
@@ -456,8 +481,16 @@ export function SessionDrawer({
                 collapsed={collapsedProjects.has(key)}
                 onToggle={() => toggleProjectGroup(key)}
               >
+                {home && onEnsureProjectHome && (
+                  <ProjectHomeEntry
+                    home={home}
+                    homeSession={homeSession}
+                    selected={homeSession !== null && homeSession.sessionId === selectedSessionId}
+                    onEnsure={onEnsureProjectHome}
+                  />
+                )}
                 <SessionGroupBody
-                  sessions={group.sessions}
+                  sessions={rows}
                   selectionMode={selectionMode}
                   partitionBodyProps={partitionBodyProps}
                 />
