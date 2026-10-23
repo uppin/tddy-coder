@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use tddy_session_tool_client::SessionExecToolAnswer;
+use tddy_tool_engine::project_home_git_tools::project_home_git_tool_defs;
 use tddy_tool_engine::project_home_tools::project_home_tool_defs;
 
 use crate::mcp_primitives::RemoteToolDef;
@@ -52,11 +53,13 @@ pub async fn admitted_exec_tool_names() -> Result<Vec<String>, String> {
     admission_from_answer(crate::session_tool_client::session_exec_tool_answer().await)
 }
 
-/// The project-home tools, as MCP tool definitions. Registered at construction so a project-home
-/// session's call to one of them dispatches; advertised only to a project-home session.
+/// The project-home tools and the project-home git tools (`#project-home` 7/7), as MCP tool
+/// definitions. Registered at construction so a project-home session's call to one of them
+/// dispatches; advertised only to a project-home session.
 pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
     project_home_tool_defs()
         .into_iter()
+        .chain(project_home_git_tool_defs())
         .map(|tool| RemoteToolDef {
             name: tool.name,
             description: tool.description,
@@ -65,12 +68,16 @@ pub fn project_home_remote_tool_defs() -> Vec<RemoteToolDef> {
         .collect()
 }
 
-/// Every name in the exec catalog: the static catalog and the project-home tools. Built once, since
-/// `tools/list` asks it for every tool of every listing.
+/// Every name in the exec catalog: the static catalog, the project-home tools and the project-home git
+/// tools. Built once, since `tools/list` asks it for every tool of every listing.
 static EXEC_CATALOG_NAMES: LazyLock<HashSet<String>> = LazyLock::new(|| {
     static_exec_tool_names()
         .into_iter()
-        .chain(project_home_tool_defs().into_iter().map(|tool| tool.name))
+        .chain(
+            project_home_remote_tool_defs()
+                .into_iter()
+                .map(|tool| tool.name),
+        )
         .collect()
 });
 
@@ -111,7 +118,8 @@ mod tests {
         // When the advertised exec tools are read
         let advertised = advertised_exec_names(&admitted);
 
-        // Then exactly the read-only tools and the four project-home tools, and no write or shell tool
+        // Then exactly the read-only tools, the four project-home tools and the seven git tools, and
+        // no write or shell tool
         assert_eq!(
             advertised,
             sorted(&[
@@ -124,6 +132,13 @@ mod tests {
                 "StartProjectSession",
                 "ReadSessionWorktree",
                 "DiffSessionWorktree",
+                "CommitSessionWorktree",
+                "PushSessionBranch",
+                "RebaseSessionBranch",
+                "StashSessionWorktree",
+                "ResetSessionWorktree",
+                "CheckoutSessionWorktree",
+                "CleanSessionWorktree",
             ])
         );
     }
@@ -148,6 +163,9 @@ mod tests {
         );
         assert!(!advertised.iter().any(|name| name == "ListProjectSessions"));
         assert!(!advertised.iter().any(|name| name == "DiffSessionWorktree"));
+        assert!(!advertised
+            .iter()
+            .any(|name| name == "CommitSessionWorktree"));
     }
 
     #[test]

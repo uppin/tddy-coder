@@ -376,7 +376,7 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
     // When
     let offered = offered_tool_names(&world, &world.home).await;
 
-    // Then exactly the read-only tools and the four project-home tools
+    // Then exactly the read-only tools, the four project-home tools and the seven git tools
     assert_eq!(
         offered,
         sorted_names(&[
@@ -389,6 +389,13 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "StartProjectSession",
             "ReadSessionWorktree",
             "DiffSessionWorktree",
+            "CommitSessionWorktree",
+            "PushSessionBranch",
+            "RebaseSessionBranch",
+            "StashSessionWorktree",
+            "ResetSessionWorktree",
+            "CheckoutSessionWorktree",
+            "CleanSessionWorktree",
         ])
     );
 }
@@ -410,4 +417,5 @@ async fn an_ordinary_session_is_offered_the_catalog_without_the_project_home_too
     expected.sort();
     assert_eq!(offered, expected);
     assert!(!offered.iter().any(|name| name == "ListProjectSessions"));
+    assert!(!offered.iter().any(|name| name == "CommitSessionWorktree"));
 }

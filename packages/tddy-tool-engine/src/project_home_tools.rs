@@ -30,8 +30,10 @@ use tddy_worktree_service::worktree_files::{
 
 use crate::catalog::{tool_catalog, ToolDef};
 use crate::project_home_diff::worktree_diff;
+use crate::project_home_git_tools::{
+    execute_project_home_git_tool, is_project_home_git_tool, project_home_git_tool_defs,
+};
 use crate::read_only::is_project_home_allowed_tool;
-use crate::project_home_git_tools::{execute_project_home_git_tool, is_project_home_git_tool};
 use crate::ToolOutcome;
 
 pub const LIST_PROJECT_SESSIONS: &str = "ListProjectSessions";
@@ -51,7 +53,8 @@ pub fn is_project_home_tool(name: &str) -> bool {
 }
 
 /// The exec tools a project-home session's agent is offered: exactly the tools
-/// [`is_project_home_allowed_tool`] lets it run, in catalog order, then the four project-home tools.
+/// [`is_project_home_allowed_tool`] lets it run, in catalog order, then the four project-home tools,
+/// then the seven project-home git tools (`#project-home` 7/7).
 /// The same predicate the daemon's role guard applies at call time, so what is advertised and what
 /// is executed cannot disagree.
 pub fn project_home_offered_catalog() -> Vec<ToolDef> {
@@ -59,6 +62,7 @@ pub fn project_home_offered_catalog() -> Vec<ToolDef> {
         .into_iter()
         .filter(|tool| is_project_home_allowed_tool(&tool.name))
         .chain(project_home_tool_defs())
+        .chain(project_home_git_tool_defs())
         .collect()
 }
 

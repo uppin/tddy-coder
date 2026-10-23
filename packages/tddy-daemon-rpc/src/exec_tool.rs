@@ -10,13 +10,12 @@ pub use result_frames::EXEC_TOOL_FRAME_BYTES;
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
-use std::sync::Arc;
 
 use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
-use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_host_service::GithubCli;
+use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecTools};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;

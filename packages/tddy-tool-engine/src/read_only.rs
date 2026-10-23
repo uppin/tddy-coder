@@ -30,8 +30,8 @@ pub fn is_project_home_allowed_tool(name: &str) -> bool {
 const MCP_TOOL_PREFIX: &str = "mcp__tddy-tools__";
 
 /// What a project-home session's `claude` is pre-approved to call, in the names `--allowedTools` takes:
-/// every tool [`is_project_home_allowed_tool`] lets it run (the read-only tools and the project-home
-/// session tools), as the `mcp__tddy-tools__*` tools they are reached through. Derived from
+/// every tool [`is_project_home_allowed_tool`] lets it run (the read-only tools, the project-home
+/// session tools and the project-home git tools), as the `mcp__tddy-tools__*` tools they are reached through. Derived from
 /// [`project_home_offered_catalog`](crate::project_home_tools::project_home_offered_catalog), so the
 /// set the spawn names, the set the daemon advertises and the set it executes are one set.
 pub fn project_home_allowed_tools() -> Vec<String> {
@@ -88,7 +88,8 @@ mod tests {
         // When
         let names = project_home_allowed_tools();
 
-        // Then exactly the read-only tools and the four project-home tools, under their MCP names
+        // Then exactly the read-only tools, the four project-home tools and the seven git tools, under
+        // their MCP names
         assert_eq!(
             names,
             vec![
@@ -101,6 +102,13 @@ mod tests {
                 "mcp__tddy-tools__StartProjectSession",
                 "mcp__tddy-tools__ReadSessionWorktree",
                 "mcp__tddy-tools__DiffSessionWorktree",
+                "mcp__tddy-tools__CommitSessionWorktree",
+                "mcp__tddy-tools__PushSessionBranch",
+                "mcp__tddy-tools__RebaseSessionBranch",
+                "mcp__tddy-tools__StashSessionWorktree",
+                "mcp__tddy-tools__ResetSessionWorktree",
+                "mcp__tddy-tools__CheckoutSessionWorktree",
+                "mcp__tddy-tools__CleanSessionWorktree",
             ]
         );
     }
