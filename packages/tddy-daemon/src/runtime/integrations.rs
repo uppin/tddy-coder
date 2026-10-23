@@ -64,6 +64,9 @@ impl Registries {
 pub(super) struct Plugins {
     pub(super) integration_board: Arc<tddy_daemon_extensions::IntegrationStatusBoard>,
     pub(super) livekit_status: tddy_daemon_extensions::IntegrationReporter,
+    /// Telegram's entry: what the `telegram:` block says at start, then the bot's identity check
+    /// and every send the hooks make.
+    pub(super) telegram_status: tddy_daemon_extensions::IntegrationReporter,
     pub(super) livekit_reach: Arc<tddy_daemon_livekit::LiveKitSessionReach>,
     pub(super) terminal_exposure: Arc<dyn tddy_daemon_extensions::TerminalExposure>,
     pub(super) split_rooms: Arc<dyn tddy_daemon_extensions::SplitRoomHosting>,
@@ -82,6 +85,13 @@ impl Plugins {
         // One reporter, cloned to the discovery loop below: both report into the same board entry.
         let livekit_status =
             integration_board.reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit");
+        let telegram_status =
+            integration_board.reporter(tddy_telegram::status::TELEGRAM_INTEGRATION_ID, "Telegram");
+        // Reported whatever the block says: an enabled block with no token starts no bot, and this
+        // entry is the only place an operator is told why.
+        telegram_status.report(tddy_telegram::status::configured_state(
+            config.telegram.as_ref(),
+        ));
         let livekit_reach = tddy_daemon_livekit::LiveKitSessionReach::new(
             config.clone(),
             Arc::clone(shared_session_rooms),
@@ -107,6 +117,7 @@ impl Plugins {
         Self {
             integration_board,
             livekit_status,
+            telegram_status,
             livekit_reach,
             terminal_exposure,
             split_rooms,
@@ -114,9 +125,11 @@ impl Plugins {
     }
 }
 
-/// A configured Telegram bot: its hooks, its inbound dispatcher and the lifecycle chat.
+/// A configured Telegram bot: its hooks, its identity check, its inbound dispatcher and the
+/// lifecycle chat.
 pub(super) struct Telegram {
     pub(super) hooks: Option<Arc<TelegramDaemonHooks>>,
+    pub(super) identity_check: Option<crate::runtime::tasks::TelegramIdentityCheck>,
     pub(super) inbound: Option<crate::runtime::tasks::TelegramInbound>,
     pub(super) lifecycle: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
 }
@@ -127,19 +140,9 @@ impl Telegram {
         options: &RuntimeOptions,
         keys: &Keys,
         registries: &Registries,
-        terminal_exposure: &Arc<dyn tddy_daemon_extensions::TerminalExposure>,
+        plugins: &Plugins,
     ) -> Self {
-        let tddy_data_dir = &keys.tddy_data_dir;
-        let shared_claude_cli_manager = &registries.shared_claude_cli_manager;
-        let shared_session_rooms = &registries.shared_session_rooms;
-        let telegram = build_telegram(
-            config,
-            tddy_data_dir,
-            options,
-            shared_claude_cli_manager,
-            shared_session_rooms,
-            terminal_exposure,
-        );
+        let telegram = build_telegram(config, &keys.tddy_data_dir, options, registries, plugins);
         let telegram_hooks = telegram.hooks;
         let lifecycle_telegram = telegram_hooks.as_ref().map(|h| {
             (
@@ -149,6 +152,7 @@ impl Telegram {
         });
         Self {
             hooks: telegram_hooks,
+            identity_check: telegram.identity_check,
             inbound: telegram.inbound,
             lifecycle: lifecycle_telegram,
         }

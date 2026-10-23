@@ -90,8 +90,8 @@ pub struct DaemonSessionHost {
     /// shared with the families served above this crate, which route against the same roster.
     peer_routing: crate::peer_routing::PeerRouting,
     /// Where each presenter event of a workflow session goes besides the notification bus — the
-    /// Telegram chat surface, on a daemon that has one. `None` when no chat surface is configured.
-    presenter_event_sink: Option<tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink>,
+    /// Telegram chat surface, on a daemon that has one; `NoOperatorChannel` when none is configured.
+    operator_channel: tddy_daemon_kernel::operator_channel::SharedOperatorChannel,
     claude_cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,

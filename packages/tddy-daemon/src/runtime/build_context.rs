@@ -63,13 +63,7 @@ impl BuildContext {
             &registries.shared_session_rooms,
             &identity.keys.room_tokens,
         );
-        let telegram = Telegram::open(
-            &config,
-            &options,
-            &identity.keys,
-            &registries,
-            &plugins.terminal_exposure,
-        );
+        let telegram = Telegram::open(&config, &options, &identity.keys, &registries, &plugins);
         let relay = RelayIdle::open(&options);
         let tasks = RuntimeTasks {
             common_room: None,
@@ -79,6 +73,7 @@ impl BuildContext {
             lsp_idle_reaper: None,
             index_daemon: None,
             relay_idle_monitor: relay.relay_idle_monitor,
+            telegram_identity_check: telegram.identity_check,
             telegram_inbound: telegram.inbound,
             credential_sync_publish_watch: None,
         };

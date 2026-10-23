@@ -28,7 +28,7 @@ use crate::telegram_notifier::{
     InMemoryTelegramSender, InlineKeyboardRows, TelegramSender,
 };
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
-use tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink;
+use tddy_daemon_kernel::operator_channel::SharedOperatorChannel;
 use tddy_session_lifecycle::config::DaemonConfig;
 use tddy_session_lifecycle::presenter_intent_client;
 use tddy_session_lifecycle::project_storage::{
@@ -60,6 +60,7 @@ mod elicitation;
 mod pickers;
 mod session_start;
 mod types;
+mod workflow_launch;
 mod workflow_spawn;
 
 pub use callbacks::*;

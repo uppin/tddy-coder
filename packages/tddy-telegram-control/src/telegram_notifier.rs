@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
+use tddy_daemon_kernel::operator_channel::awaits_operator;
 use tddy_service::gen::server_message::Event;
 use tddy_service::gen::{ModeChanged, ServerMessage};
 
@@ -213,9 +214,8 @@ impl TelegramSessionWatcher {
     ///
     /// The recipient rule for a session notification: a session started or entered from Telegram
     /// routes to the operator who claimed it, and only when nobody has does the caller fall back
-    /// to the daemon's configured broadcast list. Read by
-    /// [`crate::telegram_notification_subscriber::TelegramNotificationSubscriber`], which owns
-    /// that routing now.
+    /// to the daemon's configured broadcast list. Read by `TelegramDaemonHooks`' operator-channel
+    /// notification path ([`crate::telegram_session_subscriber`]), which owns that routing now.
     ///
     /// `Some(vec![])` and `None` are deliberately different answers. The first says *nobody claimed
     /// this session*, which is the caller's cue to broadcast. The second says *the tracking map
@@ -880,8 +880,7 @@ impl TelegramSessionWatcher {
                         }
                     }
                 }
-                let now_eliciting =
-                    tddy_telegram::elicitation::mode_changed_requires_telegram_elicitation(mc);
+                let now_eliciting = awaits_operator(mc);
                 let was_eliciting = self
                     .last_presenter_elicitation
                     .get(session_id)

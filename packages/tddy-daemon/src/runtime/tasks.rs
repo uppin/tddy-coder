@@ -56,6 +56,8 @@ pub struct RuntimeTasks {
         Arc<tddy_session_lifecycle::relay_idle::IdleTimeoutTracker>,
         tokio::sync::oneshot::Sender<()>,
     )>,
+    /// Asks Telegram whether the configured bot token works, before the dispatcher starts.
+    pub(super) telegram_identity_check: Option<TelegramIdentityCheck>,
     pub(super) telegram_inbound: Option<TelegramInbound>,
     /// `#keyring` 6/9's peer-join watch, when a common room and an open-vault population exist to
     /// sync over. See `credential_sync::run_publish_watch`.
@@ -151,6 +153,74 @@ pub(super) struct TelegramInbound {
             >,
         >,
     >,
+}
+
+impl TelegramInbound {
+    /// Serve the buttons an operator presses until the dispatcher stops.
+    async fn run(self) {
+        if let Err(e) =
+            tddy_telegram_control::telegram_bot::run_telegram_bot(self.bot, self.harness).await
+        {
+            log::warn!(
+                target: "tddy_daemon::telegram_bot",
+                "inbound dispatcher ended: {e:#}"
+            );
+        }
+    }
+}
+
+/// The bot's `getMe`, reported on Telegram's status-board entry with the token redacted from any
+/// error.
+pub(super) struct TelegramIdentityCheck {
+    bot: Bot,
+    status: tddy_daemon_extensions::IntegrationReporter,
+    bot_token: String,
+}
+
+impl TelegramIdentityCheck {
+    pub(super) fn new(
+        bot: Bot,
+        status: tddy_daemon_extensions::IntegrationReporter,
+        bot_token: &str,
+    ) -> Self {
+        Self {
+            bot,
+            status,
+            bot_token: bot_token.to_string(),
+        }
+    }
+
+    async fn run(self) {
+        tddy_telegram::status::report_bot_identity(
+            &tddy_telegram::status::TeloxideBotIdentity::new(self.bot),
+            &self.status,
+            &self.bot_token,
+        )
+        .await;
+    }
+}
+
+/// The Telegram bot's task, when a bot is configured: its identity check, then its inbound
+/// dispatcher.
+///
+/// The identity check runs first, so the board says whether the token works before the
+/// dispatcher's long poll starts failing on a bad one. It runs for a bot whose inbound control is
+/// unavailable too: its notifications still go out on the same token.
+fn spawn_telegram(
+    identity_check: Option<TelegramIdentityCheck>,
+    inbound: Option<TelegramInbound>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if identity_check.is_none() && inbound.is_none() {
+        return None;
+    }
+    Some(tokio::spawn(async move {
+        if let Some(check) = identity_check {
+            check.run().await;
+        }
+        if let Some(inbound) = inbound {
+            inbound.run().await;
+        }
+    }))
 }
 
 /// The tasks a host started, so it can stop them when its server is done.
@@ -285,21 +355,10 @@ impl RuntimeTasks {
             )));
         }
 
-        if let Some(inbound) = self.telegram_inbound {
-            handles.push(tokio::spawn(async move {
-                if let Err(e) = tddy_telegram_control::telegram_bot::run_telegram_bot(
-                    inbound.bot,
-                    inbound.harness,
-                )
-                .await
-                {
-                    log::warn!(
-                        target: "tddy_daemon::telegram_bot",
-                        "inbound dispatcher ended: {e:#}"
-                    );
-                }
-            }));
-        }
+        handles.extend(spawn_telegram(
+            self.telegram_identity_check,
+            self.telegram_inbound,
+        ));
 
         // The common-room connection, from now until the daemon's roster is dropped: it joins the
         // configured room and rejoins whenever `daemon_config.DaemonConfigService` names another.

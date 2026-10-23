@@ -51,42 +51,87 @@ stays exactly one definition of each.
 
 ## Ports
 
-### `presenter_observer::PresenterEventSink`
+### `operator_channel::OperatorChannel`
 
 ```rust
 #[async_trait]
-pub trait PresenterEventSink: Send + Sync {
+pub trait OperatorChannel: Send + Sync {
+    fn id(&self) -> &'static str;
+    fn follows_presenter_events(&self) -> bool { true }
     async fn on_presenter_event(&self, session_id: &str, event: &ServerMessage)
         -> anyhow::Result<()>;
+    fn wants_notification(&self, notification: &SessionNotification) -> bool;
+    async fn on_notification(&self, notification: &SessionNotification) -> anyhow::Result<()>;
 }
-pub type SharedPresenterEventSink = Arc<dyn PresenterEventSink>;
+pub type SharedOperatorChannel = Arc<dyn OperatorChannel>;
+pub struct NoOperatorChannel;
+pub fn awaits_operator(mode_changed: &ModeChanged) -> bool;
 ```
 
-Where a workflow session's presenter events go besides the session-notification bus.
-`tddy-session-lifecycle`'s `DaemonSessionHost` holds `Option<SharedPresenterEventSink>`, and its
-`presenter_observer_task` calls the sink for each event of the child's `PresenterObserver` stream, in
-stream order. An error from the sink ends that session's observer loop, as a failed stream read
-does. The one implementation is `TelegramDaemonHooks` in
-[`tddy-telegram-control`](../../tddy-telegram-control/docs/architecture.md), which `tddy-daemon`'s
-`runtime.rs` injects when a bot is configured.
+**A chat an operator is reached on.** A session reaches its operator two ways, and both end at this
+one port:
 
-**The port is the sink, not the observer.** The observer feeds two independent consumers: this
-sink and the notification bus that lights a session's drawer indicator in `tddy-web`. It runs when
-either exists. A port for the whole observer, owned by Telegram, would take the bus publish with
-it and leave the indicator dark on every daemon without a `telegram:` block. So the loop — connect
-with retry, stream, bus publish, the "neither sink, do not spawn" rule — stays in
-`tddy-session-lifecycle`, and only the Telegram half is behind the trait.
+| Path | Methods | Fed by |
+|---|---|---|
+| **Presenter events** — a workflow session's presenter stream, in stream order (elicitations, state lines) | `on_presenter_event` | `tddy-session-activity`'s `presenter_observer_task`, for each event of the child's `PresenterObserver` stream |
+| **Notifications** — the attention-worthy events off the session-notification bus | `wants_notification`, then `on_notification` | `tddy_session_activity::session_notifications::OperatorChannelSubscriber`, the bus adapter that registers a channel as a subscriber named after `id()` |
 
-**Absence is `None`, and there is no no-op implementation.** The spawn rule has to know that
-there is no sink. A no-op sink would start an observer on a daemon with nothing to deliver to.
+`id()` is what the channel logs under and reports on the integration status board. An error from
+`on_presenter_event` ends that session's presenter observer, as a failed stream read does; an error
+from `on_notification` is logged by the bus and never reaches the RPC that published it.
+`wants_notification` is asked first, so a channel that sends over a network is never handed what it
+would only discard.
 
-`tests/telegram_extraction_shape.rs` proves delivery through the shared port with a recording sink
-of its own, and pins the shape of the cut around it: `connection_service` names no Telegram symbol,
-its one consumer goes through the port, `tddy-session-lifecycle` declares no `teloxide` and holds no
-`telegram_*` module, `tddy-telegram-control` depends on `tddy-telegram` and
-`tddy-session-lifecycle` with no edge back from either, and no `telegram_session_control` module
-exceeds 800 production lines. The suite parses manifests with `toml` (a dev-dependency) and checks
-every dependency table, so a comment naming a crate is not mistaken for a dependency on it.
+`tddy-session-lifecycle`'s `DaemonSessionHost` holds a `SharedOperatorChannel` (the
+`operator_channel` field), and `tddy-daemon`'s `runtime/mount_host.rs` installs it twice from the
+same value — on the host, and on the daemon's bus through `OperatorChannelSubscriber`. The one
+implementation is `TelegramDaemonHooks` in
+[`tddy-telegram-control`](../../tddy-telegram-control/docs/architecture.md), installed when a bot is
+configured.
+
+**Absence is the named null object `NoOperatorChannel`**, the extensions convention
+([extension-ports.md](../../tddy-daemon-extensions/docs/extension-ports.md)). It wants no notification
+and accepts every presenter event, and its `follows_presenter_events()` answers `false`. That answer
+is what the observer's spawn rule reads: the observer runs when a channel follows presenter events
+**or** a notification bus wants them, and is not started when neither does. The bus is what lights a
+workflow session's drawer indicator in `tddy-web`, so the observer — connect with retry, stream, bus
+publish — runs on every daemon, Telegram or not, and only the chat half is behind the trait.
+
+**The core owns the presenter-gate rule.** `awaits_operator(&ModeChanged)` is the one answer to
+"this mode waits on a human": document review, markdown viewer, feature input, select, multi-select
+and text input do; `Running`, `Done` and a mode change naming no mode do not. The drawer indicator
+turns a session's dot yellow on it, and Telegram opens and closes its per-chat elicitation queue on
+it, so the two cannot disagree about a gate. It is here rather than in a channel because it must hold
+on a daemon with no channel at all.
+
+**Why the kernel and not `tddy-daemon-extensions`.** The port carries `tddy-service`'s
+`ServerMessage`, and the extensions crate stays free of `tddy-service`. The integration status board
+the Telegram channel reports on stays in extensions.
+
+### `session_notification` — the types the port names
+
+`SessionNotification`, `SessionNotificationKind` (`Activity`, `AttentionRequired`) and
+`SessionNotificationSource` (`ActivityStatus`, `AgentToolCall`, `Presenter`) are defined here so the
+port can name them. The bus, its subscriber trait and its subscribers live in `tddy-session-activity`,
+whose `session_notifications` module re-exports these three under its own path —
+[session-notifications.md](../../tddy-session-activity/docs/session-notifications.md).
+
+### Tests
+
+`tests/operator_channel_acceptance.rs` pins the gate rule over every mode that asks a question and
+every autonomous one, the null object's answers (wants nothing, follows no presenter stream, accepts
+every event), the trait's default for `follows_presenter_events`, and delivery through the shared
+port.
+
+`tests/telegram_extraction_shape.rs` pins the shape of the cut around the port:
+`connection_service` names no Telegram symbol and holds the operator-channel port, its one consumer
+goes through the port, `tddy-session-lifecycle` declares no `teloxide` and holds no `telegram_*`
+module, `tddy-telegram-control` depends on `tddy-telegram` and `tddy-session-lifecycle` with no edge
+back from either, and no `telegram_session_control` module exceeds 800 production lines. The suite
+parses manifests with `toml` (a dev-dependency) and checks every dependency table, so a comment
+naming a crate is not mistaken for a dependency on it. The workspace-wide rule — no crate but
+Telegram's own and the daemon's wiring names a Telegram crate — is the ratchet in
+`tddy-daemon-extensions` ([extension-ports.md](../../tddy-daemon-extensions/docs/extension-ports.md#telegram-the-operator-channel-and-its-ratchet)).
 
 ## Users, the live holder and first-login enrolment
 

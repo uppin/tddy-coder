@@ -246,7 +246,7 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
                 common_room_livekit_room: room_slot,
             }),
         ),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
     .with_session_tokens(tokens);
@@ -837,7 +837,7 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
         user_resolver,
         None,
         tddy_daemon_livekit::peer_routing::peer_routing_over(&config, discovery),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     )
     .with_session_tokens(SessionTokens::new(

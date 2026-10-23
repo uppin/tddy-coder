@@ -11,12 +11,13 @@ presenter events and metadata ticks into chat messages and keyboards.
 It sits above both `tddy-telegram` and `tddy-session-lifecycle` and is reached by
 `tddy-daemon` alone — see [README.md](../README.md) for why it is a crate of its own.
 
-## `telegram_session_control/` — nine files, one harness
+## `telegram_session_control/` — ten files, one harness
 
 `mod.rs` holds `TelegramSessionControlHarness` and the inherent methods more than one flow calls; its
 DTOs live in `types.rs`, glob-re-exported from `mod.rs` so every child sees them under the same names.
-Five child modules (`session_start`, `cli_spawns`, `pickers`, `chaining_and_listing`, `elicitation`)
-each add one `impl TelegramSessionControlHarness` block for one family of flows. A private method is
+Six child modules (`session_start`, `cli_spawns`, `pickers`, `workflow_launch`,
+`chaining_and_listing`, `elicitation`) each add one `impl TelegramSessionControlHarness` block for one
+family of flows. A private method is
 visible only inside the module that declares it and its children, so a helper two families share
 lives in `mod.rs`, where every child can see it; a free helper they share is `pub(super)` in
 `callbacks` or `workflow_spawn`. Those two hold no harness methods: `callbacks` is pure functions,
@@ -25,14 +26,15 @@ and `workflow_spawn` is `TelegramWorkflowSpawn` and its helpers.
 | Module | Prod lines | Holds |
 |---|---:|---|
 | `callbacks.rs` | 736 | the command and `callback_data` vocabulary: the slash commands, the prefixes, and the pure parsers, formatters and chunkers (`parse_*`, `chunk_telegram_text`) with their unit tests |
-| `pickers.rs` | 706 | the project, branch-intent, branch, branch-conflict, model and agent keyboards, ending in `spawn_telegram_workflow` |
+| `pickers.rs` | 617 | the project, branch-intent, branch, branch-conflict, model and agent keyboards, which end in `spawn_telegram_workflow` |
 | `chaining_and_listing.rs` | 518 | `/chain-workflow` and its parent picker, recipe and plan-review callbacks, the session list with Enter and Delete |
-| `workflow_spawn.rs` | 477 | `TelegramWorkflowSpawn`: the chain integration-base merge, the spawn configuration and inputs, and the branch-name helpers the start paths share |
+| `workflow_spawn.rs` | 480 | `TelegramWorkflowSpawn`: the chain integration-base merge, the spawn configuration and inputs, and the branch-name helpers the start paths share |
 | `elicitation.rs` | 456 | presenter input from Telegram: feature submission, document review, elicitation answers, the changeset writes and recipe keyboard around them |
 | `cli_spawns.rs` | 444 | the Claude and Cursor model-pick callbacks and the two CLI spawns they end in, `spawn_telegram_claude_cli` and `spawn_telegram_cursor_cli` — including the terminal exposure a Claude start announces, where the exposure port's `FailedPrecondition` ("nothing is wired") is not logged as a failure |
-| `mod.rs` | 412 | the harness and the shared helpers |
-| `session_start.rs` | 295 | `/start-workflow`, `/start-claude`, `/start-cursor`: session creation up to the model pick |
+| `mod.rs` | 413 | the harness and the shared helpers |
+| `session_start.rs` | 296 | `/start-workflow`, `/start-claude`, `/start-cursor`: session creation up to the model pick |
 | `types.rs` | 151 | the harness's DTOs |
+| `workflow_launch.rs` | 133 | `spawn_telegram_workflow`: from the session's recorded recipe and chain parent to the "Workflow started" message — the spawn deps, the project lookup, the chain child's integration-base merge, the spawn, following the spawned session's presenter stream, and the announcement |
 
 Production lines are counted to the first `#[cfg(test)]`. No module may exceed **800**, which
 `telegram_extraction_shape`'s `no_control_module_exceeds_eight_hundred_production_lines` enforces.
@@ -72,43 +74,42 @@ the open work is marked `TODO(stdio-relay)` in `workflow_spawn.rs` (the daemon's
 sockets would have to be handed to this crate). Telegram never wired `spawn_conversation`, so this is
 not a regression.
 
-## Telegram's two sinks
+## Telegram's operator channel
 
-A workflow session's presenter events reach Telegram through a port, and its activity-status
-events through the notification bus. The crate provides one implementation of each, and
-`tddy-daemon`'s `runtime.rs` wires both when the daemon has a `telegram:` block.
+The daemon's core reaches an operator's chat through one port,
+`tddy_daemon_kernel::operator_channel::OperatorChannel`
+([`daemon-kernel.md` § Ports](../../tddy-daemon-kernel/docs/daemon-kernel.md#ports)). Telegram's
+implementation is `TelegramDaemonHooks` (`telegram_session_subscriber`), built with
+`TelegramDaemonHooks::new(config, sender, watcher)`. It holds the daemon's `DaemonConfig`, the shared
+`TelegramSender` and the `TelegramSessionWatcher`, plus a private per-session dedupe of the last
+notification text sent (`LastDeliveredPerSession`). Its `id()` is `telegram`
+(`tddy_telegram::status::TELEGRAM_INTEGRATION_ID`).
 
-### The presenter-event sink
+| Port method | What Telegram does |
+|---|---|
+| `on_presenter_event` | locks the watcher and calls `on_server_message`. An error ends that session's presenter observer. The watcher opens and closes its per-chat elicitation queue on the core's `awaits_operator` rule, so it agrees with the drawer indicator on every mode |
+| `wants_notification` | `AttentionRequired` from the `ActivityStatus` path, while the `telegram:` block is enabled. `Activity` is declined (every tool call would become a message) and so is `Presenter` (those elicitations already arrive through `on_presenter_event`, with their keyboards — taking them twice would double-send) |
+| `on_notification` | drops a text identical to the last one sent for that session, resolves the recipients tracked-first (the chats that entered the session, else the configured broadcast list; an unreadable tracking map sends nothing), and sends the notification's text to each, failing with "N of M chat(s)" when some sends fail |
 
-`TelegramDaemonHooks` (`telegram_session_subscriber`) holds the daemon's `DaemonConfig`, the shared
-`TelegramSender` and the `TelegramSessionWatcher`. It implements
-`tddy_daemon_kernel::presenter_observer::PresenterEventSink`: each event locks the watcher and calls
-`on_server_message`. An error ends that session's observer loop.
+`tddy-daemon`'s `runtime/mount_host.rs` installs the hooks twice from one value: on
+`DaemonSessionHost::new` as its `SharedOperatorChannel`, and on the daemon's notification bus through
+`tddy_session_activity::session_notifications::OperatorChannelSubscriber`, beside the
+`StreamSessionNotifications` relay. A daemon with no bot installs `NoOperatorChannel` in both
+places. The presenter observer loop itself — connect with retry, read the stream, publish to the bus —
+is `tddy-session-activity`'s and runs whether or not Telegram is configured, because the bus half
+lights the drawer indicator in `tddy-web` on every daemon. A test that wants the channel on a host's
+bus installs the bus the way the daemon does (`telegram_claude_cli_activity_alert_acceptance`).
 
-`runtime.rs` hands the hooks to `DaemonSessionHost::new` as `Option<SharedPresenterEventSink>`. The
-observer loop itself — connect with retry, read the stream, publish to the notification bus — is
-`tddy_session_lifecycle::presenter_observer_task::spawn_presenter_observer_task`. It runs whether
-or not Telegram is configured, because the bus half lights the drawer indicator in `tddy-web` on
-every daemon. See [`daemon-kernel.md`](../../tddy-daemon-kernel/docs/daemon-kernel.md) § Ports.
+The sender the hooks hold is a `tddy_telegram::status::ReportingSender` over the `TeloxideSender`, so
+every send the channel makes reports Telegram's state on the integration status board. The inbound
+control plane's own sender (`telegram_bot`) is a plain `TeloxideSender` and does not report; the bot's
+identity check before the dispatcher starts covers token health.
 
-The Telegram-started spawn path (`pickers.rs`, `spawn_telegram_workflow`) starts the same loop with
-the hooks as its sink and **no** bus. A Telegram-started workflow session therefore raises no drawer
-indicator. That is recorded as a `TODO(session-notifications)` at the call site: publishing needs
-the bus and the sessions base on `TelegramWorkflowSpawn`, which every inbound-control harness
-constructs by hand.
-
-### The notification subscriber
-
-`TelegramNotificationSubscriber` (`telegram_notification_subscriber`) is one subscriber on
-`tddy-session-activity`'s `SessionNotificationBus`. It takes `AttentionRequired` from the
-activity-status path, declines `Activity` and `Presenter`, and sends tracked-first — see
-[session-notifications.md](../../tddy-session-activity/docs/session-notifications.md).
-
-`runtime.rs` builds the daemon's bus with this subscriber beside the `StreamSessionNotifications`
-relay and installs it with `with_session_notification_bus`. `DaemonSessionHost::new` installs no
-bus of its own: a host holding only the port cannot name this subscriber. A test that wants the
-subscriber on a host installs the bus the way `runtime.rs` does
-(`telegram_claude_cli_activity_alert_acceptance`).
+The Telegram-started spawn path (`workflow_launch.rs`, `spawn_telegram_workflow`) starts the same
+observer with the hooks as its channel and **no** bus. A Telegram-started workflow session therefore
+raises no drawer indicator. That is recorded as a `TODO(session-notifications)` at the call site:
+publishing needs the bus and the sessions base on `TelegramWorkflowSpawn`, which every inbound-control
+harness constructs by hand.
 
 ## Log targets
 
@@ -120,10 +121,17 @@ does not show in its target.
 
 ## Tests
 
-The 15 suites in `tests/` exercise the crate through its own paths
-(`tddy_telegram_control::…`). The Claude and Cursor start suites wait on a PTY with
+The 17 suites in `tests/` exercise the crate through its own paths
+(`tddy_telegram_control::…`). `telegram_operator_channel_acceptance` pins the channel's port contract
+(its id, what it wants and declines, delivery to the tracked chat, one send per unchanged alert);
+`telegram_notification_subscriber_unit` pins the routing matrix and the dedupe;
+`telegram_workflow_launch_acceptance` covers the workflow launch's refusals (a daemon without LiveKit
+is refused with the reason and announces nothing; a chain child of a gone parent is refused at the
+base merge). The Claude and Cursor start suites wait on a PTY with
 `tddy_testing_commons::wait::a_capture_showing` and its `PTY_STUB_OUTPUT` ceiling, shared with
 `tddy-session-lifecycle`'s CLI suites.
 
 The crate's shape — the port, the manifests, the module budget — is pinned from
-`packages/tddy-daemon-kernel/tests/telegram_extraction_shape.rs`, beside the port it asserts on.
+`packages/tddy-daemon-kernel/tests/telegram_extraction_shape.rs`, beside the port it asserts on. The
+workspace rule that only this crate, `tddy-telegram` and `tddy-daemon` name a Telegram crate is
+`packages/tddy-daemon-extensions/tests/telegram_is_a_satellite.rs`.

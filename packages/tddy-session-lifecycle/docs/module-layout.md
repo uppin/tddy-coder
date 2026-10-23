@@ -126,7 +126,7 @@ them exactly as they name this crate's own modules.
 | `agent_host_callbacks`, `agent_roster`, `roster_replacement`, `seeded_clone_guard`, `seed_codebase`, `peer_session_answer`, `session_dir_lookup`, `svc_provision_agent_clone`, `svc_start_hosted_agent_clone`, `svc_ensure_session_room_for_agents`, `svc_resolve_listed_worktree`, `svc_turn_end_reporter` | `tddy-session-agents` | `pub use tddy_session_agents::{…};` in `connection_service.rs` |
 | `task_service`, `action_service` | `tddy-daemon-sandbox` | `pub use tddy_daemon_sandbox::*;` |
 | `pty_runtime`, `tddy_user_config` | `tddy-terminal-rpc` | `pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};` |
-| the worktree, host, project, auth and telegram modules | `tddy-worktree-service`, `tddy-host-service`, `tddy-projects`, `tddy-daemon-auth`, `tddy-telegram` | named `pub use` lines in `lib.rs` |
+| the worktree, host, project and auth modules | `tddy-worktree-service`, `tddy-host-service`, `tddy-projects`, `tddy-daemon-auth` | named `pub use` lines in `lib.rs` |
 
 A facade is named rather than globbed wherever the receiver has a module this crate also declares: a root
 glob of `tddy-terminal-rpc` would re-export its `service`, which this crate's private `mod service;`

@@ -6,7 +6,7 @@
 **Metrics:** **705 production lines** (no `#[cfg(test)]` module) · budget 500 · **+205**, measured to the first `#[cfg(test)]`
 **Thresholds breached:** length 705 > 500
 **Restructure:** required — see *What would close it*
-**Status:** Open — regressed 2026-10-08 (705 → 706 in #516, `#keyring` 9/9) — **unclaimed**; produced by a move-only split, deferral consented by the developer (`docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`)
+**Status:** Open — narrowed 2026-10-22 (706 → 617, `spawn_telegram_workflow` moved to `workflow_launch.rs`); regressed 2026-10-08 (705 → 706 in #516, `#keyring` 9/9) — **unclaimed**; produced by a move-only split, deferral consented by the developer (`docs/dev/todo/2026-09-22-telegram-control-plane-left-over-budget-by-a-move-only-node.md`)
 
 ## Measurement history
 
@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-09-22 | 705 | first detection — created by #494's split of `telegram_session_control.rs` |
 | 2026-10-08 | 706 | 705 on `origin/master` → 706 after `#keyring` 9/9 (#516); split deferred with the developer's consent — see the backlog entry "`#keyring` 9/9 left files over the 500-production-line budget" (2026-10-08): +1 line |
+| 2026-10-22 | 617 | `2026-10-22-telegram-satellite`: **−89**. `spawn_telegram_workflow` left for `telegram_session_control/workflow_launch.rs` (in-crate, split in four, to close its CRAP finding). Narrowed; still over 500 |
 
 ## What the tool found
 

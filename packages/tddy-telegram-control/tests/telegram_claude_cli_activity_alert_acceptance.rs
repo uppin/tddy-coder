@@ -14,11 +14,12 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::Request;
 use tddy_service::proto::activity::{ActivityService as _, ReportSessionStatusRequest};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::session_notifications::SessionNotificationBus;
+use tddy_session_lifecycle::session_notifications::{
+    OperatorChannelSubscriber, SessionNotificationBus,
+};
 use tddy_telegram::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
-use tddy_telegram_control::telegram_notification_subscriber::TelegramNotificationSubscriber;
 use tddy_telegram_control::telegram_notifier::{InMemoryTelegramSender, TelegramSessionWatcher};
 use tddy_telegram_control::telegram_session_subscriber::TelegramDaemonHooks;
 
@@ -84,7 +85,7 @@ fn write_claude_cli_session(
 /// Build a `DaemonSessionHost` wired with:
 /// - `sessions_base_for_user` pointing at `sessions_base`
 /// - `TelegramDaemonHooks` carrying `InMemoryTelegramSender` + a watcher sharing `tracked`
-/// - a notification bus carrying Telegram's subscriber — the shape `runtime.rs` assembles
+/// - a notification bus carrying Telegram's operator channel — the shape `runtime.rs` assembles
 /// - A no-op user resolver (accepts OS_USER)
 fn make_service(
     sessions_base: PathBuf,
@@ -111,12 +112,12 @@ fn make_service(
     );
     let watcher_arc = Arc::new(tokio::sync::Mutex::new(watcher));
 
-    let telegram = Arc::new(TelegramDaemonHooks {
-        config: test_daemon_config(),
-        sender: Arc::clone(&sender)
+    let telegram = Arc::new(TelegramDaemonHooks::new(
+        test_daemon_config(),
+        Arc::clone(&sender)
             as Arc<dyn tddy_telegram_control::telegram_notifier::TelegramSender + Send + Sync>,
-        watcher: watcher_arc,
-    });
+        watcher_arc,
+    ));
 
     DaemonSessionHost::new(
         test_daemon_config(),
@@ -125,12 +126,12 @@ fn make_service(
         user_resolver,
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_daemon_config()),
-        Some(Arc::clone(&telegram) as _),
+        Arc::clone(&telegram) as _,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_session_notification_bus(Arc::new(
         SessionNotificationBus::new()
-            .with_subscriber(Arc::new(TelegramNotificationSubscriber::new(telegram))),
+            .with_subscriber(Arc::new(OperatorChannelSubscriber::new(telegram))),
     ))
 }
 

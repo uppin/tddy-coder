@@ -15,6 +15,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 214 | 10 | 21 | 12 | first detection |
+| 2026-10-22 | 213 | 10 | 21 | 12 | `2026-10-22-telegram-satellite`: the gate call became `awaits_operator(mc)`, one line instead of two. Branches unchanged. CRAP 31 (complexity 31, covered) by `tddy-tools analyze report` |
 
 ## What the tool found
 

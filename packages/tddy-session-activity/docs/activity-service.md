@@ -49,8 +49,8 @@ has no test that would notice it drifting.
 
 It is declared in `tddy-service` rather than here because the producers are this crate and
 `tddy-daemon-livekit`'s session room, while the consumer is `tddy-session-sync` — a standalone
-shipped binary. Reaching the rule through this crate would put its `livekit` and `tddy-telegram`
-dependency trees into that binary for three symbols. `tddy-session-sync` migrated in the same PR.
+shipped binary. Reaching the rule through this crate would put its `livekit` dependency tree into that
+binary for three symbols. `tddy-session-sync` migrated in the same PR.
 
 This is a deliberate exception to the stack's "move only" rule, taken because a field-numbering
 decision made once, with the single consumer migrated alongside, is cheaper now than at any later

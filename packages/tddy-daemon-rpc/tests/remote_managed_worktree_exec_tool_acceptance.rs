@@ -107,7 +107,7 @@ fn service_with_known_codebase_peer_and_config(
         user_resolver_valid(),
         None,
         tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     ))
 }
@@ -127,7 +127,7 @@ fn service_with_a_user_this_daemon_does_not_map(sessions_base: PathBuf) -> TestD
         unmapped_user,
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     ))
 }

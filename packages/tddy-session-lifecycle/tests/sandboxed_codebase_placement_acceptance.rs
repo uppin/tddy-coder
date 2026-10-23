@@ -229,7 +229,7 @@ fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) 
             user_resolver_valid(),
             None,
             tddy_daemon_livekit::peer_routing::peer_routing_over(&test_config(), discovery),
-            None,
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(ClaudeCliSessionManager::new()),
         )
         .with_session_tokens(this_daemons_session_tokens().clone()),

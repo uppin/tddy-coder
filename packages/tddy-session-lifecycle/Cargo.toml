@@ -75,12 +75,6 @@ uuid = { version = "1", features = ["v4", "v7"] }
 # and registers both, and `session_reader` implements the worktree crate's session-listing port.
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
-# The moved telegram transport plus `active_elicitation`, `elicitation`,
-# `telegram_tracked_session` and `telegram_github_link`. `hmac`, `sha2` and `subtle` are the
-# OAuth-state signer's and left with it. Still a dependency after the control plane left for
-# `tddy-telegram-control`: `session_list_enrichment` reads a session's pending elicitation through
-# `elicitation`, and the four modules stay re-exported here under their old paths.
-tddy-telegram = { path = "../tddy-telegram" }
 # The moved auth subsystem: `runtime.rs` calls `build_auth_entries`, and the daemon re-exports the
 # three of its seven modules that something here still names.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
@@ -95,8 +89,8 @@ tddy-credentials = { path = "../tddy-credentials" }
 # ten names `connection_service` — the coupling was always daemon → session files.
 tddy-session-files = { path = "../tddy-session-files" }
 # The session-notification bus, its subscriber trait and the stream subscriber `tddy-web` reads —
-# `#unbundle` node 7. The daemon keeps the label resolution built on `session_list_enrichment`
-# and its Telegram subscriber, and re-exports the rest through the same two module paths.
+# `#unbundle` node 7. The daemon keeps the label resolution built on `session_list_enrichment`,
+# and re-exports the rest through the same two module paths.
 tddy-session-activity = { path = "../tddy-session-activity" }
 # The session-agent roster, the agent-status mapping, its inference from ACP frames, and the clone
 # store and mirror — `#unbundle` node 7. The daemon keeps `clone_worktree_path`, which resolves a

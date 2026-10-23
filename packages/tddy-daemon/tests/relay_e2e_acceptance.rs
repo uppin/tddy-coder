@@ -211,7 +211,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
             valid_user_resolver(),
             None,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b), // B has no discovery of its own — it only serves its local tools
-            None,
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(ClaudeCliSessionManager::new()),
         ))
         .0,
@@ -271,7 +271,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
                 common_room_livekit_room: room_slot,
             }),
         ),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
     ));
 

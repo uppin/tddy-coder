@@ -292,7 +292,7 @@ pub fn apply_session_list_status_to_proto(
     entry.stack_plan_json = status.stack_plan_json;
     entry.branch = status.branch;
     entry.pending_elicitation =
-        tddy_telegram::elicitation::pending_elicitation_for_session_dir(session_dir);
+        crate::pending_elicitation::pending_elicitation_for_session_dir(session_dir);
     entry.context_docs = tddy_session_files::session_context_docs::context_docs_for_session(
         &status.recipe,
         session_dir,
@@ -927,7 +927,7 @@ sessions:
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(
-            tddy_telegram::elicitation::pending_elicitation_for_session_dir(&session_dir),
+            crate::pending_elicitation::pending_elicitation_for_session_dir(&session_dir),
             "pending_elicitation in .session.yaml must map to the Connection list flag"
         );
     }

@@ -39,7 +39,7 @@ fn make_unit_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
         user_resolver,
         None,
         crate::peer_routing::PeerRouting::local_only(&config),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
 }

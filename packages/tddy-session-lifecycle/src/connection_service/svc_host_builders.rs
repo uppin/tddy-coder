@@ -18,7 +18,7 @@ use tddy_session_agents::agent_host_callbacks::{NoRoomTransport, RoomConnector};
 
 use std::sync::Arc;
 
-use tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink;
+use tddy_daemon_kernel::operator_channel::SharedOperatorChannel;
 
 use std::path::PathBuf;
 
@@ -33,7 +33,7 @@ impl DaemonSessionHost {
         user_resolver: tddy_daemon_kernel::SessionUserResolver,
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
         peer_routing: PeerRouting,
-        presenter_event_sink: Option<SharedPresenterEventSink>,
+        operator_channel: SharedOperatorChannel,
         claude_cli_manager: Arc<CliSessionManager>,
     ) -> Self {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
@@ -53,7 +53,7 @@ impl DaemonSessionHost {
             user_resolver,
             spawn_client,
             peer_routing,
-            presenter_event_sink,
+            operator_channel,
             claude_cli_manager,
             sandbox_manager: Arc::new(
                 tddy_daemon_sandbox::sandbox_session::SandboxSessionManager::new(),

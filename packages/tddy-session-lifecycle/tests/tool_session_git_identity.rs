@@ -116,7 +116,7 @@ spawn_startup_poll_interval_ms: 10
         Arc::new(|token| (token == TEST_TOKEN).then(|| OWNER.to_string())),
         None,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
     .with_credential_vaults(vaults_holding_ada(vault_dir))

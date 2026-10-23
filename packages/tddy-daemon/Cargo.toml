@@ -113,8 +113,12 @@ tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
 # installs them on it as its `DaemonRpcFamilies`.
 tddy-daemon-rpc = { path = "../tddy-daemon-rpc" }
 # The Telegram control plane: `runtime.rs` builds the hooks, the inbound harness and the bot
-# dispatcher, and injects the hooks into `DaemonSessionHost` as its presenter-event sink.
+# dispatcher, and installs the hooks as `DaemonSessionHost`'s operator channel and on the bus.
 tddy-telegram-control = { path = "../tddy-telegram-control" }
+# The Telegram transport's chat-side state (the elicitation lease, the tracked-session gate) the
+# wiring builds the hooks over, and `status` — Telegram's entry on the integration status board.
+# Named here, by the wiring crate, so no session crate has to carry it.
+tddy-telegram = { path = "../tddy-telegram" }
 # Reached from `src/index_daemon/registry.rs`, not from a top-level source file.
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }

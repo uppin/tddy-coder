@@ -127,12 +127,12 @@ impl DaemonSessionHost {
         }
     }
 
-    /// The fields the presenter observer reads, shared with this host (the sink and the bus are
+    /// The fields the presenter observer reads, shared with this host (the channel and the bus are
     /// the same handles).
     pub(crate) fn presenter_observer_deps(&self) -> PresenterObserverDeps {
         PresenterObserverDeps {
             tddy_data_dir: self.tddy_data_dir.clone(),
-            presenter_event_sink: self.presenter_event_sink.clone(),
+            operator_channel: self.operator_channel.clone(),
             session_notification_bus: self.session_notification_bus.clone(),
         }
     }

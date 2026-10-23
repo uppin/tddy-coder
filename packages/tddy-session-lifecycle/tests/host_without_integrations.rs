@@ -102,7 +102,7 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
         Arc::new(move |token| (token == TEST_TOKEN).then(|| user.clone())),
         None,
         PeerRouting::local_only(&config),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
     AHostWithNothingWired {

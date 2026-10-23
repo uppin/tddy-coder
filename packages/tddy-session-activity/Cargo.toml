@@ -13,7 +13,8 @@ path = "src/lib.rs"
 # each to the notification it raises.
 tddy-core = { path = "../tddy-core" }
 # `AgentActivityHub` and `now_unix_ms`, node 1's. Consumed unchanged: the hub's broadcast semantics
-# belong to the kernel.
+# belong to the kernel. Also the operator-channel port and its `awaits_operator` rule, and the
+# `SessionNotification` types the port names — re-exported from `session_notifications`.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `ServiceEntry` and `Status`: this crate answers RPCs, so `Status` is its error type at the edge.
 tddy-rpc = { path = "../tddy-rpc" }
@@ -24,11 +25,6 @@ tddy-service = { path = "../tddy-service" }
 # `Result`-carrying stream. Re-declaring a fifth copy of it here would be a fifth thing to keep
 # equal to the four already in the workspace.
 tddy-worktree-service = { path = "../tddy-worktree-service" }
-# `elicitation::mode_changed_requires_telegram_elicitation` classifies which presenter `ModeChanged`
-# holds a gate the operator has to answer, which is what makes a presenter event attention-worthy.
-# The classifier lives there because Telegram was its first consumer; the notification bus is its
-# second. Same direction as `tddy-daemon`'s own edge to that crate.
-tddy-telegram = { path = "../tddy-telegram" }
 # `async_trait` on `SessionNotificationSubscriber` — a subscriber delivers over a network.
 async-trait = "0.1"
 # A subscriber's delivery failure is reported as an `anyhow::Error` and logged by the bus, never
@@ -58,6 +54,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `#[tokio::test]` in `tests/operator_channel_subscriber_acceptance.rs` — the bus publishes async.
+tokio = { version = "1", features = ["macros", "rt"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-workflow = { path = "../tddy-workflow" }

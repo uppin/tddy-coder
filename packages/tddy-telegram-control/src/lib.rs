@@ -7,20 +7,18 @@
 //! - [`telegram_notifier`] — the session watcher that turns presenter events into chat messages.
 //! - [`telegram_multi_select_shortcuts`] — the *choose none* / *choose recommended* callbacks.
 //! - [`telegram_session_subscriber`] — [`TelegramDaemonHooks`], the daemon's shared Telegram
-//!   handles, and the presenter-event sink the connection service is injected with.
-//! - [`telegram_notification_subscriber`] — Telegram's subscriber on the session-notification bus.
+//!   handles, and the operator channel the session host and the notification bus are wired with.
 //!
 //! It sits between [`tddy_telegram`] (the transport, and the chat-side state) and
 //! [`tddy_session_lifecycle`] (the sessions it controls), because it needs both and each of them
-//! would close a cycle by holding it. `tddy_session_lifecycle` never names this crate: it reaches
-//! Telegram only through `tddy_daemon_kernel::presenter_observer::PresenterEventSink`, which
-//! `tddy-daemon`'s `runtime.rs` injects.
+//! would close a cycle by holding it. No session crate names this crate or `tddy-telegram`: they
+//! reach Telegram only through `tddy_daemon_kernel::operator_channel::OperatorChannel`, which
+//! `tddy-daemon`'s `runtime` installs.
 //!
 //! [`TelegramDaemonHooks`]: telegram_session_subscriber::TelegramDaemonHooks
 
 pub mod telegram_bot;
 pub mod telegram_multi_select_shortcuts;
-pub mod telegram_notification_subscriber;
 pub mod telegram_notifier;
 pub mod telegram_session_control;
 pub mod telegram_session_subscriber;

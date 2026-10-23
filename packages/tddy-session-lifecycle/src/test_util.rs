@@ -73,7 +73,7 @@ pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
         user_resolver,
         None,
         PeerRouting::local_only(&config),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),
     )
 }

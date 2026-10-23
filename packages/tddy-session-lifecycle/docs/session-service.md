@@ -82,9 +82,10 @@ only caller that needed an `Arc` back into the old god object.
 
 **This crate names nothing Telegram.** The Telegram control plane is
 [`tddy-telegram-control`](../../tddy-telegram-control/README.md), which depends on this crate, and
-`teloxide` is not in this manifest. `tddy-telegram` stays a dependency only for the re-exports:
-`active_elicitation`, `elicitation`, `telegram_github_link` and `telegram_tracked_session` keep their
-old paths here. `session_list_enrichment`, which reads a session's pending elicitation, is
+neither `tddy-telegram` nor `teloxide` is in this manifest — the ratchet
+`tddy-daemon-extensions/tests/telegram_is_a_satellite.rs` fails on either. The host reaches an
+operator's chat only through the kernel's `OperatorChannel` port (below). `session_list_enrichment`,
+which reads a session's pending elicitation, is
 [`tddy-session-activity`](../../tddy-session-activity/README.md)'s.
 
 ## RPC families served above this crate
@@ -205,25 +206,26 @@ also re-exported at the crate root. `family_proto_bridge::wire_same` and
 ## The presenter observer
 
 When a workflow session starts, `DaemonSessionHost::maybe_spawn_presenter_observer` builds
-`PresenterObserverDeps` (the data root and the two sinks below) and calls its
+`PresenterObserverDeps` (the data root and the two consumers below) and calls its
 `maybe_spawn_presenter_observer`, which calls
 `presenter_observer_task::spawn_presenter_observer_task`, which connects to the child's
 `PresenterObserver` gRPC stream (90 attempts, 100 ms apart) and hands each event to **two
-independent sinks**:
+independent consumers**:
 
-| Sink | Held as | What it does |
+| Consumer | Held as | What it does |
 |---|---|---|
-| presenter-event sink | `presenter_event_sink: Option<SharedPresenterEventSink>` — the [`tddy-daemon-kernel` port](../../tddy-daemon-kernel/docs/daemon-kernel.md#ports) | Telegram's chat surface, on a daemon that has one |
+| operator channel | `operator_channel: SharedOperatorChannel` — the [`tddy-daemon-kernel` port](../../tddy-daemon-kernel/docs/daemon-kernel.md#ports) | Telegram's chat surface on a daemon that has one; `NoOperatorChannel` otherwise |
 | notification publishing | the host's session-notification bus, plus the caller's sessions base | publishes a `Presenter` notification so the session's drawer row shows a dot |
 
-The observer is spawned when **either** exists and not at all when neither does. Gating it on
-Telegram would leave the indicator dark on every daemon without a `telegram:` block.
+The observer is spawned when the channel `follows_presenter_events()` **or** a bus is present, and
+not at all when neither is. `NoOperatorChannel` follows none, so on a daemon without a `telegram:`
+block the observer runs for the bus alone and the indicator still lights.
 
-`DaemonSessionHost::new` takes the sink as a parameter and installs **no** notification bus.
+`DaemonSessionHost::new` takes the channel as a parameter and installs **no** notification bus.
 `tddy-daemon`'s `runtime.rs` installs the daemon's bus with `with_session_notification_bus`,
 because the `StreamSessionNotifications` subscriber on it must be the very one the RPC handler
-subscribes to. A test that needs a bus installs one the same way. With no bus, the observer runs
-for the sink alone.
+subscribes to. A test that needs a bus installs one the same way; a test with no chat surface passes
+`Arc::new(NoOperatorChannel)`. With no bus, the observer runs for the channel alone.
 
 ## Transports
 

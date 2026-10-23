@@ -276,7 +276,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             user_resolver.clone(),
             None,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-            None,
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         );
         let service = daemon_rpc_participant::with_the_livekit_room_ports(
@@ -401,7 +401,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
                 },
             ),
         ),
-        None,
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     );
     let session_admissions =

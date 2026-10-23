@@ -1,14 +1,17 @@
 # Session notifications — one bus, several surfaces
 
 **Status:** Shipped
-**Updated:** 2026-08-30
+**Updated:** 2026-10-22
 
 ## Overview
 
 When something happens in a coding session that an operator should know about — the agent needs an
 answer, it finished a turn, it is working — the daemon publishes a **session notification**.
-Subscribers declare which kinds they want. **Telegram** is one; **`tddy-web`'s drawer indicators**
-are another.
+Subscribers declare which kinds they want. The daemon's **operator channel** — the chat an operator
+is reached on, which is **Telegram** when one is configured — is one; **`tddy-web`'s drawer
+indicators** are another. The operator channel is also where a workflow session's elicitations are
+delivered, with their keyboards, so both of a session's ways of reaching its operator end at one
+place.
 
 Telegram used to *be* the notification system rather than a surface on top of one, and it named
 sessions by their uuid prefix while the web named them by worktree — so a chat message could not be
@@ -76,13 +79,16 @@ refused, and a notification whose owner cannot be established is delivered to no
 - A notification that cannot be delivered is logged, never propagated: reporting a hook still
   succeeds when a subscriber errors, and one subscriber's failure does not starve the others.
 - Bot tokens and session tokens never appear in a notification's text or in a log line.
-- A status re-reported without changing sends no second Telegram message.
+- A status re-reported without changing sends no second Telegram message, and a presenter
+  elicitation reaches Telegram once — through its keyboard surface, never also as a bus alert.
+- The drawer indicator does not depend on Telegram: which presenter modes wait on the operator is
+  the daemon's own rule, so a daemon with no `telegram:` block lights a workflow session's dot for
+  every elicitation, and a daemon with Telegram agrees with the chat on every mode.
 
 ## Known limitation
 
 A workflow session **started from Telegram** does not yet raise a drawer indicator from its
 presenter events; sessions started or resumed from the web do. Its Telegram surface is unaffected.
-Tracked in `docs/dev/TODO.md`.
 
 ## Related
 

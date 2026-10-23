@@ -4,7 +4,8 @@
 //! [`SessionNotificationBus`] and each subscriber decides whether it wants it: the notification
 //! stream relays every one of them to connected browsers
 //! ([`crate::session_notification_subscribers::SessionNotificationStreamSubscriber`]), which turn
-//! them into the drawer's per-row indicator, and `tddy-daemon`'s Telegram subscriber sends the
+//! them into the drawer's per-row indicator, and the daemon's operator channel (Telegram, when one
+//! is configured) is registered through [`OperatorChannelSubscriber`] and sends the
 //! attention-worthy ones to a chat.
 //!
 //! PRD: `docs/ft/daemon/session-notifications.md`.
@@ -37,56 +38,13 @@ use tddy_service::gen::server_message::Event;
 use tddy_service::gen::ServerMessage;
 
 use tddy_core::SessionActivityStatus;
+use tddy_daemon_kernel::operator_channel::{awaits_operator, SharedOperatorChannel};
 
-/// Whether a notification asks the operator for something, or merely reports progress.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionNotificationKind {
-    /// The agent is working. Drives the drawer's blinking green dot; sent to no chat.
-    Activity,
-    /// The session is blocked on the operator, or has finished a turn and is waiting for them.
-    AttentionRequired,
-}
-
-/// Which of the daemon's inbound paths raised a notification.
-///
-/// Subscribers filter on this: the Telegram subscriber takes the activity-status path only,
-/// because the presenter's elicitations already reach Telegram through `telegram_notifier` with
-/// their inline keyboards attached.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionNotificationSource {
-    /// `ReportSessionStatus` — the per-worktree claude-cli / cursor-cli hooks.
-    ActivityStatus,
-    /// `ReportAgentActivity` — the agent's own tool loop.
-    AgentToolCall,
-    /// `PresenterObserver.ObserveEvents` — a `tddy-coder` workflow session's presenter.
-    Presenter,
-}
-
-/// One thing that happened in one session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionNotification {
-    pub session_id: String,
-    /// The OS user whose sessions directory this session lives in — the operator it belongs to.
-    ///
-    /// Server-side only, and deliberately kept off the wire: it is an authorization fact, not
-    /// something a browser renders. `StreamSessionNotifications` matches it against the OS user
-    /// the subscribing token maps to and relays only what matches, so a daemon serving several
-    /// operators never hands one of them another's session ids, repository names or
-    /// operator-facing prose. A notification that names no owner belongs to nobody and reaches no
-    /// client — the safe answer to an unresolvable owner is to deliver it to no one, never to
-    /// everyone.
-    pub os_user: String,
-    /// The session's display label — [`tddy_core::session_label::session_display_label`], so a
-    /// chat message and a drawer row name the same session identically.
-    pub label: String,
-    pub kind: SessionNotificationKind,
-    pub source: SessionNotificationSource,
-    /// Operator-facing line. Telegram sends it verbatim; the web shows it as the dot's tooltip.
-    pub text: String,
-    /// Epoch milliseconds. The web ages activity out of its blink window against this, so it is
-    /// the moment the event happened, never the moment a client read it.
-    pub at_unix_ms: u64,
-}
+/// The notification itself is the kernel's, so the operator-channel port can name it; it is
+/// re-exported here under the paths every publish site and subscriber already uses.
+pub use tddy_daemon_kernel::session_notification::{
+    SessionNotification, SessionNotificationKind, SessionNotificationSource,
+};
 
 /// A consumer of session notifications.
 ///
@@ -171,6 +129,37 @@ impl SessionNotificationBus {
         self.subscribers
             .iter()
             .find_map(|subscriber| subscriber.client_relay())
+    }
+}
+
+/// An operator channel on the bus: it wants what the channel wants, and delivers through it.
+///
+/// The channel is the kernel's port ([`tddy_daemon_kernel::operator_channel::OperatorChannel`]), so
+/// a chat integration implements one trait for both of its inbound paths — presenter events and
+/// these notifications — and never this crate's subscriber trait.
+pub struct OperatorChannelSubscriber {
+    channel: SharedOperatorChannel,
+}
+
+impl OperatorChannelSubscriber {
+    pub fn new(channel: SharedOperatorChannel) -> Self {
+        Self { channel }
+    }
+}
+
+#[async_trait]
+impl SessionNotificationSubscriber for OperatorChannelSubscriber {
+    /// The channel's id, so the bus's delivery-failure log line names the channel that failed.
+    fn name(&self) -> &'static str {
+        self.channel.id()
+    }
+
+    fn wants(&self, notification: &SessionNotification) -> bool {
+        self.channel.wants_notification(notification)
+    }
+
+    async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {
+        self.channel.on_notification(notification).await
     }
 }
 
@@ -311,8 +300,8 @@ pub fn notification_for_agent_tool_call(
 /// The notification a presenter event raises, or `None` for an event that says nothing about
 /// whether the session is working or waiting.
 ///
-/// The Telegram subscriber declines these (`source == Presenter`): a workflow session's
-/// elicitations already reach a chat through `tddy-daemon`'s `telegram_notifier`, keyboards and
+/// The Telegram channel declines these (`source == Presenter`): a workflow session's
+/// elicitations already reach a chat through the channel's own presenter path, keyboards and
 /// per-chat FIFO included. What is new here is the indicator — a workflow session's dot goes
 /// yellow while the presenter holds a gate, and blinks green while it moves through states.
 pub fn notification_for_presenter_event(
@@ -324,8 +313,7 @@ pub fn notification_for_presenter_event(
 ) -> Option<SessionNotification> {
     let (kind, text) = match message.event.as_ref()? {
         Event::ModeChanged(mode_changed) => {
-            if !tddy_telegram::elicitation::mode_changed_requires_telegram_elicitation(mode_changed)
-            {
+            if !awaits_operator(mode_changed) {
                 // An autonomous mode (`Running`, `Done`) — the presenter changed screens, which is
                 // not by itself something to raise a dot for.
                 return None;
@@ -373,9 +361,9 @@ pub fn notification_for_presenter_event(
 /// each one into a message must suppress the repeats itself. Keyed by session so two sessions
 /// reporting the same thing are two notifications, not one.
 ///
-/// `pub` rather than the `pub(crate)` it carried inside `tddy-daemon`: the subscriber that
-/// needs it is the Telegram one, and that one stays in the daemon because it is built on the
-/// daemon's config and its bot hooks. A crate boundary now runs between the two.
+/// `pub` rather than the `pub(crate)` it carried inside `tddy-daemon`: what needs it is the
+/// Telegram operator channel, which lives in `tddy-telegram-control` and keeps one per daemon on
+/// its hooks. A crate boundary runs between the two.
 #[derive(Default)]
 pub struct LastDeliveredPerSession {
     last: StdMutex<HashMap<String, String>>,

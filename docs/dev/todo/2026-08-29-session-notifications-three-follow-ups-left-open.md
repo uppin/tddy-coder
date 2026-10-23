@@ -11,6 +11,18 @@
   `source == PRESENTER` to avoid double-sending. Folding that path onto the bus means giving a
   notification an optional keyboard and a routing policy, which is a larger design than this
   changeset's plain-text events.
+
+  **Partly answered (2026-10-22, `2026-10-22-telegram-satellite`).** The bus still carries no
+  elicitation, but both paths now end at one port:
+  `tddy_daemon_kernel::operator_channel::OperatorChannel` receives a session's presenter events
+  (`on_presenter_event`) *and* its bus notifications (`wants_notification` / `on_notification`,
+  registered through `OperatorChannelSubscriber`), and Telegram's `TelegramDaemonHooks` implements
+  both halves. The "this mode waits on the operator" rule is the core's
+  (`operator_channel::awaits_operator`), shared by the drawer indicator and Telegram's FIFO. That
+  port is where a fold onto the bus would land: a presenter notification carrying the keyboard and
+  routing policy would be delivered through `on_notification`, and Telegram's
+  `wants_notification` would stop declining `Presenter`. Still open: the optional keyboard and
+  routing policy on a notification, and removing `on_presenter_event` once nothing needs it.
 - **Two id-shortening rules still coexist in Telegram.** `session_telegram_label` (first two
   UUID segments) survives for inbound callback-data keys, alongside `claude-{id[..8]}` and
   `cursor-cli/{short_id}` in `telegram_session_control.rs`. Only the *notification* label was

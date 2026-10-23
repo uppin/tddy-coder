@@ -7,10 +7,20 @@ use super::*;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 impl BuildContext {
+    /// The daemon's operator channel: Telegram's hooks when a bot is configured, the port's null
+    /// object otherwise. One channel for both the session host and the notification bus.
+    fn operator_channel(&self) -> tddy_daemon_kernel::operator_channel::SharedOperatorChannel {
+        match &self.telegram_hooks {
+            Some(hooks) => {
+                Arc::clone(hooks) as tddy_daemon_kernel::operator_channel::SharedOperatorChannel
+            }
+            None => Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        }
+    }
+
     pub(super) async fn open_shared(&self) -> anyhow::Result<Shared> {
         let config = &self.config;
         let tddy_data_dir = &self.identity.keys.tddy_data_dir;
-        let telegram_hooks = &self.telegram_hooks;
         // This daemon's model registry: the providers it talks to, their models, and the
         // assistants composed from them. Opened before ConnectionService so an assistant is
         // listed by `ListAgents` as a selectable `--agent`.
@@ -25,21 +35,18 @@ impl BuildContext {
             .await?
             .reserving_agent_ids(config.allowed_agents().iter().map(|a| a.id.clone())),
         );
-        // The daemon's session-notification bus: Telegram takes the attention-worthy events
-        // from the activity-status path, and `StreamSessionNotifications` relays every event
-        // to the browsers driving the drawer's indicators. Assembled here because
-        // `DaemonSessionHost::new` installs no bus of its own, and because the stream subscriber
-        // must be the very one the RPC handler subscribes to.
+        // The daemon's session-notification bus: the operator channel (Telegram's, on a daemon
+        // that has one) takes the attention-worthy events from the activity-status path, and
+        // `StreamSessionNotifications` relays every event to the browsers driving the drawer's
+        // indicators. Assembled here because `DaemonSessionHost::new` installs no bus of its own,
+        // and because the stream subscriber must be the very one the RPC handler subscribes to.
         let session_notification_bus = {
-            let mut bus =
-                tddy_session_lifecycle::session_notifications::SessionNotificationBus::new();
-            if let Some(ref hooks) = telegram_hooks {
-                bus = bus.with_subscriber(Arc::new(
-                tddy_telegram_control::telegram_notification_subscriber::TelegramNotificationSubscriber::new(
-                    Arc::clone(hooks),
-                ),
-            ));
-            }
+            let bus = tddy_session_lifecycle::session_notifications::SessionNotificationBus::new()
+                .with_subscriber(Arc::new(
+                    tddy_session_lifecycle::session_notifications::OperatorChannelSubscriber::new(
+                        self.operator_channel(),
+                    ),
+                ));
             Arc::new(bus.with_subscriber(Arc::new(
             tddy_session_lifecycle::session_notification_subscribers::SessionNotificationStreamSubscriber::new(),
         )))
@@ -171,7 +178,6 @@ impl BuildContext {
         let sessions_base_resolver = &mount.sessions_base_resolver;
         let user_resolver = mount.user_resolver.clone();
         let livekit_discovery = mount.livekit_discovery.take();
-        let telegram_hooks = &self.telegram_hooks;
         let shared_claude_cli_manager = &self.registries.shared_claude_cli_manager;
         let shared_session_rooms = &self.registries.shared_session_rooms;
         let shared_session_admissions = &self.registries.shared_session_admissions;
@@ -189,9 +195,7 @@ impl BuildContext {
             user_resolver,
             options.spawn_client.clone(),
             tddy_daemon_livekit::peer_routing::peer_routing_over(config, livekit_discovery),
-            telegram_hooks.clone().map(|hooks| {
-                hooks as tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink
-            }),
+            self.operator_channel(),
             Arc::clone(shared_claude_cli_manager),
         );
 

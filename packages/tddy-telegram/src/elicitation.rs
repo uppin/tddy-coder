@@ -1,27 +1,18 @@
-//! Pending elicitation: shared definition for Telegram notifications and Connection `ListSessions`.
+//! What Telegram says in a chat when a presenter gate asks the operator something.
 //!
-//! **Authoritative list flag**: [`pending_elicitation_for_session_dir`] reads `pending_elicitation` from
-//! [`.session.yaml`](tddy_core::SESSION_METADATA_FILENAME) (see [`tddy_core::SessionMetadata`]), written
-//! by the tool when elicitation starts/ends.
+//! **Presenter stream**: [`telegram_elicitation_line_for_mode_changed`] gives the chat line for a
+//! [`ModeChanged`] whose presenter [`AppMode`](tddy_service::gen::app_mode_proto) requires user
+//! input or approval: document review, markdown viewer, feature input, clarification
+//! select/multi-select, and free-text input. Autonomous modes (`Running`, `Done`) get none.
 //!
-//! **Presenter stream**: [`telegram_elicitation_line_for_mode_changed`] treats [`ModeChanged`] as
-//! elicitation when the presenter [`AppMode`](tddy_service::gen::app_mode_proto) requires user input
-//! or approval: document review, markdown viewer, feature input, clarification select/multi-select,
-//! and free-text input. Autonomous modes (`Running`, `Done`) are not elicitation.
-
-use std::path::Path;
+//! *Whether* a mode waits on the operator is not decided here: that is the core's rule,
+//! `tddy_daemon_kernel::operator_channel::awaits_operator`, which the drawer indicator uses on
+//! every daemon. This module's line exists for exactly the modes that rule names (pinned by
+//! `mode_gate_tests`). The session list's `pending_elicitation` flag is read by
+//! `tddy_session_activity::pending_elicitation`.
 
 use tddy_service::gen::app_mode_proto;
 use tddy_service::gen::ModeChanged;
-
-/// Whether [`ModeChanged`] represents a presenter gate that [`telegram_elicitation_line_for_mode_changed`] would surface on Telegram.
-///
-/// Used to detect transitions **out** of elicitation (e.g. user answered on web/LiveKit) so the daemon
-/// can rotate the per-chat elicitation FIFO — see `tddy_telegram_control::telegram_notifier::TelegramSessionWatcher`.
-pub fn mode_changed_requires_telegram_elicitation(mc: &ModeChanged) -> bool {
-    // Session label is only interpolated into message text; elicitation detection is independent.
-    telegram_elicitation_line_for_mode_changed("_", mc).is_some()
-}
 
 /// Stable dedupe key for identical [`ModeChanged`] payloads (Telegram anti-spam).
 pub fn elicitation_signature_for_mode_changed(mc: &ModeChanged) -> String {
@@ -155,54 +146,53 @@ Or use the web / LiveKit UI."
     Some(line)
 }
 
-/// Reads `pending_elicitation` from `.session.yaml` for the Connection session list.
-pub fn pending_elicitation_for_session_dir(session_dir: &Path) -> bool {
-    match tddy_core::read_session_metadata(session_dir) {
-        Ok(meta) => {
-            log::debug!(
-                target: "tddy_daemon::elicitation",
-                "pending_elicitation_for_session_dir: session_id={} pending_elicitation={}",
-                meta.session_id,
-                meta.pending_elicitation
-            );
-            meta.pending_elicitation
-        }
-        Err(e) => {
-            log::debug!(
-                target: "tddy_daemon::elicitation",
-                "pending_elicitation_for_session_dir: no metadata in {}: {e}",
-                session_dir.display()
-            );
-            false
-        }
-    }
-}
-
 #[cfg(test)]
 mod mode_gate_tests {
     use super::*;
-    use tddy_service::gen::app_mode_proto;
-    use tddy_service::gen::{AppModeProto, AppModeRunning, AppModeSelect, ModeChanged};
+    use rstest::rstest;
+    use tddy_daemon_kernel::operator_channel::awaits_operator;
+    use tddy_service::gen::app_mode_proto::Variant;
+    use tddy_service::gen::{
+        AppModeDocumentReview, AppModeDone, AppModeFeatureInput, AppModeMarkdownViewer,
+        AppModeMultiSelect, AppModeProto, AppModeRunning, AppModeSelect, AppModeTextInput,
+    };
 
-    #[test]
-    fn mode_changed_requires_telegram_elicitation_select_true_running_false() {
-        let select = ModeChanged {
+    fn a_mode_change_to(variant: Variant) -> ModeChanged {
+        ModeChanged {
             mode: Some(AppModeProto {
-                variant: Some(app_mode_proto::Variant::Select(AppModeSelect {
-                    question: None,
-                    question_index: 0,
-                    total_questions: 1,
-                    initial_selected: 0,
-                })),
+                variant: Some(variant),
             }),
-        };
-        assert!(mode_changed_requires_telegram_elicitation(&select));
+        }
+    }
 
-        let running = ModeChanged {
-            mode: Some(AppModeProto {
-                variant: Some(app_mode_proto::Variant::Running(AppModeRunning {})),
-            }),
-        };
-        assert!(!mode_changed_requires_telegram_elicitation(&running));
+    /// Telegram asks in a chat exactly when the core says the session waits on its operator: a
+    /// line for a mode the core calls autonomous would ping a chat for nothing, and a missing line
+    /// for a gate would leave the chat's elicitation queue waiting on a prompt it never showed.
+    #[rstest]
+    #[case::document_review(a_mode_change_to(Variant::DocumentReview(
+        AppModeDocumentReview::default()
+    )))]
+    #[case::markdown_viewer(a_mode_change_to(Variant::MarkdownViewer(
+        AppModeMarkdownViewer::default()
+    )))]
+    #[case::feature_input(a_mode_change_to(Variant::FeatureInput(AppModeFeatureInput::default())))]
+    #[case::select(a_mode_change_to(Variant::Select(AppModeSelect::default())))]
+    #[case::multi_select(a_mode_change_to(Variant::MultiSelect(AppModeMultiSelect::default())))]
+    #[case::text_input(a_mode_change_to(Variant::TextInput(AppModeTextInput::default())))]
+    #[case::running(a_mode_change_to(Variant::Running(AppModeRunning::default())))]
+    #[case::done(a_mode_change_to(Variant::Done(AppModeDone::default())))]
+    #[case::no_mode(ModeChanged { mode: None })]
+    fn the_telegram_line_exists_exactly_for_the_modes_that_await_the_operator(
+        #[case] mode_changed: ModeChanged,
+    ) {
+        // When
+        let line = telegram_elicitation_line_for_mode_changed("my-feature-branch", &mode_changed);
+
+        // Then
+        assert_eq!(
+            line.is_some(),
+            awaits_operator(&mode_changed),
+            "Telegram and the core disagree on {mode_changed:?}: line {line:?}"
+        );
     }
 }

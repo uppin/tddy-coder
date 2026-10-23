@@ -841,6 +841,7 @@ export const TEST_IDS = {
   /** Says whether the daemon holds a LiveKit API secret; never shows the secret itself. */
   daemonSettingsLivekitSecretState: "daemon-settings-livekit-secret-state",
   daemonSettingsLivekitStatus: "daemon-settings-livekit-status",
+  daemonSettingsTelegramStatus: "daemon-settings-telegram-status",
   /** The operator's LiveKit switch: off preserves every other field in the block. */
   daemonSettingsLivekitEnabled: "daemon-settings-livekit-enabled",
   daemonSettingsSave: "daemon-settings-save",

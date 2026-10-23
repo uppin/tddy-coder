@@ -1,7 +1,7 @@
 # Extension ports
 
 How an optional integration hooks into the daemon without the daemon depending on it. LiveKit is the
-first integration; the shape is the same for any that follows.
+first integration and Telegram the second; the shape is the same for any that follows.
 
 The daemon's core crates depend on `tddy-daemon-extensions`. An integration's crates implement its
 ports. Only the crates that build a binary (`tddy-daemon`, and the embedders) bring the two together.
@@ -84,6 +84,10 @@ Semantics:
   `Unreachable` whose error text varies between retries is one outage, not several.
 - All reporters of one `id` write the same entry; the last writer wins.
 - A reporter's entry is registered when the reporter is made, so `report` cannot miss it.
+
+Two integrations report: LiveKit (`livekit`) and Telegram (`telegram`, label `Telegram`, from
+`tddy_telegram::status` — see
+[telegram-notifier.md](../../tddy-telegram/docs/telegram-notifier.md#integration-status)).
 
 ## The session-rooms port (`session_rooms`)
 
@@ -173,9 +177,10 @@ a `livekit:` block and `NoSplitRooms` otherwise; the session host takes it throu
 ## Wiring the session host
 
 `DaemonSessionHost::new(config, sessions_base_for_user, tddy_data_dir, user_resolver, spawn_client,
-peer_routing, presenter_event_sink, claude_cli_manager)` names no integration: it takes a
+peer_routing, operator_channel, claude_cli_manager)` names no integration: it takes a
 `tddy_host_service::peer_routing::PeerRouting` (`PeerRouting::local_only(&config)` for a machine
-with no peers) and installs every port's null object. A `with_*` builder replaces each:
+with no peers) and a `SharedOperatorChannel` (`NoOperatorChannel` on a daemon with no chat surface),
+and installs every port's null object. A `with_*` builder replaces each:
 
 | Builder | Port | Null object |
 |---|---|---|
@@ -252,3 +257,33 @@ edge, which is what each cluster that moves behind a port can remove.
 crates that still named a LiveKit crate, node by node, from eighteen to none, and its last node
 deleted the list. A crate that starts naming a LiveKit crate and is on neither list fails
 the third test; the fix is a port, or the code moving into the plugin, never a new list entry.
+
+## Telegram: the operator channel and its ratchet
+
+Telegram is a satellite under the same rule. Its port is **not in this crate**: the operator channel
+(`tddy_daemon_kernel::operator_channel::OperatorChannel`, with the null object `NoOperatorChannel`)
+carries `tddy-service`'s `ServerMessage`, and this crate stays free of `tddy-service`. It lives in
+the kernel — [daemon-kernel.md § Ports](../../tddy-daemon-kernel/docs/daemon-kernel.md#ports). What
+Telegram uses from this crate is the integration status board.
+
+`tests/telegram_is_a_satellite.rs` sits beside the LiveKit ratchet because this crate already carries
+the graph harness, and reads "names" the same way (`[dependencies]` and `[build-dependencies]`,
+optional ones included; `[dev-dependencies]` not counted):
+
+| Test | Holds |
+|---|---|
+| `the_daemon_reaches_the_telegram_plugin` | The walk from `tddy-daemon` sees `tddy-telegram-control`, so the tests below are not vacuous. |
+| `only_telegram_plugins_and_wiring_name_a_telegram_crate` | Every workspace crate that names a Telegram crate directly is on `PLUGINS` or `WIRING`. |
+| `the_kernel_reaches_no_telegram_crate` | `reaches("tddy-daemon-kernel")`, the crate defining the port, shares nothing with `TELEGRAM_FAMILY`. |
+| `no_session_crate_reaches_a_telegram_crate` | No `SESSION_CRATES` entry reaches a Telegram crate transitively. |
+
+The lists, in the test file:
+
+- `TELEGRAM_FAMILY`: `teloxide`, `tddy-telegram`, `tddy-telegram-control`.
+- `PLUGINS`: `tddy-telegram`, `tddy-telegram-control`.
+- `WIRING`: `tddy-daemon`.
+- `SESSION_CRATES`: `tddy-session-activity`, `tddy-session-lifecycle`, `tddy-agent-launch`,
+  `tddy-cli-sessions`, `tddy-session-split`.
+
+Over normal and build edges, the crates that can be built with Telegram are the two plugin crates,
+`tddy-daemon`, and the crates built on the daemon (`tddy-desktop`).
