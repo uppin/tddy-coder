@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { CatalogService } from "../../gen/catalog_pb";
 import type { ProjectEntry } from "../../gen/project_pb";
-import type { ProjectHomeInfo } from "./SessionDrawer";
+import type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
 
 /**
  * What each project's pinned **main** entry shows (`#project-home` 4/7): its main branch ref and

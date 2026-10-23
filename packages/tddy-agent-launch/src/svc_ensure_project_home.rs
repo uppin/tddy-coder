@@ -32,6 +32,7 @@ use tddy_worktree_service::home_worktree::{ensure_home_worktree, fast_forward_ho
 
 use crate::harness_profile_request::request_on_profile;
 use crate::launch_ports::LaunchSessions;
+use crate::session_coordinate_handlers::SESSION_SERVICE;
 
 /// The one harness that can enforce managed-codebase mode, which is what makes the home session's
 /// read-only guarantee real (`docs/dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md`).
@@ -39,6 +40,13 @@ const ENFORCING_HARNESS: &str = "claude-cli";
 
 /// Serializes ensures, so two clicks cannot both find no home session and start two.
 static ENSURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Whose sessions an ensure looks through, and for which project.
+struct HomeScope {
+    os_user: String,
+    sessions_base: PathBuf,
+    project: ProjectData,
+}
 
 /// What `EnsureProjectHomeSession` did, reported on the wire as `outcome`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +73,39 @@ impl LaunchSessions {
         request: Request<EnsureProjectHomeSessionRequest>,
     ) -> Result<Response<EnsureProjectHomeSessionResponse>, Status> {
         let req = request.into_inner();
+        // The home session is one per project per host: a request naming another daemon is that
+        // daemon's to answer, the way `GetWorktreeSnapshot` is routed.
+        if let Some(answered) = self
+            .peer_routing
+            .rpc_served_by_peer(
+                SESSION_SERVICE,
+                "EnsureProjectHomeSession",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+        let scope = self.caller_home_scope(&req)?;
+        let profile = self.home_agent_profile(&scope.project)?;
+
+        let _one_ensure_at_a_time = ENSURE_LOCK.lock().await;
+        let (session_id, outcome) = self
+            .ensure_on_this_host(&req.session_token, &scope, &profile)
+            .await?;
+        let session = self.listed_session(&req.session_token, &session_id).await?;
+        Ok(Response::new(EnsureProjectHomeSessionResponse {
+            session: Some(session),
+            outcome: outcome.as_wire().to_string(),
+        }))
+    }
+
+    /// The caller's OS user and sessions base, and the registered project the request names.
+    fn caller_home_scope(
+        &self,
+        req: &EnsureProjectHomeSessionRequest,
+    ) -> Result<HomeScope, Status> {
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         let os_user = self
@@ -76,41 +117,52 @@ impl LaunchSessions {
             Some(&self.tddy_data_dir),
         )
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let project_id = req.project_id.trim();
         let (_, project) = tddy_session_split::service_util::find_registered_project(
             &self.tddy_data_dir,
             &os_user,
-            project_id,
+            req.project_id.trim(),
         )?;
-        let profile = self.home_agent_profile(&project)?;
+        Ok(HomeScope {
+            os_user,
+            sessions_base,
+            project,
+        })
+    }
 
-        let _one_ensure_at_a_time = ENSURE_LOCK.lock().await;
-        let (session_id, outcome) = match find_home_session(&sessions_base, project_id)? {
-            Some(existing) if existing.is_active || self.is_served(&existing.session_id).await => {
-                (existing.session_id, EnsureOutcome::Running)
-            }
-            Some(stopped) => {
-                self.resume_stopped_home(&req.session_token, &project, &sessions_base, &stopped)
-                    .await?;
-                (stopped.session_id, EnsureOutcome::Resumed)
-            }
-            None => (
-                self.start_home(
-                    &req.session_token,
-                    &os_user,
-                    &project,
-                    &sessions_base,
-                    &profile,
-                )
-                .await?,
-                EnsureOutcome::Started,
-            ),
+    /// The started / resumed / running decision for the project's home session on this daemon.
+    async fn ensure_on_this_host(
+        &self,
+        session_token: &str,
+        scope: &HomeScope,
+        profile: &HarnessProfile,
+    ) -> Result<(String, EnsureOutcome), Status> {
+        let HomeScope {
+            os_user,
+            sessions_base,
+            project,
+        } = scope;
+        let existing = find_home_session(sessions_base, &project.project_id)?;
+        // Running: its recorded pid is alive, or this daemon still serves its terminal. A live pid
+        // with no served terminal also reads as running
+        // (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
+        let running = match &existing {
+            Some(home) => home.is_active || self.is_served(&home.session_id).await,
+            None => false,
         };
-        let session = self.listed_session(&req.session_token, &session_id).await?;
-        Ok(Response::new(EnsureProjectHomeSessionResponse {
-            session: Some(session),
-            outcome: outcome.as_wire().to_string(),
-        }))
+        match existing {
+            Some(home) if running => Ok((home.session_id, EnsureOutcome::Running)),
+            Some(stopped) => {
+                self.resume_stopped_home(session_token, project, sessions_base, &stopped)
+                    .await?;
+                Ok((stopped.session_id, EnsureOutcome::Resumed))
+            }
+            None => {
+                let started = self
+                    .start_home(session_token, os_user, project, sessions_base, profile)
+                    .await?;
+                Ok((started, EnsureOutcome::Started))
+            }
+        }
     }
 
     /// The harness profile the project's home agent names, refused unless its harness can enforce
@@ -141,8 +193,8 @@ impl LaunchSessions {
         Ok(profile)
     }
 
-    /// Whether this daemon is still serving `session_id`'s terminal, even if its process has since
-    /// exited — a session it serves is running as far as the user can tell.
+    /// Whether this daemon still serves `session_id`'s terminal; the handle is dropped when the
+    /// agent's process exits.
     async fn is_served(&self, session_id: &str) -> bool {
         self.claude_cli_manager.get(session_id).await.is_some()
     }

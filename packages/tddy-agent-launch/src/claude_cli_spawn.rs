@@ -144,25 +144,21 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // on an SSH target when `ssh_config_host` is set.
     let ssh_alias = ssh_config_host.trim();
     progress.begin_phase(StartStep::Worktree);
-    let adopted_checkout = repo_path.trim();
-    let worktree_path = if !adopted_checkout.is_empty() {
-        claude_cli_spawn_steps::adopt_checkout(adopted_checkout)?
-    } else {
-        claude_cli_spawn_steps::cut_claude_cli_worktree(
-            claude_cli_spawn_steps::ClaudeCliWorktreeCut {
-                config,
-                session_id,
-                create_remote_branch,
-                project,
-                repo_root: &repo_root,
-                session_dir: &session_dir,
-                intent,
-                worktree_base_ref,
-                ssh_alias,
-            },
-        )
-        .await?
-    };
+    let worktree_path = claude_cli_spawn_steps::claude_cli_checkout(
+        repo_path,
+        claude_cli_spawn_steps::ClaudeCliWorktreeCut {
+            config,
+            session_id,
+            create_remote_branch,
+            project,
+            repo_root: &repo_root,
+            session_dir: &session_dir,
+            intent,
+            worktree_base_ref,
+            ssh_alias,
+        },
+    )
+    .await?;
     progress.end_phase(StartStep::Worktree);
 
     // The child's branch now exists (and, when requested, is on origin), so a pr-stack

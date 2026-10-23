@@ -30,7 +30,7 @@ use tddy_spawn::spawner;
 use tddy_worktree_service::stream::MpscResultStream;
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
-const SESSION_SERVICE: &str = "session.SessionService";
+pub(crate) const SESSION_SERVICE: &str = "session.SessionService";
 
 pub use crate::facilitation::{facilitated_checkout, FacilitatedCheckout};
 

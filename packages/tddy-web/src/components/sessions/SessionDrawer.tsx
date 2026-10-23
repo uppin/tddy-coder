@@ -10,6 +10,11 @@ import {
   groupSessionsByProject,
   type ProjectSessionGroup,
 } from "../../utils/sessionProjectGroups";
+import {
+  projectHomeSlot,
+  withProjectHomeGroups,
+  type ProjectHomeInfo,
+} from "../../utils/projectHomeGroups";
 import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
 import { ProjectHomeEntry } from "./ProjectHomeEntry";
 import { readCollapsedProjects, writeCollapsedProjects } from "./projectGroupCollapse";
@@ -88,15 +93,7 @@ interface SessionDrawerProps {
   onEnsureProjectHome?: (projectId: string) => Promise<void>;
 }
 
-/** One project's pinned home entry, as the drawer renders it. */
-export interface ProjectHomeInfo {
-  projectId: string;
-  mainBranchRef: string;
-  homeAgentLabel: string | null;
-}
-
-/** `SessionEntry.sessionRole` of a project's project-home session. */
-const PROJECT_HOME_ROLE = "project-home";
+export type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
 
 interface StackGroup {
   parent: SessionEntry;
@@ -351,7 +348,13 @@ export function SessionDrawer({
     hostLabelForInstance,
   };
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(readCollapsedProjects);
-  const projectGroups = groupSessionsByProject(sessions, projects);
+  // A project with a home agent but no session yet still gets its group, so its pinned entry is
+  // reachable; only when the pinned entry can act at all.
+  const projectGroups = withProjectHomeGroups(
+    groupSessionsByProject(sessions, projects),
+    projects,
+    onEnsureProjectHome ? projectHomes : [],
+  );
   const selectedGroupKey = projectGroupKeyContaining(projectGroups, selectedSessionId);
 
   // Selecting a session expands its project group; the viewer can still collapse it afterwards.
@@ -470,17 +473,7 @@ export function SessionDrawer({
         <div className="py-1 px-2 space-y-0.5">
           {projectGroups.map((group) => {
             const key = projectGroupKey(group);
-            // The pinned entry stands for the project-home session, so it is not repeated as a row.
-            const home =
-              group.projectId === null
-                ? undefined
-                : projectHomes.find((h) => h.projectId === group.projectId);
-            const homeSession = home
-              ? (group.sessions.find((s) => s.sessionRole === PROJECT_HOME_ROLE) ?? null)
-              : null;
-            const rows = home
-              ? group.sessions.filter((s) => s.sessionRole !== PROJECT_HOME_ROLE)
-              : group.sessions;
+            const { home, homeSession, rows } = projectHomeSlot(group, projectHomes);
             return (
               <SessionProjectGroup
                 key={key}

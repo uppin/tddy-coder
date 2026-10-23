@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import type { SessionEntry } from "../../gen/session_pb";
 import { cn } from "../../lib/utils";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
-import type { ProjectHomeInfo } from "./SessionDrawer";
+import type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
 
 /**
  * The pinned **main** entry first in a project group (`#project-home` 4/7): label `main`, the

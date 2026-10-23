@@ -85,7 +85,8 @@ export function ProjectHomeEntry(props: { home: ProjectHomeInfo; homeSession: Se
 // SessionDrawerProps gains (optional): projectHomes?: ReadonlyArray<ProjectHomeInfo>; onEnsureProjectHome?(projectId): Promise<void>
 export interface ProjectHomeInfo { projectId: string; mainBranchRef: string; homeAgentLabel: string | null }
 // packages/tddy-web/src/components/sessions/useEnsureProjectHome.ts (new)
-export function useEnsureProjectHome(client: Client<typeof SessionService> | null, sessionToken: string, onEnsured: (sessionId: string) => void): { ensure(projectId: string, daemonInstanceId: string): Promise<void>; errorByProject: ReadonlyMap<string, string> };
+export function useEnsureProjectHome(client: Client<typeof SessionService> | null, sessionToken: string, onEnsured: (sessionId: string) => void): { ensure(projectId: string, daemonInstanceId: string): Promise<void> };
+// (validation: `errorByProject` dropped — no consumer; the pinned entry shows the rejection itself)
 // testIds: sessionsDrawerProjectHome(projectId), sessionsDrawerProjectHomeHint(projectId), sessionsDrawerProjectHomeError(projectId)
 ```
 Plus the failing tests below. Bodies `// TODO(home-session): implement`.
@@ -130,12 +131,12 @@ A standing, safe, one-click agent per project; the rest of the stack gives it to
 
 ## Scope
 
-- [ ] `session_role` end to end
-- [ ] Home worktree helper
-- [ ] Ensure service + refusals
-- [ ] Read-only filter (advertise + execute)
-- [ ] Pinned drawer entry
-- [ ] Tests
+- [x] `session_role` end to end
+- [x] Home worktree helper
+- [x] Ensure service + refusals
+- [x] Read-only filter — execute ✅; advertise deferred (`docs/dev/todo/2026-10-23-project-home-read-only-catalog-not-advertised.md`)
+- [x] Pinned drawer entry
+- [x] Tests
 
 ## Technical Changes
 
@@ -207,21 +208,50 @@ stub scripts) and a real git fixture repo for the home worktree; a unit test tab
 - `HarnessProfile.provider_account` is now `#[serde(default)]` (empty = the harness's own vendor): the red fixtures' profiles name none, and were silently skipped at load.
 - ExecuteTool/StreamExecuteTool refuse non-read-only tools for the role (`role_guard.rs`). Advertising the read-only catalog via tddy-tools is NOT done (ListExecTools has no session id).
 - Spec fix: `rowOrderIn` in the drawer spec filtered out a row's own status/label ids, which its prefix selector matched.
-- Known gap: a project with no sessions has no group, so no pinned entry (grouping is node 2's rule).
+- ~~Known gap: a project with no sessions has no group, so no pinned entry~~ — fixed at validation without touching node 2's `groupSessionsByProject`: `withProjectHomeGroups` (`src/utils/projectHomeGroups.ts`) adds an empty group for a known project that has a home agent and no session, in the same name order, before **Other**.
 
 ## Technical Debt & Production Readiness
 
-## Refactoring Needed
-### From /validate-changes
-### From /validate-tests
-### From /validate-prod-ready
-### From /analyze-clean-code
+- 🆕 `docs/dev/todo/2026-10-23-project-home-read-only-catalog-not-advertised.md` — the read-only
+  catalog is enforced by `ExecuteTool`, not advertised (ListExecTools has no session id; the
+  allowlist is fixed at spawn), and the role is recorded just after the start returns.
+- 🆕 `docs/dev/todo/2026-10-23-project-home-running-heuristic.md` — "running" = pid alive or
+  terminal served; a live pid with no served terminal reads as running.
+- `ENSURE_LOCK` is process-wide: ensures for different projects wait on each other for the length
+  of one start/resume. Accepted — ensures are rare, user-initiated clicks.
+- `useSessionsDrawerProjectHomes` shows a home agent by its id when `ListAgents` fails or does not
+  name it — display only, the ensure itself is unaffected.
 
 ## Validation Results
-### /validate-changes
+
+### /validate-changes (2026-10-23, [W])
+- Stack gate: `/pr-stack-rebase` single mode — already current on `origin/feature/project-home/activity-sidebar`, leak-free (3 own commits), no rewrite.
+- Boundaries: ✅ no `## Dependencies` symbol implemented here; `groupSessionsByProject`, `home_agent`, `managed_codebase` consumed only. No unplanned deletions.
+- Fixed:
+  - **daemon_instance_id was ignored** — `EnsureProjectHomeSession` now forwards a request naming another daemon through `peer_routing.rpc_served_by_peer` (as `GetWorktreeSnapshot`); empty/local = local. `SESSION_SERVICE` shared from `session_coordinate_handlers` instead of a second copy.
+  - **Role guard failed open** on unreadable metadata — now refuses (`failed_precondition`). Unreachable on the ordinary path (worktree resolution reads the same metadata first), but the guard no longer depends on that ordering.
+  - **No pinned entry for a project with no sessions** ([G] open item b) — `withProjectHomeGroups`, plus two Cypress cases and `projectHomeGroups.test.ts`.
+  - `useEnsureProjectHome.errorByProject` removed (no consumer).
+- [G]'s out-of-plan fixes are recorded above (Green-phase notes): `HarnessProfile.provider_account` `#[serde(default)]` in tddy-discovery; the spec's `rowOrderIn` filter.
+
 ### /validate-tests
+- Rust acceptance suites read Given/When/Then, assert outcomes on the wire and on disk (worktree HEAD, metadata), no sleeps. Not run locally (developer instruction: build only, Rust tests in CI).
+- Added: `SessionsDrawerProjectHomeAcceptance` cases for the home-only group and for a no-agent project with no session; `src/utils/projectHomeGroups.test.ts` (5).
+
 ### /validate-prod-ready
-### /analyze-clean-code
+- No `TODO`/`FIXME`/`println!`/`dbg!`/`console.log`/`unwrap()` on added production lines.
+
+### /analyze-clean-code + code issues (measured without an instrumented coverage build: no Rust tests locally, disk at 93%)
+- Structural scan (fn span lines / brace nesting) of every function this PR added or grew, against `/analyze-clean-code` (length 60, nesting 4):
+  - `ensure_project_home_session_at_session_coordinate` 66 → **32** (split: `caller_home_scope` 26, `ensure_on_this_host` 33).
+  - `execute_tool` had grown 58 → 63 (past 60) and `stream_execute_tool` 81 → 86 (open record): both back to **58 / 81** — the two local refusals are one call, `role_guard::reject_refused_local_exec_tool`.
+  - `spawn_claude_cli_session_inner` +8 → **+4** (the checkout choice moved to `claude_cli_spawn_steps::claude_cli_checkout`); the remaining +4 and `start_claude_cli_session` +3 are the `repo_path` parameter threaded through two already-long, unrecorded functions (291 / 113 lines at base).
+  - New functions all ≤ 36 lines, nesting ≤ 2.
+- File-length gate (≥ 500 production lines), all **stack-shared, not split**:
+  - 🔴 `tddy-web/src/components/sessions/SessionDrawer.tsx` 534 → 567 — record `oversized-file-session-drawer.md` (row added; the slotting logic moved out to `utils/projectHomeGroups.ts`).
+  - 🔴 `tddy-web/src/components/sessions/SessionsDrawerScreen.tsx` 497 → 511 — new record `oversized-file-sessions-drawer-screen.md`.
+  - ⚠️ `tddy-tool-engine/src/lib.rs` 873 → 874 (`pub mod read_only;`) — row added to `oversized-file-lib.md`.
+  - (`agent_activity_unit_tests.rs` 1270 → 1271 is a test file — one `session_role` literal.)
 
 ## TODO
 
@@ -234,19 +264,19 @@ stub scripts) and a real git fixture repo for the home worktree; a unit test tab
 - [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code (Rust tests deferred to CI per coordinator; clippy -D warnings clean on 7 crates; drawer Cypress specs green)
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests for touched packages; full-workspace result from CI
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run scoped tests for touched packages — web specs + bun test locally; Rust tests deferred to CI (developer instruction, 2026-10-23)
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] USER REVIEW — development complete (waived: unattended `/green-yolo` § Consent)
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
 - [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-22-project-home-session-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps

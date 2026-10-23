@@ -2,7 +2,8 @@
  * Acceptance: each project group in the drawer starts with a pinned **main** entry for the
  * project-home session. Clicking it ensures that session (`EnsureProjectHomeSession`) and selects
  * it; the home session is not repeated among the group's rows; a project with no home agent shows
- * a hint instead; the **Other** group has no pinned entry.
+ * a hint instead; the **Other** group has no pinned entry; a project with a home agent and no
+ * session yet still gets its group, so the pinned entry is how its first session starts.
  *
  * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-22-project-home-session.md (`#project-home` 4/7).
  */
@@ -24,6 +25,7 @@ import {
   byTestId,
   sessionsDrawerItem,
   sessionsDrawerProjectGroup,
+  sessionsDrawerProjectGroupHeader,
   sessionsDrawerProjectHome,
   sessionsDrawerProjectHomeHint,
 } from "../support/testIds";
@@ -177,4 +179,26 @@ it("the Other group has no pinned entry", () => {
     .find("[data-testid^='sessions-drawer-project-home-']")
     .should("not.exist");
   byTestId(sessionsDrawerItem("orphan")).should("exist");
+});
+
+it("a project with a home agent and no session yet still shows its pinned entry", () => {
+  // When only beta (no home agent) has a session
+  aDrawer([aSession("b1", BETA.projectId)]);
+
+  // Then alpha's group exists for its pinned entry alone, ordered before beta's
+  rowOrderIn(ALPHA.projectId).should("deep.equal", [sessionsDrawerProjectHome(ALPHA.projectId)]);
+  cy.get("[data-testid^='sessions-drawer-project-group-header-']").then(($headers) => {
+    expect([...$headers].map((h) => h.getAttribute("data-testid"))).to.deep.equal([
+      sessionsDrawerProjectGroupHeader(ALPHA.projectId),
+      sessionsDrawerProjectGroupHeader(BETA.projectId),
+    ]);
+  });
+});
+
+it("a project with no home agent and no session gets no group", () => {
+  // When only alpha has a session
+  aDrawer([aSession("a1", ALPHA.projectId)]);
+
+  // Then
+  byTestId(sessionsDrawerProjectGroup(BETA.projectId)).should("not.exist");
 });
