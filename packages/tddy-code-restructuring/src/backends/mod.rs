@@ -3,6 +3,8 @@
 
 pub mod lsp_bridge;
 pub mod rust;
+pub mod server;
 
 pub use lsp_bridge::LspClientBridge;
 pub use rust::RustBackend;
+pub use server::ServerBackend;

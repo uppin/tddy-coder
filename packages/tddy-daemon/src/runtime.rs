@@ -285,7 +285,9 @@ pub async fn build(
     apply_env_overrides(&mut config);
 
     let identity = Identity::assemble(&config, &options)?;
-    let mut context = BuildContext::new(config, options, identity);
+    // The index daemon's own registry: the session level serves what it serves (R7).
+    let index_supports = tddy_daemon_rpc::code_navigation::host_supports()?;
+    let mut context = BuildContext::new(config, options, identity, index_supports);
     context.mount_session_services().await?;
     context.mount_daemon_settings();
     context.serve_common_room();

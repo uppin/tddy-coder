@@ -352,3 +352,43 @@ fn a_grammar_load_failure_says_which_extension_and_grammar() {
         "unexpected report: {report}"
     );
 }
+
+#[test]
+fn a_snapshot_re_resolves_an_extension_languages_item_anchors_without_a_server() {
+    // Given a plan file whose only item anchor lies in a file the server-less demo-toml claims
+    let installed = an_extensions_dir_with(&[AFixtureExtension::DemoToml]);
+    let workspace = a_workspace_holding_the_app_config();
+    let fingerprint =
+        serde_json::to_string(&the_fingerprint_of_lines(1, 3)).expect("a fingerprint is JSON");
+    let plan = workspace.root().join("plan.jsonl");
+    std::fs::write(
+        &plan,
+        format!(
+            "{{\"v\":1,\"snapshot\":{{}}}}\n\
+             {{\"op\":\"extract_module\",\"anchor\":{{\"kind\":\"items\",\"file\":\"{APP}\",\
+             \"items\":[\"{APP}::server\"],\"fingerprints\":[{fingerprint}]}},\"name\":\"moved\"}}\n"
+        ),
+    )
+    .expect("write the plan");
+    let mut supports = SupportRegistry::new();
+    supports
+        .with_installed_extensions(&installed.extensions)
+        .expect("the extensions register");
+
+    // When its snapshot is rewritten with no language server
+    let rewritten = tddy_code_restructuring::runner::snapshot_resolving(
+        workspace.root(),
+        Options {
+            command: Command::Snapshot,
+            target: Some(plan),
+            installed: Arc::new(supports),
+            ..Options::default()
+        },
+        None,
+        CancellationToken::new(),
+    );
+
+    // Then the anchor is re-resolved from the file's text, and nothing is stale
+    let rewrite = rewritten.expect("a server-less item anchor needs no server");
+    assert_eq!(rewrite.stale.len(), 0);
+}

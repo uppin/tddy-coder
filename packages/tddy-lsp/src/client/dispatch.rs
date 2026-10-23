@@ -10,26 +10,41 @@ use super::parse::parse_diagnostics;
 use super::{DiagnosticsCache, Notifications, Pending, Response, ResponseError};
 use crate::protocol::{encode_message, FrameReader};
 
+/// Where [`read_loop`] routes what the server sends: the client's pending requests, its
+/// diagnostics cache and notification sink, the channel replies go back on, and the settings a
+/// `workspace/configuration` request is answered from.
+pub(super) struct Routes {
+    pub(super) pending: Pending,
+    pub(super) diagnostics: DiagnosticsCache,
+    pub(super) notifications: Notifications,
+    pub(super) stdin: mpsc::UnboundedSender<Bytes>,
+    pub(super) workspace_configuration: Value,
+}
+
 /// Drain the server's stdout: correlate responses to pending requests and cache
 /// `publishDiagnostics` notifications.
-pub(super) async fn read_loop(
-    mut stdout: broadcast::Receiver<Bytes>,
-    pending: Pending,
-    diagnostics: DiagnosticsCache,
-    notifications: Notifications,
-    stdin: mpsc::UnboundedSender<Bytes>,
-) {
+pub(super) async fn read_loop(mut stdout: broadcast::Receiver<Bytes>, routes: Routes) {
     let mut frames = FrameReader::new();
     loop {
-        match stdout.recv().await {
-            Ok(bytes) => {
-                frames.push(&bytes);
-                while let Some(message) = frames.next_message() {
-                    dispatch(&message, &pending, &diagnostics, &notifications, &stdin);
-                }
-            }
+        let bytes = match stdout.recv().await {
+            Ok(bytes) => bytes,
             Err(broadcast::error::RecvError::Lagged(_)) => continue,
             Err(broadcast::error::RecvError::Closed) => break,
+        };
+        frames.push(&bytes);
+        while let Some(message) = frames.next_message() {
+            if let Some(reply) = configuration_reply(&message, &routes.workspace_configuration) {
+                let _ = routes.stdin.send(Bytes::from(encode_message(&reply)));
+                continue;
+            }
+            let Routes {
+                pending,
+                diagnostics,
+                notifications,
+                stdin,
+                ..
+            } = &routes;
+            dispatch(&message, pending, diagnostics, notifications, stdin);
         }
     }
 }
@@ -85,6 +100,17 @@ fn dispatch(
     }
 }
 
+/// The reply to a `workspace/configuration` request, answered from the launch's settings; `None` for
+/// any other message, which [`dispatch`] handles.
+fn configuration_reply(message: &Value, settings: &Value) -> Option<Value> {
+    let method = message.get("method").and_then(Value::as_str)?;
+    let id = message.get("id").cloned()?;
+    (method == "workspace/configuration").then(|| {
+        let result = configuration_answer(settings, message.get("params"));
+        json!({ "jsonrpc": "2.0", "id": id, "result": result })
+    })
+}
+
 /// Split a response into its `result` or its `error`.
 fn response_payload(message: &Value) -> Response {
     if let Some(error) = message.get("error") {
@@ -101,21 +127,43 @@ fn response_payload(message: &Value) -> Response {
 }
 
 /// Build the response to a server→client request. `workspace/configuration` expects an
-/// array with one entry per requested item; every other request is acknowledged with a
+/// array with one entry per requested item (null each here; [`read_loop`] answers it from the
+/// launch's settings before it reaches this); every other request is acknowledged with a
 /// `null` result (sufficient for `registerCapability` / `workDoneProgress/create`).
 fn server_request_reply(method: &str, params: Option<&Value>, id: Value) -> Value {
     let result = match method {
-        "workspace/configuration" => {
-            let count = params
-                .and_then(|p| p.get("items"))
-                .and_then(Value::as_array)
-                .map(|items| items.len())
-                .unwrap_or(0);
-            Value::Array(vec![Value::Null; count])
-        }
+        "workspace/configuration" => configuration_answer(&Value::Null, params),
         _ => Value::Null,
     };
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
+}
+
+/// The answer to a `workspace/configuration` request, from the launch's settings: one entry per
+/// requested item, each the value at the item's dot-separated `section` path in `settings`, the
+/// whole of `settings` for an item that names no section, and null where the path is absent
+/// (`#reshape` extension-language-server, R4).
+///
+/// With `settings` null this is one null per item — what [`server_request_reply`] answers today,
+/// and what Rust's launch keeps getting.
+pub(super) fn configuration_answer(settings: &Value, params: Option<&Value>) -> Value {
+    let items = params
+        .and_then(|params| params.get("items"))
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    Value::Array(
+        items
+            .iter()
+            .map(|item| match item.get("section").and_then(Value::as_str) {
+                Some(section) => section
+                    .split('.')
+                    .try_fold(settings, |value, key| value.get(key))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                None => settings.clone(),
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -303,5 +351,70 @@ mod tests {
             reply,
             json!({ "jsonrpc": "2.0", "id": 3, "result": [null, null, null] })
         );
+    }
+
+    /// The settings a launch answers `workspace/configuration` from in the tests below.
+    fn a_servers_settings() -> Value {
+        json!({ "fake": { "mode": "strict", "lint": { "level": 2 } } })
+    }
+
+    /// A `workspace/configuration` request's params asking for `sections`, one item each.
+    fn a_configuration_request_for(sections: &[Option<&str>]) -> Value {
+        let items: Vec<Value> = sections
+            .iter()
+            .map(|section| match section {
+                Some(section) => json!({ "section": section }),
+                None => json!({}),
+            })
+            .collect();
+        json!({ "items": items })
+    }
+
+    #[test]
+    fn answers_each_configuration_item_from_its_section_path() {
+        // Given a request for a leaf and for a table of the settings
+        let params = a_configuration_request_for(&[Some("fake.mode"), Some("fake.lint")]);
+
+        // When it is answered from the settings
+        let answer = configuration_answer(&a_servers_settings(), Some(&params));
+
+        // Then each item gets the value at its dot-separated path
+        assert_eq!(answer, json!(["strict", { "level": 2 }]));
+    }
+
+    #[test]
+    fn answers_null_for_a_section_the_settings_lack() {
+        // Given a request for a path the settings do not hold
+        let params = a_configuration_request_for(&[Some("fake.missing"), Some("other")]);
+
+        // When it is answered from the settings
+        let answer = configuration_answer(&a_servers_settings(), Some(&params));
+
+        // Then each absent path is null, one per item
+        assert_eq!(answer, json!([null, null]));
+    }
+
+    #[test]
+    fn answers_the_whole_settings_for_an_item_without_a_section() {
+        // Given a request whose one item names no section
+        let params = a_configuration_request_for(&[None]);
+
+        // When it is answered from the settings
+        let answer = configuration_answer(&a_servers_settings(), Some(&params));
+
+        // Then the item gets the settings whole
+        assert_eq!(answer, json!([a_servers_settings()]));
+    }
+
+    #[test]
+    fn answers_one_null_per_item_when_the_launch_has_no_settings() {
+        // Given a launch with no settings — Rust's — and a request for two items
+        let params = a_configuration_request_for(&[Some("rust-analyzer"), None]);
+
+        // When it is answered
+        let answer = configuration_answer(&Value::Null, Some(&params));
+
+        // Then every item is null, as before settings existed
+        assert_eq!(answer, json!([null, null]));
     }
 }

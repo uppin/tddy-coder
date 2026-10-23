@@ -17,6 +17,7 @@ mod comparison;
 mod compile_gate;
 mod entry_points;
 pub mod group_gate;
+mod installed_servers;
 mod options;
 mod outcome;
 mod rehearsal;
@@ -29,9 +30,10 @@ pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, Applied
 pub use entry_points::{
     apply, apply_from_store, check, check_plan, dispatch, item_anchors, open_plan_run,
     open_run_resolving_anchors, record_applied_op, refuse_a_stale_pending_op, registry_for,
-    registry_for_waiting, run, snapshot, snapshot_resolving, stale_findings, status,
-    status_of_plan, PlanRun,
+    registry_for_apply, registry_for_waiting, run, snapshot, snapshot_resolving, stale_findings,
+    status, status_of_plan, PlanRun,
 };
+pub use installed_servers::{installed_launches_for, InstalledServers};
 pub use options::{command_of, parse_options, Command, Options};
 pub use outcome::{FileLines, Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 

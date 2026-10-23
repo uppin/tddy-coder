@@ -21,7 +21,7 @@ use crate::{
 
 use crate::Overlay;
 
-use super::registry_for;
+use super::registry_for_apply;
 
 use super::super::refuse_a_broken_baseline;
 
@@ -274,15 +274,7 @@ fn apply_held_plan(
         })?
         .plan
         .clone();
-    // TODO(extension-language-server): route through `options.installed`, once an installed
-    // language has a server and so an operation to apply — until then (R7) it supports none.
-    let mut registry = registry_for(
-        root,
-        client,
-        cancel.clone(),
-        Arc::clone(&options.progress),
-        options.trace,
-    );
+    let mut registry = registry_for_apply(root, client, cancel.clone(), options);
     let PlanRun {
         mut journal,
         plan,

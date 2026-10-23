@@ -55,6 +55,14 @@
 //!   ready" need no sleeps. The load runs on a thread of its own, so every request is answered while
 //!   it waits — as `--answers-in-its-workspace` says when combined with it. Wins over
 //!   `--loads-crate-graph`.
+//! - `--requests-configuration <section>` — on `initialized`, ask the client `workspace/configuration`
+//!   for one item, `{ section: <section> }`, the way a server that reads its settings from the
+//!   client does. `tddy/configurationAnswers` replays what the client answered, held until the
+//!   answer has arrived — so a test that asks straight after the handshake does not race it.
+//! - `--answers-rename` — answer `textDocument/rename` with a `WorkspaceEdit` that replaces the
+//!   identifier under the requested position (letters, digits, `_` and `-`, in the text the client
+//!   last announced for that document) with `newName`. Without it a rename is answered `null`, as
+//!   every unknown request is.
 //!
 //! Every mode above is off unless asked for, so adding one leaves a server started without it
 //! byte-identical to what it was.
@@ -143,6 +151,15 @@ fn main() {
         args.iter().any(|a| a == "--answers-in-its-workspace"),
         std::sync::atomic::Ordering::SeqCst,
     );
+    *REQUESTS_CONFIGURATION.lock().unwrap() = args
+        .iter()
+        .position(|a| a == "--requests-configuration")
+        .and_then(|at| args.get(at + 1))
+        .cloned();
+    ANSWERS_RENAME.store(
+        args.iter().any(|a| a == "--answers-rename"),
+        std::sync::atomic::Ordering::SeqCst,
+    );
     let cold_hovers = args
         .iter()
         .position(|a| a == "--cold-hovers")
@@ -167,6 +184,22 @@ fn main() {
         }
     }
 }
+
+/// Set by `--requests-configuration <section>`: the section the server asks the client for.
+static REQUESTS_CONFIGURATION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// The id of the `workspace/configuration` request this server sends the client.
+const CONFIGURATION_REQUEST_ID: &str = "fake-lsp-configuration";
+
+/// What the client answered to the `workspace/configuration` request, once it has.
+static CONFIGURATION_ANSWERS: std::sync::Mutex<Option<Vec<Value>>> = std::sync::Mutex::new(None);
+
+/// A `tddy/configurationAnswers` that arrived before the client's answer did, to reply to once it
+/// arrives.
+static PENDING_CONFIGURATION_REPLAY: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+
+/// Set by `--answers-rename`: `textDocument/rename` is answered with an edit.
+static ANSWERS_RENAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Set by `--answers-in-its-workspace`: locations are reported under the client's `rootUri`.
 static ANSWERS_IN_ITS_WORKSPACE: std::sync::atomic::AtomicBool =
@@ -640,9 +673,107 @@ fn remembered_initialize_params() -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// Ask the client for the `--requests-configuration` section, if one was given.
+fn request_configuration() {
+    let Some(section) = REQUESTS_CONFIGURATION.lock().unwrap().clone() else {
+        return;
+    };
+    send(&json!({
+        "jsonrpc": "2.0",
+        "id": CONFIGURATION_REQUEST_ID,
+        "method": "workspace/configuration",
+        "params": { "items": [{ "section": section }] }
+    }));
+}
+
+/// A response from the client: the answer to this server's `workspace/configuration` request is
+/// kept, and replayed to a `tddy/configurationAnswers` that was waiting for it.
+fn record_client_response(message: &Value) {
+    if message.get("id").and_then(Value::as_str) != Some(CONFIGURATION_REQUEST_ID) {
+        return;
+    }
+    let answer = message.get("result").cloned().unwrap_or(Value::Null);
+    CONFIGURATION_ANSWERS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(Vec::new)
+        .push(answer);
+    if let Some(waiting) = PENDING_CONFIGURATION_REPLAY.lock().unwrap().take() {
+        replay_configuration_answers(Some(waiting));
+    }
+}
+
+/// Reply with every configuration answer the client gave, or hold the reply until it has given one.
+fn replay_configuration_answers(id: Option<Value>) {
+    let answers = CONFIGURATION_ANSWERS.lock().unwrap().clone();
+    match answers {
+        Some(answers) => reply(id, json!(answers)),
+        None => *PENDING_CONFIGURATION_REPLAY.lock().unwrap() = id,
+    }
+}
+
+/// The edit `--answers-rename` gives a `textDocument/rename`: the identifier under the position, in
+/// the text last announced for the document, replaced by `newName`; `null` when the document was
+/// never announced or no identifier is there.
+fn rename_result(message: &Value) -> Value {
+    let uri = notified_uri(message);
+    let line = message
+        .pointer("/params/position/line")
+        .and_then(Value::as_u64);
+    let character = message
+        .pointer("/params/position/character")
+        .and_then(Value::as_u64);
+    let new_name = message
+        .pointer("/params/newName")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let text = recorded_document_texts()
+        .get(&uri)
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let (Some(text), Some(line), Some(character)) = (text, line, character) else {
+        return Value::Null;
+    };
+    let Some(source_line) = text.split('\n').nth(line as usize) else {
+        return Value::Null;
+    };
+    let Some((start, end)) = identifier_around(source_line, character as usize) else {
+        return Value::Null;
+    };
+    json!({
+        "changes": {
+            uri: [{ "range": range(line as u32, start as u32, line as u32, end as u32), "newText": new_name }]
+        }
+    })
+}
+
+/// The byte range of the identifier that contains byte `at` of `line`.
+fn identifier_around(line: &str, at: usize) -> Option<(usize, usize)> {
+    let is_part = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-';
+    let bytes = line.as_bytes();
+    if at >= bytes.len() || !is_part(bytes[at]) {
+        return None;
+    }
+    let start = (0..at)
+        .rev()
+        .take_while(|&i| is_part(bytes[i]))
+        .last()
+        .unwrap_or(at);
+    let end = (at..bytes.len())
+        .find(|&i| !is_part(bytes[i]))
+        .unwrap_or(bytes.len());
+    Some((start, end))
+}
+
 fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_graph: bool) {
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
     let id = message.get("id").cloned();
+    // A response from the client to a request this server sent: it carries no method, and must
+    // not be answered as an unknown request.
+    if method.is_empty() && (message.get("result").is_some() || message.get("error").is_some()) {
+        record_client_response(message);
+        return;
+    }
     if let Some(id) = &id {
         record_request_method(id, method);
     }
@@ -668,6 +799,7 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
             } else if loads_crate_graph {
                 narrate_a_crate_graph_load();
             }
+            request_configuration();
         }
         "textDocument/didOpen" => {
             record_document_sync(message, method);
@@ -693,6 +825,11 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
         "tddy/documentTexts" => reply(id, recorded_document_texts()),
         // Replays the `languageId` each URI was last opened as.
         "tddy/documentLanguages" => reply(id, recorded_document_languages()),
+        // Replays what the client answered to this server's `workspace/configuration` request.
+        "tddy/configurationAnswers" => replay_configuration_answers(id),
+        "textDocument/rename" if ANSWERS_RENAME.load(std::sync::atomic::Ordering::SeqCst) => {
+            reply(id, rename_result(message))
+        }
         // Replays the methods of the requests the client asked to cancel.
         "tddy/cancelledRequests" => reply(id, recorded_cancellations()),
         // Writes more to stderr than a pipe buffer holds, then replies.

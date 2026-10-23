@@ -28,7 +28,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::activity::Activity;
-use crate::apply::{apply_plan, HeldPlan};
+use crate::apply::{apply_plan, servers_for_a_run, HeldPlan};
 use crate::index::WorkspaceIndex;
 use crate::proto::code_index::{
     restructure_event, ApplyRequest, CheckRequest, Finding, IndexProgress, RestructureEvent,
@@ -211,8 +211,8 @@ pub(crate) async fn serve_apply(
                 return;
             }
         };
-        let client = match index.client_for(&root).await {
-            Ok(client) => client,
+        let (client, options) = match servers_for_a_run(&index, &root, &held, options).await {
+            Ok(served) => served,
             Err(refusal) => {
                 activity.refused(&refusal);
                 let _ = events.send(Err(refusal)).await;

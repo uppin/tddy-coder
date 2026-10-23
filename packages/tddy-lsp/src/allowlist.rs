@@ -63,6 +63,13 @@ pub struct LaunchSpec {
     /// Empty from [`LaunchSpec::new`]; [`LspAllowList::allow`] fills an empty one with the id of the
     /// language it is allowed for, which is what a server of that language expects to be told.
     pub language_id: String,
+    /// The settings a `workspace/configuration` request is answered from: each requested item gets
+    /// the value at its `section` path (dot-separated) in here, the whole value for an item that
+    /// names no section, and null where the path is absent.
+    ///
+    /// Null by default — every item answered null, which is what every server got before this
+    /// field existed, and what Rust's launch still sends (`#reshape` extension-language-server, R4).
+    pub workspace_configuration: Value,
 }
 
 impl LaunchSpec {
@@ -75,6 +82,7 @@ impl LaunchSpec {
             capabilities: Value::Object(Default::default()),
             initialization_options: Value::Null,
             language_id: String::new(),
+            workspace_configuration: Value::Null,
         }
     }
 
@@ -87,6 +95,12 @@ impl LaunchSpec {
     /// Send `options` as the handshake's `initializationOptions`.
     pub fn with_initialization_options(mut self, options: Value) -> Self {
         self.initialization_options = options;
+        self
+    }
+
+    /// Answer the server's `workspace/configuration` requests from `settings`.
+    pub fn with_workspace_configuration(mut self, settings: Value) -> Self {
+        self.workspace_configuration = settings;
         self
     }
 

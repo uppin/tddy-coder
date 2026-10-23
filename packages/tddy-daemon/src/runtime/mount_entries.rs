@@ -129,7 +129,8 @@ impl BuildContext {
                         Arc::new(registry)
                             as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>
                     }),
-                ),
+                )
+                .with_supports(Arc::clone(&self.index_supports)),
             ),
         );
     }

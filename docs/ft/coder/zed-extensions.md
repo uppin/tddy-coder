@@ -1,6 +1,6 @@
 # Zed extensions
 
-**Status:** 🚧 Install, list and remove delivered (`#reshape` 19/24, [#678](https://github.com/uppin/tddy-coder/pull/678)); an installed extension's languages get anchors and outlines from their grammar (`#reshape` 20/24, [#679](https://github.com/uppin/tddy-coder/pull/679)); no language server is started for them yet.
+**Status:** 🚧 Install, list and remove delivered (`#reshape` 19/24, [#678](https://github.com/uppin/tddy-coder/pull/678)); an installed extension's languages get anchors and outlines from their grammar (`#reshape` 20/24, [#679](https://github.com/uppin/tddy-coder/pull/679)); an extension language's server starts from tddy settings, with rename and references (`#reshape` 22/24, [#681](https://github.com/uppin/tddy-coder/pull/681)).
 
 tddy reuses Zed editor extensions — their languages, tree-sitter grammars (already compiled to WASM)
 and language-server declarations — to understand languages it has no built-in support for. This
@@ -91,11 +91,12 @@ cold CLI (`tddy-tools restructure`) and the index daemon, so the two answer the 
 - **Item paths.** `<file relative to the workspace root>::<context…>::<name>` — no module system is
   known, so the file is the prefix: `config/app.toml::server::port`.
 - **Anchors.** `restructure anchors --items` / `--at` on such a file, an `item` / `items` anchor in a
-  plan, and a static `check`'s fingerprint test work as they do for Rust, with Rust's refusals
+  plan, a static `check`'s fingerprint test and a `snapshot`'s re-resolution work as they do for Rust, with Rust's refusals
   (non-adjacent items, a stale fingerprint, an absent or ambiguous name). None of them starts
   rust-analyzer for a file only an extension language claims.
-- **No server.** Every operation on such a file — `rename_symbol`, code actions, references — is
-  refused with `UnsupportedOp { backend: "<language id>", op }`.
+- **No server.** A language no `[language_servers.<id>]` serves refuses every operation on its files —
+  `rename_symbol`, code actions, references — with `UnsupportedOp { backend: "<language id>", op }`. A
+  language with a server is described under [Language servers](#language-servers).
 - **A grammar that does not load** is reported once per run, however many languages share it —
   `extension <id>: grammar <g> did not load: <reason>` — and its languages claim nothing; every other
   extension still loads. An `outline.scm` that does not compile fails its own language with the same
@@ -106,8 +107,60 @@ cold CLI (`tddy-tools restructure`) and the index daemon, so the two answer the 
 108 MB (60 MB without it); a standalone release binary that loads a grammar, parses and runs a query
 is 11 MB. The release sizes of `tddy-tools` and `tddy-index-daemon` are not measured.
 
+## Language servers
+
+An extension's `[language_servers.<id>]` entries say **which** server serves which of its languages. Zed takes
+the server's **command** from the extension's WASM; tddy runs no WASM, so it takes the command from its own
+settings, in the shape of Zed's `lsp` setting — a block copied from Zed's `settings.json` works unchanged.
+
+**Settings file.** `<extensions dir>/settings.json`. Unknown keys are ignored; a file that is not there is no
+settings; one that does not parse fails the load, naming the file.
+
+```json
+{
+  "lsp": {
+    "elixir-ls": {
+      "binary": { "path": "/opt/elixir-ls/language_server.sh", "arguments": [], "env": {} },
+      "initialization_options": {},
+      "settings": {}
+    }
+  },
+  "languages": { "Elixir": { "language_servers": ["elixir-ls"] } }
+}
+```
+
+- **Which server.** The manifest entry whose `language` or `languages` names the language. An entry that also
+  lists the language in `opt_in_languages` serves it only when `languages.<Name>.language_servers` names it as a
+  bare id — `!<id>` disables it, `...` does not name an opt-in server, and a language with no entry names nothing,
+  as in Zed. When several entries qualify, the first by id serves the language (the tie-break is an open
+  decision: [backlog](../../dev/todo/2026-10-22-extension-language-several-qualifying-servers-tie-break.md)).
+- **Command.** Only `lsp.<id>.binary.path`, with its `arguments` and `env`. A server id is never looked up on
+  `PATH`.
+- **No command.** Every operation that needs the server is refused before any process starts:
+  `language server <id> (extension <ext>) has no command: set lsp.<id>.binary.path in <file>`. Item anchors
+  still answer from the outline.
+- **Configuration.** `initialization_options` is sent at `initialize`. A `workspace/configuration` request is
+  answered item by item from `settings`, by each item's `section` path, with `null` where nothing is set.
+- **Language id.** Documents are opened with the entry's `language_ids` value for the language, else the
+  language's id.
+- **Root.** The workspace root of the run or worktree; no manifest rule is looked for.
+- **Positions.** tddy asks for byte (`utf-8`) positions; a server that settles on anything else is refused
+  before a rename is sent, since its columns would be mis-addressed.
+- **Readiness.** A server not asked for rust-analyzer's `experimental/serverStatus` reads `READY` once
+  `initialize` has completed.
+
+**What a server gives the language:**
+
+- **`rename_symbol`** on an `item` / `items` / `range` anchor: the item's name position, as the outline locates
+  it, is sent as `textDocument/rename`, and the returned `WorkspaceEdit` is applied as Rust's edits are — by the
+  cold CLI and through the index daemon. A run starts one server per installed language a file of its plan
+  belongs to, beside rust-analyzer.
+- **Definition, references and hover** through the index daemon's code-index queries, answered by the server.
+- **An index.** A worktree with no `Cargo.toml` whose files an installed language with a configured server
+  claims has a code index (`LOADING` / `READY`, never `NONE`), at the index daemon and at the session level.
+
 ## Not yet
 
-- No language server is started for an extension language, and no code action is run on one.
+- No code action is run for an extension language, and its server is not told of files changed on disk
+  ([backlog](../../dev/todo/2026-10-22-extension-servers-are-not-told-of-tree-changes.md)).
 - No `extension.wasm` is run; no grammar or extension is built.
-- A plan's `snapshot` re-resolves only the built-ins' item anchors.

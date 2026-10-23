@@ -230,7 +230,8 @@ impl BuildContext {
         if let Some(registry) = index_daemon_registry.clone() {
             connection_impl = connection_impl.with_worktree_observer(Arc::new(
                 tddy_daemon_rpc::code_index_warmup::IndexWarmupObserver::new(Arc::new(registry)
-                    as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>),
+                    as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>)
+                .with_supports(Arc::clone(&self.index_supports)),
             ));
         }
         if let Some(ref tracker) = idle_tracker {

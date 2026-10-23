@@ -17,6 +17,7 @@ use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
 use super::comparison::verify;
+use super::installed_servers::InstalledServers;
 use super::options::usage;
 use super::{parse_options, Command, Options, Outcome, RunSummary};
 
@@ -113,7 +114,35 @@ pub fn registry_for(
     progress: ProgressSink,
     trace: fn(&str),
 ) -> BackendRegistry {
-    registry_for_waiting(root, client, cancel, progress, trace, WAIT_HEARTBEAT)
+    let installed = InstalledServers::default();
+    registry_for_waiting(
+        root,
+        client,
+        cancel,
+        progress,
+        trace,
+        WAIT_HEARTBEAT,
+        &installed,
+    )
+}
+
+/// The registry an apply runs through: [`registry_for_waiting`] over `options`' sinks and cadence,
+/// routing every installed language to the server started for it ([`Options::installed_servers`]).
+pub fn registry_for_apply(
+    root: &Path,
+    client: Arc<LspClient>,
+    cancel: CancellationToken,
+    options: &Options,
+) -> BackendRegistry {
+    registry_for_waiting(
+        root,
+        client,
+        cancel,
+        Arc::clone(&options.progress),
+        options.trace,
+        options.wait_heartbeat,
+        &options.installed_servers(),
+    )
 }
 
 /// [`registry_for`], then the server-less backends of `options.installed` after the built-ins': the
@@ -141,6 +170,10 @@ fn registry_with_installed(
 /// The cadence is not a budget: nothing ends a wait at it, and a run still waits until the server
 /// is ready or `cancel` fires. A host passes the one it was configured with and a test passes a
 /// short one, so neither waits [`WAIT_HEARTBEAT`] to see a beat.
+///
+/// The built-ins come first, over `client`; then each of `installed`'s supports, over the server
+/// started for its language when there is one and with none otherwise (`#reshape`
+/// extension-language-server, R6).
 pub fn registry_for_waiting(
     root: &Path,
     client: Arc<LspClient>,
@@ -148,6 +181,7 @@ pub fn registry_for_waiting(
     progress: ProgressSink,
     trace: fn(&str),
     wait_heartbeat: Duration,
+    installed: &InstalledServers,
 ) -> BackendRegistry {
     let server = LiveServer {
         client: &client,
@@ -156,7 +190,9 @@ pub fn registry_for_waiting(
         trace: wants_trace(std::env::var_os(TRACE_VARIABLE).as_deref()).then_some(trace),
         wait_heartbeat,
     };
-    SupportRegistry::with_builtins().backends(ServerHandle::live(server), root)
+    let mut registry = SupportRegistry::with_builtins().backends(ServerHandle::live(server), root);
+    registry.extend(installed.backends(root, &server));
+    registry
 }
 
 /// Execute a plan against the working tree under `root`.

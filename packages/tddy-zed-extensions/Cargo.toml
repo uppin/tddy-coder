@@ -8,6 +8,13 @@ description = "Install, list and remove Zed editor extensions under <tddy data d
 name = "tddy_zed_extensions"
 path = "src/lib.rs"
 
+# tddy-lsp's deterministic fake server, so the language-server suite starts a real process from the
+# launch an extension language's settings give it (exposes CARGO_BIN_EXE_fake_lsp to this crate's
+# tests). It compiles against `tddy_lsp::protocol` and `serde_json`, both dependencies here.
+[[bin]]
+name = "fake_lsp"
+path = "../tddy-lsp/tests/bin/fake_lsp.rs"
+
 [dependencies]
 anyhow = "1"
 # `default_tddy_data_dir`: the debug-build default the daemon resolves the tddy data dir from.
@@ -37,6 +44,9 @@ tree-sitter = { version = "0.26.13", features = ["wasm"] }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = "3"
+# `TaskRegistry`, which the `LspRegistry` the language-server suite starts its server through takes.
+# A workspace crate already under tddy-lsp, so nothing new enters the tree.
+tddy-task = { path = "../tddy-task" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # `CancellationToken`, which the static `check` entry point takes: already a dependency of
 # tddy-code-restructuring at this version, so no new crate enters the tree.

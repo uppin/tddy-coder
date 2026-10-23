@@ -69,8 +69,10 @@ executor that would have answered without an index is not asked in its place.
 
 ## Availability and `ReadLints`
 
-`is_available` is true when the worktree's root holds a `Cargo.toml` (`tddy_index_daemon::is_rust_workspace`)
-— the one language the index serves.
+`is_available` is true when the index serves the worktree (`tddy_index_daemon::serves_workspace` over the
+host's registry, handed in with `IndexLspExecutor::with_supports`): a `Cargo.toml` at its root, or a file an
+installed extension language with a configured server claims. Without a registry only a Rust worktree is
+served.
 
 `workspace_diagnostics` (the `ReadLints` tool) is **refused**: the index answers diagnostics for one file
 at a time. The message points the agent at `LspDiagnostics` with a file. Answering it from a language

@@ -106,18 +106,15 @@ fn anchor_and_span(
     );
     let anchor = runner::item_anchors(root, options, client.clone(), cancel.clone())?;
     let mut registry = match client {
-        Some(client) => {
-            let mut registry = runner::registry_for_waiting(
-                root,
-                client,
-                cancel,
-                progress,
-                logged_trace,
-                heartbeat,
-            );
-            registry.extend(installed.backends_static(root));
-            registry
-        }
+        Some(client) => runner::registry_for_waiting(
+            root,
+            client,
+            cancel,
+            progress,
+            logged_trace,
+            heartbeat,
+            &runner::InstalledServers::over(std::sync::Arc::clone(&installed)),
+        ),
         None => installed.backends_static(root),
     };
     let range = item_anchor::span_of(&anchor, root, &mut registry)?;
@@ -190,11 +187,12 @@ async fn snapshotted(
         target: Some(plan.clone()),
         progress: logged_progress(),
         trace: logged_trace,
+        installed: index.supports(),
         ..Options::default()
     };
 
     let _queued = index.hold(&root).await;
-    let client = if item_anchor::plan_file_has_item_anchors(&plan) {
+    let client = if options.plan_item_anchors_need_a_server() {
         Some(index.client_for(&root).await?)
     } else {
         None

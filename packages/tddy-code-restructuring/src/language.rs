@@ -143,9 +143,19 @@ impl SupportRegistry {
 
     /// Each support's backend over `server` for the workspace at `root`, in registration order.
     pub fn backends(&self, server: ServerHandle<'_>, root: &Path) -> BackendRegistry {
+        self.backends_over(root, |_| server)
+    }
+
+    /// Each support's backend over the server `server_of` names for its language — the static
+    /// tier's [`ServerHandle::none`] for one it names none for — in registration order.
+    pub fn backends_over<'s>(
+        &self,
+        root: &Path,
+        server_of: impl Fn(&LanguageId) -> ServerHandle<'s>,
+    ) -> BackendRegistry {
         let mut registry = BackendRegistry::new();
         for support in &self.supports {
-            registry.register(support.backend(server, root));
+            registry.register(support.backend(server_of(support.id()), root));
         }
         registry
     }

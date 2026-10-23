@@ -164,20 +164,19 @@ async fn main() -> ExitCode {
 /// run, because the serving path needs the same handle in more than one place and a second
 /// construction shape would be a second thing to keep in step.
 ///
-/// The allow-list is the one the built-in Rust support launches, with the configured program.
-/// TODO(extension-language-server): an installed language that launches a server is allowed here
-/// too; today none does, so the built-in's is the whole list.
-///
-/// This process cannot share `tddy-daemon`'s registry: the handshake is fixed at spawn, and the handshake
+/// The allow-list is built from the same registry the service routes by: the built-in Rust support
+/// launching the configured program, then every installed language (`#reshape`
+/// extension-language-server, R7). This
+/// process cannot share `tddy-daemon`'s registry: the handshake is fixed at spawn, and the handshake
 /// is what this process's server needs to answer code actions and count columns the way it does.
 fn wired(
     rust_analyzer: &str,
     spawn_observer: Option<Arc<dyn SpawnObserver>>,
 ) -> anyhow::Result<(TaskRegistry, LspRegistry, Arc<CodeIndexServiceImpl>)> {
-    let installed = installed_languages()?;
+    let supports = installed_languages(rust_analyzer)?;
     let tasks = TaskRegistry::new();
     let registry = LspRegistry::new(
-        SupportRegistry::with_builtin_rust(RustSupport::launching(rust_analyzer)).allow_list(),
+        supports.allow_list(),
         tasks.clone(),
         A_SERVER_MAY_SIT_UNUSED_FOR,
     );
@@ -190,7 +189,7 @@ fn wired(
             servers: servers.clone(),
             wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
         },
-        Arc::new(installed),
+        Arc::new(supports),
     ));
     Ok((tasks, servers, service))
 }
@@ -227,18 +226,10 @@ fn send_stderr_to(path: &std::path::Path) -> anyhow::Result<()> {
     )
 }
 
-/// The languages this process routes after the built-ins: every installed Zed extension's under
-/// `<tddy data dir>/extensions` (`TDDY_DATA_DIR`, else `$HOME/.tddy`), each grammar that does not
-/// load logged once, by name, and leaving the other languages working (`#reshape`
-/// extension-outline, R8). The cold CLI registers the same through `tddy-tools`, which is what
-/// keeps the two answering the same anchors.
-fn installed_languages() -> anyhow::Result<SupportRegistry> {
-    let dir = tddy_zed_extensions::ExtensionsDir::resolve()?;
-    let mut installed = SupportRegistry::new();
-    for failure in
-        tddy_zed_extensions::InstalledExtensions::with_installed_extensions(&mut installed, &dir)?
-    {
-        log::error!(target: MAIN, "{failure}");
-    }
-    Ok(installed)
+/// The languages this process routes: the built-in Rust support launching `rust_analyzer`, then
+/// every installed Zed extension's (see [`tddy_index_daemon::host_supports_launching`]), each grammar that
+/// does not load logged once, by name. The cold CLI registers the same through `tddy-tools`, which
+/// is what keeps the two answering the same anchors.
+fn installed_languages(rust_analyzer: &str) -> anyhow::Result<SupportRegistry> {
+    tddy_index_daemon::host_supports_launching(RustSupport::launching(rust_analyzer))
 }

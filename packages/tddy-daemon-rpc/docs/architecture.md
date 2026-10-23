@@ -70,7 +70,11 @@ pane's bidirectional `CodeSession`.
   reports the root `FAILED` with the reason — and then follows `code_index.WatchRoot`, relaying every
   message as a `progress` event for as long as the stream is open. `WatchRoot` ending ends the session
   `UNAVAILABLE`.
-- **No index.** A worktree with no `Cargo.toml` at its root (`without_an_index.rs`) neither dials the
+- **No index.** A worktree the index does not serve (`without_an_index.rs`) — no `Cargo.toml` at its root,
+  and no file an installed extension language with a configured server claims (`has_an_index`, asking
+  `tddy_index_daemon::serves_workspace` over the registry `CodeNavigationServiceImpl::with_supports` and
+  `IndexWarmupObserver::with_supports` were given; the host hands both `code_navigation::host_supports()`) —
+  neither dials the
   index daemon nor warms or follows anything: it sends one `NONE` progress carrying why, and answers every
   query with that `error`.
 - **Queries.** Each query is asked of the index on a task of its own (`ask.rs`), so a slow hover never

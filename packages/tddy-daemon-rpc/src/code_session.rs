@@ -20,9 +20,11 @@
 //! `IDLE`, since the session is warming the root again. A probe never waits: while loading it
 //! answers `UNKNOWN`. `cancel` drops a query, held or in flight, so no answer is ever sent for it.
 //!
-//! A worktree with no `Cargo.toml` at its root is not a Rust worktree and has no index: the session
-//! neither warms nor follows it, reports it `NONE` once with why, and answers every query with an `error`
-//! ([`without_an_index`]).
+//! A worktree with no index — no `Cargo.toml` at its root, and no file a language support with a
+//! server claims ([`has_an_index`]) — is neither warmed nor followed: the session reports it `NONE`
+//! once with why, and answers every query with an `error` ([`without_an_index`]). An extension-only
+//! worktree whose language has a configured server has an index (`#reshape`
+//! extension-language-server, R7).
 //!
 //! Every event is sent from the one loop that owns the session's state, which reads the pane's frames
 //! before anything else: a `cancel` the pane sent before the index became ready is always applied
@@ -49,7 +51,8 @@ use tonic::transport::Channel;
 
 use crate::code_index_warmup::drain_warm;
 use crate::code_navigation::convert::web_progress;
-use crate::code_navigation::{connect_index, index_source, IndexChannelSource};
+use crate::code_navigation::{connect_index, has_an_index, index_source, IndexChannelSource};
+use tddy_code_restructuring::SupportRegistry;
 
 mod ask;
 mod keep_alive;
@@ -67,11 +70,20 @@ type Events = mpsc::Sender<Result<CodeSessionEvent, Status>>;
 pub(crate) fn start(
     worktrees: Arc<WorktreeServiceImpl>,
     index_daemon: Option<Arc<dyn IndexChannelSource>>,
+    supports: Option<Arc<SupportRegistry>>,
     frames: tddy_rpc::Streaming<CodeSessionRequest>,
 ) -> ReceiverStream<Result<CodeSessionEvent, Status>> {
     let (events, rx) = mpsc::channel(EVENT_BUFFER);
     tokio::spawn(async move {
-        if let Err(status) = run(&worktrees, index_daemon.as_ref(), frames, &events).await {
+        if let Err(status) = run(
+            &worktrees,
+            index_daemon.as_ref(),
+            supports.as_deref(),
+            frames,
+            &events,
+        )
+        .await
+        {
             // Fails only when the pane has already gone, and then there is no one to tell.
             let _ = events.send(Err(status)).await;
         }
@@ -83,6 +95,7 @@ pub(crate) fn start(
 async fn run(
     worktrees: &WorktreeServiceImpl,
     index_daemon: Option<&Arc<dyn IndexChannelSource>>,
+    supports: Option<&SupportRegistry>,
     mut frames: tddy_rpc::Streaming<CodeSessionRequest>,
     events: &Events,
 ) -> Result<(), Status> {
@@ -99,7 +112,7 @@ async fn run(
         &open.project_id,
         &open.worktree_path,
     )?;
-    if !tddy_index_daemon::is_rust_workspace(&root) {
+    if !has_an_index(&root, supports) {
         return without_an_index::serve(frames, events).await;
     }
     let source = Arc::clone(index_source(index_daemon)?);

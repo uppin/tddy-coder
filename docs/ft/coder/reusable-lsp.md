@@ -171,6 +171,10 @@ definitions, and three parts of `LspClient` exist for it:
   returns what the server negotiated. A server tailors its answers to this: rust-analyzer returns no
   code actions at all to a client that advertised no `codeAction` support, and it counts positions in
   utf-16 code units unless asked for utf-8. The allow-list entry is where a consumer states both.
+- **`workspace/configuration` is answered from the launch.** `LaunchSpec::with_workspace_configuration`
+  holds a settings value; a server's `workspace/configuration` request is answered item by item, each
+  item's `section` read as a dotted path into it (no `section` is the whole value), `null` where nothing
+  is set. A launch without one — Rust's — answers every item `null`.
 - **A JSON-RPC `error` reaches the caller** as `LspError::Server { code, message }`. The code is the
   server's own and consumers dispatch on it — rust-analyzer's `ContentModified` (-32801) means "ask
   again" rather than "this failed", and a caller that cannot tell those apart either retries forever

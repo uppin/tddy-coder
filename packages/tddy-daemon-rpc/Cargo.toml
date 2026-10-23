@@ -57,6 +57,10 @@ tempfile = "3"
 # existing workspace crates; nothing new enters the tree.
 futures-util = "0.3"
 pretty_assertions = { workspace = true }
+# A language support standing in for an installed extension's names `tddy-lsp`'s `LanguageId` and
+# `LaunchSpec` (`#reshape` extension-language-server, R7). Already in this crate's tree through
+# `tddy-code-restructuring`; test-only.
+tddy-lsp = { path = "../tddy-lsp" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }

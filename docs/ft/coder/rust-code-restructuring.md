@@ -761,8 +761,17 @@ installed)`, the index daemon through `WorkspaceIndex::with_supports`. A run hol
 `runner::Options::installed` (empty by default — the built-ins only). An `anchors`, or a static
 `check`, over a file only such a language claims needs no server and starts none: its item anchors
 resolve from the file's text through the language's outline backend, and a stale fingerprint is the
-static check's refusal, as a deep check's is for Rust. `apply` and `snapshot` still route only to the
-built-ins; an extension language has no operation to apply.
+static check's refusal, as a deep check's is for Rust.
+
+**Their servers.** For an `apply`, the front end — `tddy-tools restructure`
+cold, or the index daemon — also starts the server of every installed language a file of the plan belongs to
+(`runner::installed_launches_for`) and hands the clients over as `Options::installed_clients`.
+`registry_for_waiting` builds the built-ins over rust-analyzer, then each installed support over its own server
+(`InstalledServers`), or over none when it has none. Such a language's server backend, `ServerBackend`,
+supports `rename_symbol`: the item's name position from its outline backend, `textDocument/rename`, and the
+returned `WorkspaceEdit` as the resolution. A language whose server cannot be started (no command, or a code
+extension's refusal) refuses every server operation with `ServerNotConfigured { language, reason }`
+(`FailedPrecondition` through the daemon) before any process starts.
 
 ## LSP integration
 

@@ -22,9 +22,10 @@ use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
+use crate::allowlist::LaunchSpec;
 use crate::error::LspError;
 use crate::protocol::encode_message;
-use dispatch::read_loop;
+use dispatch::{read_loop, Routes};
 use documents::DocumentVersions;
 use notifications::NotificationSink;
 
@@ -109,12 +110,14 @@ impl LspClient {
     /// tailors its answers to it — rust-analyzer returns no code actions whatsoever to a client
     /// that advertised no `codeAction` support, and that is indistinguishable from a range which
     /// supports no refactoring.
+    ///
+    /// Both come from `spec`, with its `initialization_options`; its `workspace_configuration` is
+    /// what the server's `workspace/configuration` requests are answered from.
     pub async fn initialize(
         stdin: mpsc::UnboundedSender<Bytes>,
         stdout: broadcast::Receiver<Bytes>,
         root_uri: &str,
-        capabilities: Value,
-        initialization_options: Value,
+        spec: &LaunchSpec,
     ) -> Result<Self, LspError> {
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let diagnostics: DiagnosticsCache = Arc::new(Mutex::new(HashMap::new()));
@@ -122,10 +125,13 @@ impl LspClient {
 
         let reader = tokio::spawn(read_loop(
             stdout,
-            Arc::clone(&pending),
-            Arc::clone(&diagnostics),
-            Arc::clone(&notifications),
-            stdin.clone(),
+            Routes {
+                pending: Arc::clone(&pending),
+                diagnostics: Arc::clone(&diagnostics),
+                notifications: Arc::clone(&notifications),
+                stdin: stdin.clone(),
+                workspace_configuration: spec.workspace_configuration.clone(),
+            },
         ));
 
         let client = Self {
@@ -145,8 +151,8 @@ impl LspClient {
         let params = json!({
             "processId": Value::Null,
             "rootUri": root_uri,
-            "capabilities": capabilities,
-            "initializationOptions": initialization_options,
+            "capabilities": spec.capabilities,
+            "initializationOptions": spec.initialization_options,
         });
         let handshake = client.request("initialize", params).await?;
         *client.handshake.lock().unwrap() = handshake;

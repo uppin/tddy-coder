@@ -28,6 +28,7 @@ use tddy_lsp::{NotificationEvent, NotificationStream};
 use tokio::sync::watch;
 
 use crate::proto::code_index::IndexState;
+use crate::readiness::Readiness;
 
 /// One root's progress as its server has reported it, folded from every notification since spawn.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -68,6 +69,17 @@ impl RootProgress {
     }
 }
 
+impl RootProgress {
+    /// This progress read by `readiness`: for a server that is ready once initialized, quiescent
+    /// and loaded whatever its notifications said (it sends no `serverStatus`).
+    fn settle(&mut self, readiness: Readiness) {
+        if readiness == Readiness::AfterInitialize {
+            self.quiescent = true;
+            self.loaded = true;
+        }
+    }
+}
+
 /// The state the wire reports for a server whose latest status said `quiescent`: `READY` when it
 /// did, `LOADING` otherwise — the one reading of quiescence, for a follower and an answer alike.
 pub(crate) fn state_of_quiescence(quiescent: bool) -> IndexState {
@@ -88,6 +100,8 @@ pub(crate) fn state_of_quiescence(quiescent: bool) -> IndexState {
 #[derive(Clone)]
 pub(crate) struct GraphLoad {
     progress: watch::Receiver<RootProgress>,
+    /// How the server this watcher follows says it is ready.
+    readiness: Readiness,
 }
 
 impl GraphLoad {
@@ -98,11 +112,29 @@ impl GraphLoad {
     /// watcher outlives every request: it ends when the client it watches is dropped, which is what
     /// makes a dropped sender mean "the server this was about is gone" rather than "nothing
     /// happened yet".
-    pub(crate) fn watching(client: &LspClient) -> Self {
-        let (published, progress) = watch::channel(RootProgress::default());
+    ///
+    /// `readiness` is the rule for the server's launch ([`Readiness::of_launch`]): a server read
+    /// [`Readiness::AfterInitialize`] is ready from the start — a client exists only after its
+    /// handshake — rather than waiting for a `serverStatus` it was never asked to send.
+    pub(crate) fn watching(client: &LspClient, readiness: Readiness) -> Self {
+        let mut initial = RootProgress::default();
+        initial.settle(readiness);
+        let (published, progress) = watch::channel(initial);
         let notifications = client.subscribe_notifications();
-        tokio::spawn(fold_the_servers_progress(notifications, published));
-        Self { progress }
+        tokio::spawn(fold_the_servers_progress(
+            notifications,
+            published,
+            readiness,
+        ));
+        Self {
+            progress,
+            readiness,
+        }
+    }
+
+    /// How the server this follows says it is ready.
+    pub(crate) fn readiness(&self) -> Readiness {
+        self.readiness
     }
 
     /// The root's progress, to follow change by change. Its sender is dropped when the server it
@@ -142,12 +174,18 @@ impl GraphLoad {
 async fn fold_the_servers_progress(
     mut notifications: NotificationStream,
     published: watch::Sender<RootProgress>,
+    readiness: Readiness,
 ) {
     let mut chatter = ServerChatter::unthrottled();
     loop {
         match hear(&mut chatter, notifications.recv().await) {
             Heard::Line(line) => {
-                published.send_if_modified(|progress| progress.fold(&chatter, line));
+                published.send_if_modified(|progress| {
+                    let before = progress.clone();
+                    progress.fold(&chatter, line);
+                    progress.settle(readiness);
+                    *progress != before
+                });
             }
             // Dropping the sender is the signal: every follower learns the server went away
             // instead of waiting on a transition that can no longer happen.

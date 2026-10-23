@@ -99,7 +99,7 @@ A group that fails its gate ends the stream as `FailedPrecondition`.
 |---|---|---|
 | `Warm` | server-streaming | Loads a root and reports progress. Idempotent. Every phase the server reports reaches the stream; only the printed console is throttled |
 | `Check` | server-streaming | Every finding in a plan, no writes. Streams one `Finding` per finding |
-| `Apply` | server-streaming | Executes a plan. Streams indexing, per-operation (each naming its group, if any) and outcome events |
+| `Apply` | server-streaming | Executes a plan. Streams indexing, per-operation (each naming its group, if any) and outcome events. Beside the root's rust-analyzer it reaches the server of every installed extension language a file of the plan belongs to, so an extension language's `rename_symbol` is applied through its own server |
 | `Snapshot` | unary | Rewrites a plan's snapshot header to the tree as it stands and answers `{paths, rewritten, stale}`: how many files the header names, whether it differed and was replaced, and the operations of an item-anchored plan whose item changed or went (each left as written). A language server is acquired from the root's warm index **only** for a plan with item anchors, to re-resolve them; a plan with none is hashed without one, because waiting for an index the answer never consults would make a cheap command as slow as a cold one. Serialized per root, since it writes the plan file and reads the tree |
 | `Anchors` | unary | An anchor a plan can carry: `items` for named items, or the `item` anchor of the innermost item enclosing `at`. The response holds the anchor's JSON (`anchor_json`) and its absolute span (`range`) |
 | `PlanStatus` | unary | completed / in-flight / pending / failed, and the plan's stale operations with their reasons |
@@ -112,7 +112,7 @@ A group that fails its gate ends the stream as `FailedPrecondition`.
 | `Report` | unary | CRAP leaderboard over a capture |
 | `DuplicateTests` | server-streaming | Identical and subset coverage signatures |
 | `Complexity` | unary | Per-function cyclomatic complexity of one file |
-| `Definition` | unary | Where the symbol at a one-based line and byte column of a Rust file is defined |
+| `Definition` | unary | Where the symbol at a one-based line and byte column of a Rust file, or of an installed extension language's file, is defined |
 | `References` | unary | Every reference to that symbol, its declaration included |
 | `Hover` | unary | The language server's hover markdown for that symbol; unset when it has none |
 | `Symbols` | unary | The symbols of a Rust file, or, when the request carries a `query`, the root's symbols matching it |
@@ -120,8 +120,11 @@ A group that fails its gate ends the stream as `FailedPrecondition`.
 
 The navigation, symbol and diagnostic calls answer in the service's own coordinates (one-based line,
 one-based byte column) and return each location relative to `workspace_root`, or as an absolute path
-marked `outside_root` when it lies in a dependency or the standard library. They serve Rust files
-only: any file they are asked about that is not one is refused with `InvalidArgument`, as is a path
+marked `outside_root` when it lies in a dependency or the standard library. `Definition`,
+`References` and `Hover` serve Rust files and the files of an installed
+[Zed extension](zed-extensions.md#language-servers) language whose server is configured, each answered by
+that language's own server; `Symbols` and `Diagnostics` serve Rust files. Any other file is refused with
+`InvalidArgument` — one no language claims, or one whose language has no configured server — as is a path
 that is absolute or climbs out of the root. A `Symbols` request with a `query` names no file, so none
 of that applies to it.
 

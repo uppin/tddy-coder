@@ -28,6 +28,7 @@ use serde_json::{json, Value};
 use tddy_core::toolcall::lsp::{LspExecutor, LspQuery};
 use tddy_index_daemon::proto::code_index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
+use tddy_index_daemon::SupportRegistry;
 use tddy_lsp::{Diagnostic, Location, Position, Range, SymbolInfo};
 use tonic::transport::Channel;
 
@@ -47,13 +48,27 @@ pub trait IndexChannel: Send + Sync {
 /// Answers the `Lsp*` tools from the warm index reached through an [`IndexChannel`].
 pub struct IndexLspExecutor {
     index: Arc<dyn IndexChannel>,
+    /// The languages beyond Rust the index serves — the registry the host built it over. `None`
+    /// unless [`IndexLspExecutor::with_supports`] says otherwise: Rust only.
+    supports: Option<Arc<SupportRegistry>>,
 }
 
 impl IndexLspExecutor {
     /// An executor asking the index `index` connects to.
     #[must_use]
     pub fn new(index: Arc<dyn IndexChannel>) -> Self {
-        Self { index }
+        Self {
+            index,
+            supports: None,
+        }
+    }
+
+    /// Available on an extension-only worktree too when `supports` — the registry the host built
+    /// the index over — serves it (`#reshape` extension-language-server, R7).
+    #[must_use]
+    pub fn with_supports(mut self, supports: Arc<SupportRegistry>) -> Self {
+        self.supports = Some(supports);
+        self
     }
 
     /// A client on a fresh channel to the index.
@@ -73,9 +88,10 @@ fn message_of(status: tonic::Status) -> String {
 }
 
 impl LspExecutor for IndexLspExecutor {
-    /// Whether the worktree holds a Rust workspace, the one language the index serves.
+    /// Whether the index serves the worktree: a Rust workspace, or a tree holding a file one of the
+    /// host's supports claims and serves ([`tddy_index_daemon::serves_workspace`]).
     fn is_available(&self, repo_dir: &Path) -> bool {
-        tddy_index_daemon::is_rust_workspace(repo_dir)
+        tddy_index_daemon::serves_workspace(repo_dir, self.supports.as_deref())
     }
 
     fn diagnostics(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
@@ -469,6 +485,68 @@ pub fn select_lsp_executor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tddy_code_restructuring::{LanguageBackend, LanguageSupport, ServerHandle};
+    use tddy_lsp::{LanguageId, LaunchSpec};
+
+    /// An index nothing dials: availability is decided before any channel is asked for.
+    struct AnUndialledIndex;
+
+    #[async_trait::async_trait]
+    impl IndexChannel for AnUndialledIndex {
+        async fn connect(&self) -> Result<tonic::transport::Channel, String> {
+            unreachable!("availability dials nothing")
+        }
+    }
+
+    /// An installed extension's TOML support with a configured server, standing in for one.
+    struct ATomlSupportWithAServer {
+        id: LanguageId,
+    }
+
+    impl LanguageSupport for ATomlSupportWithAServer {
+        fn id(&self) -> &LanguageId {
+            &self.id
+        }
+
+        fn claims(&self, path: &Path) -> bool {
+            path.extension()
+                .is_some_and(|extension| extension == "toml")
+        }
+
+        fn launch(&self) -> Option<LaunchSpec> {
+            Some(LaunchSpec::new("/opt/fake-ls"))
+        }
+
+        fn workspace_root(&self, _file: &Path, root: &Path) -> Result<PathBuf, tddy_lsp::LspError> {
+            Ok(root.to_path_buf())
+        }
+
+        fn backend(&self, _server: ServerHandle<'_>, _root: &Path) -> Box<dyn LanguageBackend> {
+            unreachable!("availability builds no backend")
+        }
+    }
+
+    #[test]
+    fn the_tools_are_available_on_an_extension_only_worktree_the_host_serves() {
+        // Given an extension-only worktree, and an executor over a host serving its TOML file
+        let worktree = tempfile::tempdir().expect("a temporary worktree");
+        std::fs::write(worktree.path().join("app.toml"), "[server]\n").expect("a toml file");
+        let mut supports = SupportRegistry::new();
+        supports.register(Box::new(ATomlSupportWithAServer {
+            id: LanguageId::new("demo-toml"),
+        }));
+        let executor =
+            IndexLspExecutor::new(Arc::new(AnUndialledIndex)).with_supports(Arc::new(supports));
+
+        // When the session's tools ask whether the index serves the worktree
+        let available = executor.is_available(worktree.path());
+
+        // Then it does
+        assert!(
+            available,
+            "the index tools were unavailable on a served extension-only worktree"
+        );
+    }
 
     #[test]
     fn a_relative_file_inside_the_worktree_is_bound_to_it() {

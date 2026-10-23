@@ -55,9 +55,10 @@ pub fn status_of(error: &RestructureError) -> Status {
         // before it left it, and the same request fails identically until the plan or the code
         // changes.
         | RestructureError::GroupDoesNotCompile { .. }
-        // A move of a file git does not track: nothing of the operation was written, and the same
-        // request fails identically until the file is added.
-        | RestructureError::UntrackedMoveSource { .. } => Status::failed_precondition(refusal),
+        // A move of a file git does not track, or a language server that cannot be started: nothing
+        // was written or started, and the same request fails until the file or setting is added.
+        | RestructureError::UntrackedMoveSource { .. }
+        | RestructureError::ServerNotConfigured { .. } => Status::failed_precondition(refusal),
         // The wait ended before the index was ready. Nothing here says the plan is wrong, which is
         // the distinction `docs/dev/todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md`
         // records as actively misleading when it is lost.

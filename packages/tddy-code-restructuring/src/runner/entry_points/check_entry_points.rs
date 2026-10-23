@@ -18,7 +18,7 @@ use crate::item_anchor::{has_item_anchors, plan_file_has_item_anchors};
 
 use super::registry_for_static;
 
-use super::{registry_for, registry_with_installed};
+use super::registry_with_installed;
 
 use crate::RestructureError;
 
@@ -141,21 +141,19 @@ pub fn snapshot_resolving(
     if !plan_file_has_item_anchors(&path) {
         return snapshot(root, options);
     }
-    let client = client.ok_or_else(|| {
-        RestructureError::MalformedPlan(
-            "snapshot of a plan with item anchors requires a rust-analyzer LSP session".into(),
-        )
-    })?;
-    // TODO(extension-language-server): route through `options.installed` too, and ask no client
-    // when every item anchor lies in a file a server-less installed language claims — today a
-    // snapshot re-resolves only the built-ins' item anchors.
-    let mut registry = registry_for(
-        root,
-        client,
-        cancel,
-        Arc::clone(&options.progress),
-        options.trace,
-    );
+    // Item anchors that all lie in files a server-less installed language claims resolve from
+    // their text, as an `anchors` on them does.
+    let mut registry = match client {
+        Some(client) => registry_with_installed(root, client, cancel, &options),
+        None if !options.plan_item_anchors_need_a_server() => {
+            registry_for_static(root, &options.installed)
+        }
+        None => {
+            return Err(RestructureError::MalformedPlan(
+                "snapshot of a plan with item anchors requires a rust-analyzer LSP session".into(),
+            ))
+        }
+    };
     let stale = crate::plan_store::rebase_plan_file(root, &path, &mut registry)?;
     let rewrite = snapshot(root, options)?;
     Ok(SnapshotRewrite { stale, ..rewrite })

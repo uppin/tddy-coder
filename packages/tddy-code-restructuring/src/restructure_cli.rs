@@ -68,28 +68,8 @@ pub async fn run_with_installed(args: RestructureArgs, installed: SupportRegistr
     let rehearsal = options.dry_run;
 
     let client = if needs_lsp_client(&options) {
-        let task_registry = TaskRegistry::new();
         let observer: Arc<dyn SpawnObserver> = Arc::clone(&record) as Arc<dyn SpawnObserver>;
-        let lsp_registry = LspRegistry::new(
-            SupportRegistry::with_builtins().allow_list(),
-            task_registry,
-            Duration::from_secs(600),
-        )
-        .with_spawn_observer(observer);
-        let key = LspKey {
-            root: root.clone(),
-            language: LanguageId::RUST,
-        };
-        (options.progress)("acquiring shared rust-analyzer client (first run may take minutes)");
-        let service = lsp_registry
-            .get_or_spawn(key)
-            .await
-            .context("rust-analyzer LSP")?;
-        (options.progress)("rust-analyzer client ready");
-        service
-            .client
-            .set_request_timeout(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX);
-        Some(Arc::clone(&service.client))
+        Some(start_servers(&root, &mut options, observer).await?)
     } else {
         None
     };
@@ -102,6 +82,68 @@ pub async fn run_with_installed(args: RestructureArgs, installed: SupportRegistr
     .map_err(anyhow::Error::msg)?;
 
     report(outcome, rehearsal)
+}
+
+/// Start the run's servers: the shared rust-analyzer client it returns, and — for an `apply` — one
+/// server per installed language a file of the plan belongs to, its client left in
+/// [`Options::installed_clients`] so the run's registry routes that language to it (`#reshape`
+/// extension-language-server, R6).
+async fn start_servers(
+    root: &std::path::Path,
+    options: &mut Options,
+    observer: Arc<dyn SpawnObserver>,
+) -> Result<Arc<tddy_lsp::client::LspClient>> {
+    let launches = installed_launches_of_an_apply(options);
+    let mut allow = SupportRegistry::with_builtins().allow_list();
+    // First registration wins, as `SupportRegistry::allow_list` has it: no installed language
+    // replaces a built-in's launch.
+    for (language, launch) in &launches {
+        if !allow.is_allowed(language) {
+            allow.allow(language.clone(), launch.clone());
+        }
+    }
+    let lsp_registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(600))
+        .with_spawn_observer(observer);
+    let spawn = |language: LanguageId| {
+        lsp_registry.get_or_spawn(LspKey {
+            root: root.to_path_buf(),
+            language,
+        })
+    };
+    (options.progress)("acquiring shared rust-analyzer client (first run may take minutes)");
+    let service = spawn(LanguageId::RUST).await.context("rust-analyzer LSP")?;
+    (options.progress)("rust-analyzer client ready");
+    service
+        .client
+        .set_request_timeout(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX);
+    for (language, _) in launches {
+        let started = spawn(language.clone())
+            .await
+            .with_context(|| format!("the {language} language server"))?;
+        started
+            .client
+            .set_request_timeout(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX);
+        options
+            .installed_clients
+            .push((language, Arc::clone(&started.client)));
+    }
+    Ok(Arc::clone(&service.client))
+}
+
+/// The installed languages an `apply`'s plan reaches, each with its launch; none for any other
+/// command. A plan that cannot be read or parsed starts no installed server: the run reads the same
+/// file next and refuses it in its own words, before any operation would reach a server.
+fn installed_launches_of_an_apply(options: &Options) -> Vec<(LanguageId, tddy_lsp::LaunchSpec)> {
+    if options.command != Command::Apply {
+        return Vec::new();
+    }
+    options
+        .plan()
+        .ok()
+        .and_then(|plan| std::fs::read_to_string(plan).ok())
+        .and_then(|text| crate::Plan::parse(&text).ok())
+        .map(|plan| crate::runner::installed_launches_for(&plan, &options.installed))
+        .unwrap_or_default()
 }
 
 /// Write a run's result to the console this front end owns, and say whether the run succeeded.
@@ -289,7 +331,7 @@ fn needs_lsp_client(options: &Options) -> bool {
         // is no seam to resolve and nothing to ask a server about, so starting one would cost
         // minutes of indexing to produce an answer `sha256` already has — unless the plan has item
         // anchors, which only a server can re-resolve.
-        Command::Snapshot => names_item_anchors(options),
+        Command::Snapshot => options.plan_item_anchors_need_a_server(),
         // The store's commands are answered by the index daemon; without one they are refused
         // before any server would be needed.
         Command::Status | Command::Verify | Command::Load | Command::Unload | Command::Plans => {
@@ -300,14 +342,6 @@ fn needs_lsp_client(options: &Options) -> bool {
         // A count of lines in files on disk: nothing to resolve.
         Command::Lines => false,
     }
-}
-
-/// Whether the plan `options` names holds item anchors.
-fn names_item_anchors(options: &Options) -> bool {
-    options
-        .plan()
-        .ok()
-        .is_some_and(|path| crate::item_anchor::plan_file_has_item_anchors(&path))
 }
 
 #[cfg(test)]

@@ -19,21 +19,48 @@ use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeI
 
 use tddy_session_lifecycle::connection_service::SessionWorktreeObserver;
 
-use crate::code_navigation::{index_daemon_error, IndexChannelSource};
+use tddy_code_restructuring::SupportRegistry;
 
-/// Starts warming `worktree`'s code index for `session_id` in the background.
-///
-/// Returns the warm's task, or `None` when nothing was started: no index daemon is configured, or
-/// `worktree` is not a Rust workspace (no `Cargo.toml` at its root). The task never fails the
-/// session — a failed warm is logged.
+use crate::code_navigation::{has_an_index, index_daemon_error, IndexChannelSource};
+
+/// Starts warming `worktree`'s code index for `session_id` in the background, for a host with no
+/// languages beyond Rust: only a Rust workspace is warmed, as before extensions existed.
 #[must_use = "dropping the handle detaches the warm, it does not cancel it"]
 pub fn warm_for_session(
     index_daemon: Option<&Arc<dyn IndexChannelSource>>,
     session_id: &str,
     worktree: &Path,
 ) -> Option<tokio::task::JoinHandle<()>> {
+    start_warm(index_daemon, None, session_id, worktree)
+}
+
+/// Starts warming `worktree`'s code index for `session_id` in the background.
+///
+/// Returns the warm's task, or `None` when nothing was started: no index daemon is configured, or
+/// `worktree` has no index for `supports` — the registry the host built its index daemon over
+/// ([`has_an_index`]: neither a Rust workspace nor a tree holding a file a support with a server
+/// claims; `#reshape` extension-language-server, R7). The task never fails the session — a failed
+/// warm is logged.
+#[must_use = "dropping the handle detaches the warm, it does not cancel it"]
+pub fn warm_for_session_with_supports(
+    index_daemon: Option<&Arc<dyn IndexChannelSource>>,
+    supports: &SupportRegistry,
+    session_id: &str,
+    worktree: &Path,
+) -> Option<tokio::task::JoinHandle<()>> {
+    start_warm(index_daemon, Some(supports), session_id, worktree)
+}
+
+/// The warm both entry points start, `supports` being `None` for a host with no extension
+/// language.
+fn start_warm(
+    index_daemon: Option<&Arc<dyn IndexChannelSource>>,
+    supports: Option<&SupportRegistry>,
+    session_id: &str,
+    worktree: &Path,
+) -> Option<tokio::task::JoinHandle<()>> {
     let source = Arc::clone(index_daemon?);
-    if !tddy_index_daemon::is_rust_workspace(worktree) {
+    if !has_an_index(worktree, supports) {
         return None;
     }
     let session_id = session_id.to_string();
@@ -86,23 +113,153 @@ fn warm_failed(status: tonic::Status) -> String {
 /// [`SessionWorktreeObserver`] port.
 pub struct IndexWarmupObserver {
     index_daemon: Arc<dyn IndexChannelSource>,
+    /// The languages beyond Rust the index daemon serves. `None` — Rust only — unless
+    /// [`IndexWarmupObserver::with_supports`] says otherwise.
+    supports: Option<Arc<SupportRegistry>>,
 }
 
 impl IndexWarmupObserver {
     /// An observer warming through `index_daemon`.
     #[must_use]
     pub fn new(index_daemon: Arc<dyn IndexChannelSource>) -> Self {
-        Self { index_daemon }
+        Self {
+            index_daemon,
+            supports: None,
+        }
+    }
+
+    /// Warms an extension-only worktree too when `supports` — the registry the host built its index
+    /// daemon over — serves it (`#reshape` extension-language-server, R7).
+    #[must_use]
+    pub fn with_supports(mut self, supports: Arc<SupportRegistry>) -> Self {
+        self.supports = Some(supports);
+        self
     }
 }
 
 impl SessionWorktreeObserver for IndexWarmupObserver {
     fn worktree_ready(&self, session_id: &str, worktree: &Path) {
         // Detached on purpose: a session's start never waits on its index.
-        drop(warm_for_session(
+        drop(start_warm(
             Some(&self.index_daemon),
+            self.supports.as_deref(),
             session_id,
             worktree,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use tddy_code_restructuring::{LanguageBackend, LanguageSupport, ServerHandle};
+    use tddy_lsp::{LanguageId, LaunchSpec};
+    use tonic::transport::Channel;
+
+    use super::*;
+    use crate::code_navigation::IndexChannelError;
+
+    /// An index daemon nothing can dial: the warm this suite starts fails and is logged, and only
+    /// whether one was started is read.
+    struct AnUnreachableIndexDaemon;
+
+    #[async_trait::async_trait]
+    impl IndexChannelSource for AnUnreachableIndexDaemon {
+        async fn connect(&self) -> Result<Channel, IndexChannelError> {
+            Err("no index daemon runs in this suite".into())
+        }
+
+        async fn connect_if_running(&self) -> Result<Option<Channel>, IndexChannelError> {
+            Ok(None)
+        }
+
+        async fn keep_alive(&self) {}
+
+        fn keep_alive_every(&self) -> Duration {
+            Duration::from_secs(60)
+        }
+    }
+
+    /// An installed extension's TOML support with a configured server, standing in for one so the
+    /// warm-up is pinned without loading a grammar.
+    struct ATomlSupportWithAServer {
+        id: LanguageId,
+    }
+
+    impl LanguageSupport for ATomlSupportWithAServer {
+        fn id(&self) -> &LanguageId {
+            &self.id
+        }
+
+        fn claims(&self, path: &Path) -> bool {
+            path.extension()
+                .is_some_and(|extension| extension == "toml")
+        }
+
+        fn launch(&self) -> Option<LaunchSpec> {
+            Some(LaunchSpec::new("/opt/fake-ls"))
+        }
+
+        fn workspace_root(&self, _file: &Path, root: &Path) -> Result<PathBuf, tddy_lsp::LspError> {
+            Ok(root.to_path_buf())
+        }
+
+        fn backend(&self, _server: ServerHandle<'_>, _root: &Path) -> Box<dyn LanguageBackend> {
+            unreachable!("a warm-up builds no backend")
+        }
+    }
+
+    fn supports_serving_toml() -> SupportRegistry {
+        let mut supports = SupportRegistry::new();
+        supports.register(Box::new(ATomlSupportWithAServer {
+            id: LanguageId::new("demo-toml"),
+        }));
+        supports
+    }
+
+    /// A worktree with no `Cargo.toml`, holding `config/app.toml`.
+    fn an_extension_only_worktree() -> tempfile::TempDir {
+        let worktree = tempfile::tempdir().expect("a temporary worktree");
+        std::fs::create_dir_all(worktree.path().join("config")).expect("config dir");
+        std::fs::write(worktree.path().join("config/app.toml"), "[server]\n").expect("a toml file");
+        worktree
+    }
+
+    #[tokio::test]
+    async fn an_extension_only_worktree_whose_language_has_a_server_is_warmed() {
+        // Given an index daemon, an extension-only worktree, and a host serving its TOML file
+        let index_daemon: Arc<dyn IndexChannelSource> = Arc::new(AnUnreachableIndexDaemon);
+        let worktree = an_extension_only_worktree();
+
+        // When the session's worktree appears
+        let warming = warm_for_session_with_supports(
+            Some(&index_daemon),
+            &supports_serving_toml(),
+            "a-session",
+            worktree.path(),
+        );
+
+        // Then a warm is started for it, as for a Rust worktree
+        assert!(
+            warming.is_some(),
+            "an extension-only worktree with a served language was not warmed"
+        );
+    }
+
+    #[test]
+    fn an_extension_only_worktree_whose_language_has_a_server_is_not_reported_none() {
+        // Given an extension-only worktree, and a host serving its TOML file
+        let worktree = an_extension_only_worktree();
+
+        // When a code session or `WatchCodeIndex` asks whether it has an index
+        let indexed = has_an_index(worktree.path(), Some(&supports_serving_toml()));
+
+        // Then it has one: the session follows it rather than reporting `NONE`
+        assert!(
+            indexed,
+            "an extension-only worktree was reported as having no index"
+        );
     }
 }
