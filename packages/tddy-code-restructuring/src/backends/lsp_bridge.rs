@@ -117,6 +117,23 @@ impl LspClientBridge {
         self.client.handshake()
     }
 
+    /// `workspace/executeCommand` of `command`, giving up as soon as the run is cancelled; the
+    /// command's answer with every edit the server asked this client to apply while it ran.
+    pub(super) fn execute(
+        &self,
+        command: &str,
+        arguments: Vec<Value>,
+    ) -> Result<tddy_lsp::client::ExecutedCommand> {
+        tokio::runtime::Handle::current().block_on(async {
+            tokio::select! {
+                executed = self.client.execute_command(command, arguments) => {
+                    executed.map_err(map_lsp_error)
+                }
+                () = self.cancel.cancelled() => Err(map_lsp_error(LspError::Abandoned)),
+            }
+        })
+    }
+
     /// Send a notification.
     pub fn notify(&self, method: &str, params: Value) -> Result<()> {
         tokio::runtime::Handle::current()

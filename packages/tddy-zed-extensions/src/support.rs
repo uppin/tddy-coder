@@ -97,13 +97,13 @@ fn read_installed_manifest(extension_dir: &Path) -> Result<ExtensionManifest, Ex
 /// share it. A language's own failure — an `outline.scm` that does not compile — fails that
 /// language alone: a sibling on the same grammar still loads.
 fn supports_of(
-    languages: Vec<(ExtensionLanguage, ServerChoice)>,
+    languages: Vec<crate::server::Served>,
     store: Arc<Mutex<GrammarStore>>,
 ) -> InstalledLanguages {
     let mut supports = Vec::new();
     let mut failures: Vec<GrammarLoadError> = Vec::new();
     let mut failed_grammars: BTreeSet<(String, String)> = BTreeSet::new();
-    for (language, server) in languages {
+    for (language, server, kinds) in languages {
         let grammar = (language.extension.clone(), language.grammar.clone());
         if failed_grammars.contains(&grammar) {
             continue;
@@ -118,7 +118,7 @@ fn supports_of(
             );
         let support = match loaded {
             Ok(_) => ExtensionSupport::new(language, Arc::clone(&store))
-                .map(|support| support.with_server(server)),
+                .map(|support| support.with_server(server).with_code_action_kinds(kinds)),
             Err(failure) => {
                 failed_grammars.insert(grammar);
                 Err(failure)
@@ -191,6 +191,8 @@ pub struct ExtensionSupport {
     /// What serves the language (`#reshape` extension-language-server, R1–R3):
     /// [`ServerChoice::Undeclared`] until [`ExtensionSupport::with_server`] says otherwise.
     server: ServerChoice,
+    /// The kinds `apply_code_action` asks the language's server for; empty asks for every kind.
+    code_action_kinds: Vec<String>,
 }
 
 impl ExtensionSupport {
@@ -233,7 +235,17 @@ impl ExtensionSupport {
             outline,
             store,
             server: ServerChoice::Undeclared,
+            code_action_kinds: Vec::new(),
         })
+    }
+
+    /// This support, whose server is asked for code actions of `kinds` only (`context.only`) —
+    /// the manifest's `code_action_kinds` for the server; none asks for every kind.
+    pub fn with_code_action_kinds(self, kinds: Vec<String>) -> Self {
+        Self {
+            code_action_kinds: kinds,
+            ..self
+        }
     }
 
     /// This support, served as `server` says ([`load_installed`] gives every support its
@@ -313,7 +325,10 @@ impl LanguageSupport for ExtensionSupport {
                     "" => self.id.as_str(),
                     declared => declared,
                 };
-                Box::new(ServerBackend::over(outline, live, language_id))
+                Box::new(
+                    ServerBackend::over(outline, live, language_id)
+                        .with_code_action_kinds(self.code_action_kinds.clone()),
+                )
             }
             _ => outline,
         }
@@ -326,9 +341,10 @@ impl ExtensionSupport {
     /// `text` parsed with this language's grammar, through the process's one store; `None` only
     /// when tree-sitter gives up on the text altogether.
     pub fn parse(&self, text: &str) -> Option<tree_sitter::Tree> {
-        let _ = text;
-        // TODO(reshape-extension-code-actions): implement
-        todo!("ExtensionSupport::parse")
+        self.store
+            .lock()
+            .expect("the grammar store is not poisoned")
+            .parse(&self.grammar, text)
     }
 }
 

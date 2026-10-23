@@ -33,6 +33,8 @@ pub struct ServerBackend {
     /// `--at` — exactly as it does with no server.
     outline: Box<dyn LanguageBackend>,
     server: Server,
+    /// The kinds `apply_code_action` asks the server for (`context.only`); empty asks for all.
+    code_action_kinds: Vec<String>,
 }
 
 /// What a rename is put to.
@@ -65,6 +67,16 @@ impl ServerBackend {
                 cancel: server.cancel.clone(),
                 language_id: language_id.into(),
             },
+            code_action_kinds: Vec::new(),
+        }
+    }
+
+    /// This backend, asking the server only for code actions of `kinds` — the manifest's
+    /// `code_action_kinds` for the server (`#reshape` extension-code-actions); none asks for all.
+    pub fn with_code_action_kinds(self, kinds: Vec<String>) -> Self {
+        Self {
+            code_action_kinds: kinds,
+            ..self
         }
     }
 
@@ -78,6 +90,7 @@ impl ServerBackend {
             server: Server::NoCommand {
                 reason: reason.into(),
             },
+            code_action_kinds: Vec::new(),
         }
     }
 }
@@ -93,9 +106,12 @@ impl LanguageBackend for ServerBackend {
         self.outline.handles_extension(extension)
     }
 
-    /// `rename_symbol` only; code actions are `extension-code-actions`' (K23).
+    /// `rename_symbol`, and `apply_code_action` — any action the server offers.
     fn supports(&self, kind: RefactorKind) -> bool {
-        kind == RefactorKind::RenameSymbol
+        matches!(
+            kind,
+            RefactorKind::RenameSymbol | RefactorKind::ApplyCodeAction
+        )
     }
 
     /// R6: the anchor resolves to an item through the outline backend; the document is opened as
@@ -122,17 +138,26 @@ impl LanguageBackend for ServerBackend {
                 op: format!("{:?}", op.op),
             });
         }
+        if op.op == RefactorKind::ApplyCodeAction {
+            let range = anchor_range(self.outline.as_mut(), &op.anchor, workspace)?;
+            refuse_unless_bytes(client)?;
+            open_document(client, language_id, workspace, op.anchor.file())?;
+            let bridge = LspClientBridge::new(Arc::clone(client), cancel.clone());
+            return super::code_action::resolve(
+                &bridge,
+                op,
+                range,
+                &self.code_action_kinds,
+                workspace,
+            );
+        }
         let new_name = op.name.clone().ok_or_else(|| {
             RestructureError::MalformedPlan("rename_symbol needs a name".to_string())
         })?;
         let at = name_position(self.outline.as_mut(), &op.anchor, workspace)?;
         refuse_unless_bytes(client)?;
 
-        let uri = file_uri(workspace, op.anchor.file());
-        let text = workspace.read(op.anchor.file())?;
-        tokio::runtime::Handle::current()
-            .block_on(client.sync_document(&uri, language_id, &text))
-            .map_err(map_lsp_error)?;
+        let uri = open_document(client, language_id, workspace, op.anchor.file())?;
         let answer = LspClientBridge::new(Arc::clone(client), cancel.clone()).request(
             "textDocument/rename",
             json!({
@@ -164,8 +189,21 @@ fn name_position(
     anchor: &Anchor,
     workspace: &Workspace<'_>,
 ) -> Result<Position> {
-    if let Anchor::Range { start, .. } = anchor {
-        return Ok(*start);
+    Ok(anchor_range(outline, anchor, workspace)?.start)
+}
+
+/// The range an anchor names: a range anchor's own, an item anchor's as the outline backend
+/// locates it. A symbol anchor names no range this backend can find, and is refused.
+fn anchor_range(
+    outline: &mut dyn LanguageBackend,
+    anchor: &Anchor,
+    workspace: &Workspace<'_>,
+) -> Result<Range> {
+    if let Anchor::Range { start, end, .. } = anchor {
+        return Ok(Range {
+            start: *start,
+            end: *end,
+        });
     }
     let backend = outline.language().to_string();
     let resolver = outline
@@ -174,7 +212,22 @@ fn name_position(
             backend,
             op: "item anchors".to_string(),
         })?;
-    Ok(span_of(anchor, workspace.root, resolver)?.start)
+    span_of(anchor, workspace.root, resolver)
+}
+
+/// Announce `file`'s text to the server as open — as the launch's `languageId` — and return its uri.
+fn open_document(
+    client: &LspClient,
+    language_id: &str,
+    workspace: &Workspace<'_>,
+    file: &str,
+) -> Result<String> {
+    let uri = file_uri(workspace, file);
+    let text = workspace.read(file)?;
+    tokio::runtime::Handle::current()
+        .block_on(client.sync_document(&uri, language_id, &text))
+        .map_err(map_lsp_error)?;
+    Ok(uri)
 }
 
 /// Refuses a server that settled on anything but byte positions: [`Range`] columns are bytes, and
@@ -195,7 +248,7 @@ fn refuse_unless_bytes(client: &LspClient) -> Result<()> {
 }
 
 /// The `file://` uri of `file` under the workspace root — spelled as the server's root uri is.
-fn file_uri(workspace: &Workspace<'_>, file: &str) -> String {
+pub(super) fn file_uri(workspace: &Workspace<'_>, file: &str) -> String {
     format!("file://{}", workspace.root.join(file).display())
 }
 
@@ -260,7 +313,7 @@ fn workspace_edit_of(
 }
 
 /// The root-relative path a `file://` uri names; one outside the root is refused.
-fn relative_path(uri: &str, workspace: &Workspace<'_>) -> Result<String> {
+pub(super) fn relative_path(uri: &str, workspace: &Workspace<'_>) -> Result<String> {
     uri.strip_prefix("file://")
         .and_then(|path| std::path::Path::new(path).strip_prefix(workspace.root).ok())
         .map(|relative| relative.display().to_string())
@@ -270,7 +323,7 @@ fn relative_path(uri: &str, workspace: &Workspace<'_>) -> Result<String> {
 }
 
 /// One LSP text edit in one-based coordinates, refusing a malformed one.
-fn text_edit_of(edit: &Value) -> Result<TextEdit> {
+pub(super) fn text_edit_of(edit: &Value) -> Result<TextEdit> {
     let point = |at: &str| -> Result<Position> {
         let read = |field: &str| {
             edit.pointer(&format!("/range/{at}/{field}"))

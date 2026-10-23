@@ -9,7 +9,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::{LspClient, LspError};
 
@@ -25,8 +25,6 @@ pub struct ExecutedCommand {
 
 /// The edits a server sent through `workspace/applyEdit` while a command ran: `Some` exactly while
 /// [`LspClient::execute_command`] is waiting on its answer, `None` otherwise.
-// TODO(reshape-extension-code-actions): held by the client, set by `execute_command` and read by
-// dispatch once implemented.
 pub(super) type ApplyEditCapture = Arc<Mutex<Option<Vec<Value>>>>;
 
 impl LspClient {
@@ -40,26 +38,54 @@ impl LspClient {
         command: &str,
         arguments: Vec<Value>,
     ) -> Result<ExecutedCommand, LspError> {
-        let _ = (command, arguments);
-        // TODO(reshape-extension-code-actions): implement
-        todo!("LspClient::execute_command")
+        let _running = CommandInFlight::begin(&self.apply_edits);
+        let result = self
+            .request(
+                "workspace/executeCommand",
+                json!({ "command": command, "arguments": arguments }),
+            )
+            .await?;
+        let applied_edits = self.apply_edits.lock().unwrap().take().unwrap_or_default();
+        Ok(ExecutedCommand {
+            result,
+            applied_edits,
+        })
     }
 }
 
 /// The answer to a server's `workspace/applyEdit` request with `params`: while a command runs
 /// (`capture` holds `Some`), the request's `edit` is appended to the capture and the answer is
 /// `{ "applied": true }`; otherwise nothing is captured and the answer is `null`, as before.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "TODO(reshape-extension-code-actions): server_request_reply answers from it once implemented"
-    )
-)]
 pub(super) fn apply_edit_answer(capture: &ApplyEditCapture, params: Option<&Value>) -> Value {
-    let _ = (capture, params);
-    // TODO(reshape-extension-code-actions): implement
-    todo!("apply_edit_answer")
+    let mut captured = capture.lock().unwrap();
+    let Some(edits) = captured.as_mut() else {
+        return Value::Null;
+    };
+    edits.push(
+        params
+            .and_then(|params| params.get("edit"))
+            .cloned()
+            .unwrap_or(Value::Null),
+    );
+    json!({ "applied": true })
+}
+
+/// A command's capture, open for as long as this is held: opened empty by [`Self::begin`], and
+/// closed on drop however the call ends — answered, failed, timed out, or its future dropped — so
+/// an edit sent after the command is answered `null` and not kept.
+struct CommandInFlight<'a>(&'a ApplyEditCapture);
+
+impl<'a> CommandInFlight<'a> {
+    fn begin(capture: &'a ApplyEditCapture) -> Self {
+        *capture.lock().unwrap() = Some(Vec::new());
+        Self(capture)
+    }
+}
+
+impl Drop for CommandInFlight<'_> {
+    fn drop(&mut self) {
+        *self.0.lock().unwrap() = None;
+    }
 }
 
 #[cfg(test)]

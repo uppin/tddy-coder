@@ -15,6 +15,14 @@ impl LspClient {
             return Ok(cached);
         }
         // Nothing published yet — fall back to a pull diagnostic request.
+        self.pull_diagnostics(uri).await
+    }
+
+    /// Diagnostics for a document as the server computes them now, by a `textDocument/diagnostic`
+    /// request — never the cache, which holds whatever the server last chose to publish and says
+    /// nothing about the text it was last sent. A server reads its messages in order, so the answer
+    /// is for every change announced before this call.
+    pub async fn pull_diagnostics(&self, uri: &str) -> Result<Vec<Diagnostic>, LspError> {
         let result = self
             .request(
                 "textDocument/diagnostic",

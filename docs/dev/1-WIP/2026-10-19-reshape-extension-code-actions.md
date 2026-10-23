@@ -116,18 +116,45 @@ test need nothing beyond this node.
 **Concurrent with:** `extension-wasm-command` (K24).
 **Blocks:** none.
 
-## Open questions (contract, 2026-10-20)
+## Decisions (green, 2026-10-23)
 
-- **`only` for an extension server.** `ServerBackend::over` (K22) takes no `code_action_kinds`; green needs a builder
-  or field on K22's struct to pass K19's kinds as `context.only`. No test pins it.
-- **Verify with no server.** `ExtensionVerify::new(support, None)` runs the parse check alone (no diagnostics exist to
-  compare). Confirm, or require a server for an extension language's verify.
-- **Where `verify_sources`' findings surface.** `restructure verify` (CLI) and the daemon's `VerifyResponse` carry only
-  the Rust `Comparison`; green has to print/carry `SourceFinding`s (touches `tddy-tools`/`tddy-index-daemon`
-  rendering) and the front ends must build `Options::verifies` beside `Options::installed`.
-- **Several command edits.** `resolve` keeps each `workspace/applyEdit` as its own `FileEdit::Change`, in arrival order
-  (each applies to the text the previous left) rather than one merged set of simultaneous edits.
-- **`workspace/applyEdit` outside a command** keeps today's `null` answer (not `{ applied: false }`).
+The contract's open questions, resolved conservatively:
+
+- **`only` for an extension server.** `ServerBackend::with_code_action_kinds(Vec<String>)` (a field, empty
+  asks for every kind); `ExtensionSupport::with_code_action_kinds` carries the manifest entry's
+  `code_action_kinds` from `load_installed` (`server::served` now returns them beside the `ServerChoice`, so
+  `ServerChoice::Configured` is unchanged) and `LanguageSupport::backend` hands them to the `ServerBackend`.
+- **Verify with no server.** `ExtensionVerify::new(support, None)` runs the parse check alone. With a server,
+  diagnostics are read by a **pull** (`textDocument/diagnostic`, new `LspClient::pull_diagnostics`) after the
+  before / after text is announced, never from the publish cache, which says nothing about the text last sent.
+  A server that advertises no `diagnosticProvider` is refused (`ServerDefect`), not silently verified by parse
+  alone.
+- **Where `verify_sources`' findings surface.** **Not done here**: `restructure verify` and the daemon's
+  `VerifyResponse` still carry only the Rust `Comparison`, and no front end builds `Options::verifies`. That
+  needs `tddy-tools` / `tddy-index-daemon` rendering and wiring outside this node's owned crates and
+  Boundaries; the library seam (`verify_sources`, `ExtensionVerify`) is complete and tested.
+- **Several command edits.** Kept as separate `FileEdit::Change`s in arrival order.
+- **`workspace/applyEdit` outside a command** keeps the `null` answer.
+- **A Rust backend that spawned its own server** (no shared client) refuses `apply_code_action`: the
+  self-spawned transport cannot carry `workspace/applyEdit`.
+
+Sanctioned additions to earlier nodes' files (no signature changed): `ServerBackend::supports` /
+`resolve` arm for `ApplyCodeAction` and the `code_action_kinds` field; `server.rs`'s `file_uri`,
+`relative_path`, `text_edit_of` made `pub(super)` for `code_action.rs`; `name_position` now reads
+`anchor_range`; `tddy-zed-extensions` gains `tokio` (`rt`) as a dependency, already a dev-dependency and a
+dependency of `tddy-lsp`.
+
+## Documentation deltas (applied at wrap)
+
+- `rust-code-restructuring.md`: **`apply_code_action`** — a plan line `{"op":"apply_code_action","anchor":<range|item|items>,
+  "action":{"title":..}|{"kind":..}}`. Selection is `textDocument/codeAction` over the anchor's range (`title` exact,
+  `kind` dotted prefix; none or several matches refuse and list what was offered); resolution is the action's `edit`,
+  else `codeAction/resolve`, else its command's `workspace/applyEdit` requests captured during
+  `workspace/executeCommand`. The server writes nothing; the run applies the edit like any other. **`## Verify`** —
+  `restructure verify` also hands each changed non-Rust file to the `SourceVerify` that claims it
+  (`runner::verify_sources`); Rust keeps the statement comparison.
+- `zed-extensions.md`: `ExtensionVerify` (new error diagnostics by pull, mapped through the lines the change left
+  alone, plus `ERROR` / `MISSING` parse nodes), `code_action_kinds` passed as `context.only`.
 
 ## Successor PRs
 
@@ -137,12 +164,12 @@ test need nothing beyond this node.
 
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests (batched; ticked at `/green` start)
+- [x] USER REVIEW — acceptance tests (batched; ticked at `/green` start)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] LSP: executeCommand + applyEdit capture
-- [ ] Operation (R1–R4), Rust and extension dispatch
-- [ ] Verify by support (R5)
-- [ ] Docs: `apply_code_action` and `## Verify` in rust-code-restructuring.md; zed-extensions.md
+- [x] LSP: executeCommand + applyEdit capture
+- [x] Operation (R1–R4), Rust and extension dispatch
+- [x] Verify by support (R5)
+- [x] Docs: `apply_code_action` and `## Verify` in rust-code-restructuring.md; zed-extensions.md (deltas below, applied to `packages/*/docs` at wrap)
 - [ ] Code Quality
 
 ## Testing plan

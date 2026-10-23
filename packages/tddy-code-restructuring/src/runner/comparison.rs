@@ -6,7 +6,7 @@
 use crate::apply::{ensure_git_worktree, git_output};
 use crate::spawn_record::SpawnRecorder;
 use crate::Result;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::options::usage;
@@ -46,9 +46,74 @@ pub fn verify_sources(root: &Path, options: &Options) -> Result<Vec<crate::verif
     if options.verifies.is_empty() {
         return Ok(Vec::new());
     }
-    let _ = root;
-    // TODO(reshape-extension-code-actions): implement
-    todo!("verify_sources")
+    let against = options
+        .against
+        .as_deref()
+        .ok_or_else(|| usage("verify needs --against <git-ref>"))?;
+    ensure_git_worktree(root, &options.spawns)?;
+
+    let confined = root.canonicalize()?;
+    let in_ref: BTreeSet<String> = git_output(
+        root,
+        &["ls-tree", "-r", "--name-only", "-z", against],
+        &options.spawns,
+    )?
+    .split('\0')
+    .map(str::to_string)
+    .collect();
+    let mut findings = Vec::new();
+    for path in changed_paths(root, against, &options.spawns)? {
+        let Some(verify) = options
+            .verifies
+            .iter()
+            .find(|verify| verify.claims(Path::new(&path)))
+        else {
+            continue;
+        };
+        let before = if in_ref.contains(&path) {
+            git_output(
+                root,
+                &["show", &format!("{against}:{path}")],
+                &options.spawns,
+            )?
+        } else {
+            String::new()
+        };
+        let after = match confined_regular_file(&confined, &path) {
+            Some(absolute) => std::fs::read_to_string(absolute)?,
+            None => String::new(),
+        };
+        findings.extend(verify.verify(
+            root,
+            &crate::verify::SourceChange {
+                path,
+                before,
+                after,
+            },
+        )?);
+    }
+    Ok(findings)
+}
+
+/// Every non-Rust file the working tree differs from `git_ref` in — changed, added, deleted or not
+/// yet tracked — by path relative to the root, in path order.
+fn changed_paths(root: &Path, git_ref: &str, spawns: &SpawnRecorder) -> Result<BTreeSet<String>> {
+    let tracked = git_output(
+        root,
+        &["diff", "--name-only", "--no-renames", "-z", git_ref],
+        spawns,
+    )?;
+    let untracked = git_output(
+        root,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+        spawns,
+    )?;
+    Ok(tracked
+        .split('\0')
+        .chain(untracked.split('\0'))
+        .filter(|path| !path.is_empty() && !path.ends_with(".rs"))
+        .map(str::to_string)
+        .collect())
 }
 
 fn sources_at(

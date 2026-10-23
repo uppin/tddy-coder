@@ -10,12 +10,13 @@
 //! Nothing is written here or by the server (R3): the edit is the operation's resolution, applied
 //! by the run like any other.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use crate::edit::{Range, Resolution};
+use super::server::{file_uri, relative_path, text_edit_of};
+use crate::edit::{FileEdit, Range, Resolution, WorkspaceEdit};
 use crate::plan::{ActionSelector, RefactorOp};
 use crate::registry::Workspace;
-use crate::Result;
+use crate::{RestructureError, Result};
 
 /// What `apply_code_action` asks of a language server. Every method is one request, made on a
 /// document the backend has already opened.
@@ -111,9 +112,62 @@ impl std::fmt::Display for CodeActionRefusal {
 /// `refactor.extract.function`, not `refactor.extractor`). None matching, or more than one, is
 /// [`crate::RestructureError::CodeActionRefused`].
 pub fn select<'a>(offered: &'a [Value], selector: &ActionSelector) -> Result<&'a Value> {
-    let _ = (offered, selector);
-    // TODO(reshape-extension-code-actions): implement
-    todo!("code_action::select")
+    let (wanted, matches): (String, Vec<&Value>) = match (&selector.title, &selector.kind) {
+        (Some(title), None) => (
+            format!("title `{title}`"),
+            offered
+                .iter()
+                .filter(|action| action["title"].as_str() == Some(title))
+                .collect(),
+        ),
+        (None, Some(kind)) => (
+            format!("kind `{kind}`"),
+            offered
+                .iter()
+                .filter(|action| {
+                    action["kind"]
+                        .as_str()
+                        .is_some_and(|k| nests_under(k, kind))
+                })
+                .collect(),
+        ),
+        _ => {
+            return Err(RestructureError::MalformedPlan(
+                "`action` takes exactly one of `title` and `kind`".to_string(),
+            ))
+        }
+    };
+    match matches.as_slice() {
+        [one] => Ok(one),
+        [] => Err(refused(CodeActionRefusal::NotOffered {
+            wanted,
+            offered: offered.iter().map(offered_action).collect(),
+        })),
+        _ => Err(refused(CodeActionRefusal::Ambiguous {
+            wanted,
+            matches: matches.into_iter().map(offered_action).collect(),
+        })),
+    }
+}
+
+/// Whether the LSP kind `actual` is `wanted` or nested under it: `refactor.extract.function` is
+/// under `refactor.extract`, `refactor.extractor` is not.
+fn nests_under(actual: &str, wanted: &str) -> bool {
+    actual == wanted
+        || actual
+            .strip_prefix(wanted)
+            .is_some_and(|rest| rest.starts_with('.'))
+}
+
+fn offered_action(action: &Value) -> OfferedAction {
+    OfferedAction {
+        title: action["title"].as_str().unwrap_or_default().to_string(),
+        kind: action["kind"].as_str().map(str::to_string),
+    }
+}
+
+fn refused(refusal: CodeActionRefusal) -> RestructureError {
+    RestructureError::CodeActionRefused(refusal)
 }
 
 /// `op` — an `apply_code_action` — over `range` of its anchor's file, asking `server` for the kinds
@@ -126,34 +180,120 @@ pub fn resolve(
     only: &[String],
     workspace: &Workspace<'_>,
 ) -> Result<Resolution> {
-    let _ = (server, op, range, only, workspace);
-    // TODO(reshape-extension-code-actions): implement
-    todo!("code_action::resolve")
+    let selector = op.action.as_ref().ok_or_else(|| {
+        RestructureError::MalformedPlan("`apply_code_action` needs `action`".to_string())
+    })?;
+    let uri = file_uri(workspace, op.anchor.file());
+    let offered = server.code_actions(&uri, range, only)?;
+    let chosen = select(&offered, selector)?;
+    let action = if chosen.get("edit").is_none() && server.resolves_code_actions() {
+        server.resolve_code_action(chosen)?
+    } else {
+        chosen.clone()
+    };
+    let edits = edits_of_action(server, &action)?;
+    let changes = edits
+        .iter()
+        .map(|edit| file_edits_of(edit, workspace))
+        .collect::<Result<Vec<_>>>()?
+        .concat();
+    if changes.is_empty() {
+        return Err(refused(CodeActionRefusal::NoEdit {
+            title: action["title"].as_str().unwrap_or_default().to_string(),
+        }));
+    }
+    Ok(Resolution::of(WorkspaceEdit { changes }))
+}
+
+/// R2: the `WorkspaceEdit`s `action` stands for — its own `edit`, else what its command sends back
+/// through `workspace/applyEdit` while it runs, in arrival order; none for an action with neither.
+fn edits_of_action(server: &dyn CodeActionServer, action: &Value) -> Result<Vec<Value>> {
+    if let Some(edit) = action.get("edit").filter(|edit| !edit.is_null()) {
+        return Ok(vec![edit.clone()]);
+    }
+    match action.get("command") {
+        Some(command) if command.is_object() => server.execute_command(command),
+        // A bare `Command` entry: its `command` is the name, and the entry is the command.
+        Some(Value::String(_)) => server.execute_command(action),
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// Every document of an LSP `WorkspaceEdit` as one change each, paths relative to the root, in the
+/// order the edit lists them. A change that is not a text edit — a file operation — is refused
+/// rather than half-applied.
+fn file_edits_of(edit: &Value, workspace: &Workspace<'_>) -> Result<Vec<FileEdit>> {
+    let not_text = || {
+        RestructureError::ServerDefect(
+            "the code action's edit holds a change that is not a text edit".to_string(),
+        )
+    };
+    let mut documents: Vec<(&str, &Vec<Value>)> = Vec::new();
+    if let Some(changes) = edit.get("documentChanges").and_then(Value::as_array) {
+        for change in changes {
+            let named = change
+                .pointer("/textDocument/uri")
+                .and_then(Value::as_str)
+                .zip(change.get("edits").and_then(Value::as_array));
+            documents.push(named.ok_or_else(not_text)?);
+        }
+    } else if let Some(changes) = edit.get("changes").and_then(Value::as_object) {
+        documents.extend(
+            changes
+                .iter()
+                .filter_map(|(uri, edits)| Some((uri.as_str(), edits.as_array()?))),
+        );
+    }
+    documents
+        .into_iter()
+        .filter(|(_, edits)| !edits.is_empty())
+        .map(|(uri, edits)| {
+            Ok(FileEdit::Change {
+                path: relative_path(uri, workspace)?,
+                edits: edits.iter().map(text_edit_of).collect::<Result<_>>()?,
+            })
+        })
+        .collect()
 }
 
 /// The server half of the generic path over the client every live backend already holds.
 impl CodeActionServer for crate::backends::LspClientBridge {
     fn code_actions(&self, uri: &str, range: Range, only: &[String]) -> Result<Vec<Value>> {
-        let _ = (uri, range, only);
-        // TODO(reshape-extension-code-actions): implement
-        todo!("LspClientBridge::code_actions")
+        let mut context = json!({ "diagnostics": [] });
+        if !only.is_empty() {
+            context["only"] = json!(only);
+        }
+        let answer = self.request(
+            "textDocument/codeAction",
+            json!({
+                "textDocument": { "uri": uri },
+                "range": {
+                    "start": { "line": range.start.line - 1, "character": range.start.col - 1 },
+                    "end": { "line": range.end.line - 1, "character": range.end.col - 1 },
+                },
+                "context": context,
+            }),
+        )?;
+        Ok(answer.as_array().cloned().unwrap_or_default())
     }
 
     fn resolves_code_actions(&self) -> bool {
-        // TODO(reshape-extension-code-actions): implement
-        todo!("LspClientBridge::resolves_code_actions")
+        self.handshake()
+            .pointer("/capabilities/codeActionProvider/resolveProvider")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     }
 
     fn resolve_code_action(&self, action: &Value) -> Result<Value> {
-        let _ = action;
-        // TODO(reshape-extension-code-actions): implement
-        todo!("LspClientBridge::resolve_code_action")
+        self.request("codeAction/resolve", action.clone())
     }
 
     fn execute_command(&self, command: &Value) -> Result<Vec<Value>> {
-        let _ = command;
-        // TODO(reshape-extension-code-actions): implement
-        todo!("LspClientBridge::execute_command")
+        let name = command["command"].as_str().ok_or_else(|| {
+            RestructureError::ServerDefect("a code action's command names no command".to_string())
+        })?;
+        let arguments = command["arguments"].as_array().cloned().unwrap_or_default();
+        Ok(self.execute(name, arguments)?.applied_edits)
     }
 }
 

@@ -30,6 +30,7 @@ use dispatch::{read_loop, Routes};
 use documents::DocumentVersions;
 use notifications::NotificationSink;
 
+use commands::ApplyEditCapture;
 pub use commands::ExecutedCommand;
 pub use notifications::{NotificationEvent, NotificationStream};
 pub use types::{Diagnostic, Location, Position, Range, ResponseError, SymbolInfo};
@@ -96,6 +97,9 @@ pub struct LspClient {
     /// Installed by the host that owns this client's idle timer, and called on every request and
     /// notification. Behind a `Mutex` because the host only ever holds the client behind an `Arc`.
     activity: Mutex<Option<ActivityHook>>,
+    /// The edits the server has sent through `workspace/applyEdit` during the one
+    /// `workspace/executeCommand` in flight; `None` while no command runs.
+    apply_edits: ApplyEditCapture,
 }
 
 impl Drop for LspClient {
@@ -124,6 +128,7 @@ impl LspClient {
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let diagnostics: DiagnosticsCache = Arc::new(Mutex::new(HashMap::new()));
         let notifications: Notifications = Arc::new(NotificationSink::new());
+        let apply_edits: ApplyEditCapture = Arc::new(Mutex::new(None));
 
         let reader = tokio::spawn(read_loop(
             stdout,
@@ -133,6 +138,7 @@ impl LspClient {
                 notifications: Arc::clone(&notifications),
                 stdin: stdin.clone(),
                 workspace_configuration: spec.workspace_configuration.clone(),
+                apply_edits: Arc::clone(&apply_edits),
             },
         ));
 
@@ -148,6 +154,7 @@ impl LspClient {
             notifications,
             documents: Mutex::new(HashMap::new()),
             activity: Mutex::new(None),
+            apply_edits,
         };
 
         let params = json!({

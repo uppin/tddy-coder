@@ -7,8 +7,9 @@
 //! no range to ask for actions over), and an `action` on any other operation, which would otherwise
 //! be ignored. Which actions the server offers over the range is `backends::code_action`'s.
 
+use super::super::malformed;
 use super::super::{RefactorKind, RefactorOp};
-use crate::Result;
+use crate::{Anchor, Result};
 
 /// Refuse an `apply_code_action` line that misses what it needs or carries what it cannot honour,
 /// and an `action` on any other operation; every other line passes untouched.
@@ -16,8 +17,30 @@ pub(super) fn rules(op: &RefactorOp) -> Result<()> {
     if op.op != RefactorKind::ApplyCodeAction && op.action.is_none() {
         return Ok(());
     }
-    // TODO(reshape-extension-code-actions): implement
-    todo!("TODO(reshape-extension-code-actions): the plan-line refusals of `apply_code_action`")
+    if op.op != RefactorKind::ApplyCodeAction {
+        return Err(malformed(
+            "`action` names a code action, which only `apply_code_action` honours".to_string(),
+        ));
+    }
+    let Some(action) = &op.action else {
+        return Err(malformed(
+            "`apply_code_action` needs `action`, naming the code action by `title` or `kind`"
+                .to_string(),
+        ));
+    };
+    if action.title.is_some() == action.kind.is_some() {
+        return Err(malformed(
+            "`action` names exactly one of `title` and `kind`".to_string(),
+        ));
+    }
+    match op.anchor {
+        Anchor::Symbol { .. } => Err(malformed(
+            "`apply_code_action` takes an anchor that is a range, or `items` / a single `item`: \
+             a `symbol` anchor names no range to ask for actions over"
+                .to_string(),
+        )),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
