@@ -27,6 +27,7 @@ use crate::proto::code_index::{
     VerifyResponse, WarmRequest, WatchRootRequest, WorkspacesRequest, WorkspacesResponse,
 };
 use crate::queries;
+use crate::queries::verify;
 use crate::symbols;
 use crate::CODE_INDEX_SERVICE;
 
@@ -219,7 +220,7 @@ impl CodeIndexService for CodeIndexServiceImpl {
         &self,
         request: tddy_rpc::Request<VerifyRequest>,
     ) -> Result<tddy_rpc::Response<VerifyResponse>, tddy_rpc::Status> {
-        queries::serve_verify(&self.index, request.into_inner())
+        verify::serve_verify(&self.index, request.into_inner())
             .await
             .map(tddy_rpc::Response::new)
     }
