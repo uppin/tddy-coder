@@ -61,12 +61,19 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
             failures: Vec::new(),
         });
     }
-    let languages = crate::server::served(dir, languages.clone())?
+    let served = crate::server::served(dir, languages.clone())?;
+    // The code-action kinds ride past the WASM step, which answers one choice per language, in order.
+    let kinds: Vec<Vec<String>> = served.iter().map(|(_, _, kinds)| kinds.clone()).collect();
+    let languages = served
         .into_iter()
         .zip(languages)
-        .map(|((language, choice), (manifest, _))| (manifest, language, choice))
+        .map(|((language, choice, _), (manifest, _))| (manifest, language, choice))
         .collect();
-    let languages = crate::wasm::served_by_wasm(dir, languages)?;
+    let languages = crate::wasm::served_by_wasm(dir, languages)?
+        .into_iter()
+        .zip(kinds)
+        .map(|((language, choice), kinds)| (language, choice, kinds))
+        .collect();
     let store = GrammarStore::new().map_err(|error| ExtensionError::GrammarEngineUnavailable {
         message: error.message,
     })?;
