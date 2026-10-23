@@ -79,6 +79,8 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             "",
             // A spawned child conversation is never a managed-codebase session.
             false,
+            // A child conversation cuts its own worktree.
+            "",
             // The orchestrator's owner's vault: a child is the same owner's, on the same project.
             &self.account_access,
             // A child conversation runs on its vendor: the orchestrator's account is not inherited.

@@ -64,6 +64,9 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     ssh_config_host: &str,
     // Recorded in the session's initial metadata, so `ListSessions` reports the session as managed.
     managed_codebase: bool,
+    // A checkout to run in directly (a project's home worktree) instead of cutting a session
+    // worktree. Empty cuts one, as every other claude-cli start does.
+    repo_path: &str,
     // What the session's vault says about the project's GitHub account — read once, here, for the
     // commit identity the agent is launched with.
     account_access: &SessionAccountAccess,
@@ -141,20 +144,25 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // on an SSH target when `ssh_config_host` is set.
     let ssh_alias = ssh_config_host.trim();
     progress.begin_phase(StartStep::Worktree);
-    let worktree_path = claude_cli_spawn_steps::cut_claude_cli_worktree(
-        claude_cli_spawn_steps::ClaudeCliWorktreeCut {
-            config,
-            session_id,
-            create_remote_branch,
-            project,
-            repo_root: &repo_root,
-            session_dir: &session_dir,
-            intent,
-            worktree_base_ref,
-            ssh_alias,
-        },
-    )
-    .await?;
+    let adopted_checkout = repo_path.trim();
+    let worktree_path = if !adopted_checkout.is_empty() {
+        claude_cli_spawn_steps::adopt_checkout(adopted_checkout)?
+    } else {
+        claude_cli_spawn_steps::cut_claude_cli_worktree(
+            claude_cli_spawn_steps::ClaudeCliWorktreeCut {
+                config,
+                session_id,
+                create_remote_branch,
+                project,
+                repo_root: &repo_root,
+                session_dir: &session_dir,
+                intent,
+                worktree_base_ref,
+                ssh_alias,
+            },
+        )
+        .await?
+    };
     progress.end_phase(StartStep::Worktree);
 
     // The child's branch now exists (and, when requested, is on origin), so a pr-stack

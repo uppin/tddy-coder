@@ -8,17 +8,20 @@
 
 use crate::catalog::ToolDef;
 
+/// The exec-catalog tools that only read or search.
+const READ_ONLY_TOOLS: [&str; 5] = ["Read", "Grep", "Glob", "ReadLints", "SemanticSearch"];
+
 /// Whether `name` (an exec-catalog tool name, e.g. `Read`) is one a project-home session may run.
 pub fn is_read_only_tool(name: &str) -> bool {
-    // TODO(home-session): implement
-    let _ = name;
-    false
+    READ_ONLY_TOOLS.contains(&name)
 }
 
 /// The subset of [`crate::tool_catalog`] a project-home session is offered.
 pub fn read_only_catalog() -> Vec<ToolDef> {
-    // TODO(home-session): implement
-    Vec::new()
+    crate::tool_catalog()
+        .into_iter()
+        .filter(|tool| is_read_only_tool(&tool.name))
+        .collect()
 }
 
 #[cfg(test)]

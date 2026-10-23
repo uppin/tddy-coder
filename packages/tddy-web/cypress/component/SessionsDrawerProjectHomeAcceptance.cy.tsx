@@ -94,7 +94,12 @@ function DrawerWithEnsure({ client, onSelected }: { client: ReturnType<typeof cr
 function rowOrderIn(projectId: string): Cypress.Chainable<string[]> {
   return byTestId(sessionsDrawerProjectGroup(projectId))
     .find("[data-testid^='sessions-drawer-project-home-'], [data-testid^='sessions-drawer-item-']")
-    .then(($rows) => [...$rows].map((el) => el.getAttribute("data-testid")!));
+    .then(($rows) =>
+      [...$rows]
+        .map((el) => el.getAttribute("data-testid")!)
+        // A row's own parts (status dot, label) and the entry's hint/error are not rows.
+        .filter((id) => !/^sessions-drawer-(item-(status|label)|project-home-(hint|error))-/.test(id)),
+    );
 }
 
 beforeEach(() => {

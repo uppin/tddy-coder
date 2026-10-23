@@ -1,5 +1,7 @@
-import type React from "react";
+import React, { useState } from "react";
 import type { SessionEntry } from "../../gen/session_pb";
+import { cn } from "../../lib/utils";
+import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import type { ProjectHomeInfo } from "./SessionDrawer";
 
 /**
@@ -16,7 +18,60 @@ export function ProjectHomeEntry(props: {
   selected: boolean;
   onEnsure: (projectId: string) => Promise<void>;
 }): React.ReactElement | null {
-  // TODO(home-session): implement
-  void props;
-  return null;
+  const { home, homeSession, selected, onEnsure } = props;
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const hasHomeAgent = home.homeAgentLabel !== null;
+
+  const activate = () => {
+    if (!hasHomeAgent || pending) return;
+    setError(null);
+    setPending(true);
+    onEnsure(home.projectId)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setPending(false));
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        data-testid={`sessions-drawer-project-home-${home.projectId}`}
+        aria-current={selected ? "true" : undefined}
+        aria-disabled={!hasHomeAgent}
+        onClick={activate}
+        className={cn(
+          "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
+          selected && "bg-muted",
+          !hasHomeAgent && "text-muted-foreground",
+        )}
+      >
+        {homeSession && <SessionIndicatorDot session={homeSession} sizeClassName="h-2 w-2" />}
+        <span className="font-medium">main</span>
+        <span className="truncate text-xs text-muted-foreground">{home.mainBranchRef}</span>
+        {home.homeAgentLabel && (
+          <span className="ml-auto truncate text-xs text-muted-foreground">
+            {home.homeAgentLabel}
+          </span>
+        )}
+      </button>
+      {!hasHomeAgent && (
+        <div
+          data-testid={`sessions-drawer-project-home-hint-${home.projectId}`}
+          className="px-2 pb-1 text-xs text-muted-foreground"
+        >
+          Set a home agent for this project on the Projects screen to start its main session.
+        </div>
+      )}
+      {error !== null && (
+        <div
+          data-testid={`sessions-drawer-project-home-error-${home.projectId}`}
+          role="alert"
+          className="px-2 pb-1 text-xs text-destructive"
+        >
+          {error}
+        </div>
+      )}
+    </div>
+  );
 }

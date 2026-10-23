@@ -11,6 +11,7 @@ import {
   type ProjectSessionGroup,
 } from "../../utils/sessionProjectGroups";
 import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
+import { ProjectHomeEntry } from "./ProjectHomeEntry";
 import { readCollapsedProjects, writeCollapsedProjects } from "./projectGroupCollapse";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
@@ -93,6 +94,9 @@ export interface ProjectHomeInfo {
   mainBranchRef: string;
   homeAgentLabel: string | null;
 }
+
+/** `SessionEntry.sessionRole` of a project's project-home session. */
+const PROJECT_HOME_ROLE = "project-home";
 
 interface StackGroup {
   parent: SessionEntry;
@@ -339,6 +343,8 @@ export function SessionDrawer({
   onSelectAll,
   onBulkDelete,
   projects = [],
+  projectHomes = [],
+  onEnsureProjectHome,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
@@ -464,6 +470,17 @@ export function SessionDrawer({
         <div className="py-1 px-2 space-y-0.5">
           {projectGroups.map((group) => {
             const key = projectGroupKey(group);
+            // The pinned entry stands for the project-home session, so it is not repeated as a row.
+            const home =
+              group.projectId === null
+                ? undefined
+                : projectHomes.find((h) => h.projectId === group.projectId);
+            const homeSession = home
+              ? (group.sessions.find((s) => s.sessionRole === PROJECT_HOME_ROLE) ?? null)
+              : null;
+            const rows = home
+              ? group.sessions.filter((s) => s.sessionRole !== PROJECT_HOME_ROLE)
+              : group.sessions;
             return (
               <SessionProjectGroup
                 key={key}
@@ -471,8 +488,16 @@ export function SessionDrawer({
                 collapsed={collapsedProjects.has(key)}
                 onToggle={() => toggleProjectGroup(key)}
               >
+                {home && onEnsureProjectHome && (
+                  <ProjectHomeEntry
+                    home={home}
+                    homeSession={homeSession}
+                    selected={homeSession !== null && homeSession.sessionId === selectedSessionId}
+                    onEnsure={onEnsureProjectHome}
+                  />
+                )}
                 <SessionGroupBody
-                  sessions={group.sessions}
+                  sessions={rows}
                   selectionMode={selectionMode}
                   partitionBodyProps={partitionBodyProps}
                 />

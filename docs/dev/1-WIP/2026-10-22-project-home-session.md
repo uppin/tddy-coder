@@ -199,6 +199,16 @@ stub scripts) and a real git fixture repo for the home worktree; a unit test tab
 - "Opens with the activity sidebar" is not a separate spec here: the started session is asserted `managed_codebase = true`, and node 3's `defaultActivitySidebarOpen` turns that into an open sidebar.
 - `session_role` touched every `SessionMetadata` / reader / proto `SessionEntry` literal (50 sites); `cargo check --all-targets` clean on the 19 crates that build them; clippy `-D warnings` clean on tool-engine, worktree-service, agent-launch, session-lifecycle, daemon-rpc, changeset, session-activity.
 
+## Green-phase notes
+
+- Non-sandboxed claude-cli start had no way to run in a given checkout; `repo_path` is now honoured there (`adopt_checkout` in `claude_cli_spawn_steps.rs`, one extra parameter threaded through `spawn_claude_cli_session_inner`). Child/conversation spawns pass `""`. No branch added to `start_session_core`.
+- `session_role` is recorded after the start returns (StartSessionRequest has no role field); ensures are serialized by a process-wide lock.
+- Running = pid alive or the daemon still serves its terminal; otherwise stopped -> fast-forward + resume.
+- `HarnessProfile.provider_account` is now `#[serde(default)]` (empty = the harness's own vendor): the red fixtures' profiles name none, and were silently skipped at load.
+- ExecuteTool/StreamExecuteTool refuse non-read-only tools for the role (`role_guard.rs`). Advertising the read-only catalog via tddy-tools is NOT done (ListExecTools has no session id).
+- Spec fix: `rowOrderIn` in the drawer spec filtered out a row's own status/label ids, which its prefix selector matched.
+- Known gap: a project with no sessions has no group, so no pinned entry (grouping is node 2's rule).
+
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
@@ -223,7 +233,7 @@ stub scripts) and a real git fixture repo for the home worktree; a unit test tab
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: the developer asked for wave 2 to run without per-node review, 2026-10-23)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (Rust tests deferred to CI per coordinator; clippy -D warnings clean on 7 crates; drawer Cypress specs green)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

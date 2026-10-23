@@ -442,8 +442,7 @@ fn session_entry_from_listing(
         codebase_session_id: s.codebase_session_id,
         ssh_config_host: s.ssh_config_host,
         managed_codebase: s.managed_codebase,
-        // TODO(home-session): report the session role
-        session_role: String::new(),
+        session_role: s.session_role,
         // Inferred below from the session's own conversation
         // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is
         // the honest value for a session nothing has been observed on, and stays the

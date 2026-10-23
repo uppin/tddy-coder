@@ -95,8 +95,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             codebase_session_id: metadata.codebase_session_id.unwrap_or_default(),
             ssh_config_host: metadata.ssh_config_host.unwrap_or_default(),
             managed_codebase: metadata.managed_codebase,
-            // TODO(home-session): report the session role
-            session_role: String::new(),
+            session_role: metadata.session_role.unwrap_or_default(),
         });
     }
 

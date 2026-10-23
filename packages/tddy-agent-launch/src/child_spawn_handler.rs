@@ -124,6 +124,8 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             "",
             // A spawned child is never a managed-codebase session: the orchestrator does not ask for one.
             false,
+            // A child cuts its own worktree.
+            "",
             // The orchestrator's owner's vault: a child is the same owner's, on the same project.
             &self.account_access,
             // A child runs on its vendor: the orchestrator's account is not inherited.

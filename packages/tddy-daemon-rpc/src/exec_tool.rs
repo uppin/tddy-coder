@@ -3,6 +3,7 @@
 mod path_guard;
 mod ports;
 mod result_frames;
+mod role_guard;
 
 pub use result_frames::EXEC_TOOL_FRAME_BYTES;
 
