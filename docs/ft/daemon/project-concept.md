@@ -178,6 +178,37 @@ session whose record carries the `project-home` role may run them; any other cal
   would read as an option is refused too.
 - Every call is appended to the home session's tool-call log, as any exec tool is.
 
+### Git tools
+
+A project-home session can run git on **another session's worktree** in its project. Targets are
+resolved as for the project-home tools: same project, never the home worktree (refused
+naming `project-home`), and only a project-home caller may run them. They are in the project-home
+session's offered set, so they are advertised to it and pre-approved in its `--allowedTools`.
+
+| Tool | Arguments | Runs |
+|---|---|---|
+| `CommitSessionWorktree` | `session_id`, `message`, `paths?` (every change when empty) | always |
+| `PushSessionBranch` | `session_id`, `force_with_lease?` | plain push always; force-with-lease only on an inactive target |
+| `RebaseSessionBranch` | `session_id`, `onto` | inactive target |
+| `StashSessionWorktree` | `session_id` (untracked files included) | inactive target |
+| `ResetSessionWorktree` | `session_id`, `mode` (`soft`/`mixed`/`hard`), `to` | inactive target |
+| `CheckoutSessionWorktree` | `session_id`, `to` | inactive target |
+| `CleanSessionWorktree` | `session_id` | inactive target |
+
+- **Activity gate.** Every operation that rewrites the target's files or history — and a
+  force-with-lease push, which rewrites the remote branch its agent builds on — is refused while the
+  target session is active, as an `is_error` result naming the session ("… is active; stop it
+  before rewriting its worktree"). Commit runs beside an active agent; its next edit lands in a
+  later commit.
+- **Rebase conflicts** are a result, not an error: the rebase is aborted (`git rebase --abort`),
+  the worktree is left as it was, and `result_json` carries `{"conflict_paths": [...], "aborted": true}`.
+- **Identity.** Every git command runs with the `GIT_*` environment the target session itself
+  starts with (its project's account, or the host's `gh`). When that does not resolve, the
+  checkout's own git identity applies. A ref argument that starts with `-` is refused.
+- **Push** goes to `origin` under the worktree's branch name, with the checkout's own credentials for
+  an HTTPS remote ([TODO](../../dev/todo/2026-10-23-project-home-git-push-remote-and-token.md)).
+- No merge, PR or branch-creation tools here — the `pr_*` tools cover those.
+
 ## Related
 
 - [Cloning over SSH](clone-ssh-passphrase.md) — the passphrase question a clone asks.

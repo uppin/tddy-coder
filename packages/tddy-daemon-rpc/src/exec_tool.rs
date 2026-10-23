@@ -11,8 +11,10 @@ pub use result_frames::EXEC_TOOL_FRAME_BYTES;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
+use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
+use tddy_host_service::GithubCli;
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecTools};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
@@ -32,6 +34,9 @@ pub struct ExecToolRpcHandler {
     /// to the host (`#project-home` 5/7). Unset on a handler built from a host that was never given
     /// its families, and a project-home tool that needs it then refuses.
     session_launch: Arc<OnceLock<LaunchSessions>>,
+    /// The vaults a project-home git tool reads a target's GitHub identity from (`#project-home` 7/7).
+    credential_vaults: Option<Arc<SessionVaults>>,
+    github_cli: GithubCli,
 }
 
 impl ExecToolRpcHandler {
@@ -47,6 +52,8 @@ impl ExecToolRpcHandler {
             rpc_activity: host.rpc_activity(),
             local_exec_tools: host.local_exec_tools(),
             session_launch: Arc::new(OnceLock::new()),
+            credential_vaults: host.credential_vaults(),
+            github_cli: host.github_cli(),
         }
     }
 

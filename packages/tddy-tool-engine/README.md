@@ -52,6 +52,15 @@ untracked files appear and the worktree's own index is never written; an option-
 refused. `ListExecTools` is in `IN_JAIL_RELAYABLE_EXEC_TOOLS`. See
 [project-home tools](../../docs/ft/daemon/project-concept.md#project-home-tools).
 
+## Project-home git tools
+
+`project_home_git_tools`: the seven git tools a project-home session runs on another session's
+worktree (`project_home_git_tool_defs`, `is_project_home_git_tool`); `execute_project_home_tool`
+routes them to `execute_project_home_git_tool`, which resolves the target through the
+`ProjectHomePort`, reads its `push_identity`, and runs `tddy_worktree_service::session_git_ops`.
+`read_only::is_project_home_allowed_tool` admits the seven names. See
+[project concept § Git tools](../../docs/ft/daemon/project-concept.md#git-tools).
+
 ## One catalog
 
 `tool_catalog()` is the only exec-tool catalog in the workspace. `tddy-tools` used to hold a

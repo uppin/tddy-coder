@@ -108,6 +108,22 @@ of another project `OtherProject`, the home session itself `IsHome`, and one wit
 `NoWorktree`. The project-home read and git tools resolve every target through it; see
 [project-home tools](../../../docs/ft/daemon/project-concept.md#project-home-tools).
 
+## Session git operations (`session_git_ops.rs`)
+
+The [project-home git tools](../../../docs/ft/daemon/project-concept.md#git-tools) run here, on a
+`session_target::SessionTarget`:
+
+- `GitOp` — `Commit { message, paths }`, `Push { force_with_lease }`, `Rebase { onto }`, `Stash`,
+  `Reset { mode, to }`, `Checkout { to }`, `Clean`.
+- `requires_inactive_target(op)` — false for commit and a plain push, true for everything else.
+- `run_git_op(target, op, &PushIdentity)` checks that gate **before** any git process starts
+  (`GitOpError::TargetActive { session_id }`), then runs the commands in `session_git_ops/run.rs` in
+  the target's worktree with `PushIdentity.env` and `GIT_TERMINAL_PROMPT=0`. A failing command is
+  `GitOpError::Git` with its stderr.
+- A rebase that leaves unmerged paths is aborted and answered `GitOpOutcome::RebaseConflict { paths }`;
+  a rebase that fails without conflicts is the error.
+- Push is `git push [--force-with-lease] origin HEAD:refs/heads/<branch>`.
+
 
 `tddy-daemon`'s `runtime.rs` builds one `WorktreeServiceImpl` and registers it from the same `Arc`
 on all three transports: a `ServiceEntry` from `tddy_service::WorktreeServiceServer::from_arc` for
