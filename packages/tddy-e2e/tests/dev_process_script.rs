@@ -754,6 +754,9 @@ const SPAWN_LEFTOVER: &str =
 
 /// [`SPAWN_LEFTOVER`] whose process ignores TERM (an ignored signal survives `exec`), so only the
 /// KILL escalation stops it.
+/// A group led by a shell that dies on TERM, with a member that ignores TERM; the member's pid is
+/// written to `$RUN.member`.
+const SPAWN_LEADER_WITH_TERM_IGNORING_MEMBER: &str = r#"set -m; bash -c 'bash -c "trap \"\" TERM; exec sleep 300" & echo $! > "$0"; wait' "$RUN.member" </dev/null >/dev/null 2>&1 & leftover=$!; set +m; disown "$leftover""#;
 const SPAWN_TERM_IGNORING_LEFTOVER: &str = r#"set -m; bash -c 'trap "" TERM; exec sleep 300' </dev/null >/dev/null 2>&1 & leftover=$!; set +m; disown "$leftover""#;
 
 /// A recorded group from a run that is gone is stopped by the next run.
@@ -812,6 +815,30 @@ fn a_recorded_group_that_ignores_term_is_killed() {
         "leftover {} killed after ignoring TERM",
         leftover.pid()
     );
+}
+
+/// A group whose leader dies on TERM while a member ignores it: the member is still ours (a
+/// process-group id cannot be reused while any member lives), so it is killed — not skipped
+/// because the leader's start time can no longer be read.
+#[test]
+fn a_recorded_group_whose_leader_exited_still_has_its_members_killed() {
+    // Given an earlier run's group: a leader that dies on TERM, and a member that ignores it
+    let record = RunRecord::new();
+    let earlier = record.run(&format!(
+        "{SPAWN_LEADER_WITH_TERM_IGNORING_MEMBER}\necho \"leftover=$leftover\"\nfor _ in 1 2 3 4 5 6 7 8 9 10; do [ -s \"$RUN.member\" ] && break; sleep 0.2; done\necho \"member=$(cat \"$RUN.member\")\"\ndev_run_record_init \"$RUN\"\ndev_run_record_group \"$RUN\" \"$leftover\""
+    ));
+    let leftover = Leftover(earlier.value("leftover"));
+    let member = earlier.value("member");
+    assert!(earlier.succeeded, "stderr:\n{}", earlier.stderr);
+    assert!(alive(&member), "the member outlived its run");
+
+    // When the next run reaps
+    let next = record.run("dev_reap_previous_run \"$RUN\"");
+
+    // Then the leader went on TERM, and the member it left behind is killed
+    assert!(next.succeeded, "stderr:\n{}", next.stderr);
+    assert!(!alive(leftover.pid()), "the leader exited");
+    assert!(!alive(&member), "member {member} of the recorded group is killed");
 }
 
 /// A recorded pid now held by a different process (started at another time) is not ours: untouched.

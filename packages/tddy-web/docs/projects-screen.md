@@ -82,6 +82,27 @@ with the shared `lib/participantRole.ts` (`inferParticipantRole`, `metadataLooks
 daemon's `eligible_daemon_from_participant_fields`, so client host selection and the server's
 `AddProjectToHost` routing agree on what counts as a daemon.
 
+## Failures
+
+Every RPC failure is shown in the daemon's words, where it happened (conventions:
+[operator-visible-failures.md](operator-visible-failures.md)). With no wire to the host at all, the
+layout's host connection gate covers the screen.
+
+- **Create project.** The reason appears under the form (`projects-create-project-error`), and what
+  was typed stays. The button reads "Creating…" while the request is in flight, and the form closes
+  only once the project exists.
+- **The project list.** A failed poll shows its reason above the list (`projects-load-error`), beside
+  the last good list. It clears on the next successful poll.
+- **Assignable accounts.** A failed `ListAccounts` shows `projects-accounts-load-error`. A daemon with
+  no credential vault does not mount `AccountsService`, and says so.
+- **Card actions** (add to host, default branch, account assignment) and the branch load show their
+  failure on that card (`project-card-error-<projectId>`). Add-to-host addresses the target host's own
+  client, and "Not connected to `<host>`" names that host.
+
+The container's action props return promises that reject with the reason. `useProjectsRpc` takes one
+options object, and `POLL_INTERVAL_MS` is exported for tests. Acceptance:
+`cypress/component/ProjectsVisibleErrorsAcceptance.cy.tsx`.
+
 ## Test IDs
 
 All `data-testid` values are centralized in `cypress/support/testIds.ts` (static in `TEST_IDS`,

@@ -430,16 +430,28 @@ export function useDaemons(): DaemonHost[] {
 /**
  * Name a host in text — an error, a badge, a gate title — by the one rule in `./hostLabel`.
  *
- * The callback's identity is stable for the component's lifetime and always reads the current
- * directory: the daemon list is rebuilt on every participant event, and a callback that changed with
- * it would re-run every effect keyed on it (a poll, a stream). Call it during render to key an
- * effect on the label itself.
+ * The callback changes identity exactly when a name it can give changes. The daemon list is rebuilt
+ * on every participant event, and a callback that changed with each rebuild would re-run every effect
+ * keyed on it (a poll, a stream). So it is keyed on the names themselves, never on the array. The key
+ * is real data the callback reads, not a ref: the React Compiler memoises a render-time call on its
+ * inputs, and a callback whose identity never changed would hand a compiled caller a stale label.
  */
 export function useHostLabel(): (instanceId: string) => string {
   const { daemons, selectedInstanceId, selectedLabel } = useSelectedDaemon();
-  const sourceRef = useRef({ daemons, selectedInstanceId, selectedLabel });
-  sourceRef.current = { daemons, selectedInstanceId, selectedLabel };
-  return useCallback((instanceId: string) => hostLabelOf(sourceRef.current, instanceId), []);
+  const names = JSON.stringify([
+    selectedInstanceId,
+    selectedLabel,
+    daemons.map((d) => [d.instanceId, d.label]),
+  ]);
+  return useMemo(() => {
+    const [id, label, listed] = JSON.parse(names) as [string | null, string | null, [string, string][]];
+    const source = {
+      selectedInstanceId: id,
+      selectedLabel: label,
+      daemons: listed.map(([instanceId, l]) => ({ instanceId, label: l })),
+    };
+    return (instanceId: string) => hostLabelOf(source, instanceId);
+  }, [names]);
 }
 
 /**

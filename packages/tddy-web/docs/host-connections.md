@@ -65,6 +65,20 @@ would not otherwise re-render at all.
 `revision()` is a counter rather than the provider array, because the array is mutated in place: a
 `useSyncExternalStore` snapshot has to compare equal until something actually changed.
 
+### Under the React Compiler
+
+Development and production builds run the React Compiler (`vite.config.ts`). Cypress turns it off
+(`CYPRESS_DISABLE_REACT_COMPILER=1`). The compiler memoises on what a function body **reads**, so a
+manual `useMemo` keyed on a value its body never reads loses that key:
+
+- `useHostConnector`'s resolver is keyed on `revision`;
+- `SelectedDaemonScope`'s `isReady` is keyed on `listedCount`.
+
+Both functions open with `"use no memo"`, the compiler's opt-out, so their hand-written memos hold.
+Without it, a page whose common room joined after the first render kept a resolver from before the
+join, and every `useDaemonClient` answered `null` for the life of the tab. Component tests cannot
+catch this class, because they run uncompiled.
+
 ## Hooks
 
 | Hook | Use |
@@ -85,6 +99,33 @@ down on every render.
 
 `useDaemonClient` / `useDaemonClientFor` in `rpc/selectedDaemon.tsx` are thin names over
 `useHostClient` — a daemon *is* a host, and the screens read in that vocabulary.
+
+## The host connection gate
+
+`AppShell requiresHost` wraps a host-scoped screen's body in `components/shell/HostConnectionGate.tsx`.
+While no viable RPC client reaches the selected host, the gate covers the body and names the host and
+the reason. The body stays mounted underneath, `inert` and `aria-hidden`, so a connection that comes
+back resumes the screen as it was. The header stays usable: the host selector and navigation both
+work.
+
+`hostGateOf` (`components/shell/hostGate.ts`, unit-tested in `hostGate.test.ts`) makes the decision.
+
+| Situation | Gate |
+|---|---|
+| No host selected | "No host selected" |
+| No connection; the common room's join failed | "Not connected to `<host>`" + `LiveKit: <error>` |
+| No connection; the room is still joining | "Connecting to `<host>`…" (`role="status"`) |
+| No connection; the room is up | "`<host>` is not in the common room — it may be offline." |
+| No connection; no LiveKit configured | "Not connected to `<host>`" + "LiveKit is not configured" |
+| A LiveKit connection whose room failed after joining | "Not connected to `<host>`" + `LiveKit: <error>` |
+| A connection exists while the room settles, or any non-LiveKit connection | open |
+
+The gate reads `connection.providerId` to tell a LiveKit connection from the others. A refused
+single call is not the gate's business: each screen shows it inline (see
+[operator-visible-failures.md](operator-visible-failures.md)).
+
+The gate is opted into by **Projects** and **Sessions**. Accounts, Worktrees and VMs are scoped to the
+selected host too, but they are not gated (see the backlog).
 
 ## Registration
 

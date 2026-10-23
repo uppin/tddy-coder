@@ -224,18 +224,24 @@ dev_reap_previous_run() {
 
   if [ "${#stopped[@]}" -gt 0 ]; then
     local pid i _
+    # Waited on the whole group, not its leader: a leader that dies on TERM can leave members behind.
     for _ in 1 2 3 4 5; do
       local alive=false
-      for pid in "${stopped[@]}"; do kill -0 "$pid" 2>/dev/null && alive=true; done
+      for pid in "${stopped[@]}"; do kill -0 -- "-$pid" 2>/dev/null && alive=true; done
       [ "$alive" = "true" ] || break
       sleep 1
     done
-    # Checked again before KILL: a pid that exited during the grace period may already belong to
-    # another process.
+    # Checked again before KILL. A leader still alive must still be the recorded one: an exited
+    # leader's pid may already belong to another process. A leader that is gone while its group
+    # lives left members behind, and they are still ours — a process-group id cannot be reused
+    # while any member of the group is alive.
     for ((i = 0; i < ${#stopped[@]}; i++)); do
       pid="${stopped[$i]}"
-      [ "$(_dev_started_at "$pid")" = "${stopped_at[$i]}" ] || continue
-      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      if kill -0 "$pid" 2>/dev/null; then
+        [ "$(_dev_started_at "$pid")" = "${stopped_at[$i]}" ] || continue
+      fi
+      kill -0 -- "-$pid" 2>/dev/null || continue
+      kill -KILL -- "-$pid" 2>/dev/null || true
     done
   fi
   rm -f "$file"

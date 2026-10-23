@@ -88,21 +88,22 @@ RUN_RECORD_OWNED=false
 # own process group, so `kill -- -<pid>` reaches the nix shell and everything under it.
 stop_children() {
   local pids=() pid
+  # By group, not by leader: the nix shell leading a group can exit while the daemon under it lives.
+  # These groups are this run's own, and a group id cannot be reused while any member is alive.
   for pid in $daemon_pid $vite_pid; do
-    kill -0 "$pid" 2>/dev/null && pids+=("$pid")
+    kill -0 -- "-$pid" 2>/dev/null && pids+=("$pid")
   done
   [ "${#pids[@]}" -gt 0 ] || return 0
   for pid in "${pids[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done
   for _ in 1 2 3 4 5; do
     local alive=false
-    for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null && alive=true; done
+    for pid in "${pids[@]}"; do kill -0 -- "-$pid" 2>/dev/null && alive=true; done
     [ "$alive" = "true" ] || return 0
     sleep 1
   done
-  # Only what is still alive: a pid that exited during the grace period may since have been handed
-  # to another process.
-  for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null && kill -KILL -- "-$pid" 2>/dev/null || true; done
+  for pid in "${pids[@]}"; do kill -0 -- "-$pid" 2>/dev/null && kill -KILL -- "-$pid" 2>/dev/null || true; done
 }
+
 
 # Runs on every exit — normal, Ctrl+C and error alike — so neither the processes nor the LiveKit
 # container this run started outlive it.
