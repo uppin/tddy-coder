@@ -248,8 +248,9 @@ jobs:
       # binaries deleted before the next. `cargo nextest run --workspace` builds all ~1,070 test
       # binaries first — each statically linking its crate's dependency graph — and that no longer
       # fits the runner's disk (`rustc`: "No space left on device", 110 GB free at the start). A
-      # filterset does not help: nextest applies `-E` after building. Two batches, balanced by test
-      # binaries, halve the peak; see scripts/nextest-windowed.ts.
+      # filterset does not help: nextest applies `-E` after building. One batch for now — with
+      # CARGO_INCREMENTAL=0 it may fit; `--batches 2` (balanced by test binaries) halves the peak if
+      # it does not. See scripts/nextest-windowed.ts.
       - name: cargo nextest
         id: nextest
         # Keep going on failure so the JUnit reports still publish; the report
@@ -259,7 +260,7 @@ jobs:
         # .config/nextest.toml apply to every leg.
         run: |
           e2e="$(cat .config/rust-e2e.filterset)"
-          ./dev bun scripts/nextest-windowed.ts --batches 2 -- --profile ci --locked -E "not ($e2e)"
+          ./dev bun scripts/nextest-windowed.ts --batches 1 -- --profile ci --locked -E "not ($e2e)"
 
       - name: Disk after the tests
         if: always()
