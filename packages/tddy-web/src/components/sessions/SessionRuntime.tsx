@@ -124,6 +124,11 @@ export function SessionRuntime({
   // Each renders as a tab after the bash tabs; selecting one attaches that child and shows its pane.
   const childSessions = useChildSessions(runtime.sessionId, sessions);
 
+  // This session's type, which decides what its "+" menu offers. A session the drawer's list does
+  // not carry yet has no type here, so the tab strip offers the harnesses and the daemon refuses any
+  // it does not run.
+  const sessionType = sessions.find((s) => s.sessionId === runtime.sessionId)?.sessionType;
+
   // The selected child conversation, or `null` when a terminal (Agent/bash) tab is active. Children
   // are attached lazily: a child's runtime pane is only mounted (and its `ConnectSession` fired)
   // once its tab has been selected, and it then stays mounted across further tab switches.
@@ -228,6 +233,7 @@ export function SessionRuntime({
         onSelect={selectTerminal}
         onOpen={open}
         onClose={close}
+        sessionType={sessionType}
         childSessions={childSessions}
         activeChildSessionId={activeChildSessionId}
         onSelectChild={selectChild}
@@ -299,7 +305,7 @@ export function SessionRuntime({
 
         {/* One mounted pane per bash terminal — kept alive whether focused or backgrounded. A bash
             terminal's output stream ending removes only its own tab (never the session). */}
-        {terminals.map((id) => (
+        {terminals.map(({ terminalId: id }) => (
           <div key={id} data-testid={`sessions-terminal-pane-${id}`} className={paneClass(id)}>
             {sessionTerminalClient && (
               <GrpcSessionTerminal

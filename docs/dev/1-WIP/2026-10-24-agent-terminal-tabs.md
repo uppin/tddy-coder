@@ -140,11 +140,11 @@ dispatch, not a launcher.
 
 ## Scope
 
-- [ ] **Proto**: `kind = 4`, regenerated for Rust and the web
-- [ ] **Port**: `TerminalLaunch` / `TerminalKind`, and the `TerminalRoster::start` signature across three implementations
-- [ ] **Daemon**: agent kind → descriptor → binary → argv → `start_agent_terminal`; unknown kind refused
-- [ ] **Coder**: refuses agent kinds
-- [ ] **Web**: `+` menu; kind-aware labels with ordinals, restored on reattach; Bash only on a tool session; refusal shown
+- [x] **Proto**: `kind = 4`, regenerated for Rust and the web
+- [x] **Port**: `TerminalLaunch` / `TerminalKind`, and the `TerminalRoster::start` signature across three implementations
+- [x] **Daemon**: agent kind → descriptor → binary → argv → `start_agent_terminal`; unknown kind refused
+- [x] **Coder**: refuses agent kinds
+- [x] **Web**: `+` menu; kind-aware labels with ordinals, restored on reattach; Bash only on a tool session; refusal shown
 - [ ] **Docs**: `session-terminal-tabs.md`, `terminal-sessions.md`, and one line in each harness doc, at wrap; a TODO for the claude-cli-tab hooks limitation
 
 ## Technical Changes
@@ -212,10 +212,10 @@ dispatch, not a launcher.
 
 ## Implementation Milestones
 
-- [ ] Proto plus port plus the bash path migrated; existing terminal suites green unchanged
-- [ ] Daemon agent dispatch: `agent_terminal_tabs_acceptance.rs` green
-- [ ] Coder refusal plus the two-server parity test green
-- [ ] Web menu and labels: `SessionTerminalTabsAgentKindsAcceptance.cy.tsx` green; existing tab specs green
+- [x] Proto plus port plus the bash path migrated; existing terminal suites green unchanged
+- [x] Daemon agent dispatch: `agent_terminal_tabs_acceptance.rs` green
+- [x] Coder refusal plus the two-server parity test green
+- [x] Web menu and labels: `SessionTerminalTabsAgentKindsAcceptance.cy.tsx` green; existing tab specs green
 
 ## Testing Plan
 
@@ -256,42 +256,44 @@ on the wire, labels, reattach labels, tool session, refusal, Escape.
 
 Red state, verified 2026-10-24: the agent-kind test fails; the two bash-path tests pass (the bash path is kept).
 
-- [ ] **Integration**: `start_terminal_session_hands_the_roster_the_requested_agent_kind`
-- [ ] **Integration**: `a_start_without_a_kind_hands_the_roster_the_login_shell`
-- [ ] **Integration**: `a_start_naming_bash_hands_the_roster_the_login_shell`
+- [x] **Integration**: `start_terminal_session_hands_the_roster_the_requested_agent_kind`
+- [x] **Integration**: `a_start_without_a_kind_hands_the_roster_the_login_shell`
+- [x] **Integration**: `a_start_naming_bash_hands_the_roster_the_login_shell`
 
 ### tddy-session-lifecycle — `packages/tddy-session-lifecycle/tests/agent_terminal_tabs_acceptance.rs`
 
 Red state, verified 2026-10-24: 7 of 7 fail. The RPC handler still hands the roster `Bash`, so a shell starts instead of the harness and an unknown kind is not refused. The existing `terminal_session_acceptance.rs` passes 12/12.
 
-- [ ] **Integration**: `an_agent_terminal_runs_that_harness_in_the_sessions_worktree` — Muse stub; argv `["muse"]`, cwd = the main terminal's worktree
-- [ ] **Integration**: `an_agent_terminal_is_listed_with_its_harness_as_its_kind`
-- [ ] **Integration**: `an_agent_terminal_gets_a_fresh_id_distinct_from_main_and_from_other_tabs`
-- [ ] **Integration**: `an_agent_terminal_resolves_its_binary_from_the_harness_config` — `cli_harnesses.opencode-cli.binary_path` stub is the one spawned
-- [ ] **Integration**: `a_claude_agent_terminal_starts_a_conversation_of_its_own` — `--session-id` is present and is not the session's id
-- [ ] **Integration**: `an_unknown_terminal_kind_is_refused_and_nothing_is_spawned`
-- [ ] **Integration**: `stopping_an_agent_terminal_kills_it_and_removes_it_from_the_list`
+- [x] **Integration**: `an_agent_terminal_runs_that_harness_in_the_sessions_worktree` — Muse stub; argv `["muse"]`, cwd = the main terminal's worktree
+- [x] **Integration**: `an_agent_terminal_is_listed_with_its_harness_as_its_kind`
+- [x] **Integration**: `an_agent_terminal_gets_a_fresh_id_distinct_from_main_and_from_other_tabs`
+- [x] **Integration**: `an_agent_terminal_resolves_its_binary_from_the_harness_config` — `cli_harnesses.opencode-cli.binary_path` stub is the one spawned
+- [x] **Integration**: `a_claude_agent_terminal_starts_a_conversation_of_its_own` — `--session-id` is present and is not the session's id
+- [x] **Integration**: `an_unknown_terminal_kind_is_refused_and_nothing_is_spawned`
+- [x] **Integration**: `stopping_an_agent_terminal_kills_it_and_removes_it_from_the_list`
 
 ### tddy-coder — `packages/tddy-coder/src/session_participant/connection_service_participant/tests.rs`
-- [ ] **Unit**: `start_terminal_session_refuses_an_agent_kind`
+- [x] **Unit**: `start_terminal_session_refuses_an_agent_kind`
 
 ### tddy-web — `packages/tddy-web/cypress/component/SessionTerminalTabsAgentKindsAcceptance.cy.tsx`
 
 Red state, verified 2026-10-24: 7 of 7 fail (no `sessions-terminal-tab-new-menu`). The existing `SessionTerminalTabsAcceptance.cy.tsx` passes 5/5.
 
-- [ ] **Component**: "opens a menu of Bash and every CLI harness from '+'"
-- [ ] **Component**: "starts a Muse Code terminal from the menu and focuses its tab"
-- [ ] **Component**: "labels tabs by kind with a per-kind ordinal"
-- [ ] **Component**: "restores tab labels from the listed terminals' kinds on reattach"
-- [ ] **Component**: "offers only Bash on a tool session"
-- [ ] **Component**: "closes the menu on Escape without starting a terminal"
-- [ ] **Component**: "shows why an agent terminal could not start and opens no tab"
-- [ ] **Component (migrated)**: `SessionTerminalTabsAcceptance.cy.tsx` and `SessionTabsVisibleErrorsAcceptance.cy.tsx` open bash through the menu (`sessions-terminal-tab-new` → `sessions-terminal-tab-new-bash`) and keep their assertions
+- [x] **Component**: "opens a menu of Bash and every CLI harness from '+'"
+- [x] **Component**: "starts a Muse Code terminal from the menu and focuses its tab"
+- [x] **Component**: "labels tabs by kind with a per-kind ordinal"
+- [x] **Component**: "restores tab labels from the listed terminals' kinds on reattach"
+- [x] **Component**: "offers only Bash on a tool session"
+- [x] **Component**: "closes the menu on Escape without starting a terminal"
+- [x] **Component**: "shows why an agent terminal could not start and opens no tab"
+- [x] **Component (migrated)**: `SessionTerminalTabsAcceptance.cy.tsx` and `SessionTabsVisibleErrorsAcceptance.cy.tsx` open bash through the menu (`sessions-terminal-tab-new` → `sessions-terminal-tab-new-bash`) and keep their assertions
 
 ## Technical Debt & Production Readiness
 
-- [ ] **Existing tab specs need the menu**: `SessionTerminalTabsAcceptance.cy.tsx`, `SessionTabsVisibleErrorsAcceptance.cy.tsx` and `SessionTerminalFullscreenAcceptance.cy.tsx` click a bare `+` (`tabs.newTab()`) and expect a bash tab. Once `+` opens a menu, they must go through `newTabOption("bash")`. Migrate them in green; they are left unmigrated in the contract so they keep proving the bash path until then.
-- [ ] The daemon roster needs the `DaemonConfig` to resolve a harness binary: `CliManagerTerminalRoster::new` gains it (wired in `terminal_session_ports`).
+- [x] **Existing tab specs need the menu**: `SessionTerminalTabsAcceptance.cy.tsx` and `SessionTabsVisibleErrorsAcceptance.cy.tsx` clicked a bare `+` (`tabs.newTab()`) for a bash tab; they now go through `newTabOption("bash")` with their assertions unchanged. `SessionTerminalFullscreenAcceptance.cy.tsx` never clicks `+` (it seeds `bash-1` through the listing), so it needed no change. (Corrected in green: the premise above named it wrongly.)
+- [x] The daemon roster needs the `DaemonConfig` to resolve a harness binary: `CliManagerTerminalRoster::new` takes it (wired in `svc_terminal_ports.rs`).
+- [ ] **Developer decision: a session absent from the drawer's list offers the harnesses.** `SessionRuntime` passes `sessionType` as undefined until the session is listed, and the tab strip then offers every harness. That is a fail-open default. The daemon refuses a kind it does not run and the coder refuses every agent kind, so the refusal is shown rather than silent. Alternative: offer Bash only until the type is known. Keep or change.
+- [ ] **Blocked on #717**: `WARP_CLI`'s `warp_argv` is `todo!()` on this base, so picking Warp from the `+` menu reaches that `todo!()` in the daemon. It is also reachable from the Create pane on the base. Clears when #717 greens; nothing here changes it.
 
 ## Decisions & Trade-offs
 
@@ -340,7 +342,7 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

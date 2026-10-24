@@ -1,19 +1,10 @@
 import type { SessionType } from "./createSessionRequest";
+import { SESSION_TYPE_OPTIONS } from "./cliHarnessOptions";
 
 export interface CreateSessionTypeToggleProps {
   sessionType: SessionType;
   setSessionType: (sessionType: SessionType) => void;
 }
-
-/** The session types the toggle offers, in order, with the label each button shows. */
-const SESSION_TYPE_OPTIONS: { id: SessionType; label: string }[] = [
-  { id: "tool", label: "Tool" },
-  { id: "claude-cli", label: "Claude CLI" },
-  { id: "cursor-cli", label: "Cursor CLI" },
-  { id: "opencode-cli", label: "OpenCode" },
-  { id: "muse-cli", label: "Muse Code" },
-  { id: "warp-cli", label: "Warp" },
-];
 
 /**
  * Session type toggle — which backend the session is started as. Presentational: the selection
