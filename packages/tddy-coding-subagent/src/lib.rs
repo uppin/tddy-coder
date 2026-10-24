@@ -8,7 +8,7 @@ pub mod launcher;
 pub mod permissions;
 pub mod session;
 
-pub use catalog::{coding_agent_defs, CodingAgentDef, ACP_HARNESSES};
+pub use catalog::{coding_agent_defs, coding_agent_defs_in, CodingAgentDef, ACP_HARNESSES};
 pub use confinement::{confinement_for, Confinement};
 pub use launcher::{CodingAgentLaunch, CodingAgentLauncher};
 pub use permissions::DenyAndRecord;

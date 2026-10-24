@@ -167,12 +167,12 @@ See *Responsibility*, per package as listed in *Affected Packages*.
 
 ## Implementation Milestones
 
-- [ ] proto + record kind, back-compat load
-- [ ] `CodingAgentDef` resolution and `ListSubagents` rows
-- [ ] attach admission incl. managed confinement refusal
-- [ ] `CodingAgentSession` turn / descriptors / refusals / deny-and-record / cancel / drop
-- [ ] `CodingAgentLauncher` daemon adapter (user, route, cwd, MCP)
-- [ ] web badge
+- [x] proto + record kind, back-compat load
+- [x] `CodingAgentDef` resolution and `ListSubagents` rows
+- [x] attach admission incl. managed confinement refusal
+- [x] `CodingAgentSession` turn / descriptors / refusals / deny-and-record / cancel / drop
+- [ ] `CodingAgentLauncher` daemon adapter — same-user, unmanaged, vendor-login launches only (see 🔴 TODOs under Technical Debt)
+- [x] web badge
 
 ## Testing Plan
 
@@ -232,7 +232,42 @@ Cypress (`mountWithRpc` / per-daemon in-memory backends):
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+**Green (2026-10-24)** — session, catalog, admission, open/turn/end and the web badge are real and
+covered by the acceptance tests. Three launcher gaps remain; each is a typed refusal naming its
+reason (never a weaker launch), and each is open work:
+
+- 🔴 **TODO(acp-subagent) — run as the session's OS user.** `DaemonCodingAgentLauncher`
+  (`tddy-session-lifecycle/src/coding_agent_launcher.rs`) starts the harness only when the daemon
+  already runs as `session_os_user` (the desktop deployment). No existing spawn path
+  (`spawn_as_user`, the spawn worker) hands the ACP driver piped stdio for a non-PTY child run as
+  another user, so under a root/supervisor daemon every launch is refused with a message naming both
+  users. Needs a spawn-as-user path with piped stdio.
+- 🔴 **TODO(acp-subagent) — provider account route.** A harness profile naming `provider_account`
+  is refused at launch: resolving the route reads the session owner's vault
+  (`tddy-agent-launch::SessionAccountAccess`), which the launcher does not hold.
+- 🔴 **TODO(acp-subagent) — managed confinement is admitted but not yet launched.** Attach
+  admission, the table and the open path are real (a managed session refuses `codex-acp` at attach
+  and passes `claude-acp` / `opencode`, with `mcp_servers = [tddy-tools --mcp]` on the launch), but
+  the production launcher refuses any `managed` launch: it neither applies the withdrawal below nor
+  gives `tddy-tools --mcp` its transport (`TDDY_REMOTE_*` agent token + daemon socket). Until then a
+  managed session can attach a confinable harness but cannot open a conversation with it.
+- `subagent_cancel` while a turn runs ends the conversation (the table's `closed` signal drops the
+  turn and the session, which kills the process). `CodingAgentSession::cancel_handle` is real
+  (`session/cancel`, turn ends `cancelled`) but the conversation table holds `Box<dyn SubagentSession>`
+  and cannot reach it; wiring it is n3's table work.
+- A provider-account-less coding agent's model is `default_model_for_agent(id)` — a model id the
+  harness may not advertise; `session/set_model` then fails loudly naming the offered models.
+
+### Confinement mechanism per harness (what `confinement_for` relies on)
+
+- `claude-acp` — `claude-agent-acp` accepts `disallowedTools` in `session/new` `_meta.claudeCode.options`.
+  **Not applied yet**: `OpenSession` (n1) carries no `_meta`, and n2 does not change the driver.
+- `opencode` — its config's tool permissions (`OPENCODE_CONFIG_CONTENT`) disable the built-in
+  bash/read/edit/write/glob/grep tools. **Not applied yet** (launcher gap above).
+- `codex-acp` — sandbox modes only, no tool withdrawal; `CannotWithdraw`, refused in managed sessions.
+
+Neither mechanism was verified against a real adapter (none is available here); the table is the
+documented claim, the launcher is where it will be proven.
 
 ## Decisions & Trade-offs
 
@@ -278,7 +313,7 @@ _(populated during development)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (launcher gaps open, see Technical Debt)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-coding-subagent -p tddy-session-agents -p tddy-daemon-rpc -p tddy-changeset`; the two Cypress specs) — verify 100% pass

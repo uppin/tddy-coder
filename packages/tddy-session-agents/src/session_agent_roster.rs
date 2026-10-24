@@ -389,9 +389,8 @@ fn roster_entry(
         // The last activity survives a state change rather than being cleared with it: what an idle
         // agent was last seen doing is the only useful thing to show on its row.
         last_activity: activity.as_ref().and_then(AgentActivity::to_proto),
-        // TODO(acp-subagent): implement — the record's `kind` and `harness`
-        kind: tddy_service::proto::types::AgentKind::Model as i32,
-        harness: String::new(),
+        kind: crate::coding_agent::agent_kind_to_wire(record.kind) as i32,
+        harness: record.harness.clone().unwrap_or_default(),
     }
 }
 

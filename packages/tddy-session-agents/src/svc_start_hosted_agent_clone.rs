@@ -158,6 +158,17 @@ impl AgentRoster {
         session_token: &str,
         system_prompt: Option<&str>,
     ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
+        if record.kind == tddy_core::AgentKindRecord::CodingAgent {
+            return self
+                .open_coding_agent_session(
+                    session_id,
+                    session_dir,
+                    record,
+                    session_token,
+                    system_prompt,
+                )
+                .await;
+        }
         let github_user = (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         // Through the spawn resolver rather than the listing one: a registry assistant's def comes

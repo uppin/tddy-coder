@@ -22,9 +22,39 @@ pub struct CodingAgentDef {
 /// The coding agents offered from `profiles` (every one whose harness is in [`ACP_HARNESSES`]) and
 /// `allowed_agent_ids` (`(id, label)` pairs whose id is one), profiles first.
 pub fn coding_agent_defs(
-    _profiles: &[HarnessProfile],
-    _allowed_agent_ids: &[(String, Option<String>)],
+    profiles: &[HarnessProfile],
+    allowed_agent_ids: &[(String, Option<String>)],
 ) -> Vec<CodingAgentDef> {
-    // TODO(acp-subagent): implement
-    Vec::new()
+    let from_profiles = profiles
+        .iter()
+        .filter(|profile| ACP_HARNESSES.contains(&profile.harness.as_str()))
+        .map(|profile| CodingAgentDef {
+            name: profile.name.clone(),
+            label: profile.label.clone(),
+            harness: profile.harness.clone(),
+            model: profile.model.clone(),
+            provider_account: Some(profile.provider_account.clone())
+                .filter(|account| !account.is_empty()),
+        });
+    let from_allowed = allowed_agent_ids
+        .iter()
+        .filter(|(id, _)| ACP_HARNESSES.contains(&id.as_str()))
+        .map(|(id, label)| CodingAgentDef {
+            name: id.clone(),
+            label: label.clone(),
+            harness: id.clone(),
+            model: tddy_agent_backend::default_model_for_agent(id).to_string(),
+            provider_account: None,
+        });
+    from_profiles.chain(from_allowed).collect()
+}
+
+/// [`coding_agent_defs`] over the harness profiles in `agents_dir` (`<tddyhome>/agents`) — what a
+/// daemon resolves a listing, an attach and an open against, so the three read one list.
+pub fn coding_agent_defs_in(
+    agents_dir: &std::path::Path,
+    allowed_agent_ids: &[(String, Option<String>)],
+) -> Vec<CodingAgentDef> {
+    let profiles = tddy_discovery::harness_profile::load_harness_profiles(agents_dir);
+    coding_agent_defs(&profiles, allowed_agent_ids)
 }

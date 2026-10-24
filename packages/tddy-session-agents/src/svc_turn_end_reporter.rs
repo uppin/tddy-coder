@@ -62,13 +62,22 @@ impl AgentRoster {
             .resolvable_agent_defs()
             .await?
             .into_iter()
-            .find(|d| d.name == id.name)
-            .ok_or_else(|| {
-                Status::invalid_argument(format!(
+            .find(|d| d.name == id.name);
+        let Some(def) = def else {
+            // Not a model def: a coding agent this daemon offers under that name is the other
+            // thing an id can resolve to.
+            return match self.coding_agent_def(&id.name) {
+                Some(coding) => {
+                    crate::coding_agent::coding_agent_record(&coding, &local_instance_id)
+                        .map_err(|e| Status::invalid_argument(e.to_string()))
+                }
+                None => Err(Status::invalid_argument(format!(
                     "agent '{named_as}' resolves to no def on daemon '{local_instance_id}' (not \
-                     found under <tddyhome>/agents, and not an assistant in its registry)"
-                ))
-            })?;
+                     found under <tddyhome>/agents, not an ACP coding agent it offers, and not an \
+                     assistant in its registry)"
+                ))),
+            };
+        };
         agent_roster::roster_record(&def, &local_instance_id)
             .map_err(|e| Status::invalid_argument(e.to_string()))
     }
@@ -140,6 +149,10 @@ impl AgentRoster {
                 .map_err(|e| Status::invalid_argument(e.to_string()))?,
             false => row.agent_id,
         };
+        let (kind, harness) = (
+            crate::coding_agent::agent_kind_from_wire(row.kind),
+            Some(row.harness.clone()).filter(|h| !h.is_empty()),
+        );
         Ok(tddy_core::SessionAgentRecord {
             agent_id,
             name: row.name,
@@ -151,9 +164,8 @@ impl AgentRoster {
             // Filled in by the caller once the clone for (session, owning daemon) is claimed: the
             // record is resolved before this daemon knows which session it is being attached to.
             codebase_session_id: None,
-            // TODO(acp-subagent): implement — take the peer row's `kind` and `harness`
-            kind: tddy_core::AgentKindRecord::Model,
-            harness: None,
+            kind,
+            harness,
         })
     }
 }
