@@ -40,9 +40,7 @@ use tddy_discovery::subagent::{
 use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
 use crate::agent_conversations::{AgentConversation, PromptRouting};
-use crate::conversation_recorder::{
-    take_recorded_turn, with_recording_failure, ConversationRecorder, TurnError,
-};
+use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder};
 use crate::ports::SessionAgentPorts;
 use crate::session_agent_status::ManagedAgentState;
 
@@ -304,29 +302,12 @@ impl SessionAgentServiceImpl {
                     }
                     turn_ended(answered);
                 }
-                // Closed while in flight: the caller has been told, so no badge is reported, as before.
-                Err(TurnError::Closed { recording }) => {
-                    let _ = tx.send(Err(Status::failed_precondition(with_recording_failure(
-                        format!(
-                            "conversation '{conversation_id}' was closed while its turn was in flight"
-                        ),
-                        recording,
-                    ))));
-                }
-                Err(TurnError::Recording(e)) => {
-                    turn_ended(format!("turn failed: {e}"));
-                    let _ = tx.send(Err(Status::internal(format!(
-                        "conversation '{conversation_id}' turn could not be recorded: {e}"
-                    ))));
-                }
-                Err(TurnError::Agent { error, recording }) => {
-                    // Idle, not ERROR: the agent is still attached and still promptable, and it is
-                    // the *clone* that ERROR is reserved for. The summary is what says what happened.
-                    turn_ended(format!("turn failed: {error}"));
-                    let _ = tx.send(Err(Status::internal(with_recording_failure(
-                        format!("agent conversation '{conversation_id}' failed: {error}"),
-                        recording,
-                    ))));
+                Err(error) => {
+                    let (badge, status) = error.into_reply(&conversation_id);
+                    if let Some(badge) = badge {
+                        turn_ended(badge);
+                    }
+                    let _ = tx.send(Err(status));
                 }
             }
         });

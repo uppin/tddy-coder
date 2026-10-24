@@ -46,10 +46,7 @@ impl ConversationFrames {
         session_id: &str,
         conversation_id: &str,
     ) -> broadcast::Receiver<ConversationFrame> {
-        let mut senders = self
-            .senders
-            .lock()
-            .expect("conversation frames mutex poisoned");
+        let mut senders = self.senders.lock().unwrap_or_else(|e| e.into_inner());
         senders.retain(|_, sender| sender.receiver_count() > 0);
         senders
             .entry((session_id.to_string(), conversation_id.to_string()))
@@ -62,7 +59,7 @@ impl ConversationFrames {
         let sender = self
             .senders
             .lock()
-            .expect("conversation frames mutex poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .get(&(session_id.to_string(), conversation_id.to_string()))
             .cloned();
         if let Some(sender) = sender {

@@ -477,6 +477,59 @@ re-opening a cached row paints its JSON on the first frame with no skeleton flas
 rather than evaluated once per mount, it also means a dialog that stays mounted while the operator
 switches rows cannot show the previous row's bodies.
 
+## A subagent conversation is one bubble (Added: 2026-10-24)
+
+The main agent's `subagent_*` calls for one conversation (`new_session`, `prompt`, `await`,
+`resume`, `cancel`) fold into **one bubble** in the session's transcript, keyed by the conversation.
+Clicking it opens **the conversation itself**.
+
+### The bubble
+
+- Folded **server-side** in `frame_for_agent_activity`: a `subagent_*` hook record carrying a
+  `sessionId` becomes one ACP tool-call frame with `tool_call_id = "subagent:<conversation id>"`
+  (`SUBAGENT_TOOL_CALL_PREFIX`), so the web stays a pure projection (stream frames are body-stripped
+  and the web never sees `sessionId`).
+- Title: `<agent id> · <first prompt summary>` (first line, capped at 80 characters). The label is the
+  agent id, since `AgentActivityRecord` carries no label.
+- Status follows the last call: `subagent_prompt`/`await` running → in progress,
+  `permission_requested` → pending ("waiting for permission"), end/cancel → completed, error → failed.
+- The web projects it as `ChatMessage.from: "subagent"` (`data-message-kind="subagent"`), clickable in
+  `AgentTranscriptView` via `onSubagentClick`.
+
+### The conversation dialog
+
+`SubagentConversationDialog` hosts `useAcpReplay({ sessionId, conversationId })` in the pane's
+read-only `AgentChatView`: live while the conversation runs, older turns paged in, each tool call
+opening `AgentActivityDetailDialog` with the conversation's id. `useAcpReplay`,
+`useAcpToolCallDetail` and `agentActivityRegistry` are keyed by `(sessionId, conversationId)`.
+A conversation that recorded nothing (an in-jail loop) shows `subagent-conversation-not-recorded`
+instead of a transcript — told apart by the replay's `NOT_FOUND`, not by a field on the bubble.
+
+### Recording and replay
+
+- Every **daemon-run** conversation keeps its own transcript at
+  `<session dir>/conversations/<conversation id>/acp-transcript.jsonl`: the prompt
+  (`user_message_chunk`), streamed text, tool calls and updates, the pending permission request and
+  the stop reason.
+- A streaming coding agent's updates are appended **as they arrive** (a recorder task on the
+  session's `updates()` broadcast) and published on a per-conversation live channel
+  (`ConversationFrames`). A model loop is recorded whole at turn end, through the same writer.
+- A turn that cannot be recorded **fails** and delivers no answer.
+- `StreamAcpReplay`, `GetAcpReplayPage` and `GetAcpToolCallDetail` take an optional
+  `conversation_id`; with it they serve that conversation's transcript with the same modes, paging and
+  lazy bodies, and a conversation-addressed stream tails the live channel (`COUNT_THEN_LIVE` returns
+  the count and does not tail). A host that records no conversations (`tddy-coder`) answers
+  `NOT_FOUND` naming the conversation.
+
+### Known limits
+
+- In-jail conversations are not recorded.
+- A bubble first seen live keeps its opening call's title (the agent only) until reload.
+- `AgentActivityOverlay` does not pass `onSubagentClick`, so subagent entries are inert there
+  (it has no production mount — `docs/dev/todo/2026-10-23-agent-activity-overlay-has-no-production-mount.md`).
+- Live positions equal the append count; they align with replay positions unless one conversation
+  sends two `tool_call` frames with the same id. A recorder more than 1024 updates behind fails the turn.
+
 ## Scope
 
 - **In scope:** the `agent-activity.jsonl` log + shared `AgentActivityRecord` (in `tddy-core`);
@@ -505,6 +558,10 @@ switches rows cannot show the previous row's bodies.
   settled call), and curated error text separating a failed lookup, an unknown `tool_call_id`, and an
   entry that never carried one (which issues **no request**); a render-time cache read so a cached row
   never flashes a skeleton; running calls excluded from the body cache in both directions.
+- **In scope (Added: 2026-10-24):** one bubble per subagent conversation, the conversation dialog, the
+  per-conversation transcript and the `conversation_id` axis on the three replay requests.
+- **Out of scope (Added: 2026-10-24):** answering a permission request from the web (next `#coagents`
+  node); recording in-jail conversations; the operator's Agents-tab conversation tabs.
 - **Out of scope (Added: 2026-07-26):** a retry **affordance** on a failed lookup (closing and
   reopening the row already retries); a per-session cap on cached bodies (the `MAX_SESSIONS` session
   LRU is the only bound); prefetching bodies for rows the operator has not opened.

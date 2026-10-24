@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use tddy_agent_backend::{AcpToolStatus, AcpUpdate};
 use tddy_daemon_kernel::conversation_frames::{ConversationFrame, ConversationFrames};
 use tddy_discovery::subagent::{PromptOutcome, SubagentError, SubagentSession, TurnRequest};
+use tddy_rpc::Status;
 use tddy_service::acp_replay::{agent_text_frame, read_acp_transcript, session_update_frame};
 use tddy_service::proto::acp::{
     session_update, AcpAgentMessage, SessionUpdate, ToolCall, ToolCallId, ToolCallStatus,
@@ -191,6 +192,40 @@ pub(crate) enum TurnError {
     },
     /// The turn's transcript could not be written, so the turn delivers no answer.
     Recording(String),
+}
+
+impl TurnError {
+    /// What a failed turn reports: the roster badge's summary, when it reports one, and the caller's error.
+    ///
+    /// A closed conversation reports no badge, since its caller has been told. An agent failure leaves the
+    /// agent idle, not ERROR: it is still attached and still promptable, and it is the *clone* that ERROR is
+    /// reserved for. The summary is what says what happened.
+    pub(crate) fn into_reply(self, conversation_id: &str) -> (Option<String>, Status) {
+        match self {
+            TurnError::Closed { recording } => (
+                None,
+                Status::failed_precondition(with_recording_failure(
+                    format!(
+                        "conversation '{conversation_id}' was closed while its turn was in flight"
+                    ),
+                    recording,
+                )),
+            ),
+            TurnError::Recording(e) => (
+                Some(format!("turn failed: {e}")),
+                Status::internal(format!(
+                    "conversation '{conversation_id}' turn could not be recorded: {e}"
+                )),
+            ),
+            TurnError::Agent { error, recording } => (
+                Some(format!("turn failed: {error}")),
+                Status::internal(with_recording_failure(
+                    format!("agent conversation '{conversation_id}' failed: {error}"),
+                    recording,
+                )),
+            ),
+        }
+    }
 }
 
 /// Take one turn of a local conversation and record it as it runs.
@@ -398,7 +433,7 @@ fn tool_status_of(status: AcpToolStatus) -> ToolCallStatus {
 }
 
 /// `message`, with the recording failure of a turn that also failed named after it.
-pub(crate) fn with_recording_failure(message: String, recording: Option<String>) -> String {
+fn with_recording_failure(message: String, recording: Option<String>) -> String {
     match recording {
         Some(failure) => format!("{message}; its transcript could not be written: {failure}"),
         None => message,

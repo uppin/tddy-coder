@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-coding-subagent/src/session.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-24 by `/pr-wrap` step 3.5 file-length gate on PR #722 (`#coagents` 3/8)
-**Metrics:** **501 production lines** · budget 500 · **1.00× over**
+**Metrics:** **530 production lines** · budget 500 · **1.06× over**
 **Thresholds breached:** length 501 > 500
 **Status:** Open — unclaimed
 
@@ -12,6 +12,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-24 | 323 → 501 | first detection — PR #722 crossed it: the in-flight prompt held across tddy turns (`InFlightPrompt`, `settle`, `resume`, `finish`) and the cancel that drives a paused prompt to its end. Not split: stack-shared — later `#coagents` nodes modify this file, so a decomposition here would conflict through their diffs |
+| 2026-10-24 | gate: 501 → 530 | **worse** by 29 in PR #723 (`#coagents` 4/8): the update broadcast (`update_stream`, `UPDATE_STREAM_CAPACITY`, `SubagentSession::updates`) and the recorder sink (`record_updates_with`) wired into `begin_prompt`'s one fan-out. Not split: stack-shared — after the stack lands |
 
 ## What would close it
 
