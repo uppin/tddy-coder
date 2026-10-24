@@ -529,6 +529,7 @@ impl AgentSessions for OwnedLoopOnce {
     async fn open_local(
         &self,
         _session_id: &str,
+        _conversation_id: &str,
         _session_dir: &Path,
         _record: &SessionAgentRecord,
         _session_token: &str,

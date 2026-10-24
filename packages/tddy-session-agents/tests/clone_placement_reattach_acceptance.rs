@@ -254,6 +254,9 @@ fn a_daemon_with_a_session() -> ADaemonWithASession {
         broadcast: Arc::new(NoRoomBroadcast),
         sessions: Arc::new(NotReachedByAttach),
         peers: Arc::new(NotReachedByAttach),
+        conversation_frames: Arc::new(
+            tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
+        ),
     });
     ADaemonWithASession {
         _sessions: sessions,
