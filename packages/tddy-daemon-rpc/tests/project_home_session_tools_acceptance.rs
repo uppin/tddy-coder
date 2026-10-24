@@ -148,8 +148,13 @@ async fn a_claude_capable_project_home_world() -> World {
     let sessions = tempfile::tempdir().unwrap();
     let config = a_config_with_a_stub_claude();
     let user = current_os_user();
-    let user_resolver: Arc<dyn Fn(&str) -> Option<String> + Send + Sync> =
-        Arc::new(move |token| if token == TEST_TOKEN { Some(user.clone()) } else { None });
+    let user_resolver: Arc<dyn Fn(&str) -> Option<String> + Send + Sync> = Arc::new(move |token| {
+        if token == TEST_TOKEN {
+            Some(user.clone())
+        } else {
+            None
+        }
+    });
     let sessions_base = sessions.path().to_path_buf();
     let base_resolver: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync> =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -204,7 +209,9 @@ async fn a_project_home_world_on(service: TestDaemon, sessions: tempfile::TempDi
 fn current_os_user() -> String {
     let pw = unsafe { libc::getpwuid(libc::getuid()) };
     assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
-    unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }.to_string_lossy().into_owned()
+    unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// A daemon config whose `claude` is `/bin/cat` — a stub that works in a PTY without the real
@@ -333,7 +340,11 @@ async fn a_project_home_session_starts_a_claude_cli_session_on_the_model_it_name
     let session_dir =
         tddy_core::session_lifecycle::unified_session_dir_path(world.sessions.path(), &new_id);
     let meta = tddy_core::read_session_metadata(&session_dir).expect("session metadata");
-    assert_eq!(meta.model.as_deref(), Some(TEST_MODEL), "the named model is recorded");
+    assert_eq!(
+        meta.model.as_deref(),
+        Some(TEST_MODEL),
+        "the named model is recorded"
+    );
 }
 
 #[tokio::test]
