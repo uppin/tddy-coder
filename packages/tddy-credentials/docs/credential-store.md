@@ -143,6 +143,11 @@ status) arrive later, with only a session token. For each user it answers `Vault
   opens the vault next; the state tells the client to prompt. Pending tokens are held per user, not
   per lineage: session tokens are stateless, so the daemon cannot tell two lineages of one user
   apart, and a later token for the same account replaces an earlier one.
+- **A sign-in with no credential** (`sign_in_without_credential`, a stub login): with the vault
+  open, the lineage is handed an unlock slot and nothing is sealed. With it closed, a
+  **credential-free pending mark** is held in the record's place — same lifetime, same per-user
+  replacement — which permits `create` and `reset` exactly as a waiting credential does and seals
+  nothing when the vault opens.
 - **At unlock / create / reset**: the vault opens, everything pending is sealed (anything that fails
   to seal stays pending and the failure is reported), the lineage is handed an unlock slot, and the
   handle is kept.
@@ -230,9 +235,12 @@ doubling to at most 15 min, refused as `RESOURCE_EXHAUSTED` with the retry-after
 count is in memory only, cleared by the right passphrase and by a daemon restart. A passphrase is
 at most `MAX_PASSPHRASE_CHARS` (1024) characters, checked before anything is derived.
 
-A stub login (`issues_usable_access_token() == false`) retains nothing, creates nothing, is handed no
-unlock key and reports `VaultState::None` on the wire: its token is synthetic and a demo holds no
-credential by construction.
+A stub login (`issues_usable_access_token() == false`) gets a vault like any other, through
+`sign_in_without_credential`: it reports `Uninitialized`, `Locked` or `Open`, may create, unlock and
+reset its vault, and the vault then holds provider accounts on a local daemon. Its GitHub token is
+synthetic and is never retained, so the vault holds no `github` record. Choosing the passphrase is
+gated by a stub sign-in, which proves nothing about account control — accepted, because stub mode
+is local-only.
 
 ## What the unlock key and the passphrase buy, and what they do not
 
