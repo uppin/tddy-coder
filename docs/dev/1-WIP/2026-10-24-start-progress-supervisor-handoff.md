@@ -124,13 +124,13 @@ started" should not be a config value.
 
 ## Scope
 
-- [ ] Supervisor sets `TDDY_SUPERVISOR_SOCKET` for managed services, unspoofable by `env:`
-- [ ] `SpawnBackendChoice::from_environment`; `spawn_backend_choice` deleted
-- [ ] Startup choice injected into the five call sites, `main.rs`, desktop `lib.rs`
-- [ ] `DaemonConfig.supervisor` removed; obsolete-key error
-- [ ] `./install` strips the block from an existing `daemon.yaml` and reports it; no block rendered; cross-check removed
-- [ ] Templates, examples, `systemd-install.md`, `daemon-kernel.md` updated
-- [ ] Existing tests carrying `supervisor:` rewritten to the new declaration
+- [x] Supervisor sets `TDDY_SUPERVISOR_SOCKET` for managed services, unspoofable by `env:`
+- [x] `SpawnBackendChoice::from_environment`; `spawn_backend_choice` deleted
+- [x] Startup choice injected into the five call sites, `main.rs`, desktop `lib.rs`
+- [x] `DaemonConfig.supervisor` removed; obsolete-key error
+- [x] `./install` strips the block from an existing `daemon.yaml` and reports it; no block rendered; cross-check removed
+- [~] Templates, examples, `systemd-install.md`, `daemon-kernel.md` updated — `daemon-kernel.md` and `packages/tddy-supervisor/docs/architecture.md` are deferred to `/wrap-context-docs` (CLAUDE.md: package docs change through the changeset, not directly); the rest is done
+- [x] Existing tests carrying `supervisor:` rewritten to the new declaration
 
 ## Technical Changes
 
@@ -146,6 +146,21 @@ runtime starts, keeps the `SpawnBackendChoice` in its state, and every spawn/clo
 
 ### Delta
 Per package as listed in Responsibility.
+
+Green implementation notes (2026-10-24):
+- `EnvironmentBase::Inherited` now carries `supervisor_socket`, so the socket can only reach a
+  declared managed service through the variant that describes one; `Slot::spawn_plan` supplies it.
+- `ChildEnvironment::build` drops `TDDY_SUPERVISOR_SOCKET` for every child before the managed-service
+  value is inserted, so neither a session request nor an `env:` overlay can set it.
+- The obsolete-key check runs on the untyped YAML before typed deserialization (`daemon_methods.rs`).
+- `./install`: `drop_top_level_yaml_block` now removes the block from an existing `daemon.yaml` in
+  both system and `--user` modes, keeps the file's mode and owner, and reports the removal.
+
+Package docs to fold in at `/wrap-context-docs`: `packages/tddy-daemon-kernel/docs/daemon-kernel.md`
+(the `config` layout: no `supervisor:` section, `load` refuses one) and
+`packages/tddy-supervisor/docs/architecture.md` (managed services are told `TDDY_SUPERVISOR_SOCKET`
+after the `env:` overlay). `packages/tddy-daemon/docs/daemon-endpoint.md` still names
+`RuntimeOptions::for_binary()` without its new argument.
 
 ## Testing Plan
 
@@ -173,6 +188,12 @@ Per package as listed in Responsibility.
 
 ## Technical Debt & Production Readiness
 
+- Children the daemon spawns itself (not through `tddy-supervisor`) inherit the daemon's environment,
+  so they can read `TDDY_SUPERVISOR_SOCKET`. `ChildEnvironment` is the only place the variable is set
+  or stripped, so this path is not covered by it. The socket is reachable only by `tddy-clients`
+  members and the daemon's user is already one, so this gives no new capability. Whether to clear it
+  on those spawns is a decision for the developer.
+
 ## Decisions & Trade-offs
 
 - **Environment variable, not an inherited fd.** The supervisor client connects per operation by design
@@ -181,6 +202,9 @@ Per package as listed in Responsibility.
 - **Obsolete key is an error, not ignored** (developer's choice), with `install` removing it so upgrades
   work.
 - **No fallback** when the named socket is unreachable — unchanged fail-closed behaviour.
+- **The socket travels in the `Inherited` variant** (`EnvironmentBase::Inherited { supervisor_socket }`),
+  not in a separate argument. A session plan has no field that could carry it, so "only a declared
+  managed service is told" is a type fact, not a convention.
 
 ## Refactoring Needed
 ### From /validate-changes
@@ -204,12 +228,12 @@ Per package as listed in Responsibility.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests (`./test -p tddy-supervisor -p tddy-spawn -p tddy-daemon-kernel -p tddy-e2e` + compile of the injected crates); full-workspace result from CI
+- [~] TDD Green — implement with quality code. This changeset's own contract is green; `tddy-spawn` `pre_exec_safety` / `clone_privilege_acceptance` and `tddy-daemon-kernel` `pre_exec_stages_acceptance` / `privilege_change_acceptance` stay red — node 1's (spawn-diag, #734) privilege-drop contract, not implemented on this base (`spawner.rs` still calls `initgroups` by hand)
+- [x] Update documentation with progress
+- [~] Run scoped tests (`./test -p tddy-supervisor -p tddy-spawn -p tddy-daemon-kernel -p tddy-e2e` + compile of the injected crates); full-workspace result from CI. Green: `tddy-daemon-kernel` lib (118, incl. the obsolete-key test), `tddy-spawn` `supervisor_routing`, `install_script` (29), `install_supervisor` (20, incl. both migration tests), `cargo check --all-targets` for the five injected crates, `cargo check -p tddy-desktop`. `supervisor_service_environment.rs` is `cfg(linux)`: it compiles to zero tests on this macOS host, and no Linux target is installed here, so it has neither run nor been compiled for Linux
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped clippy, `cargo fmt`)
+- [x] Linting and formatting (scoped clippy, `cargo fmt`) — `cargo clippy -p` for the nine touched packages with `-D warnings` exits 0; rustfmt `--check` is clean on the 131 Rust files in the PR diff
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
