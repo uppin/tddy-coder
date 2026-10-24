@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 3 — one package (`tddy-web`), a hook state change plus a new component, Cypress component tests over the in-memory RPC backend
-**Stack**: #start-progress 7/8. Base: `feature/start-progress/supervised-clone-progress`.
+**Stack**: #start-progress 7/8. PR: #740. Base: `feature/start-progress/supervised-clone-progress`.
 
 ## Initial Discovery
 
@@ -54,8 +54,9 @@ export interface StartProgressState {
   stoppedAt: StartPhase_Step | null;
 }
 export function CreateSessionStartProgress(props: { hostLabel: string; progress: StartProgressState }): JSX.Element | null;
-// src/lib/formatBytes.ts (new, if absent): formatBytes(n), formatThroughput(bytesPerSecond)
-// useSessionAttachments → returns `startProgress: StartProgressState` instead of `startPhase`
+// bytes and throughput render through the existing formatAttachmentBytes (binary units)
+// src/components/sessions/startProgress.ts (new): StartProgressState, NO_START_PROGRESS, startProgressAfter(state, event), startProgressFailed(state)
+// useSessionAttachments → returns `startProgress: StartProgressState` instead of `startPhase` (green)
 // data-testids: create-session-start-progress, create-session-start-step-<name>, create-session-clone-progress
 ```
 
@@ -94,7 +95,7 @@ for 30 s.
 - [ ] Start progress state in the hook (steps, clone, stopped-at)
 - [ ] `CreateSessionStartProgress` component; `CreateSessionStartPhase` removed
 - [ ] Clone row: stage, percent bar, bytes and throughput
-- [ ] Byte / throughput formatting
+- [ ] Byte / throughput formatting — reuses `formatAttachmentBytes` (`src/lib/attachmentBytes.ts`, binary units) instead of a new helper
 - [ ] Page object + stale spec comment
 - [ ] Docs: `session-drawer.md` § Start progress
 
@@ -154,10 +155,10 @@ assertions. Single-spec runs only.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the changed specs only (`cypress run --component --spec …`); full Cypress from CI

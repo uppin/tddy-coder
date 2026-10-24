@@ -378,6 +378,22 @@ export const createSessionPage = {
   /** The form-level error strip, shown when the daemon refuses the creation. */
   error: () => byTestId(TEST_IDS.createSessionError),
 
+  /** The list of the start's steps, while a creation is streaming. */
+  startProgress: () => byTestId(TEST_IDS.createSessionStartProgress),
+
+  /** "Creating session on <host>" above the steps. */
+  startProgressHeading: () => byTestId(TEST_IDS.createSessionStartProgressHeading),
+
+  /**
+   * One step row, by the step's name as the host reports it (`clone`, `worktree`, `semantic-index`,
+   * `agent`); its `data-state` is `active`, `done` or `failed`.
+   */
+  startStep: (name: "clone" | "worktree" | "semantic-index" | "agent") =>
+    byTestId(`create-session-start-step-${name}`),
+
+  /** The clone step's progress line: stage, percent, bytes and throughput. */
+  cloneProgress: () => byTestId(TEST_IDS.createSessionCloneProgress),
+
   /** The line naming the step of the start the host is in, while a creation is streaming. */
   startPhase: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionStartPhase, options),
