@@ -26,6 +26,9 @@ const THIS_PROJECT: &str = "019d105b-ac0f-78d3-9a89-409731145a3b";
 const OTHER_PROJECT: &str = "019d105b-ac0f-78d3-9a89-409731145a3c";
 const TEST_MODEL: &str = "claude-opus-4-8";
 
+type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 fn git(cwd: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
         .args(args)
@@ -148,7 +151,7 @@ async fn a_claude_capable_project_home_world() -> World {
     let sessions = tempfile::tempdir().unwrap();
     let config = a_config_with_a_stub_claude();
     let user = current_os_user();
-    let user_resolver: Arc<dyn Fn(&str) -> Option<String> + Send + Sync> = Arc::new(move |token| {
+    let user_resolver: UserResolver = Arc::new(move |token| {
         if token == TEST_TOKEN {
             Some(user.clone())
         } else {
@@ -156,8 +159,7 @@ async fn a_claude_capable_project_home_world() -> World {
         }
     });
     let sessions_base = sessions.path().to_path_buf();
-    let base_resolver: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync> =
-        Arc::new(move |_| Some(sessions_base.clone()));
+    let base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
     let host = DaemonSessionHost::new(
         config.clone(),
         base_resolver,
