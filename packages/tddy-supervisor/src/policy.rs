@@ -228,7 +228,7 @@ fn containment_of(resolved: std::io::Result<OwnedFd>) -> Result<(), SupervisorEr
 /// A `..` is refused rather than normalized. Normalizing would either need the filesystem — making
 /// the decision depend on what is on disk at this instant, so a symlink swapped in before `exec`
 /// changes the answer — or reimplement path resolution, which is where traversal bugs live.
-fn plain_absolute_path(path: &Path) -> Result<&Path, SupervisorError> {
+pub(crate) fn plain_absolute_path(path: &Path) -> Result<&Path, SupervisorError> {
     let traversal_free = path
         .components()
         .all(|component| !matches!(component, Component::ParentDir));

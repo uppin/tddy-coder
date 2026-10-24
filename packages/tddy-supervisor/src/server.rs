@@ -23,6 +23,7 @@ use tokio::net::UnixListener;
 
 use crate::authz::{Authorizer, PeerIdentity};
 use crate::cgroup_broker::CgroupBroker;
+use crate::clone::{self, CloneEvents, RunningClone};
 use crate::config::{SocketConfig, SupervisorConfig};
 use crate::error::SupervisorError;
 use crate::policy;
@@ -33,7 +34,9 @@ use crate::request::{
     SpawnedProcess,
 };
 use crate::socket::{resolve_socket_source, SocketSource};
-use crate::spawn_broker::{self, EnvironmentBase, JailMount, SandboxJail, SpawnPlan, TargetUser};
+use crate::spawn_broker::{
+    self, ChildOutput, EnvironmentBase, JailMount, SandboxJail, SpawnPlan, TargetUser,
+};
 use crate::supervisor::Supervisor;
 
 /// Name this service answers to on the wire, taken from the generated server so a client and a
@@ -136,9 +139,21 @@ impl PrivilegedSurface {
         scope: Option<&str>,
         env: &BTreeMap<String, String>,
     ) -> Result<ResolvedSpawn, SupervisorError> {
+        let program = policy::resolve_tool_path(&self.config.spawn_policy, tool_path)?;
+        self.resolve_spawn_of(os_user, program, working_dir, scope, env)
+    }
+
+    /// The rest of [`Self::resolve_spawn`], for a `program` the tool allowlist has already passed.
+    fn resolve_spawn_of(
+        &self,
+        os_user: &str,
+        program: PathBuf,
+        working_dir: Option<&Path>,
+        scope: Option<&str>,
+        env: &BTreeMap<String, String>,
+    ) -> Result<ResolvedSpawn, SupervisorError> {
         let policy = &self.config.spawn_policy;
         let os_user = policy::resolve_session_user(policy, os_user)?;
-        let program = policy::resolve_tool_path(policy, tool_path)?;
         // Here rather than in either caller: the environment is as much a way to choose what runs as
         // the tool path is, and a gate that only one of the two spawn methods passed through would be
         // a gate the other one is missing.
@@ -169,6 +184,64 @@ impl PrivilegedSurface {
             target,
             scope_procs,
         })
+    }
+
+    /// Clone a repository as an allowlisted OS user and report on it as it runs.
+    ///
+    /// Everything a caller can ask is checked before git exists, in the order `SpawnSession` checks
+    /// it: user, tool (git, found on the supervisor's own `PATH`, still has to be allowlisted),
+    /// environment. A refusal is therefore an error on the call, not an event on the stream.
+    async fn clone_repository(
+        &self,
+        request: wire::CloneRepositoryRequest,
+    ) -> Result<CloneEvents, SupervisorError> {
+        let destination = policy::plain_absolute_path(Path::new(&request.destination))?;
+        let git = clone::git_on_supervisor_path()?;
+        let env: BTreeMap<String, String> = request.env.into_iter().collect();
+        let resolved = self.resolve_spawn_of(
+            &request.os_user,
+            policy::resolve_tool_path(&self.config.spawn_policy, &git)?,
+            None,
+            None,
+            &env,
+        )?;
+        // The tree is already present: nothing to clone, and nothing to fork a git for.
+        if destination.exists() {
+            return Ok(clone::already_present());
+        }
+        let partial = clone::partial_sibling(destination)?;
+        let os_user = resolved.os_user.clone();
+        let mut plan = resolved.plan(
+            vec![
+                "clone".to_string(),
+                "--progress".to_string(),
+                // Whatever follows is a URL, even one that starts with a dash.
+                "--".to_string(),
+                request.git_url,
+                partial.display().to_string(),
+            ],
+            None,
+        );
+        plan.output = ChildOutput::CaptureStderr;
+        let (pid, stderr) = self
+            .supervisor
+            .spawn_session_capturing_stderr(plan)
+            .await
+            .map_err(|error| SupervisorError::OperationFailed {
+                message: format!("spawn clone: {error}"),
+            })?;
+        log::info!(
+            target: "tddy_supervisor::server",
+            "spawned clone pid {pid} as `{os_user}`"
+        );
+        Ok(clone::report_on(RunningClone {
+            supervisor: Arc::clone(&self.supervisor),
+            pid,
+            stderr,
+            partial,
+            destination: destination.to_path_buf(),
+            stop_grace: Duration::from_secs(self.config.shutdown_grace_secs),
+        }))
     }
 
     /// Hand a resolved plan to the supervisor.
@@ -245,7 +318,7 @@ impl ResolvedSpawn {
             target: self.target,
             scope_procs: self.scope_procs,
             // A session's output belongs to whoever asked for it, not to the supervisor's journal.
-            inherit_output: false,
+            output: ChildOutput::Discard,
             // A session is spawned for somebody else and has no claim on the environment the
             // supervisor was started with — see [`EnvironmentBase`].
             environment: EnvironmentBase::Minimal,
@@ -366,6 +439,21 @@ impl SupervisorService for SupervisorServiceImpl {
             .session_status(request.into_inner().pid)
             .map_err(protocol::status_from_error)?;
         Ok(Response::new(protocol::session_status_to_wire(status)))
+    }
+
+    type CloneRepositoryStream = CloneEvents;
+
+    async fn clone_repository(
+        &self,
+        request: Request<wire::CloneRepositoryRequest>,
+    ) -> Result<Response<Self::CloneRepositoryStream>, Status> {
+        self.authorize_peer()?;
+        let events = self
+            .surface
+            .clone_repository(request.into_inner())
+            .await
+            .map_err(protocol::status_from_error)?;
+        Ok(Response::new(events))
     }
 
     async fn stop_session(

@@ -23,6 +23,9 @@ serde_yaml = "0.9"
 # The wire protocol: `supervisor.proto` is owned by this crate (see build.rs) and rides tddy-rpc's
 # frame codec over AF_UNIX via tddy-stdio's duplex endpoint.
 tddy-rpc = { path = "../tddy-rpc" }
+# `CloneRepository` is server-streaming, and the generated server's stream type is a
+# `futures_util::Stream` (the developer approved the dependency, 2026-10-24).
+futures-util = "0.3"
 tddy-stdio = { path = "../tddy-stdio" }
 # Multi-thread runtime for the socket server only. Deliberately no `process` feature: every fork/exec
 # goes through `spawn_broker::ForkBroker`'s own thread with `std::process::Command`, because a fork

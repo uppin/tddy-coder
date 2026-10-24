@@ -94,7 +94,8 @@ the stage in git's words (`Counting objects`, `Receiving objects`, `Resolving de
 counts, bytes received and throughput. The events are throttled where git runs — at most four a second,
 plus every stage change and every 100% — so neither the spawn worker's pipe nor a relayed stream carries
 git's every redraw. A start whose project is already on the host reports no clone step. On a host run by
-`tddy-supervisor` the clone step begins and ends with no progress between.
+`tddy-supervisor` the supervisor runs git and streams its progress back (`CloneRepository`), so the
+clone step looks the same, a failure carries git's own message, and the clone can be stopped.
 
 **No deadline, and no half-written checkout.** A clone takes as long as its repository and network do;
 only the operator stopping it (or the client hanging up) ends it early. Git writes into a temporary

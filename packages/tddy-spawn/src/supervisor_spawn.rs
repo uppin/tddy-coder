@@ -25,10 +25,15 @@
 //! everything the session logs still lands where it always did.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use tddy_supervisor::proto::supervisor::clone_event::Event;
+use tddy_supervisor::proto::supervisor::{CloneExited, CloneRepositoryRequest};
 use tddy_supervisor::request::{SessionState, SpawnSessionRequest};
 use tddy_supervisor::SupervisorClient;
+
+use crate::clone_run::CloneHandle;
+use crate::git_progress::{parse, GitProgress, ProgressThrottle};
 
 use crate::spawn_worker::SpawnRequest;
 use crate::spawner::{
@@ -83,93 +88,6 @@ pub fn with_commit_identity(
 ) -> SpawnSessionRequest {
     request.env.extend(git_environment.iter().cloned());
     request
-}
-
-/// The `SpawnSession` request that clones a repository as the target user.
-///
-/// `git` itself, not a shell running a `git` command line: a shell on
-/// `SpawnPolicy::allowed_tool_paths` would grant the daemon arbitrary code execution as every
-/// allowlisted session user, which is the one thing the allowlist exists to prevent. The operator
-/// consequence is that the git binary's own absolute path must appear in `allowed_tool_paths`.
-///
-/// `working_dir` is left unset so the supervisor uses the target user's home; the destination is
-/// absolute and `git clone` creates it.
-pub fn clone_request(
-    os_user: &str,
-    git_program: &Path,
-    git_url: &str,
-    destination: &Path,
-) -> SpawnSessionRequest {
-    clone_request_with_env(os_user, git_program, git_url, destination, BTreeMap::new())
-}
-
-/// The `SpawnSession` request that clones a repository as the target user, carrying transport-
-/// shim env vars the clone needs (PRD AC37).
-///
-/// `env` holds `GIT_SSH_COMMAND`, `TDDY_DAEMON_URL`, `TDDY_SESSION_TOKEN` for a facilitator-
-/// provisioned clone that drives `tddy-remote-git-repo` as its `GIT_SSH_COMMAND`, or the variables
-/// of an SSH clone that can ask for a passphrase (`crate::clone_env::CloneSshEnv`). The
-/// supervisor's `SpawnPolicy::allowed_env_keys` **denies** any key not on its list, so an operator
-/// must add those three keys — and, for passphrase prompts,
-/// `crate::clone_env::CloneSshEnv::ALLOWED_ENV_KEYS` — to `spawn_policy.allowed_env_keys` in
-/// `supervisor.yaml`; the daemon cannot widen the policy itself, by design.
-pub fn clone_request_with_env(
-    os_user: &str,
-    git_program: &Path,
-    git_url: &str,
-    destination: &Path,
-    env: BTreeMap<String, String>,
-) -> SpawnSessionRequest {
-    SpawnSessionRequest {
-        os_user: os_user.to_string(),
-        tool_path: git_program.to_path_buf(),
-        args: vec![
-            "clone".to_string(),
-            git_url.to_string(),
-            destination.display().to_string(),
-        ],
-        env,
-        working_dir: None,
-        scope: None,
-    }
-}
-
-/// The first executable named `program` on `path_var`, as an absolute path.
-///
-/// The supervisor is asked for an absolute program because its allowlist is a set of absolute paths;
-/// resolving here means the binary an operator allowlists is the same one the daemon would have run
-/// itself.
-pub fn program_in_path(program: &str, path_var: &str) -> Option<PathBuf> {
-    path_var
-        .split(':')
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| Path::new(entry).join(program))
-        .find(|candidate| is_executable_file(candidate))
-}
-
-fn is_executable_file(path: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(path)
-            .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        path.is_file()
-    }
-}
-
-/// The `git` this daemon would run, named absolutely so the supervisor can allowlist it.
-fn resolve_git_program() -> anyhow::Result<PathBuf> {
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    program_in_path("git", &path_var).ok_or_else(|| {
-        anyhow::anyhow!(
-            "no `git` on the daemon's PATH, so there is no clone tool to ask tddy-supervisor for \
-             (PATH={path_var})"
-        )
-    })
 }
 
 /// Start a session through the supervisor, from the same request the forked spawn worker would get.
@@ -297,7 +215,7 @@ async fn watch_session_startup(
     }
 }
 
-/// Clone a repository through the supervisor, as the target OS user.
+/// Clone a repository through the supervisor, as the target OS user, reporting nothing on the way.
 ///
 /// An existing destination is left alone without asking the supervisor for anything, matching
 /// [`crate::spawner::clone_as_user`].
@@ -307,19 +225,40 @@ pub async fn clone_repo_via_supervisor(
     git_url: &str,
     destination: &Path,
 ) -> anyhow::Result<()> {
-    clone_repo_via_supervisor_with_env(socket_path, os_user, git_url, destination, BTreeMap::new())
-        .await
+    clone_repo_via_supervisor_with_progress(
+        socket_path,
+        os_user,
+        git_url,
+        destination,
+        BTreeMap::new(),
+        |_| {},
+        |_| {},
+    )
+    .await
 }
 
-/// Clone a repository through the supervisor with transport-shim env vars the clone needs (PRD AC37).
+/// Clone `git_url` into `destination` as `os_user` through the supervisor at `socket_path`, with
+/// `env` on the git child: `on_started` once git runs (its handle stops it via `StopSession`),
+/// `on_progress` for each throttled progress line. Fails with git's own stderr tail.
 ///
-/// See [`clone_request_with_env`] for the `allowed_env_keys` requirement.
-pub async fn clone_repo_via_supervisor_with_env(
+/// One server-streaming `CloneRepository` call: the supervisor runs `git clone --progress` as the
+/// user, into a temporary sibling of `destination` that it renames into place only on success.
+/// `env` is checked against the supervisor's `spawn_policy.allowed_env_keys`, which **denies** a key
+/// it does not list: an operator must list the keys a clone needs — `GIT_SSH_COMMAND`,
+/// `TDDY_DAEMON_URL`, `TDDY_SESSION_TOKEN` for a facilitator-provisioned clone, and
+/// `crate::clone_env::CloneSshEnv::ALLOWED_ENV_KEYS` for passphrase prompts. Git's own absolute path
+/// must be in `allowed_tool_paths`, as it always was; the daemon cannot widen the policy.
+///
+/// Unbounded on purpose: how long a clone may take is the caller's deadline, not this function's to
+/// guess. An existing destination is left alone without asking the supervisor for anything.
+pub async fn clone_repo_via_supervisor_with_progress(
     socket_path: &Path,
     os_user: &str,
     git_url: &str,
     destination: &Path,
     env: BTreeMap<String, String>,
+    on_started: impl FnOnce(CloneHandle),
+    mut on_progress: impl FnMut(GitProgress),
 ) -> anyhow::Result<()> {
     if destination.exists() {
         log::info!(
@@ -329,58 +268,92 @@ pub async fn clone_repo_via_supervisor_with_env(
         return Ok(());
     }
 
-    let git = resolve_git_program()?;
     let client = connect_supervisor(socket_path).await?;
     log::info!(
-        "supervisor_spawn: asking {} to clone as os_user={} dest={} git={}",
+        "supervisor_spawn: asking {} to clone as os_user={} dest={}",
         socket_path.display(),
         os_user,
         destination.display(),
-        git.display()
     );
-    let spawned = client
-        .spawn_session(clone_request_with_env(
-            os_user,
-            &git,
-            git_url,
-            destination,
-            env,
-        ))
+    let mut events = client
+        .clone_repository(CloneRepositoryRequest {
+            os_user: os_user.to_string(),
+            git_url: git_url.to_string(),
+            destination: destination.display().to_string(),
+            env: env.into_iter().collect(),
+        })
         .await
         .map_err(|e| anyhow::anyhow!("tddy-supervisor refused to clone the repository: {e}"))?;
 
-    let exit_code = wait_for_exit(&client, spawned.pid).await?;
-    match exit_code {
-        Some(0) => Ok(()),
-        Some(code) => Err(anyhow::anyhow!(
-            "git clone failed: exited with code {code} (dest={})",
-            destination.display()
-        )),
-        None => Err(anyhow::anyhow!(
-            "git clone failed: killed by a signal (dest={})",
-            destination.display()
-        )),
-    }
-}
-
-/// Poll a supervisor-spawned process until it exits, returning its exit code.
-///
-/// Unbounded on purpose: how long a clone may take is the caller's deadline
-/// (`spawn_worker_request_timeout`), not this function's to guess.
-async fn wait_for_exit(client: &SupervisorClient, pid: u32) -> anyhow::Result<Option<i32>> {
-    /// How often a clone in progress is checked. Its own constant, not the spawn-startup knob: an
-    /// operator retuning how long a *session* is watched for an early exit is saying nothing about
-    /// how often a clone should be polled.
-    const CLONE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(25);
-
-    loop {
-        let status = client
-            .session_status(pid)
-            .await
-            .map_err(|e| anyhow::anyhow!("tddy-supervisor could not report process {pid}: {e}"))?;
-        match status.state {
-            SessionState::Exited => return Ok(status.exit_code),
-            SessionState::Running => tokio::time::sleep(CLONE_POLL_INTERVAL).await,
+    let mut on_started = Some(on_started);
+    let mut throttle = ProgressThrottle::new();
+    while let Some(event) = events.recv().await {
+        let event = event.map_err(|e| {
+            anyhow::anyhow!("tddy-supervisor's clone of the repository failed: {e}")
+        })?;
+        match event.event {
+            Some(Event::Started(started)) => {
+                if let Some(on_started) = on_started.take() {
+                    on_started(CloneHandle::through_supervisor(socket_path, started.pid));
+                }
+            }
+            Some(Event::Progress(progress)) => {
+                if let Some(progress) = parse(&progress.line) {
+                    if throttle.admit(&progress, std::time::Instant::now()) {
+                        on_progress(progress);
+                    }
+                }
+            }
+            Some(Event::Exited(exited)) => return clone_outcome(&exited, destination),
+            None => {}
         }
     }
+    anyhow::bail!(
+        "tddy-supervisor ended the clone's stream without saying how git exited (dest={})",
+        destination.display()
+    )
+}
+
+/// How git's exit reads as a result: success, or git's own words about why not.
+fn clone_outcome(exited: &CloneExited, destination: &Path) -> anyhow::Result<()> {
+    if exited.code == Some(0) {
+        return Ok(());
+    }
+    let how = match exited.code {
+        Some(code) => format!("exited with code {code}"),
+        None => "was killed by a signal".to_string(),
+    };
+    if exited.stderr_tail.is_empty() {
+        anyhow::bail!("git clone failed: {how} (dest={})", destination.display())
+    }
+    anyhow::bail!(
+        "git clone failed: {how} (dest={}): {}",
+        destination.display(),
+        exited.stderr_tail
+    )
+}
+
+/// Ask the supervisor to stop the clone it is running as `pid`, and wait for it to answer.
+///
+/// On a thread of its own with its own runtime, because [`CloneHandle::stop`] is synchronous and may
+/// be called from inside the daemon's runtime, where blocking on a nested one would panic.
+#[cfg(unix)]
+pub(crate) fn stop_supervised_clone(socket_path: &Path, pid: u32) -> std::io::Result<()> {
+    let socket_path = socket_path.to_path_buf();
+    std::thread::spawn(move || -> anyhow::Result<()> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(async {
+            let client = connect_supervisor(&socket_path).await?;
+            client
+                .stop_session(pid)
+                .await
+                .map_err(|e| anyhow::anyhow!("tddy-supervisor could not stop clone {pid}: {e}"))?;
+            Ok(())
+        })
+    })
+    .join()
+    .map_err(|_| std::io::Error::other("the thread stopping the clone panicked"))?
+    .map_err(|e| std::io::Error::other(format!("{e:#}")))
 }
