@@ -36,6 +36,12 @@ impl CodingAgentSession {
         // TODO(conversation-bubble): implement
     }
 
+    /// What the daemon's `AnswerAgentPermission` answers this conversation's parked request through.
+    pub fn permission_answering(&self) -> std::sync::Arc<dyn crate::PermissionAnswering> {
+        // TODO(web-approvals): implement — the session's own ParkedPermissions
+        std::sync::Arc::new(crate::ParkedPermissions::default())
+    }
+
     /// A handle that cancels this session's running turn without holding the session — what the
     /// conversation table uses when `subagent_cancel` arrives while a prompt holds the session.
     pub fn cancel_handle(&self) -> CancelHandle {

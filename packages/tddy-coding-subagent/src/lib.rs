@@ -9,6 +9,7 @@ pub mod parked_permissions;
 pub mod permissions;
 pub mod session;
 pub mod transports;
+pub mod user_permission_answers;
 
 pub use catalog::{coding_agent_defs, CodingAgentDef, ACP_HARNESSES};
 pub use confinement::{confinement_for, Confinement};
@@ -19,3 +20,4 @@ pub use session::{CancelHandle, CodingAgentSession};
 pub use transports::{
     permission_policy_of, transport_of, PermissionPolicy, Transport, HEADLESS_HARNESSES,
 };
+pub use user_permission_answers::{AnsweredBy, PermissionAnswering};

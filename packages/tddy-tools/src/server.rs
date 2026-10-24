@@ -2586,6 +2586,7 @@ fn subagent_resume_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
             },
             (crate::sync_worktree_choice::SYNC_WORKTREE_ARG): crate::sync_worktree_choice::sync_worktree_property(),
             (crate::permission_answer_arg::PERMISSION_ARG): crate::permission_answer_arg::permission_property(),
+            (crate::permission_deferral_arg::DEFER_ARG): crate::permission_deferral_arg::defer_property(),
         }
     }))
 }

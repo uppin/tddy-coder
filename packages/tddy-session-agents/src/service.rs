@@ -1106,6 +1106,20 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         );
         Ok(Response::new(ReportAgentConversationStateResponse {}))
     }
+
+    /// Answer a coding subagent's permission request the main agent deferred to the user.
+    async fn answer_agent_permission(
+        &self,
+        _request: Request<tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest>,
+    ) -> Result<
+        Response<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse>,
+        Status,
+    > {
+        // TODO(web-approvals): implement
+        Err(Status::unimplemented(
+            "TODO(web-approvals): AnswerAgentPermission is not implemented",
+        ))
+    }
 }
 
 impl SessionAgentServiceImpl {
