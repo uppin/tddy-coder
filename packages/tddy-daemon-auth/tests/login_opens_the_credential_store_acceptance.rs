@@ -25,7 +25,7 @@ use support::{
 };
 use tddy_credentials::VaultError;
 use tddy_daemon_auth::github_pr_credentials::PrLookup;
-use tddy_rpc::Code;
+use tddy_rpc::{Code, ServiceEntry};
 use tddy_service::proto::auth::{
     ExchangeCodeRequest, ExchangeCodeResponse, GetAuthUrlRequest, GetAuthUrlResponse,
     UnlockVaultRequest, UnlockVaultResponse, VaultState,
@@ -393,8 +393,9 @@ async fn no_passphrase_reaches_the_log_the_vault_file_or_any_response() {
 }
 
 #[tokio::test]
-async fn a_stub_login_leaves_no_credential_store_behind_and_reports_no_vault() {
-    // Given a demo daemon — a stub provider retains nothing, because its access token is synthetic
+async fn a_stub_login_is_asked_to_create_the_vault_and_writes_nothing_yet() {
+    // Given a demo daemon — its stub provider's access token is synthetic and is never retained,
+    // but the operator still gets a vault, to hold provider accounts on a local daemon
     let dir = tempfile::tempdir().expect("a temporary directory");
     let storage = dir.path().join("auth");
     let (config, _config_dir) = a_demo_daemon_retaining_credentials_in(&storage);
@@ -402,7 +403,7 @@ async fn a_stub_login_leaves_no_credential_store_behind_and_reports_no_vault() {
     // When the demo operator signs in
     let signed_in = sign_in_to(&config).await;
 
-    // Then the login succeeds, reports that there is no vault to unlock, and none exists
+    // Then the login succeeds, asks for a first passphrase, and nothing is on disk yet
     assert_eq!(
         (
             signed_in.session_token.is_empty(),
@@ -410,7 +411,12 @@ async fn a_stub_login_leaves_no_credential_store_behind_and_reports_no_vault() {
             signed_in.vault_unlock_key,
             vault_files_in(&storage)
         ),
-        (false, VaultState::None, String::new(), Vec::<String>::new())
+        (
+            false,
+            VaultState::Uninitialized,
+            String::new(),
+            Vec::<String>::new()
+        )
     );
 }
 
@@ -431,15 +437,16 @@ fn vault_files_in(storage: &std::path::Path) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn a_stub_daemon_has_no_vault_to_unlock() {
+async fn a_stub_operator_creates_their_vault_with_a_first_passphrase() {
     // Given a demo operator signed in
     let dir = tempfile::tempdir().expect("a temporary directory");
     let (config, _config_dir) = a_demo_daemon_retaining_credentials_in(&dir.path().join("auth"));
-    let signed_in = sign_in_to(&config).await;
+    let auth = the_auth_service(&config);
+    let signed_in = sign_in_through(&auth).await;
 
-    // When the page asks to create a vault anyway
-    let refused: Result<UnlockVaultResponse, _> = call(
-        &the_auth_service(&config),
+    // When they choose a passphrase
+    let created: Result<UnlockVaultResponse, _> = call(
+        &auth,
         "UnlockVault",
         UnlockVaultRequest {
             session_token: signed_in.session_token,
@@ -449,21 +456,29 @@ async fn a_stub_daemon_has_no_vault_to_unlock() {
     )
     .await;
 
-    // Then there is nothing to create: a demo holds no credential
+    // Then the vault is open and the lineage holds a key to it
+    let created = created.expect("a stub login permits creating its vault");
     assert_eq!(
-        refused.map(|_| ()).map_err(|status| status.code),
-        Err(Code::FailedPrecondition)
+        (
+            state(created.vault_state),
+            created.vault_unlock_key.is_empty()
+        ),
+        (VaultState::Open, false)
     );
 }
 
 /// Complete a whole sign-in through the served `auth.AuthService`.
 async fn sign_in_to(config: &tddy_daemon_kernel::config::DaemonConfig) -> ExchangeCodeResponse {
-    let auth = the_auth_service(config);
-    let started: GetAuthUrlResponse = call(&auth, "GetAuthUrl", GetAuthUrlRequest {})
+    sign_in_through(&the_auth_service(config)).await
+}
+
+/// Complete a whole sign-in through one served `auth.AuthService`, which a later call can reuse.
+async fn sign_in_through(auth: &ServiceEntry) -> ExchangeCodeResponse {
+    let started: GetAuthUrlResponse = call(auth, "GetAuthUrl", GetAuthUrlRequest {})
         .await
         .expect("a configured daemon hands out an authorize url");
     call(
-        &auth,
+        auth,
         "ExchangeCode",
         ExchangeCodeRequest {
             code: "the-code".to_string(),

@@ -30,8 +30,11 @@ pub const PENDING_LOGIN_LIFETIME: Duration = Duration::from_secs(600);
 pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
 
 /// A credential waiting for its vault, and when the sign-in that produced it arrived.
+///
+/// `record` is `None` for a sign-in that carries no credential worth keeping (a local stub login):
+/// it still permits a create or a reset, and seals nothing.
 pub(super) struct Pending {
-    pub(super) record: CredentialRecord,
+    pub(super) record: Option<CredentialRecord>,
     since: Instant,
 }
 
@@ -83,31 +86,32 @@ impl PendingSignIns {
         held(&self.expired).remove(subject);
     }
 
-    /// Keep `record` until `subject`'s vault opens, replacing one held for the same account.
-    pub(super) fn hold(&self, subject: &str, record: CredentialRecord) {
+    /// Keep `record` until `subject`'s vault opens, replacing one held for the same account — or,
+    /// with `None`, only the fact that `subject` signed in just now, replacing an earlier such fact.
+    pub(super) fn hold(&self, subject: &str, record: Option<CredentialRecord>) {
         let mut waiting = held(&self.waiting);
         self.drop_expired(&mut waiting);
         held(&self.expired).remove(subject);
+        let what = what_waits(record.as_ref());
         match self.lifetime {
             Some(lifetime) => log::info!(
                 target: LOG_TARGET,
-                "holding the {} credential of a sign-in of '{subject}' in memory until their vault \
-                 opens; it expires in {} s (at unix {})",
-                record.provider.as_str(),
+                "holding {what} of a sign-in of '{subject}' in memory until their vault opens; it \
+                 expires in {} s (at unix {})",
                 lifetime.as_secs(),
                 unix_seconds_in(lifetime)
             ),
             None => log::info!(
                 target: LOG_TARGET,
-                "holding the {} credential of a sign-in of '{subject}' in memory until their vault \
-                 opens; it never expires",
-                record.provider.as_str()
+                "holding {what} of a sign-in of '{subject}' in memory until their vault opens; it \
+                 never expires"
             ),
         }
+        let key = |record: Option<&CredentialRecord>| {
+            record.map(|record| (record.provider.clone(), record.account.clone()))
+        };
         let records = waiting.entry(subject.to_string()).or_default();
-        records.retain(|held| {
-            (&held.record.provider, &held.record.account) != (&record.provider, &record.account)
-        });
+        records.retain(|held| key(held.record.as_ref()) != key(record.as_ref()));
         records.push(Pending {
             record,
             since: (self.clock)(),
@@ -145,9 +149,9 @@ impl PendingSignIns {
                 }
                 log::info!(
                     target: LOG_TARGET,
-                    "dropped the {} credential a sign-in of '{subject}' left waiting for their \
-                     vault: it waited {} s, its lifetime is {} s",
-                    pending.record.provider.as_str(),
+                    "dropped {} a sign-in of '{subject}' left waiting for their vault: it waited \
+                     {} s, its lifetime is {} s",
+                    what_waits(pending.record.as_ref()),
                     age.as_secs(),
                     lifetime.as_secs()
                 );
@@ -159,6 +163,14 @@ impl PendingSignIns {
         });
         dropped
     }
+}
+
+/// What a pending entry is, for a log line.
+fn what_waits(record: Option<&CredentialRecord>) -> String {
+    record.map_or_else(
+        || "the credential-free mark".to_string(),
+        |record| format!("the {} credential", record.provider.as_str()),
+    )
 }
 
 /// The Unix time `after` from now, for a log line; `0` on a clock before the epoch.

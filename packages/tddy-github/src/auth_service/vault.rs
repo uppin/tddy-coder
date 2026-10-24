@@ -105,21 +105,20 @@ use crate::provider::{GitHubOAuthProvider, GitHubUser};
 use crate::session_token_v2::TokenKind;
 
 impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
-    /// The vaults this service retains real logins' credentials in — `None` when it keeps none:
-    /// no `auth_storage`, or a stub provider, whose token is synthetic and different on every
-    /// exchange, so a demo holds no credential by construction (D12).
-    pub(super) fn retaining_vaults(&self) -> Option<&SessionVaults> {
-        self.credential_vaults
-            .as_deref()
-            .filter(|_| self.provider.issues_usable_access_token())
+    /// The vaults this service keeps operators' credentials in — `None` when it keeps none (no
+    /// `auth_storage`).
+    ///
+    /// A stub provider's logins get a vault too, so a local daemon can hold provider accounts; only
+    /// their GitHub token is never retained, being synthetic and different on every exchange (D12).
+    pub(super) fn vaults(&self) -> Option<&SessionVaults> {
+        self.credential_vaults.as_deref()
     }
 
     /// Where `login`'s vault stands, as a response reports it.
     pub(super) fn vault_state_of(&self, login: &str) -> ProtoVaultState {
-        self.retaining_vaults()
-            .map_or(ProtoVaultState::None, |vaults| {
-                to_proto_state(vaults.state(login))
-            })
+        self.vaults().map_or(ProtoVaultState::None, |vaults| {
+            to_proto_state(vaults.state(login))
+        })
     }
 
     /// Retain this login's GitHub token, and say where the operator's vault stands — with the
@@ -136,18 +135,24 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         user: &GitHubUser,
         access_token: &str,
     ) -> Result<(ProtoVaultState, String), Status> {
-        let Some(vaults) = self.retaining_vaults() else {
+        let Some(vaults) = self.vaults() else {
             return Ok((ProtoVaultState::None, String::new()));
         };
         let login = &user.login;
-        let retained = vaults
-            .retain(login, github_record(user, access_token)?)
-            .map_err(|e| refused_by_the_vault(login, "retain the GitHub access token", e))?;
+        let retained = if self.provider.issues_usable_access_token() {
+            vaults
+                .retain(login, github_record(user, access_token)?)
+                .map_err(|e| refused_by_the_vault(login, "retain the GitHub access token", e))?
+        } else {
+            vaults
+                .sign_in_without_credential(login)
+                .map_err(|e| refused_by_the_vault(login, "note the sign-in", e))?
+        };
         if retained.state != VaultState::Open {
             log::info!(
                 target: "tddy_github::auth_service",
-                "the credential vault of '{login}' is {:?} on this daemon; its GitHub token is held \
-                 in memory until the vault is unlocked",
+                "the credential vault of '{login}' is {:?} on this daemon; its sign-in is held in \
+                 memory until the vault is unlocked",
                 retained.state
             );
         }
@@ -177,7 +182,7 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         login: &str,
         presented: &str,
     ) -> (String, ProtoVaultState) {
-        let Some(vaults) = self.retaining_vaults() else {
+        let Some(vaults) = self.vaults() else {
             return (String::new(), ProtoVaultState::None);
         };
         if presented.is_empty() {
@@ -233,7 +238,6 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
     pub(super) fn vaults_to_unlock(&self) -> Result<Arc<SessionVaults>, Status> {
         self.credential_vaults
             .as_ref()
-            .filter(|_| self.provider.issues_usable_access_token())
             .map(Arc::clone)
             .ok_or_else(|| {
                 Status::failed_precondition("this daemon keeps no credential vault for this login")

@@ -244,7 +244,35 @@ impl SessionVaults {
                 Err(failed) => return Err(failed),
             }
         }
-        self.pending.hold(subject, record);
+        self.pending.hold(subject, Some(record));
+        Ok(Retained {
+            state: self.state(subject),
+            unlock_key: None,
+        })
+    }
+
+    /// Note a sign-in of `subject` that produced no credential worth keeping — a local stub login,
+    /// whose token is synthetic.
+    ///
+    /// With the vault open, the lineage is handed an unlock slot and nothing is sealed. With it
+    /// closed, only the sign-in itself is remembered, for the same lifetime a credential would wait:
+    /// it permits [`Self::create`] and [`Self::reset`] as a credential-bearing sign-in does, and
+    /// opening the vault seals nothing for it.
+    pub fn sign_in_without_credential(&self, subject: &str) -> Result<Retained, VaultError> {
+        let _transition = held(&self.transitions);
+        if let Some(vault) = self.use_open(subject) {
+            match vault.add_unlock_slot() {
+                Ok(unlock_key) => {
+                    return Ok(Retained {
+                        state: VaultState::Open,
+                        unlock_key: Some(unlock_key),
+                    })
+                }
+                Err(VaultError::Locked) => self.close(subject, &vault),
+                Err(failed) => return Err(failed),
+            }
+        }
+        self.pending.hold(subject, None);
         Ok(Retained {
             state: self.state(subject),
             unlock_key: None,
@@ -440,7 +468,10 @@ impl SessionVaults {
     fn seal_pending(&self, subject: &str, vault: &SessionVault) -> Result<(), VaultError> {
         let mut waiting = self.pending.take(subject);
         while let Some(Pending { record, .. }) = waiting.first() {
-            if let Err(failed) = vault.put(record.clone()) {
+            if let Err(failed) = record
+                .as_ref()
+                .map_or(Ok(()), |record| vault.put(record.clone()))
+            {
                 self.pending.restore(subject, waiting);
                 return Err(failed);
             }
@@ -573,6 +604,49 @@ mod tests {
                 vaults.holds_pending(THE_OPERATOR)
             ),
             (Some(THE_FIRST_TOKEN.to_string()), false)
+        );
+    }
+
+    #[test]
+    fn a_credential_free_sign_in_permits_creating_a_vault_that_holds_nothing() {
+        // Given a first sign-in that produced no credential worth keeping
+        let dir = tempfile::tempdir().unwrap();
+        let vaults = SessionVaults::new(dir.path());
+        let retained = vaults.sign_in_without_credential(THE_OPERATOR).unwrap();
+
+        // When the operator chooses a passphrase
+        let created = vaults.create(THE_OPERATOR, &the_passphrase());
+
+        // Then the vault was reported uninitialized, is now created, and holds no record
+        assert_eq!(
+            (
+                retained.state,
+                created.is_ok(),
+                vaults.state(THE_OPERATOR),
+                vaults.get(THE_OPERATOR).unwrap().list(None).unwrap().len(),
+                vaults.holds_pending(THE_OPERATOR)
+            ),
+            (VaultState::Uninitialized, true, VaultState::Open, 0, false)
+        );
+    }
+
+    #[test]
+    fn a_credential_free_sign_in_over_an_open_vault_gets_an_unlock_slot_and_seals_nothing() {
+        // Given an open vault holding the first login's token
+        let dir = tempfile::tempdir().unwrap();
+        let (vaults, _) = a_daemon_with_a_created_vault(dir.path());
+
+        // When a sign-in without a credential arrives
+        let retained = vaults.sign_in_without_credential(THE_OPERATOR).unwrap();
+
+        // Then it is handed a key to the open vault, and the stored token is untouched
+        assert_eq!(
+            (
+                retained.state,
+                retained.unlock_key.is_some(),
+                the_stored_token(&vaults)
+            ),
+            (VaultState::Open, true, Some(THE_FIRST_TOKEN.to_string()))
         );
     }
 
