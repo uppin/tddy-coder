@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — several crates (session-split, session-agents, agent-launch, daemon-kernel, session-lifecycle tests), ordering semantics across a forwarded stream, LiveKit peer seam
-**Stack**: #start-progress 4/8. Base: `feature/start-progress/supervisor-handoff`.
+**Stack**: #start-progress 4/8. PR: #737. Base: `feature/start-progress/supervisor-handoff`.
 
 ## Initial Discovery
 
@@ -71,8 +71,7 @@ the stack is a line.
 /// returning the peer's result. Ends with the peer's status, or with the relay's idle status when the
 /// peer is silent for PEER_FORWARD_STREAM_IDLE_TIMEOUT. No overall deadline.
 pub async fn forward_start_session_relaying(room: &CommonRoom, peer: &str, req: &StartSessionRequest,
-    sink: &dyn StartEventSink) -> Result<StartSessionResponse, ForwardedStartFailure>;
-pub trait StartEventSink: Send + Sync { fn relay(&self, event: StartSessionEvent); }
+    relay: &(dyn Fn(StartSessionEvent) + Send + Sync)) -> Result<StartSessionResponse, ForwardedStartFailure>;
 pub enum ForwardedStartFailure { PeerAnswered(Status), PeerSilent(Status) }
 // deleted: forward_start_session_within
 
@@ -83,7 +82,7 @@ pub(crate) enum SplitStartFailure { PeerAnswered, PeerSilent }   // ForwardDeadl
 // tddy-agent-launch/src/start_request_checks.rs — start_forward_deadline deleted
 ```
 
-`AttachmentProgressSink` implements `StartEventSink` (in `tddy-session-files`, the sink's crate).
+`AttachmentProgressSink::relay(StartSessionEvent)` (in `tddy-session-files`) is what callers pass as `relay` — a closure rather than a trait, so the kernel does not depend on `tddy-session-files`.
 
 ## Green wave
 
@@ -172,6 +171,12 @@ gains one case run by CI (needs the testkit container).
 
 `packages/tddy-agent-launch/tests/start_forward_deadline.rs` is deleted with the deadline it pins.
 
+⚠ **Written at the contract commit:** the two kernel relay tests (plus `a_peer_that_goes_silent_is_reported_as_silent`)
+and the two split tests. **Deferred to `/green`, not yet written:** `a_split_start_outlives_the_old_budget_while_the_codebase_host_keeps_it_alive`
+(it replaces the two `remote_managed_worktree_acceptance.rs` deadline tests, which green rewrites together with
+removing the deadline), `a_streamed_start_sends_keep_alives_through_a_slow_worktree_step` (needs a seam for a slow
+step that `/green` introduces with the whole-life keep-alive), and the LiveKit cross-host case (CI-only).
+
 ## Technical Debt & Production Readiness
 
 ## Decisions & Trade-offs
@@ -200,10 +205,10 @@ gains one case run by CI (needs the testkit container).
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests (`./test -p tddy-daemon-kernel -p tddy-session-split -p tddy-session-agents -p tddy-agent-launch -p tddy-session-lifecycle`); full-workspace result (incl. the LiveKit cross-host case) from CI

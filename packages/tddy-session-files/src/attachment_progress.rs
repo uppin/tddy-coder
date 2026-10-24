@@ -93,6 +93,13 @@ impl AttachmentProgressSink {
         }));
     }
 
+    /// Passes on an event another daemon reported for its half of this start (a split start's
+    /// codebase host), unchanged. A closed receiver is ignored, as for [`Self::report`].
+    pub fn relay(&self, event: StartSessionEvent) {
+        // TODO(split-stream): implement
+        let _ = event;
+    }
+
     /// A closed receiver is ignored, as for [`Self::report`].
     fn report_phase(&self, step: StartStep, boundary: StartPhaseBoundary) {
         let Some(tx) = self.tx.as_ref() else {

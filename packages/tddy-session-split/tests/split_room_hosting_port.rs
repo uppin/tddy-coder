@@ -29,8 +29,11 @@ use tddy_host_service::multi_host::LocalOnlyEligibleDaemonSource;
 use tddy_host_service::peer_routing::PeerRouting;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
+use tddy_service::proto::session::start_phase::{Boundary, Step};
+use tddy_service::proto::session::start_session_event::Event;
 use tddy_service::proto::session::{
-    DeleteSessionRequest, DeleteSessionResponse, StartSessionRequest, StartSessionResponse,
+    DeleteSessionRequest, DeleteSessionResponse, StartKeepAlive, StartPhase, StartSessionEvent,
+    StartSessionRequest, StartSessionResponse,
 };
 use tddy_session_agents::agent_host_callbacks::{AgentHostCallbacks, AgentRoster};
 use tddy_session_agents::session_agent_clone::{
@@ -127,6 +130,87 @@ async fn a_split_start_hosts_the_room_over_the_remote_checkout() {
     );
 }
 
+#[tokio::test]
+async fn a_split_start_relays_the_codebase_hosts_worktree_step_and_keep_alives() {
+    // Given a facilitating daemon whose codebase host reports cutting the worktree as it goes
+    let daemon = a_facilitating_daemon();
+    let (tx, mut progress) = mpsc::unbounded_channel();
+
+    // When an operator streams a split start
+    let _ = daemon
+        .split
+        .start_split_claude_cli_session(
+            "operator",
+            CODEBASE_HOST,
+            &a_split_claude_cli_request(
+                CODEBASE_HOST,
+                &daemon.a_caller_token_with_seconds_left(600),
+            ),
+            &AttachmentProgressSink::streaming(tx),
+        )
+        .await;
+
+    // Then the codebase host's step and keep-alive reached the operator's stream, in order
+    let mut said = Vec::new();
+    while let Ok(Ok(event)) = progress.try_recv() {
+        said.push(match event.event {
+            Some(Event::Phase(phase)) if phase.step == Step::Worktree as i32 => {
+                format!(
+                    "worktree {}",
+                    if phase.boundary == Boundary::Begin as i32 {
+                        "begin"
+                    } else {
+                        "end"
+                    }
+                )
+            }
+            Some(Event::KeepAlive(_)) => "keep-alive".to_string(),
+            other => format!("{other:?}"),
+        });
+    }
+    assert_eq!(
+        said.iter().take(3).cloned().collect::<Vec<_>>(),
+        vec!["worktree begin", "keep-alive", "worktree end"],
+        "the operator sees the codebase host's progress first: {said:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_split_start_whose_codebase_host_answers_deadline_exceeded_reports_that_host() {
+    // Given a codebase host whose own clone deadline fires — the 2026-10-24 incident
+    let daemon = a_facilitating_daemon_whose_codebase_host(a_codebase_host_failing_with(
+        Status::deadline_exceeded("ensure_project_available_for_start: clone timed out"),
+    ));
+
+    // When
+    let failed = daemon
+        .split
+        .start_split_claude_cli_session(
+            "operator",
+            CODEBASE_HOST,
+            &a_split_claude_cli_request(
+                CODEBASE_HOST,
+                &daemon.a_caller_token_with_seconds_left(600),
+            ),
+            &AttachmentProgressSink::discarding(),
+        )
+        .await
+        .expect_err("the codebase host failed the start");
+
+    // Then the operator gets the codebase host's own answer, and its half is torn down
+    assert!(
+        failed.message().contains("clone timed out"),
+        "the error is the codebase host's: {}",
+        failed.message()
+    );
+    let created = daemon.codebase_host.the_checkout_it_created();
+    assert_eq!(
+        daemon.codebase_host.deleted.lock().unwrap().clone(),
+        vec![created.codebase_session_id],
+        "the workspace session it was asked for is torn down"
+    );
+}
+
 // ─── the facilitating daemon ────────────────────────────────────────────────────
 
 const FACILITATING_HOST: &str = "workstation-a";
@@ -148,6 +232,10 @@ struct AFacilitatingDaemon {
 }
 
 fn a_facilitating_daemon() -> AFacilitatingDaemon {
+    a_facilitating_daemon_whose_codebase_host(ACodebaseHost::default())
+}
+
+fn a_facilitating_daemon_whose_codebase_host(codebase_host: ACodebaseHost) -> AFacilitatingDaemon {
     let data_dir = tempfile::tempdir().expect("data dir");
     let staging = tempfile::tempdir().expect("staging dir");
     let toolchain = a_toolchain_holding_tddy_tools();
@@ -161,7 +249,7 @@ fn a_facilitating_daemon() -> AFacilitatingDaemon {
         ..DaemonConfig::default()
     };
 
-    let codebase_host = Arc::new(ACodebaseHost::default());
+    let codebase_host = Arc::new(codebase_host);
     let peer_routing = PeerRouting::new(
         config.clone(),
         Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config)),
@@ -387,10 +475,32 @@ impl SplitRoomHosting for RecordedSplitRooms {
 // ─── the codebase host, on the common room ──────────────────────────────────────
 
 /// The peer holding the codebase: it creates the workspace session it is asked for, under the id it
-/// was given, and tears one down when asked.
+/// was given, and tears one down when asked. Served as a stream, it reports cutting the worktree
+/// (begin, a keep-alive, end) before its result — or, scripted to fail, answers with its own status.
 #[derive(Default)]
 struct ACodebaseHost {
     started: Mutex<Vec<StartSessionRequest>>,
+    deleted: Mutex<Vec<String>>,
+    fails_with: Option<Status>,
+}
+
+/// A codebase host whose streamed start keeps itself alive and then fails with `status`.
+fn a_codebase_host_failing_with(status: Status) -> ACodebaseHost {
+    ACodebaseHost {
+        fails_with: Some(status),
+        ..ACodebaseHost::default()
+    }
+}
+
+fn an_event(event: Event) -> Vec<u8> {
+    StartSessionEvent { event: Some(event) }.encode_to_vec()
+}
+
+fn a_worktree_phase(boundary: Boundary) -> Event {
+    Event::Phase(StartPhase {
+        step: Step::Worktree as i32,
+        boundary: boundary as i32,
+    })
 }
 
 /// The checkout the codebase host created, and the agent session it was created for.
@@ -451,19 +561,65 @@ impl PeerForwarder for ACodebaseHost {
                     .push(request);
                 Ok(created.encode_to_vec())
             }
-            "DeleteSession" => Ok(DeleteSessionResponse::default().encode_to_vec()),
+            "DeleteSession" => {
+                let request = DeleteSessionRequest::decode(body.as_slice())
+                    .expect("a forwarded DeleteSession decodes");
+                self.deleted
+                    .lock()
+                    .expect("deleted sessions lock")
+                    .push(request.session_id);
+                Ok(DeleteSessionResponse::default().encode_to_vec())
+            }
             other => panic!("a split start does not forward {other}"),
         }
     }
 
     async fn call_server_stream(
         &self,
-        _peer_id: &str,
-        _service: &str,
+        peer_id: &str,
+        service: &str,
         method: &str,
-        _body: Vec<u8>,
+        body: Vec<u8>,
     ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
-        panic!("a split start with no agents opens no stream, but {method} was opened")
+        assert_eq!(
+            (peer_id, service, method),
+            (
+                CODEBASE_HOST,
+                "session.SessionService",
+                "StreamStartSession"
+            ),
+            "a split start streams the codebase host's start and nothing else"
+        );
+        let request = StartSessionRequest::decode(body.as_slice())
+            .expect("a forwarded StreamStartSession decodes");
+        let session_id = request.requested_session_id.clone();
+        self.started
+            .lock()
+            .expect("started sessions lock")
+            .push(request);
+        let (tx, frames) = mpsc::channel(8);
+        let mut script = vec![
+            Ok(an_event(a_worktree_phase(Boundary::Begin))),
+            Ok(an_event(Event::KeepAlive(StartKeepAlive {
+                activity: "worktree".to_string(),
+            }))),
+        ];
+        match &self.fails_with {
+            Some(status) => script.push(Err(status.clone())),
+            None => {
+                script.push(Ok(an_event(a_worktree_phase(Boundary::End))));
+                script.push(Ok(an_event(Event::Result(StartSessionResponse {
+                    session_id,
+                    ..Default::default()
+                }))));
+            }
+        }
+        for frame in script {
+            tx.send(frame)
+                .await
+                .expect("the relay reads the codebase host's frames");
+        }
+        Ok(frames)
     }
 }
 

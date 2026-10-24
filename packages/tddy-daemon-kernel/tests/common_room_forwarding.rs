@@ -427,3 +427,162 @@ async fn a_consumer_that_drops_the_relay_releases_the_forwarders_stream() {
     // Then the relay ends and lets go of the forwarder's stream, which the peer side observes
     peer_side.closed().await;
 }
+
+// ---------------------------------------------------------------------------
+// A forwarded start, relayed (docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-split-stream.md)
+// ---------------------------------------------------------------------------
+
+mod forwarded_start {
+    use super::{
+        a_room_over, mpsc, AScriptedPeer, Answer, Arc, CommonRoom, Mutex, Status, PEER,
+        PEER_FORWARD_STREAM_IDLE_TIMEOUT,
+    };
+    use pretty_assertions::assert_eq;
+    use prost::Message;
+    use tddy_daemon_kernel::peer_calls::{forward_start_session_relaying, ForwardedStartFailure};
+    use tddy_service::proto::session::start_phase::{Boundary, Step};
+    use tddy_service::proto::session::start_session_event::Event;
+    use tddy_service::proto::session::{
+        StartKeepAlive, StartPhase, StartSessionEvent, StartSessionRequest, StartSessionResponse,
+    };
+
+    fn a_phase(step: Step, boundary: Boundary) -> Vec<u8> {
+        StartSessionEvent {
+            event: Some(Event::Phase(StartPhase {
+                step: step as i32,
+                boundary: boundary as i32,
+            })),
+        }
+        .encode_to_vec()
+    }
+
+    fn a_keep_alive() -> Vec<u8> {
+        StartSessionEvent {
+            event: Some(Event::KeepAlive(StartKeepAlive {
+                activity: "provisioning".to_string(),
+            })),
+        }
+        .encode_to_vec()
+    }
+
+    fn a_result(session_id: &str) -> Vec<u8> {
+        StartSessionEvent {
+            event: Some(Event::Result(StartSessionResponse {
+                session_id: session_id.to_string(),
+                ..Default::default()
+            })),
+        }
+        .encode_to_vec()
+    }
+
+    fn a_room_whose_peer_streams(frames: mpsc::Receiver<Result<Vec<u8>, Status>>) -> CommonRoom {
+        a_room_over(Arc::new(AScriptedPeer::default().answering(
+            "session.SessionService",
+            "StreamStartSession",
+            Answer::Frames(frames),
+        )))
+    }
+
+    fn what_it_relayed(events: &Mutex<Vec<StartSessionEvent>>) -> Vec<String> {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| match &event.event {
+                Some(Event::Phase(phase)) => format!("phase {} {}", phase.step, phase.boundary),
+                Some(Event::KeepAlive(_)) => "keep-alive".to_string(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_start_relays_the_peers_events_in_order_then_returns_its_result() {
+        // Given — a peer that cuts a worktree, keeping the stream alive, then answers
+        let (tx, frames) = mpsc::channel(8);
+        for frame in [
+            a_phase(Step::Worktree, Boundary::Begin),
+            a_keep_alive(),
+            a_phase(Step::Worktree, Boundary::End),
+            a_result("ws-1"),
+        ] {
+            tx.send(Ok(frame)).await.unwrap();
+        }
+        drop(tx);
+        let room = a_room_whose_peer_streams(frames);
+        let relayed = Mutex::new(Vec::new());
+
+        // When
+        let started = forward_start_session_relaying(
+            &room,
+            PEER,
+            &StartSessionRequest::default(),
+            &|event| relayed.lock().unwrap().push(event),
+        )
+        .await
+        .expect("the peer's result completes the forward");
+
+        // Then — every event before the result reached the caller, in order; the result is returned
+        assert_eq!(started.session_id, "ws-1");
+        assert_eq!(
+            what_it_relayed(&relayed),
+            vec![
+                format!("phase {} {}", Step::Worktree as i32, Boundary::Begin as i32),
+                "keep-alive".to_string(),
+                format!("phase {} {}", Step::Worktree as i32, Boundary::End as i32),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_peer_status_is_its_answer_even_when_it_is_deadline_exceeded() {
+        // Given — the 2026-10-24 shape: the peer's own clone deadline fired and it said so
+        let (tx, frames) = mpsc::channel(8);
+        tx.send(Ok(a_keep_alive())).await.unwrap();
+        tx.send(Err(Status::deadline_exceeded(
+            "ensure_project_available_for_start: clone timed out",
+        )))
+        .await
+        .unwrap();
+        drop(tx);
+
+        // When
+        let failure = forward_start_session_relaying(
+            &a_room_whose_peer_streams(frames),
+            PEER,
+            &StartSessionRequest::default(),
+            &|_| {},
+        )
+        .await
+        .expect_err("the peer failed the start");
+
+        // Then — it is the peer's answer, not this side's silence
+        assert!(
+            matches!(&failure, ForwardedStartFailure::PeerAnswered(status) if status.message().contains("clone timed out")),
+            "a peer-sent DEADLINE_EXCEEDED is the peer's answer: {failure:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_peer_that_goes_silent_is_reported_as_silent() {
+        // Given — a peer that reports one step and then sends nothing more
+        let (tx, frames) = mpsc::channel(8);
+        tx.send(Ok(a_phase(Step::Worktree, Boundary::Begin)))
+            .await
+            .unwrap();
+        let room = a_room_whose_peer_streams(frames);
+
+        // When — longer than the idle timeout passes
+        let failure =
+            forward_start_session_relaying(&room, PEER, &StartSessionRequest::default(), &|_| {})
+                .await
+                .expect_err("a silent peer ends the start");
+        drop(tx);
+
+        // Then
+        assert!(
+            matches!(failure, ForwardedStartFailure::PeerSilent(_)),
+            "silence for {PEER_FORWARD_STREAM_IDLE_TIMEOUT:?} is reported as silence: {failure:?}"
+        );
+    }
+}

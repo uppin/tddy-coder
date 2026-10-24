@@ -106,6 +106,44 @@ pub async fn forward_stream_start_session(
     .await
 }
 
+/// Why a forwarded start did not produce a session.
+#[derive(Debug)]
+pub enum ForwardedStartFailure {
+    /// The peer answered with this status — whatever its code, including `DEADLINE_EXCEEDED` from
+    /// the peer's own deadlines. The peer has said what happened.
+    PeerAnswered(Status),
+    /// The peer sent nothing for [`crate::peer_forwarding::PEER_FORWARD_STREAM_IDLE_TIMEOUT`]: it
+    /// may still be working, so whatever it was building may still appear.
+    PeerSilent(Status),
+}
+
+impl ForwardedStartFailure {
+    /// The status to hand the caller.
+    pub fn into_status(self) -> Status {
+        match self {
+            ForwardedStartFailure::PeerAnswered(status)
+            | ForwardedStartFailure::PeerSilent(status) => status,
+        }
+    }
+}
+
+/// Forward a start to `peer_instance_id` as **StreamStartSession**, handing every non-terminal event
+/// the peer sends (phases, keep-alives, progress) to `relay` as it arrives, and returning the peer's
+/// result. There is no overall deadline: the relay's per-frame idle timeout ends a start whose peer
+/// has gone silent, and a live peer keeps it open with keep-alives.
+pub async fn forward_start_session_relaying(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &StartSessionRequest,
+    relay: &(dyn Fn(StartSessionEvent) + Send + Sync),
+) -> Result<StartSessionResponse, ForwardedStartFailure> {
+    // TODO(split-stream): implement over forward_stream_start_session
+    let _ = (room, peer_instance_id, request, relay);
+    Err(ForwardedStartFailure::PeerAnswered(Status::unimplemented(
+        "forward_start_session_relaying",
+    )))
+}
+
 /// Forward **DeleteSession** to another daemon in the common room.
 ///
 /// `DeleteSessionRequest` carries no `daemon_instance_id`, so the peer is addressed explicitly. Used
