@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-agent-backend/src/backend/mod.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-23 — `/pr-wrap` step 3.5 file-length gate on #522 (`#carve` 12/14), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **877 production lines** of 1,366 total (first `#[cfg(test)]` at line 878; two test modules, L878–1160 and L1162–1366, with no production code after the first) · budget 500 · **1.8× over**
-**Thresholds breached:** length 877 > 500
+**Metrics:** **850 production lines** (2026-10-24; 877 at detection, first `#[cfg(test)]` then at line 878; two test modules with no production code after the first) · budget 500 · **1.7× over**
+**Thresholds breached:** length 850 > 500
 **Restructure:** not designed
-**Status:** Open — regressed 2026-10-22 (877 → 906 across `#provider-route` 3/9, 4/9, 6/9 and 7/9, stack-shared, split deferred) — **unclaimed**
+**Status:** Open — partially fixed 2026-10-24 (906 → 850 by `#warp-agent` 1/2, #717, which moved `context_globs_for_agent` out); seams A–D remain — **unclaimed**
 **Moved:** 2026-09-23 — from `packages/tddy-core/src/backend/mod.rs` by `#carve` 12/14 (PR #522), with `git mv`
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
@@ -19,6 +19,7 @@
 | 2026-10-22 | 880 | `#provider-route` 4/9 (#665): 879 → 880 — `mod routed;`. **Regressed, split deferred**: still stack-shared with `#provider-route` 7/9 (#668) |
 | 2026-10-22 | 881 | `#provider-route` 6/9 (#667): 880 → 881 — the `muse` row of `context_globs_for_agent` (one arm; its comment replaced, not added). **Regressed, split deferred**: still stack-shared with `#provider-route` 7/9 (#668) |
 | 2026-10-22 | 906 | `#provider-route` 7/9 (#668): 882 → 906 (882 is this count on the rebased base) — `AnyBackend::OpenCode` and its five dispatch arms, the `OpenCode` selection option, `OPENCODE_DEFAULT_MODEL` and its rows in `backend_from_label`, `default_model_for_agent`, `curated_models_for_agent` and `preselected_index_for_agent`, `mod opencode_acp;` / `mod acp_updates;` and the re-export. **Regressed, split deferred**: stack-shared — `#provider-route` 8/9 (#669) and 9/9 (#670) sit on this branch, and the split is the follow-up after the stack lands (seams B and C above take most of what this PR added) |
+| 2026-10-24 | 850 | `#warp-agent` 1/2 (#717): 906 → 908 with the `warp` row of `context_globs_for_agent` (one comment, one arm), then 908 → 850 by moving `SHARED_CONTEXT_GLOBS` and `context_globs_for_agent` into `backend/context_globs.rs` (60 production lines) with `tddy-tools restructure` (`move_item`, then a named `pub use context_globs::context_globs_for_agent` so every path is kept). **Partially fixed**: still 1.7× over |
 
 ## What would close it — candidate seams (not proven)
 
@@ -29,4 +30,4 @@
 | C | the model catalogue data: the Claude aliases and pinned models, `default_model_for_agent`, `BackendModel(s)`, `curated_models_for_agent`, `claude_cli_models`, `cursor_cli_models`, `acp_models_from_session_state` (L618–700, L761–815). `model_catalog.rs` is its natural home | ~140 |
 | D | request and sink types: `AgentOutputSink`, `ProgressSink`, `SessionMode`, `RemoteToolEnv`, `InvokeRequest` (L283–493) | ~210 |
 
-Seams A–C leave about 530 lines, so D, or `context_globs_for_agent` (L701–760), is needed too. `pub use` at the module root keeps every path. Prove the seams with `restructure check --deep` before applying them.
+`context_globs_for_agent` is out (`backend/context_globs.rs`); seams A–C leave about 470 lines, under budget, and D takes it further. Line numbers above predate that move. `pub use` at the module root keeps every path. Prove the seams with `restructure check --deep` before applying them.

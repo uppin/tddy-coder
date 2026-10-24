@@ -36,4 +36,10 @@ describe("whyMainCannotRun", () => {
       "Muse Code cannot run in managed-codebase mode, so main would not stay read-only.",
     );
   });
+
+  it("explains that Warp cannot run in managed-codebase mode", () => {
+    expect(whyMainCannotRun("warp-cli")).toBe(
+      "Warp cannot run in managed-codebase mode, so main would not stay read-only.",
+    );
+  });
 });

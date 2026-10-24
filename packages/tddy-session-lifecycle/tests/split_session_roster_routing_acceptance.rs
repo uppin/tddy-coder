@@ -283,6 +283,7 @@ fn write_session(sessions_base: &Path, session_id: &str, agents: Vec<SessionAgen
             session_type: Some("claude-cli".to_string()),
             model: None,
             cursor_chat_id: None,
+            harness_resume_token: None,
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),

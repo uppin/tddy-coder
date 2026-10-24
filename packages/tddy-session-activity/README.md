@@ -16,7 +16,7 @@ Extracted from `tddy-daemon` by `#unbundle` node 7; the catalog modules came fro
 cargo test -p tddy-session-activity
 ```
 
-That runs 63 tests: the session catalog's (unit tests in its modules, and
+That runs 64 tests: the session catalog's (unit tests in its modules, and
 `tests/worktree_removal_eligibility.rs`), the presenter observer's run condition and per-event
 delivery (`presenter_observer_task.rs`), and the operator-channel bus adapter
 (`tests/operator_channel_subscriber_acceptance.rs`). ⚠ **The activity service itself has no test of

@@ -28,7 +28,7 @@ production lines.
 | `changeset` | `changeset.yaml`: model, PR-stack DAG, atomic IO, merge into a run |
 | `branch_worktree_intent` | new branch from a base, or work on a selected branch |
 | `session_lifecycle` | the unified session directory and id validation |
-| `session_metadata`, `session_agent`, `session_activity`, `session_label`, `session_participant_metadata`, `session_context` | the per-session files beside the changeset |
+| `session_metadata`, `session_agent`, `session_activity`, `session_label`, `session_participant_metadata`, `session_context` | the per-session files beside the changeset; `.session.yaml`'s `harness_resume_token` is the handle a CLI harness printed on exit for resuming its conversation ([architecture](docs/architecture.md#harness-resume-token-session_metadata)) |
 | `agent_activity` | the per-session agent tool-call log |
 | `elapsed_format`, `source_path` | small helpers |
 

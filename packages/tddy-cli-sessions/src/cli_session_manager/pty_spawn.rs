@@ -10,7 +10,7 @@ use tddy_pty::runtime::PtyReady;
 
 use tddy_task::TaskHandle;
 
-use super::TerminalEntry;
+use super::{ExitSettlements, TerminalEntry};
 
 use tddy_terminal_rpc::pty_runtime::PtyRuntime;
 
@@ -20,11 +20,23 @@ use std::sync::Arc;
 
 use std::path::PathBuf;
 
+/// Work to finish for a terminal once its process has exited and its output is complete: it
+/// receives the terminal's capture. The terminal leaves the index only once the returned future
+/// completes, and [`CliSessionManager::exit_hook_settled`] waits for it — which is how a resume
+/// reads what the previous run's hook recorded.
+pub type ExitHook = Box<
+    dyn FnOnce(
+            Arc<std::sync::Mutex<tddy_task::TerminalCapture>>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send,
+>;
+
 impl CliSessionManager {
     /// Spawn `argv` in a PTY as an identified tool and register it under `(session_id, terminal_id)`.
     ///
     /// Shared by [`start`](Self::start) (the `claude` tool) and
-    /// [`start_terminal`](Self::start_terminal) (Bash tools).
+    /// [`start_terminal`](Self::start_terminal) (Bash tools). `on_exit` runs to completion when the
+    /// process has exited, before the terminal is deregistered (see [`ExitHook`]).
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_tool(
         &self,
@@ -36,6 +48,7 @@ impl CliSessionManager {
         argv: Vec<String>,
         env: Vec<(String, String)>,
         os_user: Option<&str>,
+        on_exit: Option<ExitHook>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
         let spec = PtySpawnSpec {
@@ -71,10 +84,18 @@ impl CliSessionManager {
                 },
             );
 
+        let on_exit = match on_exit {
+            Some(hook) => Some(
+                self.pending_exit(session_id, terminal_id, &handle.task_id, hook)
+                    .await,
+            ),
+            None => None,
+        };
         self.spawn_terminal_cleanup(
             session_id.to_string(),
             terminal_id.to_string(),
             handle.task_id.clone(),
+            on_exit,
         );
 
         log::info!(
@@ -142,8 +163,10 @@ impl CliSessionManager {
         session_id: String,
         terminal_id: String,
         task_id: TaskId,
+        on_exit: Option<PendingExit>,
     ) {
         let terminals = Arc::clone(&self.terminals);
+        let exit_settlements = Arc::clone(&self.exit_settlements);
         let managed_workflows = Arc::clone(&self.managed_workflows);
         let exposed_terminals = Arc::clone(&self.exposed_terminals);
         let task_registry = self.task_registry.clone();
@@ -160,6 +183,12 @@ impl CliSessionManager {
                 if status_rx.changed().await.is_err() {
                     break;
                 }
+            }
+            // The process has exited and its output is complete. The hook finishes before the
+            // terminal leaves the index, and before a waiting resume goes on.
+            if let Some(pending) = on_exit {
+                let key = (session_id.clone(), terminal_id.clone());
+                pending.finish(&task, key, &exit_settlements).await;
             }
             let mut reg = terminals.write().await;
             if let Some(tools) = reg.get_mut(&session_id) {
@@ -182,6 +211,39 @@ impl CliSessionManager {
                 exposed_terminals.write().await.remove(&session_id);
             }
         });
+    }
+
+    /// Registers `hook` as `task_id`'s pending exit, for [`Self::exit_hook_settled`] to wait on.
+    async fn pending_exit(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        task_id: &TaskId,
+        hook: ExitHook,
+    ) -> PendingExit {
+        let (settled, settled_rx) = watch::channel(false);
+        self.exit_settlements.write().await.insert(
+            (session_id.to_string(), terminal_id.to_string()),
+            (task_id.clone(), settled_rx),
+        );
+        PendingExit { hook, settled }
+    }
+
+    /// Waits until the exit hook of `session_id`'s main terminal has finished, when its process has
+    /// exited and the hook is still running — so a resume reads what the hook recorded. Returns at
+    /// once when there is no hook pending, or when the process is still running (nothing has been
+    /// recorded yet, and waiting for its exit would hold the caller for the whole run).
+    pub async fn exit_hook_settled(&self, session_id: &str) {
+        let key = (session_id.to_string(), MAIN_TERMINAL_ID.to_string());
+        let Some((task_id, mut settled)) = self.exit_settlements.read().await.get(&key).cloned()
+        else {
+            return;
+        };
+        // The PTY runtime drops a terminal's control the moment its process exits.
+        if self.pty_registry.get(&task_id).await.is_some() {
+            return;
+        }
+        let _ = settled.wait_for(|done| *done).await;
     }
 
     pub(crate) async fn resolve_pty_handle(
@@ -213,5 +275,26 @@ impl CliSessionManager {
         )
         .ok()
         .map(Arc::new)
+    }
+}
+
+/// An exit hook, and the flag that tells [`CliSessionManager::exit_hook_settled`] it has finished.
+pub(crate) struct PendingExit {
+    hook: ExitHook,
+    settled: watch::Sender<bool>,
+}
+
+impl PendingExit {
+    /// Runs the hook on `task`'s capture, then tells any waiting resume it has finished and forgets
+    /// it — unless `key` has since been taken by a later run of the same terminal.
+    async fn finish(self, task: &TaskHandle, key: (String, String), settlements: &ExitSettlements) {
+        if let Some(channel) = task.channel("0") {
+            (self.hook)(channel.capture_arc()).await;
+        }
+        let _ = self.settled.send(true);
+        let mut pending = settlements.write().await;
+        if pending.get(&key).is_some_and(|(id, _)| *id == task.id) {
+            pending.remove(&key);
+        }
     }
 }

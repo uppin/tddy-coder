@@ -4,6 +4,7 @@ pub mod child_spawn_handler;
 pub mod claude_cli_spawn;
 pub mod claude_cli_spawn_steps;
 pub mod cli_branch_starts;
+mod cli_resume_token;
 pub mod cli_route_launch;
 mod cli_session_worktree;
 mod clone_backend;
@@ -67,6 +68,8 @@ pub mod workspace_branch_start;
 pub mod worktree_source;
 
 mod cli_harness_jail;
+#[cfg(test)]
+mod cli_harness_start_checks_unit_tests;
 #[cfg(test)]
 mod cli_route_launch_tests;
 #[cfg(test)]

@@ -1,8 +1,8 @@
 # Muse Code CLI Session
 
-> **Related:** [OpenCode CLI session](opencode-cli-session.md) — the sibling session type it shares one
-> start and resume path with; [Claude Code CLI session](claude-cli-session.md) and
-> [Cursor Agent CLI session](cursor-cli-session.md). All four are registered through one **CLI harness
+> **Related:** [OpenCode CLI session](opencode-cli-session.md) and [Warp CLI session](warp-cli-session.md)
+> — the sibling session types it shares one start and resume path with; [Claude Code CLI session](claude-cli-session.md)
+> and [Cursor Agent CLI session](cursor-cli-session.md). All five are registered through one **CLI harness
 > descriptor** and share `CliSessionManager`, `StreamSessionTerminalIO` and the web terminal mount.
 
 ## Summary

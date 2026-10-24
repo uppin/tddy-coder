@@ -132,6 +132,17 @@ fn an_unrecognised_agent_gets_the_shared_base_rather_than_the_union_of_every_lis
     }
 }
 
+/// Warp reads `WARP.md` beside `AGENTS.md`, and its skills from `.agents/skills/`, which the shared
+/// base already carries.
+#[test]
+fn warp_reads_warp_md_on_top_of_the_shared_base() {
+    // When
+    let globs = globs_of("warp");
+
+    // Then
+    assert_eq!(globs, vec![".agents/**", "AGENTS.md", "WARP.md"]);
+}
+
 /// AC5. Every known agent carries the shared base, so `AGENTS.md` and `.agents/skills` reach an
 /// agent whatever backend runs it.
 #[rstest::rstest]

@@ -66,6 +66,7 @@ fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         session_type: Some("claude-cli".to_string()),
         model: Some("claude-sonnet-4-6".to_string()),
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: Some(hook_token.to_string()),
         sandbox: None,

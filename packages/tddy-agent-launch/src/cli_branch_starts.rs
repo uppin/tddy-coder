@@ -20,7 +20,9 @@ use crate::launch_ports::LaunchSessions;
 use crate::session_provider_route::{
     sandboxed_start_route, session_route_sources_with_default, start_route,
 };
-use crate::start_request_checks::refuse_a_cli_start_without_a_model;
+use crate::start_request_checks::{
+    refuse_a_cli_start_without_a_model, refuse_an_unsupported_cli_harness_start,
+};
 use crate::svc_start_session_core::managed_recipe_for;
 use tddy_core::cli_harness::CliHarness;
 use tddy_core::output::SESSIONS_SUBDIR;
@@ -280,13 +282,7 @@ impl LaunchSessions {
         progress: &AttachmentProgressSink,
         os_user: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        // None of them has a workflow of its own for a managed codebase to drive.
-        if req.managed_codebase {
-            return Err(Status::invalid_argument(format!(
-                "managed_codebase is not supported for {} sessions",
-                harness.session_type
-            )));
-        }
+        refuse_an_unsupported_cli_harness_start(harness, req)?;
         let start = self.cli_start_prelude(req, progress, os_user).await?;
         let sessions_base = start.sessions_base.clone();
         let session_id = start.session_id.clone();

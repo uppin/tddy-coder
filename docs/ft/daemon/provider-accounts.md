@@ -68,6 +68,7 @@ which account is one **capability matrix**, held by the daemon for every harness
 | OpenCode — `opencode`, `opencode-cli` | serves OpenAI Responses or OpenAI Chat Completions |
 | Muse Code — `muse-cli` | is a `meta` account |
 | Cursor — `cursor`, `cursor-cli` | — never: Cursor's agent cannot be pointed at another provider |
+| Warp — `warp-cli` | — never: Warp runs on the person's own Warp sign-in ([Warp CLI session](warp-cli-session.md)) |
 
 An unsupported pair is refused with the reason, never silently ignored. Of the harnesses the matrix
 admits, **`claude-cli`**, **`opencode-cli`** and **`muse-cli`** started unsandboxed are run on an account today

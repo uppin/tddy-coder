@@ -542,6 +542,7 @@ mod tests {
             managed_codebase: false,
             session_role: None,
             cursor_chat_id: None,
+            harness_resume_token: None,
         };
         tddy_core::write_session_metadata(session_dir, &meta).unwrap();
     }

@@ -6,7 +6,9 @@
 //! spawns them verbatim.
 
 use std::path::PathBuf;
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -22,6 +24,11 @@ pub const DEFAULT_TERM_COLS: u16 = 220;
 
 /// PTY reader buffer size.
 const PTY_READ_BUF: usize = 4096;
+
+/// How long a child's exit waits for the reader to drain what is left of its output. Draining
+/// takes milliseconds; the bound matters only when a process the child left behind still holds the
+/// terminal open.
+const READER_DRAIN_GRACE: Duration = Duration::from_secs(1);
 
 /// The variables `gh` honours ahead of its own login.
 const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
@@ -143,14 +150,8 @@ impl TaskBody for PtyTaskBody {
 
         ctx.register_child_pid(setup.pid);
 
-        if let Some(tx) = ready_tx {
-            let _ = tx.send(Ok(PtyReady {
-                pid: setup.pid,
-                master: Arc::clone(&setup.master),
-                current_size: Arc::clone(&setup.current_size),
-            }));
-        }
-
+        // Registered before the ready signal: whoever is told the process runs finds its control,
+        // and its absence means the process has exited.
         self.pty_registry
             .insert(
                 task_id.clone(),
@@ -162,6 +163,14 @@ impl TaskBody for PtyTaskBody {
                 },
             )
             .await;
+
+        if let Some(tx) = ready_tx {
+            let _ = tx.send(Ok(PtyReady {
+                pid: setup.pid,
+                master: Arc::clone(&setup.master),
+                current_size: Arc::clone(&setup.current_size),
+            }));
+        }
 
         let exit_status = tokio::select! {
             _ = cancel.cancelled() => {
@@ -239,7 +248,10 @@ fn open_pty_and_pump(
     // Reader: start BEFORE child spawn so fast-exiting stubs cannot miss PTY output.
     let master_for_reader = Arc::clone(&master);
     let output_ch_reader = Arc::clone(&output_ch);
+    // Disconnects when the reader ends, which the exit monitor waits for (see below).
+    let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel::<()>();
     std::thread::spawn(move || {
+        let _reader_done = reader_done_tx;
         let reader = {
             let m = master_for_reader.lock().unwrap();
             m.try_clone_reader()
@@ -354,8 +366,18 @@ fn open_pty_and_pump(
                 message: format!("child wait error: {e}"),
             },
         };
-        // Unblock the writer thread first so it drops its master fd, then report terminal status.
+        // Unblock the writer thread first so it drops its master fd.
         let _ = child_exited_tx.send(());
+        // The reader ends once every holder of the slave side has closed it. Waiting for it means
+        // the capture holds everything the child wrote before it exited, by the time the terminal
+        // status is reported. A process the child left behind can hold the slave open for as long
+        // as it runs, so the wait is bounded: past it, the exit is reported without that output.
+        if let Err(RecvTimeoutError::Timeout) = reader_done_rx.recv_timeout(READER_DRAIN_GRACE) {
+            log::info!(
+                target: "tddy_pty::runtime",
+                "PTY child {pid} exited while another process still holds its terminal open"
+            );
+        }
         let _ = exit_tx.send(status);
     });
 
@@ -493,6 +515,65 @@ mod tests {
             master_released_within(&master, std::time::Duration::from_secs(3)).await,
             "PTY master was not released after the child exited — the writer thread is still \
              blocked on stdin and pinning the master fd"
+        );
+    }
+
+    /// A spawned `/bin/sh -c script`, once it has signalled ready.
+    async fn a_running_shell(script: &str) -> Arc<TaskHandle> {
+        let registry = TaskRegistry::new();
+        let pty_registry = PtyRegistry::new();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let task = PtyRuntime::spawn(
+            &registry,
+            &pty_registry,
+            a_pty_spec_running(&["/bin/sh", "-c", script]),
+            ready_tx,
+        )
+        .await;
+        let _ready = ready_rx.await.expect("ready signal").expect("PTY spawned");
+        task
+    }
+
+    /// The exit is reported only once the reader has drained the terminal, so the capture holds
+    /// what was written to it up to then.
+    ///
+    /// Linux only: there a process the child leaves behind, ignoring the hangup, can still write to
+    /// the terminal. macOS revokes the terminal as its session leader (the child) exits.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn output_written_just_after_the_child_exits_is_captured_when_the_exit_is_reported() {
+        // Given a child that exits at once, leaving a process on its terminal that writes a line
+        // a moment later and then exits too
+        let task = a_running_shell("(trap '' HUP; sleep 0.3; printf 'late-line') & exit 0").await;
+
+        // When the exit is reported
+        assert!(
+            reaches_terminal_within(&task, std::time::Duration::from_secs(5)).await,
+            "PTY task never reached terminal status"
+        );
+
+        // Then the capture already holds that line
+        let capture = task.channel("0").expect("channel 0").capture_arc();
+        let output = String::from_utf8_lossy(capture.lock().unwrap().buffered_bytes()).into_owned();
+        assert!(
+            output.contains("late-line"),
+            "capture at exit was {output:?}"
+        );
+    }
+
+    /// The wait for the terminal to drain is bounded: a process the child left running does not
+    /// hold its exit back. (On macOS the terminal is revoked as the child exits, so nothing can
+    /// hold it; the bound is what keeps this true on Linux.)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_process_left_holding_the_terminal_does_not_hold_back_the_exit() {
+        // Given a child that exits at once, leaving a long sleep on its terminal that ignores the
+        // hangup
+        let task = a_running_shell("(trap '' HUP; sleep 10) & exit 0").await;
+
+        // When / Then the exit is reported well before that sleep ends
+        assert!(
+            reaches_terminal_within(&task, std::time::Duration::from_secs(4)).await,
+            "the exit waited for the process left holding the terminal"
         );
     }
 }

@@ -40,6 +40,11 @@ pub struct SessionMetadata {
     /// opening a new one. Absent for non-cursor sessions and legacy files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_chat_id: Option<String>,
+    /// The handle a CLI harness printed for continuing its conversation when it last exited
+    /// (Warp's `warp --resume <TOKEN>`), read back off the terminal. A resume passes it to the
+    /// harness; absent until a run has printed one, and for harnesses that print none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness_resume_token: Option<String>,
     /// Granular activity status reported by per-worktree claude-cli hooks (e.g. "Running",
     /// "WaitingForInput"). Absent for tool sessions and legacy files. Set by `ReportSessionStatus`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -225,6 +230,7 @@ pub fn write_initial_tool_session_metadata(
         session_type: opts.session_type,
         model: opts.model,
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: opts.activity_status,
         hook_token: opts.hook_token,
         sandbox: opts.sandbox,
@@ -718,6 +724,37 @@ session_type: workspace
             session_role: None,
             ..a_workspace_session()
         }
+    }
+
+    #[test]
+    fn a_session_without_a_resume_token_writes_no_resume_token_field() {
+        // Given
+        let session = a_workspace_session();
+
+        // When
+        let yaml = serde_yaml::to_string(&session).unwrap();
+
+        // Then
+        assert!(
+            !yaml.contains("harness_resume_token"),
+            "an absent token must not be written; got:\n{yaml}"
+        );
+    }
+
+    #[test]
+    fn a_recorded_resume_token_round_trips_through_session_yaml() {
+        // Given
+        let session = SessionMetadata {
+            harness_resume_token: Some("tok-123".to_string()),
+            ..a_workspace_session()
+        };
+
+        // When
+        let read_back: SessionMetadata =
+            serde_yaml::from_str(&serde_yaml::to_string(&session).unwrap()).unwrap();
+
+        // Then
+        assert_eq!(read_back.harness_resume_token.as_deref(), Some("tok-123"));
     }
 
     #[test]
