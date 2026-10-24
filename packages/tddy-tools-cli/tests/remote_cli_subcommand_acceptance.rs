@@ -10,6 +10,11 @@
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
+use prost::Message as _;
+use tddy_service::proto::exec_tools::{ExecuteToolResponse, ListExecToolsResponse, ToolDef};
+use tddy_service::proto::session::{
+    ConnectSessionResponse, StartSessionRequest, StartSessionResponse,
+};
 
 fn tddy_tools_bin() -> Command {
     cargo_bin_cmd!("tddy-tools")
@@ -31,7 +36,7 @@ fn write_discovery(dir: &std::path::Path, port: u16) {
 /// when the tokio current_thread runtime is blocked in `Command::output()`.
 ///
 /// Returns the port the stub listens on.
-fn spawn_stub_thread(response_body: &'static str) -> u16 {
+fn spawn_stub_thread(response_body: Vec<u8>) -> u16 {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -46,12 +51,12 @@ fn spawn_stub_thread(response_body: &'static str) -> u16 {
             // Reject GETs with 405 so tests fail until the transport is correct.
             let is_post = buf.starts_with(b"POST ");
             if is_post {
-                let resp = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                    response_body.len(),
-                    response_body
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/proto\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    response_body.len()
                 );
-                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&response_body);
             } else {
                 let body = b"Method Not Allowed";
                 let resp = format!(
@@ -74,7 +79,11 @@ fn spawn_stub_thread(response_body: &'static str) -> u16 {
 #[test]
 fn start_session_prints_session_id_from_daemon_response() {
     // Given
-    let response = r#"{"sessionId":"sess-stub-abc","livekitRoom":"","livekitUrl":"","livekitServerIdentity":""}"#;
+    let response = StartSessionResponse {
+        session_id: "sess-stub-abc".to_string(),
+        ..Default::default()
+    }
+    .encode_to_vec();
     let port = spawn_stub_thread(response);
     let relay_dir = tempfile::tempdir().unwrap();
     write_discovery(relay_dir.path(), port);
@@ -133,7 +142,12 @@ fn start_session_help_lists_session_token_flag() {
 #[test]
 fn connect_session_prints_livekit_info_from_daemon_response() {
     // Given
-    let response = r#"{"livekitRoom":"room-stub","livekitUrl":"ws://stub:7880","livekitServerIdentity":"srv-identity"}"#;
+    let response = ConnectSessionResponse {
+        livekit_room: "room-stub".to_string(),
+        livekit_url: "ws://stub:7880".to_string(),
+        livekit_server_identity: "srv-identity".to_string(),
+    }
+    .encode_to_vec();
     let port = spawn_stub_thread(response);
     let relay_dir = tempfile::tempdir().unwrap();
     write_discovery(relay_dir.path(), port);
@@ -197,7 +211,11 @@ fn connect_session_help_lists_session_token_flag() {
 #[test]
 fn sync_context_writes_context_files_to_dest_directory() {
     // Given — ExecuteTool Read/Glob response: returns project docs content.
-    let response = r#"{"resultJson":"{\"content\":\"Project docs\"}","isError":false}"#;
+    let response = ExecuteToolResponse {
+        result_json: r#"{"content":"Project docs"}"#.to_string(),
+        ..Default::default()
+    }
+    .encode_to_vec();
     let port = spawn_stub_thread(response);
     let relay_dir = tempfile::tempdir().unwrap();
     write_discovery(relay_dir.path(), port);
@@ -273,8 +291,17 @@ fn sync_context_help_lists_dest_and_session_token_flags() {
 /// object shape. This test serves a Connect response — it will fail until the transport is changed.
 #[test]
 fn list_tools_parses_connect_list_exec_tools_response() {
-    // Given — Connect-protocol ListExecToolsResponse JSON.
-    let response = r#"{"tools":[{"name":"Read","description":"Read a file","inputSchemaJson":"{}"},{"name":"Write","description":"Write a file","inputSchemaJson":"{}"},{"name":"Shell","description":"Run a shell command","inputSchemaJson":"{}"}]}"#;
+    // Given — Connect-protocol ListExecToolsResponse, protobuf-encoded.
+    let response = ListExecToolsResponse {
+        tools: ["Read", "Write", "Shell"]
+            .into_iter()
+            .map(|name| ToolDef {
+                name: name.to_string(),
+                ..Default::default()
+            })
+            .collect(),
+    }
+    .encode_to_vec();
     let port = spawn_stub_thread(response);
     let relay_dir = tempfile::tempdir().unwrap();
     write_discovery(relay_dir.path(), port);
@@ -317,8 +344,9 @@ fn list_tools_parses_connect_list_exec_tools_response() {
     );
 }
 
-/// A relay stub that answers every POST with `{}` and hands back each request's body.
-fn spawn_recording_stub() -> (u16, std::sync::mpsc::Receiver<String>) {
+/// A relay stub that answers every POST with an empty protobuf message and hands back each
+/// request's body: the bytes after the header block.
+fn spawn_recording_stub() -> (u16, std::sync::mpsc::Receiver<Vec<u8>>) {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -329,14 +357,12 @@ fn spawn_recording_stub() -> (u16, std::sync::mpsc::Receiver<String>) {
         for mut stream in listener.incoming().flatten() {
             let mut buf = vec![0u8; 16384];
             let n = stream.read(&mut buf).unwrap_or(0);
-            let request = String::from_utf8_lossy(&buf[..n]).to_string();
-            let body = request
-                .split("\r\n\r\n")
-                .nth(1)
-                .unwrap_or_default()
-                .to_string();
-            let _ = tx.send(body);
-            let resp = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}";
+            let body_start = buf[..n]
+                .windows(4)
+                .position(|w| w == b"\r\n\r\n")
+                .map_or(n, |at| at + 4);
+            let _ = tx.send(buf[body_start..n].to_vec());
+            let resp = "HTTP/1.1 200 OK\r\ncontent-type: application/proto\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
             let _ = stream.write_all(resp.as_bytes());
         }
     });
@@ -364,11 +390,14 @@ fn remote_start_session_passes_each_agent() {
         .success();
 
     // Then
-    let body: serde_json::Value =
-        serde_json::from_str(&bodies.recv().expect("a request")).expect("a JSON body");
-    assert_eq!(body["sessionType"], "workspace");
+    let body = bodies.recv().expect("a request");
+    let request = StartSessionRequest::decode(body.as_slice()).expect("a protobuf body");
+    assert_eq!(request.session_type, "workspace");
     assert_eq!(
-        body["specializedAgents"],
-        serde_json::json!(["codex-fast@codebase-host", "claude-coder@codebase-host"])
+        request.specialized_agents,
+        vec![
+            "codex-fast@codebase-host".to_string(),
+            "claude-coder@codebase-host".to_string(),
+        ]
     );
 }

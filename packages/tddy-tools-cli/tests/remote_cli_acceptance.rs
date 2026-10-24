@@ -9,6 +9,8 @@
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
+use prost::Message as _;
+use tddy_service::proto::exec_tools::{ListExecToolsResponse, ToolDef};
 
 fn tddy_tools_bin() -> Command {
     cargo_bin_cmd!("tddy-tools")
@@ -89,15 +91,23 @@ async fn remote_list_tools_fetches_catalog_from_relay_daemon_not_from_discovery_
             // request RSTs the connection and surfaces in the client as a send error.
             let mut buf = [0u8; 2048];
             let _ = stream.read(&mut buf).await;
-            // ListExecToolsResponse-shaped body — `run_list_tools` reads `tools[].name`.
-            let body =
-                r#"{"tools":[{"name":"Read"},{"name":"Write"},{"name":"Grep"},{"name":"Shell"}]}"#;
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                body.len(),
-                body
+            // ListExecToolsResponse, protobuf-encoded — `run_list_tools` reads `tools[].name`.
+            let body = ListExecToolsResponse {
+                tools: ["Read", "Write", "Grep", "Shell"]
+                    .into_iter()
+                    .map(|name| ToolDef {
+                        name: name.to_string(),
+                        ..Default::default()
+                    })
+                    .collect(),
+            }
+            .encode_to_vec();
+            let head = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/proto\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
             );
-            let _ = stream.write_all(resp.as_bytes()).await;
+            let _ = stream.write_all(head.as_bytes()).await;
+            let _ = stream.write_all(&body).await;
             let _ = stream.flush().await;
             let _ = stream.shutdown().await;
         }
