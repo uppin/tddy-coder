@@ -25,6 +25,11 @@ use tddy_core::{default_log_config, resolve_logger, LogConfig};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::user_paths;
 
+#[cfg(unix)]
+use tddy_daemon_kernel::pre_exec_stages::StagedCommand;
+#[cfg(unix)]
+use tddy_daemon_kernel::privilege_drop::{plan_privilege_change, PrivilegeChange, TargetAccount};
+
 /// Same default line format as `tddy_core` and typical `dev.desktop.yaml` `log.loggers.*.format`.
 pub const CHILD_LOG_FORMAT_FALLBACK: &str = "{timestamp} [{level}] [{target}] {message}";
 
@@ -627,14 +632,12 @@ pub fn clone_as_user_with_env(
     destination: &Path,
     extra_env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
-    use std::os::unix::process::CommandExt;
-
     let dest_str = destination
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("destination path is not valid UTF-8"))?;
 
-    // Match shell `if test -e "$1"; then exit 0; fi` without fork/pre_exec — avoids NSS hangs
-    // in setuid/initgroups when the tree is already present.
+    // Match shell `if test -e "$1"; then exit 0; fi` without starting a child — the tree is already
+    // present, so there is nothing to refuse or drop privileges for.
     if destination.exists() {
         log::info!(
             "clone_as_user: destination already exists, skipping fork (dest={})",
@@ -649,40 +652,10 @@ pub fn clone_as_user_with_env(
         destination.display()
     );
 
-    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
-    let mut buf = vec![0u8; 16384];
-    let mut result = std::ptr::null_mut();
-    let ret = unsafe {
-        libc::getpwnam_r(
-            std::ffi::CString::new(os_user)
-                .map_err(|e| anyhow::anyhow!("invalid username: {}", e))?
-                .as_ptr(),
-            passwd.as_mut_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_char,
-            buf.len(),
-            &mut result,
-        )
-    };
-    if ret != 0 || result.is_null() {
-        anyhow::bail!("user '{}' not found", os_user);
-    }
-    let passwd = unsafe { &*result };
-    let uid = passwd.pw_uid;
-    let gid = passwd.pw_gid;
-    if passwd.pw_dir.is_null() {
-        anyhow::bail!("user '{}' has no home directory", os_user);
-    }
-    if passwd.pw_name.is_null() {
-        anyhow::bail!("user '{}' has no passwd pw_name", os_user);
-    }
-    // initgroups(3) requires a non-NULL user; NULL yields EINVAL on Linux and is not POSIX.
-    let pw_name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name).to_owned() };
-
-    let home_dir = unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
-        .to_string_lossy()
-        .into_owned();
-
-    let same_user = uid == unsafe { libc::getuid() } && gid == unsafe { libc::getgid() };
+    let target = resolve_target_account(os_user)?;
+    let home_dir = target.home.clone();
+    // Refused here, before any fork, when this process cannot become `os_user`.
+    let change = plan_privilege_change(target)?;
 
     // Run as target user: skip clone if destination exists; else `git clone`.
     let mut cmd = std::process::Command::new("sh");
@@ -695,39 +668,24 @@ pub fn clone_as_user_with_env(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // Transport-shim env vars (e.g. GIT_SSH_COMMAND + TDDY_* for a facilitator clone). Set before the
-    // privilege drop so a same-user clone (no setuid) carries them too.
+    // Transport-shim env vars (e.g. GIT_SSH_COMMAND + TDDY_* for a facilitator clone) travel in the
+    // child's own environment, which the privilege drop does not touch.
     for (key, value) in extra_env {
         cmd.env(key, value);
     }
 
-    if !same_user {
-        let home_dir_pre = home_dir.clone();
-        unsafe {
-            cmd.pre_exec(move || {
-                std::env::set_var("HOME", &home_dir_pre);
-                if libc::setgid(gid) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::initgroups(pw_name.as_ptr(), gid as _) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::setuid(uid) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
-
     log::debug!(
         "clone_as_user: invoking sh/git same_user={} dest={}",
-        same_user,
+        matches!(change, PrivilegeChange::None),
         destination.display()
     );
 
-    let output = cmd
-        .output()
+    let staged = StagedCommand::new(cmd, &format!("clone {}", destination.display()), change)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("git clone: {}", e))?;
+    let output = staged
+        .child
+        .wait_with_output()
         .map_err(|e| anyhow::anyhow!("git clone: {}", e))?;
 
     if !output.status.success() {
@@ -762,59 +720,11 @@ pub fn run_capture_as_user(
     anyhow::bail!("run_capture_as_user is only supported on Unix")
 }
 
-/// The target OS account a child runs as, resolved from passwd once.
-#[cfg(unix)]
-struct TargetAccount {
-    uid: libc::uid_t,
-    gid: libc::gid_t,
-    /// `initgroups(3)` requires a non-NULL user name; NULL yields EINVAL on Linux.
-    pw_name: std::ffi::CString,
-    home_dir: String,
-}
-
-#[cfg(unix)]
-impl TargetAccount {
-    /// True when the child would run as the account this process already is, in which case
-    /// `spawn_as_user` skips `pre_exec` entirely (and the supervisor skips the privilege drop).
-    fn is_this_process(&self) -> bool {
-        self.uid == unsafe { libc::getuid() } && self.gid == unsafe { libc::getgid() }
-    }
-}
-
+/// The target account of a spawn, resolved from passwd and its groups before any fork — the kernel's
+/// [`tddy_daemon_kernel::privilege_drop::resolve_target_account`] as an anyhow error.
 #[cfg(unix)]
 fn resolve_target_account(os_user: &str) -> anyhow::Result<TargetAccount> {
-    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
-    let mut buf = vec![0u8; 16384];
-    let mut result = std::ptr::null_mut();
-    let ret = unsafe {
-        libc::getpwnam_r(
-            std::ffi::CString::new(os_user)
-                .map_err(|e| anyhow::anyhow!("invalid username: {}", e))?
-                .as_ptr(),
-            passwd.as_mut_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_char,
-            buf.len(),
-            &mut result,
-        )
-    };
-    if ret != 0 || result.is_null() {
-        anyhow::bail!("user '{}' not found", os_user);
-    }
-    let passwd = unsafe { &*result };
-    if passwd.pw_dir.is_null() {
-        anyhow::bail!("user '{}' has no home directory", os_user);
-    }
-    if passwd.pw_name.is_null() {
-        anyhow::bail!("user '{}' has no passwd pw_name", os_user);
-    }
-    Ok(TargetAccount {
-        uid: passwd.pw_uid,
-        gid: passwd.pw_gid,
-        pw_name: unsafe { std::ffi::CStr::from_ptr(passwd.pw_name).to_owned() },
-        home_dir: unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
-            .to_string_lossy()
-            .into_owned(),
-    })
+    tddy_daemon_kernel::privilege_drop::resolve_target_account(os_user).map_err(anyhow::Error::msg)
 }
 
 /// Everything about a session's child process that is decided before any process exists.
@@ -842,7 +752,8 @@ pub struct SessionChildPlan {
     /// The commit identity pairs the child is started with ([`SpawnOptions::git_environment`]),
     /// on top of `HOME` and `PATH`. Both backends apply exactly these.
     pub env: Vec<(String, String)>,
-    /// Resolved passwd identity, used by the forking backend's `pre_exec`.
+    /// Resolved passwd identity: the forking backend plans its privilege change from it, and the
+    /// session's files are chowned to it.
     target: TargetAccount,
     /// The child's `--config` document (named in `args`, so both backends route the session's logs
     /// the same way) plus open stdout/stderr sinks. Only a backend that forks the child itself can
@@ -1004,7 +915,7 @@ pub fn plan_session_child(
         coder_log_config_yaml,
     )?;
 
-    let home = Path::new(&target.home_dir);
+    let home = Path::new(&target.home);
     let user_cfg = home.join(".tddy").join("config.yaml");
     let path_extra = user_paths::spawn_path_extra_for_home(home);
     if let Some(ref extra) = path_extra {
@@ -1162,8 +1073,6 @@ pub fn spawn_as_user(
     coder_log_config_yaml: Option<&str>,
     startup: StartupWatch,
 ) -> anyhow::Result<SpawnResult> {
-    use std::os::unix::process::CommandExt;
-
     let SessionChildPlan {
         program: resolved_tool_path,
         args,
@@ -1188,13 +1097,10 @@ pub fn spawn_as_user(
         coder_log_config_yaml,
     )?;
 
-    let same_user = target.is_this_process();
-    let TargetAccount {
-        uid,
-        gid,
-        pw_name,
-        home_dir,
-    } = target;
+    let home_dir = target.home.clone();
+    // Refused here, before any fork, when this process cannot become `os_user`.
+    let change = plan_privilege_change(target)?;
+    let same_user = matches!(change, PrivilegeChange::None);
     let child_path = merge_spawn_child_path(path_extra.as_deref());
 
     let mut cmd = std::process::Command::new(&resolved_tool_path);
@@ -1252,35 +1158,7 @@ pub fn spawn_as_user(
         cfg_abs.display(),
         app_abs.display()
     );
-    if !same_user {
-        log::info!(
-            "spawner: cmd.spawn() blocks until child finishes pre_exec (setgid/initgroups/setuid) and exec; if this hangs, check NSS/LDAP for os_user={} (often stuck in initgroups)",
-            os_user
-        );
-    }
-
     log::debug!("spawner: about to cmd.spawn() session_id={}", session_id);
-
-    // When spawning as same user, skip pre_exec — avoids fork() which can deadlock in some envs.
-    // pre_exec forces the slow fork path; plain spawn may use posix_spawn.
-    if !same_user {
-        let home_dir_pre = home_dir.clone();
-        unsafe {
-            cmd.pre_exec(move || {
-                std::env::set_var("HOME", &home_dir_pre);
-                if libc::setgid(gid) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::initgroups(pw_name.as_ptr(), gid as _) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::setuid(uid) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
 
     log::info!(
         "[spawn] child cmd: {} {}",
@@ -1290,7 +1168,11 @@ pub fn spawn_as_user(
             .collect::<Vec<_>>()
             .join(" ")
     );
-    let mut child = cmd.spawn()?;
+    // Every child goes through the staged path, so its pre-exec steps reach the log: `Forked` and
+    // `Exec` for a same-user child, the three privilege steps as well for another user.
+    let mut child = StagedCommand::new(cmd, &format!("session {session_id}"), change)
+        .spawn()?
+        .child;
     let pid = child.id();
 
     log::info!(

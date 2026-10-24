@@ -121,11 +121,11 @@ three places, one of them in the multi-threaded daemon.
 
 ## Scope
 
-- [ ] Pre-fork `TargetAccount` resolution with supplementary groups
-- [ ] Fail-fast `plan_privilege_change` with a message naming both users
-- [ ] `StagedCommand` / `StagedChild`: async-signal-safe pre_exec, stage pipe, stage logs, heartbeat
-- [ ] `clone_as_user_with_env`, `spawn_as_user`, `as_user_command` moved onto it; `set_var` / `initgroups` gone
-- [ ] Clone failure / deadline logged on the cloning host
+- [x] Pre-fork `TargetAccount` resolution with supplementary groups
+- [x] Fail-fast `plan_privilege_change` with a message naming both users
+- [x] `StagedCommand` / `StagedChild`: async-signal-safe pre_exec, stage pipe, stage logs, heartbeat
+- [x] `clone_as_user_with_env`, `spawn_as_user`, `as_user_command` moved onto it; `set_var` / `initgroups` gone
+- [x] Clone failure / deadline logged on the cloning host
 - [ ] Docs: `daemon-kernel.md` privilege drop section, `tddy-spawn` README
 
 ## Technical Changes
@@ -183,6 +183,14 @@ test asserts no `pre_exec` closure in the three files calls `set_var`/`initgroup
   otherwise misjudged.
 - **The held-child heartbeat is tested on the watcher, not by freezing a real child.** Holding a
   child mid-`pre_exec` needs a test-only hook in production code, which AGENTS.md forbids.
+- **A record is written before its step, not after.** A child that hangs inside `setgroups` therefore
+  shows `still at groups`, which is the step it is stuck in. `Exec` is written last, immediately
+  before `execve`.
+- **Refusal also covers a matching uid with another gid.** A non-root process whose uid already
+  matches the target but whose gid differs cannot `setgid` either, so `plan_privilege_change` refuses
+  it up front. The Draft PR contract says "target uid differs"; the implementation is stricter here.
+- **`watch_stages` takes no pid argument.** Each record carries the child's pid, so the watcher needs
+  no value the caller could get out of step with the child.
 
 ## Refactoring Needed
 ### From /validate-changes
@@ -206,9 +214,9 @@ test asserts no `pre_exec` closure in the three files calls `set_var`/`initgroup
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
-- [ ] Run scoped tests for touched packages (`./test -p tddy-daemon-kernel -p tddy-spawn -p tddy-agent-launch`); full-workspace result from CI
+- [x] Run scoped tests for touched packages (`./test -p tddy-daemon-kernel -p tddy-spawn -p tddy-agent-launch`); full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
