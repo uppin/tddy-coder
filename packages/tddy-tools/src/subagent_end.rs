@@ -65,6 +65,13 @@ pub(crate) async fn subagent_end_tool(args: serde_json::Value) -> String {
 /// its agent is `clone`-placed. An unknown conversation is refused.
 pub(crate) async fn host_of(session_id: &str) -> Result<ConversationHost, String> {
     let sessions = subagent_sessions().lock().await;
+    host_in(&sessions, session_id)
+}
+
+fn host_in(
+    sessions: &tddy_discovery::subagent_runtime::SubagentConversations,
+    session_id: &str,
+) -> Result<ConversationHost, String> {
     let conversation = sessions
         .open
         .get(session_id)
@@ -80,14 +87,12 @@ pub(crate) async fn host_of(session_id: &str) -> Result<ConversationHost, String
 }
 
 /// [`host_of`] for a conversation with no turn outstanding: what `subagent_pull` and `subagent_end`
-/// take is what the turns have committed, so they wait for the turns to end.
+/// take is what the turns have committed, so they wait for the turns to end. Both are read under
+/// one lock, so the answer is about one state of the conversation.
 pub(crate) async fn the_host_of(session_id: &str) -> Result<ConversationHost, String> {
-    let host = host_of(session_id).await?;
-    let outstanding = subagent_sessions()
-        .lock()
-        .await
-        .pending
-        .queue_size(session_id);
+    let sessions = subagent_sessions().lock().await;
+    let host = host_in(&sessions, session_id)?;
+    let outstanding = sessions.pending.queue_size(session_id);
     match outstanding {
         0 => Ok(host),
         outstanding => Err(format!(

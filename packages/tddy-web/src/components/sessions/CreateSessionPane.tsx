@@ -12,7 +12,7 @@ import { CreateSessionTypeToggle } from "./CreateSessionTypeToggle";
 import { CreateSessionModelField } from "./CreateSessionModelField";
 import { BUILT_IN_PROVIDER, CreateSessionProviderField } from "./CreateSessionProviderField";
 import { CreateSessionAgentPickerSection } from "./CreateSessionAgentPickerSection";
-import type { AgentPlacementChoice } from "./agentPlacementChoice";
+import { useSpecializedAgentPicks } from "./useSpecializedAgentPicks";
 import { CreateSessionToolFields } from "./CreateSessionToolFields";
 import { CreateSessionCursorCliFields } from "./CreateSessionCursorCliFields";
 import { CreateSessionClaudeCliFields } from "./CreateSessionClaudeCliFields";
@@ -113,14 +113,8 @@ export function CreateSessionPane({
     setProjectId,
   });
 
-  // The qualified ids (`name@daemon_instance_id`) of the agents to attach at start. Qualified rather
-  // than bare names because the picker lists every host's agents and two hosts routinely offer a def
-  // of the same name — a bare name cannot say which of them was picked.
-  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
-  // The subset of the picked agents whose conversations each work on a clone of their own; every
-  // other picked agent works on the session's worktree. Kept beside the picks rather than inside them
-  // so the picks stay what the list of ids means on its own.
-  const [clonePlacedAgentIds, setClonePlacedAgentIds] = useState<string[]>([]);
+  // The qualified ids (`name@daemon_instance_id`) of the agents to attach at start, and placements.
+  const agentPicks = useSpecializedAgentPicks();
   const [semanticIndex, setSemanticIndex] = useState(false);
 
   // One option per logical project: aggregated `ListProjects` returns a row per (project, host), and
@@ -192,19 +186,6 @@ export function CreateSessionPane({
   // host that cannot answer costs one error row rather than the whole picker — see
   // docs/ft/daemon/session-agent-roster.md § Web UI.
   const availableAgents = useAvailableAgents(catalogClient, connectedInstanceId);
-
-  const toggleAgent = (agentId: string) => {
-    setSelectedAgentIds((prev) =>
-      prev.includes(agentId) ? prev.filter((id) => id !== agentId) : [...prev, agentId],
-    );
-  };
-
-  const setAgentPlacement = (agentId: string, placement: AgentPlacementChoice) => {
-    setClonePlacedAgentIds((prev) => {
-      const others = prev.filter((id) => id !== agentId);
-      return placement === "clone" ? [...others, agentId] : others;
-    });
-  };
 
   const { remoteBranches, error: remoteBranchesError } = useProjectBranches({
     client,
@@ -286,8 +267,8 @@ export function CreateSessionPane({
     managedCodebase,
     sandboxedCodebase,
     isSplitCodebase,
-    selectedAgentIds,
-    clonePlacedAgentIds,
+    selectedAgentIds: agentPicks.selectedAgentIds,
+    clonePlacedAgentIds: agentPicks.clonePlacedAgentIds,
     semanticIndex,
     codebaseDaemonInstanceId,
     sshConfigHost,
@@ -313,10 +294,10 @@ export function CreateSessionPane({
   const agentPickerSection = (
     <CreateSessionAgentPickerSection
       availableAgents={availableAgents}
-      selectedAgentIds={selectedAgentIds}
-      toggleAgent={toggleAgent}
-      clonePlacedAgentIds={clonePlacedAgentIds}
-      setAgentPlacement={setAgentPlacement}
+      selectedAgentIds={agentPicks.selectedAgentIds}
+      toggleAgent={agentPicks.toggleAgent}
+      clonePlacedAgentIds={agentPicks.clonePlacedAgentIds}
+      setAgentPlacement={agentPicks.setAgentPlacement}
     />
   );
 
@@ -388,7 +369,7 @@ export function CreateSessionPane({
           managedCodebase={managedCodebase}
           setManagedCodebase={setManagedCodebase}
           setSemanticIndex={setSemanticIndex}
-          setSelectedAgentIds={setSelectedAgentIds}
+          setSelectedAgentIds={agentPicks.setSelectedAgentIds}
           recipe={recipe}
           setRecipe={setRecipe}
           semanticIndex={semanticIndex}
@@ -420,7 +401,7 @@ export function CreateSessionPane({
           setManagedCodebase={setManagedCodebase}
           semanticIndex={semanticIndex}
           setSemanticIndex={setSemanticIndex}
-          setSelectedAgentIds={setSelectedAgentIds}
+          setSelectedAgentIds={agentPicks.setSelectedAgentIds}
           isSplitCodebase={isSplitCodebase}
           recipe={recipe}
           setRecipe={setRecipe}

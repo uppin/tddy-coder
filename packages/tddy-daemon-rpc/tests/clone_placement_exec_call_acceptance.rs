@@ -7,7 +7,7 @@
 //! carries that name; and an exec call the daemon receives for that conversation runs in its worktree.
 //! The `tddy-tools` process itself is not run here.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-clone-placement.md
+//! Feature doc: docs/ft/coder/managed-codebase-subagents.md § A daemon-run conversation of a `clone`-placed agent
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

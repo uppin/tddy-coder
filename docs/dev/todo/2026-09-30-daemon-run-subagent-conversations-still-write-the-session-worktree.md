@@ -1,4 +1,4 @@
-# 2026-09-30 — Daemon-run subagent conversations still write the session worktree
+# 2026-09-30 — Peer-owned daemon-run subagent conversations still write their clone directly
 
 **Category:** Future enhancement
 **Source:** `#agent-worktree` stack, `2026-09-30-agent-worktree-isolated-edits` changeset
@@ -29,8 +29,16 @@ case collides with the roster PRD's non-goal *"Write-back from a remote clone"*.
 `local_agent_codebase_access` wrapping its dispatch in `tddy_subagent_worktree::run_in_conversation`
 keyed by the daemon-side conversation id is the cheap half. The wire half is the rest.
 
-## Coding agents (2026-10-24)
+## Narrowed 2026-10-24 (#724, `#coagents` 5/8)
 
-A **coding-agent** conversation (`#coagents` 2/8, #721) is daemon-run and works the session worktree
-too — for it that is the intended default ("the same checkout as the main agent"), not a gap. Its
-own clone placement is `#coagents` 7/8 (`clone-placement`), which claims this entry.
+The **local** case is resolved by `clone` placement: a daemon-run conversation (`open_local`) of a
+`clone`-placed agent works on its own conversation worktree, synced before every turn, and
+`subagent_diff` / `_pull` / `_end` reach it through the existing `ConversationWorktree` RPC
+(docs/ft/coder/managed-codebase-subagents.md § A daemon-run conversation of a `clone`-placed agent).
+`shared` stays the default by the developer's choice, so a `shared` agent writing the session
+worktree is intended, not a gap.
+
+What remains is the **peer-owned** case: `open_owned` → `owned_agent_codebase_access` still proxies
+mutations to the owning daemon's clone, and a peer's `RemoteAgentSession` inherits it — the roster
+PRD's non-goal *"Write-back from a remote clone"*. Remote placement is `#coagents` 8/8
+(`remote-codebase`).

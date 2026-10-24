@@ -4,7 +4,7 @@
 //! under the other placement cannot be honoured. It is refused before anything is admitted, and the
 //! same placement stays the idempotent attach it always was.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-clone-placement.md
+//! Feature doc: docs/ft/coder/managed-codebase-subagents.md § A daemon-run conversation of a `clone`-placed agent
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};

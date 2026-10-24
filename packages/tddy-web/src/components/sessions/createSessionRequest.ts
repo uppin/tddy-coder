@@ -104,8 +104,7 @@ export function buildStartSessionRequest(
     codebaseDaemonInstanceId,
     sshConfigHost,
   } = form;
-  // A placement names an agent that is picked: one left on a since-unpicked agent goes nowhere.
-  const clonePlacedAgents = clonePlacedAgentIds.filter((id) => selectedAgentIds.includes(id));
+  const clonePlacedAgents = pickedClonePlacedAgents(clonePlacedAgentIds, selectedAgentIds);
   const commonParams = {
     sessionToken,
     projectId,
@@ -256,8 +255,7 @@ function claudeCliAgentChoices(form: CreateSessionFormValues) {
     // built wherever the worktree is. Nothing gates them here: the picker and the toggle are shown
     // on every claude-cli placement, so what the form holds is what the screen showed.
     specializedAgents: form.selectedAgentIds,
-    // A placement names an agent that is picked: one left on a since-unpicked agent goes nowhere.
-    clonePlacedAgents: form.clonePlacedAgentIds.filter((id) => form.selectedAgentIds.includes(id)),
+    clonePlacedAgents: pickedClonePlacedAgents(form.clonePlacedAgentIds, form.selectedAgentIds),
     semanticIndex: form.semanticIndex,
   } satisfies StartSessionRequestInit;
 }
@@ -269,4 +267,9 @@ function claudeCliAgentChoices(form: CreateSessionFormValues) {
  */
 export function buildProjectHomeStartSpec(form: CreateSessionFormValues): StartSessionRequestInit {
   return claudeCliAgentChoices(form);
+}
+
+/** A placement names an agent that is picked: one left on a since-unpicked agent goes nowhere. */
+function pickedClonePlacedAgents(clonePlacedAgentIds: string[], selectedAgentIds: string[]): string[] {
+  return clonePlacedAgentIds.filter((id) => selectedAgentIds.includes(id));
 }

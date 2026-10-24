@@ -1,7 +1,7 @@
 //! Acceptance tests: `clone` placement — a conversation of a clone-placed agent works on a worktree
 //! and branch of its own instead of the session's.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-clone-placement.md
+//! Feature doc: docs/ft/coder/managed-codebase-subagents.md § A daemon-run conversation of a `clone`-placed agent
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

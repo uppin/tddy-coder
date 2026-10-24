@@ -5,7 +5,7 @@
 //! one exactly when its agent was attached with `clone` placement; a `shared` one wrote the session
 //! worktree directly and has nothing to hand back.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-clone-placement.md
+//! Feature doc: docs/ft/coder/managed-codebase-subagents.md § A daemon-run conversation of a `clone`-placed agent
 
 /// Where the conversation's turns run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
