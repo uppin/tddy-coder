@@ -314,6 +314,7 @@ impl ProjectHomePort for DaemonProjectHome {
                     "new_branch_from_base".to_string()
                 },
                 new_branch_name: args.new_branch_name,
+                model: args.model,
                 ..Default::default()
             }))
             .await
