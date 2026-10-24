@@ -1,8 +1,8 @@
 # `terminal_session.TerminalSessionService` (tddy-terminal-rpc)
 
 The nine RPCs that carry a terminal, and the one implementation behind them. The proto is
-`packages/tddy-terminal-rpc/proto/terminal_session.proto`; the service is `src/service.rs`; the
-streaming logic every method shares is `src/bridge.rs`.
+`packages/tddy-terminal-rpc/proto/terminal_session.proto`; the service is `src/service.rs`, with
+the host port types in `src/service/ports.rs`; the streaming logic every method shares is `src/bridge.rs`.
 
 Product contract: [terminal-sessions.md](../../../docs/ft/daemon/terminal-sessions.md).
 
@@ -14,7 +14,7 @@ Product contract: [terminal-sessions.md](../../../docs/ft/daemon/terminal-sessio
 | `StreamTerminalOutput` | server stream | Attach to a terminal's output: mode prologue, anchored replay, then the live tail. |
 | `SendTerminalInput` | unary | One write to a terminal's stdin, carrying a cumulative `input_offset`. |
 | `GetTerminalHistory` | server stream | Bytes older than what a stream replayed, addressed by absolute offsets. |
-| `StartTerminalSession` | unary | Spawn a Bash tool in the session's checkout and return its `terminal_id`. |
+| `StartTerminalSession` | unary | Spawn the tool `kind` names — the login shell, or a CLI harness — in the session's checkout and return its `terminal_id`. |
 | `StopTerminalSession` | unary | Terminate one tool and deregister it. |
 | `ListTerminalSessions` | unary | The tools running in a session. |
 | `ClaimTerminalControl` | unary | Take the session's single-screen control lease, optionally by stealing it. |
@@ -53,8 +53,15 @@ a handler has no per-host branch in it.
 |---|---|
 | `TerminalSessionStore` | Which live terminal a `(session_id, terminal_id)` names — after the host's own auth. An empty `terminal_id` resolves to the reserved `"main"`. |
 | `TerminalSession` | One live terminal: its replay ring, its stdout broadcast, its exit watch, its acked-offset watch, resize and input. |
-| `TerminalRoster` | Starting, stopping and listing the tools a session runs. |
+| `TerminalRoster` | Starting (from a `TerminalLaunch`), stopping and listing the tools a session runs. |
 | `TerminalControl` | The single-screen control lease — claim, steal, and the change broadcast. |
+
+The port types — `TerminalSessionPorts`, `TerminalRoster`, `TerminalControl`, `TerminalDescriptor`,
+`ControlClaim`, `ControlChange`, `TerminalLaunch` and `TerminalKind` — live in the module
+`tddy_terminal_rpc::service::ports` (`src/service/ports.rs`). `service` re-exports them, and the crate
+root re-exports them from there, so `tddy_terminal_rpc::service::TerminalRoster` and
+`tddy_terminal_rpc::TerminalRoster` both name them; `src/service.rs` keeps the handlers and
+`build_terminal_session_entry`.
 
 `TerminalSession` carries two defaulted predicates, and both are load-bearing:
 
@@ -191,9 +198,27 @@ credentials for one hour and waiting thirty seconds for the server participant. 
 opens through `RoomSession::open_duplex("terminal.TerminalService", "StreamTerminalIO")`.
 `tests/pty_relay_room_join.rs` pins the join request against an in-memory connector.
 
+## Starting a terminal: `TerminalLaunch`
+
+`StartTerminalSessionRequest.kind` says what a started terminal runs. The handler parses it with
+`TerminalKind::from_request` — `""` or `"bash"` (surrounding whitespace ignored) is
+`TerminalKind::Bash`; anything else is `TerminalKind::Agent(kind)` — resolves the login shell, and
+hands the roster `start(session_id, &TerminalLaunch { kind, login_shell })`. Whether an agent kind
+is one the host runs is the roster's decision, because only the host knows its harness registry:
+
+- **`tddy-daemon`** (`CliManagerTerminalRoster`, in `tddy-session-lifecycle`) runs `Bash` with
+  `launch.login_shell`, and resolves `Agent(kind)` through `cli_harness(kind)` — `INVALID_ARGUMENT`
+  "unknown terminal kind" when unregistered — then `DaemonConfig::cli_harness_binary` and the
+  descriptor's argv for a default `CliLaunch` with a fresh conversation id, spawned by
+  `CliSessionManager::start_agent_terminal`.
+- **`tddy-coder`** (`CoderTerminalRoster`) runs `Bash` only and refuses `Agent(_)` with
+  `INVALID_ARGUMENT` "this session's terminals run bash only".
+
+A kind is a registered harness name, never an argv, so a client cannot choose the binary.
+
 ## Login shells
 
-`StartTerminalSession` spawns the user's login shell in the session's checkout.
+A `Bash` terminal runs the user's login shell in the session's checkout.
 `login_shell::login_shell_for` resolves it from the passwd database for the OS user the host runs as,
 falling back to `DEFAULT_LOGIN_SHELL`. That last resort is a named constant rather than an inline
 literal so a host without it — a minimal Nix closure, Alpine — fails the spawn with the assumption
@@ -203,7 +228,7 @@ named.
 
 | Suite | What it pins |
 |---|---|
-| `terminal_session_service_acceptance.rs` | all nine methods answer at the registered coordinate |
+| `terminal_session_service_acceptance.rs` | all nine methods answer at the registered coordinate; the request's `kind` reaches the roster, and an empty or `"bash"` kind arrives as `Bash` with the login shell |
 | `terminal_session_bidi_acceptance.rs` | `StreamSessionTerminalIO` carries a session end to end |
 | `terminal_history_parity_acceptance.rs` | `GetTerminalHistory` frames and offsets |
 | `src/pty_runtime.rs` (6 unit) | the spawn spec carrying its target OS user; and, through the re-export, `tddy_daemon_kernel::privilege_drop`'s helpers: the `HOME`/`PATH` overrides for a target user, when a privilege drop is and is not required, and the `setpriv` launcher wrapping |

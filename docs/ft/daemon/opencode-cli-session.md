@@ -1,6 +1,8 @@
 # OpenCode CLI Session
 
 > **Related:** [Claude Code CLI session](claude-cli-session.md), [Cursor Agent CLI session](cursor-cli-session.md), [Muse Code CLI session](muse-cli-session.md) and [Warp CLI session](warp-cli-session.md) — sibling session types; all five share `CliSessionManager`, `StreamSessionTerminalIO` and the web terminal mount, and all five are registered through one **CLI harness descriptor**. OpenCode, Muse Code and Warp share one start and resume path.
+>
+> **Also runs as an agent tab:** the harness can be opened as an extra terminal inside another session, beside that session's main agent in its worktree — see [Session terminal tabs](../web/session-terminal-tabs.md).
 
 ## Summary
 

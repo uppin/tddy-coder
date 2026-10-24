@@ -127,6 +127,26 @@ Panes state their stacking inline, bottom-up: terminal panes `2`, the terminal-c
 be painted over by the terminal canvas, leaving a session another screen controls looking interactive
 while swallowing every key.
 
+## The tab strip (`components/sessions/SessionTerminalTabs.tsx`)
+
+A session's extra terminals are tabs beside the Agent tab. `useSessionTerminals` holds them as
+`{ terminalId, kind }[]`, seeded from `ListTerminalSessions` on attach, and `open(kind)` calls
+`StartTerminalSession` with that `kind` (`"bash"` or a CLI harness's session type) and focuses the
+result; a refusal lands in `sessions-terminal-error` and opens no tab. Tab labels are built in tab
+order as the kind's name plus a per-kind ordinal ("Bash 1", "Warp 1"), by `terminalKindLabel`.
+
+The `+` is `NewTerminalMenu.tsx`: a button and a `role="menu"` list of bash followed by
+`CLI_HARNESS_OPTIONS`, rendered in its own wrapper outside the tab scroller so the scroller cannot
+clip the menu. Its Escape and outside-press listeners are attached only while the menu is open. A
+`sessionType` of `"tool"` (passed from `SessionRuntime`) limits it to bash; an unset one offers every
+harness. `cliHarnessOptions.ts` is the one list both the menu and the Create pane's
+`CreateSessionTypeToggle` read (`SESSION_TYPE_OPTIONS`, `CLI_HARNESS_OPTIONS`, `BASH_KIND`,
+`TOOL_SESSION_TYPE`, `terminalKindLabel`).
+
+In Cypress, `terminalSessionServiceBackend.ts` records `startedTerminalKinds` and lists each started
+terminal with its requested kind; `sessionTerminalTabsPage.ts` offers `newTabMenu()` and
+`newTabOption(kind)`. Feature doc: [Session terminal tabs](../../../docs/ft/web/session-terminal-tabs.md).
+
 ## Current limits
 
 - **The host-served feed is implemented ahead of its use.** `SessionRuntime` opens a terminal only for
