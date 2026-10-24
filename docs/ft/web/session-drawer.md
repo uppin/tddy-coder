@@ -606,20 +606,28 @@ in the form's own error strip and nothing is created. Rules, refusals and the se
 
 ### Start progress
 
-Creating a session fetches the project and cuts a worktree and, when asked, builds a semantic index
-before the agent launches. While that runs, Create is disabled and the line under the form names the
-step the host is in:
+Creating a session may clone the project, cut a worktree and, when asked, build a semantic index
+before the agent launches. While that runs, Create is disabled and the pane lists each step the host
+reports, under the heading **Creating session on <host>** — the codebase host on a split session, the
+session's own host otherwise:
 
-| Step | Text |
+| Step | Row |
 |---|---|
-| Fetching the project and cutting the worktree | *Creating worktree…* |
-| Building the semantic index (only when the form asked for one) | *Indexing (semantic)…* |
-| Launching the agent | *Starting agent…* |
+| Cloning the project (only when the host has no copy yet) | *Cloning repository* |
+| Cutting the worktree | *Worktree* |
+| Building the semantic index (only when the form asked for one) | *Semantic index* |
+| Launching the agent | *Agent* |
 
-The line shows with or without attachments, changes as each step begins, and disappears when the start
-ends — by creating the session or by failing. It appears for Claude CLI, Cursor CLI and workspace
-sessions. A start that reports no steps (a sandboxed session, a tool session, a split session) keeps the
-disabled button and shows no step text.
+Steps appear in the order the host begins them — a start that does not clone shows no clone row. A row
+is marked in progress (`…`), done (`✓`) or failed (`✗`), and stays after it ends, so the list reads as
+the history of the start. While the clone runs its row carries git's own stage and percent, a progress
+bar, and the bytes received with the throughput (binary units), updating in place; it is replaced by the
+done mark when the clone ends.
+
+The list shows with or without attachments, for Claude CLI, Cursor CLI and workspace sessions. When the
+start fails, the list stays with the step it stopped at marked failed, beside the error. It disappears
+when the session is created, and a new attempt starts from an empty list. A start that reports no steps
+(a sandboxed session, a tool session) keeps the disabled button and shows no list.
 
 The same stream carries each attachment's materialisation progress; see
 [Session attachments](../coder/session-attachments.md#streamstartsession--start-with-materialization-progress).

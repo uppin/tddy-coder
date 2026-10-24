@@ -171,9 +171,8 @@ function mountTheCreatePane(backend: InMemoryRpcBackend) {
 }
 
 /**
- * Today the form streams a start only when something is attached (a start with nothing attached
- * stays on the unary RPC, pinned by `CreateSessionAttachmentProgress.cy.tsx`), so the creation here
- * carries one attachment.
+ * The form always streams the start; this creation carries one attachment so the host also reports
+ * the attachment's materialization.
  */
 function createASessionWithOneAttachment() {
   createSessionPage.selectProject("proj-1");
@@ -232,7 +231,7 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-it("the create pane shows the current start phase", () => {
+it("the create pane shows the step the start is in", () => {
   // Given a host that is creating the session's worktree
   const gate = aGate();
   mountTheCreatePane(aHostHoldingTheStartInItsWorktreeStep(gate));
@@ -241,7 +240,7 @@ it("the create pane shows the current start phase", () => {
   createASessionWithOneAttachment();
 
   // Then the pane names the step the host is in while Create is disabled
-  createSessionPage.startPhase().should("have.text", "Creating worktree…");
+  createSessionPage.startStep("worktree").should("have.attr", "data-state", "active");
   createSessionPage.submitButton().should("be.disabled");
 
   // And the session is created once the host has started its agent and reported its result
