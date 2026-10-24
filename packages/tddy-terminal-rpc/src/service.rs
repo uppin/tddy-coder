@@ -98,12 +98,41 @@ pub trait TerminalControl: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalDescriptor {
     pub terminal_id: String,
-    /// `"claude-cli"` for the reserved main tool, `"bash"` for a started shell.
+    /// The reserved main tool's session type, `"bash"` for a started shell, or the session type of
+    /// the CLI harness a started agent terminal runs.
     pub kind: String,
     pub pid: u32,
 }
 
-/// The terminals a host runs for a session: start a login shell, stop one, list them.
+/// What a started terminal runs, as `StartTerminalSessionRequest.kind` names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalKind {
+    /// The session user's login shell — an empty kind or `"bash"`.
+    Bash,
+    /// A CLI harness, by its session type (`"warp-cli"`, …). Whether the host runs it is the
+    /// roster's to decide: only the host knows its harness registry.
+    Agent(String),
+}
+
+impl TerminalKind {
+    /// The kind a request names; surrounding whitespace is ignored.
+    #[must_use]
+    pub fn from_request(_kind: &str) -> TerminalKind {
+        // TODO(agent-terminal-tabs): implement
+        todo!("TerminalKind::from_request")
+    }
+}
+
+/// One terminal start as the roster receives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalLaunch {
+    pub kind: TerminalKind,
+    /// The session user's login shell, resolved by [`crate::login_shell::login_shell_for`]; what a
+    /// [`TerminalKind::Bash`] terminal runs.
+    pub login_shell: String,
+}
+
+/// The terminals a host runs for a session: start one, stop one, list them.
 ///
 /// A port because every step needs host state this crate has none of — which worktree the session
 /// checked out and which task registry owns the child. Which *shell* to run is not among them:
@@ -111,9 +140,9 @@ pub struct TerminalDescriptor {
 /// a shell the target user does not have.
 #[async_trait]
 pub trait TerminalRoster: Send + Sync {
-    /// Start a terminal running `shell_path` for `session_id`, and return its fresh id (never
+    /// Start the terminal `launch` describes for `session_id`, and return its fresh id (never
     /// [`MAIN_TERMINAL_ID`]).
-    async fn start(&self, session_id: &str, shell_path: &str) -> Result<String, Status>;
+    async fn start(&self, session_id: &str, launch: &TerminalLaunch) -> Result<String, Status>;
 
     /// Stop a started terminal. `false` when the session has no such terminal. The caller has
     /// already refused [`MAIN_TERMINAL_ID`], which is not stoppable through this surface.
@@ -378,8 +407,12 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         let os_user = self.os_user(&req.session_token)?;
         let session_id = keyed_session_id(&req.session_id);
 
-        let shell_path = crate::login_shell::login_shell_for(&os_user);
-        let terminal_id = self.ports.roster.start(&session_id, &shell_path).await?;
+        let launch = TerminalLaunch {
+            // TODO(agent-terminal-tabs): the kind `req.kind` names
+            kind: TerminalKind::Bash,
+            login_shell: crate::login_shell::login_shell_for(&os_user),
+        };
+        let terminal_id = self.ports.roster.start(&session_id, &launch).await?;
         Ok(Response::new(StartTerminalSessionResponse { terminal_id }))
     }
 

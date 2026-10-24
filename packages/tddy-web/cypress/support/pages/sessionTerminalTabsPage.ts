@@ -7,6 +7,7 @@
 import {
   byTestId,
   sessionsTerminalTab,
+  sessionsTerminalTabNewOption,
   sessionsTerminalTabClose,
   sessionsTerminalPane,
   sessionsTerminalPaneStack,
@@ -30,6 +31,14 @@ export const sessionTerminalTabsPage = {
   /** The "+" new-terminal button. */
   newTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsTerminalTabNew, { timeout: 10000, ...options }),
+
+  /** The menu the "+" opens: Bash, then one item per CLI harness. */
+  newTabMenu: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsTerminalTabNewMenu, { timeout: 10000, ...options }),
+
+  /** One item of the "+" menu, by the kind of terminal it opens (`bash`, `warp-cli`, …). */
+  newTabOption: (kind: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsTerminalTabNewOption(kind), { timeout: 10000, ...options }),
 
   /** The trailing ⛶ full-screen toggle — acts on whichever pane is active. */
   fullscreenToggle: (options?: Parameters<typeof cy.get>[1]) =>
