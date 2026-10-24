@@ -210,8 +210,9 @@ branch), correct the title (the full title rules in `pr-wrap` step 8), and push.
   PR=$(gh pr view --json number --jq .number)
   ```
   The body states what the branch delivers (from the changeset's `## Summary`, captured **before**
-  the wrap deletes it), the verification that ran, and the TODO table with its decisions. End it with
-  the PR attribution line from the session's git instructions.
+  the wrap deletes it), the verification that ran, and the TODO table with its decisions — and no
+  post-wrap item such as CI or merge (`/wrap-context-docs` § *Checklists end at the wrap*). End it
+  with the PR attribution line from the session's git instructions.
 
 ## Phase C — `/fix-pr`, waiting out the checks
 
