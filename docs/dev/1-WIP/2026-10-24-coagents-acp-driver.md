@@ -165,10 +165,10 @@ OpenCodeAcpBackend┘     │ thread + LocalSet └─ PermissionHandler (AllowO
 
 ## Implementation Milestones
 
-- [ ] `AcpDriver` spawn / initialize / open / prompt / cancel / drop
-- [ ] model applied via `set_session_model`; unknown model refused naming the offered ones
-- [ ] `mcp_servers` passed through
-- [ ] `PermissionHandler` port; `AllowOnce`
+- [x] `AcpDriver` spawn / initialize / open / prompt / cancel / drop
+- [x] model applied via `set_session_model`; unknown model refused naming the offered ones
+- [x] `mcp_servers` passed through
+- [x] `PermissionHandler` port; `AllowOnce`
 - [ ] `claude-acp`, `codex-acp`, `opencode` moved; `claude-acp` resumes by `load_session`
 - [ ] Codex auth retry as a hook
 - [ ] complexity records re-measured
