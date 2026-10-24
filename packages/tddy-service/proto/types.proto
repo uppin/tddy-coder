@@ -100,3 +100,14 @@ enum AgentKind {
   AGENT_KIND_MODEL = 0;
   AGENT_KIND_CODING_AGENT = 1;
 }
+
+// Where a roster agent's conversations work.
+//
+// SHARED is the session's own worktree — the agent edits the main agent's checkout, as a teammate
+// in the same tree would. CLONE gives each conversation a worktree and branch of its own, synced
+// with the main agent's files before every turn, whose work is read and taken with `subagent_diff`,
+// `subagent_pull` and `subagent_end`. An entry written before this field existed reads as SHARED.
+enum AgentPlacement {
+  AGENT_PLACEMENT_SHARED = 0;
+  AGENT_PLACEMENT_CLONE = 1;
+}

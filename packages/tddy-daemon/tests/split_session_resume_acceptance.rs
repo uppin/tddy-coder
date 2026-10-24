@@ -377,6 +377,7 @@ fn an_agent_withdrawing(tool: &str) -> SessionAgentRecord {
         codebase_session_id: None,
         kind: Default::default(),
         harness: None,
+        placement: Default::default(),
     }
 }
 

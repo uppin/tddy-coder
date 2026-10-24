@@ -392,6 +392,7 @@ fn roster_entry(
         // TODO(acp-subagent): implement — the record's `kind` and `harness`
         kind: tddy_service::proto::types::AgentKind::Model as i32,
         harness: String::new(),
+        placement: 0,
     }
 }
 
@@ -436,6 +437,7 @@ mod tests {
             codebase_session_id: None,
             kind: Default::default(),
             harness: None,
+            placement: Default::default(),
         }
     }
 

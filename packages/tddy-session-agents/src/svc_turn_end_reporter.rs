@@ -154,6 +154,7 @@ impl AgentRoster {
             // TODO(acp-subagent): implement — take the peer row's `kind` and `harness`
             kind: tddy_core::AgentKindRecord::Model,
             harness: None,
+            placement: Default::default(),
         })
     }
 }

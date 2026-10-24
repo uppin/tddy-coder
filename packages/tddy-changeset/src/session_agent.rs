@@ -145,6 +145,27 @@ pub struct SessionAgentRecord {
     /// model entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
+    /// Where this agent's conversations work. A record written before placements existed reads as
+    /// [`AgentPlacementRecord::Shared`], which is what it was.
+    #[serde(default, skip_serializing_if = "AgentPlacementRecord::is_shared")]
+    pub placement: AgentPlacementRecord,
+}
+
+/// Where a roster agent's conversations work, as persisted in `.session.yaml`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPlacementRecord {
+    /// The session's own worktree.
+    #[default]
+    Shared,
+    /// A worktree and branch of the conversation's own.
+    Clone,
+}
+
+impl AgentPlacementRecord {
+    fn is_shared(&self) -> bool {
+        *self == Self::Shared
+    }
 }
 
 /// What runs a roster agent's turns, as persisted in `.session.yaml`.

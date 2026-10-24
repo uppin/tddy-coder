@@ -209,6 +209,7 @@ impl CodingAgentSession {
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
                 agent_id: agent_id.to_string(),
+                placement: 0,
             }))
             .await
             .map(|r| r.into_inner())
@@ -512,7 +513,10 @@ async fn a_coding_agent_turn_answers_through_prompt_agent_conversation() {
 
     // Then
     assert_eq!(text, "fixed it");
-    assert_eq!(stop_reason, "EndTurn", "the wire spelling `agent_stop_reason` writes");
+    assert_eq!(
+        stop_reason, "EndTurn",
+        "the wire spelling `agent_stop_reason` writes"
+    );
 }
 
 #[tokio::test]

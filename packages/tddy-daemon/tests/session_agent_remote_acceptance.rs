@@ -120,6 +120,7 @@ impl Fleet {
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
                 agent_id: agent_id.to_string(),
+                placement: 0,
             }))
             .await
             .map(|r| r.into_inner())

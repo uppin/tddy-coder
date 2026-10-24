@@ -493,6 +493,9 @@ message StartSessionRequest {
   // session's mcp__tddy-tools__subagent_* tools. Each name must resolve to a builtin or
   // <tddyhome>/agents/*.yaml def; an unresolvable name is a request error.
   repeated string specialized_agents = 18;
+  // The subset of `specialized_agents` whose conversations each work on a clone of their own
+  // (`types.AgentPlacement.CLONE`); the rest work on the session's worktree.
+  repeated string clone_placed_agents = 44;
   // Absolute path to a local git checkout to use as the session worktree, sent by a local client
   // (e.g. tddy-sandbox-app) instead of selecting a configured project_id. When set, it overrides
   // project_id-based resolution. The session still runs as the caller's mapped os_user, so this
