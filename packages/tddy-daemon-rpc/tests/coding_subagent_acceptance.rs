@@ -6,7 +6,7 @@
 //! `tddy-acp-stub`, so what the daemon asked for — the OS user, the worktree, the MCP servers — is
 //! observable without root and without a real coding agent.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

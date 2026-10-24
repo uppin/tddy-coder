@@ -25,7 +25,7 @@
 //! `bunx` lets the session user run any npm package; set `TDDY_CLAUDE_AGENT_ACP_CLI` and allowlist
 //! that binary instead.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use std::ffi::OsString;
 use std::path::PathBuf;

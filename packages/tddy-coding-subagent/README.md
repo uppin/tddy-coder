@@ -11,4 +11,4 @@ A **coding agent** — Claude Code (`claude-agent-acp`), Codex (`codex-acp`), Op
 | `permissions` | `DenyAndRecord` — denies every permission request and records it for the turn's messages |
 | `session` | `CodingAgentSession: SubagentSession` over `tddy_agent_backend::AcpDriver` |
 
-PRD: [docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md](../../docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md)
+Architecture: [docs/architecture.md](docs/architecture.md). Product: [Session agent roster § Coding agents](../../docs/ft/daemon/session-agent-roster.md#coding-agents).

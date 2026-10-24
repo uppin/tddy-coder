@@ -4,7 +4,7 @@
 //! Every test drives a real `tddy-acp-stub` child through the ACP driver; the stub records what it
 //! was asked (`TDDY_ACP_STUB_RECORD`).
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

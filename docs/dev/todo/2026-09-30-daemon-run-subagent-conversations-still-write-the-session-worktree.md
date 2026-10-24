@@ -28,3 +28,9 @@ case collides with the roster PRD's non-goal *"Write-back from a remote clone"*.
 
 `local_agent_codebase_access` wrapping its dispatch in `tddy_subagent_worktree::run_in_conversation`
 keyed by the daemon-side conversation id is the cheap half. The wire half is the rest.
+
+## Coding agents (2026-10-24)
+
+A **coding-agent** conversation (`#coagents` 2/8, #721) is daemon-run and works the session worktree
+too — for it that is the intended default ("the same checkout as the main agent"), not a gap. Its
+own clone placement is `#coagents` 7/8 (`clone-placement`), which claims this entry.

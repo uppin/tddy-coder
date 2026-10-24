@@ -66,7 +66,7 @@ the daemon and refuses every spawn request — which is the correct reading of a
 
 ### Relayed spawns (coding agents)
 
-`SpawnRelayed` starts an allowlisted harness binary (`opencode`, `codex-acp`, `bunx`) as an allowed session
+`SpawnRelayed` starts an allowlisted harness binary (`opencode`, `codex-acp`, `claude-agent-acp`) as an allowed session
 user with its stdin/stdout relayed over a unix socket the **daemon** listens on — the one request that gives
 a child stdio, because the ACP driver talks to its agent over stdio and an unprivileged daemon cannot become
 another user itself. It passes every gate `SpawnSession` does (peer authorization, `allowed_session_users`,
@@ -85,8 +85,10 @@ failure is the opaque denial and nothing is forked. The child's exit status and 
 - **A coding agent runs as the session user only if its harness is in `allowed_relay_tool_paths`.** The
   list is empty in the shipped template, so a supervised install starts no coding-agent subagent as
   another user until the operator lists each harness binary by the absolute path the daemon resolves
-  (`codex-acp` in the install's bin directory, `opencode`, and `bunx` for `claude-acp`). Arguments are not
-  allowlisted, so listing `bunx` admits any package `bunx` can fetch, run as the session user. The
+  (`codex-acp` in the install's bin directory, `opencode`, and for `claude-acp` the `claude-agent-acp`
+  binary the daemon's `TDDY_CLAUDE_AGENT_ACP_CLI` names). Without that variable `claude-acp` runs as
+  `bunx claude-agent-acp`; arguments are not allowlisted, so listing `bunx` admits any package `bunx`
+  can fetch, run as the session user. The
   launch's provider-route variables and `OPENCODE_CONFIG_CONTENT` must be in `allowed_env_keys` too. The
   daemon turns the supervisor's opaque denial into an error naming these three lists.
 - **`allowed_env_keys` is a deny, not a filter.** A request naming an unlisted key is refused outright.

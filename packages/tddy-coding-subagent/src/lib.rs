@@ -1,6 +1,6 @@
 //! A coding agent as a session subagent.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 pub mod catalog;
 pub mod confinement;

@@ -153,6 +153,17 @@ message SessionAgentEntry {
   SessionAgentStatus status  = 11;
   // The last thing it was observed doing; unset when nothing has been observed.
   SessionAgentActivity last_activity = 12;
+  // What runs this agent's turns (§ Coding agents), snapshotted at attach from the catalog row.
+  types.AgentKind kind       = 13;
+  // The harness of a CODING_AGENT entry (`claude-acp`, `codex-acp`, `opencode`); empty for MODEL.
+  string harness             = 14;
+}
+
+// MODEL: a `<tddyhome>/agents/*.yaml` def or a registry assistant, driven by tddy's own loop.
+// CODING_AGENT: a coding agent the daemon launches and speaks to over ACP.
+enum AgentKind {
+  AGENT_KIND_MODEL        = 0;
+  AGENT_KIND_CODING_AGENT = 1;
 }
 
 enum SessionAgentStatus {
@@ -182,6 +193,62 @@ enum AgentCloneState {
 `replaces` and `tools` are **snapshotted into the entry at attach**, not re-read from the def on
 every use. Editing a YAML def or a registry assistant after attaching therefore does not silently
 change what the running session's main agent is allowed to call; detaching and re-attaching does.
+
+### Coding agents
+
+A roster entry is one of two **kinds**. A `MODEL` entry is a definition or registry assistant — a
+model behind an endpoint, driven by tddy's own read/grep loop. A `CODING_AGENT` entry is a coding
+agent — Claude Code (`claude-agent-acp`), Codex (`codex-acp`), OpenCode (`opencode acp`) — that the
+daemon launches and talks to over ACP. `SubagentInfo` (the `ListSubagents` row) carries the same
+`kind` and `harness` (fields 8 and 9).
+
+**What is offered.** `ListSubagents` lists, after the model rows, as `CODING_AGENT` rows:
+
+- every harness profile whose harness speaks ACP, under its label, with its model and provider
+  account ([Harness profiles](harness-profiles.md));
+- every `allowed_agents` entry whose id is one of those harnesses, on that harness's default model.
+
+A profile shadows an `allowed_agents` entry of the same name, and a coding agent named like a model
+row is not offered. Headless (`claude`, `cursor`, `codex`) and PTY harnesses are not offered, and a
+coding agent's `replaces` is always empty.
+
+**Attaching one** works like any other row: `name@daemon`, revisioned and streamed. In a
+managed-codebase session a harness whose native tools cannot be withdrawn is refused with
+`FAILED_PRECONDITION` naming it — today that is `codex-acp`, which offers sandbox modes but no tool
+withdrawal. A coding agent owned by another daemon is not supported.
+
+**A conversation** with a coding agent always runs on the daemon (the in-jail process holds no
+definition for it). Opening one starts the agent process for that conversation:
+
+- **as the session's OS user**, with its working directory on the session's worktree — the same
+  checkout the main agent works, no separate clone;
+- on the profile's **provider account route**, resolved from the session owner's vault exactly as a
+  tool session's is (environment and secret environment for every harness, `-c` overrides for
+  `codex-acp`, the route's config file as inline `OPENCODE_CONFIG_CONTENT` for `opencode`). A route
+  that does not resolve refuses the launch — it never falls back to the vendor's own login;
+- in a **managed** session, with its native file-system and shell tools withdrawn (`claude-acp`:
+  `disallowedTools` in `session/new`'s `_meta`; `opencode`: `tools` set to `false` in its inline
+  config) and `tddy-tools --mcp` handed to it as its only MCP server, pointed at the session's exec
+  tools with a credential minted for it. A daemon that signs no session tokens refuses.
+
+How the process becomes the session's user depends on the host: the daemon's own user needs
+nothing; a privileged daemon runs it behind `setpriv`; a daemon under `tddy-supervisor` asks for a
+**relayed spawn** ([tddy-supervisor § Relayed spawns](../supervisor/tddy-supervisor.md#relayed-spawns-coding-agents)),
+which works only for harness binaries the operator listed in `allowed_relay_tool_paths`. Any other
+case is refused with the reason; a coding agent is never started as the daemon's user in place of
+the session's.
+
+**Turns.** `subagent_prompt` sends one ACP prompt and returns the usual outcome: `stopReason`,
+`content` (the agent's text), `usage` (zero where the agent reports none) and `messages` (one
+descriptor per tool call the turn made). Options that act on an OpenAI-loop transcript —
+`subagent_resume`'s `fromMessageId`, `correction`, `replacement`, `yieldConditions`, and
+`subagent_prompt`'s `yieldConditions` and `maxTurns` — are refused with an error naming the option.
+A permission request from the agent is **denied**, and the denial appears in the turn's `messages`.
+`subagent_cancel` closes the conversation as it does for every agent — the running turn is
+interrupted and the process stopped — and `subagent_end` and a detach stop the process too.
+
+**At rest**, `SessionAgentRecord` carries `kind` (`model` / `coding_agent`, omitted for a model) and
+`harness`; a record written without them loads as a model entry.
 
 ### Persistence
 
@@ -824,6 +891,9 @@ is resolved and recorded on the codebase host, which is the host that holds the 
 (§ Seeding at start). The Semantic index toggle beside it is offered on the same terms, and for the
 same reason (remote-managed-worktree.md § What a split session cannot also ask for).
 
+A coding-agent row in this picker, in the session's Add-agent picker and on its Agents-tab row
+carries a **"coding agent · <harness>"** badge; a model row carries none.
+
 ### The Agents tab — a tree of everything working for one agent
 
 The session inspector's **Agents** tab is a tree rooted at the session's own **main agent**. Two
@@ -1012,6 +1082,21 @@ says why on its row. An unreadable roster is not an empty one, at any depth.
 53e. An orchestrator cycle terminates, a self-reference is dropped, and an orphan is not promoted
     to the root.
 53f. An expanded subagent whose roster could not be read says why, on its own row.
+
+### Coding agents
+
+- [x] `ListSubagents` lists ACP harness profiles and ACP `allowed_agents` as `CODING_AGENT` rows with
+  their harness; headless harness profiles are not listed.
+- [x] Attaching a coding agent puts a `CODING_AGENT` entry on the roster stream.
+- [x] A managed session refuses to attach a harness that cannot withdraw its native tools, naming it.
+- [x] A coding-agent conversation's turn returns the agent's text with `stopReason: end_turn`.
+- [x] The agent process is launched as the session's OS user with its working directory on the
+  session worktree; managed, with its native tools withdrawn and only `tddy-tools --mcp`.
+- [x] Loop-only options are refused with an error naming the option.
+- [x] A permission request is denied and recorded in the turn's `messages`.
+- [x] Ending a coding-agent conversation stops its process.
+- [x] Records written before kinds existed load as model entries (`#[serde(default)]`).
+- [x] Both pickers and the Agents tab show the coding-agent badge; a model row shows none.
 
 ### Seeding at start
 

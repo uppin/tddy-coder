@@ -12,7 +12,7 @@ export interface AgentKindBadgeProps {
  * "coding agent · <harness>" on a row whose agent is a coding agent the daemon launches; nothing on
  * a model (definition or registry assistant) row, which is what every row was before coding agents.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md
+ * Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
  */
 export function AgentKindBadge({ kind, harness, testId }: AgentKindBadgeProps) {
   if (kind !== AgentKind.CODING_AGENT) return null;

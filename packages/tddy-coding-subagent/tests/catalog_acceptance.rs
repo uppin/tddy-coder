@@ -1,6 +1,6 @@
 //! Which coding agents a daemon offers as subagents, and which of them a managed session can run.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use tddy_coding_subagent::{coding_agent_defs, confinement_for, CodingAgentDef, Confinement};
 use tddy_discovery::harness_profile::HarnessProfile;

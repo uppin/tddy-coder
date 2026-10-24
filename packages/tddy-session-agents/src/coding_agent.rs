@@ -4,7 +4,7 @@
 //! The session itself, the catalog and the confinement table live in `tddy-coding-subagent`; this
 //! module is the daemon-side glue that reads the session, the config and the launcher port.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use std::path::{Path, PathBuf};
 

@@ -88,6 +88,9 @@ and those crates deliberately do not grow a transport.
 - **`local_exec_tools.rs`**: the local exec-tool dispatch, kept in the wiring crate with its
   `run_exec_tool_locally` child because the host and `tddy-daemon-rpc` share it.
 - **`svc_resolve_os_user.rs`**: routing delegations and `resolve_exec_tool_worktree`, which read host fields.
+- **`coding_agent_launcher.rs`, `coding_agent_as_user.rs`, `coding_agent_relay.rs`**: the daemon's
+  `CodingAgentLauncher` — the port implementation that needs the daemon's config, vaults, tokens and
+  privilege, so it cannot live in `tddy-coding-subagent`. See [coding-agent-launcher.md](coding-agent-launcher.md).
 
 ## Per-topic state, and who defines it
 

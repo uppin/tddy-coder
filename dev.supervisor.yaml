@@ -65,8 +65,8 @@ shutdown_grace_secs: 5
 #   allowed_relay_tool_paths:
 #     - REPO_ROOT/node_modules/.bin/codex-acp      # codex-acp
 #     - /usr/local/bin/opencode                    # opencode (`opencode acp`)
-#     # - /usr/local/bin/bunx                      # claude-acp (`bunx claude-agent-acp`); arguments are
-#     #                                            # not allowlisted, so this admits any bunx package
+#     # - /usr/local/bin/claude-agent-acp          # claude-acp, with TDDY_CLAUDE_AGENT_ACP_CLI set to it
+#     #                                            # (else bunx, which admits any bunx package)
 #   allowed_mount_roots: [REPO_ROOT]
 #   # A key not listed here makes the whole request fail, rather than being dropped — so if you point
 #   # a daemon at this supervisor and it sends any env, list every key it sends. LD_*/MALLOC_* and
