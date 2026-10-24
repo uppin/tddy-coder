@@ -198,6 +198,8 @@ pub trait AgentSessions: Send + Sync {
     ///
     /// Refuses by default rather than recording an answer under a login this host cannot name. The
     /// daemon's adapter answers it from its user mapping.
+    // TODO(web-approvals): make this required once the test fakes of `AgentSessions` implement it,
+    // so a new adapter cannot forget it and refuse every answer.
     fn github_user(&self, _session_token: &str) -> Result<String, Status> {
         Err(Status::unimplemented(
             "this host cannot name the GitHub user of a session, so it cannot record a permission answer",

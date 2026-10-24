@@ -240,6 +240,10 @@ pub(crate) async fn take_recorded_turn(
     requested: TurnRequest,
     prompt: Option<&str>,
 ) -> Result<PromptOutcome, TurnError> {
+    // FIXME(web-approvals): a turn that defers a permission request to the user holds this lock until
+    // the user answers it, so a main-agent answer taken here waits behind it and is refused only once
+    // the user has answered (already answered by …). The answer should reach the parked request
+    // without this lock, through the conversation's answering handle.
     let mut session = tokio::select! {
         // Biased so a conversation already closed is reported as closed rather than racing one more turn out
         // of a model.

@@ -657,6 +657,10 @@ fn turn_summary(request: &TurnRequest) -> String {
 /// file, and the publication of the result — so no awaiter can read a turn as done before what it
 /// spent has been recorded.
 pub async fn run_turn(turn: DeferredTurn) {
+    // FIXME(web-approvals): this lock is held until the turn ends, which for a turn deferring a
+    // permission request to the user is when the user answers it. A main-agent `subagent_resume`
+    // with an answer queues here behind that turn, so its answer is refused only then, as already
+    // answered. Routing the answer around this lock is the open decision on the deferral design.
     let mut session = turn.session.lock().await;
     if let Some(agent_id) = turn.reported_agent.as_deref() {
         report_local_conversation_state(
