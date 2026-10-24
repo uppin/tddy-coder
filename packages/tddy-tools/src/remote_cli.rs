@@ -63,6 +63,11 @@ pub struct StartSessionArgs {
     /// Session token to associate with the new session.
     #[arg(long, value_name = "TOKEN")]
     pub session_token: Option<String>,
+
+    /// A coding agent the codebase daemon offers, as `name@daemon_instance_id`, to put on the
+    /// workspace session's roster — it runs on the codebase host. Repeatable.
+    #[arg(long = "agent", value_name = "AGENT_ID")]
+    pub agents: Vec<String>,
 }
 
 /// Args for `remote connect-session`.

@@ -16,6 +16,7 @@
 //! and no longer depend on `tddy-tools` at all.
 
 mod conversation;
+pub mod daemon_http_rpc;
 mod exec_catalog;
 mod room_transport;
 mod rpc_transports;
