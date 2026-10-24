@@ -272,11 +272,17 @@ impl TaskService for TaskServiceImpl {
     ) -> Result<Response<CancelTaskResponse>, Status> {
         let req = request.into_inner();
         let _user = self.authenticate(&req.session_token)?;
-        // TODO(start-cancel): forward to `req.daemon_instance_id` when it names a peer (self.peers)
-        let _ = self
-            .peers
-            .as_ref()
-            .map(|peers| (&peers.room, peers.local_instance_id.as_str()));
+        if let Some(peers) = &self.peers {
+            if !req.daemon_instance_id.is_empty()
+                && req.daemon_instance_id != peers.local_instance_id
+            {
+                let peer = req.daemon_instance_id.clone();
+                let answer =
+                    tddy_daemon_kernel::peer_calls::forward_cancel_task(&peers.room, &peer, &req)
+                        .await?;
+                return Ok(Response::new(answer));
+            }
+        }
         let task_id = tddy_task::TaskId(req.task_id);
         let found = self.registry.cancel_task(&task_id).await;
         if found {

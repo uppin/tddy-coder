@@ -144,9 +144,14 @@ pub async fn forward_cancel_task(
     peer_instance_id: &str,
     request: &tddy_service::proto::tasks::CancelTaskRequest,
 ) -> Result<tddy_service::proto::tasks::CancelTaskResponse, Status> {
-    // TODO(start-cancel): implement with forward_unary to "tasks.TaskService"/"CancelTask"
-    let _ = (room, peer_instance_id, request);
-    Err(Status::unimplemented("forward_cancel_task"))
+    forward_unary(
+        room,
+        peer_instance_id,
+        "tasks.TaskService",
+        "CancelTask",
+        request,
+    )
+    .await
 }
 
 /// Forward **DeleteSession** to another daemon in the common room.
