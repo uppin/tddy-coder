@@ -4,6 +4,16 @@
 //! subagent of that session must not have them either. Withdrawing them is harness-specific, and a
 //! harness this table cannot prove withdrawable is refused in managed sessions — never launched
 //! unconfined.
+//!
+//! The mechanism each `WithdrawsNativeTools` harness relies on (the launcher applies it):
+//!
+//! - `claude-acp` (`claude-agent-acp`): `session/new` `_meta.claudeCode.options.disallowedTools`
+//!   names the native tools to withdraw (`Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, …); the
+//!   MCP tools of `tddy-tools --mcp` remain.
+//! - `opencode`: its config's `permission` / `tools` table (`OPENCODE_CONFIG_CONTENT`) disables the
+//!   built-in `bash`, `read`, `edit`, `write`, `glob`, `grep` tools.
+//!
+//! `codex-acp` offers sandbox modes only, no tool withdrawal, so it is `CannotWithdraw`.
 
 /// What a harness can do about its native tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,8 +24,10 @@ pub enum Confinement {
     CannotWithdraw,
 }
 
-/// The confinement `harness` supports.
-pub fn confinement_for(_harness: &str) -> Confinement {
-    // TODO(acp-subagent): implement
-    Confinement::CannotWithdraw
+/// The confinement `harness` supports. Anything not proven is [`Confinement::CannotWithdraw`].
+pub fn confinement_for(harness: &str) -> Confinement {
+    match harness {
+        "claude-acp" | "opencode" => Confinement::WithdrawsNativeTools,
+        _ => Confinement::CannotWithdraw,
+    }
 }

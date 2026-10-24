@@ -49,9 +49,8 @@ function availableAgentOf(info: SubagentInfo): AvailableAgent {
     model: info.model,
     daemonInstanceId: info.daemonInstanceId,
     replaces: info.replaces,
-    // TODO(acp-subagent): implement — the row's own kind and harness
-    kind: AgentKind.MODEL,
-    harness: "",
+    kind: info.kind,
+    harness: info.harness,
   };
 }
 

@@ -14,7 +14,14 @@ export interface AgentKindBadgeProps {
  *
  * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md
  */
-export function AgentKindBadge(_props: AgentKindBadgeProps) {
-  // TODO(acp-subagent): implement
-  return null;
+export function AgentKindBadge({ kind, harness, testId }: AgentKindBadgeProps) {
+  if (kind !== AgentKind.CODING_AGENT) return null;
+  return (
+    <span
+      data-testid={testId}
+      className="rounded border border-border px-1 text-[10px] text-muted-foreground"
+    >
+      {`coding agent · ${harness}`}
+    </span>
+  );
 }

@@ -212,6 +212,9 @@ impl BuildContext {
         .with_terminal_exposure(Arc::clone(terminal_exposure))
         .with_split_rooms(split_rooms)
         .with_model_registry(Arc::clone(model_registry))
+        .with_coding_agent_launcher(Arc::new(
+            tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher::for_this_process(),
+        ))
         .with_session_notification_bus(session_notification_bus)
         .with_session_tokens(session_tokens.clone())
         .with_askpass_endpoint(askpass_endpoint)
