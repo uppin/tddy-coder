@@ -7,7 +7,9 @@
 **Metrics:** **244 lines** · **nesting depth 13** · 4 parameters · 24 branch/match lines · 1 early exits
 **Thresholds breached:** length 244 > 60; nesting 13 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — claimed
+**Claimed by:** #720 — `#coagents 1/8` (one ACP client driver replaces this worker)
+**Lands after:** — (stack root, based on `master`)
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
