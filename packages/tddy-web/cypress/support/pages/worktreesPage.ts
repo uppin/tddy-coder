@@ -1,5 +1,5 @@
 /**
- * Page object for WorktreesScreen component tests.
+ * Page object for the Worktrees screen (sidebar of worktrees + the selected worktree's pane).
  */
 
 import { byTestId, TEST_IDS } from "../testIds";
@@ -8,35 +8,30 @@ export const worktreesPage = {
   menuButton: () => byTestId(TEST_IDS.shellMenuWorktrees),
   screen: () => byTestId(TEST_IDS.worktreesScreen),
 
-  /** The project filter `<select>` that scopes the worktree list. */
+  /** The project `<select>` in the sidebar. */
   projectSelect: () => byTestId(TEST_IDS.worktreesProjectSelect, { timeout: 5000 }),
-  /** Pick the project with the given id in the project filter. */
+  /** Pick the project with the given id. */
   chooseProject: (projectId: string) => {
     byTestId(TEST_IDS.worktreesProjectSelect, { timeout: 5000 }).select(projectId);
   },
 
-  table: () => byTestId(TEST_IDS.worktreesTable),
   rows: () => byTestId(TEST_IDS.worktreeRow),
-  /** First delete button by default; pass an index for others. */
-  deleteBtn: (index = 0) => byTestId(TEST_IDS.worktreeDelete).eq(index),
-  confirmDeleteBtn: () => byTestId(TEST_IDS.worktreeDeleteConfirm),
-  deletedPath: () => byTestId(TEST_IDS.worktreeDeletedPath),
-
-  // --- Lazy, streamed disk usage (docs/ft/web/worktree-disk-usage-streaming.md) ---
-  /** The size-status cell for the row at `index`. */
-  status: (index = 0) => byTestId(TEST_IDS.worktreeStatus).eq(index),
-  /** The "last calculated" label for the row at `index`. */
-  lastCalculated: (index = 0) => byTestId(TEST_IDS.worktreeLastCalculated).eq(index),
-  /** The row element at `index` (assert size presence/absence via its text). */
+  /** The sidebar row at `index` (sorted biggest first). */
   row: (index = 0) => byTestId(TEST_IDS.worktreeRow).eq(index),
-  /** The per-row Calculate / Recalculate button for the row at `index`. */
-  calculateBtn: (index = 0) => byTestId(TEST_IDS.worktreeCalculate).eq(index),
-  /** The screen-level Recalculate-all button. */
-  recalculateAll: () => byTestId(TEST_IDS.worktreesRecalculateAll),
-  /** Harness span recording the last path passed to `onCalculate`. */
-  calculatedPath: () => byTestId(TEST_IDS.worktreesCalculatedPath),
-  /** Harness span recording that `onRecalculateAll` fired. */
-  recalculatedAll: () => byTestId(TEST_IDS.worktreesRecalculatedAll),
+  rowName: (index = 0) => byTestId(TEST_IDS.worktreeRowName).eq(index),
+  rowSize: (index = 0) => byTestId(TEST_IDS.worktreeRowSize).eq(index),
+  rowSpinner: (index = 0) => worktreesPage.row(index).find(`[data-testid="${TEST_IDS.worktreeRowSpinner}"]`),
+  /** The sidebar's Refresh (recalculate all) button. */
+  refresh: () => byTestId(TEST_IDS.worktreesRefresh),
+  /** The "Calculating disk usage… n of m" progress block; absent when nothing is calculating. */
+  progress: () => byTestId(TEST_IDS.worktreesProgress),
+  /** The selected worktree's name in the pane header. */
+  selectedName: () => byTestId(TEST_IDS.worktreesSelectedName),
+  /** The pane — the Session Inspector's Worktree tab. */
+  pane: () => byTestId(TEST_IDS.sessionWorktreeTab),
+  paneSize: () => byTestId(TEST_IDS.sessionWorktreeSize),
+  paneDelete: () => byTestId(TEST_IDS.sessionWorktreeDelete),
+  paneDeleteConfirm: () => byTestId(TEST_IDS.sessionWorktreeDeleteConfirm),
 };
 
 /** @deprecated Use `worktreesPage` (lowercase). Kept for backward compatibility. */

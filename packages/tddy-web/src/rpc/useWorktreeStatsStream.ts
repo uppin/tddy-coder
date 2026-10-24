@@ -42,6 +42,8 @@ export interface UseWorktreeStatsStreamResult {
   calculate: (path: string) => void;
 }
 
+const EMPTY_ROWS: WorktreeStatsRow[] = [];
+
 function domainStatus(status: WorktreeSizeStatus): DomainSizeStatus {
   switch (status) {
     case WorktreeSizeStatus.CALCULATING:
@@ -88,7 +90,12 @@ function eventFromRpc(event: {
 export function useWorktreeStatsStream(projectId: string): UseWorktreeStatsStreamResult {
   const client = useDaemonClient(WorktreeService);
   const { sessionToken } = useAuthContext();
-  const [rows, setRows] = useState<WorktreeStatsRow[]>([]);
+  // Rows are held with the project they belong to, so a render between a project switch and the
+  // new subscription's reset never hands the previous project's rows out as the new one's.
+  const [held, setHeld] = useState<{ projectId: string; rows: WorktreeStatsRow[] }>({
+    projectId: "",
+    rows: [],
+  });
   const [subscription, setSubscription] = useState({ recalculateAll: false, nonce: 0 });
 
   const token = sessionToken ?? "";
@@ -97,12 +104,12 @@ export function useWorktreeStatsStream(projectId: string): UseWorktreeStatsStrea
 
   useEffect(() => {
     if (!client || !trimmedProjectId) {
-      setRows([]);
+      setHeld({ projectId: trimmedProjectId, rows: [] });
       return;
     }
     let cancelled = false;
     // A new subscription always starts from an empty list — the daemon's first frame is a snapshot.
-    setRows([]);
+    setHeld({ projectId: trimmedProjectId, rows: [] });
 
     (async () => {
       try {
@@ -113,7 +120,10 @@ export function useWorktreeStatsStream(projectId: string): UseWorktreeStatsStrea
         })) {
           if (cancelled) break;
           const mapped = eventFromRpc(event);
-          setRows((prev) => applyWorktreeStatsEvent(prev, mapped));
+          setHeld((prev) => ({
+            projectId: trimmedProjectId,
+            rows: applyWorktreeStatsEvent(prev.projectId === trimmedProjectId ? prev.rows : [], mapped),
+          }));
         }
       } catch (err) {
         // A stream aborted on unmount/re-subscribe surfaces as an AbortError; ignore it. Any other
@@ -148,6 +158,8 @@ export function useWorktreeStatsStream(projectId: string): UseWorktreeStatsStrea
     },
     [client, token, trimmedProjectId],
   );
+
+  const rows = held.projectId === trimmedProjectId ? held.rows : EMPTY_ROWS;
 
   return { rows, recalculateAll, refresh, calculate };
 }

@@ -310,7 +310,7 @@ See [LiveKit peer discovery (daemon)](../daemon/livekit-peer-discovery.md) for c
 
 ### Worktrees manager scaffolding
 
-The **Worktrees** product area includes a **`WorktreesScreen`** table component (mocked data in component tests) and a **`tddy-worktree-service`** **`worktrees`** library for **`git worktree list`**, on-disk stats cache, and **`git worktree remove`**. The worktree RPCs the browser calls live on **`worktree.WorktreeService`** (served by **`tddy-worktree-service`**); shell navigation from the main app to a dedicated route is follow-up work. **`WorktreesAppPage`** does not yet align project identity with composite **`project_id` + `daemon_instance_id`** rows from **`ListProjects`**. Full operator semantics, cache layout, and test commands: [worktrees.md](worktrees.md).
+The **Worktrees** product area includes a **`WorktreesScreen`** (side panel of worktrees by name and size, plus the selected worktree's pane) and a **`tddy-worktree-service`** **`worktrees`** library for **`git worktree list`**, on-disk stats cache, and **`git worktree remove`**. The worktree RPCs the browser calls live on **`worktree.WorktreeService`** (served by **`tddy-worktree-service`**); shell navigation from the main app to a dedicated route is follow-up work. **`WorktreesAppPage`** does not yet align project identity with composite **`project_id` + `daemon_instance_id`** rows from **`ListProjects`**. Full operator semantics, cache layout, and test commands: [worktrees.md](worktrees.md).
 
 ## See also (development)
 

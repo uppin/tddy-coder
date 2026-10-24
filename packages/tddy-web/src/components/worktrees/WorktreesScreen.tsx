@@ -1,150 +1,141 @@
-import React, { useState } from "react";
-
-function logTddyMarker(markerId: string, scope: string): void {
-  // Mirrors daemon development markers; visible in Cypress run logs.
-  console.error(
-    JSON.stringify({ tddy: { marker_id: markerId, scope, data: {} } }),
-  );
-}
-
-/** Size-calculation state for a single worktree (lazy, streamed disk usage). */
-export type WorktreeSizeStatus = "none" | "calculating" | "cached";
-
-export interface WorktreesScreenMockRow {
-  path: string;
-  branch: string;
-  /** Formatted disk size (e.g. "1.2 GB"); absent until a size is cached. */
-  sizeLabel?: string;
-  changedFiles: number;
-  linesAdded: number;
-  linesRemoved: number;
-  /** When true, stats may be outdated until Refresh is used. */
-  stale?: boolean;
-  /** Size-calculation state; drives the status cell and Calculate label. */
-  status?: WorktreeSizeStatus;
-  /** Pre-formatted "last calculated" label, shown for cached rows. */
-  lastCalculatedLabel?: string;
-}
+import React from "react";
+import { Loader2, RefreshCw } from "lucide-react";
+import { formatDiskBytes } from "../sessions/worktreeStatsFormat";
+import { sizingProgress, type WorktreeListItem } from "../../lib/worktreeList";
+import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
+import { ScrollArea } from "../ui/scroll-area";
 
 export interface WorktreesScreenProps {
-  worktrees: WorktreesScreenMockRow[];
-  onConfirmDelete?: (path: string) => void;
-  /** Shown when the list is empty (e.g. pick Refresh stats). */
-  emptyHint?: string;
-  /** Request size calculation for a single worktree by path. */
-  onCalculate?: (path: string) => void;
-  /** Request a project-wide recalculation of every worktree's size. */
-  onRecalculateAll?: () => void;
+  projects: ReadonlyArray<{ projectId: string; name: string }>;
+  projectId: string;
+  onSelectProject: (projectId: string) => void;
+  /** Already sorted, biggest first. */
+  items: readonly WorktreeListItem[];
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+  /** Recalculate every worktree's size. */
+  onRefresh: () => void;
+  /** The selected worktree's detail pane. */
+  children?: React.ReactNode;
+  /** Shown in the list when it is empty. */
+  emptyHint: string;
 }
 
-const STATUS_LABELS: Record<WorktreeSizeStatus, string> = {
-  none: "None",
-  calculating: "Calculating",
-  cached: "Cached",
-};
+const selectClassName =
+  "box-border w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /**
- * Project worktrees table (daemon-backed stats when wired to RPC).
+ * The Worktrees screen in the Sessions screen's layout: a side panel listing the project's
+ * worktrees by name with their disk usage (project selector and Refresh above the list), and the
+ * selected worktree's pane beside it.
  */
-export function WorktreesScreen(props: WorktreesScreenProps) {
-  const { worktrees, onConfirmDelete, emptyHint, onCalculate, onRecalculateAll } =
-    props;
-  const [pendingDeletePath, setPendingDeletePath] = useState<string | null>(
-    null,
-  );
-
-  logTddyMarker("M009", "tddy-web::WorktreesScreen");
+export function WorktreesScreen({
+  projects,
+  projectId,
+  onSelectProject,
+  items,
+  selectedPath,
+  onSelect,
+  onRefresh,
+  children,
+  emptyHint,
+}: WorktreesScreenProps) {
+  const { done, total } = sizingProgress(items);
+  const calculating = done < total;
 
   return (
-    <div data-testid="worktrees-screen">
-      <div>
-        <button
-          type="button"
-          data-testid="worktrees-recalculate-all"
-          onClick={() => {
-            onRecalculateAll?.();
-          }}
-        >
-          Recalculate all
-        </button>
-      </div>
-      <table data-testid="worktrees-table">
-        <thead>
-          <tr>
-            <th scope="col">Path</th>
-            <th scope="col">Branch</th>
-            <th scope="col">Status</th>
-            <th scope="col">Size</th>
-            <th scope="col">Last calculated</th>
-            <th scope="col">Changed files</th>
-            <th scope="col">+/- lines</th>
-            <th scope="col">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {worktrees.length === 0 && emptyHint ? (
-            <tr>
-              <td colSpan={8} className="text-muted-foreground">
-                {emptyHint}
-              </td>
-            </tr>
+    <div data-testid="worktrees-screen" className="flex flex-1 min-h-0 overflow-hidden flex-col md:flex-row">
+      <div
+        data-testid="worktrees-sidebar"
+        className="flex flex-col border-b md:border-b-0 md:border-r border-border bg-background flex-shrink-0 md:w-[280px] max-h-[45dvh] md:max-h-none md:h-full"
+      >
+        <div className="px-3 py-2 border-b border-border flex flex-col gap-2">
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex-1">
+              Worktrees
+            </span>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              data-testid="worktrees-refresh"
+              disabled={projectId === ""}
+              onClick={onRefresh}
+            >
+              <RefreshCw className={cn("h-3 w-3", calculating && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
+          <select
+            aria-label="Project"
+            data-testid="worktrees-project-select"
+            className={selectClassName}
+            value={projectId}
+            onChange={(e) => onSelectProject(e.target.value)}
+          >
+            <option value="">—</option>
+            {projects.map((p) => (
+              <option key={p.projectId} value={p.projectId}>
+                {p.name || p.projectId}
+              </option>
+            ))}
+          </select>
+          {calculating ? (
+            <div data-testid="worktrees-progress" className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">
+                Calculating disk usage… {done} of {total}
+              </span>
+              <div className="h-1 w-full overflow-hidden rounded bg-muted">
+                <div
+                  className="h-full bg-primary transition-[width]"
+                  style={{ width: `${total === 0 ? 0 : (done / total) * 100}%` }}
+                />
+              </div>
+            </div>
           ) : null}
-          {worktrees.map((row) => (
-            <tr key={row.path} data-testid="worktrees-row">
-              <td>{row.path}</td>
-              <td>
-                {row.branch}
-                {row.stale ? (
-                  <span className="ml-1 text-xs text-muted-foreground">(stale)</span>
+        </div>
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="py-1 px-2 space-y-0.5">
+            {items.map((item) => (
+              <button
+                key={item.path}
+                type="button"
+                data-testid="worktrees-row"
+                title={`${item.path}\n${item.branch}`}
+                aria-selected={item.path === selectedPath ? "true" : undefined}
+                onClick={() => onSelect(item.path)}
+                className={cn(
+                  "w-full text-left flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+                  item.path === selectedPath ? "bg-accent text-accent-foreground" : "hover:bg-muted",
+                )}
+              >
+                <span data-testid="worktrees-row-name" className="truncate flex-1">
+                  {item.name}
+                </span>
+                {item.calculating ? (
+                  <Loader2 data-testid="worktrees-row-spinner" className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
                 ) : null}
-              </td>
-              <td data-testid="worktrees-status">
-                {row.status ? STATUS_LABELS[row.status] : ""}
-              </td>
-              <td>{row.sizeLabel}</td>
-              <td data-testid="worktrees-last-calculated">
-                {row.status === "cached" ? row.lastCalculatedLabel : ""}
-              </td>
-              <td>{row.changedFiles}</td>
-              <td>
-                +{row.linesAdded} / -{row.linesRemoved}
-              </td>
-              <td>
-                <button
-                  type="button"
-                  data-testid="worktrees-calculate"
-                  onClick={() => {
-                    onCalculate?.(row.path);
-                  }}
+                <span
+                  data-testid="worktrees-row-size"
+                  className={cn(
+                    "shrink-0 text-xs tabular-nums text-muted-foreground",
+                    item.stale && "italic opacity-70",
+                  )}
                 >
-                  {row.status === "cached" ? "Recalculate" : "Calculate"}
-                </button>
-                <button
-                  type="button"
-                  data-testid="worktrees-delete"
-                  onClick={() => {
-                    setPendingDeletePath(row.path);
-                  }}
-                >
-                  Delete
-                </button>
-                {pendingDeletePath === row.path ? (
-                  <button
-                    type="button"
-                    data-testid="worktrees-delete-confirm"
-                    onClick={() => {
-                      onConfirmDelete?.(row.path);
-                      setPendingDeletePath(null);
-                    }}
-                  >
-                    Confirm delete
-                  </button>
-                ) : null}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                  {item.diskBytes !== undefined ? formatDiskBytes(item.diskBytes) : ""}
+                </span>
+              </button>
+            ))}
+            {items.length === 0 ? (
+              <div className="px-3 py-4 text-sm text-muted-foreground text-center">{emptyHint}</div>
+            ) : null}
+          </div>
+        </ScrollArea>
+      </div>
+      <div data-testid="worktrees-main" className="flex flex-1 min-w-0 min-h-0 flex-col overflow-hidden">
+        {children}
+      </div>
     </div>
   );
 }

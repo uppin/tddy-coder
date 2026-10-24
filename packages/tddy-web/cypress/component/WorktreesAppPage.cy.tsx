@@ -109,29 +109,39 @@ describe("Worktrees screen over worktree.WorktreeService", () => {
     cy.window().then((win) => win.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN));
   });
 
-  it("streams the project's worktrees from the daemon's worktree service", () => {
+  it("lists the project's worktrees from the daemon's worktree service, by name", () => {
     // Given a daemon whose worktree feed is served only under `worktree.WorktreeService`
     const daemon = aDaemonServingTheSplit([A_CACHED_WORKTREE]);
 
-    // When the Worktrees manager screen is opened
+    // When the Worktrees screen is opened
     mountWorktrees(daemon);
 
-    // Then the streamed worktree is on screen with the size the daemon reported
-    page.status(0).should("contain.text", "Cached");
-    page.row(0).should("contain.text", "500 MB");
+    // Then the worktree is listed by name with the size the daemon reported
+    page.rowName(0).should("have.text", "feat-a");
+    page.rowSize(0).should("have.text", "500 MB");
+  });
+
+  it("shows the selected worktree in the Session Inspector's Worktree pane", () => {
+    const daemon = aDaemonServingTheSplit([A_CACHED_WORKTREE]);
+
+    mountWorktrees(daemon);
+
+    page.selectedName().should("have.text", "feat-a");
+    page.pane().should("exist");
+    page.paneSize().should("contain.text", "500 MB");
   });
 
   it("deletes a worktree through the same service", () => {
     // Given the screen showing that worktree
     const daemon = aDaemonServingTheSplit([A_CACHED_WORKTREE]);
     mountWorktrees(daemon);
-    page.status(0).should("contain.text", "Cached");
+    page.paneSize().should("contain.text", "500 MB");
 
-    // When the operator deletes it
-    page.deleteBtn(0).click();
-    page.confirmDeleteBtn().click();
+    // When the operator deletes it from the pane
+    page.paneDelete().click();
+    page.paneDeleteConfirm().click();
 
-    // Then `RemoveWorktree` reached the worktree service, addressed at the path on the row
+    // Then `RemoveWorktree` reached the worktree service, addressed at the worktree's path
     cy.wrap(null).should(() => {
       expect(daemon.removedWorktreePaths).to.deep.equal([A_CACHED_WORKTREE.path]);
     });

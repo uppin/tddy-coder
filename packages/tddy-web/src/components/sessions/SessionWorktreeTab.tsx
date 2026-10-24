@@ -13,8 +13,11 @@ export interface SessionWorktreeTabProps {
   client: Client<typeof WorktreeService> | null;
   sessionToken: string;
   projectId: string;
-  sessionId: string;
+  /** The owning session. Absent when the worktree is shown outside any session (the Worktrees screen), where there is nothing to restore it from. */
+  sessionId?: string;
   repoPath: string;
+  /** Called once the worktree has been deleted, so a list showing it can drop it. */
+  onDeleted?: () => void;
 }
 
 /**
@@ -31,6 +34,7 @@ export function SessionWorktreeTab({
   projectId,
   sessionId,
   repoPath,
+  onDeleted,
 }: SessionWorktreeTabProps) {
   const { row, status, missing, error: statsError, refresh } = useSessionWorktreeStats(
     client,
@@ -59,11 +63,13 @@ export function SessionWorktreeTab({
     void action.run(async () => {
       await connected().removeWorktree({ sessionToken, projectId, worktreePath: repoPath });
       setPendingDelete(false);
+      onDeleted?.();
       // No recalculation here — the worktree is gone; the daemon's stream drops it from the snapshot.
     });
   }
 
   function onRestore() {
+    if (sessionId === undefined) return;
     void action.run(async () => {
       await connected().restoreSessionWorktree({ sessionToken, projectId, sessionId });
       refresh();
@@ -82,18 +88,20 @@ export function SessionWorktreeTab({
       {missing ? (
         <div data-testid="session-worktree-missing" className="flex flex-col gap-2">
           <p>This session&apos;s worktree is no longer on disk.</p>
-          <div>
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              data-testid="session-worktree-restore"
-              disabled={!client || action.pending}
-              onClick={onRestore}
-            >
-              Restore worktree
-            </Button>
-          </div>
+          {sessionId !== undefined ? (
+            <div>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                data-testid="session-worktree-restore"
+                disabled={!client || action.pending}
+                onClick={onRestore}
+              >
+                Restore worktree
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : row ? (
         <>

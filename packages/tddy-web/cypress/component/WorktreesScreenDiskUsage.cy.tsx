@@ -1,122 +1,78 @@
-import React, { useState } from "react";
+import React from "react";
 import { WorktreesScreen } from "../../src/components/worktrees/WorktreesScreen";
+import {
+  mergeWorktreeItems,
+  sortWorktreesBySize,
+  type RememberedWorktree,
+} from "../../src/lib/worktreeList";
+import type { WorktreeStatsRow } from "../../src/lib/worktreeSize";
 import { worktreesPage as page } from "../support/pages/worktreesPage";
 
 /**
- * Lazy, streamed worktree disk usage — the Worktrees screen surfaces each worktree's size status
- * (None / Calculating / Cached with a last-calculated label), a project-wide Recalculate-all
- * control, and a per-row Calculate control.
+ * The Worktrees sidebar lists the biggest worktree first, a remembered size stands in (stale) until
+ * the daemon's own arrives, and a worktree never sized sinks to the bottom.
  *
  * Feature: docs/ft/web/worktree-disk-usage-streaming.md
  */
 
-const NONE_ROW = {
-  path: "/repos/demo/.worktrees/feat-a",
-  branch: "feature/a",
-  status: "none" as const,
-  changedFiles: 0,
-  linesAdded: 0,
-  linesRemoved: 0,
-};
+function aRow(overrides: Partial<WorktreeStatsRow> & { path: string }): WorktreeStatsRow {
+  return {
+    branch: "main",
+    status: "none",
+    changedFiles: 0,
+    linesAdded: 0,
+    linesRemoved: 0,
+    ...overrides,
+  };
+}
 
-const CALCULATING_ROW = {
-  path: "/repos/demo/.worktrees/feat-b",
-  branch: "feature/b",
-  status: "calculating" as const,
-  changedFiles: 2,
-  linesAdded: 5,
-  linesRemoved: 1,
-};
-
-const CACHED_ROW = {
-  path: "/repos/demo/.worktrees/feat-c",
-  branch: "feature/c",
-  status: "cached" as const,
-  sizeLabel: "1.2 GB",
-  lastCalculatedLabel: "2 min ago",
-  changedFiles: 7,
-  linesAdded: 240,
-  linesRemoved: 18,
-};
-
-const ROWS = [NONE_ROW, CALCULATING_ROW, CACHED_ROW];
-
-function WorktreesHarness() {
-  const [calculatedPath, setCalculatedPath] = useState<string | null>(null);
-  const [recalculatedAll, setRecalculatedAll] = useState(false);
-  return (
-    <div>
+function mountList(streamed: WorktreeStatsRow[], remembered: RememberedWorktree[] = []) {
+  const items = sortWorktreesBySize(mergeWorktreeItems(streamed, remembered));
+  cy.viewport(1280, 800);
+  cy.mount(
+    <div style={{ height: 600, display: "flex" }}>
       <WorktreesScreen
-        worktrees={ROWS as never}
-        onCalculate={(p: string) => setCalculatedPath(p)}
-        onRecalculateAll={() => setRecalculatedAll(true)}
+        projects={[]}
+        projectId=""
+        onSelectProject={() => undefined}
+        items={items}
+        selectedPath={null}
+        onSelect={() => undefined}
+        onRefresh={() => undefined}
+        emptyHint="nothing"
       />
-      {calculatedPath ? (
-        <span data-testid="worktrees-calculated-path">{calculatedPath}</span>
-      ) : null}
-      {recalculatedAll ? <span data-testid="worktrees-recalculated-all">yes</span> : null}
-    </div>
+    </div>,
   );
 }
 
-describe("Worktrees screen — lazy disk usage", () => {
-  it("shows the size status for each worktree", () => {
-    // Given the screen rendering a None, a Calculating, and a Cached worktree
-    cy.mount(<WorktreesHarness />);
+describe("Worktrees sidebar disk usage", () => {
+  it("sorts biggest first, with the never-sized last", () => {
+    mountList([
+      aRow({ path: "/w/none" }),
+      aRow({ path: "/w/small", status: "cached", diskBytes: 1_024n }),
+      aRow({ path: "/w/big", status: "cached", diskBytes: 1_288_490_189n }),
+    ]);
 
-    // Then each row shows its status
-    page.status(0).should("contain.text", "None");
-    page.status(1).should("contain.text", "Calculating");
-    page.status(2).should("contain.text", "Cached");
+    page.rowName(0).should("have.text", "big");
+    page.rowSize(0).should("have.text", "1.2 GB");
+    page.rowName(1).should("have.text", "small");
+    page.rowName(2).should("have.text", "none");
   });
 
-  it("shows no size and offers Calculate for a never-calculated worktree", () => {
-    // Given the screen
-    cy.mount(<WorktreesHarness />);
+  it("shows the remembered size at once, before the daemon has answered", () => {
+    mountList([], [{ path: "/w/a", branch: "main", diskBytes: 524_288_000n }]);
 
-    // Then the None row shows no byte size and offers a Calculate action
-    page.row(0).should("not.contain.text", "GB");
-    page.row(0).should("not.contain.text", " B");
-    page.calculateBtn(0).should("be.visible");
+    page.rowSize(0).should("have.text", "500 MB").and("have.class", "italic");
+    page.progress().should("not.exist");
   });
 
-  it("shows a calculating worktree without a size yet", () => {
-    // Given the screen
-    cy.mount(<WorktreesHarness />);
+  it("keeps the remembered size beside the spinner while a fresh one is calculated", () => {
+    mountList(
+      [aRow({ path: "/w/a", status: "calculating" })],
+      [{ path: "/w/a", branch: "main", diskBytes: 524_288_000n }],
+    );
 
-    // Then the Calculating row reports Calculating and shows no byte size
-    page.status(1).should("contain.text", "Calculating");
-    page.row(1).should("not.contain.text", "GB");
-  });
-
-  it("shows the size and last-calculated time for a cached worktree", () => {
-    // Given the screen
-    cy.mount(<WorktreesHarness />);
-
-    // Then the Cached row shows its formatted size and when it was last calculated
-    page.row(2).should("contain.text", "1.2 GB");
-    page.lastCalculated(2).should("contain.text", "2 min ago");
-  });
-
-  it("triggers a project-wide recalculation from Recalculate all", () => {
-    // Given the screen
-    cy.mount(<WorktreesHarness />);
-
-    // When Recalculate all is pressed
-    page.recalculateAll().click();
-
-    // Then the project-wide recalculation is requested
-    page.recalculatedAll().should("exist");
-  });
-
-  it("triggers calculation for a single worktree's path from its Calculate button", () => {
-    // Given the screen
-    cy.mount(<WorktreesHarness />);
-
-    // When the first row's Calculate is pressed
-    page.calculateBtn(0).click();
-
-    // Then calculation is requested for exactly that worktree's path
-    page.calculatedPath().should("have.text", NONE_ROW.path);
+    page.rowSize(0).should("have.text", "500 MB");
+    page.rowSpinner(0).should("exist");
   });
 });

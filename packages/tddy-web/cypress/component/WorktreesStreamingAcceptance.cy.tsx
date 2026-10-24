@@ -87,38 +87,42 @@ describe("Worktrees screen — streamed disk usage", () => {
     cy.window().then((win) => win.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN));
   });
 
-  it("renders each streamed worktree with its size status", () => {
+  it("lists the biggest worktree first, with the never-sized one calculating at the bottom", () => {
     // Given a daemon streaming a snapshot of a never-calculated and an already-cached worktree
     const backend = aWorktreesBackend();
 
-    // When the Worktrees manager screen is mounted
+    // When the Worktrees screen is mounted
     mountWorktrees(backend);
 
-    // Then each row shows the status carried by the snapshot
-    page.status(0).should("contain.text", "None");
-    page.status(1).should("contain.text", "Cached");
+    // Then the cached worktree is on top with its size, and the other shows it is being calculated
+    page.rowName(0).should("have.text", "feat-c");
+    page.rowSize(0).should("have.text", "1.2 GB");
+    page.rowName(1).should("have.text", "feat-a");
+    page.rowSpinner(1).should("exist");
   });
 
-  it("shows the formatted size for a worktree that streams a Cached update", () => {
+  it("moves a worktree up the list when its calculated size turns out to be the biggest", () => {
     // Given a daemon that, after the snapshot, streams the first worktree's finished size
-    const backend = aWorktreesBackend({ worktreeStatsUpdate: NONE_ROW_CACHED_UPDATE });
+    const backend = aWorktreesBackend({
+      worktreeStatsUpdate: { ...NONE_ROW_CACHED_UPDATE, diskBytes: 5_368_709_120n },
+    });
 
-    // When the Worktrees manager screen is mounted
+    // When the Worktrees screen is mounted
     mountWorktrees(backend);
 
-    // Then that worktree flips to Cached and shows its formatted size
-    page.status(0).should("contain.text", "Cached");
-    page.row(0).should("contain.text", "500 MB");
+    // Then that worktree is first, showing its formatted size
+    page.rowName(0).should("have.text", "feat-a");
+    page.rowSize(0).should("have.text", "5 GB");
   });
 
-  it("re-subscribes with recalculate-all when Recalculate all is pressed", () => {
+  it("re-subscribes with recalculate-all when Refresh is pressed", () => {
     // Given a mounted screen whose first (lazy) subscription has opened
     const backend = aWorktreesBackend();
     mountWorktrees(backend);
-    page.status(0).should("contain.text", "None");
+    page.rowName(0).should("have.text", "feat-c");
 
-    // When the operator presses Recalculate all
-    page.recalculateAll().click();
+    // When the operator presses Refresh
+    page.refresh().click();
 
     // Then a StreamWorktreeStats subscription was opened with recalculate_all set
     cy.wrap(null).should(() => {
@@ -126,18 +130,20 @@ describe("Worktrees screen — streamed disk usage", () => {
     });
   });
 
-  it("requests calculation for a single worktree's path from its Calculate button", () => {
-    // Given a mounted screen showing the streamed worktrees
-    const backend = aWorktreesBackend();
-    mountWorktrees(backend);
-    page.status(0).should("contain.text", "None");
+  it("shows the size remembered from the last visit as soon as the screen opens", () => {
+    // Given a size remembered for the project from an earlier visit
+    cy.window().then((win) =>
+      win.localStorage.setItem(
+        "tddy.worktrees.sizes.proj-1",
+        JSON.stringify([{ path: CACHED_ROW.path, branch: "feature/c", diskBytes: "1288490189" }]),
+      ),
+    );
 
-    // When the first row's Calculate is pressed
-    page.calculateBtn(0).click();
+    // When the screen is mounted
+    mountWorktrees(aWorktreesBackend());
 
-    // Then CalculateWorktreeSize was invoked for exactly that worktree's path
-    cy.wrap(null).should(() => {
-      expect(backend.calculatedWorktreePaths).to.deep.equal([NONE_ROW.path]);
-    });
+    // Then the worktree is listed with that size
+    page.rowName(0).should("have.text", "feat-c");
+    page.rowSize(0).should("have.text", "1.2 GB");
   });
 });
