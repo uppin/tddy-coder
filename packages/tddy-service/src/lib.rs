@@ -27,6 +27,7 @@ pub mod service_acp;
 pub mod service_coordinates;
 pub mod session_activity;
 pub mod session_agents;
+pub mod subagent_conversation_replay;
 pub mod terminal_service;
 pub mod token_service;
 pub mod tonic_status;

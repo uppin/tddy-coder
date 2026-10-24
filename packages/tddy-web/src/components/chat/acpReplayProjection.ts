@@ -56,6 +56,16 @@ function appendAgentMessageChunk(
   ctx.merger.finalize(entries, at);
 }
 
+/** The `tool_call_id` prefix of a session transcript's subagent-conversation entry
+ *  (`tddy_service::subagent_conversation_replay::SUBAGENT_TOOL_CALL_PREFIX`). */
+export const SUBAGENT_TOOL_CALL_PREFIX = "subagent:";
+
+/** The conversation a `tool_call_id` names, when it is a subagent-conversation entry's; else `null`. */
+export function subagentConversationIdOf(_toolCallId: string): string | null {
+  // TODO(conversation-bubble): implement
+  return null;
+}
+
 /** `tool_call`: a tool entry carrying the server-enriched `title` and a coarse status, coalesced by
  *  `tool_call_id` so a call refined from running to completed keeps one row. */
 function appendToolCall(

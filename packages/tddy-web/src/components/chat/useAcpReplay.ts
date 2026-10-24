@@ -75,6 +75,9 @@ export function useAcpReplay(args: {
   sessionId: string;
   sessionToken: string;
   client: Client<typeof ActivityService>;
+  /** A subagent conversation of the session: replay its own transcript instead of the session's.
+   *  Unset ⇒ the session's. */
+  conversationId?: string;
 }): UseAcpReplayResult {
   const { sessionId, sessionToken, client } = args;
 

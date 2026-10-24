@@ -26,7 +26,7 @@ type AppModeCase = AppModeProto["variant"]["case"];
 export interface ChatMessage {
   key: string;
   text: string;
-  from: "user" | "agent" | "goal" | "activity" | "tool";
+  from: "user" | "agent" | "goal" | "activity" | "tool" | "subagent";
   /** Coarse status of a `from: "tool"` entry, rendered as a marker on the read-only transcript.
    *  Unset for non-tool bubbles. */
   toolStatus?: "running" | "completed" | "error";
@@ -34,6 +34,9 @@ export interface ChatMessage {
    *  metadata only, so the detail dialog names the call by this id to fetch its bodies through
    *  `SessionService.GetAcpToolCallDetail`. Unset for non-tool bubbles. */
   toolCallId?: string;
+  /** The subagent conversation a `from: "subagent"` entry stands for — the one bubble the session's
+   *  transcript shows for all of the main agent's `subagent_*` calls on it. Unset otherwise. */
+  conversationId?: string;
   /** Epoch ms when this message was first shown — used for the exported transcript timeline. */
   at: number;
 }

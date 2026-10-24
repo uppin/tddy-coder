@@ -525,6 +525,7 @@ async fn stream_acp_replay_replays_the_persisted_snapshot() {
             daemon_instance_id: String::new(),
             mode: StreamMode::SnapshotThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -562,6 +563,7 @@ async fn stream_acp_replay_delivers_a_live_frame_after_the_snapshot() {
             daemon_instance_id: String::new(),
             mode: StreamMode::SnapshotThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -631,6 +633,7 @@ async fn stream_acp_replay_count_then_live_broadcasts_the_activity_count() {
             daemon_instance_id: String::new(),
             mode: StreamMode::CountThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -676,6 +679,7 @@ async fn stream_acp_replay_count_then_live_counts_a_tool_call_once_across_its_tw
             daemon_instance_id: String::new(),
             mode: StreamMode::CountThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -727,6 +731,7 @@ async fn stream_acp_replay_replays_persisted_agent_activity_when_no_acp_transcri
             daemon_instance_id: String::new(),
             mode: StreamMode::SnapshotThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -767,6 +772,7 @@ async fn stream_acp_replay_count_then_live_counts_persisted_agent_activity_rows(
             daemon_instance_id: String::new(),
             mode: StreamMode::CountThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -820,6 +826,7 @@ async fn stream_acp_replay_snapshot_frames_omit_tool_bodies() {
             daemon_instance_id: String::new(),
             mode: StreamMode::SnapshotThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -853,6 +860,7 @@ async fn stream_acp_replay_live_frames_omit_tool_bodies() {
             daemon_instance_id: String::new(),
             mode: StreamMode::LiveOnly as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -893,6 +901,7 @@ async fn get_acp_tool_call_detail_returns_the_full_tool_bodies() {
             session_id: session_id.to_string(),
             daemon_instance_id: String::new(),
             tool_call_id: "call-a".to_string(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("detail lookup should succeed")
@@ -932,6 +941,7 @@ async fn get_acp_tool_call_detail_is_not_found_for_an_unknown_tool_call_id() {
             session_id: session_id.to_string(),
             daemon_instance_id: String::new(),
             tool_call_id: "does-not-exist".to_string(),
+            conversation_id: String::new(),
         }))
         .await
         .expect_err("an unknown tool_call_id should be an error");
@@ -978,6 +988,7 @@ async fn stream_acp_replay_in_tail_mode_replays_only_the_newest_page() {
             daemon_instance_id: String::new(),
             mode: StreamMode::TailThenLive as i32,
             page_size: 2,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -1013,6 +1024,7 @@ async fn stream_acp_replay_tail_frames_carry_their_absolute_transcript_position(
             daemon_instance_id: String::new(),
             mode: StreamMode::TailThenLive as i32,
             page_size: 2,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -1043,6 +1055,7 @@ async fn get_acp_replay_page_serves_the_frames_before_the_cursor() {
             daemon_instance_id: String::new(),
             before_seq: 3,
             page_size: 2,
+            conversation_id: String::new(),
         }))
         .await
         .expect("page lookup should succeed")
@@ -1089,6 +1102,7 @@ async fn get_acp_replay_page_strips_tool_bodies_like_the_replay_stream_does() {
             daemon_instance_id: String::new(),
             before_seq: 1,
             page_size: 10,
+            conversation_id: String::new(),
         }))
         .await
         .expect("page lookup should succeed")
@@ -1136,6 +1150,7 @@ async fn stream_acp_replay_gives_a_tool_calls_terminal_record_the_position_of_it
             daemon_instance_id: String::new(),
             mode: StreamMode::TailThenLive as i32,
             page_size: 2,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -1173,6 +1188,7 @@ async fn stream_acp_replay_gives_the_call_after_a_refinement_the_next_position()
             daemon_instance_id: String::new(),
             mode: StreamMode::TailThenLive as i32,
             page_size: 2,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -1213,6 +1229,7 @@ async fn stream_acp_replay_live_only_frames_are_numbered_from_the_recorded_trans
             daemon_instance_id: String::new(),
             mode: StreamMode::LiveOnly as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
@@ -1254,6 +1271,7 @@ async fn stream_acp_replay_gives_a_live_terminal_record_the_position_its_call_ho
             daemon_instance_id: String::new(),
             mode: StreamMode::SnapshotThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         }))
         .await
         .unwrap()
