@@ -34,6 +34,16 @@ fn main() -> anyhow::Result<()> {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
+    // Decided once, here, from how this process was started — before the logger or tokio start
+    // any thread, and never re-read from config. A process `tddy-supervisor` started spawns through
+    // it; any other forks a worker below. The socket variable is removed from this process's
+    // environment now, while it is single-threaded, so no child the daemon spawns itself inherits it.
+    let spawn_backend =
+        tddy_spawn::supervisor_client::SpawnBackendChoice::adopt_from_environment(|key| {
+            std::env::var_os(key)
+        })
+        .consume_from_process_environment();
+
     let args = Args::parse();
     let config_path = args
         .config
@@ -50,12 +60,6 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("tddy-daemon loaded config from {}", config_path.display());
 
-    // Decided once, here, from how this process was started — before tokio, and never re-read from
-    // config. A process `tddy-supervisor` started spawns through it; any other forks a worker below.
-    let spawn_backend =
-        tddy_spawn::supervisor_client::SpawnBackendChoice::from_environment(|key| {
-            std::env::var_os(key)
-        });
     // Fork spawn worker before tokio — fork() from multi-threaded process can deadlock. Skipped
     // entirely on a supervised host: there, `tddy-supervisor` spawns sessions, and a worker the
     // daemon could reach for would be a way to spawn one with less isolation than it asked for.

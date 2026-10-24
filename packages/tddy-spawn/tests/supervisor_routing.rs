@@ -48,6 +48,32 @@ fn a_daemon_not_told_of_a_supervisor_forks_its_own_worker() {
     );
 }
 
+#[test]
+fn a_supervised_daemon_consumes_the_socket_variable_so_its_own_children_do_not_inherit_it() {
+    // When
+    let adopted = SpawnBackendChoice::adopt_from_environment(an_environment_with(
+        "TDDY_SUPERVISOR_SOCKET",
+        "/run/tddy-supervisor.sock",
+    ));
+
+    // Then
+    assert_eq!(
+        adopted.choice,
+        SpawnBackendChoice::Supervisor {
+            socket_path: PathBuf::from("/run/tddy-supervisor.sock")
+        }
+    );
+    assert_eq!(adopted.consumed_env, vec!["TDDY_SUPERVISOR_SOCKET"]);
+}
+
+#[test]
+fn an_unsupervised_daemon_consumes_nothing_from_its_environment() {
+    let adopted = SpawnBackendChoice::adopt_from_environment(an_empty_environment);
+
+    assert_eq!(adopted.choice, SpawnBackendChoice::ForkedWorker);
+    assert!(adopted.consumed_env.is_empty());
+}
+
 #[tokio::test]
 async fn fails_to_reach_a_declared_supervisor_whose_socket_is_absent() {
     // Given a host configured for a supervisor that is not running.

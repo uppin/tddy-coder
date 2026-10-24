@@ -43,6 +43,15 @@ pub fn run() -> anyhow::Result<()> {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
+    // Decided before anything starts a thread, from how this process was started; the socket
+    // variable is removed from this process's environment here, while that is still sound, so no
+    // child the hosted daemon spawns itself inherits it.
+    let spawn_backend =
+        tddy_spawn::supervisor_client::SpawnBackendChoice::adopt_from_environment(|key| {
+            std::env::var_os(key)
+        })
+        .consume_from_process_environment();
+
     let source = config_source::resolve()?;
     let config = source.load_config()?;
 
@@ -57,14 +66,9 @@ pub fn run() -> anyhow::Result<()> {
         source.workspace_root.display()
     );
 
-    // Decided before anything starts a runtime, from how this process was started. Fork the spawn
-    // worker before anything starts a runtime: `fork` from a multi-threaded process can deadlock,
-    // and every line below this one may touch Tauri's. Skipped on a supervised host, where
-    // `tddy-supervisor` spawns sessions instead.
-    let spawn_backend =
-        tddy_spawn::supervisor_client::SpawnBackendChoice::from_environment(|key| {
-            std::env::var_os(key)
-        });
+    // Fork the spawn worker before anything starts a runtime: `fork` from a multi-threaded process
+    // can deadlock, and every line below this one may touch Tauri's. Skipped on a supervised host,
+    // where `tddy-supervisor` spawns sessions instead.
     let spawn_client = tddy_spawn::supervisor_client::spawn_worker_for(&spawn_backend)?;
     #[cfg(unix)]
     if let Some((_, worker_pid)) = spawn_client.as_ref() {

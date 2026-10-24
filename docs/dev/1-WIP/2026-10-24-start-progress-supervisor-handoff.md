@@ -188,11 +188,7 @@ after the `env:` overlay). `packages/tddy-daemon/docs/daemon-endpoint.md` still 
 
 ## Technical Debt & Production Readiness
 
-- Children the daemon spawns itself (not through `tddy-supervisor`) inherit the daemon's environment,
-  so they can read `TDDY_SUPERVISOR_SOCKET`. `ChildEnvironment` is the only place the variable is set
-  or stripped, so this path is not covered by it. The socket is reachable only by `tddy-clients`
-  members and the daemon's user is already one, so this gives no new capability. Whether to clear it
-  on those spawns is a decision for the developer.
+- None open. The inherited-socket gap found at green is closed (see Decisions).
 
 ## Decisions & Trade-offs
 
@@ -205,6 +201,14 @@ after the `env:` overlay). `packages/tddy-daemon/docs/daemon-endpoint.md` still 
 - **The socket travels in the `Inherited` variant** (`EnvironmentBase::Inherited { supervisor_socket }`),
   not in a separate argument. A session plan has no field that could carry it, so "only a declared
   managed service is told" is a type fact, not a convention.
+
+- **The daemon consumes the socket variable.** `SpawnBackendChoice::adopt_from_environment` returns
+  the choice plus the variables it consumed (`AdoptedSpawnBackend`); `tddy-daemon` `main` and
+  `tddy-desktop` `run` call `consume_from_process_environment()` as their first act after `SIGPIPE`,
+  before the logger, config load or any runtime starts a thread, so `std::env::remove_var` is sound.
+  Children the daemon spawns itself therefore never inherit `TDDY_SUPERVISOR_SOCKET`. The pure half is
+  pinned by `supervisor_routing.rs` (`a_supervised_daemon_consumes_the_socket_variable_…`,
+  `an_unsupervised_daemon_consumes_nothing_…`) without mutating a shared test binary's environment.
 
 ## Refactoring Needed
 ### From /validate-changes
