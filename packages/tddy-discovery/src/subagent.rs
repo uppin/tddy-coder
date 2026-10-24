@@ -170,6 +170,17 @@ impl std::fmt::Display for SubagentError {
 
 impl std::error::Error for SubagentError {}
 
+impl SubagentError {
+    /// A request option that acts on an OpenAI-loop transcript, sent to a coding agent — which
+    /// keeps its own history and exposes none of it to rewind, correct or condition on.
+    pub fn unsupported_by_coding_agent(option: &str) -> Self {
+        SubagentError(format!(
+            "`{option}` is not supported by a coding agent: it acts on a model-loop transcript, and a \
+             coding agent keeps its own"
+        ))
+    }
+}
+
 impl From<String> for SubagentError {
     fn from(message: String) -> Self {
         SubagentError(message)

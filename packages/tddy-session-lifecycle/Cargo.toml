@@ -37,6 +37,7 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `agent-client-protocol` and `tddy-acp` left with it.
 tddy-model-registry = { path = "../tddy-model-registry" }
 tddy-discovery = { path = "../tddy-discovery" }
+tddy-coding-subagent = { path = "../tddy-coding-subagent" }
 tddy-github = { path = "../tddy-github" }
 # Defines `PrStackHandler`, which session start names for the stack paths it serves.
 tddy-pr-stack = { path = "../tddy-pr-stack" }

@@ -56,6 +56,8 @@ fn an_agent_this_daemon_runs() -> SessionAgentRecord {
         replaces: Vec::new(),
         tools: vec!["Read".to_string(), "Grep".to_string()],
         codebase_session_id: None,
+        kind: Default::default(),
+        harness: None,
     }
 }
 

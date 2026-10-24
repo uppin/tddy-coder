@@ -377,6 +377,8 @@ fn an_agent_withdrawing(tool: &str) -> SessionAgentRecord {
         replaces: vec![tool.to_string()],
         tools: vec![tool.to_string()],
         codebase_session_id: None,
+        kind: Default::default(),
+        harness: None,
     }
 }
 

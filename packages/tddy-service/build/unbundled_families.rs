@@ -187,7 +187,8 @@ pub(super) fn compile_unbundled_families_5() -> Result<(), Box<dyn std::error::E
                 format!(".{package}"),
                 format!("crate::proto::{}", rust_module(package)),
             );
-        if package == "pr_stack" {
+        // `catalog` reaches `types.AgentKind` through `SubagentInfo`, `pr_stack` its own shared types.
+        if package == "pr_stack" || package == "catalog" {
             tonic = tonic.extern_path(".types", "crate::proto::types");
         }
         tonic.compile_protos(&[proto], &["proto"])?;

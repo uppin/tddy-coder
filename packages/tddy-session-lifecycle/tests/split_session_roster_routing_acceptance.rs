@@ -260,6 +260,8 @@ fn an_attached_explorer() -> SessionAgentRecord {
         replaces: Vec::new(),
         tools: Vec::new(),
         codebase_session_id: None,
+        kind: Default::default(),
+        harness: None,
     }
 }
 

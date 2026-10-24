@@ -929,6 +929,8 @@ mod tests {
             clone_error: String::new(),
             status: 0,
             last_activity: None,
+            kind: 0,
+            harness: String::new(),
         }
     }
 

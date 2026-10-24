@@ -137,4 +137,29 @@ pub struct SessionAgentRecord {
     /// after a restart has to be able to name the checkout it deletes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codebase_session_id: Option<String>,
+    /// What runs this agent's turns. A record written before kinds existed reads as
+    /// [`AgentKindRecord::Model`], which is what it was.
+    #[serde(default, skip_serializing_if = "AgentKindRecord::is_model")]
+    pub kind: AgentKindRecord,
+    /// The harness of a coding-agent entry (`claude-acp`, `codex-acp`, `opencode`, …); `None` for a
+    /// model entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+}
+
+/// What runs a roster agent's turns, as persisted in `.session.yaml`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentKindRecord {
+    /// An OpenAI-loop definition or registry assistant.
+    #[default]
+    Model,
+    /// A coding agent the daemon launches.
+    CodingAgent,
+}
+
+impl AgentKindRecord {
+    fn is_model(&self) -> bool {
+        *self == Self::Model
+    }
 }

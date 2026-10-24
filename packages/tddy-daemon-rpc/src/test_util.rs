@@ -113,6 +113,20 @@ pub fn test_service(sessions_base: PathBuf) -> TestDaemon {
     daemon
 }
 
+/// [`test_service`] with `launcher` starting every coding-agent subagent — a test injects one that
+/// records each launch and points it at `tddy-acp-stub`.
+pub fn test_service_with_coding_agent_launcher(
+    sessions_base: PathBuf,
+    launcher: Arc<dyn tddy_coding_subagent::CodingAgentLauncher>,
+) -> TestDaemon {
+    let daemon = TestDaemon::from_host(
+        tddy_session_lifecycle::test_util::test_host(sessions_base)
+            .with_coding_agent_launcher(launcher),
+    );
+    daemon.as_arc().install_sandbox_rpc_bridge();
+    daemon
+}
+
 impl Deref for TestDaemon {
     type Target = tddy_session_lifecycle::test_util::TestDaemon;
 
