@@ -25,12 +25,13 @@ use async_trait::async_trait;
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session_agents_svc::{
-    AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
-    CancelAgentConversationResponse, DetachSessionAgentRequest, ListSessionAgentsRequest,
-    OpenAgentConversationRequest, OpenAgentConversationResponse, PromptAgentConversationRequest,
-    ReportAgentCloneStateRequest, ReportAgentCloneStateResponse,
-    ReportAgentConversationStateRequest, ReportAgentConversationStateResponse,
-    ResumeAgentConversationRequest, SessionAgentRoster, StreamSessionAgentsRequest,
+    AgentConversationChunk, AnswerAgentPermissionRequest, AnswerAgentPermissionResponse,
+    AttachSessionAgentRequest, CancelAgentConversationRequest, CancelAgentConversationResponse,
+    DetachSessionAgentRequest, ListSessionAgentsRequest, OpenAgentConversationRequest,
+    OpenAgentConversationResponse, PromptAgentConversationRequest, ReportAgentCloneStateRequest,
+    ReportAgentCloneStateResponse, ReportAgentConversationStateRequest,
+    ReportAgentConversationStateResponse, ResumeAgentConversationRequest, SessionAgentRoster,
+    StreamSessionAgentsRequest,
 };
 use tddy_worktree_service::stream::MpscResultStream;
 
@@ -1164,17 +1165,38 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
     }
 
     /// Answer a coding subagent's permission request the main agent deferred to the user.
+    ///
+    /// Authenticated first, as the neighbouring handlers are, and the conversation must be open on
+    /// the session the request names: a conversation id is host-wide, so an id another session opened
+    /// is refused as not held rather than answered.
+    ///
+    /// The success path is not wired yet. The answer has to reach the session's parked requests, but
+    /// a deferred turn keeps the session behind its lock and the conversation table holds it only as
+    /// a `Box<dyn SubagentSession>`, with no route to the parked requests (see
+    /// `CodingAgentSession::cancel_handle`). That route is the permission-yield wiring of #722.
     async fn answer_agent_permission(
         &self,
-        _request: Request<tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest>,
-    ) -> Result<
-        Response<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse>,
-        Status,
-    > {
-        // TODO(web-approvals): implement
-        Err(Status::unimplemented(
-            "TODO(web-approvals): AnswerAgentPermission is not implemented",
-        ))
+        request: Request<AnswerAgentPermissionRequest>,
+    ) -> Result<Response<AnswerAgentPermissionResponse>, Status> {
+        let req = request.into_inner();
+        self.session_dir(&req.session_token, &req.session_id)?;
+        if !self
+            .ports
+            .conversations
+            .is_open_on(&req.session_id, &req.conversation_id)
+            .await
+        {
+            return Err(Status::not_found(format!(
+                "conversation '{}' is not open on session '{}'",
+                req.conversation_id, req.session_id
+            )));
+        }
+        // TODO(web-approvals): blocked on the permission-yield handle wiring — decision pending
+        Err(Status::unimplemented(format!(
+            "answering a permission request of conversation '{}' is not yet wired: the conversation \
+             table cannot reach the session's parked permission requests (the permission-yield handle, #722)",
+            req.conversation_id
+        )))
     }
 }
 

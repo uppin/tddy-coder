@@ -305,6 +305,9 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         self.local.report_agent_conversation_state(request).await
     }
 
+    /// Routed BEFORE session lookup, as the conversation RPCs are: the conversation is held by the
+    /// daemon running its loop, and an answer served anywhere else would report "not open" for a
+    /// request that is pending.
     async fn answer_agent_permission(
         &self,
         request: Request<tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest>,
@@ -313,7 +316,19 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         Status,
     > {
         self.record_activity();
-        // TODO(web-approvals): implement — route to the peer named by `daemon_instance_id`
+        let req = request.get_ref();
+        if let Some(answered) = self
+            .connection
+            .rpc_served_by_peer::<_, tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse>(
+                SESSION_AGENT_SERVICE,
+                "AnswerAgentPermission",
+                &req.daemon_instance_id,
+                req,
+            )
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
         self.local.answer_agent_permission(request).await
     }
 }

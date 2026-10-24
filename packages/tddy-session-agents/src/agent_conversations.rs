@@ -51,6 +51,15 @@ impl AgentConversation {
         }
     }
 
+    /// The session this conversation is open on, whichever daemon runs its loop.
+    #[must_use]
+    pub fn session_id(&self) -> &str {
+        match self {
+            AgentConversation::Local { session_id, .. }
+            | AgentConversation::Remote { session_id, .. } => session_id,
+        }
+    }
+
     /// Whether this conversation is with `agent_id` on `session_id`, whichever daemon runs its
     /// loop.
     #[must_use]
@@ -143,6 +152,17 @@ impl OpenAgentConversations {
                 agent_id.clone(),
             )),
         }
+    }
+
+    /// Whether `conversation_id` is open on `session_id`. The map is host-wide, so the session a
+    /// conversation was opened on is checked here too: a conversation another session opened is not
+    /// one this session may act on. Takes only the map's lock, never a session's.
+    pub async fn is_open_on(&self, session_id: &str, conversation_id: &str) -> bool {
+        self.open
+            .lock()
+            .await
+            .get(conversation_id)
+            .is_some_and(|conversation| conversation.session_id() == session_id)
     }
 
     /// Forget `conversation_id`, handing back what was open under it.
