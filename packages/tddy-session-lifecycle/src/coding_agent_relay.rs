@@ -83,7 +83,7 @@ pub async fn start_relayed(
         .spawner
         .spawn_relayed(request)
         .await
-        .map_err(|e| refusal(os_user, &command.program, e))?;
+        .map_err(|e| relay_refusal_error(os_user, &command.program, e))?;
     let (stream, _) = tokio::time::timeout(ACCEPT_DEADLINE, socket.listener.accept())
         .await
         .map_err(|_| {
@@ -98,7 +98,7 @@ pub async fn start_relayed(
         .map_err(|e| SubagentError::from(format!("taking the relay stream: {e}")))
 }
 
-fn refusal(os_user: &str, program: &Path, error: SupervisorError) -> SubagentError {
+fn relay_refusal_error(os_user: &str, program: &Path, error: SupervisorError) -> SubagentError {
     SubagentError::from(match error {
         SupervisorError::Denied => format!(
             "tddy-supervisor refused to run {} as '{os_user}' (its refusals are opaque): its \
@@ -230,21 +230,75 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn asks_the_supervisor_for_the_user_the_harness_and_a_socket_it_listens_on() {
-        let (endpoint, supervisor, _dir) = an_endpoint(Ok(()));
+    /// The one request the supervisor saw for a relayed start of [`a_command`] as `dev`.
+    async fn the_request_for_dev() -> (SpawnRelayedRequest, RelayEndpoint, tempfile::TempDir) {
+        let (endpoint, supervisor, dir) = an_endpoint(Ok(()));
+        let _stream = start_relayed(&endpoint, "dev", &a_command())
+            .await
+            .expect("relayed");
+        let seen = supervisor.seen.lock().expect("seen")[0].clone();
+        (seen, endpoint, dir)
+    }
 
+    async fn denied_by_the_supervisor() -> String {
+        let (endpoint, _supervisor, _dir) = an_endpoint(Err(SupervisorError::Denied));
+        start_relayed(&endpoint, "dev", &a_command())
+            .await
+            .expect_err("refused")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn asks_the_supervisor_for_the_session_user() {
+        // When
+        let (seen, _endpoint, _dir) = the_request_for_dev().await;
+
+        // Then
+        assert_eq!(seen.os_user, "dev");
+    }
+
+    #[tokio::test]
+    async fn asks_the_supervisor_for_the_harness_with_its_arguments() {
+        // When
+        let (seen, _endpoint, _dir) = the_request_for_dev().await;
+
+        // Then
+        assert_eq!(
+            (seen.tool_path, seen.args),
+            (PathBuf::from("/usr/bin/opencode"), vec!["acp".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn asks_the_supervisor_for_the_launchs_environment_and_directory() {
+        // When
+        let (seen, _endpoint, _dir) = the_request_for_dev().await;
+
+        // Then
+        assert_eq!(seen.env.get("K").map(String::as_str), Some("V"));
+        assert_eq!(seen.working_dir, Some(PathBuf::from("/work")));
+    }
+
+    #[tokio::test]
+    async fn asks_the_supervisor_to_connect_to_a_socket_in_the_daemons_own_directory() {
+        // When
+        let (seen, endpoint, _dir) = the_request_for_dev().await;
+
+        // Then
+        assert!(seen.relay_socket.starts_with(&endpoint.socket_dir));
+    }
+
+    #[tokio::test]
+    async fn the_agents_stdout_arrives_on_the_relayed_stream() {
+        // Given
+        let (endpoint, _supervisor, _dir) = an_endpoint(Ok(()));
+
+        // When
         let mut stream = start_relayed(&endpoint, "dev", &a_command())
             .await
             .expect("relayed");
 
-        let seen = supervisor.seen.lock().expect("seen")[0].clone();
-        assert_eq!(seen.os_user, "dev");
-        assert_eq!(seen.tool_path, PathBuf::from("/usr/bin/opencode"));
-        assert_eq!(seen.args, ["acp"]);
-        assert_eq!(seen.env.get("K").map(String::as_str), Some("V"));
-        assert_eq!(seen.working_dir, Some(PathBuf::from("/work")));
-        assert!(seen.relay_socket.starts_with(&endpoint.socket_dir));
+        // Then
         let mut received = [0u8; 14];
         stream.read_exact(&mut received).expect("the relayed bytes");
         assert_eq!(&received, b"from the agent");
@@ -252,44 +306,55 @@ mod tests {
 
     #[tokio::test]
     async fn the_socket_is_removed_once_the_supervisor_has_connected() {
-        let (endpoint, supervisor, _dir) = an_endpoint(Ok(()));
+        // When
+        let (seen, _endpoint, _dir) = the_request_for_dev().await;
 
-        let _stream = start_relayed(&endpoint, "dev", &a_command())
-            .await
-            .expect("relayed");
-
-        let path = supervisor.seen.lock().expect("seen")[0]
-            .relay_socket
-            .clone();
-        assert!(!path.exists());
+        // Then
+        assert!(!seen.relay_socket.exists());
     }
 
     #[tokio::test]
-    async fn the_supervisors_opaque_refusal_becomes_an_error_naming_what_to_configure() {
-        let (endpoint, _supervisor, _dir) = an_endpoint(Err(SupervisorError::Denied));
+    async fn the_supervisors_opaque_refusal_names_the_relay_tool_allowlist() {
+        // When
+        let refusal = denied_by_the_supervisor().await;
 
-        let refusal = start_relayed(&endpoint, "dev", &a_command())
-            .await
-            .expect_err("refused")
-            .to_string();
-
+        // Then
         assert!(refusal.contains("allowed_relay_tool_paths"), "{refusal}");
+    }
+
+    #[tokio::test]
+    async fn the_supervisors_opaque_refusal_names_the_session_user_allowlist() {
+        // When
+        let refusal = denied_by_the_supervisor().await;
+
+        // Then
         assert!(refusal.contains("allowed_session_users"), "{refusal}");
+    }
+
+    #[tokio::test]
+    async fn the_supervisors_opaque_refusal_names_the_environment_allowlist() {
+        // When
+        let refusal = denied_by_the_supervisor().await;
+
+        // Then
         assert!(refusal.contains("allowed_env_keys"), "{refusal}");
     }
 
     #[tokio::test]
     async fn a_relay_directory_left_open_to_others_is_narrowed_to_its_owner() {
         use std::os::unix::fs::PermissionsExt;
+        // Given
         let (endpoint, _supervisor, _dir) = an_endpoint(Ok(()));
         std::fs::create_dir_all(&endpoint.socket_dir).expect("pre-existing dir");
         std::fs::set_permissions(&endpoint.socket_dir, std::fs::Permissions::from_mode(0o777))
             .expect("open it up");
 
+        // When
         let _stream = start_relayed(&endpoint, "dev", &a_command())
             .await
             .expect("relayed");
 
+        // Then
         let mode = std::fs::metadata(&endpoint.socket_dir)
             .expect("dir")
             .permissions()
@@ -299,25 +364,37 @@ mod tests {
 
     #[tokio::test]
     async fn a_relay_directory_that_is_a_symlink_is_refused_before_asking() {
+        // Given
         let (endpoint, supervisor, dir) = an_endpoint(Ok(()));
         let elsewhere = dir.path().join("elsewhere");
         std::fs::create_dir(&elsewhere).expect("target");
         std::os::unix::fs::symlink(&elsewhere, &endpoint.socket_dir).expect("symlink");
 
+        // When
         let refusal = start_relayed(&endpoint, "dev", &a_command()).await;
 
+        // Then
         assert!(refusal.is_err());
         assert!(supervisor.seen.lock().expect("seen").is_empty());
     }
 
     #[tokio::test]
     async fn a_socket_path_too_long_for_a_unix_socket_is_refused_before_asking() {
+        // Given
         let (mut endpoint, supervisor, dir) = an_endpoint(Ok(()));
         endpoint.socket_dir = dir.path().join("x".repeat(120));
 
-        let refusal = start_relayed(&endpoint, "dev", &a_command()).await;
+        // When
+        let refusal = start_relayed(&endpoint, "dev", &a_command())
+            .await
+            .expect_err("refused")
+            .to_string();
 
-        assert!(refusal.is_err());
+        // Then
+        assert!(
+            refusal.contains("longer than a unix socket path may be"),
+            "{refusal}"
+        );
         assert!(supervisor.seen.lock().expect("seen").is_empty());
     }
 }

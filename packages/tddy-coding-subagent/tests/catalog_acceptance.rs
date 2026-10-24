@@ -91,19 +91,51 @@ fn profiles_come_before_allowed_agents() {
 }
 
 #[test]
-fn claude_and_opencode_can_withdraw_their_native_tools_and_codex_cannot() {
-    // When / Then
-    assert_eq!(
-        confinement_for("claude-acp"),
-        Confinement::WithdrawsNativeTools
-    );
-    assert_eq!(
-        confinement_for("opencode"),
-        Confinement::WithdrawsNativeTools
-    );
-    assert_eq!(confinement_for("codex-acp"), Confinement::CannotWithdraw);
-    assert_eq!(
-        confinement_for("some-new-harness"),
-        Confinement::CannotWithdraw
-    );
+fn a_profile_shadows_an_allowed_agent_of_the_same_name() {
+    // Given
+    let profiles = [a_profile("claude-acp", "claude-acp", "opus")];
+    let allowed = [("claude-acp".to_string(), Some("Claude (ACP)".to_string()))];
+
+    // When
+    let defs = coding_agent_defs(&profiles, &allowed);
+
+    // Then
+    assert_eq!(defs.len(), 1, "one def per name: {defs:?}");
+    assert_eq!(defs[0].label.as_deref(), Some("claude-acp label"));
+}
+
+#[test]
+fn claude_can_withdraw_its_native_tools() {
+    // When
+    let confinement = confinement_for("claude-acp");
+
+    // Then
+    assert_eq!(confinement, Confinement::WithdrawsNativeTools);
+}
+
+#[test]
+fn opencode_can_withdraw_its_native_tools() {
+    // When
+    let confinement = confinement_for("opencode");
+
+    // Then
+    assert_eq!(confinement, Confinement::WithdrawsNativeTools);
+}
+
+#[test]
+fn codex_cannot_withdraw_its_native_tools() {
+    // When
+    let confinement = confinement_for("codex-acp");
+
+    // Then
+    assert_eq!(confinement, Confinement::CannotWithdraw);
+}
+
+#[test]
+fn a_harness_nobody_proved_confinable_cannot_withdraw() {
+    // When
+    let confinement = confinement_for("some-new-harness");
+
+    // Then
+    assert_eq!(confinement, Confinement::CannotWithdraw);
 }

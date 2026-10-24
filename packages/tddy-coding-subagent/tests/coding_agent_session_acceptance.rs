@@ -16,9 +16,14 @@ use tddy_discovery::subagent::{StopReason, SubagentSession, TurnRequest};
 
 const TURN_DEADLINE: Duration = Duration::from_secs(10);
 
+/// `tddy-acp-stub` in the target directory cargo builds into: `CARGO_TARGET_DIR` when set (a
+/// relative one read from the workspace root), else the workspace's `target/`, as cargo itself does.
 fn stub_agent_path() -> PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    let stub = PathBuf::from(manifest_dir).join("../../target/debug/tddy-acp-stub");
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(|dir| workspace.join(dir))
+        .unwrap_or_else(|| workspace.join("target"));
+    let stub = target.join("debug/tddy-acp-stub");
     assert!(
         stub.exists(),
         "tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub"
@@ -86,6 +91,17 @@ impl ScriptedAgent {
 
     fn recorded(&self, event: &str) -> Vec<serde_json::Value> {
         recorded_events(&self.record_path(), event)
+    }
+
+    /// Wait until the agent has recorded `event`, failing past [`TURN_DEADLINE`].
+    async fn wait_for(&self, event: &str) {
+        tokio::time::timeout(TURN_DEADLINE, async {
+            while self.recorded(event).is_empty() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the agent recorded `{event}` in time"));
     }
 }
 
@@ -159,60 +175,96 @@ async fn each_tool_call_of_the_turn_is_one_message_descriptor() {
     assert_eq!(tools, [Some("Read"), Some("Edit")]);
 }
 
-#[tokio::test]
-#[serial]
-async fn a_loop_only_option_is_refused_naming_it() {
-    // Given
+/// Take `request` on a fresh session and return its refusal, asserting nothing was re-opened.
+async fn refusal_of(request: TurnRequest) -> String {
     let agent = a_coding_agent();
     let mut session = agent.start().await;
+
+    let refusal = session
+        .take_turn(request)
+        .await
+        .expect_err("a loop-only option is refused")
+        .to_string();
+
+    assert_eq!(agent.recorded("new_session").len(), 1, "nothing re-opened");
+    refusal
+}
+
+#[tokio::test]
+#[serial]
+async fn max_turns_is_refused_naming_it() {
+    // Given
+    let request = TurnRequest::prompting("Fix the parser").within_turns(3);
+
+    // When
+    let refusal = refusal_of(request).await;
+
+    // Then
+    assert!(refusal.contains("maxTurns"), "{refusal}");
+}
+
+#[tokio::test]
+#[serial]
+async fn yield_conditions_are_refused_naming_them() {
+    // Given
     let yield_on_shell: tddy_discovery::subagent::YieldCondition =
         serde_json::from_value(serde_json::json!({
             "tool": "SHELL",
             "when": { "argument": { "field": "command", "contains": "rm" } },
         }))
         .expect("a yield condition");
-    let loop_only = [
-        ("maxTurns", TurnRequest::prompting("x").within_turns(3)),
-        (
-            "yieldConditions",
-            TurnRequest::prompting("x").with_yield_conditions(vec![yield_on_shell]),
-        ),
-        (
-            "fromMessageId",
-            TurnRequest::resuming().from_message("m-1".into()),
-        ),
-        (
-            "correction",
-            TurnRequest::resuming().with_correction("try again"),
-        ),
-        (
-            "replacement",
-            TurnRequest::resuming().with_replacement(
-                serde_json::from_value(serde_json::json!({
-                    "tool": "READ", "arguments": {}, "result": "{}",
-                }))
-                .expect("a replacement"),
-            ),
-        ),
-    ];
+    let request =
+        TurnRequest::prompting("Fix the parser").with_yield_conditions(vec![yield_on_shell]);
 
-    for (option, request) in loop_only {
-        // When
-        let refusal = session
-            .take_turn(request)
-            .await
-            .expect_err("a loop-only option is refused");
+    // When
+    let refusal = refusal_of(request).await;
 
-        // Then
-        assert!(
-            refusal.to_string().contains(option),
-            "the refusal names `{option}`: {refusal}"
-        );
-    }
-    assert!(
-        agent.recorded("new_session").len() <= 1,
-        "nothing re-opened"
+    // Then
+    assert!(refusal.contains("yieldConditions"), "{refusal}");
+}
+
+#[tokio::test]
+#[serial]
+async fn a_rewind_point_is_refused_naming_it() {
+    // Given
+    let request = TurnRequest::resuming().from_message("m-1".into());
+
+    // When
+    let refusal = refusal_of(request).await;
+
+    // Then
+    assert!(refusal.contains("fromMessageId"), "{refusal}");
+}
+
+#[tokio::test]
+#[serial]
+async fn a_correction_is_refused_naming_it() {
+    // Given
+    let request = TurnRequest::resuming().with_correction("try again");
+
+    // When
+    let refusal = refusal_of(request).await;
+
+    // Then
+    assert!(refusal.contains("correction"), "{refusal}");
+}
+
+#[tokio::test]
+#[serial]
+async fn a_replacement_is_refused_naming_it() {
+    // Given
+    let request = TurnRequest::resuming().with_replacement(
+        serde_json::from_value(serde_json::json!({
+            "tool": "READ", "arguments": {}, "result": "{}",
+        }))
+        .expect("a replacement"),
     );
+
+    // When
+    let refusal = refusal_of(request).await;
+
+    // Then
+    assert!(refusal.contains("replacement"), "{refusal}");
 }
 
 #[tokio::test]
@@ -249,7 +301,10 @@ async fn a_permission_request_is_denied_and_recorded_in_the_turns_messages() {
 #[serial]
 async fn cancelling_a_running_turn_returns_cancelled() {
     // Given
+    // The turn asks one permission before it holds: its recorded outcome is the sign the turn is
+    // running inside the agent.
     let mut held = a_turn();
+    held["permission_requests"] = serde_json::json!([{ "title": "Run cargo test" }]);
     held["hold_until_cancel"] = serde_json::json!(true);
     let agent = a_coding_agent().answering(held);
     let mut session = agent.start().await;
@@ -257,7 +312,7 @@ async fn cancelling_a_running_turn_returns_cancelled() {
     // `subagent_prompt` holds the session.
     let cancel = session.cancel_handle();
     let turn = tokio::spawn(async move { session.prompt("Work").await });
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    agent.wait_for("permission_outcome").await;
 
     // When
     cancel.cancel().await.expect("cancel is sent");

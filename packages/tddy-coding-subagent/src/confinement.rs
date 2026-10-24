@@ -10,10 +10,16 @@
 //! - `claude-acp` (`claude-agent-acp`): `session/new` `_meta.claudeCode.options.disallowedTools`
 //!   names the native tools to withdraw (`Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, …); the
 //!   MCP tools of `tddy-tools --mcp` remain.
-//! - `opencode`: its config's `permission` / `tools` table (`OPENCODE_CONFIG_CONTENT`) disables the
-//!   built-in `bash`, `read`, `edit`, `write`, `glob`, `grep` tools.
+//! - `opencode`: its config's `tools` table, handed over inline as [`OPENCODE_CONFIG_CONTENT`]
+//!   ([`opencode_withdrawal_config`]), disables the built-in `bash`, `read`, `edit`, `write`, `glob`,
+//!   `grep` tools.
 //!
 //! `codex-acp` offers sandbox modes only, no tool withdrawal, so it is `CannotWithdraw`.
+
+use crate::catalog::{ACP_HARNESSES, CLAUDE_ACP, OPENCODE};
+
+/// The variable `opencode` reads inline JSON configuration from, merged over its other config.
+pub const OPENCODE_CONFIG_CONTENT: &str = "OPENCODE_CONFIG_CONTENT";
 
 /// What a harness can do about its native tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,9 +33,29 @@ pub enum Confinement {
 /// The confinement `harness` supports. Anything not proven is [`Confinement::CannotWithdraw`].
 pub fn confinement_for(harness: &str) -> Confinement {
     match harness {
-        "claude-acp" | "opencode" => Confinement::WithdrawsNativeTools,
+        CLAUDE_ACP | OPENCODE => Confinement::WithdrawsNativeTools,
         _ => Confinement::CannotWithdraw,
     }
+}
+
+/// Refuse `harness` for a managed session when its native tools cannot be withdrawn: the session's
+/// main agent has none, so a subagent must not either. `Err` is the reason, naming the harnesses
+/// that can be confined; the caller says which agent and which session it refused.
+pub fn refuse_unless_confinable(harness: &str, managed: bool) -> Result<(), String> {
+    if !managed || confinement_for(harness) == Confinement::WithdrawsNativeTools {
+        return Ok(());
+    }
+    let confinable: Vec<&str> = ACP_HARNESSES
+        .iter()
+        .copied()
+        .filter(|candidate| confinement_for(candidate) == Confinement::WithdrawsNativeTools)
+        .collect();
+    Err(format!(
+        "the '{harness}' harness's native file-system and shell tools cannot be withdrawn, and a \
+         managed session's main agent has none, so its subagent must not either: attach a coding \
+         agent on a harness that can be confined ({}) or a model agent",
+        confinable.join(", ")
+    ))
 }
 
 /// The native tools a confined coding agent loses: Claude's own file-system and shell tools. The
@@ -55,7 +81,7 @@ const OPENCODE_NATIVE_TOOLS: &[&str] = &[
 ];
 
 /// The `_meta` a `session/new` of `harness` carries to withdraw its native tools; `None` when the
-/// harness withdraws them another way (see [`withdrawal_env`]) or cannot.
+/// harness withdraws them another way (see [`opencode_withdrawal_config`]) or cannot.
 ///
 /// `claude-acp`: `claude-agent-acp` merges `_meta.claudeCode.options` into the Claude Code SDK
 /// options, whose `disallowedTools` removes a tool outright. DOCUMENTED, not verified against a live
@@ -63,7 +89,7 @@ const OPENCODE_NATIVE_TOOLS: &[&str] = &[
 pub fn withdrawal_session_meta(
     harness: &str,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
-    if harness != "claude-acp" {
+    if harness != CLAUDE_ACP {
         return None;
     }
     let mut meta = serde_json::Map::new();
@@ -74,49 +100,110 @@ pub fn withdrawal_session_meta(
     Some(meta)
 }
 
-/// The environment that withdraws `harness`'s native tools; empty when it uses [`withdrawal_session_meta`]
-/// or cannot.
+/// The inline OpenCode config ([`OPENCODE_CONFIG_CONTENT`]) that withdraws `harness`'s native
+/// tools; `None` when the harness withdraws them through [`withdrawal_session_meta`] or cannot.
 ///
 /// `opencode`: `OPENCODE_CONFIG_CONTENT` is inline JSON config merged over the others, and its
-/// `tools` table switches built-in tools off. DOCUMENTED, not verified against a live OpenCode.
-pub fn withdrawal_env(harness: &str) -> Vec<(String, String)> {
-    if harness != "opencode" {
-        return Vec::new();
+/// `tools` table switches built-in tools off. The launcher merges this into whatever inline config
+/// the provider route already set. DOCUMENTED, not verified against a live OpenCode.
+pub fn opencode_withdrawal_config(harness: &str) -> Option<serde_json::Value> {
+    if harness != OPENCODE {
+        return None;
     }
     let tools: serde_json::Map<String, serde_json::Value> = OPENCODE_NATIVE_TOOLS
         .iter()
         .map(|tool| ((*tool).to_string(), serde_json::Value::Bool(false)))
         .collect();
-    vec![(
-        "OPENCODE_CONFIG_CONTENT".to_string(),
-        serde_json::json!({ "tools": tools }).to_string(),
-    )]
+    Some(serde_json::json!({ "tools": tools }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::CODEX_ACP;
 
     #[test]
     fn claude_withdraws_its_native_tools_through_session_meta() {
-        let meta = withdrawal_session_meta("claude-acp").expect("meta");
+        // When
+        let meta = withdrawal_session_meta(CLAUDE_ACP).expect("meta");
+
+        // Then
         let tools = &meta["claudeCode"]["options"]["disallowedTools"];
         assert!(tools.as_array().expect("array").iter().any(|t| t == "Bash"));
-        assert!(withdrawal_env("claude-acp").is_empty());
     }
 
     #[test]
-    fn opencode_withdraws_its_native_tools_through_config_content() {
-        let env = withdrawal_env("opencode");
-        let config: serde_json::Value = serde_json::from_str(&env[0].1).expect("JSON");
-        assert_eq!(env[0].0, "OPENCODE_CONFIG_CONTENT");
+    fn claude_needs_no_inline_opencode_config() {
+        // When
+        let config = opencode_withdrawal_config(CLAUDE_ACP);
+
+        // Then
+        assert_eq!(config, None);
+    }
+
+    #[test]
+    fn opencode_withdraws_its_native_tools_through_inline_config() {
+        // When
+        let config = opencode_withdrawal_config(OPENCODE).expect("config");
+
+        // Then
         assert_eq!(config["tools"]["bash"], false);
-        assert!(withdrawal_session_meta("opencode").is_none());
     }
 
     #[test]
-    fn a_harness_that_cannot_withdraw_gets_nothing() {
-        assert!(withdrawal_session_meta("codex-acp").is_none());
-        assert!(withdrawal_env("codex-acp").is_empty());
+    fn opencode_needs_no_session_meta() {
+        // When
+        let meta = withdrawal_session_meta(OPENCODE);
+
+        // Then
+        assert!(meta.is_none());
+    }
+
+    #[test]
+    fn a_harness_that_cannot_withdraw_gets_no_session_meta() {
+        // When
+        let meta = withdrawal_session_meta(CODEX_ACP);
+
+        // Then
+        assert!(meta.is_none());
+    }
+
+    #[test]
+    fn a_harness_that_cannot_withdraw_gets_no_inline_config() {
+        // When
+        let config = opencode_withdrawal_config(CODEX_ACP);
+
+        // Then
+        assert_eq!(config, None);
+    }
+
+    #[test]
+    fn an_unconfinable_harness_is_admitted_to_an_unmanaged_session() {
+        // When
+        let admitted = refuse_unless_confinable(CODEX_ACP, false);
+
+        // Then
+        assert_eq!(admitted, Ok(()));
+    }
+
+    #[test]
+    fn a_confinable_harness_is_admitted_to_a_managed_session() {
+        // When
+        let admitted = refuse_unless_confinable(OPENCODE, true);
+
+        // Then
+        assert_eq!(admitted, Ok(()));
+    }
+
+    #[test]
+    fn an_unconfinable_harness_is_refused_in_a_managed_session_naming_the_confinable_ones() {
+        // When
+        let refusal = refuse_unless_confinable(CODEX_ACP, true).expect_err("refused");
+
+        // Then
+        assert!(
+            refusal.contains("'codex-acp'") && refusal.contains("(claude-acp, opencode)"),
+            "{refusal}"
+        );
     }
 }

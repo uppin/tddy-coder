@@ -43,7 +43,8 @@ pub use result_summary::{summarize, ResultSummary, SUMMARY_FIRST_LINE_CHARS};
 pub use tddy_subagent_worktree::{FileCounts, LineCounts, WorktreeChange};
 pub use tool_arguments::{validate_tool_arguments, ArgumentProblem, ArgumentViolation};
 pub use transcript::{
-    MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor, MESSAGE_PREVIEW_CHARS,
+    preview_of, MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor,
+    MESSAGE_PREVIEW_CHARS,
 };
 pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
 pub use worktree_reset::{ResetTarget, WorktreeReset, WorktreeResetPort};

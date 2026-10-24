@@ -16,10 +16,12 @@ use futures_util::StreamExt;
 use serial_test::serial;
 use tddy_coding_subagent::{CodingAgentLaunch, CodingAgentLauncher};
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::AcpAgentCommand;
 use tddy_core::SessionMetadata;
+use tddy_core::{AcpAgentCommand, McpServerSpec};
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_daemon_rpc::test_util::{test_service_with_coding_agent_launcher, TestDaemon};
+use tddy_daemon_rpc::test_util::{
+    test_service, test_service_with_coding_agent_launcher, TestDaemon,
+};
 use tddy_discovery::subagent::SubagentError;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest, SubagentInfo};
@@ -28,13 +30,19 @@ use tddy_service::proto::session_agents_svc::{
     PromptAgentConversationRequest, SessionAgentService as _,
 };
 use tddy_service::proto::types::AgentKind;
+use tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
 const TURN_DEADLINE: Duration = Duration::from_secs(10);
 
+/// `tddy-acp-stub` in the target directory cargo builds into: `CARGO_TARGET_DIR` when set (a
+/// relative one read from the workspace root), else the workspace's `target/`, as cargo itself does.
 fn stub_agent_path() -> PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    let stub = PathBuf::from(manifest_dir).join("../../target/debug/tddy-acp-stub");
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(|dir| workspace.join(dir))
+        .unwrap_or_else(|| workspace.join("target"));
+    let stub = target.join("debug/tddy-acp-stub");
     assert!(
         stub.exists(),
         "tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub"
@@ -47,10 +55,19 @@ fn stub_agent_path() -> PathBuf {
 // ---------------------------------------------------------------------------
 
 /// Records every launch and answers it with `tddy-acp-stub`, scripted and recording into `dir`.
+///
+/// The MCP servers come from the daemon's own launcher (`DaemonCodingAgentLauncher`), whose tool
+/// server is pointed at a fixed `tddy-tools` — so what reaches `session/new` is what production
+/// hands a managed agent, not a spec this test made up.
 struct RecordingLauncher {
     dir: PathBuf,
     launches: Mutex<Vec<CodingAgentLaunch>>,
+    served: Mutex<Vec<McpServerSpec>>,
+    daemons_own: DaemonCodingAgentLauncher,
 }
+
+/// The `tddy-tools` the daemon's launcher resolves a managed agent's MCP server to.
+const TDDY_TOOLS_PATH: &str = "/opt/tddy/bin/tddy-tools";
 
 impl RecordingLauncher {
     fn into(dir: &Path, answer: serde_json::Value) -> Arc<Self> {
@@ -59,14 +76,32 @@ impl RecordingLauncher {
             serde_json::json!({ "responses": [answer] }).to_string(),
         )
         .expect("write scenario");
+        let daemons_own = DaemonCodingAgentLauncher::new(
+            Arc::new(|_| Ok(None)),
+            Arc::new(|launch| {
+                Ok((
+                    PathBuf::from(TDDY_TOOLS_PATH),
+                    vec![(
+                        "TDDY_REMOTE_SESSION_ID".to_string(),
+                        launch.session_id.clone(),
+                    )],
+                ))
+            }),
+        );
         Arc::new(Self {
             dir: dir.to_path_buf(),
             launches: Mutex::new(Vec::new()),
+            served: Mutex::new(Vec::new()),
+            daemons_own,
         })
     }
 
     fn launches(&self) -> Vec<CodingAgentLaunch> {
         self.launches.lock().expect("launches").clone()
+    }
+
+    fn served(&self) -> Vec<McpServerSpec> {
+        self.served.lock().expect("served").clone()
     }
 
     fn recorded(&self, event: &str) -> Vec<serde_json::Value> {
@@ -102,6 +137,15 @@ impl CodingAgentLauncher for RecordingLauncher {
             cwd: Some(launch.worktree.clone()),
         })
     }
+
+    async fn mcp_servers_for(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<Vec<McpServerSpec>, SubagentError> {
+        let servers = self.daemons_own.mcp_servers_for(launch).await?;
+        self.served.lock().expect("served").extend(servers.clone());
+        Ok(servers)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -114,20 +158,25 @@ struct CodingAgentSession {
     session_id: String,
     worktree: PathBuf,
     launcher: Arc<RecordingLauncher>,
-    sessions: tempfile::TempDir,
+    /// Owns the daemon's home, the session and the worktree; dropped with the session.
+    _sessions: tempfile::TempDir,
 }
 
 struct ASession {
     managed: bool,
     profiles: Vec<(&'static str, &'static str)>,
+    model_agents: Vec<&'static str>,
     answer: serde_json::Value,
+    with_launcher: bool,
 }
 
 fn a_session() -> ASession {
     ASession {
         managed: false,
         profiles: vec![("codex-fast", "codex-acp")],
+        model_agents: Vec::new(),
         answer: serde_json::json!({ "chunks": ["done"] }),
+        with_launcher: true,
     }
 }
 
@@ -147,6 +196,18 @@ impl ASession {
         self
     }
 
+    /// Also offering an OpenAI-loop model agent called `name`.
+    fn and_a_model_agent(mut self, name: &'static str) -> Self {
+        self.model_agents.push(name);
+        self
+    }
+
+    /// On a daemon that installed no coding-agent launcher.
+    fn on_a_daemon_without_a_launcher(mut self) -> Self {
+        self.with_launcher = false;
+        self
+    }
+
     fn build(self) -> CodingAgentSession {
         let sessions = tempfile::tempdir().expect("sessions tempdir");
         let agents_dir = sessions.path().join("agents");
@@ -157,6 +218,15 @@ impl ASession {
                 format!("name: {name}\nlabel: \"{name}\"\nharness: {harness}\nmodel: stub-model\n"),
             )
             .expect("write profile");
+        }
+        for name in &self.model_agents {
+            std::fs::write(
+                agents_dir.join(format!("{name}-model.yaml")),
+                format!(
+                    "name: {name}\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n"
+                ),
+            )
+            .expect("write model agent");
         }
         let worktree = sessions.path().join("worktree");
         std::fs::create_dir_all(&worktree).expect("worktree");
@@ -171,16 +241,19 @@ impl ASession {
         let launcher_dir = sessions.path().join("launcher");
         std::fs::create_dir_all(&launcher_dir).expect("launcher dir");
         let launcher = RecordingLauncher::into(&launcher_dir, self.answer);
-        let service = test_service_with_coding_agent_launcher(
-            sessions.path().to_path_buf(),
-            launcher.clone(),
-        );
+        let service = match self.with_launcher {
+            true => test_service_with_coding_agent_launcher(
+                sessions.path().to_path_buf(),
+                launcher.clone(),
+            ),
+            false => test_service(sessions.path().to_path_buf()),
+        };
         CodingAgentSession {
             service,
             session_id,
             worktree,
             launcher,
-            sessions,
+            _sessions: sessions,
         }
     }
 }
@@ -221,6 +294,17 @@ impl CodingAgentSession {
     }
 
     async fn open(&self, agent_id: &str) -> String {
+        self.try_open(agent_id, "")
+            .await
+            .expect("opening a coding-agent conversation succeeds")
+    }
+
+    /// Open a conversation with `agent_id`, replacing its system prompt unless that is empty.
+    async fn try_open(
+        &self,
+        agent_id: &str,
+        system_prompt: &str,
+    ) -> Result<String, tddy_rpc::Status> {
         self.service
             .session_agents_service()
             .open_agent_conversation(Request::direct(OpenAgentConversationRequest {
@@ -229,12 +313,19 @@ impl CodingAgentSession {
                 daemon_instance_id: String::new(),
                 agent_id: agent_id.to_string(),
                 conversation_id: String::new(),
-                system_prompt: String::new(),
+                system_prompt: system_prompt.to_string(),
             }))
             .await
-            .expect("opening a coding-agent conversation succeeds")
+            .map(|response| response.into_inner().conversation_id)
+    }
+
+    async fn listed_rows(&self) -> Vec<SubagentInfo> {
+        self.service
+            .list_subagents(Request::direct(ListSubagentsRequest {}))
+            .await
+            .expect("ListSubagents succeeds")
             .into_inner()
-            .conversation_id
+            .subagents
     }
 
     /// The concatenated content and the final stop reason of one prompt turn.
@@ -384,19 +475,34 @@ async fn a_headless_harness_profile_is_not_listed_yet() {
     let session = a_session().offering("plain-claude", "claude").build();
 
     // When
-    let rows = session
-        .service
-        .list_subagents(Request::direct(ListSubagentsRequest {}))
-        .await
-        .expect("ListSubagents succeeds")
-        .into_inner()
-        .subagents;
+    let rows = session.listed_rows().await;
 
     // Then
     assert!(
         rows.iter().all(|row| row.name != "plain-claude"),
         "a headless harness is not offered yet: {rows:?}"
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_coding_agent_named_like_a_model_agent_is_not_advertised() {
+    // Given
+    let session = a_session()
+        .offering("reviewer", "claude-acp")
+        .and_a_model_agent("reviewer")
+        .build();
+
+    // When
+    let rows = session.listed_rows().await;
+
+    // Then
+    let kinds: Vec<i32> = rows
+        .iter()
+        .filter(|row| row.name == "reviewer")
+        .map(|row| row.kind)
+        .collect();
+    assert_eq!(kinds, [AgentKind::Model as i32], "{rows:?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -472,28 +578,123 @@ async fn opening_a_coding_agent_conversation_launches_it_as_the_session_user_on_
     assert!(!launches[0].managed);
 }
 
-#[tokio::test]
-#[serial]
-async fn a_managed_session_launches_the_coding_agent_with_only_tddy_tools_exec_tools() {
-    // Given
+/// A managed session with a `claude-acp` coding agent, attached and opened.
+async fn a_managed_claude_conversation() -> CodingAgentSession {
     let session = a_session()
         .managed()
         .offering("claude-coder", "claude-acp")
         .build();
     let agent_id = session.attached("claude-coder").await;
-
-    // When
     session.open(&agent_id).await;
+    session
+}
+
+#[tokio::test]
+#[serial]
+async fn a_managed_session_launches_the_coding_agent_as_managed() {
+    // When
+    let session = a_managed_claude_conversation().await;
 
     // Then
-    let launch = &session.launcher.launches()[0];
-    assert!(launch.managed);
-    let servers: Vec<&str> = launch.mcp_servers.iter().map(|s| s.name.as_str()).collect();
-    assert_eq!(servers, ["tddy-tools"]);
+    assert!(session.launcher.launches()[0].managed);
+}
+
+#[tokio::test]
+#[serial]
+async fn a_managed_coding_agent_is_handed_the_launchers_tddy_tools_mcp_server() {
+    // When
+    let session = a_managed_claude_conversation().await;
+
+    // Then
+    let served: Vec<(String, PathBuf, Vec<String>)> = session
+        .launcher
+        .served()
+        .into_iter()
+        .map(|server| (server.name, server.command, server.args))
+        .collect();
+    assert_eq!(
+        served,
+        [(
+            "tddy-tools".to_string(),
+            PathBuf::from(TDDY_TOOLS_PATH),
+            vec!["--mcp".to_string()]
+        )]
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn the_launchers_mcp_servers_reach_session_new() {
+    // When
+    let session = a_managed_claude_conversation().await;
+
+    // Then
     let recorded = session.launcher.recorded("new_session");
     assert_eq!(
         recorded[0]["mcp_servers"],
         serde_json::json!(["tddy-tools"])
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_managed_claude_agent_has_its_native_tools_withdrawn_at_session_new() {
+    // When
+    let session = a_managed_claude_conversation().await;
+
+    // Then
+    let recorded = session.launcher.recorded("new_session");
+    let withdrawn = recorded[0]["meta"]["claudeCode"]["options"]["disallowedTools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        withdrawn.iter().any(|tool| tool == "Bash"),
+        "Bash is withdrawn: {}",
+        recorded[0]
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn opening_a_coding_agent_with_a_system_prompt_is_refused() {
+    // Given
+    let session = a_session().build();
+    let agent_id = session.attached("codex-fast").await;
+
+    // When
+    let refusal = session
+        .try_open(&agent_id, "You are a careful reviewer.")
+        .await
+        .expect_err("a coding agent keeps its own system prompt");
+
+    // Then
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        session.launcher.launches().is_empty(),
+        "nothing was launched"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_daemon_without_a_launcher_refuses_to_open_a_coding_agent() {
+    // Given
+    let session = a_session().on_a_daemon_without_a_launcher().build();
+    let agent_id = session.attached("codex-fast").await;
+
+    // When
+    let refusal = session
+        .try_open(&agent_id, "")
+        .await
+        .expect_err("no launcher, no coding agent");
+
+    // Then
+    assert_eq!(refusal.code(), tddy_rpc::Code::FailedPrecondition);
+    assert!(
+        refusal.message().contains("no coding-agent launcher"),
+        "{}",
+        refusal.message()
     );
 }
 
@@ -512,7 +713,10 @@ async fn a_coding_agent_turn_answers_through_prompt_agent_conversation() {
 
     // Then
     assert_eq!(text, "fixed it");
-    assert_eq!(stop_reason, "EndTurn", "the wire spelling `agent_stop_reason` writes");
+    assert_eq!(
+        stop_reason, "EndTurn",
+        "the wire spelling `agent_stop_reason` writes"
+    );
 }
 
 #[tokio::test]
@@ -535,5 +739,4 @@ async fn ending_a_coding_agent_conversation_stops_its_process() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(!process_is_running(pid), "the agent process {pid} is gone");
-    let _ = &session.sessions;
 }

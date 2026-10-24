@@ -8,8 +8,8 @@ use tddy_agent_backend::{
 };
 use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{
-    ContentBlock, MessageDescriptor, MessageId, MessageRole, PromptOutcome, StopReason,
-    SubagentError, SubagentSession, ToolCallDescriptor, TurnRequest, MESSAGE_PREVIEW_CHARS,
+    preview_of, ContentBlock, MessageDescriptor, MessageId, MessageRole, PromptOutcome, StopReason,
+    SubagentError, SubagentSession, ToolCallDescriptor, TurnRequest,
 };
 
 use crate::permissions::DenyAndRecord;
@@ -81,6 +81,8 @@ impl CodingAgentSession {
 
     /// A handle that cancels this session's running turn without holding the session — what the
     /// conversation table uses when `subagent_cancel` arrives while a prompt holds the session.
+    // TODO(acp-subagent n3): the conversation table holds Box<dyn SubagentSession> and cannot reach
+    // this; n3 permission-yield wires it.
     pub fn cancel_handle(&self) -> CancelHandle {
         CancelHandle {
             driver: Arc::downgrade(&self.driver),
@@ -93,80 +95,46 @@ impl CodingAgentSession {
         self.driver.agent_pid()
     }
 
-    fn mint_id(&mut self) -> MessageId {
-        let id = MessageId::from(format!("m{}", self.next_ordinal));
+    /// One message of this turn, under the next id this conversation mints.
+    fn message(&mut self, shape: MessageShape) -> MessageDescriptor {
+        let id = MessageId::from_ordinal(self.next_ordinal);
         self.next_ordinal += 1;
-        id
+        MessageDescriptor {
+            id,
+            role: shape.role,
+            tool: shape.tool,
+            tool_calls: shape.tool_calls,
+            is_error: shape.is_error,
+            preview: preview_of(&shape.preview),
+            result_summary: None,
+            worktree_change: None,
+        }
     }
 
+    /// The turn's messages: one per tool call, one per permission request denied, then the
+    /// agent's text when it wrote any.
     fn describe_turn(&mut self, updates: Vec<AcpUpdate>, text: &str) -> Vec<MessageDescriptor> {
-        let mut calls: Vec<ToolCallRecord> = Vec::new();
-        for update in updates {
-            match update {
-                AcpUpdate::ToolCall {
-                    id,
-                    title,
-                    raw_input,
-                    ..
-                } => calls.push(ToolCallRecord {
-                    id,
-                    name: title,
-                    arguments: raw_input.map(|input| input.to_string()).unwrap_or_default(),
-                    failed: false,
-                }),
-                AcpUpdate::ToolCallUpdate { id, status, .. } => {
-                    if let Some(call) = calls.iter_mut().find(|call| call.id == id) {
-                        call.failed |= status == Some(AcpToolStatus::Failed);
-                    }
-                }
-                AcpUpdate::Text(_) | AcpUpdate::Thought(_) | AcpUpdate::Plan(_) => {}
-            }
-        }
-        let mut messages = Vec::new();
-        for call in calls {
-            messages.push(MessageDescriptor {
-                id: self.mint_id(),
-                role: MessageRole::Tool,
-                tool: Some(call.name.clone()),
-                tool_calls: vec![ToolCallDescriptor {
-                    name: call.name,
-                    arguments: cut(&call.arguments),
-                }],
-                is_error: call.failed,
-                preview: cut(&call.arguments),
-                result_summary: None,
-                worktree_change: None,
-            });
-        }
-        for denied in self.permissions.take_denied() {
-            let title = denied.title.unwrap_or_else(|| denied.tool_call_id.clone());
-            messages.push(MessageDescriptor {
-                id: self.mint_id(),
-                role: MessageRole::Tool,
-                tool: Some(title.clone()),
-                tool_calls: Vec::new(),
-                is_error: true,
-                preview: cut(&format!("permission denied: {title}")),
-                result_summary: None,
-                worktree_change: None,
-            });
-        }
+        let mut shapes: Vec<MessageShape> = collect_tool_calls(updates)
+            .into_iter()
+            .map(MessageShape::tool_call)
+            .collect();
+        shapes.extend(
+            self.permissions
+                .take_denied()
+                .into_iter()
+                .map(|denied| MessageShape::denied(denied.title.unwrap_or(denied.tool_call_id))),
+        );
         if !text.is_empty() {
-            messages.push(MessageDescriptor {
-                id: self.mint_id(),
-                role: MessageRole::Assistant,
-                tool: None,
-                tool_calls: Vec::new(),
-                is_error: false,
-                preview: cut(text),
-                result_summary: None,
-                worktree_change: None,
-            });
+            shapes.push(MessageShape::assistant(text));
         }
-        messages
+        shapes
+            .into_iter()
+            .map(|shape| self.message(shape))
+            .collect()
     }
 }
 
+/// One tool call a turn made, folded from its `tool_call` and `tool_call_update`s.
 struct ToolCallRecord {
     id: String,
     name: String,
@@ -174,13 +142,76 @@ struct ToolCallRecord {
     failed: bool,
 }
 
-/// `text` cut to [`MESSAGE_PREVIEW_CHARS`], marking that it was cut (counted in chars).
-fn cut(text: &str) -> String {
-    if text.chars().count() <= MESSAGE_PREVIEW_CHARS {
-        return text.to_string();
+/// The turn's tool calls in the order the agent made them, each marked failed when any of its
+/// updates said so.
+fn collect_tool_calls(updates: Vec<AcpUpdate>) -> Vec<ToolCallRecord> {
+    let mut calls: Vec<ToolCallRecord> = Vec::new();
+    for update in updates {
+        match update {
+            AcpUpdate::ToolCall {
+                id,
+                title,
+                raw_input,
+                ..
+            } => calls.push(ToolCallRecord {
+                id,
+                name: title,
+                arguments: raw_input.map(|input| input.to_string()).unwrap_or_default(),
+                failed: false,
+            }),
+            AcpUpdate::ToolCallUpdate { id, status, .. } => {
+                if let Some(call) = calls.iter_mut().find(|call| call.id == id) {
+                    call.failed |= status == Some(AcpToolStatus::Failed);
+                }
+            }
+            AcpUpdate::Text(_) | AcpUpdate::Thought(_) | AcpUpdate::Plan(_) => {}
+        }
     }
-    let kept: String = text.chars().take(MESSAGE_PREVIEW_CHARS - 1).collect();
-    format!("{kept}…")
+    calls
+}
+
+/// A message descriptor before it has an id; its preview not yet cut.
+struct MessageShape {
+    role: MessageRole,
+    tool: Option<String>,
+    tool_calls: Vec<ToolCallDescriptor>,
+    is_error: bool,
+    preview: String,
+}
+
+impl MessageShape {
+    fn tool_call(call: ToolCallRecord) -> Self {
+        Self {
+            role: MessageRole::Tool,
+            tool: Some(call.name.clone()),
+            tool_calls: vec![ToolCallDescriptor {
+                name: call.name,
+                arguments: preview_of(&call.arguments),
+            }],
+            is_error: call.failed,
+            preview: call.arguments,
+        }
+    }
+
+    fn denied(title: String) -> Self {
+        Self {
+            role: MessageRole::Tool,
+            preview: format!("permission denied: {title}"),
+            tool: Some(title),
+            tool_calls: Vec::new(),
+            is_error: true,
+        }
+    }
+
+    fn assistant(text: &str) -> Self {
+        Self {
+            role: MessageRole::Assistant,
+            tool: None,
+            tool_calls: Vec::new(),
+            is_error: false,
+            preview: text.to_string(),
+        }
+    }
 }
 
 /// Cancels a [`CodingAgentSession`]'s running turn (`session/cancel`); the turn then ends as
@@ -201,6 +232,17 @@ impl CancelHandle {
             .cancel(&self.session_id)
             .await
             .map_err(|e| SubagentError::from(format!("could not cancel the coding agent: {e}")))
+    }
+}
+
+/// The turn's stop reason as a subagent outcome spells it; a refusal is an error, not an outcome.
+fn stop_reason_of(reason: AcpStopReason) -> Result<StopReason, SubagentError> {
+    match reason {
+        AcpStopReason::EndTurn => Ok(StopReason::EndTurn),
+        AcpStopReason::MaxTokens => Ok(StopReason::MaxTokens),
+        AcpStopReason::MaxTurnRequests => Ok(StopReason::MaxTurnRequests),
+        AcpStopReason::Cancelled => Ok(StopReason::Cancelled),
+        AcpStopReason::Refusal => Err(SubagentError::from("the coding agent refused the turn")),
     }
 }
 
@@ -241,19 +283,12 @@ impl SubagentSession for CodingAgentSession {
             .prompt(&self.acp_session_id, prompt.to_string(), Some(sink), None)
             .await
             .map_err(|e| SubagentError::from(format!("the coding agent's turn failed: {e}")))?;
-        let stop_reason = match end.stop_reason {
-            AcpStopReason::EndTurn => StopReason::EndTurn,
-            AcpStopReason::MaxTokens => StopReason::MaxTokens,
-            AcpStopReason::MaxTurnRequests => StopReason::MaxTurnRequests,
-            AcpStopReason::Cancelled => StopReason::Cancelled,
-            AcpStopReason::Refusal => {
-                return Err(SubagentError::from("the coding agent refused the turn"))
-            }
-        };
+        let stop_reason = stop_reason_of(end.stop_reason)?;
         let updates = std::mem::take(&mut *updates.lock().unwrap_or_else(|e| e.into_inner()));
         let messages = self.describe_turn(updates, &end.text);
-        self.history.push(format!("user: {}", cut(prompt)));
-        self.history.push(format!("assistant: {}", cut(&end.text)));
+        self.history.push(format!("user: {}", preview_of(prompt)));
+        self.history
+            .push(format!("assistant: {}", preview_of(&end.text)));
         let mut outcome = PromptOutcome::new(
             stop_reason,
             vec![ContentBlock::text(end.text)],

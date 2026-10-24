@@ -2,7 +2,7 @@
 // only its methods are used.
 use prost::Message as _;
 
-use tddy_service::proto::catalog::{ListSubagentsRequest, ListSubagentsResponse};
+use tddy_service::proto::catalog::{ListSubagentsRequest, ListSubagentsResponse, SubagentInfo};
 
 use crate::agent_roster;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
@@ -110,7 +110,17 @@ impl AgentRoster {
                  daemon's common room; nothing was attached and no checkout was created"
             )));
         }
+        let row = self.peer_subagent_row(id, named_as).await?;
+        record_from_peer_row(row, owning_daemon)
+    }
 
+    /// The row the peer owning `id` lists under its name, from that peer's own `ListSubagents`.
+    async fn peer_subagent_row(
+        &self,
+        id: &tddy_core::AgentId,
+        named_as: &str,
+    ) -> Result<SubagentInfo, Status> {
+        let owning_daemon = id.daemon_instance_id.as_str();
         let slot = self.peer_routing.common_room_slot("AttachSessionAgent")?;
         let answered = slot
             .forward_to_peer(
@@ -129,8 +139,7 @@ impl AgentRoster {
             })?;
         let listed = ListSubagentsResponse::decode(answered.as_slice())
             .map_err(|e| Status::internal(format!("decode ListSubagentsResponse: {e}")))?;
-
-        let row = listed
+        listed
             .subagents
             .into_iter()
             .find(|s| s.name == id.name)
@@ -140,34 +149,36 @@ impl AgentRoster {
                      answered with no subagent called '{}')",
                     id.name
                 ))
-            })?;
-
-        // The peer stamps the id it minted, and it is taken verbatim rather than reassembled here:
-        // an id the two sides spelled differently routes to a daemon the operator never picked.
-        let agent_id = match row.agent_id.trim().is_empty() {
-            true => agent_roster::qualified_agent_id(&row.name, owning_daemon)
-                .map_err(|e| Status::invalid_argument(e.to_string()))?,
-            false => row.agent_id,
-        };
-        let (kind, harness) = (
-            crate::coding_agent::agent_kind_from_wire(row.kind),
-            Some(row.harness.clone()).filter(|h| !h.is_empty()),
-        );
-        Ok(tddy_core::SessionAgentRecord {
-            agent_id,
-            name: row.name,
-            daemon_instance_id: owning_daemon.to_string(),
-            label: Some(row.label).filter(|l| !l.is_empty()),
-            model: row.model,
-            replaces: row.replaces,
-            tools: row.tools,
-            // Filled in by the caller once the clone for (session, owning daemon) is claimed: the
-            // record is resolved before this daemon knows which session it is being attached to.
-            codebase_session_id: None,
-            kind,
-            harness,
-        })
+            })
     }
+}
+
+/// The roster entry a peer's `ListSubagents` row stands for, owned by `owning_daemon`.
+fn record_from_peer_row(
+    row: SubagentInfo,
+    owning_daemon: &str,
+) -> Result<tddy_core::SessionAgentRecord, Status> {
+    // The peer stamps the id it minted, and it is taken verbatim rather than reassembled here:
+    // an id the two sides spelled differently routes to a daemon the operator never picked.
+    let agent_id = match row.agent_id.trim().is_empty() {
+        true => agent_roster::qualified_agent_id(&row.name, owning_daemon)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?,
+        false => row.agent_id,
+    };
+    Ok(tddy_core::SessionAgentRecord {
+        agent_id,
+        kind: crate::coding_agent::agent_kind_from_wire(row.kind)?,
+        harness: Some(row.harness).filter(|h| !h.is_empty()),
+        name: row.name,
+        daemon_instance_id: owning_daemon.to_string(),
+        label: Some(row.label).filter(|l| !l.is_empty()),
+        model: row.model,
+        replaces: row.replaces,
+        tools: row.tools,
+        // Filled in by the caller once the clone for (session, owning daemon) is claimed: the
+        // record is resolved before this daemon knows which session it is being attached to.
+        codebase_session_id: None,
+    })
 }
 
 use crate::conversation_cancel_forward;

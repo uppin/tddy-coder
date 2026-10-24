@@ -63,12 +63,13 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
         record: &SessionAgentRecord,
         session_token: &str,
     ) -> Result<AdmittedAgent, Status> {
-        let codebase = seed_codebase::SeedCodebase::read(session_id, session_dir)?;
+        let metadata = seed_codebase::read_session_metadata(session_id, session_dir)?;
+        let codebase = seed_codebase::SeedCodebase::of_session_metadata(session_dir, &metadata);
         agent_roster::refuse_unenforceable_withdrawal(session_id, &codebase, record)?;
         tddy_session_agents::coding_agent::refuse_unconfinable_harness(
             session_id,
-            session_dir,
             record,
+            metadata.managed_codebase,
         )?;
         if record.daemon_instance_id == local_instance_id_for_config(&self.roster.config) {
             // A local agent works the session's real worktree: there is no clone to claim, and no

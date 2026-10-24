@@ -36,6 +36,7 @@ import {
   createSessionAgentHostError,
   createSessionAgentOption,
   createSessionAgentOptionHost,
+  createSessionAgentOptionKind,
 } from "../support/testIds";
 import { recordedFields } from "../support/rpc/recordedRequests";
 
@@ -295,7 +296,7 @@ describe("CreateSession agent picker — coding agents", () => {
     openTheAgentPicker();
 
     // Then
-    byTestId(`${createSessionAgentOption(CODEX_ON_B)}-kind`).should(
+    byTestId(createSessionAgentOptionKind(CODEX_ON_B)).should(
       "have.text",
       "coding agent · codex-acp",
     );
@@ -310,6 +311,6 @@ describe("CreateSession agent picker — coding agents", () => {
 
     // Then
     theAgentIsOfferedUnpicked(LINTER_ON_B);
-    byTestId(`${createSessionAgentOption(LINTER_ON_B)}-kind`).should("not.exist");
+    byTestId(createSessionAgentOptionKind(LINTER_ON_B)).should("not.exist");
   });
 });

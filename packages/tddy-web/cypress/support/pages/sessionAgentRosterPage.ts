@@ -18,6 +18,7 @@ import {
   agentRosterPickerHostError,
   agentRosterPickerOption,
   agentRosterPickerOptionHost,
+  agentRosterPickerOptionKind,
   agentRosterRow,
   agentRosterRowCloneState,
   agentRosterRowDetachBtn,
@@ -184,6 +185,7 @@ export const sessionAgentRosterPage = {
 
   pickerOption: (agentId: string) => byTestId(agentRosterPickerOption(agentId)),
   pickerOptionHost: (agentId: string) => byTestId(agentRosterPickerOptionHost(agentId)),
+  pickerOptionKind: (agentId: string) => byTestId(agentRosterPickerOptionKind(agentId)),
   pickerHostError: (daemonInstanceId: string) => byTestId(agentRosterPickerHostError(daemonInstanceId)),
   pickerWithdrawalWarning: () => byTestId(TEST_IDS.agentRosterPickerWithdrawalWarning),
 

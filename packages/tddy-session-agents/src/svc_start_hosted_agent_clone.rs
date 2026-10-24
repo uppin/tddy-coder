@@ -74,10 +74,7 @@ impl AgentRoster {
         let projects_dir = projects_path_for_user(
             &self
                 .config
-                .os_user_for_github(
-                    &(self.user_resolver)(session_token)
-                        .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?,
-                )
+                .os_user_for_github(&self.session_github_user(session_token)?)
                 .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?,
             Some(&self.tddy_data_dir),
         )
@@ -169,8 +166,7 @@ impl AgentRoster {
                 )
                 .await;
         }
-        let github_user = (self.user_resolver)(session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let github_user = self.session_github_user(session_token)?;
         // Through the spawn resolver rather than the listing one: a registry assistant's def comes
         // back carrying its provider's credential there, and a session opened without one comes up
         // "successfully" and 401s on every model call.

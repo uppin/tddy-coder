@@ -4,7 +4,9 @@
 //! caller. The id and tool spellings stay there, shared with the roster entry an attach produces.
 
 use tddy_service::proto::catalog::SubagentInfo;
-use tddy_session_lifecycle::connection_service::{def_tool_names, qualified_agent_id};
+use tddy_session_lifecycle::connection_service::{
+    agent_kind_to_wire, coding_agent_record, def_tool_names, qualified_agent_id,
+};
 
 /// One resolved def as the `ListSubagents` row a picker attaches from.
 pub(super) fn subagent_info(
@@ -28,26 +30,23 @@ pub(super) fn subagent_info(
     })
 }
 
-/// One coding agent as the `ListSubagents` row a picker attaches from. It replaces no tool and
-/// lists none: a coding agent's tools are its harness's own.
+/// One coding agent as the `ListSubagents` row a picker attaches from: the roster entry attaching
+/// it produces ([`coding_agent_record`]), spelled for the wire, so the two cannot disagree.
 pub(super) fn coding_agent_info(
     def: &tddy_coding_subagent::CodingAgentDef,
     daemon_instance_id: &str,
 ) -> Result<SubagentInfo, tddy_core::AgentIdError> {
+    let record = coding_agent_record(def, daemon_instance_id)?;
     Ok(SubagentInfo {
-        agent_id: qualified_agent_id(&def.name, daemon_instance_id)?,
-        name: def.name.clone(),
-        label: def
-            .label
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| def.name.clone()),
-        model: def.model.clone(),
-        daemon_instance_id: daemon_instance_id.to_string(),
-        replaces: Vec::new(),
-        tools: Vec::new(),
-        kind: tddy_service::proto::types::AgentKind::CodingAgent as i32,
-        harness: def.harness.clone(),
+        agent_id: record.agent_id,
+        label: record.label.unwrap_or_else(|| record.name.clone()),
+        name: record.name,
+        model: record.model,
+        daemon_instance_id: record.daemon_instance_id,
+        replaces: record.replaces,
+        tools: record.tools,
+        kind: agent_kind_to_wire(record.kind) as i32,
+        harness: record.harness.unwrap_or_default(),
     })
 }
 

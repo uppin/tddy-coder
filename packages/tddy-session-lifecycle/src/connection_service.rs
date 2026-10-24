@@ -287,7 +287,9 @@ pub(crate) use agent_roster::*;
 /// Shared with `tddy-daemon-rpc`'s `ListSubagents`, whose rows name agents the way the roster does.
 pub use agent_roster::{def_tool_names, qualified_agent_id};
 /// Shared with `tddy-daemon-rpc`'s `ListSubagents`: the coding agents a daemon offers.
-pub use tddy_session_agents::coding_agent::coding_agent_defs_for;
+pub use tddy_session_agents::coding_agent::{
+    agent_kind_to_wire, coding_agent_defs_for, coding_agent_record,
+};
 
 pub use svc_resolve_listed_worktree::resolvable_agent_defs;
 

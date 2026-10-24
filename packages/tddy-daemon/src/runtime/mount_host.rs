@@ -214,12 +214,14 @@ impl BuildContext {
         .with_model_registry(Arc::clone(model_registry))
         .with_coding_agent_launcher(Arc::new(
             tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher::for_daemon(
-                config.clone(),
-                tddy_data_dir.clone(),
-                &options.spawn_backend,
-                self.identity.credential_vaults.clone(),
-                user_resolver,
-                Some(session_tokens.clone()),
+                tddy_session_lifecycle::coding_agent_launcher::DaemonLauncherDeps {
+                    config: config.clone(),
+                    tddy_data_dir: tddy_data_dir.clone(),
+                    spawn_backend: options.spawn_backend.clone(),
+                    vaults: self.identity.credential_vaults.clone(),
+                    user_resolver,
+                    tokens: Some(session_tokens.clone()),
+                },
             ),
         ))
         .with_session_notification_bus(session_notification_bus)

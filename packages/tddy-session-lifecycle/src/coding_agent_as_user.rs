@@ -6,10 +6,10 @@
 //! passwd lookup ([`resolve_pty_os_user`]) and the same `HOME`/`PATH` overrides.
 //!
 //! It can do that only when this daemon process is itself privileged (root, as an unsupervised
-//! daemon with a forked spawn worker is). A supervised daemon owns no privilege: `tddy-supervisor`'s
-//! `SpawnSession` is the only way to start a process as another user there, and it gives the child no
-//! stdio and takes no file descriptors — so a launch for another user is refused with that reason.
-//! It is never run as the daemon's own user instead.
+//! daemon with a forked spawn worker is). A supervised daemon owns no privilege, so this refuses
+//! with [`AsUserRefusal::Unprivileged`]; the launcher then starts the agent through the
+//! supervisor's relayed spawn when one is configured ([`crate::coding_agent_relay`]), and refuses
+//! the launch when none is. It is never run as the daemon's own user instead.
 
 use std::path::PathBuf;
 
@@ -18,14 +18,8 @@ use tddy_daemon_kernel::privilege_drop::{
     pty_requires_privilege_drop, pty_user_env_overrides, resolve_pty_os_user,
     wrap_argv_for_privilege_drop, ResolvedPtyUser,
 };
-
 /// The GitHub token variables a daemon may have exported; a child run as a user must not inherit one.
-const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-    "GH_ENTERPRISE_TOKEN",
-    "GITHUB_ENTERPRISE_TOKEN",
-];
+use tddy_daemon_kernel::spawn_as_user::GITHUB_TOKEN_VARIABLES;
 
 /// Why a command could not be made to run as the session's user.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,45 +162,97 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_daemons_own_user_runs_the_command_unchanged() {
-        let wrapped = wrap_for_user(
-            a_command(),
-            "dev",
-            &a_user(1000),
-            &a_daemon(1000, false, false),
-        )
-        .expect("same user");
-
-        assert_eq!(wrapped.program, PathBuf::from("opencode"));
+    fn wrapped_by_a_privileged_daemon() -> AcpAgentCommand {
+        wrap_for_user(a_command(), "dev", &a_user(1000), &a_daemon(0, true, true)).expect("wrapped")
     }
 
     #[test]
-    fn a_privileged_daemon_runs_it_behind_setpriv_with_the_users_home() {
-        let wrapped = wrap_for_user(a_command(), "dev", &a_user(1000), &a_daemon(0, true, true))
-            .expect("wrapped");
+    fn the_daemons_own_user_runs_the_command_unchanged() {
+        // Given
+        let daemon = a_daemon(1000, false, false);
 
-        assert_eq!(wrapped.program, PathBuf::from("/usr/bin/setpriv"));
-        assert_eq!(wrapped.args[..2], ["--reuid", "1000"]);
-        assert!(wrapped.args.windows(2).any(|w| w == ["opencode", "acp"]));
-        assert!(wrapped.args.contains(&"GITHUB_TOKEN".to_string()));
+        // When
+        let wrapped = wrap_for_user(a_command(), "dev", &a_user(1000), &daemon).expect("same user");
+
+        // Then
+        assert_eq!(
+            (wrapped.program, wrapped.args),
+            (PathBuf::from("opencode"), vec!["acp".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_privileged_daemon_runs_it_behind_setpriv_as_the_user() {
+        // When
+        let wrapped = wrapped_by_a_privileged_daemon();
+
+        // Then
+        assert_eq!(
+            (wrapped.program, wrapped.args[..2].to_vec()),
+            (
+                PathBuf::from("/usr/bin/setpriv"),
+                vec!["--reuid".to_string(), "1000".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn a_privileged_daemon_still_runs_the_harness_with_its_arguments() {
+        // When
+        let wrapped = wrapped_by_a_privileged_daemon();
+
+        // Then
+        assert!(
+            wrapped.args.windows(2).any(|w| w == ["opencode", "acp"]),
+            "{:?}",
+            wrapped.args
+        );
+    }
+
+    #[test]
+    fn a_privileged_daemon_unsets_the_github_tokens_it_holds() {
+        // When
+        let wrapped = wrapped_by_a_privileged_daemon();
+
+        // Then
+        assert!(
+            wrapped.args.windows(2).any(|w| w == ["-u", "GITHUB_TOKEN"]),
+            "{:?}",
+            wrapped.args
+        );
+    }
+
+    #[test]
+    fn a_privileged_daemon_gives_the_agent_the_users_home() {
+        // When
+        let wrapped = wrapped_by_a_privileged_daemon();
+
+        // Then
         assert!(wrapped
             .env
             .contains(&("HOME".to_string(), "/home/dev".to_string())));
+    }
+
+    #[test]
+    fn a_privileged_daemon_keeps_the_launchs_own_environment_and_directory() {
+        // When
+        let wrapped = wrapped_by_a_privileged_daemon();
+
+        // Then
         assert!(wrapped.env.contains(&("K".to_string(), "V".to_string())));
         assert_eq!(wrapped.cwd, Some(PathBuf::from("/work")));
     }
 
     #[test]
     fn an_unprivileged_daemon_refuses_another_user_rather_than_run_as_itself() {
-        let refusal = wrap_for_user(
-            a_command(),
-            "dev",
-            &a_user(1000),
-            &a_daemon(501, false, true),
-        )
-        .expect_err("refused");
+        // Given
+        let daemon = a_daemon(501, false, true);
 
+        // When
+        let refusal =
+            wrap_for_user(a_command(), "dev", &a_user(1000), &daemon).expect_err("refused");
+
+        // Then
         assert!(
             matches!(refusal, AsUserRefusal::Unprivileged(_))
                 && refusal.to_string().contains("'dev'"),
@@ -216,9 +262,14 @@ mod tests {
 
     #[test]
     fn a_privileged_daemon_without_setpriv_refuses_naming_it() {
-        let refusal = wrap_for_user(a_command(), "dev", &a_user(1000), &a_daemon(0, true, false))
-            .expect_err("refused");
+        // Given
+        let daemon = a_daemon(0, true, false);
 
+        // When
+        let refusal =
+            wrap_for_user(a_command(), "dev", &a_user(1000), &daemon).expect_err("refused");
+
+        // Then
         assert!(refusal.to_string().contains("setpriv"), "{refusal}");
     }
 }
