@@ -63,6 +63,8 @@ impl CliSessionManager {
             argv,
             Vec::new(),
             None,
+            // A tab's exit is never recorded: it carries no resume token of its own.
+            None,
         )
         .await
     }
