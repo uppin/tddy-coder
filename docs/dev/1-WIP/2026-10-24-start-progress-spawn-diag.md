@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Bug Fix
 **Complexity**: 4 — two crates (`tddy-daemon-kernel`, `tddy-spawn`), fork/exec ordering and async-signal safety, a spawned-process seam
-**Stack**: #start-progress 1/8. Base: `master`.
+**Stack**: #start-progress 1/8. PR: #734. Base: `master`.
 
 ## Initial Discovery
 
@@ -202,10 +202,10 @@ test asserts no `pre_exec` closure in the three files calls `set_var`/`initgroup
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages (`./test -p tddy-daemon-kernel -p tddy-spawn -p tddy-agent-launch`); full-workspace result from CI

@@ -102,3 +102,106 @@ pub fn resolve_pty_os_user(os_user: &str) -> Result<ResolvedPtyUser, String> {
         home_dir,
     })
 }
+
+/// Everything the child needs to become `os_user`, resolved in the parent **before** `fork`.
+///
+/// A child between `fork` and `exec` may only make async-signal-safe calls, so nothing here may be
+/// looked up there: the passwd entry, the supplementary group list (`getgrouplist` — the NSS walk
+/// `initgroups(3)` would do after the fork) and the name as a C string are all settled up front.
+#[cfg(unix)]
+#[derive(Debug, Clone)]
+pub struct TargetAccount {
+    /// The account's login name, as the caller asked for it.
+    pub name: String,
+    pub uid: u32,
+    pub gid: u32,
+    /// Supplementary groups, primary group included, for `setgroups(2)` in the child.
+    pub groups: Vec<libc::gid_t>,
+    /// The account's home directory, for the child's `HOME` and working directory.
+    pub home: String,
+}
+
+/// Resolve `os_user` to a [`TargetAccount`] — passwd entry and supplementary groups — in the parent.
+#[cfg(unix)]
+pub fn resolve_target_account(os_user: &str) -> Result<TargetAccount, String> {
+    // TODO(spawn-diag): implement — getpwnam_r (as resolve_pty_os_user) + getgrouplist with retry
+    let _ = os_user;
+    Err("resolve_target_account: not implemented".to_string())
+}
+
+/// Who this process is, by **effective** ids — the identity `setuid` and friends check.
+#[cfg(unix)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveIdentity {
+    pub uid: u32,
+    pub gid: u32,
+    /// The login name for `uid`, or the uid in decimal when it has none.
+    pub name: String,
+}
+
+#[cfg(unix)]
+impl EffectiveIdentity {
+    /// This process's effective identity.
+    pub fn current() -> EffectiveIdentity {
+        // TODO(spawn-diag): implement — geteuid/getegid + getpwuid_r for the name
+        EffectiveIdentity {
+            uid: u32::MAX,
+            gid: u32::MAX,
+            name: String::new(),
+        }
+    }
+}
+
+/// What a child must do to become its target account.
+#[cfg(unix)]
+#[derive(Debug, Clone)]
+pub enum PrivilegeChange {
+    /// The target is this process's own effective identity: the child changes nothing.
+    None,
+    /// The child sets groups, gid and uid to the target's, in that order.
+    Drop(TargetAccount),
+}
+
+/// A child was asked to run as another user by a process that cannot switch users.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CannotBecomeUser {
+    /// The identity this process runs as.
+    pub running_as: String,
+    /// The account the child was to run as.
+    pub requested: String,
+}
+
+impl std::fmt::Display for CannotBecomeUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "this process runs as '{}' and cannot start a child as '{}': only root can switch users. \
+             On a host run by tddy-supervisor, a spawn as another user is brokered by the supervisor",
+            self.running_as, self.requested
+        )
+    }
+}
+
+impl std::error::Error for CannotBecomeUser {}
+
+/// Decide, before any fork, what a child must do to become `target` — or refuse, when this process
+/// is not root and `target` is somebody else. Reads this process's effective identity.
+#[cfg(unix)]
+pub fn plan_privilege_change(target: TargetAccount) -> Result<PrivilegeChange, CannotBecomeUser> {
+    plan_privilege_change_from(target, &EffectiveIdentity::current())
+}
+
+/// [`plan_privilege_change`] with the current identity passed in, so the decision is testable on a
+/// host where the test is not root.
+#[cfg(unix)]
+pub fn plan_privilege_change_from(
+    target: TargetAccount,
+    current: &EffectiveIdentity,
+) -> Result<PrivilegeChange, CannotBecomeUser> {
+    // TODO(spawn-diag): implement — None when uid+gid match, Drop when current.uid == 0, else refuse
+    let _ = (target, current);
+    Err(CannotBecomeUser {
+        running_as: String::new(),
+        requested: String::new(),
+    })
+}
