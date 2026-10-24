@@ -26,6 +26,8 @@ export function whyMainCannotRun(sessionType: SessionType): string | null {
       return cannotRunManaged("OpenCode");
     case "muse-cli":
       return cannotRunManaged("Muse Code");
+    case "warp-cli":
+      return cannotRunManaged("Warp");
   }
 }
 
