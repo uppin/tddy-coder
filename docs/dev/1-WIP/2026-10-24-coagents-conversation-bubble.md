@@ -153,22 +153,21 @@ Build the stub first (`cargo build -p tddy-acp-stub`).
 
 ## Technical Debt & Production Readiness
 
-- **Live append is not wired (open; PRD "live while it runs").** `CodingAgentSession::record_updates_with`
-  has no production caller, so a coding-agent turn is recorded only when it ends
-  (`packages/tddy-session-agents/src/coding_agent.rs:250`, TODO). The recorder needs the conversation id,
-  which the open path does not receive: `open_agent_conversation` mints it, but `AgentSessions::open_owned`
-  / `open_local` and `open_coding_agent_session` do not take it. Options: (A) thread `conversation_id`
-  through the `AgentSessions` port and `open_coding_agent_session` (changes a frozen port signature and its
-  test implementation); (B) a defaulted method on `SubagentSession` that installs the sink after open
-  (crosses into `tddy-discovery`). The turn-end record must also be split: the prompt moves to turn start,
-  the stream owns text and tool calls, and turn end writes only the permission entry and the stop reason.
-  Non-streaming model loops still need the full turn at turn end, so this needs a per-session "streams"
-  signal, and a turn that dies mid-stream must still get a stop reason.
-- **Live tail is not published (open).** A conversation's frames are not published to any hub, so its
-  replay ends with the recorded transcript (`packages/tddy-session-activity/src/service/conversation_replay.rs:37`,
-  TODO). The hub the session replay uses, `tddy_daemon_kernel::AgentActivityHub`, carries activity records,
-  not ACP frames, and the recording side has no hub handle. Needs a conversation-frame channel in
-  `tddy-daemon-kernel` and a port field.
+- **Live append and live tail: implemented.** A streaming conversation's updates are appended to its
+  transcript as they arrive (`packages/tddy-session-agents/src/conversation_recorder.rs`), and a
+  conversation-addressed `StreamAcpReplay` tails them live (`packages/tddy-session-activity/src/service/conversation_replay.rs`).
+  Commits `46af21382` (tail), `31c0c3dde` (session stream), `634fb1764` (recorder and turn split).
+- **Residual risks of the live path (accepted, not fixed).**
+  - Seq alignment: live seq is the append count, while replay positions come from `read_session_transcript`,
+    which collapses superseded `ToolCall` frames sharing a `tool_call_id`. They align unless one conversation
+    sends two `tool_call` frames with the same id.
+  - Recorder lag: more than 1024 queued updates before the recorder drains fails the turn ("fell N updates
+    behind"). This is the chosen policy.
+  - Lock held through the transcript write: a slow disk write delays the next turn on the same conversation.
+- **`claude_cli_fullscreen_renderer::a_host_session_starts_claude_in_fullscreen_by_default`: unverified-environmental.**
+  It timed out once under a full run (PTY produced no output in 10s). It passes alone on re-run, the timeout
+  did not reproduce, and this branch's diff does not touch its path. If it recurs under the full suite,
+  treat it as load or PTY environment, not this change.
 - **Live title gap.** Live frames are titled per record (`frame_for_agent_activity`), so a bubble first seen
   live keeps its opening call's title (the agent only) until reload, because the web keeps the first title
   it shows (`acpReplayProjection.ts`).
@@ -190,6 +189,28 @@ Build the stub first (`cargo build -p tddy-acp-stub`).
   answers `NOT_FOUND` naming the conversation instead of serving its session transcript.
 - **Test 11 corrected to the exclusive bound.** The fixture puts the tool call at seq 1, and `before_seq` is
   an exclusive bound, so the one older frame is `before_seq: 1` (developer decision). The contract had `2`.
+- **The session stream (developer design).** A session exposes `updates()` on `tddy_discovery::subagent::SubagentSession`,
+  defaulted to `None` (model loops do not stream). `CodingAgentSession` returns a broadcast receiver of every
+  update it streams, created before any turn runs. `record_updates_with` stays beside it because test 8 depends
+  on it; both share one fan-out. `OpenAgentConversation` subscribes right after open and runs a recorder task that
+  appends each update as an ACP frame and publishes it on a per-conversation channel (`ConversationFrames` in
+  `tddy-daemon-kernel`, keyed by session and conversation). The `AgentSessions` port is unchanged: the conversation
+  id is not threaded through it.
+- **Turn split for streaming sessions.** The prompt is written at turn start. Streamed text and tool calls come
+  only from the recorder task. Turn end writes the permission entry (if the turn paused on one) and the stop
+  reason. A failed turn gets `STOP_REASON_UNSPECIFIED` (the ACP enum has no error variant); a closed mid-turn stop
+  gets `CANCELLED`. Model loops (non-streaming) keep the whole-turn record at turn end.
+- **Every daemon-run conversation records through the publishing writer,** model loops included, so the live tail
+  covers them too. A conversation whose stream failed refuses its later turns, naming the failure.
+- **A lagging live reader skips, it does not end.** A replay that falls behind the channel skips to the latest
+  frame and keeps streaming, like the session relay (developer decision). Seq dedupe keeps the snapshot/live
+  boundary exact.
+- **`CountThenLive` for a conversation** returns the static count and does not tail.
+- **Lock discipline.** The prompt write, the take and the stop all run under the session lock (`take_recorded_turn`),
+  so a queued turn's prompt cannot land inside the turn before it. This is a deviation from the plan's wording,
+  which wrote the prompt before taking the lock; nothing extra is written.
+- **Double failure wording.** When a turn fails and its recording also fails, the error gets the suffix
+  `; its transcript could not be written: ...`.
 
 ## Refactoring Needed
 
@@ -215,7 +236,7 @@ Build the stub first (`cargo build -p tddy-acp-stub`).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code (partial: all 17 target tests green, plus the fold-title, recording-failure and conversation-refusal tests; the daemon live append and the live tail are open, see Technical Debt)
+- [x] TDD Green — implement with quality code (all 17 target tests green, plus the live-append, live-tail, fold-title, recording-failure and conversation-refusal tests on the scoped gates; the `AgentActivityOverlay` mount and the live title gap remain as Technical Debt)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-service -p tddy-session-agents -p tddy-session-activity -p tddy-daemon-rpc`; the new Cypress spec) — verify 100% pass
