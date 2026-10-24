@@ -162,7 +162,51 @@ Tests added (fail at the TODOs):
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+Green progress, as committed on `feature/coagents/headless-driver`:
+
+- `c51c87a86` — `HeadlessDriver` for claude, cursor, codex and oz; `AcpConversation` delegates.
+  `headless_driver_acceptance` 11/11.
+- `1af20d5c6` — `transport_of` / `permission_policy_of` / `transport_and_policy_wire`; the catalog
+  row and the roster entry carry transport and policy. `transports_acceptance` 5/5.
+- `805dca13b` — the toolcall listener answers a conversation-tagged `approve` through a
+  `ConversationApprovalHandler`; no handler means refused, never the presenter.
+- `bddcc0122` — renames of those three test files to behaviour names (the testing guide forbids
+  adding `*_acceptance.rs`).
+- `e4323686c` — `approval_prompt` with `TDDY_CONVERSATION_ID` relays a tagged approve over
+  `TDDY_SOCKET` and answers Claude from the reply; only `mcp__tddy-tools__*` skips the relay. Any
+  error, timeout or missing socket is a denial.
+
+Not done, and why:
+
+- **Offering is not changed.** Headless harnesses are not yet listed. `headless_listing_acceptance`
+  stays 0/3 until the offering lands. Offering must follow the open path, or a listed row opens as
+  ACP and fails at `initialize`.
+- **Production approval handler is not bound.** `tool_host_wiring.rs` passes
+  `conversation_approval: None`, so a tagged approval is refused in production. The embedded
+  host-agent tool socket that coding agents reach (`embedded_host_agent_tool_socket`) is
+  daemon-wide, so the handler must check that the caller owns the tagged conversation before it
+  parks anything. Decision needed.
+- **No headless open path.** `CodingAgentSession` still holds `AcpDriver` only. Moving it over
+  `ConversationDriver`, with the claude permission route wired to the conversation's
+  `ParkedPermissions`, is the remaining node work.
+- **Offering conflicts with an existing test.** `an_acp_allowed_agent_is_a_coding_agent_on_its_default_model`
+  (`packages/tddy-coding-subagent/tests/catalog_acceptance.rs`) asserts that `cursor` as an
+  `allowed_agents` id is not offered. Profiles can be offered without touching it; `allowed_agents`
+  headless ids need that test's premise narrowed first.
+- **Claude confinement stays `CannotWithdraw`** until the headless launcher applies
+  `--disallowedTools`. A managed session refuses a headless claude until then.
+- **Picker row text is not done.** No contract test pins it. A red Cypress test comes first.
+- **Pre-existing, outside this node.** The untagged `relay_approve` in `tddy-tools` speaks the older
+  newline-delimited protocol that the listener no longer serves. `workspace_roster_admission`
+  (`packages/tddy-session-agents/tests/`) is red on the base commit (`TODO(remote-codebase)` stub).
+- **Driver residuals.** Cursor surfaces no tool-call updates: its tool events differ from claude's.
+  Assistant prose reaches the transcript only as the turn's final text, not as `AcpUpdate::Text`.
+  Cursor's `mcp_config` is not written, and codex and oz ignore it. Cursor's argv drops `--force`
+  (the PRD's read-only default). The normal path ends on stdout EOF, so a grandchild that holds
+  stdout open stalls the turn; cancel does not have that problem.
+- **Test-only gate removed.** The tagged relay reads `TDDY_CONVERSATION_ID` without a `cfg(test)`
+  branch. A unit-test run from inside a managed conversation's shell therefore sees the tagged
+  path. Running tests outside a conversation shell avoids it.
 
 ## Decisions & Trade-offs
 
@@ -170,6 +214,11 @@ _(populated during development)_
 - **Fixed policies for cursor / codex** because neither CLI can ask mid-turn; the policy is visible,
   never implied.
 - **Fake CLIs** keep CI hermetic; a manual smoke against the real CLIs is recorded at green.
+- **Tagged approvals skip local pre-allow.** Only `mcp__tddy-tools__*` is exempt, so a headless
+  subagent yields every permission prompt to its conversation. `Bash(tddy-tools *)` is not kept,
+  since a prefix match would let `tddy-tools x; <anything>` through.
+- **Round-trip test in the listener first.** The conversation-tagged approve has its own red tests
+  before the listener binds a handler, per the developer.
 
 ## Refactoring Needed
 
