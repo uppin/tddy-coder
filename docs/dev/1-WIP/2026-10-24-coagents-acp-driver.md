@@ -169,9 +169,9 @@ OpenCodeAcpBackend┘     │ thread + LocalSet └─ PermissionHandler (AllowO
 - [x] model applied via `set_session_model`; unknown model refused naming the offered ones
 - [x] `mcp_servers` passed through
 - [x] `PermissionHandler` port; `AllowOnce`
-- [ ] `claude-acp`, `codex-acp`, `opencode` moved; `claude-acp` resumes by `load_session`
-- [ ] Codex auth retry as a hook
-- [ ] complexity records re-measured
+- [x] `claude-acp`, `codex-acp`, `opencode` moved; `claude-acp` resumes by `load_session`
+- [x] Codex auth retry as a hook
+- [x] complexity records re-measured
 
 ## Testing Plan
 
@@ -208,7 +208,57 @@ Dropped from the plan: the Codex `codex login` retry end-to-end test. It needs a
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+### Complexity records re-measured (2026-10-24, `#coagents` 1/8)
+
+Both records are left open here; closing them is the wrap's job. The records give their metrics
+without a scanner, so the same structural scan was run on both sides: length is the lines from the
+`fn` line through its closing brace; nesting is the deepest brace depth, counting the body's own
+brace (this reproduces the records' nesting, 10 and 13, on the `master` bodies); branch lines are
+lines with `if`, `else`, `match`, `while`, `for` or `loop`; early exits are lines with `return`.
+On the `master` bodies the scan gives 185 / 10 / 18 / 1 and 246 / 13 / 26 / 1 against the records'
+184 / 10 / 18 / 1 and 244 / 13 / 24 / 1, so its length and branch counts run one to two above the
+records. Before and after below both come from this scan.
+
+| Function (length / nesting / branch lines / early exits) | Before, `master` | After, successor |
+|---|---|---|
+| `run_acp_worker` (`acp.rs`) | 185 / 10 / 18 / 1 | removed; replaced by `acp_driver/worker.rs::serve` 45 / 3 / 3 / 2, `dispatch` 24 / 4 / 1 / 0, `supervise` 17 / 4 / 1 / 0 |
+| `run_acp_worker` session requests | — | `acp_driver/session.rs::open_session` 58 / 4 / 2 / 0, `prompt` 29 / 2 / 0 / 0 |
+| `run_codex_acp_worker` (`codex_acp.rs`) | 246 / 13 / 26 / 1 | removed; its login retry is `codex_acp.rs::CodexLoginHooks::on_session_error` 16 / 3 / 3 / 2 and `open_session` 14 / 2 / 1 / 0 |
+
+Across the 117 functions in the changed files (test helpers included), the largest is
+`session.rs::open_session` at 58 lines, and the deepest nesting is 4. None is over the 60-line or
+nesting-4 thresholds that `/analyze-clean-code` applies.
+
+### Decisions and deviations recorded during the green phase
+
+- **Update order.** The library delivers `session/update` on a task of its own, while a prompt's
+  response wakes the prompt directly, so a turn could end before its last update was recorded (the
+  `updates_stream_as_tool_calls_and_text` test failed on that race before the fix). The connection
+  spawns each incoming message through `worker::run_or_spawn`, which polls the future once at once,
+  so a notification handler completes before the response that follows it. The driver suite passed
+  10 of 10 repeated runs, and the driver and Claude suites together passed 15 of 15.
+- **Concurrent prompts.** A second prompt on a session with a turn running is refused; a session
+  runs one turn at a time, and the turn's text would otherwise mix two answers.
+- **Route model.** On a provider route the request's model is not applied: the route's model stands,
+  as it did before (`acp_driver::open_for_request`).
+- **Permission answer.** `AllowOnce` picks the first offered `allow_once` option. It no longer sends
+  the literal id `allow-once`, and a request with no such option is answered `cancelled`.
+- **Spawn failure.** A failed spawn is not kept: the next request spawns again. The old worker kept
+  the first spawn error for every later request.
+- **Model refusal.** A requested model the agent does not advertise is refused naming the offered
+  ones, and an agent that advertises none refuses every requested model. This is strict by design;
+  the `claude-acp` default model is sent by the workflows, so the advertised ids of the real
+  `claude-agent-acp` must be checked before merge.
+- **Codex login failure.** A failed `codex login` is still the error the caller sees; the session
+  error it followed is not reported in its place.
+- **Folded module.** `backend/acp_updates.rs` is deleted; its mapping lives in
+  `acp_driver/mapping.rs`. Its message-chunk, empty-chunk and terminal-tool-result tests moved there;
+  its `allow_once()` test is replaced by the `AllowOnce` tests in `acp_driver.rs`.
+
+### Markers left in the code
+
+None. No `TODO` or `FIXME` was added, and the `TODO(acp-driver)` and `TODO(opencode-acp)` markers are
+removed.
 
 ## Decisions & Trade-offs
 
@@ -243,7 +293,7 @@ _(populated during development)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-agent-backend -p tddy-acp-stub -p tddy-integration-tests`) — verify 100% pass
