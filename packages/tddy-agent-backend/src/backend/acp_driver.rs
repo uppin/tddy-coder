@@ -322,6 +322,7 @@ impl AcpDriver {
         let pid = Arc::new(AtomicU32::new(0));
         let setup = worker::Setup {
             command,
+            stream: None,
             permissions,
             hooks,
             commands: receiver,
@@ -343,6 +344,47 @@ impl AcpDriver {
         })??;
         Ok(Self {
             program,
+            commands,
+            pid,
+        })
+    }
+
+    /// Serve an ACP agent that is already running elsewhere and reachable over `stream` — one a
+    /// supervisor started as another OS user and relays — instead of spawning a child here. No pid
+    /// is known ([`Self::agent_pid`] is `None`); closing the stream, which dropping the driver does,
+    /// is what ends the agent.
+    pub fn spawn_over(
+        stream: std::os::unix::net::UnixStream,
+        permissions: Arc<dyn PermissionHandler>,
+        hooks: Arc<dyn AcpAgentHooks>,
+    ) -> Result<Self, BackendError> {
+        let (commands, receiver) = mpsc::channel(COMMAND_QUEUE_DEPTH);
+        let (started, spawned) = std::sync::mpsc::sync_channel(1);
+        let pid = Arc::new(AtomicU32::new(0));
+        let setup = worker::Setup {
+            command: AcpAgentCommand::default(),
+            stream: Some(stream),
+            permissions,
+            hooks,
+            commands: receiver,
+            started,
+            pid: Arc::clone(&pid),
+        };
+        std::thread::Builder::new()
+            .name("acp-driver".to_string())
+            .spawn(move || worker::run(setup))
+            .map_err(|e| {
+                BackendError::InvocationFailed(format!(
+                    "could not start the ACP driver thread: {e}"
+                ))
+            })?;
+        spawned.recv().map_err(|_| {
+            BackendError::InvocationFailed(
+                "the ACP driver thread stopped before its agent connected".to_string(),
+            )
+        })??;
+        Ok(Self {
+            program: PathBuf::from("<relayed agent>"),
             commands,
             pid,
         })

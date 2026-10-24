@@ -1,5 +1,6 @@
 import { safeTestIdPart } from "../../lib/testId";
 import type { AvailableAgents } from "./useAvailableAgents";
+import { AgentKindBadge } from "./AgentKindBadge";
 
 export interface CreateSessionAgentPickerSectionProps {
   availableAgents: AvailableAgents;
@@ -51,6 +52,11 @@ export function CreateSessionAgentPickerSection({
             >
               {agent.daemonInstanceId}
             </span>
+            <AgentKindBadge
+              kind={agent.kind}
+              harness={agent.harness}
+              testId={`create-session-agent-${safeTestIdPart(agent.agentId)}-kind`}
+            />
           </label>
         ))
       )}

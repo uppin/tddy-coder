@@ -389,6 +389,8 @@ fn roster_entry(
         // The last activity survives a state change rather than being cleared with it: what an idle
         // agent was last seen doing is the only useful thing to show on its row.
         last_activity: activity.as_ref().and_then(AgentActivity::to_proto),
+        kind: crate::coding_agent::agent_kind_to_wire(record.kind) as i32,
+        harness: record.harness.clone().unwrap_or_default(),
     }
 }
 
@@ -431,6 +433,8 @@ mod tests {
             replaces: Vec::new(),
             tools: Vec::new(),
             codebase_session_id: None,
+            kind: Default::default(),
+            harness: None,
         }
     }
 
@@ -455,6 +459,8 @@ mod tests {
     fn a_remote_record(agent_id: &str, codebase_session_id: &str) -> SessionAgentRecord {
         SessionAgentRecord {
             codebase_session_id: Some(codebase_session_id.to_string()),
+            kind: Default::default(),
+            harness: None,
             ..a_record(agent_id)
         }
     }

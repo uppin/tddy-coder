@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::task::{Context, Waker};
 
 use agent_client_protocol as acp;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{spawn_local, LocalSet};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -54,6 +55,9 @@ pub(super) enum Command {
 /// the child's pid).
 pub(super) struct Setup {
     pub(super) command: AcpAgentCommand,
+    /// A connected stream to an agent started elsewhere (a relayed spawn); when set, no child is
+    /// spawned here and `command` is unused.
+    pub(super) stream: Option<std::os::unix::net::UnixStream>,
     pub(super) permissions: Arc<dyn PermissionHandler>,
     pub(super) hooks: Arc<dyn AcpAgentHooks>,
     pub(super) commands: mpsc::Receiver<Command>,
@@ -83,12 +87,40 @@ pub(super) fn run(setup: Setup) {
 async fn serve(setup: Setup) {
     let Setup {
         command,
+        stream,
         permissions,
         hooks,
-        mut commands,
+        commands,
         started,
         pid,
     } = setup;
+    if let Some(stream) = stream {
+        let stream = match stream
+            .set_nonblocking(true)
+            .and_then(|()| tokio::net::UnixStream::from_std(stream))
+        {
+            Ok(stream) => stream,
+            Err(e) => {
+                let _ = started.send(Err(BackendError::InvocationFailed(format!(
+                    "could not use the relayed agent stream: {e}"
+                ))));
+                return;
+            }
+        };
+        let (read, write) = stream.into_split();
+        // No child here: the process runs where the stream leads, and ends when it is closed.
+        converse(
+            (Box::new(read) as Box<dyn AsyncRead + Unpin>).compat(),
+            (Box::new(write) as Box<dyn AsyncWrite + Unpin>).compat_write(),
+            permissions,
+            hooks,
+            commands,
+            started,
+            None,
+        )
+        .await;
+        return;
+    }
     let mut child = match spawn_agent(&command) {
         Ok(child) => child,
         Err(error) => {
@@ -107,11 +139,32 @@ async fn serve(setup: Setup) {
     pid.store(child_pid, Ordering::SeqCst);
     let (end_child, child_ended) = oneshot::channel();
     let supervisor = spawn_local(supervise(child, child_ended, Arc::clone(&pid)));
+    converse(
+        (Box::new(stdout) as Box<dyn AsyncRead + Unpin>).compat(),
+        (Box::new(stdin) as Box<dyn AsyncWrite + Unpin>).compat_write(),
+        permissions,
+        hooks,
+        commands,
+        started,
+        Some((end_child, supervisor)),
+    )
+    .await;
+}
 
+/// Run the ACP connection over `reader`/`writer` until every driver handle is gone, then end the
+/// child (when this driver owns one) and wait until it is reaped.
+async fn converse(
+    reader: tokio_util::compat::Compat<Box<dyn AsyncRead + Unpin>>,
+    writer: tokio_util::compat::Compat<Box<dyn AsyncWrite + Unpin>>,
+    permissions: Arc<dyn PermissionHandler>,
+    hooks: Arc<dyn AcpAgentHooks>,
+    mut commands: mpsc::Receiver<Command>,
+    started: std::sync::mpsc::SyncSender<Result<(), BackendError>>,
+    child: Option<(oneshot::Sender<()>, tokio::task::JoinHandle<()>)>,
+) {
     let turns = Turns::default();
     let client = DriverClient::new(turns.clone(), permissions);
-    let (conn, io) =
-        acp::ClientSideConnection::new(client, stdin.compat_write(), stdout.compat(), run_or_spawn);
+    let (conn, io) = acp::ClientSideConnection::new(client, writer, reader, run_or_spawn);
     spawn_local(async move {
         let _ = io.await;
     });
@@ -121,9 +174,11 @@ async fn serve(setup: Setup) {
     while let Some(command) = commands.recv().await {
         dispatch(Rc::clone(&agent), command);
     }
-    // Every driver handle is gone: end the child and wait until it is reaped.
-    let _ = end_child.send(());
-    let _ = supervisor.await;
+    if let Some((end_child, supervisor)) = child {
+        // Every driver handle is gone: end the child and wait until it is reaped.
+        let _ = end_child.send(());
+        let _ = supervisor.await;
+    }
 }
 
 /// Start a future the connection spawns for one incoming message.

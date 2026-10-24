@@ -109,6 +109,25 @@ pub fn resolve_tool_path(
     }
 }
 
+/// Resolve the harness binary a relayed spawn may exec: absolute, free of `..`, and listed verbatim
+/// in `allowed_relay_tool_paths` — which is empty unless the operator turned relaying on, and is
+/// not `allowed_tool_paths`.
+pub fn resolve_relay_tool_path(
+    policy: &SpawnPolicy,
+    requested: &Path,
+) -> Result<PathBuf, SupervisorError> {
+    let requested = plain_absolute_path(requested)?;
+    if policy
+        .allowed_relay_tool_paths
+        .iter()
+        .any(|allowed| allowed == requested)
+    {
+        Ok(requested.to_path_buf())
+    } else {
+        Err(SupervisorError::Denied)
+    }
+}
+
 /// Resolve the environment a caller may put on a session it asks for.
 ///
 /// Allowlisted, not denylisted. The tool allowlist is the supervisor's whole control over *what* runs
@@ -594,6 +613,34 @@ mod tests {
 
         // Then
         assert_eq!(resolved, Err(SupervisorError::Denied));
+    }
+
+    #[test]
+    fn a_tool_allowed_for_sessions_is_not_thereby_allowed_for_relaying() {
+        let policy = a_spawn_policy().allowing_tool("/usr/bin/opencode").build();
+
+        let resolved = resolve_relay_tool_path(&policy, Path::new("/usr/bin/opencode"));
+
+        assert_eq!(resolved, Err(SupervisorError::Denied));
+    }
+
+    #[test]
+    fn a_relay_tool_path_is_matched_verbatim_and_must_be_plain() {
+        let mut policy = a_spawn_policy().build();
+        policy.allowed_relay_tool_paths = vec![PathBuf::from("/usr/bin/opencode")];
+
+        assert_eq!(
+            resolve_relay_tool_path(&policy, Path::new("/usr/bin/opencode")),
+            Ok(PathBuf::from("/usr/bin/opencode"))
+        );
+        assert_eq!(
+            resolve_relay_tool_path(&policy, Path::new("/usr/bin/../bin/opencode")),
+            Err(SupervisorError::Denied)
+        );
+        assert_eq!(
+            resolve_relay_tool_path(&policy, Path::new("opencode")),
+            Err(SupervisorError::Denied)
+        );
     }
 
     #[test]

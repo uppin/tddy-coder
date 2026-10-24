@@ -40,6 +40,9 @@ pub use tddy_worktree_service::{
     base_sync_cache, branch_intent, branch_owner, remote_git_service, worktree_files, worktrees,
 };
 pub mod claude_cli_session;
+pub mod coding_agent_as_user;
+pub mod coding_agent_launcher;
+pub mod coding_agent_relay;
 pub use tddy_cli_sessions::{cli_session_manager, session_toolcall};
 pub use tddy_daemon_kernel::{agent_list_mapping, config};
 pub mod connection_service;

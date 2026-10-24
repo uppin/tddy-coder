@@ -4,6 +4,7 @@ import { safeTestIdPart } from "../../lib/testId";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "../ui/button";
+import { AgentKindBadge } from "./AgentKindBadge";
 import { useAvailableAgents, type AvailableAgent } from "./useAvailableAgents";
 
 /**
@@ -122,6 +123,11 @@ export function AgentPicker({ testIdPrefix, errorTestId, onAttach, onClose }: Ag
                 >
                   {agent.daemonInstanceId}
                 </span>
+                <AgentKindBadge
+                  kind={agent.kind}
+                  harness={agent.harness}
+                  testId={`${optionTestId(agent.agentId)}-kind`}
+                />
               </button>
             </li>
           ))}
