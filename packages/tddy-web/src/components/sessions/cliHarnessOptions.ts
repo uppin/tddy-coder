@@ -10,11 +10,14 @@ export const SESSION_TYPE_OPTIONS: { id: SessionType; label: string }[] = [
   { id: "warp-cli", label: "Warp" },
 ];
 
+/** A tool session's terminals are served by its tddy-coder participant, which runs bash only. */
+export const TOOL_SESSION_TYPE = "tool";
+
 /**
  * The CLI harnesses a terminal tab can run, in toggle order. Every session type but `tool`: a tool
  * session's terminals are served by its tddy-coder participant, which runs bash only.
  */
-export const CLI_HARNESS_OPTIONS = SESSION_TYPE_OPTIONS.filter(({ id }) => id !== "tool");
+export const CLI_HARNESS_OPTIONS = SESSION_TYPE_OPTIONS.filter(({ id }) => id !== TOOL_SESSION_TYPE);
 
 /** The kind of a login-shell terminal. */
 export const BASH_KIND = "bash";
