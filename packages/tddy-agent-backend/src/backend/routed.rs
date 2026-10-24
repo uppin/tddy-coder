@@ -114,7 +114,7 @@ pub(super) fn splice_route_args(args: &mut Vec<String>, route: &HarnessRoute, mo
 /// The route's arguments as `codex-acp` takes them. It accepts `-c key=value` overrides, as `codex`
 /// does, but has no `-m`: its model is the `model` override, so `-m <model>` becomes
 /// `-c model="<model>"`. Any other argument passes through unchanged.
-pub(super) fn codex_acp_route_args(route: &HarnessRoute) -> Vec<String> {
+pub fn codex_acp_route_args(route: &HarnessRoute) -> Vec<String> {
     let mut out = Vec::with_capacity(route.args.len());
     let mut args = route.args.iter();
     while let Some(arg) = args.next() {

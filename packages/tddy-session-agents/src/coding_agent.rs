@@ -209,17 +209,29 @@ impl AgentRoster {
             session_os_user,
             worktree: worktree.clone(),
             managed: metadata.managed_codebase,
-            mcp_servers: mcp_servers.clone(),
+            mcp_servers,
+            session_token: session_token.to_string(),
         };
         let command = launcher
             .command_for(&launch)
             .await
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
+        let mcp_servers = launcher
+            .mcp_servers_for(&launch)
+            .await
+            .map_err(|e| Status::failed_precondition(e.to_string()))?;
+        // A managed session's agent loses its native tools: through `_meta` for the harness that
+        // takes them there; the others get theirs through the launcher's environment.
+        let meta = metadata
+            .managed_codebase
+            .then(|| tddy_coding_subagent::withdrawal_session_meta(&def.harness))
+            .flatten();
         let open = OpenSession {
             cwd: worktree,
             resume: None,
             model: Some(def.model.clone()),
             mcp_servers,
+            meta,
         };
         let session = CodingAgentSession::start(command, open, def.model)
             .await

@@ -2,6 +2,7 @@
 pub mod agent_argv;
 pub mod agent_credentials;
 pub mod attached_initial_prompt;
+pub mod coding_agent_wiring;
 pub mod service_util;
 pub mod split_claude_cli_start;
 pub mod split_ports;

@@ -1,55 +1,108 @@
 //! The daemon's [`CodingAgentLauncher`]: turns a coding-agent launch into the ACP agent command.
 //!
-//! What it does today, and — as loudly — what it refuses. A coding agent is a subagent that can
-//! write, so a launch the daemon cannot honour *exactly* is refused with a typed reason rather
-//! than started some weaker way:
+//! A coding agent is a subagent that can write, so a launch the daemon cannot honour *exactly* is
+//! refused with a typed reason rather than started some weaker way:
 //!
-//! - **The session's OS user.** The ACP driver needs piped stdio to its child. No existing daemon
-//!   spawn path (`spawn_as_user`, the spawn worker) hands back piped stdio for a non-PTY child run
-//!   as another user, so the agent can be started only when the daemon already runs as the
-//!   session's user (the desktop deployment). Any other launch is refused, never run as the
-//!   daemon's own user. FIXME(acp-subagent): a spawn-as-user path with piped stdio.
-//! - **A provider account's route.** Resolving one reads the session owner's vault
-//!   (`tddy-agent-launch`'s `SessionAccountAccess`), which this launcher does not hold. A profile
-//!   naming a `provider_account` is refused. FIXME(acp-subagent): apply the route.
-//! - **A managed session.** Withdrawing the harness's native tools (see
-//!   `tddy_coding_subagent::confinement`) and giving `tddy-tools --mcp` its transport
-//!   credential are not applied here, so a managed launch is refused. FIXME(acp-subagent).
+//! - **The session's OS user** — [`crate::coding_agent_as_user`]: run behind `setpriv` when this
+//!   daemon is privileged; refused when it is not (a supervised host: `tddy-supervisor`'s
+//!   `SpawnSession` gives a child no stdio, so the ACP driver cannot talk to it).
+//!   FIXME(acp-subagent): a supervisor request that relays a child's stdio.
+//! - **A provider account's route** — resolved from the session owner's vault through
+//!   [`tddy_agent_launch::session_provider_route::resolve_session_route`], exactly as a tool session
+//!   resolves it, and applied per harness: environment and secret environment for all of them,
+//!   `-c` overrides for `codex-acp`, the route's config file as inline `OPENCODE_CONFIG_CONTENT` for
+//!   `opencode`.
+//! - **A managed session** — the harness's native tools are withdrawn
+//!   ([`tddy_coding_subagent::withdrawal_env`]; `claude-acp` through `_meta` at `session/new`) and
+//!   the agent is handed `tddy-tools --mcp` with a credential minted for it
+//!   ([`tddy_session_split::coding_agent_wiring`]).
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use tddy_coding_subagent::{CodingAgentLaunch, CodingAgentLauncher};
-use tddy_core::AcpAgentCommand;
+use tddy_coding_subagent::{
+    confinement_for, withdrawal_env, CodingAgentLaunch, CodingAgentLauncher, Confinement,
+};
+use tddy_core::provider_route::{Harness, HarnessRoute, RouteChoice, RouteSources};
+use tddy_core::{AcpAgentCommand, McpServerSpec};
 use tddy_discovery::subagent::SubagentError;
+
+use crate::coding_agent_as_user::{run_as_session_user, DropContext};
 
 /// Env var naming the `codex-acp` binary, as the workflow backend reads it.
 const CODEX_ACP_CLI_ENV: &str = "TDDY_CODEX_ACP_CLI";
+/// The variable `opencode` reads inline JSON configuration from.
+const OPENCODE_CONFIG_CONTENT_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 
-/// Starts the harness named by a launch as the daemon's own OS user, on the session's worktree.
-#[derive(Debug, Clone)]
+/// Resolves the provider route a launch runs on: `None` for the harness's own login.
+pub type RouteResolver =
+    Arc<dyn Fn(&CodingAgentLaunch) -> Result<Option<HarnessRoute>, SubagentError> + Send + Sync>;
+
+/// The `tddy-tools` binary and environment a managed launch's MCP server runs with.
+pub type ToolServerResolver = Arc<
+    dyn Fn(&CodingAgentLaunch) -> Result<(PathBuf, Vec<(String, String)>), SubagentError>
+        + Send
+        + Sync,
+>;
+
+/// Starts the harness a launch names, as the session's OS user, on the session's worktree.
+#[derive(Clone)]
 pub struct DaemonCodingAgentLauncher {
-    daemon_os_user: Option<String>,
+    drop: DropContext,
+    route: RouteResolver,
+    tool_server: ToolServerResolver,
 }
 
 impl DaemonCodingAgentLauncher {
-    /// A launcher for a daemon running as the current process's user.
+    /// A launcher for this process's identity.
     #[must_use]
-    pub fn for_this_process() -> Self {
-        #[cfg(unix)]
-        let daemon_os_user =
-            tddy_session_activity::user_sessions_path::username_for_uid(unsafe { libc::geteuid() });
-        #[cfg(not(unix))]
-        let daemon_os_user = None;
-        Self { daemon_os_user }
+    pub fn new(route: RouteResolver, tool_server: ToolServerResolver) -> Self {
+        Self::with_identity(DropContext::current(), route, tool_server)
     }
 
-    /// A launcher for a daemon running as `os_user` (tests).
+    /// The launcher a running daemon installs: routes from the session owner's vault, tool servers
+    /// from this daemon's own tokens and toolchain.
     #[must_use]
-    pub fn running_as(os_user: &str) -> Self {
+    pub fn for_daemon(
+        config: tddy_daemon_kernel::config::DaemonConfig,
+        tddy_data_dir: PathBuf,
+        vaults: Option<Arc<tddy_daemon_auth::SessionVaults>>,
+        user_resolver: tddy_daemon_kernel::SessionUserResolver,
+        tokens: Option<tddy_daemon_auth::SessionTokens>,
+    ) -> Self {
+        let route = route_from_vault(move |token| {
+            tddy_agent_launch::session_acting_identity::SessionAccountAccess::new(
+                vaults.clone(),
+                Arc::clone(&user_resolver),
+                token,
+            )
+        });
+        let tool_server: ToolServerResolver = Arc::new(move |launch| {
+            tddy_session_split::coding_agent_wiring::coding_agent_tool_server(
+                &config,
+                &tddy_data_dir,
+                tokens.as_ref(),
+                &launch.session_id,
+                &launch.session_token,
+            )
+            .map_err(|status| SubagentError::from(status.message().to_string()))
+        });
+        Self::new(route, tool_server)
+    }
+
+    /// A launcher whose identity is `drop` (tests).
+    #[must_use]
+    pub fn with_identity(
+        drop: DropContext,
+        route: RouteResolver,
+        tool_server: ToolServerResolver,
+    ) -> Self {
         Self {
-            daemon_os_user: Some(os_user.to_string()),
+            drop,
+            route,
+            tool_server,
         }
     }
 
@@ -78,6 +131,110 @@ impl DaemonCodingAgentLauncher {
             )),
         }
     }
+
+    /// Apply `route` to the harness command: every harness gets its environment; `codex-acp` its
+    /// `-c` overrides; `opencode` its config file as inline config.
+    fn apply_route(
+        launch: &CodingAgentLaunch,
+        command: &mut AcpAgentCommand,
+        route: &HarnessRoute,
+    ) -> Result<(), SubagentError> {
+        command.env.extend(route.env.iter().cloned());
+        command.env.extend(
+            route
+                .secret_env
+                .iter()
+                .map(|(name, secret)| (name.clone(), secret.expose().to_string())),
+        );
+        match launch.def.harness.as_str() {
+            "codex-acp" => command.args.extend(tddy_core::codex_acp_route_args(route)),
+            "opencode" => {
+                if let Some(file) = route.files.first() {
+                    let config: serde_json::Value =
+                        serde_json::from_str(&file.contents).map_err(|e| {
+                            Self::refuse(
+                                launch,
+                                &format!("the route's OpenCode config is not JSON: {e}"),
+                            )
+                        })?;
+                    set_opencode_config(command, config);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn plan(&self, launch: &CodingAgentLaunch) -> Result<AcpAgentCommand, SubagentError> {
+        let (program, args) = Self::harness_command(launch)?;
+        let mut command = AcpAgentCommand {
+            program,
+            args,
+            env: Vec::new(),
+            cwd: Some(launch.worktree.clone()),
+        };
+        if launch.managed && confinement_for(&launch.def.harness) == Confinement::CannotWithdraw {
+            return Err(Self::refuse(
+                launch,
+                "it is a managed session and this harness's native tools cannot be withdrawn",
+            ));
+        }
+        if let Some(account) = launch.def.provider_account.as_deref() {
+            let route = (self.route)(launch)?.ok_or_else(|| {
+                Self::refuse(
+                    launch,
+                    &format!("provider account '{account}' resolved to no route"),
+                )
+            })?;
+            Self::apply_route(launch, &mut command, &route)?;
+        }
+        if launch.managed {
+            for (name, value) in withdrawal_env(&launch.def.harness) {
+                if name == OPENCODE_CONFIG_CONTENT_ENV {
+                    let tools = serde_json::from_str(&value).map_err(|e| {
+                        Self::refuse(launch, &format!("the withdrawal config is not JSON: {e}"))
+                    })?;
+                    set_opencode_config(&mut command, tools);
+                } else {
+                    command.env.push((name, value));
+                }
+            }
+        }
+        run_as_session_user(command, &launch.session_os_user, &self.drop)
+            .map_err(|reason| Self::refuse(launch, &reason))
+    }
+}
+
+/// Merge `config` into the command's inline OpenCode config, creating it when absent.
+fn set_opencode_config(command: &mut AcpAgentCommand, config: serde_json::Value) {
+    let existing = command
+        .env
+        .iter()
+        .position(|(name, _)| name == OPENCODE_CONFIG_CONTENT_ENV)
+        .map(|at| command.env.remove(at).1)
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+    let mut merged = existing.unwrap_or_else(|| serde_json::json!({}));
+    merge_json(&mut merged, config);
+    command
+        .env
+        .push((OPENCODE_CONFIG_CONTENT_ENV.to_string(), merged.to_string()));
+}
+
+/// Merge `from` into `into`: objects merge key by key, anything else is replaced.
+fn merge_json(into: &mut serde_json::Value, from: serde_json::Value) {
+    match (into, from) {
+        (serde_json::Value::Object(into), serde_json::Value::Object(from)) => {
+            for (key, value) in from {
+                match into.get_mut(&key) {
+                    Some(existing) => merge_json(existing, value),
+                    None => {
+                        into.insert(key, value);
+                    }
+                }
+            }
+        }
+        (into, from) => *into = from,
+    }
 }
 
 #[async_trait::async_trait]
@@ -86,53 +243,91 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<AcpAgentCommand, SubagentError> {
-        match self.daemon_os_user.as_deref() {
-            Some(daemon_user) if daemon_user == launch.session_os_user => {}
-            daemon_user => {
-                return Err(Self::refuse(
-                    launch,
-                    &format!(
-                        "the session runs as '{}' but this daemon runs as '{}', and its launcher \
-                         cannot start a piped-stdio child as another user; it will not run the \
-                         agent as the daemon's own user",
-                        launch.session_os_user,
-                        daemon_user.unwrap_or("an unresolvable user"),
-                    ),
-                ))
-            }
-        }
-        if let Some(account) = launch.def.provider_account.as_deref() {
-            return Err(Self::refuse(
-                launch,
-                &format!(
-                    "it runs on provider account '{account}', and this daemon's launcher does not \
-                     apply a provider route yet; use an agent on the harness's own login"
-                ),
-            ));
-        }
-        if launch.managed {
-            return Err(Self::refuse(
-                launch,
-                "the session is a managed codebase, and this daemon's launcher does not yet \
-                 withdraw the harness's native tools or give it tddy-tools' transport",
-            ));
-        }
-        let (program, args) = Self::harness_command(launch)?;
-        Ok(AcpAgentCommand {
-            program,
-            args,
-            env: Vec::new(),
-            cwd: Some(launch.worktree.clone()),
-        })
+        self.plan(launch)
     }
+
+    async fn mcp_servers_for(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<Vec<McpServerSpec>, SubagentError> {
+        if !launch.managed {
+            return Ok(launch.mcp_servers.clone());
+        }
+        let (command, env) = (self.tool_server)(launch)?;
+        Ok(vec![McpServerSpec {
+            name: "tddy-tools".to_string(),
+            command,
+            args: vec!["--mcp".to_string()],
+            env,
+        }])
+    }
+}
+
+/// The route resolver for a daemon whose vaults `access_for` reads: resolve the launch's provider
+/// account in the session owner's vault, as a tool session does.
+pub fn route_from_vault(
+    access_for: impl Fn(&str) -> tddy_agent_launch::session_acting_identity::SessionAccountAccess
+        + Send
+        + Sync
+        + 'static,
+) -> RouteResolver {
+    Arc::new(move |launch| {
+        let Some(account) = launch.def.provider_account.clone() else {
+            return Ok(None);
+        };
+        let harness =
+            Harness::from_agent_or_session_type(&launch.def.harness).ok_or_else(|| {
+                SubagentError::from(format!(
+                    "'{}' is not a routable harness",
+                    launch.def.harness
+                ))
+            })?;
+        let sources = RouteSources {
+            session: Some(RouteChoice::Account(account)),
+            ..RouteSources::default()
+        };
+        tddy_agent_launch::session_provider_route::resolve_session_route(
+            &access_for(&launch.session_token),
+            harness,
+            &sources,
+            &launch.def.model,
+        )
+        .map_err(|status| SubagentError::from(status.message().to_string()))
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tddy_coding_subagent::CodingAgentDef;
+    use tddy_core::provider_route::RouteSecret;
 
-    fn a_launch(harness: &str, session_user: &str) -> CodingAgentLaunch {
+    fn the_daemons_own_identity() -> DropContext {
+        #[cfg(unix)]
+        let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+        #[cfg(not(unix))]
+        let (uid, gid) = (0, 0);
+        DropContext {
+            uid,
+            gid,
+            privileged: false,
+            setpriv: None,
+        }
+    }
+
+    fn this_user() -> String {
+        #[cfg(unix)]
+        {
+            tddy_session_activity::user_sessions_path::username_for_uid(unsafe { libc::geteuid() })
+                .expect("the test user has a passwd entry")
+        }
+        #[cfg(not(unix))]
+        {
+            String::new()
+        }
+    }
+
+    fn a_launch(harness: &str) -> CodingAgentLaunch {
         CodingAgentLaunch {
             def: CodingAgentDef {
                 name: "coder".to_string(),
@@ -142,11 +337,40 @@ mod tests {
                 provider_account: None,
             },
             session_id: "s".to_string(),
-            session_os_user: session_user.to_string(),
+            session_os_user: this_user(),
             worktree: PathBuf::from("/work/tree"),
             managed: false,
             mcp_servers: Vec::new(),
+            session_token: "caller".to_string(),
         }
+    }
+
+    fn a_route() -> HarnessRoute {
+        HarnessRoute {
+            env: vec![("BASE_URL".to_string(), "https://p".to_string())],
+            secret_env: vec![("API_KEY".to_string(), RouteSecret::new("sekret"))],
+            files: vec![tddy_core::provider_route::RouteFile {
+                name: "opencode.json".to_string(),
+                contents: r#"{"provider":{"p":{}}}"#.to_string(),
+            }],
+            args: vec!["-m".to_string(), "m".to_string()],
+        }
+    }
+
+    fn a_launcher() -> DaemonCodingAgentLauncher {
+        DaemonCodingAgentLauncher::with_identity(
+            the_daemons_own_identity(),
+            Arc::new(|_| Ok(Some(a_route()))),
+            Arc::new(|launch| {
+                Ok((
+                    PathBuf::from("/bin/tddy-tools"),
+                    vec![(
+                        "TDDY_REMOTE_SESSION_ID".to_string(),
+                        launch.session_id.clone(),
+                    )],
+                ))
+            }),
+        )
     }
 
     async fn command(
@@ -159,11 +383,17 @@ mod tests {
             .map_err(|e| e.to_string())
     }
 
+    fn env_of<'a>(command: &'a AcpAgentCommand, name: &str) -> Option<&'a str> {
+        command
+            .env
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
     #[tokio::test]
     async fn a_session_of_the_daemons_own_user_starts_the_harness_on_the_worktree() {
-        let launcher = DaemonCodingAgentLauncher::running_as("dev");
-
-        let command = command(&launcher, &a_launch("opencode", "dev"))
+        let command = command(&a_launcher(), &a_launch("opencode"))
             .await
             .expect("launches");
 
@@ -173,46 +403,131 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_session_of_another_user_is_refused_naming_both_users() {
-        let launcher = DaemonCodingAgentLauncher::running_as("daemon");
+    async fn a_session_of_another_user_is_refused_by_an_unprivileged_daemon() {
+        let mut launch = a_launch("opencode");
+        launch.session_os_user = "root".to_string();
+        let launcher = DaemonCodingAgentLauncher::with_identity(
+            DropContext {
+                uid: 4242,
+                gid: 4242,
+                privileged: false,
+                setpriv: None,
+            },
+            Arc::new(|_| Ok(None)),
+            Arc::new(|_| Err(SubagentError::from("unused"))),
+        );
 
-        let refusal = command(&launcher, &a_launch("opencode", "dev"))
-            .await
-            .expect_err("refused");
+        let refusal = command(&launcher, &launch).await.expect_err("refused");
 
         assert!(
-            refusal.contains("'dev'") && refusal.contains("'daemon'"),
+            refusal.contains("'root'") && refusal.contains("not privileged"),
             "{refusal}"
         );
     }
 
     #[tokio::test]
-    async fn a_provider_account_is_refused_rather_than_run_on_the_vendor() {
-        let launcher = DaemonCodingAgentLauncher::running_as("dev");
-        let mut launch = a_launch("codex-acp", "dev");
+    async fn a_provider_route_reaches_the_codex_agent_as_env_and_overrides() {
+        let mut launch = a_launch("codex-acp");
         launch.def.provider_account = Some("meta".to_string());
 
-        let refusal = command(&launcher, &launch).await.expect_err("refused");
+        let command = command(&a_launcher(), &launch).await.expect("launches");
 
-        assert!(refusal.contains("provider account 'meta'"), "{refusal}");
+        assert_eq!(env_of(&command, "BASE_URL"), Some("https://p"));
+        assert_eq!(env_of(&command, "API_KEY"), Some("sekret"));
+        assert!(
+            command.args.windows(2).any(|w| w == ["-c", "model=\"m\""]),
+            "{:?}",
+            command.args
+        );
     }
 
     #[tokio::test]
-    async fn a_managed_launch_is_refused_rather_than_run_unconfined() {
-        let launcher = DaemonCodingAgentLauncher::running_as("dev");
-        let mut launch = a_launch("claude-acp", "dev");
-        launch.managed = true;
+    async fn a_provider_route_reaches_opencode_as_inline_config() {
+        let mut launch = a_launch("opencode");
+        launch.def.provider_account = Some("meta".to_string());
+
+        let command = command(&a_launcher(), &launch).await.expect("launches");
+
+        let config: serde_json::Value =
+            serde_json::from_str(env_of(&command, "OPENCODE_CONFIG_CONTENT").expect("config"))
+                .expect("JSON");
+        assert_eq!(config["provider"]["p"], serde_json::json!({}));
+        assert_eq!(env_of(&command, "API_KEY"), Some("sekret"));
+    }
+
+    #[tokio::test]
+    async fn a_route_that_does_not_resolve_refuses_rather_than_run_on_the_vendor() {
+        let mut launch = a_launch("claude-acp");
+        launch.def.provider_account = Some("meta".to_string());
+        let launcher = DaemonCodingAgentLauncher::with_identity(
+            the_daemons_own_identity(),
+            Arc::new(|_| Err(SubagentError::from("the vault is locked"))),
+            Arc::new(|_| Err(SubagentError::from("unused"))),
+        );
 
         let refusal = command(&launcher, &launch).await.expect_err("refused");
 
-        assert!(refusal.contains("managed codebase"), "{refusal}");
+        assert!(refusal.contains("vault is locked"), "{refusal}");
+    }
+
+    #[tokio::test]
+    async fn a_managed_opencode_loses_its_native_tools_and_keeps_its_route() {
+        let mut launch = a_launch("opencode");
+        launch.managed = true;
+        launch.def.provider_account = Some("meta".to_string());
+
+        let command = command(&a_launcher(), &launch).await.expect("launches");
+
+        let config: serde_json::Value =
+            serde_json::from_str(env_of(&command, "OPENCODE_CONFIG_CONTENT").expect("config"))
+                .expect("JSON");
+        assert_eq!(config["tools"]["bash"], false);
+        assert_eq!(config["provider"]["p"], serde_json::json!({}));
+    }
+
+    #[tokio::test]
+    async fn a_managed_harness_that_cannot_withdraw_is_refused() {
+        let mut launch = a_launch("codex-acp");
+        launch.managed = true;
+
+        let refusal = command(&a_launcher(), &launch).await.expect_err("refused");
+
+        assert!(refusal.contains("cannot be withdrawn"), "{refusal}");
+    }
+
+    #[tokio::test]
+    async fn a_managed_launch_hands_the_agent_tddy_tools_with_its_transport() {
+        let mut launch = a_launch("claude-acp");
+        launch.managed = true;
+
+        let servers = a_launcher()
+            .mcp_servers_for(&launch)
+            .await
+            .expect("servers");
+
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "tddy-tools");
+        assert_eq!(servers[0].args, ["--mcp"]);
+        assert_eq!(servers[0].command, PathBuf::from("/bin/tddy-tools"));
+        assert_eq!(
+            servers[0].env[0],
+            ("TDDY_REMOTE_SESSION_ID".to_string(), "s".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unmanaged_launch_keeps_its_own_mcp_servers() {
+        let servers = a_launcher()
+            .mcp_servers_for(&a_launch("opencode"))
+            .await
+            .expect("servers");
+
+        assert!(servers.is_empty());
     }
 
     #[tokio::test]
     async fn a_harness_with_no_command_is_refused() {
-        let launcher = DaemonCodingAgentLauncher::running_as("dev");
-
-        let refusal = command(&launcher, &a_launch("claude", "dev"))
+        let refusal = command(&a_launcher(), &a_launch("claude"))
             .await
             .expect_err("refused");
 

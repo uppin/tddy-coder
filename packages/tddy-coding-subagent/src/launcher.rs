@@ -8,7 +8,7 @@ use tddy_discovery::subagent::SubagentError;
 use crate::catalog::CodingAgentDef;
 
 /// Everything a launch needs to know about the conversation it serves.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CodingAgentLaunch {
     pub def: CodingAgentDef,
     /// The session the conversation belongs to.
@@ -22,6 +22,23 @@ pub struct CodingAgentLaunch {
     /// MCP servers handed to the agent — in a managed session, `tddy-tools --mcp` pointed at the
     /// session's exec tools.
     pub mcp_servers: Vec<McpServerSpec>,
+    /// The caller's session token — what the launcher reads the session owner's vault and mints the
+    /// agent's own tool credential with. Never logged.
+    pub session_token: String,
+}
+
+impl std::fmt::Debug for CodingAgentLaunch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CodingAgentLaunch")
+            .field("def", &self.def)
+            .field("session_id", &self.session_id)
+            .field("session_os_user", &self.session_os_user)
+            .field("worktree", &self.worktree)
+            .field("managed", &self.managed)
+            .field("mcp_servers", &self.mcp_servers)
+            .field("session_token", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Turns a [`CodingAgentLaunch`] into the command the ACP driver spawns: the harness binary,
@@ -33,4 +50,13 @@ pub trait CodingAgentLauncher: Send + Sync {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<AcpAgentCommand, SubagentError>;
+
+    /// The MCP servers the ACP session is opened with. By default the launch's own; a launcher that
+    /// has to complete them (resolve the binary, mint the agent's tool credential) overrides it.
+    async fn mcp_servers_for(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<Vec<McpServerSpec>, SubagentError> {
+        Ok(launch.mcp_servers.clone())
+    }
 }
