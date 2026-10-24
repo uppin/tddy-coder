@@ -11,8 +11,16 @@
 //!
 //! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-acp-driver.md
 
+mod client;
+mod mapping;
+mod session;
+mod worker;
+
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+
+use tokio::sync::{mpsc, oneshot};
 
 use crate::error::BackendError;
 
@@ -148,11 +156,22 @@ pub trait PermissionHandler: Send + Sync {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AllowOnce;
 
+/// The kind ACP gives an option that allows one call.
+const ALLOW_ONCE_KIND: &str = "allow_once";
+
 #[async_trait::async_trait]
 impl PermissionHandler for AllowOnce {
-    async fn decide(&self, _request: PermissionRequest) -> PermissionDecision {
-        // TODO(acp-driver): implement
-        PermissionDecision::Cancelled
+    async fn decide(&self, request: PermissionRequest) -> PermissionDecision {
+        match request
+            .options
+            .into_iter()
+            .find(|option| option.kind == ALLOW_ONCE_KIND)
+        {
+            Some(option) => PermissionDecision::Selected {
+                option_id: option.option_id,
+            },
+            None => PermissionDecision::Cancelled,
+        }
     }
 }
 
@@ -180,69 +199,188 @@ pub struct NoHooks;
 
 impl AcpAgentHooks for NoHooks {}
 
+/// How many requests may wait for the worker before a caller waits to send one.
+const COMMAND_QUEUE_DEPTH: usize = 16;
+
 /// One ACP agent child and its connection. Dropping it terminates the child.
+///
+/// Every method is a request to the worker thread that owns the child, so the driver is shared
+/// freely: a cancel can reach a turn that another task is still waiting on.
 pub struct AcpDriver {
-    // TODO(acp-driver): implement — worker channel, child pid
-    _command: AcpAgentCommand,
+    program: PathBuf,
+    commands: mpsc::Sender<worker::Command>,
+    /// The child's pid while it runs; `0` once the worker has seen the child exit or has killed it.
+    pid: Arc<AtomicU32>,
 }
 
 impl std::fmt::Debug for AcpDriver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AcpDriver")
-            .field("program", &self._command.program)
+            .field("program", &self.program)
             .finish()
     }
 }
 
-fn not_implemented(what: &str) -> BackendError {
-    BackendError::InvocationFailed(format!("TODO(acp-driver): {what} is not implemented"))
-}
-
 impl AcpDriver {
-    /// Spawn the agent and initialize the connection.
+    /// Spawn the agent and start serving its connection. The child is spawned before this returns,
+    /// so a missing binary is an error here; the connection is initialized by the first request
+    /// that needs it.
     pub fn spawn(
         command: AcpAgentCommand,
-        _permissions: Arc<dyn PermissionHandler>,
-        _hooks: Arc<dyn AcpAgentHooks>,
+        permissions: Arc<dyn PermissionHandler>,
+        hooks: Arc<dyn AcpAgentHooks>,
     ) -> Result<Self, BackendError> {
-        // TODO(acp-driver): implement
-        Ok(Self { _command: command })
+        let program = command.program.clone();
+        let (commands, receiver) = mpsc::channel(COMMAND_QUEUE_DEPTH);
+        let (started, spawned) = std::sync::mpsc::sync_channel(1);
+        let pid = Arc::new(AtomicU32::new(0));
+        let setup = worker::Setup {
+            command,
+            permissions,
+            hooks,
+            commands: receiver,
+            started,
+            pid: Arc::clone(&pid),
+        };
+        std::thread::Builder::new()
+            .name("acp-driver".to_string())
+            .spawn(move || worker::run(setup))
+            .map_err(|e| {
+                BackendError::InvocationFailed(format!(
+                    "could not start the ACP driver thread: {e}"
+                ))
+            })?;
+        spawned.recv().map_err(|_| {
+            BackendError::InvocationFailed(
+                "the ACP driver thread stopped before its agent started".to_string(),
+            )
+        })??;
+        Ok(Self {
+            program,
+            commands,
+            pid,
+        })
     }
 
     /// `session/new` (or `session/load` for `open.resume`), then `session/set_model` if asked.
-    pub async fn open_session(&self, _open: OpenSession) -> Result<AcpSession, BackendError> {
-        // TODO(acp-driver): implement
-        Err(not_implemented("open_session"))
+    pub async fn open_session(&self, open: OpenSession) -> Result<AcpSession, BackendError> {
+        self.request(|reply| worker::Command::OpenSession { open, reply })
+            .await
     }
 
     /// One `session/prompt` with `prompt` as its text. Every update goes to `updates` and, mapped
     /// to [`crate::ProgressEvent`]s, to `progress`.
     pub async fn prompt(
         &self,
-        _session_id: &str,
-        _prompt: String,
-        _updates: Option<AcpUpdateSink>,
-        _progress: Option<ProgressSink>,
+        session_id: &str,
+        prompt: String,
+        updates: Option<AcpUpdateSink>,
+        progress: Option<ProgressSink>,
     ) -> Result<AcpTurnEnd, BackendError> {
-        // TODO(acp-driver): implement
-        Err(not_implemented("prompt"))
+        self.request(|reply| worker::Command::Prompt {
+            session_id: session_id.to_string(),
+            prompt,
+            updates,
+            progress,
+            reply,
+        })
+        .await
     }
 
     /// `session/cancel` for a running turn; that turn then ends as [`AcpStopReason::Cancelled`].
-    pub async fn cancel(&self, _session_id: &str) -> Result<(), BackendError> {
-        // TODO(acp-driver): implement
-        Err(not_implemented("cancel"))
+    pub async fn cancel(&self, session_id: &str) -> Result<(), BackendError> {
+        self.request(|reply| worker::Command::Cancel {
+            session_id: session_id.to_string(),
+            reply,
+        })
+        .await
     }
 
     /// The models a fresh session would offer.
     pub async fn list_models(&self) -> Result<BackendModels, BackendError> {
-        // TODO(acp-driver): implement
-        Err(not_implemented("list_models"))
+        self.request(|reply| worker::Command::ListModels { reply })
+            .await
     }
 
     /// The agent child's process id, while it runs.
     pub fn agent_pid(&self) -> Option<u32> {
-        // TODO(acp-driver): implement
-        None
+        match self.pid.load(Ordering::SeqCst) {
+            0 => None,
+            pid => Some(pid),
+        }
+    }
+
+    /// Send one command to the worker and wait for its answer.
+    async fn request<T>(
+        &self,
+        command: impl FnOnce(worker::Reply<T>) -> worker::Command,
+    ) -> Result<T, BackendError> {
+        let (reply, answer) = oneshot::channel();
+        self.commands
+            .send(command(reply))
+            .await
+            .map_err(|_| agent_stopped())?;
+        answer.await.map_err(|_| agent_stopped())?
+    }
+}
+
+fn agent_stopped() -> BackendError {
+    BackendError::InvocationFailed("the ACP agent is no longer running".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn option(id: &str, kind: &str) -> PermissionOptionView {
+        PermissionOptionView {
+            option_id: id.to_string(),
+            name: id.to_string(),
+            kind: kind.to_string(),
+        }
+    }
+
+    fn asking(options: Vec<PermissionOptionView>) -> PermissionRequest {
+        PermissionRequest {
+            session_id: "session-1".to_string(),
+            tool_call_id: "call-1".to_string(),
+            title: None,
+            raw_input: None,
+            options,
+        }
+    }
+
+    #[tokio::test]
+    async fn allow_once_picks_the_first_option_that_allows_one_call() {
+        // Given
+        let request = asking(vec![
+            option("reject-once", "reject_once"),
+            option("allow-always", "allow_always"),
+            option("allow-once", "allow_once"),
+            option("allow-once-again", "allow_once"),
+        ]);
+
+        // When
+        let decision = AllowOnce.decide(request).await;
+
+        // Then
+        assert_eq!(
+            decision,
+            PermissionDecision::Selected {
+                option_id: "allow-once".to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn allow_once_cancels_when_no_option_allows_one_call() {
+        // Given
+        let request = asking(vec![option("reject-once", "reject_once")]);
+
+        // When
+        let decision = AllowOnce.decide(request).await;
+
+        // Then
+        assert_eq!(decision, PermissionDecision::Cancelled);
     }
 }
