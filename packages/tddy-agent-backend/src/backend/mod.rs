@@ -775,6 +775,8 @@ pub fn context_globs_for_agent(agent: &str) -> &'static [&'static str] {
         "opencode" => &["AGENTS.md", ".agents/**", "opencode.json", ".opencode/**"],
         // Muse Code's `.muse/` tree is unconfirmed: TODO(muse-cli-facts) in `cli_harness_muse`.
         "muse" => &["AGENTS.md", ".agents/**", ".muse/**"],
+        // Warp reads its own `WARP.md` beside the shared base; its skills come from `.agents/`.
+        "warp" => &["AGENTS.md", ".agents/**", "WARP.md"],
         _ => SHARED_CONTEXT_GLOBS,
     }
 }

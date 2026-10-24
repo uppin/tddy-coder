@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use crate::svc_start_session_core::CliStart;
 
+use crate::cli_harness_jail::require_sandbox_hosts;
 use crate::launch_ports::LaunchSessions;
 use crate::session_provider_route::{sandboxed_start_route, session_route_sources_with_default};
 use tddy_core::cli_harness::CliHarness;
@@ -262,6 +263,10 @@ impl LaunchSessions {
                 "managed_codebase is not supported for {} sessions",
                 harness.session_type
             )));
+        }
+        // A harness the sandbox runner does not host is refused before the session is created.
+        if req.sandbox {
+            require_sandbox_hosts(harness)?;
         }
         let start = self.cli_start_prelude(req, progress, os_user).await?;
         let sessions_base = start.sessions_base.clone();

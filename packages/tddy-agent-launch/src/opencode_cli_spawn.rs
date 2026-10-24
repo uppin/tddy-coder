@@ -28,6 +28,7 @@ use tddy_service::proto::session::{
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
+use crate::cli_resume_token::watch_for_resume_token;
 use crate::cli_route_launch::{
     launch_model_for, resume_cli_route, start_cli_route, CliRouteLaunch,
 };
@@ -236,6 +237,8 @@ pub(crate) async fn start_cli_harness_session(
     };
     write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
+    // Watched only once the metadata is on disk: the watcher records its token into it.
+    watch_for_resume_token(&launched, session_dir.clone());
     // The roster naming them is on disk now, so the clones belong to the session rather than to the
     // start that claimed them.
     seeded_clones.keep();
@@ -336,6 +339,7 @@ async fn resume_cli_harness_session(
         &worktree_path,
         &CliLaunch {
             binary: &binary,
+            conversation_id: meta.harness_resume_token.as_deref(),
             resume: true,
             ..CliLaunch::default()
         },
@@ -350,6 +354,8 @@ async fn resume_cli_harness_session(
     updated.updated_at = chrono::Utc::now().to_rfc3339();
     write_session_metadata(session_dir, &updated)
         .map_err(|e| Status::internal(format!("failed to update session metadata: {e}")))?;
+    // Watched only once the metadata is on disk, for the same reason as the start.
+    watch_for_resume_token(&launched, session_dir.to_path_buf());
 
     Ok(Response::new(ResumeSessionResponse {
         session_id: session_id.to_string(),

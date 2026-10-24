@@ -174,7 +174,7 @@ export function buildStartSessionRequest(
       codebaseDaemonInstanceId: "",
     };
   }
-  if (sessionType === "opencode-cli" || sessionType === "muse-cli") {
+  if (sessionType === "opencode-cli" || sessionType === "muse-cli" || sessionType === "warp-cli") {
     return {
       ...commonParams,
       toolPath: "",
@@ -184,16 +184,19 @@ export function buildStartSessionRequest(
       stackParentDaemonInstanceId,
       stackNodeId,
       sessionType,
-      model,
-      // The provider field is offered to every CLI harness, so the account the operator chose
-      // goes out as chosen rather than being dropped in favour of the vendor; the daemon refuses
-      // one the harness cannot run on (Muse Code runs only on Meta).
+      // Warp takes no model: its CLI has no model flag, and the model is chosen in-session. So the
+      // request names none, whatever the catalog reported for the harness.
+      model: sessionType === "warp-cli" ? "" : model,
+      // The provider field is offered to every CLI harness but Warp, so the account the operator
+      // chose goes out as chosen rather than being dropped in favour of the vendor; the daemon
+      // refuses one the harness cannot run on (Muse Code runs only on Meta). Warp is offered no
+      // provider, so the form holds none for it to send.
       providerAccountId,
       providerBuiltIn,
       permissionMode: "",
-      // The form offers OpenCode and Muse Code only a model, so the request clears what another
-      // session type left in the form: no first prompt, sandbox, managed codebase, specialized
-      // agents or semantic index.
+      // The form offers OpenCode and Muse Code only a model, and Warp neither, so the request
+      // clears what another session type left in the form: no first prompt, sandbox, managed
+      // codebase, specialized agents or semantic index.
       initialPrompt: "",
       sandbox: false,
       managedCodebase: false,
