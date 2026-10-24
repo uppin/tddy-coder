@@ -3,7 +3,7 @@
 //!
 //! The peer is an in-memory `PeerForwarder` behind a real `CommonRoom`; no LiveKit.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-start-cancel.md
+//! Feature docs: docs/ft/daemon/background-tasks.md (§ RPC surface)
 
 use std::sync::{Arc, Mutex};
 

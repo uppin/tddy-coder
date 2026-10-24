@@ -182,7 +182,7 @@ impl LaunchSessions {
         }
         // Nothing past the clone is begun for a start that was cancelled: the worktree is not cut and
         // no agent is spawned.
-        refuse_a_cancelled_start(cancel)?;
+        crate::start_task::refuse_a_cancelled_start(cancel)?;
 
         // A base session that cannot seed a stack is refused here, before the session-type dispatch
         // and before anything is created, so the new-session form can show the reason in its error
@@ -495,15 +495,4 @@ pub(crate) fn managed_recipe_for(
             None
         };
     Ok(managed_recipe)
-}
-
-/// The status a cancelled start ends with.
-pub(crate) const START_CANCELLED: &str = "start cancelled";
-
-/// Ends a start whose task was cancelled before its next step.
-pub(crate) fn refuse_a_cancelled_start(cancel: &CancellationToken) -> Result<(), Status> {
-    if cancel.is_cancelled() {
-        return Err(Status::cancelled(START_CANCELLED));
-    }
-    Ok(())
 }

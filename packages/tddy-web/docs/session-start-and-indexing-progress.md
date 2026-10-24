@@ -45,6 +45,28 @@ While the clone is active its row carries `create-session-clone-progress`: git's
 
 The wire contract is [`StartPhase`](../../tddy-service/docs/start-session-phases.md).
 
+## Cancelling a start
+
+The stream's first event is `started` (`StartTaskStarted { taskId, daemonInstanceId }`), the task the
+start runs as. `startSessionStreamed(request, onStarted)` hands each `started` to `onStarted`; the latest
+stands, so on a split start it is the codebase host's task, relayed after the agent host's.
+
+`useCreateSessionSubmit` keeps that task and returns `startCancel` (`StartCancel` in
+`CreateSessionActions.tsx`) when a `taskClient` is given: `enabled` once a task is known and no cancel
+is in flight, `cancelling`, `cancelled`, and `cancel`, which calls
+`taskClient.cancelTask({ sessionToken, taskId, daemonInstanceId })`. A stream that ends with
+`Code.Canceled` sets `cancelled` instead of the error, and a refused `cancelTask` sets the error and
+re-enables Cancel. `CreateSessionActions` routes Cancel to `startCancel.cancel` while submitting
+(otherwise `onCancel`), labels it **Cancelling…** while one is in flight, and shows
+`create-session-start-cancelled` ("Start cancelled") once a cancelled start has ended. The main variant
+passes no `startCancel`.
+
+`taskClient` is the TaskService on the host the form starts on. `useSessionsDrawerClients` gives the
+selected daemon's, and `useSessionsDrawerOwningHost` the owning host's (`activeTaskClient`).
+`SessionsDrawerScreen` hands `SessionMainPane` one of them by mode, like its other clients, and
+`SessionMainPane` passes it on to `CreateSessionPane` and, through the workflow-view context, to
+`PrStackScreen` → `CreateSessionDialog`.
+
 ## Keep-alive events
 
 The stream can also carry `keepAlive` events while the host provisions the project. `startProgressAfter`

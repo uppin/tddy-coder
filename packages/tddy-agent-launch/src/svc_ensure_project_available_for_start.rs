@@ -233,7 +233,7 @@ impl LaunchSessions {
         let cloned = handle.await;
         // A clone that ended because the start was cancelled reports that, not the failure its
         // stopped git process left behind.
-        crate::svc_start_session_core::refuse_a_cancelled_start(cancel)?;
+        crate::start_task::refuse_a_cancelled_start(cancel)?;
         match cloned {
             Ok(res) => res.inspect_err(|status| {
                 log::warn!(

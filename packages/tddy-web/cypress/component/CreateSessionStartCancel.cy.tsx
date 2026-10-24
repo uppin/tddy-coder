@@ -3,7 +3,7 @@
  * as (named by the stream's first event), and when the host ends the stream cancelled the form is
  * editable again, with its values, saying the start was cancelled.
  *
- * Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-start-cancel.md
+ * Feature docs: docs/ft/web/session-drawer.md (§ Cancel)
  */
 
 import React from "react";

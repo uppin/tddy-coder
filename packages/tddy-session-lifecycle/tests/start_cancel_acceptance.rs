@@ -6,7 +6,7 @@
 //! A slow worktree cut needs none either: the project's repository carries a `post-checkout` hook,
 //! which `git worktree add` runs, that says it began and then sleeps.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-start-cancel.md
+//! Feature docs: docs/ft/daemon/background-tasks.md (§ Session starts run as tasks)
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

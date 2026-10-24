@@ -8,6 +8,9 @@
 //! agent being spawned) does not interrupt that step: the start finishes it, and the session it
 //! created is then deleted — its agent stopped, its worktree and its directory removed — exactly as
 //! a Delete would, before the stream ends `CANCELLED`.
+//!
+//! TODO(start-cancel): kill an in-flight worktree cut instead of waiting it out —
+//! `docs/dev/todo/2026-10-24-cancelled-start-waits-out-an-in-flight-worktree-cut.md`.
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Status};
@@ -24,7 +27,6 @@ use crate::launch_ports::LaunchSessions;
 use crate::start_keepalive::{
     with_activity_keepalive, STARTING_ACTIVITY, START_KEEPALIVE_INTERVAL,
 };
-use crate::svc_start_session_core::START_CANCELLED;
 
 /// The `kind` a start task is registered under.
 pub(crate) const START_TASK_KIND: &str = "start_session";
@@ -161,4 +163,17 @@ async fn run_start(
         );
     }
     Ok(started?.into_inner())
+}
+
+/// The status a cancelled start ends with.
+pub(crate) const START_CANCELLED: &str = "start cancelled";
+
+/// Ends a start whose task was cancelled before its next step.
+pub(crate) fn refuse_a_cancelled_start(
+    cancel: &tddy_task::CancellationToken,
+) -> Result<(), Status> {
+    if cancel.is_cancelled() {
+        return Err(Status::cancelled(START_CANCELLED));
+    }
+    Ok(())
 }

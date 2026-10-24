@@ -7,8 +7,8 @@ connect, signal and delete handlers; `tddy-session-lifecycle` wires it to the ho
 `tddy_session_lifecycle::…` paths.
 
 About **9.4k production lines** in 54 modules, under the 10k receiver budget. No production file is over 500 (the largest, by the count to the first `#[cfg(test)]`:
-`svc_start_session_core.rs` 496, `svc_start_sandboxed_claude_cli_session.rs` 493,
-`session_coordinate_handlers.rs` 485).
+`svc_start_session_core.rs` 498, `svc_start_sandboxed_claude_cli_session.rs` 493,
+`session_coordinate_handlers.rs` 460).
 Standing findings are in [`code-issues/`](code-issues/). A production line is any line of a `src/` file
 outside an inline `#[cfg(test)] mod x { … }` block, excluding `*_tests.rs`.
 
@@ -54,7 +54,8 @@ steps are in sibling modules:
 | `project_home_start_spec.rs` | the start request main runs from: `refuse_what_main_cannot_honour` (a requested `session_role` → `PERMISSION_DENIED`; `sandbox`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `agent_clone`, `split_agent` → `INVALID_ARGUMENT`), `refuse_a_type_main_cannot_run` (anything but `claude-cli`, checked after the profile is applied → `FAILED_PRECONDITION`), `on_home_worktree` (sets project, home-worktree `repo_path`, `managed_codebase`, the `project-home` role; clears branch, stack and `daemon_instance_id` fields; keeps the rest of the spec) |
 | `claude_cli_spawn_steps.rs` (role) | `record_role_before_spawn` writes a session's role into its initial `.session.yaml` before the agent is spawned (nothing for an ordinary session); `role_allowed_tools_args` gives a `project-home` claude-cli one `--allowedTools` per `tddy_tool_engine::read_only::project_home_allowed_tools()` entry, at spawn and again at resume from the record |
 | `project_home_launch.rs` | what a session's role adds to its claude-cli agent's launch. `StartRole { name, main: Option<MainLaunchPlan> }` replaces a bare role name on the spawn (`StartRole::ordinary()` for every caller with no role); `LaunchSessions::start_role` and `resumed_role` mint a main's agent credential (`SplitSessions::agent_session_token_for`, from the verified caller) through `main_plan` and nothing for any other role. `MainLaunchPlan::launch` is the one place that resolves the toolchain's `tddy-tools` and calls `project_home_launch`, which writes the role prompt (`project_home_prompt.md`, `include_str!`) and the MCP config into the session dir and returns a `RoleLaunch`: the role's `--allowedTools`, every `NATIVE_FILESYSTEM_TOOLS` entry as `--disallowedTools`, `--append-system-prompt-file`, `--mcp-config` + `--strict-mcp-config`, and the `colocated_jail_tool_env` pairs (agent-tool socket on an embedded host, local URL otherwise). A start's plan is carried out in `spawn_claude_cli_process`, after every check, so a refused start writes nothing; a resume carries it out in `resumed_role` and appends it after any split wiring (`RoleLaunch::after_split`) |
-| `clone_planner.rs`, `clone_backend.rs`, `clone_ssh_env.rs`, `start_keepalive.rs` | how a clone reaches its remote and runs; see [Cloning a project](#cloning-a-project-for-a-start) |
+| `clone_planner.rs`, `clone_backend.rs`, `clone_ssh_env.rs`, `clone_stopper.rs`, `start_keepalive.rs` | how a clone reaches its remote, runs and is stopped; see [Cloning a project](#cloning-a-project-for-a-start) |
+| `start_task.rs` | the streamed start as a task; see [A streamed start is a task](#a-streamed-start-is-a-task) |
 | `svc_start_claude_cli_session.rs` | the non-sandboxed Claude CLI start; holds `SessionStdioEndpoint` (the reverse stdio endpoint to a spawned `tddy-coder`). A non-empty `repo_path` is run in directly (`claude_cli_spawn_steps::claude_cli_checkout` adopts it, canonicalized, and never removes it) instead of cutting a session worktree — how the project-home session runs on its home worktree |
 | `svc_resume_claude_cli_session.rs`, `svc_resume_sandboxed_claude_cli_session.rs` | the resume paths; the sandboxed one relaunches through `relaunch_sandboxed_runner` |
 
@@ -73,8 +74,33 @@ known:
 |---|---|
 | `clone_planner.rs` | `ClonePlanner` and `PlannedClone`: a facilitator clone runs with only its transport shim; an SSH remote runs with the askpass environment when the host's OpenSSH is 8.4 or later and an agent is reachable; otherwise it runs without prompting (`BatchMode=yes`) and a failure says why. The grant a clone holds lives until it ends. A refusal before the clone starts (an unresolvable session) is kept and returned as its own `Status`. |
 | `clone_ssh_env.rs` | `ClonePlan::{Facilitator, Ssh}`, `clone_ssh_env_for`, `agent_socket_for` and `CloneAgentError` (`NoAgentReachable` and `LookupFailed`, kept distinct), `is_ssh_url`, `resolve_askpass_path` (beside the daemon executable, then `PATH`) |
-| `clone_backend.rs` | `CloneBackend::clone_repo(url, dest, env, on_progress)`: the supervised, forked-worker and in-process backends, each carrying the plan's environment. The forked worker's `WorkerEvent::CloneProgress` events (`SpawnClient::clone_repo_observed`) and the in-process `clone_run::clone_with_progress` reach `on_progress`; the supervised clone reports none |
+| `clone_backend.rs` | `CloneBackend::clone_repo(url, dest, env, on_started, on_progress)`: the supervised, forked-worker and in-process backends, each carrying the plan's environment. The forked worker's `WorkerEvent::CloneProgress` events (`SpawnClient::clone_repo_observed`) and the in-process `clone_run::clone_with_progress` reach `on_progress`. `on_started` receives the `CloneHandle` that stops the clone once git runs: from the supervised and in-process runners directly, and as `CloneHandle::for_process_group(pid)` from the forked worker's `WorkerEvent::Started` |
+| `clone_stopper.rs` | `CloneStopper::watching(cancel, runtime)`: watches the start's `CancellationToken` from the async runtime while the clone blocks a pool thread, and stops the clone through the handle `started(handle)` records — at once if the token was already cancelled when git began. Dropping it stops the watch. `ensure_project_available_for_start` answers `CANCELLED` (`start_task::refuse_a_cancelled_start`) for a clone that ended because it was stopped, not the error its killed git left |
 | `start_keepalive.rs` | `with_activity_keepalive(sink, interval, activity, work)`: awaits `work` and emits `StartKeepAlive` naming `activity` every `START_KEEPALIVE_INTERVAL` (5 s) until it ends. A streamed start wraps its whole life in it (`STARTING_ACTIVITY`); `with_keepalive` is the `PROVISIONING_ACTIVITY` form around provisioning, so two keep-alives tick per interval while a project provisions |
+
+## A streamed start is a task
+
+`stream_start_session_at_session_coordinate` spawns a `StartTask` (`start_task.rs`, `TaskBody`) in
+`LaunchSessions.task_registry` under kind `start_session` and returns the stream its events go to. The
+task sends `started` (`StartTaskStarted { task_id, daemon_instance_id }`) first, then runs
+`start_session_core_cancellable(req, sink, cancel)` (`harness_profile_request.rs`) with the task's
+token inside the whole-start keep-alive, forwarding progress through its own task so the terminal
+event cannot overtake a phase's end. `start_session_core` is that call with a token nothing signals,
+which is what the unary `StartSession` and `EnsureProjectHomeSession` use.
+
+The token reaches the start in three places:
+
+- the clone, through `StartHandles { progress, cancel }` → `ProjectClone.cancel` → `CloneStopper`;
+- `start_task::refuse_a_cancelled_start` after the clone in `start_session_on_request`, so a cancelled
+  start cuts no worktree and spawns no agent;
+- the split start (`SplitSessions::start_split_claude_cli_session`, in `tddy-session-split`), which
+  races its forward against it.
+
+When the start answers successfully but the token was cancelled meanwhile (a worktree cut or agent
+spawn is not interrupted), `undo_a_cancelled_start` deletes the session it created through
+`delete_session_at_session_coordinate` and the stream ends `Status::cancelled("start cancelled")`
+(`START_CANCELLED`). If that delete fails, it ends `INTERNAL` naming the session. The task's status is
+`Cancelled` for a `CANCELLED` end, `Failed` for any other error, `Completed` otherwise.
 
 `LaunchSessions.askpass` is the daemon's one `AskpassEndpoint` (`None` on a host the daemon runtime did not
 build, whose SSH clones are given no helper). Behaviour:

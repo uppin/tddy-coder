@@ -16,6 +16,12 @@ the two RPC services it also serves, because they run tasks through that runtime
 Both authenticate every call by resolving its session token with the daemon's
 `SessionUserResolver`; an unknown or expired token is `UNAUTHENTICATED`.
 
+`TaskServiceImpl::forwarding_to_peers(room, local_instance_id)` makes `CancelTask` forward a request whose
+`daemon_instance_id` names another daemon to that daemon over the `CommonRoom`
+(`tddy_daemon_kernel::peer_calls::forward_cancel_task`) and return its answer; a request naming this
+daemon, or none, cancels in the local registry. `tddy-daemon`'s `mount_entries.rs` calls it when the
+daemon has a common room. Without it, every request is served locally.
+
 The registry they share is created by `tddy-session-lifecycle`'s `CliSessionManager`, which is why the
 services take it as a constructor argument rather than owning it. `tddy-daemon`'s `runtime.rs` builds
 both, and names them `tddy_session_lifecycle::task_service::…` and `…::action_service::…`: lifecycle
@@ -30,6 +36,7 @@ could not host them without a cycle, and `tddy-daemon-rpc` sits above lifecycle.
 |---|---|
 | `tests/action_service_acceptance.rs` | a started bash action is visible as a task; the kinds list carries bash with its input schema |
 | `tests/action_sandbox_acceptance.rs` | sandboxed actions: writing to the output directory, refusing one without it, `tddy-coder` and a build action under a read-only mount, a write outside egress denied, PTY output streamed, and the refusal off Darwin and Linux |
+| `tests/task_service_peer_cancel.rs` | `CancelTask` naming a peer daemon is forwarded to it (over a scripted `CommonRoom` peer) and its answer returned; one naming this daemon is not forwarded |
 | `packages/tddy-session-lifecycle/tests/task_service_acceptance.rs` | `tasks.TaskService`. It stays in lifecycle because three of its tests drive lifecycle's `ClaudeCliSessionManager`, and moving it would make this crate dev-depend on lifecycle |
 
 On a macOS developer host:
