@@ -49,3 +49,31 @@ function isOption(value: unknown): value is PendingPermission["options"][number]
   const { optionId, name, kind } = value as Record<string, unknown>;
   return typeof optionId === "string" && typeof name === "string" && typeof kind === "string";
 }
+
+/** Who answered a permission request, and with which option, as its answered frame records it. */
+export interface AnsweredRecord {
+  readonly answeredBy: string;
+  /** The option the answer chose; `null` when the answer was a cancellation. */
+  readonly optionId: string | null;
+}
+
+/**
+ * The answer a permission request's transcript records: the raw output of its tool call once that
+ * call completed, `{answeredBy, optionId}` for a chosen option or `{answeredBy, cancelled: true}`
+ * for a cancellation. Any other output is not an answer, so the request reads as still unanswered.
+ */
+export function answeredRecordOf(rawOutput: string | undefined): AnsweredRecord | null {
+  if (rawOutput === undefined) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawOutput);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const { answeredBy, optionId, cancelled } = parsed as Record<string, unknown>;
+  if (typeof answeredBy !== "string" || answeredBy.trim() === "") return null;
+  if (cancelled === true) return { answeredBy, optionId: null };
+  if (typeof optionId === "string" && optionId !== "") return { answeredBy, optionId };
+  return null;
+}

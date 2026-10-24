@@ -13,12 +13,12 @@ import type { SessionAgentService } from "../../gen/session_agents_pb";
  * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
  */
 
-/** What an entry says when the daemon that owns its session is not known, so it cannot be answered. */
+/** What an entry says when its owning daemon is not known: nothing can be answered from here. */
 export const OWNING_DAEMON_UNKNOWN_TEXT =
   "The daemon that owns this session is not known, so this request cannot be answered from here.";
 
 /** Whether a session's owning daemon id is known. An empty id is "not known", never "this daemon":
- *  the answer is addressed to the daemon that holds the conversation, so none is sent without one. */
+ *  the answer is addressed to the daemon holding the conversation, so none is sent without one. */
 export function owningDaemonKnown(daemonInstanceId: string): boolean {
   return daemonInstanceId.trim() !== "";
 }
@@ -63,8 +63,8 @@ export function useAnswerAgentPermission({
 
   const answer = useCallback(
     async (requestId: string, optionId: string) => {
-      // Without the owning daemon the call would be addressed to "" — the daemon this browser is on —
-      // which is not necessarily the one that holds the conversation. Nothing is sent in its place.
+      // Without the owning daemon the call would be addressed to "", the daemon this browser is on,
+      // which is not necessarily the one holding the conversation. Nothing is sent in its place.
       if (!owningDaemonKnown(daemonInstanceId)) {
         setError(OWNING_DAEMON_UNKNOWN_TEXT);
         return;

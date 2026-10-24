@@ -3,8 +3,9 @@ import type { ActivityService } from "../../gen/activity_pb";
 import type { SessionAgentService } from "../../gen/session_agents_pb";
 import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpToolCallDetail } from "../chat/useAcpToolCallDetail";
+import type { PendingPermission } from "./PermissionRequestEntry";
 import { PermissionRequestEntry } from "./PermissionRequestEntry";
-import { permissionRequestOf } from "./pendingPermission";
+import { answeredRecordOf, permissionRequestOf } from "./pendingPermission";
 
 export interface TranscriptPermissionRequestProps {
   /** The transcript entry that records the request: a tool call whose id is `permission:<requestId>`. */
@@ -26,11 +27,10 @@ export interface TranscriptPermissionRequestProps {
  * tool call's input, fetched by the entry's `tool_call_id` the same way a tool call's bodies are, so
  * the conversation view needs nothing from the bubble beyond the transcript itself.
  *
- * A request whose input cannot be read, or cannot be fetched, is said so in place of its entry.
- *
- * TODO(web-approvals): the answer the daemon accepted is not recorded in the transcript yet (the
- * answered frame is the recording node's). A reopened dialog therefore offers the options again, and
- * the daemon refuses the second answer, naming who gave the first.
+ * The answer the daemon accepted is read from the same entry: once the call completed, its raw
+ * output is the answer, so a request answered before this conversation was opened (or on another
+ * view) shows who answered it and offers no option. A request whose input cannot be read, or cannot
+ * be fetched, is said so in place of its entry.
  */
 export function TranscriptPermissionRequest({
   message,
@@ -81,13 +81,24 @@ export function TranscriptPermissionRequest({
       </p>
     );
   }
+  // Only a completed call carries the answer. A call still running has none yet, whatever its
+  // output holds, so the request stays open and its options stay offered.
+  const answer = message.toolStatus === "completed" ? answeredRecordOf(detail.rawOutput) : null;
+  const answered: PendingPermission =
+    answer === null
+      ? permission
+      : {
+          ...permission,
+          answeredBy: answer.answeredBy,
+          answeredOptionId: answer.optionId ?? undefined,
+        };
   return (
     <PermissionRequestEntry
       sessionId={sessionId}
       conversationId={conversationId}
       sessionToken={sessionToken}
       daemonInstanceId={daemonInstanceId}
-      permission={permission}
+      permission={answered}
       client={agentClient}
     />
   );

@@ -10,7 +10,10 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { ActivityService } from "../../src/gen/activity_pb";
-import { SessionAgentService } from "../../src/gen/session_agents_pb";
+import {
+  AnswerAgentPermissionResponseSchema,
+  SessionAgentService,
+} from "../../src/gen/session_agents_pb";
 import { SessionEntrySchema } from "../../src/gen/session_pb";
 import { SessionWithActivitySidebar } from "../../src/components/sessions/SessionWithActivitySidebar";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -39,15 +42,25 @@ function aBubble(status: ToolCallStatus) {
   });
 }
 
-const THE_PERMISSION_ENTRY = replayToolCall({
-  id: "permission:perm-1",
-  title: "Permission: Run cargo test",
-  kind: ToolKind.EXECUTE,
-  status: ToolCallStatus.PENDING,
-  atUnixMs: 2_000,
-});
+/** The answered frame the transcript records for a request: the status its tool call ends in, and
+ *  the raw output the answer carried: `{answeredBy, optionId}` or `{answeredBy, cancelled: true}`. */
+interface AnsweredFrame {
+  status: ToolCallStatus;
+  output: unknown;
+}
 
-function thePermissionDetail(deferredToUser: boolean) {
+/** The request's transcript entry; once answered, the host re-emits it with the answered status. */
+function thePermissionEntry(answered: AnsweredFrame | undefined) {
+  return replayToolCall({
+    id: "permission:perm-1",
+    title: "Permission: Run cargo test",
+    kind: ToolKind.EXECUTE,
+    status: answered?.status ?? ToolCallStatus.PENDING,
+    atUnixMs: 2_000,
+  });
+}
+
+function thePermissionDetail(deferredToUser: boolean, answered: AnsweredFrame | undefined) {
   return aToolDetail({
     input: {
       requestId: "perm-1",
@@ -58,6 +71,7 @@ function thePermissionDetail(deferredToUser: boolean) {
       ],
       deferredToUser,
     },
+    output: answered?.output,
   });
 }
 
@@ -66,21 +80,25 @@ function thePermissionDetail(deferredToUser: boolean) {
 function mountASessionWhoseSubagentAsks(options: {
   deferredToUser: boolean;
   daemonInstanceId: string;
+  answered?: AnsweredFrame;
 }) {
+  const { deferredToUser, daemonInstanceId, answered } = options;
   const { backend } = aConversationReplayBackend({
     session: {
       counts: [1],
-      snapshot: [aBubble(options.deferredToUser ? ToolCallStatus.PENDING : ToolCallStatus.IN_PROGRESS)],
+      snapshot: [aBubble(deferredToUser ? ToolCallStatus.PENDING : ToolCallStatus.IN_PROGRESS)],
     },
     conversations: {
       [CONVERSATION]: {
         counts: [1],
-        snapshot: [THE_PERMISSION_ENTRY],
-        details: { "permission:perm-1": thePermissionDetail(options.deferredToUser) },
+        snapshot: [thePermissionEntry(answered)],
+        details: { "permission:perm-1": thePermissionDetail(deferredToUser, answered) },
       },
     },
   });
-  backend.onUnary(SessionAgentService.method.answerAgentPermission, () => ({ answeredBy: "alice" }));
+  backend.onUnary(SessionAgentService.method.answerAgentPermission, () =>
+    create(AnswerAgentPermissionResponseSchema, { answeredBy: "alice" }),
+  );
   mountWithRpc(
     <div style={{ display: "flex", flexDirection: "column", height: 700, width: 1200 }}>
       <SessionWithActivitySidebar
@@ -117,7 +135,7 @@ beforeEach(() => {
   cy.viewport(1280, 800);
 });
 
-it("a deferred request answered from the conversation names the daemon that owns the session", () => {
+it("a deferred request answered from the conversation names its session's daemon", () => {
   // Given
   const backend = mountASessionWhoseSubagentAsks({
     deferredToUser: true,
@@ -130,7 +148,9 @@ it("a deferred request answered from the conversation names the daemon that owns
 
   // Then
   cy.wrap(null).should(() => {
-    const answers = recordedFields(backend.callsTo(SessionAgentService.method.answerAgentPermission));
+    const answers = recordedFields(
+      backend.callsTo(SessionAgentService.method.answerAgentPermission),
+    );
     expect(answers).to.deep.equal([
       {
         sessionToken: "tok",
@@ -152,7 +172,92 @@ it("a deferred request whose owning daemon is not known offers no answer and say
   openTheConversation();
 
   // Then
-  byTestId("permission-cannot-answer", { timeout: 5000 }).should("contain.text", "cannot be answered");
+  byTestId("permission-cannot-answer", { timeout: 5000 }).should(
+    "contain.text",
+    "cannot be answered",
+  );
   byTestId("permission-option-allow-once").should("not.exist");
   expect(backend.callsTo(SessionAgentService.method.answerAgentPermission)).to.have.length(0);
+});
+
+const ANSWERED_BY_ALICE_ONCE: AnsweredFrame = {
+  status: ToolCallStatus.COMPLETED,
+  output: { answeredBy: "alice", optionId: "allow-once" },
+};
+
+it("a request the transcript records as answered names the option and who chose it", () => {
+  // Given
+  mountASessionWhoseSubagentAsks({
+    deferredToUser: true,
+    daemonInstanceId: OWNING_DAEMON,
+    answered: ANSWERED_BY_ALICE_ONCE,
+  });
+
+  // When
+  openTheConversation();
+
+  // Then
+  byTestId("permission-answered", { timeout: 5000 }).should(
+    "have.text",
+    "Allow once · answered by alice",
+  );
+  cy.get("[data-testid^='permission-option-']").should("not.exist");
+});
+
+it("a reopened conversation still shows an answered request without offering its options", () => {
+  // Given
+  mountASessionWhoseSubagentAsks({
+    deferredToUser: true,
+    daemonInstanceId: OWNING_DAEMON,
+    answered: ANSWERED_BY_ALICE_ONCE,
+  });
+  openTheConversation();
+  byTestId("permission-answered", { timeout: 5000 }).should("contain.text", "answered by alice");
+
+  // When
+  byTestId("subagent-conversation-close").click();
+  byTestId("subagent-conversation-dialog").should("not.exist");
+  openTheConversation();
+
+  // Then
+  byTestId("permission-answered", { timeout: 5000 }).should("contain.text", "answered by alice");
+  cy.get("[data-testid^='permission-option-']").should("not.exist");
+});
+
+it("a request the transcript records as cancelled names who answered it, with no option", () => {
+  // Given
+  mountASessionWhoseSubagentAsks({
+    deferredToUser: true,
+    daemonInstanceId: OWNING_DAEMON,
+    answered: {
+      status: ToolCallStatus.COMPLETED,
+      output: { answeredBy: "alice", cancelled: true },
+    },
+  });
+
+  // When
+  openTheConversation();
+
+  // Then
+  byTestId("permission-answered", { timeout: 5000 }).should("have.text", "Answered by alice");
+  cy.get("[data-testid^='permission-option-']").should("not.exist");
+});
+
+it("a transcript record whose tool call has not completed is not an answer", () => {
+  // Given
+  mountASessionWhoseSubagentAsks({
+    deferredToUser: true,
+    daemonInstanceId: OWNING_DAEMON,
+    answered: {
+      status: ToolCallStatus.IN_PROGRESS,
+      output: { answeredBy: "alice", optionId: "allow-once" },
+    },
+  });
+
+  // When
+  openTheConversation();
+
+  // Then
+  byTestId("permission-option-allow-once", { timeout: 5000 }).should("contain.text", "Allow once");
+  byTestId("permission-answered").should("not.exist");
 });
