@@ -215,7 +215,7 @@ Include all required sections:
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run all tests (`./test`) — verify 100% pass
+- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -226,14 +226,18 @@ Include all required sections:
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -- -D warnings`, `cargo fmt`)
-- [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `{slug}-initial-discovery.md`
-- [ ] USER REVIEW — work complete, decide next steps
+- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
 ```
 
-Scope test runs to the packages you touched while iterating (`./test -p {package}`), and run the
-full `./test` before claiming the checklist item above is done. `cargo build` covers compilation
-when you only need to check that the workspace still builds.
+The list **ends before the wrap**. `/wrap-context-docs` deletes this document, so it can never tick
+its own box, and everything after it — the CI run, readying, review, merge, deploy, a manual check in
+the operator's environment — is the operator's to sequence, never an item here or in the PR body.
+See `/wrap-context-docs` § *Checklists end at the wrap*.
+
+Scope test runs to the packages you touched (`./test -p {package}`) — never a full `./test`
+locally. Whole-workspace health is CI's, read after the wrap. `cargo build -p {package}` covers
+compilation when you only need to check that a package still builds.
 
 ## Rules
 

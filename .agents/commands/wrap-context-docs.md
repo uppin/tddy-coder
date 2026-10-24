@@ -73,6 +73,24 @@ own follow-up commit to those docs (never a re-opened changeset). The local, **s
 Do not tick or leave a box unticked "pending CI": a box is proven by a named test or a measured local
 result, or it is a user-approved deferral.
 
+### Checklists end at the wrap
+
+A checklist — in a changeset, a PRD, or a PR body's test plan — holds **the change itself**: the work
+and the verification that happen **up to, and excluding, this wrap**. What happens to the code after
+the wrap is the operator's, in an order they choose and track themselves, and it never becomes a box:
+
+- **Post-wrap, never a checklist item**: the CI run and whole-workspace health, readying, review,
+  merge, release and deploy, and a manual check the operator runs in their own environment
+  ("restart `./web-dev`, sign in, see the prompt").
+- **Pre-wrap, a checklist item**: a scope item, an acceptance criterion, a named test, and a scoped
+  local gate (`./test -p <pkg>`, `cargo clippy -p <pkg>`) — each `[x]` with its evidence, or a
+  user-approved deferral.
+
+Every box is therefore closable before the wrap, and a wrapped change carries no unchecked ones. A
+manual way to see the change working may be described in prose ("To try it: …") — it is information
+about the change, not a step owed by it. Post-wrap next steps go in the agent's final report to the
+operator, not into the changeset or the PR body.
+
 ## Decision Logic
 
 Prerequisites for wrapping — **all** must be true:

@@ -349,7 +349,7 @@ gh pr edit <N> --title "<type>(<package>): <what it delivers> (#<stack-slug> K/N
 | Own changeset wrapped out of `docs/dev/1-WIP/` | content transferred into package/feature docs, source deleted (step 7) |
 | Own PRD wrapped out of `docs/ft/*/1-WIP/` | same, or deferred with a written reason |
 | Backlog entries this PR resolved are gone from `docs/dev/todo/` | every ✅ RESOLVED HERE entry in this PR's own changeset deleted; every one kept has a stated reason. A parent's claimed entries are **not** this PR's |
-| No unchecked boxes in this PR's changeset | Scope and acceptance criteria all `[x]`, or annotated as deferred |
+| No unchecked boxes in this PR's changeset or PR body | Scope and acceptance criteria all `[x]`, or annotated as deferred. A post-wrap item (CI, merge, an operator's manual check) is not a box at all — remove it, and report it in step 9 instead (`/wrap-context-docs` § *Checklists end at the wrap*) |
 | Own temporary markers resolved | `TODO` / `FIXME` **this PR added** are implemented or deferred with a reason in the changeset |
 | `/pr-stack-rebase` ran and the leak check passed | `origin/<base>..HEAD` is this PR's commits only |
 | No unplanned deletions | every deleted path maps to this PR's changeset; no parent-owned file removed |
@@ -415,6 +415,11 @@ gh pr view <N> --json isDraft,baseRefName,title   # expect isDraft=false, base s
 Present comprehensive summary with recommendations. On a stack branch, state the readiness-gate result,
 whether the title was corrected, whether the PR was marked ready, and any restructure deferred to a
 follow-up branch (steps 3.5 and 4).
+
+**Post-wrap next steps live here, not in the PR body.** CI state, readying, merge, deploy and any
+manual check worth running in the operator's environment are listed for the operator to sequence —
+never written back into the PR body or a changeset as boxes (`/wrap-context-docs` § *Checklists end
+at the wrap*).
 
 ## Subagent Invocation Pattern
 

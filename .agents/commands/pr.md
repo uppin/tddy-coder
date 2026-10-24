@@ -88,7 +88,11 @@ Inherited parent documents (not in the list above) never decide this — they ar
   - **If the local branch has diverged from its remote tracking branch** (e.g., local was rebased; `git status` shows "have diverged"): a normal push is rejected. Ask the user before force-pushing, and use `git push --force-with-lease` (safe — aborts if the remote moved since your last fetch). **Never** `--force` to `master`/`main`, and never force-push without explicit user consent.
 - Create the PR using `gh pr create --base <detected-base> --head <branch-name>` — plus `--draft` when step 6 said so — with:
   - A concise title (under 70 characters). **On a stack branch**, close the title with the stack group — `<type>(<scope>): <what this PR delivers> (#<stack-slug> K/N)` — and write the subject as the capability *shipped*, never as a phase (`red`, `stubs`, `WIP`). The title becomes the squash-merge commit on `master` and cannot be fixed afterwards; see the `pr-stack` skill.
-  - A body with a summary of changes and a test plan
+  - A body with a summary of changes and a test plan. The test plan lists the verification that ran
+    **before the wrap** — named tests and the scoped local gates, each `[x]` with its result. It holds
+    **no post-wrap item**: no "Whole-workspace health — CI", no merge or deploy step, no manual check
+    left for the operator. Those are the operator's to sequence, and go in your report to them, not
+    the body. See `/wrap-context-docs` § *Checklists end at the wrap*.
   - If updating an existing PR, skip `gh pr create` (the push already updated it); just present the existing PR URL.
 - **In a stack**: once the PR exists, **re-register the stack** so it joins — `gh stack link --base master <prs…>`, bottom to top, additive. A PR nobody registered is correctly based but invisible as part of the stack.
 - Present the PR URL to the user. If the push output returned a URL to finish PR creation, you may open it in the browser (`open <URL>` on macOS).
