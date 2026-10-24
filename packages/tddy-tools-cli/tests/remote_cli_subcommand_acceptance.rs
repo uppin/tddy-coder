@@ -316,3 +316,59 @@ fn list_tools_parses_connect_list_exec_tools_response() {
         stdout
     );
 }
+
+/// A relay stub that answers every POST with `{}` and hands back each request's body.
+fn spawn_recording_stub() -> (u16, std::sync::mpsc::Receiver<String>) {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = vec![0u8; 16384];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .unwrap_or_default()
+                .to_string();
+            let _ = tx.send(body);
+            let resp = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}";
+            let _ = stream.write_all(resp.as_bytes());
+        }
+    });
+    (port, rx)
+}
+
+#[test]
+fn remote_start_session_passes_each_agent() {
+    // Given
+    let (port, bodies) = spawn_recording_stub();
+    let dir = tempfile::tempdir().unwrap();
+    write_discovery(dir.path(), port);
+
+    // When
+    tddy_tools_bin()
+        .args(["remote", "start-session", "--base-dir"])
+        .arg(dir.path())
+        .args([
+            "--agent",
+            "codex-fast@codebase-host",
+            "--agent",
+            "claude-coder@codebase-host",
+        ])
+        .assert()
+        .success();
+
+    // Then
+    let body: serde_json::Value =
+        serde_json::from_str(&bodies.recv().expect("a request")).expect("a JSON body");
+    assert_eq!(body["sessionType"], "workspace");
+    assert_eq!(
+        body["specializedAgents"],
+        serde_json::json!(["codex-fast@codebase-host", "claude-coder@codebase-host"])
+    );
+}
