@@ -457,6 +457,29 @@ A split start reports its steps: the worktree step relayed from B, and the agent
 from A around the local agent spawn. A codebase daemon whose RPC participant has vanished surfaces after
 the 30 s idle window, not after a fixed budget.
 
+### Cancelling a split start
+
+A streamed split start is a task on A, like any streamed start
+([Background tasks § Session starts run as tasks](background-tasks.md#session-starts-run-as-tasks)). B runs
+its half as a task of its own and names it first; A relays that `started` event into the operator's
+stream with B's task id and instance id, after A's own. The create pane cancels the last task it was
+told about, so on a split start **Cancel** addresses B's task, and A forwards the `CancelTask` to B.
+
+Cancelling A's own task does the same from the other side:
+
+1. While the forward is running, A stops waiting on it. If B has named its task, A sends B a
+   `CancelTask` for it over the common room. B's clone stops, or B finishes its worktree cut and
+   deletes the workspace session it made.
+2. A then tears down the workspace session under the id it chose (`codebase_session_id`), whatever B
+   had built, as it does for a failed start (`PeerSilent`). B may never have reported a task at all.
+3. If the forward has already answered, A spawns no agent and tears down B's workspace session the
+   same way.
+4. If A's agent spawn was already running, the start finishes and A then deletes the session. That
+   deletes B's paired workspace session too (see [Teardown](#teardown)).
+
+Either way the start ends `CANCELLED`, and neither host keeps a workspace session, a worktree or a
+partial clone.
+
 ### Agent working directory
 
 There is no repository on A, so the agent's cwd is a context directory holding the

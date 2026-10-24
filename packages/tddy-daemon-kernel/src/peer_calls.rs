@@ -137,6 +137,23 @@ fn decode_start_session_event(bytes: Vec<u8>) -> Result<StartSessionEvent, Statu
         .map_err(|e| Status::internal(format!("decode StartSessionEvent from peer: {e}")))
 }
 
+/// Forward **CancelTask** to the daemon that runs the task — a split start's codebase half, or a task a
+/// client addressed to a peer by `daemon_instance_id`.
+pub async fn forward_cancel_task(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &tddy_service::proto::tasks::CancelTaskRequest,
+) -> Result<tddy_service::proto::tasks::CancelTaskResponse, Status> {
+    forward_unary(
+        room,
+        peer_instance_id,
+        "tasks.TaskService",
+        "CancelTask",
+        request,
+    )
+    .await
+}
+
 /// Forward **DeleteSession** to another daemon in the common room.
 ///
 /// `DeleteSessionRequest` carries no `daemon_instance_id`, so the peer is addressed explicitly. Used

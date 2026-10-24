@@ -7,6 +7,7 @@ import { PrStackService } from "../../gen/pr_stack_pb";
 import { SessionAgentService } from "../../gen/session_agents_pb";
 import { SessionFilesService } from "../../gen/session_files_pb";
 import { SessionService, type SessionEntry } from "../../gen/session_pb";
+import { TaskService } from "../../gen/tasks_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
 import { WorktreeService } from "../../gen/worktree_pb";
 import { useHostConnection } from "../../rpc/connections/registry";
@@ -35,6 +36,9 @@ export function useSessionsDrawerOwningHost(
   const activeCatalogClient = useDaemonClientFor(CatalogService, selectedOwningHost);
   const activeExecToolClient = useDaemonClientFor(ExecToolService, selectedOwningHost);
   const activePrStackClient = useDaemonClientFor(PrStackService, selectedOwningHost);
+  // A child session started from the selected session's view (the PR-Stack dialog) starts on this
+  // host, so the start's task is cancelled here.
+  const activeTaskClient = useDaemonClientFor(TaskService, selectedOwningHost);
   // The same daemon as a connection rather than as a client: attaching a session opens a connection
   // on its host, and the spawned-child runtimes attach theirs on the same one.
   const activeHost = useHostConnection(selectedOwningHost);
@@ -50,6 +54,7 @@ export function useSessionsDrawerOwningHost(
     activeCatalogClient,
     activeExecToolClient,
     activePrStackClient,
+    activeTaskClient,
     activeHost,
   };
 }

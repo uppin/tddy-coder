@@ -128,6 +128,26 @@ their own cleanup:
 Child PIDs are tracked per-task in `TaskHandle.pid_slot: Arc<Mutex<Vec<u32>>>`, replacing the
 insufficient single global slot `CHILD_PID: AtomicU32` at `tddy-core/src/backend/mod.rs:134`.
 
+### Session starts run as tasks
+
+A streamed session start (`StreamStartSession`) is registered as a task of kind `start_session`
+(`packages/tddy-agent-launch/src/start_task.rs`). Its first event, before any progress, is
+`StartSessionEvent.started` → `StartTaskStarted { task_id, daemon_instance_id }`: the task to cancel and
+the daemon that runs it. The unary `StartSession` is not a task and cannot be cancelled.
+
+Cancelling that task (`CancelTask`) stops the start where it stands, and the stream ends with
+`CANCELLED` (`start cancelled`) instead of a result or an error:
+
+| Where the start is | What cancelling it does |
+|---|---|
+| Cloning the project | The clone's git process is stopped through the handle its backend hands back (forked worker, in-process, or the supervisor), and the clone removes its `.partial-*` directory. No repository and no session directory are left |
+| Between steps | No later step begins: a cancelled start cuts no worktree and spawns no agent |
+| Cutting the worktree, or spawning the agent | That step is not interrupted. When it finishes, the session it created is deleted the way `DeleteSession` deletes one: the agent is stopped, then the worktree and the session directory are removed. Only then does the stream end `CANCELLED` |
+| A split start | The codebase host's half is cancelled too; see [Remote-managed worktree § Cancelling a split start](remote-managed-worktree.md#cancelling-a-split-start) |
+
+If the session a cancelled start created cannot be removed, the stream ends `INTERNAL` and names the
+session, so it is not left behind silently.
+
 ### Retention / cap policy
 
 Because every `ExecuteTool` invocation becomes a task (including instant ones), the registry must be
@@ -150,9 +170,11 @@ New `tasks.TaskService` (5 methods):
 | `SendInput` | Unary | Write bytes to a channel's `stdin_tx` (present only on input-capable channels) |
 
 All methods carry `session_token` for auth. Non-list methods scope visibility to the `session_id`
-embedded in `TaskHandle`. Each request also carries `daemon_instance_id` for multi-host routing (unary
-methods forward via `tddy_daemon_livekit::livekit_peer_discovery::forward_to_peer`; `WatchTask` is local-only this
-changeset — returns `failed_precondition` for remote IDs).
+embedded in `TaskHandle`. Each request also carries `daemon_instance_id` for multi-host routing. A
+`CancelTask` whose `daemon_instance_id` names another daemon is forwarded to that daemon over the
+common room (`tddy_daemon_kernel::peer_calls::forward_cancel_task`) and its answer returned; one naming
+this daemon, or none, cancels a local task. `WatchTask` is local-only and returns `failed_precondition`
+for remote IDs.
 
 ### WatchTask replay contract
 

@@ -1,3 +1,4 @@
+use crate::svc_ensure_project_available_for_start::StartHandles;
 use std::path::Path;
 
 use tddy_core::{write_session_github_source, SessionGithubSource};
@@ -163,6 +164,7 @@ impl LaunchSessions {
         req: &StartSessionRequest,
         os_user: &str,
         progress: &AttachmentProgressSink,
+        cancel: &tddy_task::CancellationToken,
     ) -> Result<(), Status> {
         let project_id = req.project_id.trim();
         if !project_id.is_empty() {
@@ -179,7 +181,7 @@ impl LaunchSessions {
                     project_id,
                     &req.session_token,
                     req.agent_clone.as_ref(),
-                    progress,
+                    StartHandles { progress, cancel },
                 ),
             )
             .await?;

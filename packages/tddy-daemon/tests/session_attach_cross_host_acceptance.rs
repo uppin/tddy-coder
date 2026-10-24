@@ -717,6 +717,8 @@ async fn stream_start_session_forwards_to_the_peer_that_runs_the_session() {
             StartEvent::KeepAlive(_) => {}
             // Clone progress is pinned by tddy-session-lifecycle's `start_phase_acceptance.rs`.
             StartEvent::CloneProgress(_) => {}
+            // The start task is pinned by tddy-session-lifecycle's `start_cancel_acceptance.rs`.
+            StartEvent::Started(_) => {}
         }
     }
 
@@ -863,6 +865,8 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
             StartEvent::KeepAlive(_) => {}
             // Clone progress is pinned by tddy-session-lifecycle's `start_phase_acceptance.rs`.
             StartEvent::CloneProgress(_) => {}
+            // The start task is pinned by tddy-session-lifecycle's `start_cancel_acceptance.rs`.
+            StartEvent::Started(_) => {}
         }
     }
 

@@ -574,6 +574,8 @@ async fn stream_start_session_reports_progress_for_each_attachment_then_one_term
             StartEvent::KeepAlive(_) => {}
             // Clone progress is pinned by `start_phase_acceptance.rs`.
             StartEvent::CloneProgress(_) => {}
+            // The start task is pinned by tddy-session-lifecycle's `start_cancel_acceptance.rs`.
+            StartEvent::Started(_) => {}
         }
     }
 

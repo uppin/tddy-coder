@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { flushSync } from "react-dom";
-import type { BranchConflict } from "../../gen/session_pb";
+import type { BranchConflict, StartTaskStarted } from "../../gen/session_pb";
 import {
   startSessionOverridesFor,
   type BranchConflictResolution,
@@ -25,6 +26,9 @@ export interface UseCreateSessionSubmitArgs {
   stageAttachments: SessionAttachments["stageAttachments"];
   startSessionStreamed: SessionAttachments["startSessionStreamed"];
   onCreated: CreateSessionPaneProps["onCreated"];
+  /** Cancels the task a start runs as. Absent: a start in progress cannot be cancelled. */
+  taskClient?: CreateSessionPaneProps["taskClient"];
+  sessionToken: string;
 }
 
 /**
@@ -39,12 +43,20 @@ export function useCreateSessionSubmit({
   stageAttachments,
   startSessionStreamed,
   onCreated,
+  taskClient,
+  sessionToken,
 }: UseCreateSessionSubmitArgs) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Set when the daemon refused a creation because another session already owns the requested branch.
   // The form stays mounted behind the prompt, so cancelling returns to it with its values intact.
   const [branchConflict, setBranchConflict] = useState<BranchConflict | null>(null);
+  // The task the running start named (what Cancel addresses), whether Cancel was pressed, and
+  // whether the host ended the start because of it.
+  const startTask = useRef<StartTaskStarted | null>(null);
+  const [startTaskKnown, setStartTaskKnown] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [startCancelled, setStartCancelled] = useState(false);
 
   const { sessionType, projectId, selectedAgentId, toolPath, model } = form;
   const isSubmitEnabled = (() => {
@@ -77,6 +89,10 @@ export function useCreateSessionSubmit({
     flushSync(() => {
       setSubmitting(true);
       setError(null);
+      setStartCancelled(false);
+      setCancelling(false);
+      setStartTaskKnown(false);
+      startTask.current = null;
       resetAttachmentProgress();
     });
     try {
@@ -86,7 +102,10 @@ export function useCreateSessionSubmit({
       const request = startSessionRequest(branchOverrides, requestAttachments);
       // Always streamed: the host reports the step it is in (worktree, agent) as well as the
       // per-attachment progress, and ends the stream with the one result that creates the session.
-      const res = await startSessionStreamed(request);
+      const res = await startSessionStreamed(request, (task) => {
+        startTask.current = task;
+        setStartTaskKnown(true);
+      });
       if (res === null) {
         // The form unmounted while the host was still working; it owns no navigation any more.
         return;
@@ -99,12 +118,43 @@ export function useCreateSessionSubmit({
       }
       onCreated(res.sessionId);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
+      // A start the operator cancelled ends CANCELLED: that is their own doing, not a failure.
+      if (err instanceof ConnectError && err.code === Code.Canceled) {
+        setStartCancelled(true);
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+      }
     } finally {
       setSubmitting(false);
+      setCancelling(false);
     }
   };
+
+  /**
+   * Cancel the start in progress: ask the host doing the work to cancel its task. The stream then
+   * ends CANCELLED, which `submitCreation` turns into the cancelled notice — nothing is closed here.
+   */
+  const cancelStart = async () => {
+    const task = startTask.current;
+    if (!taskClient || !task) return;
+    setCancelling(true);
+    try {
+      await taskClient.cancelTask({
+        sessionToken,
+        taskId: task.taskId,
+        daemonInstanceId: task.daemonInstanceId,
+      });
+    } catch (err) {
+      setCancelling(false);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  // Offered only when there is a service to cancel through; enabled once the start has named its task.
+  const startCancel = taskClient
+    ? { enabled: startTaskKnown && !cancelling, cancelling, cancelled: startCancelled, cancel: cancelStart }
+    : undefined;
 
   const handleSubmit = () => submitCreation(null);
 
@@ -136,5 +186,6 @@ export function useCreateSessionSubmit({
     isSubmitEnabled,
     handleSubmit,
     resolveBranchConflict,
+    startCancel,
   };
 }

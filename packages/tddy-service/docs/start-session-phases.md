@@ -4,10 +4,19 @@
 client can say what the host is doing while the start is in flight. Unary `StartSession` runs the same
 start and reports nowhere.
 
-`StartSessionEvent` is a `oneof` of five arms: `attachment_progress` (attachment materialisation, 1),
-`result` (2), `phase` (a `StartPhase`, 3), `keep_alive` (4) and `clone_progress` (5). The `result` is
-always the last event; a failed start ends the stream with the failure's status instead and never emits
-one.
+`StartSessionEvent` is a `oneof` of six arms: `attachment_progress` (attachment materialisation, 1),
+`result` (2), `phase` (a `StartPhase`, 3), `keep_alive` (4), `clone_progress` (5) and `started` (6). The
+`result` is always the last event; a failed start ends the stream with the failure's status instead and
+never emits one, and a cancelled start ends it `CANCELLED`.
+
+## `StartTaskStarted`
+
+`started` (field 6) is `StartTaskStarted { string task_id; string daemon_instance_id; }`, and it is
+always the **first** event of a streamed start: the background task the start runs as, and the daemon
+running it. `tasks.TaskService.CancelTask` with that `task_id` and `daemon_instance_id` cancels the
+start ([background tasks § Session starts run as tasks](../../../docs/ft/daemon/background-tasks.md#session-starts-run-as-tasks)).
+A split start carries a second `started` after it, relayed from the codebase host with that host's own
+task. The unary start emits none.
 
 ## `StartPhase`
 

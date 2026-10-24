@@ -166,10 +166,18 @@ impl BuildContext {
             ));
 
         // TaskService — backed by the same registry as ConnectionService.
-        let task_service_impl = tddy_session_lifecycle::task_service::TaskServiceImpl::new(
+        // A `CancelTask` naming a peer daemon (a split start's codebase half) is forwarded to it
+        // through the same common room the session host routes by.
+        let mut task_service_impl = tddy_session_lifecycle::task_service::TaskServiceImpl::new(
             task_registry.clone(),
             vm_user_resolver.clone(),
         );
+        if let Some(room) = m.hosted.connection_arc.common_room_livekit_room() {
+            task_service_impl = task_service_impl.forwarding_to_peers(
+                room,
+                &tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&self.config),
+            );
+        }
         let task_server = tddy_service::TaskServiceServer::new(task_service_impl);
         self.identity.rpc_entries.push(tddy_rpc::ServiceEntry {
             name: "tasks.TaskService",

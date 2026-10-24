@@ -17,6 +17,7 @@ import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { TerminalSessionService } from "../../gen/terminal_session_pb";
 import type { CodeNavigationService } from "../../gen/code_navigation_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
+import type { TaskService } from "../../gen/tasks_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { SessionAttachmentHint } from "../../rpc/connections/session";
 import type { HostConnection } from "../../rpc/connections/types";
@@ -31,6 +32,7 @@ type CatalogClient = Client<typeof CatalogService>;
 type AccountsClient = Client<typeof AccountsService>;
 type ExecToolClient = Client<typeof ExecToolService>;
 type PrStackClient = Client<typeof PrStackService>;
+type TaskClient = Client<typeof TaskService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 export type SessionAgentClient = Client<typeof SessionAgentService>;
 type ActivityClient = Client<typeof ActivityService>;
@@ -58,6 +60,8 @@ export interface SessionMainPaneProps {
   client?: ConnectionClient;
   /** `project.ProjectService` on the same host as `client` — create form project registry reads. */
   projectClient?: ProjectClient;
+  /** The task service on the same host as `client`: the create form cancels a start in progress through it. */
+  taskClient?: TaskClient;
   /**
    * The worktree service on the same host as `client` — the Code pane, the inspector's Worktree tab
    * and the create form's host-document picker all read worktrees through it. Absent for the same

@@ -4,7 +4,7 @@
 **Moved:** 2026-10-05 by `reparent_module` under `split_start`, from `connection_service/svc_materialize_staged_attachment/`; 2026-09-24 by #524 plan `11` (misplaced code: split sessions), from `connection_service/svc_materialize_staged_attachment.rs:270`; this record was `complexity-svc-materialize-staged-attachment-start-split-claude-cli-session.md`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
-**Metrics:** **153 lines** (2026-10-24) · **nesting depth 3** · 1 parameters · 6 branch/match lines · 9 early exits
+**Metrics:** **170 lines** (2026-10-24, #741) · **nesting depth 3** · 1 parameters · 6 branch/match lines · 9 early exits
 **CRAP:** **CRAP 156** · complexity 12 · rank 25/50 in this crate · **never executed by any test**
 **Thresholds breached:** length 146 > 60 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
@@ -23,6 +23,7 @@
 | 2026-10-09 | 149 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-session-split` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 | 2026-10-24 | 153 | — | — | — | grown by `#start-progress` 4/8 (#737), **past the 150 budget**: the forward moved into `split_forward_stream::forward_split_start` (net 0), the failure is classified from `ForwardedStartFailure` (net 0), and the local agent spawn is bracketed with `STEP_AGENT` (`begin_phase` + an `Ok` arm that ends it, +4). 149 at `origin/feature/start-progress/supervisor-handoff`, 153 at HEAD (fn line to closing brace). **Deferred with the developer's consent, #start-progress 4/8** — `extract_method` on the teardown-on-failure arms is the fix. Still open, unclaimed |
 | 2026-10-20 | 149 | — | — | — | touched by `#satellite` 12/13 (#634) and **unchanged by it**: the split start asks `SplitAgentRoom::issued_by` (the split-rooms port) for the agent's join instead of `SplitLiveKitRoom::from_config`, same line count; 149 at `origin/feature/satellite/agent-clones` and at HEAD (fn line to closing brace). Still open, unclaimed |
+| 2026-10-24 | 170 | — | — | — | **regressed** by `#start-progress` 8/8 (#741): 153 at `origin/feature/start-progress/progress-ui` → 170 at HEAD (+17, fn line to closing brace). Added: the `cancel` parameter, a `CodebaseHalf` literal naming the codebase host's half, the `tokio::select!` that races the forward against the token, and a check before the agent spawn. The cancel-and-tear-down body is `SplitSessions::cancel_codebase_half`, outside the function. **Deferred with the developer's consent, #start-progress 8/8** — `extract_method` on the teardown-on-failure arms is still the fix. Still open, unclaimed |
 
 ## What the tool found
 

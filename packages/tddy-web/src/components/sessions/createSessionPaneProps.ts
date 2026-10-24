@@ -12,6 +12,7 @@ import type { CatalogService } from "../../gen/catalog_pb";
 import type { AccountsService } from "../../gen/accounts_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
+import type { TaskService } from "../../gen/tasks_pb";
 import type { BranchWorktreeIntent } from "../../lib/branchConflict";
 import type { InitialAttachment } from "./attachments/pendingAttachment";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
@@ -24,6 +25,7 @@ type CatalogClient = Client<typeof CatalogService>;
 type AccountsClient = Client<typeof AccountsService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
+type TaskClient = Client<typeof TaskService>;
 
 type BranchIntent = BranchWorktreeIntent;
 
@@ -110,6 +112,11 @@ export interface CreateSessionPaneProps {
    * the tree scopes list nothing, and nothing is what an empty worktree looks like.
    */
   worktreeClient: WorktreeClient;
+  /**
+   * Cancels a start in progress: the stream's first event names the task the start runs as, and
+   * Cancel calls `CancelTask` on it. Without one, Cancel stays disabled while a start runs.
+   */
+  taskClient?: TaskClient;
   sessionToken: string;
   onCancel: () => void;
   onCreated: (sessionId: string) => void;

@@ -289,7 +289,7 @@ every forward is a `FailedPrecondition` naming the call and the peer.
 
 ## `peer_calls` — typed RPCs forwarded to a peer
 
-`peer_calls` holds the thirteen typed forwards over `CommonRoom`: each encodes its request, forwards it
+`peer_calls` holds the fourteen typed forwards over `CommonRoom`: each encodes its request, forwards it
 to the peer's service and method, and decodes the answer. The unary ones go through one private
 `forward_unary`; a body that does not decode is `Internal`, `"decode <ResponseType>: …"`.
 
@@ -297,6 +297,7 @@ to the peer's service and method, and decodes the answer. The unary ones go thro
 |---|---|---|
 | session | `forward_start_session_relaying` (relayed start, `ForwardedStartFailure`), `forward_stream_start_session`, `forward_delete_session` | `session.SessionService` |
 | exec tool | `forward_stream_execute_tool` | `exec_tools.ExecToolService` |
+| tasks | `forward_cancel_task` (a split start's codebase half; a `CancelTask` addressed to a peer) | `tasks.TaskService` |
 | project | `forward_add_project_to_host`, `forward_set_project_default_branch`, `forward_set_project_accounts` | `project.ProjectService` |
 | session files | `forward_upload_staged_attachment_chunk`, `forward_list_staged_attachments`, `forward_delete_staged_attachment`, `forward_read_host_document`, `forward_stream_read_host_document` | `tddy_service::SESSION_FILES_SERVICE` |
 

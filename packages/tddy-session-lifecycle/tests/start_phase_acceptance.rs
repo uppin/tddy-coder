@@ -212,6 +212,8 @@ fn what_it_says(event: StartSessionEvent) -> Option<Said> {
         // `start_keepalive.rs`.
         StartEvent::KeepAlive(_) => None,
         StartEvent::CloneProgress(_) => Some(Said::CloneProgress),
+        // Which task a start runs as is pinned by `start_cancel_acceptance.rs`.
+        StartEvent::Started(_) => None,
     }
 }
 

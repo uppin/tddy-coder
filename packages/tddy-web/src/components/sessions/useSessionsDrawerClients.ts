@@ -9,6 +9,7 @@ import { PrStackService } from "../../gen/pr_stack_pb";
 import { SessionAgentService } from "../../gen/session_agents_pb";
 import { SessionFilesService } from "../../gen/session_files_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
+import { TaskService } from "../../gen/tasks_pb";
 import { WorktreeService } from "../../gen/worktree_pb";
 
 /** The sessions drawer's per-service clients on the selected daemon, each `null` until one is reachable. */
@@ -47,6 +48,8 @@ export function useSessionsDrawerClients() {
   const accountsClient = useDaemonClient(AccountsService);
   const execToolClient = useDaemonClient(ExecToolService);
   const prStackClient = useDaemonClient(PrStackService);
+  // A start in progress is a task on the host doing it; the create form cancels it through this.
+  const taskClient = useDaemonClient(TaskService);
 
   return {
     client,
@@ -60,5 +63,6 @@ export function useSessionsDrawerClients() {
     accountsClient,
     execToolClient,
     prStackClient,
+    taskClient,
   };
 }

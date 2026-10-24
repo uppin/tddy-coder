@@ -7,6 +7,8 @@ use tddy_session_files::attachment_progress::AttachmentMaterialization;
 
 use uuid::Uuid;
 
+use tddy_task::CancellationToken;
+
 use tddy_core::cli_harness::cli_harness;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -63,6 +65,7 @@ impl LaunchSessions {
         &self,
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
+        cancel: &CancellationToken,
     ) -> Result<Response<StartSessionResponse>, Status> {
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
@@ -151,7 +154,13 @@ impl LaunchSessions {
             } => {
                 return self
                     .split_sessions
-                    .start_split_claude_cli_session(os_user, codebase_instance_id, &req, progress)
+                    .start_split_claude_cli_session(
+                        os_user,
+                        codebase_instance_id,
+                        &req,
+                        progress,
+                        cancel,
+                    )
                     .await;
             }
             CodebasePlacement::SandboxedCodebase => {
@@ -168,9 +177,12 @@ impl LaunchSessions {
         // peer), clone it into the host's base location so the session can start on a host that
         // doesn't have the project yet. A truly unknown project surfaces as NotFound.
         {
-            self.provision_project_for_start(&req, os_user, progress)
+            self.provision_project_for_start(&req, os_user, progress, cancel)
                 .await?;
         }
+        // Nothing past the clone is begun for a start that was cancelled: the worktree is not cut and
+        // no agent is spawned.
+        crate::start_task::refuse_a_cancelled_start(cancel)?;
 
         // A base session that cannot seed a stack is refused here, before the session-type dispatch
         // and before anything is created, so the new-session form can show the reason in its error

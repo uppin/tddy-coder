@@ -5,6 +5,7 @@ import type { ProjectService } from "../../gen/project_pb";
 import type { CatalogService } from "../../gen/catalog_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
+import type { TaskService } from "../../gen/tasks_pb";
 import { Button } from "../ui/button";
 import { CreateSessionPane, type CreateSessionInitialValues } from "./CreateSessionPane";
 
@@ -13,6 +14,7 @@ type ProjectClient = Client<typeof ProjectService>;
 type CatalogClient = Client<typeof CatalogService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
+type TaskClient = Client<typeof TaskService>;
 
 export interface CreateSessionDialogProps {
   open: boolean;
@@ -31,6 +33,8 @@ export interface CreateSessionDialogProps {
    * the tree scopes list nothing, and nothing is what an empty worktree looks like.
    */
   worktreeClient: WorktreeClient;
+  /** Cancels a start in progress (see `CreateSessionPaneProps.taskClient`); without one Cancel stays disabled while a start runs. */
+  taskClient?: TaskClient;
   sessionToken: string;
   onClose: () => void;
   onCreated: (sessionId: string) => void;
@@ -50,6 +54,7 @@ export function CreateSessionDialog({
   catalogClient,
   sessionFilesClient,
   worktreeClient,
+  taskClient,
   sessionToken,
   onClose,
   onCreated,
@@ -88,6 +93,7 @@ export function CreateSessionDialog({
             catalogClient={catalogClient}
             sessionFilesClient={sessionFilesClient}
             worktreeClient={worktreeClient}
+            taskClient={taskClient}
             sessionToken={sessionToken}
             initialValues={initialValues}
             onCancel={onClose}

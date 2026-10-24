@@ -607,7 +607,9 @@ in the form's own error strip and nothing is created. Rules, refusals and the se
 ### Start progress
 
 Creating a session may clone the project, cut a worktree and, when asked, build a semantic index
-before the agent launches. While that runs, Create is disabled and the pane lists each step the host
+before the agent launches. Nothing on that path gives up on a timer: a start ends when it succeeds,
+when it fails (and the error names the cause), when its host goes silent, or when the operator presses
+**Cancel**. While that runs, Create is disabled and the pane lists each step the host
 reports, under the heading **Creating session on <host>** — the codebase host on a split session, the
 session's own host otherwise:
 
@@ -639,6 +641,25 @@ host restarted. It only watches: it never starts a load, nor the index daemon. W
 no index daemon is running yet, or it stopped — it shows nothing and watches again after 1 s, 2 s, 4 s …
 up to 30 s, so a load started later appears within that wait; a watch the host refuses is not repeated,
 and the indicator names why.
+
+#### Cancel
+
+While a start runs, **Cancel** cancels it instead of closing the pane. It is enabled once the start's
+stream names the task the start runs as (its first event, `started`), and it calls `CancelTask` for
+that task on the host that runs it. The button then reads **Cancelling…** until the host ends the
+start. The host stops its work and removes what the start created, on every host involved (see
+[Background tasks § Session starts run as tasks](../daemon/background-tasks.md#session-starts-run-as-tasks)).
+
+A start that ends cancelled is not shown as an error. The form becomes editable again with its
+values intact, the step list keeps the step it stopped at, and **Start cancelled** is shown above the
+buttons. The notice clears when the next start begins. If `CancelTask` itself is refused, its message
+is shown in the error strip and Cancel can be pressed again.
+
+Cancel during a start needs a task-service client on the host the form starts on (`taskClient`). The
+drawer's create pane and the PR-Stack **Start session** dialog have one (the selected daemon's, or the
+owning host's for a session's view). Without one, Cancel stays disabled while a start runs, as it does
+for the [main variant](#main-variant), whose start is not streamed. When no start is running, Cancel
+closes the pane, and a finished start cannot be cancelled (use Delete).
 
 ### Main variant
 
@@ -676,6 +697,7 @@ creating a `<branch>-1` suffixed branch. See
 ```typescript
 interface CreateSessionPaneProps {
   client: ConnectionClient;
+  taskClient?: TaskClient; // cancels a start in progress; without it Cancel is disabled while starting
   sessionToken: string;
   onCancel: () => void;
   onCreated: (sessionId: string) => void;
@@ -690,6 +712,7 @@ interface CreateSessionPaneProps {
 - `ListSessions` — populate the PR stack parent picker and the stack-base picker from one fetch (best-effort; failure hides both)
 - `ListProjectBranches` — branch dropdown when "work on existing branch"
 - `StreamStartSession` — create + start the session, streaming the start's steps and attachment progress and ending with the result
+- `CancelTask` (`tasks.TaskService`) — cancel the start in progress, by the task id its stream named first
 
 ## PR-Stack Session Grouping
 

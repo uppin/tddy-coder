@@ -17,3 +17,5 @@ pub use task::{
     AppliedOffset, ChannelKind, TaskBody, TaskChannel, TaskContext, TaskHandle, TaskId, TaskStatus,
 };
 pub use terminal_capture::{CaptureChunk, TerminalCapture};
+/// The signal a cancellable task body (or a start that runs as one) observes.
+pub use tokio_util::sync::CancellationToken;

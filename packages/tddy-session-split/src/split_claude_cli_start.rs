@@ -1,5 +1,6 @@
-use crate::split_forward_stream::forward_split_start;
+use crate::split_forward_stream::{forward_split_start, CodebaseStartTask};
 use crate::split_start::SplitStartFailure;
+use tddy_task::CancellationToken;
 
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_session_agents::agent_roster;
@@ -35,6 +36,7 @@ impl SplitSessions {
         codebase_instance_id: &str,
         req: &StartSessionRequest,
         progress: &AttachmentProgressSink,
+        cancel: &CancellationToken,
     ) -> Result<Response<StartSessionResponse>, Status> {
         // These two ask for work that only exists on the daemon running the *agent*, which a split
         // session has no repository on. A recipe's tooling runs that host's own `transition`, and a
@@ -94,14 +96,26 @@ impl SplitSessions {
             &session_id,
             &codebase_session_id,
         )?;
-        let workspace = match forward_split_start(
-            &slot,
-            codebase_instance_id,
-            &workspace_req,
-            progress,
-        )
-        .await
-        {
+        let half = CodebaseHalf {
+            room: &slot,
+            instance_id: codebase_instance_id,
+            session_id: &codebase_session_id,
+            session_token: &req.session_token,
+            task: CodebaseStartTask::default(),
+        };
+        // Cancelling this start cancels the codebase host's half too: it is that host's task that
+        // is cutting the worktree, and it does not know this daemon's task was cancelled.
+        let forwarded = tokio::select! {
+            forwarded = forward_split_start(
+                &slot,
+                codebase_instance_id,
+                &workspace_req,
+                progress,
+                &half.task,
+            ) => forwarded,
+            () = cancel.cancelled() => return Err(self.cancel_codebase_half(&half).await),
+        };
+        let workspace = match forwarded {
             Ok(workspace) => workspace,
             Err(failure) => {
                 // The peer may have created the session and its worktree, may have failed part-way
@@ -148,6 +162,10 @@ impl SplitSessions {
         // Nothing about the peer's LiveKit fields is checked here any more: a codebase daemon hosts
         // no room. It holds a checkout and answers `GetWorktreeSnapshot` and tool calls about it,
         // both of which this daemon reaches over the peer routing it already uses.
+        // No agent is spawned for a start that was cancelled while the worktree was being finished.
+        if cancel.is_cancelled() {
+            return Err(self.cancel_codebase_half(&half).await);
+        }
         progress.begin_phase(StartStep::Agent);
         let started = self
             .spawn_split_agent(
@@ -181,5 +199,55 @@ impl SplitSessions {
                 Err(status)
             }
         }
+    }
+}
+
+/// The codebase host's half of one split start: where it runs, the workspace session it was asked
+/// to create (under the id this daemon chose), and the task it reported running that start as.
+struct CodebaseHalf<'a> {
+    room: &'a tddy_daemon_kernel::peer_forwarding::CommonRoom,
+    instance_id: &'a str,
+    session_id: &'a str,
+    session_token: &'a str,
+    task: CodebaseStartTask,
+}
+
+/// The status a cancelled split start ends with.
+const START_CANCELLED: &str = "start cancelled";
+
+impl SplitSessions {
+    /// Stop the codebase host's half of a cancelled split start: its task is cancelled (it may be
+    /// mid-clone or mid-cut), then the workspace session it was asked for is torn down under the id
+    /// this daemon chose — whatever it had built, and even if it never reported a task. Returns the
+    /// status the start ends with.
+    async fn cancel_codebase_half(&self, half: &CodebaseHalf<'_>) -> Status {
+        if let Some(started) = half.task.reported() {
+            let asked = tddy_service::proto::tasks::CancelTaskRequest {
+                session_token: half.session_token.to_string(),
+                task_id: started.task_id,
+                daemon_instance_id: String::new(),
+            };
+            if let Err(status) = tddy_daemon_kernel::peer_calls::forward_cancel_task(
+                half.room,
+                half.instance_id,
+                &asked,
+            )
+            .await
+            {
+                log::warn!(
+                    "split start cancelled: daemon {} did not cancel its task: {status}",
+                    half.instance_id
+                );
+            }
+        }
+        self.tear_down_codebase_session(
+            half.room,
+            half.instance_id,
+            half.session_id,
+            half.session_token,
+            SplitStartFailure::PeerSilent,
+        )
+        .await;
+        Status::cancelled(START_CANCELLED)
     }
 }
