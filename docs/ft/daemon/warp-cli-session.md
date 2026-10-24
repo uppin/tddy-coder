@@ -48,6 +48,17 @@ one up.
 
 ## The binary
 
+`warp` is the standalone **Warp Agent CLI** — a separate product from Warp.app, which bundles only
+its own GUI and the headless `oz` CLI, neither of which the session can use. Install it:
+
+- `brew install --cask warp-agent-cli` — the Homebrew core cask (macOS 14+), links `warp` into
+  `/opt/homebrew/bin`, which a daemon started from a normal shell finds on its `PATH`.
+- Warp's own installer, `curl -fsSL https://app.warp.dev/download/agent-cli | bash` — self-updating;
+  if it lands the binary outside the daemon's `PATH`, point the daemon at it explicitly below.
+
+The CLI carries its own sign-in — a browser/device-code login on first run, separate from the Warp
+desktop app's — so a first session's terminal may open on the login flow before any conversation.
+
 `TDDY_WARP_CLI` when set and non-blank, else `cli_harnesses.warp-cli.binary_path` in `daemon.yaml`,
 else `warp` on `PATH`:
 
