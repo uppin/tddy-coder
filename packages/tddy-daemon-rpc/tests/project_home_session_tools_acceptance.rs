@@ -4,7 +4,9 @@
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools (`#project-home` 5/7).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_rpc::test_util::{test_service, TestDaemon};
 use tddy_projects::project_storage::{write_projects, ProjectData};
 use tddy_rpc::{Code, Request};
@@ -15,10 +17,14 @@ use tddy_service::proto::exec_tools::{
 use tddy_service::proto::session::{
     ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
+use tddy_session_lifecycle::CliSessionManager;
 
 const THIS_PROJECT: &str = "019d105b-ac0f-78d3-9a89-409731145a3b";
 const OTHER_PROJECT: &str = "019d105b-ac0f-78d3-9a89-409731145a3c";
+const TEST_MODEL: &str = "claude-opus-4-8";
 
 fn git(cwd: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
@@ -130,9 +136,41 @@ async fn a_workspace_in(service: &TestDaemon, project_id: &str) -> String {
 }
 
 async fn a_project_home_world() -> World {
+    let sessions = tempfile::tempdir().unwrap();
+    a_project_home_world_on(test_service(sessions.path().to_path_buf()), sessions).await
+}
+
+/// The same world, on a daemon that can spawn `claude-cli` sessions: its config points
+/// `claude_cli.binary_path` at `/bin/cat` (works in a PTY without the real binary — same stub as
+/// `claude_cli_session_acceptance.rs`), and its user resolver answers the current OS user, whom
+/// the spawn impersonates (a fabricated name does not resolve during the spawn).
+async fn a_claude_capable_project_home_world() -> World {
+    let sessions = tempfile::tempdir().unwrap();
+    let config = a_config_with_a_stub_claude();
+    let user = current_os_user();
+    let user_resolver: Arc<dyn Fn(&str) -> Option<String> + Send + Sync> =
+        Arc::new(move |token| if token == TEST_TOKEN { Some(user.clone()) } else { None });
+    let sessions_base = sessions.path().to_path_buf();
+    let base_resolver: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync> =
+        Arc::new(move |_| Some(sessions_base.clone()));
+    let host = DaemonSessionHost::new(
+        config.clone(),
+        base_resolver,
+        sessions.path().to_path_buf(),
+        user_resolver,
+        None,
+        PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+    );
+    let service = TestDaemon::from_host(host);
+    service.as_arc().install_sandbox_rpc_bridge();
+    a_project_home_world_on(service, sessions).await
+}
+
+async fn a_project_home_world_on(service: TestDaemon, sessions: tempfile::TempDir) -> World {
     let this_repo = a_repo_with_origin();
     let other_repo = a_repo_with_origin();
-    let sessions = tempfile::tempdir().unwrap();
     write_projects(
         &sessions.path().join("projects"),
         &[
@@ -141,7 +179,6 @@ async fn a_project_home_world() -> World {
         ],
     )
     .unwrap();
-    let service = test_service(sessions.path().to_path_buf());
     let home = a_workspace_in(&service, THIS_PROJECT).await;
     let sibling = a_workspace_in(&service, THIS_PROJECT).await;
     let second_sibling = a_workspace_in(&service, THIS_PROJECT).await;
@@ -159,6 +196,35 @@ async fn a_project_home_world() -> World {
         foreign,
         _repos: (this_repo, other_repo),
     }
+}
+
+/// The OS user this test process runs as — a real, resolvable one. The claude-cli spawn
+/// impersonates the resolved user, and a fabricated name does not resolve there (same pattern as
+/// `sandboxed_codebase_lifecycle_exec_tool_acceptance.rs`).
+fn current_os_user() -> String {
+    let pw = unsafe { libc::getpwuid(libc::getuid()) };
+    assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
+    unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }.to_string_lossy().into_owned()
+}
+
+/// A daemon config whose `claude` is `/bin/cat` — a stub that works in a PTY without the real
+/// binary (a positional argument would make `cat` open it as a file, but the start under test
+/// never gets that far on the red side, and the metadata assertion needs no output on green).
+fn a_config_with_a_stub_claude() -> DaemonConfig {
+    let dir = tempfile::tempdir().unwrap();
+    let user = current_os_user();
+    let yaml = format!(
+        r#"
+users:
+  - github_user: "{user}"
+    os_user: "{user}"
+claude_cli:
+  binary_path: /bin/cat
+"#
+    );
+    let config_path = dir.path().join("daemon.yaml");
+    std::fs::write(&config_path, yaml).unwrap();
+    DaemonConfig::load(&config_path).expect("config must parse")
 }
 
 fn listed_ids(response: &ExecuteToolResponse) -> Vec<String> {
@@ -230,6 +296,44 @@ async fn a_project_home_session_starts_a_session_tagged_with_itself_as_orchestra
         .expect("listed");
     assert_eq!(new_session.project_id, THIS_PROJECT);
     assert_eq!(new_session.orchestrator_session_id, world.home);
+}
+
+/// A project-home session starts a claude-cli session on the model it names in the tool call.
+///
+/// The buggy behavior: `StartProjectSession`'s arguments carried no `model` and its schema
+/// advertised none, so a home session's `model` was dropped before the daemon's start, and every
+/// `session_type = "claude-cli"` start through this tool was refused with "model is required for
+/// claude-cli sessions" — however the caller spelled the arguments.
+#[tokio::test]
+async fn a_project_home_session_starts_a_claude_cli_session_on_the_model_it_names() {
+    // Given
+    let world = a_claude_capable_project_home_world().await;
+
+    // When
+    let started = world
+        .call_as_home(
+            "StartProjectSession",
+            serde_json::json!({
+                "session_type": "claude-cli",
+                "model": TEST_MODEL,
+                "prompt": "print the current branch and stop",
+                "new_branch_name": "home-started-claude-cli"
+            }),
+        )
+        .await;
+
+    // Then — the start is not refused for a missing model, and the session it started records
+    // exactly the model the home session named
+    assert!(!started.is_error, "{}", started.error_message);
+    let new_id = serde_json::from_str::<serde_json::Value>(&started.result_json).unwrap()
+        ["session_id"]
+        .as_str()
+        .expect("the new session id")
+        .to_string();
+    let session_dir =
+        tddy_core::session_lifecycle::unified_session_dir_path(world.sessions.path(), &new_id);
+    let meta = tddy_core::read_session_metadata(&session_dir).expect("session metadata");
+    assert_eq!(meta.model.as_deref(), Some(TEST_MODEL), "the named model is recorded");
 }
 
 #[tokio::test]

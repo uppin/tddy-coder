@@ -101,6 +101,9 @@ pub struct StartProjectSessionArgs {
     /// Branch to create for the session; empty lets the start path name one.
     #[serde(default)]
     pub new_branch_name: String,
+    /// Model id for claude-cli sessions; empty is fine for a workspace start.
+    #[serde(default)]
+    pub model: String,
 }
 
 /// What the tools need from the daemon.
@@ -150,7 +153,8 @@ pub fn project_home_tool_defs() -> Vec<ToolDef> {
                     "session_type": { "type": "string" },
                     "prompt": { "type": "string" },
                     "agent": { "type": "string" },
-                    "new_branch_name": { "type": "string" }
+                    "new_branch_name": { "type": "string" },
+                    "model": { "type": "string" }
                 },
                 "required": ["session_type"]
             }),
