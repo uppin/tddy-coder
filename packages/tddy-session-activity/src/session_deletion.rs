@@ -44,7 +44,7 @@ pub fn is_daemon_managed_worktree(worktree: &Path) -> bool {
 pub fn worktree_removal_applies_to(session_type: &str) -> bool {
     matches!(
         session_type,
-        "claude-cli" | "opencode-cli" | "muse-cli" | "workspace"
+        "claude-cli" | "opencode-cli" | "muse-cli" | "warp-cli" | "workspace"
     )
 }
 

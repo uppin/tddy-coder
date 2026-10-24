@@ -4,6 +4,7 @@ pub mod child_spawn_handler;
 pub mod claude_cli_spawn;
 pub mod claude_cli_spawn_steps;
 pub mod cli_branch_starts;
+mod cli_resume_token;
 pub mod cli_route_launch;
 mod cli_session_worktree;
 mod clone_backend;

@@ -14,8 +14,8 @@ use std::path::Path;
 
 use tddy_accounts::AccountsError;
 use tddy_core::provider_route::{
-    choose_route, resolve_route, Harness, HarnessRoute, RouteChoice, RouteEndpoints, RouteRefusal,
-    RouteSecret, RouteSources, RouteTarget,
+    choose_route, harness_routable, resolve_route, Harness, HarnessRoute, RouteChoice,
+    RouteEndpoints, RouteRefusal, RouteSecret, RouteSources, RouteTarget,
 };
 use tddy_core::{
     read_session_provider_account, write_session_provider_account, SessionProviderAccount,
@@ -90,6 +90,9 @@ pub(crate) fn route_on_account(
     account_id: &str,
     model: &str,
 ) -> Result<HarnessRoute, Status> {
+    // Checked first: a harness that cannot be pointed at any provider is refused by name, whatever
+    // account or model the start also names.
+    harness_routable(harness).map_err(route_refusal_status)?;
     // Every model alias the harness could fall through to is pinned to this one; an empty pin
     // would leave the harness choosing a vendor model name the account does not serve.
     if model.trim().is_empty() {
@@ -110,10 +113,16 @@ pub(crate) fn route_on_account(
         api_key: RouteSecret::new(account.api_key.expose()),
         model: model.to_string(),
     };
-    resolve_route(harness, &target).map_err(|refusal| match refusal {
+    resolve_route(harness, &target).map_err(route_refusal_status)
+}
+
+/// A route refusal as the status a start answers with: a harness whose route is not built yet is
+/// unimplemented, and every other refusal is an invalid argument naming what would have to change.
+fn route_refusal_status(refusal: RouteRefusal) -> Status {
+    match refusal {
         RouteRefusal::NotYetRoutable(_) => Status::unimplemented(refusal.to_string()),
         other => Status::invalid_argument(other.to_string()),
-    })
+    }
 }
 
 /// A vault refusal as the status a start answers with: the same codes whichever account kind was
