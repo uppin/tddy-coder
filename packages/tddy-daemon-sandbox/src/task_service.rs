@@ -273,7 +273,10 @@ impl TaskService for TaskServiceImpl {
         let req = request.into_inner();
         let _user = self.authenticate(&req.session_token)?;
         // TODO(start-cancel): forward to `req.daemon_instance_id` when it names a peer (self.peers)
-        let _ = &self.peers;
+        let _ = self
+            .peers
+            .as_ref()
+            .map(|peers| (&peers.room, peers.local_instance_id.as_str()));
         let task_id = tddy_task::TaskId(req.task_id);
         let found = self.registry.cancel_task(&task_id).await;
         if found {
