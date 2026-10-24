@@ -162,7 +162,10 @@ an ordinary, still read-only session, and main is set up once more.
 - **Read-only.** The daemon's `ExecuteTool` and `StreamExecuteTool` refuse, with
   `PERMISSION_DENIED`, every exec tool but `Read`, `Grep`, `Glob`, `ReadLints`, `SemanticSearch` and
   the four [project-home tools](#project-home-tools) for a project-home session, so the guarantee does
-  not rest on the agent's allowlist.
+  not rest on the agent's allowlist. Claude's native filesystem and shell tools (`Read`, `Write`,
+  `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`, `BashOutput`, `KillShell`, `Glob`, `Grep`, `LS`) never
+  cross that route, so the claude-cli main is launched with every one of them in `--disallowedTools`:
+  its only reach is the `tddy-tools` set the daemon admits.
 - **What the agent is offered.** `ExecToolService.ListExecTools` takes a `session_id` and answers the
   set that session's agent is offered, read from the session's own record: the read-only tools plus
   the project-home tools for a project-home session, the catalog without the project-home tools for
@@ -172,6 +175,25 @@ an ordinary, still read-only session, and main is set up once more.
   `tools/list` with an error naming the reason, rather than offering a catalog of its own. The
   co-located claude-cli main is also started (and resumed) with one `--allowedTools` per tool of
   that set, which pre-approves them; it does not restrict — enforcement stays the daemon's.
+- **How the main reaches its tools.** The claude-cli main is launched (and resumed) with
+  `tddy-tools --mcp` — the deployment's toolchain binary — as its **only** MCP server
+  (`--mcp-config <session dir>/claude-mcp-config.json` and `--strict-mcp-config`). Its process
+  environment names the main itself (`TDDY_REMOTE_SESSION_ID`) under a credential of its own
+  (`TDDY_REMOTE_SESSION_TOKEN`): minted by this daemon from the **verified** caller of the ensure or
+  resume, with the 24 h agent lifetime, never the caller's own token; a resume mints afresh. On an
+  embedded daemon (Tddy Desktop) `TDDY_REMOTE_DAEMON_SOCKET` names its agent-tool socket, which
+  `tddy-tools` prefers; on a binary `tddy-daemon` the tools reach `TDDY_REMOTE_DAEMON_URL`, its local
+  HTTP URL. Because the main's record holds the home worktree, the daemon runs each call there, under
+  the role guard above. A start or resume that cannot mint the credential, or cannot find the
+  toolchain's `tddy-tools`, is refused and starts nothing. The main's MCP config and role prompt are
+  written into its session directory only when its agent is spawned, so a refused start leaves
+  nothing on disk.
+- **Role prompt.** The main is launched with `--append-system-prompt-file` naming a short prompt in
+  its session directory: it is the project's main session on a read-only home worktree, it has no
+  shell and cannot edit files, and it sees and starts the project's sessions with
+  `ListProjectSessions` / `StartProjectSession`, inspects them with `ReadSessionWorktree` /
+  `DiffSessionWorktree`, and manages their worktrees with the [git tools](#git-tools); to change code
+  it starts a session.
 - **Hosts.** A request whose `daemon_instance_id` names another daemon is forwarded to it (as
   `GetWorktreeSnapshot` is); empty or the local instance is answered locally. Each host has its own
   home session for a project.

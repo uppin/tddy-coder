@@ -10,7 +10,6 @@ use tddy_rpc::Response;
 
 use std::path::PathBuf;
 
-use crate::claude_cli_spawn_steps::role_allowed_tools_args;
 use crate::hooks_and_urls;
 
 use crate::launch_ports::LaunchSessions;
@@ -63,12 +62,10 @@ impl LaunchSessions {
             .or_else(|| meta.repo_path.as_ref().map(PathBuf::from))
             .unwrap_or_else(|| session_dir.clone());
         let is_split = split.is_some();
-        let (mut split_args, split_env) = match split {
-            Some(w) => (w.extra_args, w.env),
-            None => (Vec::new(), Vec::new()),
-        };
-        // A role's tool set is not in a persisted argv, so a resumed agent is given it again.
-        split_args.extend(role_allowed_tools_args(meta.session_role.as_deref()));
+        // A role's wiring is not in a persisted argv, so a resumed agent is given it again.
+        let (split_args, split_env) = self
+            .resumed_role(&meta, session_id, &session_dir, session_token)?
+            .after_split(split);
 
         let manager = Arc::clone(&self.claude_cli_manager);
         let session_id_owned = session_id.to_string();

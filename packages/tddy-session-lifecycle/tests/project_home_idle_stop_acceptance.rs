@@ -12,7 +12,7 @@ mod project_home_support;
 use std::time::{Duration, SystemTime};
 
 use project_home_support::{
-    a_home_daemon, a_repo_with_origin_main, ensure_main, HomeDaemon, PROJECT_ID, VALID_TOKEN,
+    a_caller_token, a_home_daemon, a_repo_with_origin_main, ensure_main, HomeDaemon, PROJECT_ID,
 };
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
@@ -96,7 +96,7 @@ impl World {
         self.home
             .service
             .list_sessions(Request::direct(ListSessionsRequest {
-                session_token: VALID_TOKEN.to_string(),
+                session_token: a_caller_token().to_string(),
             }))
             .await
             .expect("ListSessions")
@@ -112,7 +112,7 @@ impl World {
         self.home
             .service
             .start_session(Request::direct(StartSessionRequest {
-                session_token: VALID_TOKEN.to_string(),
+                session_token: a_caller_token().to_string(),
                 project_id: PROJECT_ID.to_string(),
                 session_type: "claude-cli".to_string(),
                 model: "claude-opus-4-8".to_string(),

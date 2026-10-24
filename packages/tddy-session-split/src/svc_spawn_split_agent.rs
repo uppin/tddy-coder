@@ -384,7 +384,10 @@ impl SplitSessions {
     /// entries were built from (`tddy-daemon/src/runtime.rs`), and deliberately a refusal rather
     /// than an `unreachable!`: the refusal is what keeps another way of assembling a session host
     /// from quietly reintroducing the fallback.
-    pub(crate) fn agent_session_token_for(&self, caller_token: &str) -> Result<String, Status> {
+    ///
+    /// Public for the placements outside this crate that hand an agent its own credential (a
+    /// project-home main, launched by `tddy-agent-launch`).
+    pub fn agent_session_token_for(&self, caller_token: &str) -> Result<String, Status> {
         crate::split_session::mint_agent_session_token(self.session_tokens()?, caller_token)
     }
 }

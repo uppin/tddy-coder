@@ -21,3 +21,9 @@
   `packages/tddy-session-lifecycle/tests/ensure_project_home_session_acceptance.rs` that sets main up
   in a sandbox and asserts the listed session carries `session_role: project-home`. Remove the code
   `TODO` in `project_home_start_spec.rs` with it.
+- **Also carry the main's tool wiring** (2026-10-24-project-home-agent-tools): an unsandboxed main is
+  launched through `packages/tddy-agent-launch/src/project_home_launch.rs` (`StartRole`, `MainLaunchPlan`:
+  `tddy-tools --mcp` as its only MCP server, `TDDY_REMOTE_*` under a minted agent credential, native
+  tools withdrawn, role prompt). A sandboxed main needs the same, with `tddy-tools` reached from inside
+  the jail — check whether the jail can reach the agent-tool socket / local URL before reusing
+  `colocated_jail_tool_env` as-is.

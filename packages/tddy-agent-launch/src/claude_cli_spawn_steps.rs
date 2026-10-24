@@ -325,8 +325,8 @@ pub(super) struct ClaudeCliProcess<'a> {
     pub(super) managed: Option<tddy_cli_sessions::session_toolcall::ManagedWorkflow>,
     pub(super) append_system_prompt_file: Option<PathBuf>,
     pub(super) env_extra: Vec<(String, String)>,
-    /// The session's standing role; see [`role_allowed_tools_args`].
-    pub(super) session_role: &'a str,
+    /// A main's launch, carried out only now that nothing before the spawn can refuse the start.
+    pub(super) main: Option<crate::project_home_launch::MainLaunchPlan<'a>>,
 }
 
 pub(super) async fn spawn_claude_cli_process(
@@ -346,8 +346,9 @@ pub(super) async fn spawn_claude_cli_process(
         managed,
         append_system_prompt_file,
         env_extra,
-        session_role,
+        main,
     } = launch;
+    let role_launch = crate::project_home_launch::RoleLaunch::of(main)?;
     let handle = manager
         .start_with_options(
             &session_id_owned,
@@ -359,8 +360,8 @@ pub(super) async fn spawn_claude_cli_process(
             dangerously_skip_permissions,
             false,
             append_system_prompt_file.as_deref(),
-            role_allowed_tools_args(Some(session_role)),
-            env_extra,
+            role_launch.extra_args,
+            env_extra.into_iter().chain(role_launch.env).collect(),
             Some(os_user),
         )
         .await

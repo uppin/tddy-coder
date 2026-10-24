@@ -125,7 +125,7 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             // A spawned child is never a managed-codebase session: the orchestrator does not ask for one.
             false,
             // A spawned child has no standing role.
-            "",
+            crate::project_home_launch::StartRole::ordinary(),
             // A child cuts its own worktree.
             "",
             // The orchestrator's owner's vault: a child is the same owner's, on the same project.

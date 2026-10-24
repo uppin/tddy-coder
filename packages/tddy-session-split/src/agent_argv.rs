@@ -121,26 +121,7 @@ pub fn split_claude_extra_args(
     tddy_tools_path: &str,
     withdrawals: &[(String, Vec<String>)],
 ) -> Result<Vec<String>, Status> {
-    // Every tool call a split session makes crosses LiveKit to the codebase daemon, and every way
-    // that can fail is reported by `tddy-tools` itself. Claude Code captures an MCP server's stderr,
-    // so without a log file those reports exist only inside a process nobody can attach to: a split
-    // session whose dispatch is failing would leave no evidence on either daemon. The sandbox path
-    // solves this the same way, pointing the same variable at its egress dir.
-    let mcp_env = BTreeMap::from([
-        (
-            "TDDY_TOOLS_LOG_FILE".to_string(),
-            split_mcp_log_path(session_dir)
-                .to_string_lossy()
-                .into_owned(),
-        ),
-        ("RUST_LOG".to_string(), MCP_RUST_LOG.to_string()),
-    ]);
-    let mcp_config = tddy_sandbox_recipes::write_claude_mcp_config(
-        session_dir,
-        Path::new(tddy_tools_path),
-        &mcp_env,
-    )
-    .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
+    let mcp_args = tddy_tools_only_mcp_args(session_dir, Path::new(tddy_tools_path))?;
 
     let withdrawn = withdrawn_tools(withdrawals);
     let withdrawn_refs: Vec<&str> = withdrawn.iter().map(String::as_str).collect();
@@ -181,13 +162,42 @@ pub fn split_claude_extra_args(
     }
     args.push("--permission-prompt-tool".to_string());
     args.push(PERMISSION_PROMPT_TOOL.to_string());
-    args.push("--mcp-config".to_string());
-    args.push(mcp_config.to_string_lossy().into_owned());
-    // `--mcp-config` alone *adds* to the user-scoped MCP configuration, so any filesystem or shell
-    // MCP server the operator has configured would load beside `tddy-tools` — reachable under an
-    // `mcp__*` name the disallowlist above does not cover, on this host rather than the codebase
-    // host. The restriction the split placement rests on has to be impossible to route around, not
-    // merely the default, so this config is the only one loaded.
-    args.push("--strict-mcp-config".to_string());
+    args.extend(mcp_args);
     Ok(args)
+}
+
+/// Write `session_dir`'s `claude-mcp-config.json`, registering `tddy_tools_path --mcp` as the one
+/// MCP server, and return the `claude` flags that load it and nothing else.
+///
+/// For an agent whose native filesystem and shell tools are withdrawn, `tddy-tools` is the only
+/// reach it has, so the config is the only one loaded: `--mcp-config` alone *adds* to the
+/// user-scoped MCP configuration, and any filesystem or shell MCP server the operator has
+/// configured would load beside `tddy-tools` — reachable under an `mcp__*` name no disallowlist
+/// covers. The restriction has to be impossible to route around, not merely the default.
+pub fn tddy_tools_only_mcp_args(
+    session_dir: &Path,
+    tddy_tools_path: &Path,
+) -> Result<Vec<String>, Status> {
+    // Every way a tool call can fail is reported by `tddy-tools` itself, and Claude Code captures
+    // an MCP server's stderr, so without a log file those reports exist only inside a process
+    // nobody can attach to: a session whose dispatch is failing would leave no evidence on any
+    // daemon. The sandbox path solves this the same way, pointing the same variable at its egress
+    // dir.
+    let mcp_env = BTreeMap::from([
+        (
+            "TDDY_TOOLS_LOG_FILE".to_string(),
+            split_mcp_log_path(session_dir)
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        ("RUST_LOG".to_string(), MCP_RUST_LOG.to_string()),
+    ]);
+    let mcp_config =
+        tddy_sandbox_recipes::write_claude_mcp_config(session_dir, tddy_tools_path, &mcp_env)
+            .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
+    Ok(vec![
+        "--mcp-config".to_string(),
+        mcp_config.to_string_lossy().into_owned(),
+        "--strict-mcp-config".to_string(),
+    ])
 }
