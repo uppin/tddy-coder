@@ -4,7 +4,9 @@
 //! **`submit`** is acknowledged on the wire immediately after persisting the payload; the listener
 //! then `try_send`s [`ToolCallRequest::SubmitActivity`] for the activity log only. **`ask`** and
 //! **`approve`** block until the presenter responds via oneshot channels (requires
-//! [`crate::presenter::Presenter::poll_tool_calls`]).
+//! [`crate::presenter::Presenter::poll_tool_calls`]). A conversation-tagged **`approve`** is the
+//! exception: it is decided by the listener's [`ConversationApprovalHandler`] and never reaches the
+//! presenter.
 
 pub mod build;
 mod client;
@@ -31,8 +33,8 @@ pub use github_token_client::{
 pub use listener::{
     set_toolcall_log_dir, start_toolcall_listener,
     start_toolcall_listener_with_conversation_handler, start_toolcall_listener_with_handlers,
-    ChildSpawnHandler, ConversationSpawnHandler, GithubCredentialHandler, ListenerHandlers,
-    ToolcallRpcService,
+    ChildSpawnHandler, ConversationApprovalHandler, ConversationSpawnHandler,
+    GithubCredentialHandler, ListenerHandlers, ToolcallRpcService,
 };
 pub use lsp::{lsp_executor, register_lsp_executor, LspExecutor, LspQuery};
 pub use restructure::{register_restructure_executor, restructure_executor, RestructureExecutor};
@@ -339,6 +341,11 @@ pub struct ApproveRequestWire {
     pub r#type: String,
     pub tool_name: String,
     pub input: serde_json::Value,
+    /// The coding-agent conversation asking for approval. Present when a headless conversation's
+    /// permission prompt is relayed; that approval is decided by the conversation's own
+    /// [`ConversationApprovalHandler`]. Absent, the approval belongs to the workflow presenter.
+    #[serde(default)]
+    pub conversation_id: Option<String>,
 }
 
 /// Wire format for `transition` request (from tddy-tools, agent-driven orchestration).
