@@ -151,6 +151,11 @@ Build the stub first (`cargo build -p tddy-acp-stub`).
 
 **Changed from the plan:** the daemon-RPC round trip (old test 8) is split into its two halves — the client (8, 9) and the daemon frames (10) — because the whole round trip needs #721's recording-launcher harness, a file that node owns; the full path is exercised end to end once both are green. The MCP-level tests (old 9, 10) are 11 and 13–17: the outcome JSON and the argument parse are the MCP surface, and the grace / `responseId` path is generic and already covered. Wire spellings published (implemented, not TODO): `PermissionRequested` in both stop-reason tables.
 
+**Changed in green (2026-10-24, developer's decision):** #721's `packages/tddy-coding-subagent/tests/coding_agent_session_acceptance.rs`
+`a_permission_request_is_denied_and_recorded_in_the_turns_messages` pinned #721's planned stopgap (deny until this node
+hands the request to the main agent). It is **rewritten**, not deleted, as `a_permission_request_yields_instead_of_being_auto_answered`:
+the turn ends `PermissionRequested` with the request's title and options, and the stub records no permission outcome yet.
+
 **Baseline (2026-10-24):** `cargo check --all-targets` clean for `tddy-discovery tddy-coding-subagent tddy-session-agents tddy-tools tddy-daemon-rpc tddy-session-lifecycle tddy-tools-cli tddy-daemon tddy-session-split tddy-acp`; scoped clippy `-D warnings` clean; the 16 existing tests in the extended client suite pass.
 
 ## Technical Debt & Production Readiness
@@ -162,6 +167,21 @@ _(populated during development)_
 - **The ACP prompt stays in flight across tddy turns.** The alternative — cancel and re-prompt with the
   decision as text — loses the agent's state and is not what the agent asked for.
 - **Always yield.** No per-entry auto-allow list: the user chose that the invoking agent decides.
+- **Cancel waits for the cancelled turn to end, bounded.** `CancelHandle::cancel` answers the parked requests as
+  cancelled, sends `session/cancel`, then waits for the turn to end. Test 7 reads the stub's record as soon as
+  `cancel()` returns, and the stub records asynchronously, so an unbounded return fails it. The wait is capped by
+  `CANCEL_SETTLE_DEADLINE` (10 s, `packages/tddy-coding-subagent/src/session.rs`): past it `cancel` returns `Ok`, the
+  turn is left unsettled, and the session's drop stops the agent process. Residual risk: a silent agent costs at most
+  that deadline, not an unbounded hang of `subagent_cancel`.
+- **`encode_permission_answer` returns `Result<String, String>`**, not the stubbed `String`. An encode failure
+  propagates through `?`; it does not turn into an empty "answers nothing" value.
+- **Judgment calls in the green implementation:** parked requests queue FIFO and the caller sees one at a time; an
+  answer naming an option the request did not offer is refused and the request stays pending; a resume carrying an
+  answer with nothing pending is refused; a new prompt is refused while a cancelled turn's result is uncollected.
+- **Tool kind is always `other` for now.** n1's `PermissionRequest` drops the ACP tool kind. The fix belongs to #720's
+  driver and is recorded in
+  [`docs/dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md`](../todo/2026-10-24-acp-permission-request-drops-tool-kind.md);
+  the FIXME at `packages/tddy-coding-subagent/src/parked_permissions.rs` points there.
 
 ## Refactoring Needed
 
@@ -187,7 +207,7 @@ _(populated during development)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (16 of 17 contract tests green; the n2 test above is red pending the developer's decision — not ticked)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-coding-subagent -p tddy-discovery -p tddy-session-agents -p tddy-daemon-rpc -p tddy-tools-cli`) — verify 100% pass

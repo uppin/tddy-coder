@@ -178,6 +178,16 @@ impl AgentConversationLink {
                 outcome.yielded_message_id =
                     Some(MessageId::from(frame.yielded_message_id.clone()));
             }
+            // A turn that paused on a permission request names it on the same final frame, for the
+            // caller to answer with a resume. An unparseable request is an error, for the reason the
+            // yield report is: the owning daemon said the turn paused on one.
+            if !frame.permission_request_json.is_empty() {
+                outcome.permission_request = Some(
+                    serde_json::from_str(&frame.permission_request_json).map_err(|e| {
+                        format!("{method} permission_request_json is not a permission request: {e}")
+                    })?,
+                );
+            }
             return Ok(outcome);
         }
         Err(format!(
@@ -198,9 +208,14 @@ impl AgentConversationLink {
 
     /// The caller's answer to the conversation's pending permission request, as the JSON object
     /// `ResumeAgentConversationRequest.permission_answer_json` carries; empty when it answers none.
-    fn encode_permission_answer(_request: &TurnRequest) -> String {
-        // TODO(permission-yield): implement
-        String::new()
+    /// A failure to encode is an error, not an empty answer: an empty answer reads as "nothing
+    /// answered", which would send the caller back to a request it believes it answered.
+    fn encode_permission_answer(request: &TurnRequest) -> Result<String, String> {
+        match request.permission_answer() {
+            Some(answer) => serde_json::to_string(answer)
+                .map_err(|e| format!("the permission answer does not encode: {e}")),
+            None => Ok(String::new()),
+        }
     }
 
     /// The caller's yield conditions as the JSON array the requests carry — the same shape the
@@ -229,7 +244,7 @@ impl AgentConversationLink {
                 max_turns: request.requested_max_turns(),
                 yield_conditions_json: Self::encode_yield_conditions(request),
                 replacement_json: Self::encode_replacement(request),
-                permission_answer_json: Self::encode_permission_answer(request),
+                permission_answer_json: Self::encode_permission_answer(request)?,
             }));
         };
         if let Some(rewind_point) = request.rewind_point() {

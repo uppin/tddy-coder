@@ -39,8 +39,45 @@ pub fn permission_property() -> serde_json::Value {
 /// The answer `args` carries, `None` when it carries no `permission`. Exactly one of `optionId`
 /// or `cancelled: true` is required; anything else is refused naming what is wrong.
 pub fn parse_permission_answer(
-    _args: &serde_json::Value,
+    args: &serde_json::Value,
 ) -> Result<Option<PermissionAnswer>, String> {
-    // TODO(permission-yield): implement
-    Err("TODO(permission-yield): parse_permission_answer is not implemented".to_string())
+    let Some(permission) = args.get(PERMISSION_ARG) else {
+        return Ok(None);
+    };
+    let Some(object) = permission.as_object() else {
+        return Err(format!(
+            "{PERMISSION_ARG} must be an object naming the request (requestId) and either its optionId or cancelled: true"
+        ));
+    };
+    let request_id = match object.get("requestId").and_then(serde_json::Value::as_str) {
+        Some(id) if !id.is_empty() => id.to_string(),
+        _ => {
+            return Err(format!(
+                "{PERMISSION_ARG}.requestId must name the pending request: the permissionRequest.requestId the turn yielded with"
+            ))
+        }
+    };
+    match (object.get("optionId"), object.get("cancelled")) {
+        (Some(_), Some(_)) => Err(format!(
+            "{PERMISSION_ARG} names both optionId and cancelled; an answer is one or the other"
+        )),
+        (Some(option), None) => match option.as_str() {
+            Some(option_id) if !option_id.is_empty() => Ok(Some(PermissionAnswer::Selected {
+                request_id,
+                option_id: option_id.to_string(),
+            })),
+            _ => Err(format!(
+                "{PERMISSION_ARG}.optionId must name one of the request's options[].optionId"
+            )),
+        },
+        (None, Some(cancelled)) => match cancelled.as_bool() {
+            Some(true) => Ok(Some(PermissionAnswer::Cancelled { request_id })),
+            _ => Err(format!(
+                "{PERMISSION_ARG}.cancelled must be true to answer the request as cancelled; to choose an option, give its optionId"
+            )),
+        },
+        (None, None) => Err(format!(
+            "{PERMISSION_ARG} must name an optionId, or cancelled: true"
+        )),
+    }
 }

@@ -1959,6 +1959,11 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
     };
+    let request = match crate::permission_answer_arg::parse_permission_answer(&args) {
+        Ok(Some(answer)) => request.with_permission_answer(answer),
+        Ok(None) => request,
+        Err(e) => return subagent_error_json(e),
+    };
     take_a_turn(session_id, request, grace).await
 }
 

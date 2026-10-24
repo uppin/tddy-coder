@@ -269,7 +269,7 @@ async fn a_replacement_is_refused_naming_it() {
 
 #[tokio::test]
 #[serial]
-async fn a_permission_request_is_denied_and_recorded_in_the_turns_messages() {
+async fn a_permission_request_yields_instead_of_being_auto_answered() {
     // Given
     let mut asking = a_turn();
     asking["permission_requests"] = serde_json::json!([{ "title": "Run cargo test" }]);
@@ -283,17 +283,20 @@ async fn a_permission_request_is_denied_and_recorded_in_the_turns_messages() {
         .expect("the turn succeeds");
 
     // Then
-    let outcome_line = agent.recorded("permission_outcome");
-    assert_eq!(outcome_line.len(), 1);
-    assert_eq!(outcome_line[0]["outcome"], "selected:reject-once");
-    let denial = outcome
-        .messages
+    assert_eq!(outcome.stop_reason, StopReason::PermissionRequested);
+    let request = outcome
+        .permission_request
+        .expect("the turn yields the request to the caller");
+    assert_eq!(request.tool_call.title, "Run cargo test");
+    let options: Vec<&str> = request
+        .options
         .iter()
-        .find(|message| message.preview.contains("Run cargo test"))
-        .expect("the denial is one of the turn's messages");
+        .map(|option| option.option_id.as_str())
+        .collect();
+    assert_eq!(options, ["allow-once", "reject-once"]);
     assert!(
-        denial.is_error,
-        "a denied request reads as an error: {denial:?}"
+        agent.recorded("permission_outcome").is_empty(),
+        "nothing answered the agent on the caller's behalf"
     );
 }
 
