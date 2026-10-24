@@ -271,21 +271,15 @@ pub fn decide_roster_subscription(
         // `tddy_sandbox_runner::ToolExecService` and `run_host_relay_with_rpc`. The subscription
         // proceeds exactly as it does over LiveKit: a fresh connection per stream, the first frame
         // replaces the seed, reconnect-on-drop with backoff.
-        // `DaemonUds` joins these two rather than the HTTP arm below: it is a full `tddy-rpc`
-        // client to the daemon, so `StreamSessionAgents` and the conversation RPCs ride it exactly
-        // as they ride the sandbox socket. An embedded daemon's co-located agent therefore gets a
-        // live roster, where the HTTP relay it used to be given could only ever refuse one.
+        // `DaemonUds` and `DaemonHttp` join these two: each is a full `tddy-rpc` client to the
+        // daemon (the HTTP one to the relay, which forwards by `daemon_instance_id`), so
+        // `StreamSessionAgents` and the conversation RPCs ride them exactly as they ride the sandbox
+        // socket. An embedded daemon's co-located agent therefore gets a live roster, where the HTTP
+        // relay it used to be given could only ever refuse one.
         SessionToolTransport::SandboxIpc { .. }
         | SessionToolTransport::DaemonUds { .. }
+        | SessionToolTransport::DaemonHttp { .. }
         | SessionToolTransport::LiveKit { .. } => Some(transport),
-        // TODO(session-agent-roster): give the HTTP transport a `StreamSessionAgents` client (or a
-        // `ListSessionAgents` poll) so a daemon-HTTP session can address agents at all.
-        SessionToolTransport::DaemonHttp { .. } => {
-            let reason = "the roster stream has no client for the daemon-HTTP transport";
-            log::error!(target: "tddy_discovery::roster", "{reason}; subagent calls are refused");
-            roster.mark_unavailable(reason);
-            None
-        }
         SessionToolTransport::IncompleteLiveKit { missing } => {
             let reason = format!(
                 "a LiveKit environment is set but {} is empty or unset",
