@@ -264,14 +264,25 @@ pub struct SpawnPlan {
     /// `cgroup.procs` of the scope the child joins while it is still root. `None` leaves the child
     /// in the supervisor's own cgroup.
     pub scope_procs: Option<PathBuf>,
-    /// Whether the child shares the supervisor's stdout/stderr. Managed services do, so their
-    /// output reaches the journal; sessions do not, because their output belongs to whoever asked
-    /// for them.
-    pub inherit_output: bool,
+    /// Where the child's stdout/stderr go. See [`ChildOutput`].
+    pub output: ChildOutput,
     /// What the child's environment is built on top of, before `env` is applied.
     pub environment: EnvironmentBase,
     /// Jail to build around the child. `None` spawns a plain process in the host's namespaces.
     pub sandbox: Option<SandboxJail>,
+}
+
+/// Where a child's stdout and stderr go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildOutput {
+    /// Shared with the supervisor's own, so a managed service's output reaches the journal.
+    Inherit,
+    /// `/dev/null`. A session's output belongs to whoever asked for it, not to the supervisor's
+    /// journal.
+    Discard,
+    /// stdout to `/dev/null`, stderr to a pipe the supervisor reads: a clone's progress and its own
+    /// explanation of a failure. The read end is handed back by [`ForkBroker::spawn_capturing_stderr`].
+    CaptureStderr,
 }
 
 /// Where a child's environment starts from.
@@ -474,10 +485,14 @@ pub struct ForkBroker {
     jobs: mpsc::UnboundedSender<Job>,
 }
 
+/// A child the fork thread started: its pid, and the read end of its stderr when the plan asked for
+/// it to be captured.
+type Spawned = (u32, Option<std::process::ChildStderr>);
+
 type Job = (
     SpawnPlan,
     Option<SocketHandover>,
-    oneshot::Sender<std::io::Result<u32>>,
+    oneshot::Sender<std::io::Result<Spawned>>,
 );
 
 impl ForkBroker {
@@ -508,6 +523,30 @@ impl ForkBroker {
         plan: SpawnPlan,
         handover: Option<SocketHandover>,
     ) -> std::io::Result<u32> {
+        self.spawn_with_output(plan, handover)
+            .await
+            .map(|(pid, _)| pid)
+    }
+
+    /// [`Self::spawn`] for a plan whose output is [`ChildOutput::CaptureStderr`]: the child's pid and
+    /// the read end of its stderr. The read ends at end-of-file once the child and everything it
+    /// started has closed it.
+    pub async fn spawn_capturing_stderr(
+        &self,
+        plan: SpawnPlan,
+    ) -> std::io::Result<(u32, std::process::ChildStderr)> {
+        let (pid, stderr) = self.spawn_with_output(plan, None).await?;
+        let stderr = stderr.ok_or_else(|| {
+            std::io::Error::other("the plan did not ask for its stderr to be captured")
+        })?;
+        Ok((pid, stderr))
+    }
+
+    pub(crate) async fn spawn_with_output(
+        &self,
+        plan: SpawnPlan,
+        handover: Option<SocketHandover>,
+    ) -> std::io::Result<Spawned> {
         let (reply, answer) = oneshot::channel();
         self.jobs
             .send((plan, handover, reply))
@@ -518,13 +557,20 @@ impl ForkBroker {
     }
 }
 
-fn spawn_now(plan: SpawnPlan, handover: Option<SocketHandover>) -> std::io::Result<u32> {
+fn spawn_now(plan: SpawnPlan, handover: Option<SocketHandover>) -> std::io::Result<Spawned> {
     let mut command = Command::new(&plan.program);
     command.args(&plan.args);
     command.stdin(Stdio::null());
-    if !plan.inherit_output {
-        command.stdout(Stdio::null());
-        command.stderr(Stdio::null());
+    match plan.output {
+        ChildOutput::Inherit => {}
+        ChildOutput::Discard => {
+            command.stdout(Stdio::null());
+            command.stderr(Stdio::null());
+        }
+        ChildOutput::CaptureStderr => {
+            command.stdout(Stdio::null());
+            command.stderr(Stdio::piped());
+        }
     }
     // Deliberately no `Command::env` anywhere above: `Command` installs its own environment *after*
     // the `pre_exec` closure has run, which would discard the one variable only the child can know —
@@ -537,8 +583,8 @@ fn spawn_now(plan: SpawnPlan, handover: Option<SocketHandover>) -> std::io::Resu
         command.pre_exec(move || steps.run());
     }
 
-    let child = command.spawn()?;
-    Ok(child.id())
+    let mut child = command.spawn()?;
+    Ok((child.id(), child.stderr.take()))
 }
 
 /// The pre-computed instructions the child executes between `fork` and `exec`.
@@ -1575,7 +1621,7 @@ mod tests {
                     groups: vec![TDDY_GID, DEVELOPERS_GID],
                 },
                 scope_procs: None,
-                inherit_output: false,
+                output: ChildOutput::Discard,
                 environment: EnvironmentBase::Minimal,
                 sandbox: None,
             },

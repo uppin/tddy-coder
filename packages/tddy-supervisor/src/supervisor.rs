@@ -22,7 +22,7 @@ use crate::service::ServiceStatus;
 use crate::services::{ExitOutcome, ServiceRuntime, STARTUP_GRACE_PERIOD};
 use crate::signals::{signal_process, signal_process_group, KILL, TERMINATE};
 use crate::spawn_broker::{
-    self, EnvironmentBase, ForkBroker, SocketHandover, SpawnPlan, TargetUser,
+    self, ChildOutput, EnvironmentBase, ForkBroker, SocketHandover, SpawnPlan, TargetUser,
 };
 
 /// How often the shutdown sequence re-checks whether its children are gone.
@@ -263,6 +263,9 @@ pub struct Supervisor {
     /// Held while a start is between `fork` and having its pid recorded, so a reap cannot see the
     /// exit of a process nothing has claimed yet. Async, because the fork round-trip is awaited.
     spawn_gate: tokio::sync::Mutex<()>,
+    /// Woken after every session exit is recorded, so a caller waiting on one
+    /// ([`Self::wait_for_session_exit`]) is told instead of polling.
+    session_exited: tokio::sync::Notify,
     shutting_down: AtomicBool,
 }
 
@@ -332,6 +335,7 @@ impl Supervisor {
             forks,
             supervisor_socket: config.socket.path.clone(),
             spawn_gate: tokio::sync::Mutex::new(()),
+            session_exited: tokio::sync::Notify::new(),
             shutting_down: AtomicBool::new(false),
         }))
     }
@@ -411,18 +415,60 @@ impl Supervisor {
     /// for, and what makes `shutdown` able to account for all of them.
     pub async fn spawn_session(&self, plan: SpawnPlan) -> std::io::Result<u32> {
         let _in_flight = self.spawn_gate.lock().await;
+        // No listener: socket handover is a declared managed service's privilege, never something a
+        // caller can ask for.
+        let (pid, _) = self.fork_session(plan).await?;
+        Ok(pid)
+    }
+
+    /// [`Self::spawn_session`] for a plan whose output is [`ChildOutput::CaptureStderr`]: the pid,
+    /// and the read end of the session's stderr.
+    pub async fn spawn_session_capturing_stderr(
+        &self,
+        plan: SpawnPlan,
+    ) -> std::io::Result<(u32, std::process::ChildStderr)> {
+        let _in_flight = self.spawn_gate.lock().await;
+        let (pid, stderr) = self.fork_session(plan).await?;
+        let stderr = stderr.ok_or_else(|| {
+            std::io::Error::other("the session's plan did not ask for its stderr to be captured")
+        })?;
+        Ok((pid, stderr))
+    }
+
+    /// Fork a session and record it. Called with the spawn gate held.
+    async fn fork_session(
+        &self,
+        plan: SpawnPlan,
+    ) -> std::io::Result<(u32, Option<std::process::ChildStderr>)> {
         // Read before the plan is handed over. A scope becomes this session's the moment the session
         // exists, so it can be reclaimed when the session ends without a caller having to ask.
         let scope = scope_directory_of(plan.scope_procs.as_deref()).map(Path::to_path_buf);
-        // No listener: socket handover is a declared managed service's privilege, never something a
-        // caller can ask for.
-        let pid = self.forks.spawn(plan, None).await?;
+        let (pid, stderr) = self.forks.spawn_with_output(plan, None).await?;
         let mut sessions = self.sessions();
         let generation = sessions.record_spawned(pid);
         if let Some(scope) = scope {
             sessions.own_scope(generation, scope);
         }
-        Ok(pid)
+        Ok((pid, stderr))
+    }
+
+    /// Wait until a session this supervisor spawned has exited, and report how.
+    ///
+    /// Woken by the reap that records the exit rather than polling for it. A pid the supervisor
+    /// never spawned is [`SupervisorError::Denied`], exactly as for [`Self::session_status`].
+    pub async fn wait_for_session_exit(&self, pid: u32) -> Result<SessionStatus, SupervisorError> {
+        loop {
+            // Registered before the status is read, so an exit recorded in between wakes this
+            // waiter instead of being missed.
+            let exited = self.session_exited.notified();
+            tokio::pin!(exited);
+            exited.as_mut().enable();
+            let status = self.session_status(pid)?;
+            if status.state == SessionState::Exited {
+                return Ok(status);
+            }
+            exited.await;
+        }
     }
 
     /// What became of a session this supervisor spawned.
@@ -512,6 +558,7 @@ impl Supervisor {
                 // cannot arrive before this point, because the status it wants is what `waitpid`
                 // just produced.
                 let reclaimed = self.sessions().record_exit(child.pid, child.exit_code());
+                self.session_exited.notify_waiters();
                 if let Some(scope) = reclaimed {
                     self.reclaim_scope(scope);
                 }
@@ -866,7 +913,7 @@ impl Slot {
             // not somebody's session, and nothing has asked for them to be limited.
             scope_procs: None,
             // So a managed service's output reaches the same journal the supervisor's does.
-            inherit_output: true,
+            output: ChildOutput::Inherit,
             // A declared service is root's own decision, and an operator who sets a variable on the
             // supervisor unit means it for the services under it. It is also the only child told
             // where the supervisor listens — see [`EnvironmentBase::Inherited`].
@@ -1285,7 +1332,7 @@ mod tests {
                 groups: Vec::new(),
             },
             scope_procs,
-            inherit_output: false,
+            output: ChildOutput::Discard,
             environment: EnvironmentBase::Minimal,
             sandbox: None,
         }

@@ -24,12 +24,34 @@ const ERROR_TAIL_LINES: usize = 8;
 #[derive(Debug, Clone)]
 pub struct CloneHandle {
     pid: u32,
+    stopped_by: StoppedBy,
+}
+
+/// Who may signal the clone: this process, for a git it forked itself, or the supervisor, which
+/// forked the git of a supervised clone and is the only one with the standing to end it.
+#[derive(Debug, Clone)]
+enum StoppedBy {
+    ThisProcess,
+    Supervisor { socket_path: PathBuf },
 }
 
 impl CloneHandle {
-    /// A handle on the clone whose process-group leader is `pid`.
+    /// A handle on the clone whose process-group leader is `pid`, which this process may signal.
     pub fn for_process_group(pid: u32) -> CloneHandle {
-        CloneHandle { pid }
+        CloneHandle {
+            pid,
+            stopped_by: StoppedBy::ThisProcess,
+        }
+    }
+
+    /// A handle on the supervised clone `pid`, stopped with `StopSession` over `socket_path`.
+    pub fn through_supervisor(socket_path: &Path, pid: u32) -> CloneHandle {
+        CloneHandle {
+            pid,
+            stopped_by: StoppedBy::Supervisor {
+                socket_path: socket_path.to_path_buf(),
+            },
+        }
     }
 
     /// The clone's git process.
@@ -41,6 +63,9 @@ impl CloneHandle {
     /// short grace. Its temporary directory is removed by the clone that was running.
     #[cfg(unix)]
     pub fn stop(&self) -> std::io::Result<()> {
+        if let StoppedBy::Supervisor { socket_path } = &self.stopped_by {
+            return crate::supervisor_spawn::stop_supervised_clone(socket_path, self.pid);
+        }
         let group = self.pid as libc::pid_t;
         signal_group(group, libc::SIGTERM)?;
         let deadline = std::time::Instant::now() + STOP_GRACE;

@@ -11,7 +11,7 @@
 
 mod support;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -50,10 +50,20 @@ fn a_repository_worth_cloning(dir: &Path) -> String {
     format!("file://{}", dir.display())
 }
 
+/// The `git` the supervisor will resolve: the first on `PATH`, which it inherits from this process.
+fn the_git_on_path() -> PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").expect("a PATH"))
+        .map(|dir| dir.join("git"))
+        .find(|candidate| candidate.is_file())
+        .expect("git on PATH")
+}
+
+/// The clone runs git, and git is a tool like any other: the policy has to list it.
 async fn a_supervisor_allowing_the_current_user() -> RunningSupervisor {
     a_supervisor()
         .managing(a_service("tddy-daemon").that_stays_alive())
         .allowing_the_current_user()
+        .allowing_tool(&the_git_on_path())
         .start()
         .await
 }
@@ -167,5 +177,82 @@ async fn a_supervised_clone_with_an_unlisted_env_key_is_refused() {
     assert!(
         refused.is_err(),
         "an environment key outside allowed_env_keys is refused"
+    );
+}
+
+/// A `git` that announces some progress in the directory it was told to clone into, then waits.
+fn a_git_that_never_finishes(bin: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let git = bin.join("git");
+    std::fs::write(
+        &git,
+        "#!/bin/sh\nfor last; do :; done\nmkdir -p \"$last\"\n\
+         echo 'Receiving objects:   1% (1/100)' >&2\nexec sleep 600\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+    git
+}
+
+#[tokio::test]
+async fn stopping_a_supervised_clone_ends_git_and_leaves_no_destination() {
+    // Given a clone that is running: git has said something, and its directory exists
+    let bin = tempfile::tempdir().unwrap();
+    let git = a_git_that_never_finishes(bin.path());
+    let repos = tempfile::tempdir().unwrap();
+    let destination = repos.path().join("project");
+    let supervisor = a_supervisor()
+        .managing(a_service("tddy-daemon").that_stays_alive())
+        .allowing_the_current_user()
+        .allowing_tool(&git)
+        .with_first_on_path(bin.path())
+        .start()
+        .await;
+    let client = supervisor.client().await;
+    let mut events = client
+        .clone_repository(a_clone_of("file:///nowhere", &destination))
+        .await
+        .expect("the clone starts");
+    let mut pid = 0;
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(30), events.recv())
+            .await
+            .expect("an event within 30 seconds")
+            .expect("the stream is open")
+            .expect("a clone event");
+        match event.event.expect("a variant") {
+            Event::Started(started) => pid = started.pid,
+            Event::Progress(_) => break,
+            Event::Exited(exited) => panic!("the clone ended on its own: {exited:?}"),
+        }
+    }
+
+    // When it is stopped
+    client
+        .stop_session(pid)
+        .await
+        .expect("the stop is accepted");
+
+    // Then git ended without succeeding, and nothing is left where it was cloning
+    let exited = loop {
+        let event = tokio::time::timeout(Duration::from_secs(30), events.recv())
+            .await
+            .expect("the clone ends within 30 seconds of being stopped")
+            .expect("the stream says how git exited")
+            .expect("a clone event");
+        if let Some(Event::Exited(exited)) = event.event {
+            break exited;
+        }
+    };
+    assert_ne!(
+        exited.code,
+        Some(0),
+        "a stopped clone is not a success: {exited:?}"
+    );
+    assert!(!destination.exists(), "no destination");
+    assert_eq!(
+        std::fs::read_dir(repos.path()).unwrap().count(),
+        0,
+        "no temporary directory left beside it"
     );
 }

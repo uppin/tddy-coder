@@ -26,9 +26,19 @@ use crate::service::ServiceStatus;
 pub struct SupervisorClient {
     socket_path: PathBuf,
     transport: Arc<StdioRpcClient>,
-    /// Drives the framed read/write loop for this connection. Aborted on drop so a short-lived
-    /// client does not leave the connection open on the supervisor.
-    endpoint: JoinHandle<()>,
+    /// Drives the framed read/write loop for this connection. Shared with the stream of a call that
+    /// outlives the client ([`SupervisorClient::clone_repository`]).
+    connection: Arc<Connection>,
+}
+
+/// The task driving a connection's read/write loop, aborted when the last holder lets go so a
+/// short-lived client does not leave the connection open on the supervisor.
+struct Connection(JoinHandle<()>);
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl std::fmt::Debug for SupervisorClient {
@@ -36,12 +46,6 @@ impl std::fmt::Debug for SupervisorClient {
         f.debug_struct("SupervisorClient")
             .field("socket_path", &self.socket_path)
             .finish_non_exhaustive()
-    }
-}
-
-impl Drop for SupervisorClient {
-    fn drop(&mut self) {
-        self.endpoint.abort();
     }
 }
 
@@ -70,7 +74,7 @@ impl SupervisorClient {
         Ok(SupervisorClient {
             socket_path: socket_path.to_path_buf(),
             transport,
-            endpoint: tokio::spawn(endpoint.run()),
+            connection: Arc::new(Connection(tokio::spawn(endpoint.run()))),
         })
     }
 
@@ -173,8 +177,12 @@ impl SupervisorClient {
         protocol::session_status_from_wire(status).map_err(protocol::error_from_status)
     }
 
-    /// Clone a repository as an allowlisted OS user, receiving git's progress as it is written; the
-    /// stream ends after `Exited`.
+    /// Clone a repository as an allowlisted OS user, receiving git's progress as it is written.
+    ///
+    /// The first event is `Started{pid}`, then one `Progress{line}` per line git wrote, and the
+    /// stream ends after `Exited`. A request the supervisor refuses fails *this call*, before any
+    /// event. The stream keeps the connection open: it outlives this client, and dropping the
+    /// receiver closes the connection, which stops the clone.
     pub async fn clone_repository(
         &self,
         request: wire::CloneRepositoryRequest,
@@ -182,11 +190,46 @@ impl SupervisorClient {
         tokio::sync::mpsc::Receiver<Result<wire::CloneEvent, SupervisorError>>,
         SupervisorError,
     > {
-        // TODO(supervised-clone-progress): implement as a server-streaming call
-        let _ = request;
-        Err(SupervisorError::Unavailable {
-            message: "clone_repository: not implemented".to_string(),
-        })
+        const METHOD: &str = "CloneRepository";
+        let mut frames = self
+            .transport
+            .call_server_stream(SERVICE_NAME, METHOD, request.encode_to_vec())
+            .await
+            .map_err(protocol::error_from_status)?;
+        // A refusal is the stream's first and only item, so it is read here rather than handed to
+        // the caller as an event it might forget to look at.
+        let first = match frames.recv().await {
+            Some(Ok(bytes)) => decode_event(&bytes)?,
+            Some(Err(status)) => return Err(protocol::error_from_status(status)),
+            None => {
+                return Err(SupervisorError::Unavailable {
+                    message:
+                        "the supervisor closed the connection before answering CloneRepository"
+                            .to_string(),
+                })
+            }
+        };
+
+        let (events, receiver) = tokio::sync::mpsc::channel(64);
+        let connection = Arc::clone(&self.connection);
+        // Owns the connection's guard and the transport, so the stream outlives `self`.
+        let transport = Arc::clone(&self.transport);
+        tokio::spawn(async move {
+            let _keep_alive = (connection, transport);
+            if events.send(Ok(first)).await.is_err() {
+                return;
+            }
+            while let Some(frame) = frames.recv().await {
+                let event = match frame {
+                    Ok(bytes) => decode_event(&bytes),
+                    Err(status) => Err(protocol::error_from_status(status)),
+                };
+                if events.send(event).await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(receiver)
     }
 
     /// Create a cgroup v2 scope with limits clamped to policy ceilings.
@@ -241,6 +284,12 @@ impl SupervisorClient {
             message: format!("could not decode the supervisor's reply to {method}: {error}"),
         })
     }
+}
+
+fn decode_event(bytes: &[u8]) -> Result<wire::CloneEvent, SupervisorError> {
+    wire::CloneEvent::decode(bytes).map_err(|error| SupervisorError::OperationFailed {
+        message: format!("could not decode the supervisor's CloneRepository event: {error}"),
+    })
 }
 
 /// The inbound half of a client connection. The supervisor issues no requests to its callers, so

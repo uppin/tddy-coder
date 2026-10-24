@@ -34,8 +34,7 @@ pub(crate) struct CloneBackend {
 
 impl CloneBackend {
     /// Clone `git_url` into `dest` as the OS user, with `env` on the `git` child, handing each
-    /// throttled line of git's progress to `on_progress`. Blocks. The supervisor's clone reports no
-    /// progress (a later node streams it).
+    /// throttled line of git's progress to `on_progress`. Blocks.
     pub(crate) fn clone_repo(
         &self,
         git_url: &str,
@@ -47,12 +46,14 @@ impl CloneBackend {
             SpawnBackendChoice::Supervisor { socket_path } => self
                 .runtime
                 .block_on(
-                    tddy_spawn::supervisor_spawn::clone_repo_via_supervisor_with_env(
+                    tddy_spawn::supervisor_spawn::clone_repo_via_supervisor_with_progress(
                         socket_path,
                         &self.os_user,
                         git_url,
                         dest,
                         env.clone(),
+                        |_| {},
+                        on_progress,
                     ),
                 )
                 .map_err(|e| format!("{e:#}")),

@@ -135,6 +135,7 @@ pub struct SupervisorFixture {
     cpu_max_ceiling: Option<String>,
     pids_max_ceiling: Option<u64>,
     shutdown_grace_secs: u64,
+    path_prefix: Option<PathBuf>,
 }
 
 /// A supervisor with no declared services and an empty spawn policy — deny-everything defaults.
@@ -148,6 +149,7 @@ pub fn a_supervisor() -> SupervisorFixture {
         cpu_max_ceiling: None,
         pids_max_ceiling: None,
         shutdown_grace_secs: 2,
+        path_prefix: None,
     }
 }
 
@@ -170,6 +172,12 @@ impl SupervisorFixture {
 
     pub fn allowing_tool(mut self, tool_path: &Path) -> Self {
         self.allowed_tool_paths.push(tool_path.to_path_buf());
+        self
+    }
+
+    /// Puts `dir` first on the supervisor's own `PATH`, which is where it looks for `git`.
+    pub fn with_first_on_path(mut self, dir: &Path) -> Self {
+        self.path_prefix = Some(dir.to_path_buf());
         self
     }
 
@@ -299,7 +307,16 @@ impl SupervisorFixture {
         let config_path = root.join("supervisor.yaml");
         fs::write(&config_path, &config_yaml).expect("write supervisor config");
 
-        let process = Command::new(env!("CARGO_BIN_EXE_tddy-supervisor"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_tddy-supervisor"));
+        if let Some(prefix) = &self.path_prefix {
+            let inherited = std::env::var_os("PATH").unwrap_or_default();
+            let path = std::env::join_paths(
+                std::iter::once(prefix.clone()).chain(std::env::split_paths(&inherited)),
+            )
+            .expect("a PATH with the prefix on it");
+            command.env("PATH", path);
+        }
+        let process = command
             .arg("--config")
             .arg(&config_path)
             .stdout(Stdio::piped())
