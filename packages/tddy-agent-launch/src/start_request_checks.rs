@@ -179,6 +179,7 @@ impl LaunchSessions {
                     project_id,
                     &req.session_token,
                     req.agent_clone.as_ref(),
+                    progress,
                 ),
             )
             .await?;

@@ -110,6 +110,8 @@ message StartPhase {
     STEP_SEMANTIC_INDEX = 2;
     // Launching the session's agent in the worktree.
     STEP_AGENT = 3;
+    // Cloning the session's project onto this host; only when the project is not here yet.
+    STEP_CLONE = 4;
   }
   enum Boundary {
     BOUNDARY_UNSPECIFIED = 0;
@@ -435,7 +437,25 @@ message StartSessionEvent {
     StartSessionResponse result = 2;
     StartPhase phase = 3;
     StartKeepAlive keep_alive = 4;
+    CloneProgress clone_progress = 5;
   }
+}
+
+// Git's own progress for the clone a start runs (STEP_CLONE), parsed from `git clone --progress`.
+// Throttled at the source: a few events a second, plus every stage change and every 100%.
+message CloneProgress {
+  // Git's words for the stage: "Counting objects", "Compressing objects", "Receiving objects",
+  // "Resolving deltas", ...
+  string stage = 1;
+  uint32 percent = 2;
+  uint64 objects_done = 3;
+  uint64 objects_total = 4;
+  // Bytes received so far; 0 when git did not report bytes for this stage.
+  uint64 bytes_received = 5;
+  // Throughput git reported; 0 when it did not report any.
+  uint64 bytes_per_second = 6;
+  // The raw progress line, for display when no stage could be parsed from it.
+  string line = 7;
 }
 
 // Sent every few seconds while a start waits on something slow it cannot report progress on — a

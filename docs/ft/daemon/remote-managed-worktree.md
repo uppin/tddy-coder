@@ -450,7 +450,7 @@ The outcome is classified from the stream, not from a status code:
 
 | Outcome | Classified as | Teardown | Orphan warning |
 |---|---|---|---|
-| B answered with any status (including its own `DEADLINE_EXCEEDED`, e.g. a clone timeout), or the transport refused before the stream opened | `PeerAnswered` — reported as B's answer | delete the requested id | no |
+| B answered with any status (including its own `DEADLINE_EXCEEDED`), or the transport refused before the stream opened | `PeerAnswered` — reported as B's answer | delete the requested id | no |
 | B was silent for the idle window (stream never opened, or no frame for 30 s) | `PeerSilent` | delete the requested id | yes — B may still create the session after silence |
 
 A split start reports its steps: the worktree step relayed from B, and the agent step (`STEP_AGENT`)

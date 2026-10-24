@@ -71,7 +71,9 @@ repos_base_path: "repos"
 
 1. Resolve destination: `{repos_base}/{name}/`, **unless** `user_relative_path` is non-empty — then `{home}/{user_relative_path}` (normalized; `..` and absolute paths are rejected).
 2. **If that path already exists** (checked as the target OS user): **no clone** — the existing directory is registered as `main_repo_path`.
-3. Otherwise: run `git clone` as the target OS user, then register the project.
+3. Otherwise: run `git clone` as the target OS user, then register the project. The clone has no deadline,
+   and it lands the way a session-start clone does (below): complete at the destination, or not at all.
+   `CreateProject` and `AddProjectToHost` are unary, so they report no clone progress.
 
 ## Cloning at session start
 
@@ -84,8 +86,23 @@ once. A daemon that is not root, asked to clone as somebody else, refuses before
 message naming the user it runs as, the user requested, and that a host run by `tddy-supervisor` brokers
 such spawns. While a child is being started the daemon log records each step it passes — forked, groups,
 gid, uid, exec — with its pid, and a step that does not finish is logged again every five seconds as
-`still at <step> after <n>s`. A session-start clone that fails or exceeds its deadline is logged on the host
-doing the clone.
+`still at <step> after <n>s`. A session-start clone that fails is logged on the host doing the clone.
+
+**The clone is a step of the start.** A streamed start (`StreamStartSession`) reports a **clone** step
+(`STEP_CLONE`) before the worktree step, and while it runs, git's own progress as `CloneProgress` events:
+the stage in git's words (`Counting objects`, `Receiving objects`, `Resolving deltas`), percent, object
+counts, bytes received and throughput. The events are throttled where git runs — at most four a second,
+plus every stage change and every 100% — so neither the spawn worker's pipe nor a relayed stream carries
+git's every redraw. A start whose project is already on the host reports no clone step. On a host run by
+`tddy-supervisor` the clone step begins and ends with no progress between.
+
+**No deadline, and no half-written checkout.** A clone takes as long as its repository and network do;
+only the operator stopping it (or the client hanging up) ends it early. Git writes into a temporary
+sibling of the destination, `<dest>.partial-<uuid>`, which is renamed into place only when git succeeds.
+A clone that fails or is stopped removes that directory, and a stopped clone ends git and everything it
+started (ssh, index-pack) as one process group. A destination therefore either does not exist or holds a
+complete clone, so a later start's "already present" check never mistakes a broken clone for a project. A
+failed clone's error carries git's last lines.
 
 ## API (ConnectionService)
 

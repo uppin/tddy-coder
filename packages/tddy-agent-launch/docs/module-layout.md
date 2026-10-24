@@ -60,14 +60,20 @@ steps are in sibling modules:
 
 ## Cloning a project for a start
 
-`ensure_project_available_for_start` clones the project's checkout when the host has none. How the clone
-reaches its remote is decided per clone, on the blocking pool, where the URL being cloned is known:
+`ensure_project_available_for_start` clones the project's checkout when the host has none, with no
+deadline. The cloner it hands `tddy-projects` (`clone_as_a_start_step`, in
+`svc_ensure_project_available_for_start.rs`) captures the start's `AttachmentProgressSink`: it begins
+`STEP_CLONE`, feeds each line of git's progress into the sink as a `CloneProgress` event
+(`clone_backend::clone_progress_event`), and ends the step when the clone succeeds — so the
+`Fn(&str, &Path) -> Result<(), String>` cloner signature in `tddy-projects` carries no progress parameter.
+How the clone reaches its remote is decided per clone, on the blocking pool, where the URL being cloned is
+known:
 
 | Module | Holds |
 |---|---|
 | `clone_planner.rs` | `ClonePlanner` and `PlannedClone`: a facilitator clone runs with only its transport shim; an SSH remote runs with the askpass environment when the host's OpenSSH is 8.4 or later and an agent is reachable; otherwise it runs without prompting (`BatchMode=yes`) and a failure says why. The grant a clone holds lives until it ends. A refusal before the clone starts (an unresolvable session) is kept and returned as its own `Status`. |
 | `clone_ssh_env.rs` | `ClonePlan::{Facilitator, Ssh}`, `clone_ssh_env_for`, `agent_socket_for` and `CloneAgentError` (`NoAgentReachable` and `LookupFailed`, kept distinct), `is_ssh_url`, `resolve_askpass_path` (beside the daemon executable, then `PATH`) |
-| `clone_backend.rs` | `CloneBackend::clone_repo`: the supervised, forked-worker and in-process backends, each carrying the plan's environment |
+| `clone_backend.rs` | `CloneBackend::clone_repo(url, dest, env, on_progress)`: the supervised, forked-worker and in-process backends, each carrying the plan's environment. The forked worker's `WorkerEvent::CloneProgress` events (`SpawnClient::clone_repo_observed`) and the in-process `clone_run::clone_with_progress` reach `on_progress`; the supervised clone reports none |
 | `start_keepalive.rs` | `with_activity_keepalive(sink, interval, activity, work)`: awaits `work` and emits `StartKeepAlive` naming `activity` every `START_KEEPALIVE_INTERVAL` (5 s) until it ends. A streamed start wraps its whole life in it (`STARTING_ACTIVITY`); `with_keepalive` is the `PROVISIONING_ACTIVITY` form around provisioning, so two keep-alives tick per interval while a project provisions |
 
 `LaunchSessions.askpass` is the daemon's one `AskpassEndpoint` (`None` on a host the daemon runtime did not

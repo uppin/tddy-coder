@@ -160,6 +160,8 @@ enum Said {
     Ended(Step),
     Result,
     Failed(Code),
+    /// A clone-progress event (consecutive ones collapse into one).
+    CloneProgress,
 }
 
 /// Everything a start's stream said, in order, up to and including how it ended.
@@ -176,7 +178,13 @@ async fn everything_the_start_said(
     let mut failure = None;
     while let Some(item) = next_item(&mut stream).await {
         match item {
-            Ok(event) => said.extend(what_it_says(event)),
+            Ok(event) => {
+                if let Some(this) = what_it_says(event) {
+                    if !(this == Said::CloneProgress && said.last() == Some(&Said::CloneProgress)) {
+                        said.push(this);
+                    }
+                }
+            }
             Err(status) => {
                 said.push(Said::Failed(status.code));
                 failure = Some(status);
@@ -203,6 +211,7 @@ fn what_it_says(event: StartSessionEvent) -> Option<Said> {
         // Keep-alives say nothing about a phase; they are pinned by tddy-agent-launch's
         // `start_keepalive.rs`.
         StartEvent::KeepAlive(_) => None,
+        StartEvent::CloneProgress(_) => Some(Said::CloneProgress),
     }
 }
 
@@ -275,5 +284,85 @@ async fn semantic_index_phase_is_streamed_when_enabled() {
             .starts_with("semantic index requested but no embedder is available"),
         "the failure names the missing embedder, was {:?}",
         failure.message
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// A start that has to clone its project
+// (docs/ft/daemon/project-concept.md)
+
+/// A daemon whose project is registered by URL only: its working copy does not exist yet, so a start
+/// clones it from a local repository served over `file://` (which makes git report progress).
+struct ADaemonThatMustClone {
+    service: DaemonSessionHost,
+    working_copy: PathBuf,
+    _source: tempfile::TempDir,
+    _sessions: tempfile::TempDir,
+    _config: tempfile::TempDir,
+}
+
+fn a_daemon_whose_project_is_not_cloned_yet() -> ADaemonThatMustClone {
+    let source = tempfile::tempdir().expect("a source repository");
+    a_repository_whose_origin_is_itself(source.path());
+    for n in 0..300 {
+        std::fs::write(
+            source.path().join(format!("file-{n}.txt")),
+            format!("{n}\n").repeat(200),
+        )
+        .expect("seed a file");
+    }
+    git(source.path(), &["add", "."]);
+    git(source.path(), &["commit", "-q", "-m", "seed"]);
+    git(source.path(), &["push", "-q", "origin", "main"]);
+    let sessions = tempfile::tempdir().expect("a sessions directory");
+    let working_copy = sessions.path().join("repos").join("start-phase");
+    let projects_dir = sessions.path().join("projects");
+    std::fs::create_dir_all(&projects_dir).expect("the projects directory");
+    std::fs::write(
+        projects_dir.join("projects.yaml"),
+        format!(
+            "projects:\n  - project_id: {TEST_PROJECT_ID}\n    name: start-phase\n    git_url: \"file://{}\"\n    main_repo_path: {}\n",
+            source.path().display(),
+            working_copy.display()
+        ),
+    )
+    .expect("register the project");
+    let (config_dir, config) = a_config_launching_claude_as("/bin/cat");
+    ADaemonThatMustClone {
+        service: a_session_host(config, sessions.path().to_path_buf()),
+        working_copy,
+        _source: source,
+        _sessions: sessions,
+        _config: config_dir,
+    }
+}
+
+#[tokio::test]
+async fn a_start_that_clones_reports_the_clone_step_and_its_progress_before_the_worktree() {
+    // Given a project this host has not cloned yet
+    let daemon = a_daemon_whose_project_is_not_cloned_yet();
+
+    // When a session is started over the streaming RPC
+    let (said, failure) = everything_the_start_said(&daemon.service, a_claude_cli_start()).await;
+
+    // Then the clone is a step of its own, reporting git's progress, before the worktree is cut
+    assert_eq!(
+        failure.map(|status| status.message),
+        None,
+        "the start succeeds"
+    );
+    assert_eq!(
+        said.iter().take(4).cloned().collect::<Vec<_>>(),
+        vec![
+            Said::Began(Step::Clone),
+            Said::CloneProgress,
+            Said::Ended(Step::Clone),
+            Said::Began(Step::Worktree),
+        ],
+        "everything the start said: {said:?}"
+    );
+    assert!(
+        daemon.working_copy.join(".git").is_dir(),
+        "the project was cloned where it is registered"
     );
 }

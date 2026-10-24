@@ -1,4 +1,4 @@
-use crate::clone_backend::CloneBackend;
+use crate::clone_backend::{clone_progress_event, CloneBackend};
 use crate::clone_planner::ClonePlanner;
 use crate::launch_ports::LaunchSessions;
 use std::path::Path;
@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use tddy_daemon_kernel::user_paths::repos_base_for_user;
 use tddy_projects::project_storage;
 use tddy_rpc::Status;
+use tddy_service::proto::session::start_phase::Step as StartStep;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_spawn::spawn_worker;
 
 /// What provisioning a project's working copy on the blocking pool needs: the clone backend, and
@@ -21,6 +23,7 @@ pub(super) struct ProjectClone {
     runtime: tokio::runtime::Handle,
     planner: ClonePlanner,
     facilitating_remote_url: Option<String>,
+    progress: AttachmentProgressSink,
 }
 
 pub(super) fn spawn_project_clone(
@@ -37,6 +40,7 @@ pub(super) fn spawn_project_clone(
         runtime,
         planner,
         facilitating_remote_url,
+        progress,
     } = launch;
     let handle = tokio::task::spawn_blocking(move || {
         let backend = CloneBackend {
@@ -45,12 +49,8 @@ pub(super) fn spawn_project_clone(
             os_user: os_user_owned,
             runtime,
         };
-        let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
-            // The plan (and the grant it holds) lives until this clone has ended.
-            let planned = planner.plan(git_url)?;
-            backend
-                .clone_repo(git_url, dest, planned.env())
-                .map_err(|e| planned.explain_failure(e))
+        let cloner = |git_url: &str, dest: &Path| {
+            clone_as_a_start_step(&backend, &planner, &progress, git_url, dest)
         };
         let provisioned = if let Some(remote_url) = facilitating_remote_url {
             tddy_projects::project_provision::ensure_project_available_from_facilitator(
@@ -80,6 +80,29 @@ pub(super) fn spawn_project_clone(
     });
     handle
 }
+
+/// Clone `git_url` into `dest` as the start's `STEP_CLONE`, feeding git's progress into `progress`.
+/// The clone is a step of its own, and only a clone that runs reports it: a project that is already
+/// present never reaches the cloner that calls this.
+fn clone_as_a_start_step(
+    backend: &CloneBackend,
+    planner: &ClonePlanner,
+    progress: &AttachmentProgressSink,
+    git_url: &str,
+    dest: &Path,
+) -> Result<(), String> {
+    progress.begin_phase(StartStep::Clone);
+    // The plan (and the grant it holds) lives until this clone has ended.
+    let planned = planner.plan(git_url)?;
+    backend
+        .clone_repo(git_url, dest, planned.env(), |line| {
+            progress.clone_progress(clone_progress_event(line))
+        })
+        .map_err(|e| planned.explain_failure(e))?;
+    progress.end_phase(StartStep::Clone);
+    Ok(())
+}
+
 impl LaunchSessions {
     /// Ensure the project's working copy exists on this (local) host before a session starts,
     /// auto-cloning it when missing: from the local registry's `git_url` if the project is already
@@ -101,6 +124,7 @@ impl LaunchSessions {
         project_id: &str,
         session_token: &str,
         agent_clone: Option<&tddy_service::proto::session::AgentClonePlacement>,
+        progress: &AttachmentProgressSink,
     ) -> Result<project_storage::ProjectData, Status> {
         // Resolved lazily: only a peer-provisioned clone needs a base path. A locally-registered
         // project (the common case) never consults it, so a `None` here must not fail the start —
@@ -110,7 +134,6 @@ impl LaunchSessions {
         let os_user_owned = os_user.to_string();
         let projects_dir_owned = projects_dir.to_path_buf();
         let project_id_owned = project_id.to_string();
-        let timeout = self.config.spawn_worker_request_timeout();
 
         // An agent clone provisions from its facilitating daemon directly, so it never fans out
         // `ListProjects` across the common room — the fan-out is the path that fails for a peer
@@ -183,23 +206,18 @@ impl LaunchSessions {
             spawn_backend,
             runtime,
             facilitating_remote_url,
+            progress: progress.clone(),
         });
 
-        match tokio::time::timeout(timeout, handle).await {
-            Ok(Ok(res)) => res.inspect_err(|status| {
+        // No deadline: a clone is as slow as its repository and its network, and it reports its
+        // progress while it runs. Only the operator's stop (or the client hanging up) ends it early.
+        match handle.await {
+            Ok(res) => res.inspect_err(|status| {
                 log::warn!(
                     "ensure_project_available_for_start: clone of project {project_id} failed: {status}"
                 )
             }),
-            Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => {
-                log::warn!(
-                    "ensure_project_available_for_start: clone of project {project_id} exceeded its {timeout:?} deadline"
-                );
-                Err(Status::deadline_exceeded(
-                    "ensure_project_available_for_start: clone timed out",
-                ))
-            }
+            Err(join_err) => Err(Status::internal(join_err.to_string())),
         }
     }
 }

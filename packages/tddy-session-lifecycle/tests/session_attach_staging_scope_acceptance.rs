@@ -572,6 +572,8 @@ async fn stream_start_session_reports_progress_for_each_attachment_then_one_term
             StartEvent::Phase(_) => {}
             // Keep-alives are pinned by tddy-agent-launch's `start_keepalive.rs`.
             StartEvent::KeepAlive(_) => {}
+            // Clone progress is pinned by `start_phase_acceptance.rs`.
+            StartEvent::CloneProgress(_) => {}
         }
     }
 

@@ -225,6 +225,39 @@ fn every_pending_request_fails_naming_the_worker_when_it_exits() {
 }
 
 #[test]
+fn the_worker_relays_clone_progress_before_the_clone_result() {
+    // Given — a git that reports receiving objects before it finishes
+    let worker = a_worker();
+    std::fs::write(
+        worker.fake_git_dir.path().join("git"),
+        "#!/bin/sh\nfor last; do :; done\n\
+         printf 'Receiving objects:  50%% (50/100), 1.00 MiB | 1.00 MiB/s\\r' >&2\n\
+         printf 'Receiving objects: 100%% (100/100), 2.00 MiB | 1.00 MiB/s, done.\\n' >&2\n\
+         mkdir -p \"$last\"\n",
+    )
+    .unwrap();
+    let mut events = Vec::new();
+
+    // When
+    worker
+        .client
+        .clone_repo_observed(
+            worker.a_clone_of("https://example.invalid/progress.git", "progress", 0),
+            |event| events.push(event),
+        )
+        .expect("the clone succeeds");
+
+    // Then
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            WorkerEvent::CloneProgress(progress) if progress.stage == "Receiving objects" && progress.percent == 100
+        )),
+        "the clone's progress crossed the worker pipe: {events:?}"
+    );
+}
+
+#[test]
 fn every_worker_line_names_the_request_it_answers() {
     // Given
     let event = tddy_spawn::spawn_worker::WorkerLine::Event {

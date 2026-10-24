@@ -16,6 +16,8 @@
 //! runtime handle.
 
 pub mod clone_env;
+pub mod clone_run;
+pub mod git_progress;
 pub mod spawn_worker;
 pub mod spawner;
 pub mod supervisor_client;

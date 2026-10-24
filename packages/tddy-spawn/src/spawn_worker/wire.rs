@@ -37,4 +37,7 @@ pub enum WorkerEvent {
     /// The request's child process is running, with this pid.
     #[serde(rename = "started")]
     Started { pid: u32 },
+    /// A throttled line of the clone's progress.
+    #[serde(rename = "clone_progress")]
+    CloneProgress(crate::git_progress::GitProgress),
 }

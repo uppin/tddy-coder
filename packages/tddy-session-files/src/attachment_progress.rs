@@ -42,6 +42,7 @@ pub fn attachment_size_bytes(session_dir: &Path, basename: &str) -> u64 {
 /// `StreamStartSession` supplies the stream's sender; unary `StartSession` supplies
 /// [`AttachmentProgressSink::discarding`], so the two entry points run the identical code path and
 /// the unary one simply has nowhere to report to.
+#[derive(Clone)]
 pub struct AttachmentProgressSink {
     pub tx: Option<tokio::sync::mpsc::UnboundedSender<Result<StartSessionEvent, Status>>>,
 }
@@ -90,6 +91,17 @@ impl AttachmentProgressSink {
             event: Some(StartSessionEventKind::KeepAlive(StartKeepAlive {
                 activity: activity.to_string(),
             })),
+        }));
+    }
+
+    /// Reports a line of the clone's progress (`STEP_CLONE`). A closed receiver is ignored, as for
+    /// [`Self::report`].
+    pub fn clone_progress(&self, progress: tddy_service::proto::session::CloneProgress) {
+        let Some(tx) = self.tx.as_ref() else {
+            return;
+        };
+        let _ = tx.send(Ok(StartSessionEvent {
+            event: Some(StartSessionEventKind::CloneProgress(progress)),
         }));
     }
 
