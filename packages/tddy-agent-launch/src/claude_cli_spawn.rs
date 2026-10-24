@@ -1,4 +1,5 @@
 use crate::hooks_and_urls;
+use crate::project_home_launch::StartRole;
 use crate::stack_parent;
 use tddy_session_split::service_util;
 use tddy_worktree_service::branch_intent::BranchIntentPolicy;
@@ -65,11 +66,8 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // Recorded in the session's initial metadata, so `ListSessions` reports the session as managed.
     managed_codebase: bool,
     // The session's standing role. Recorded in the session's record before the agent is spawned, and
-    // for "project-home" the agent is pre-approved that role's tool set. Empty for an ordinary session.
-    session_role: &str,
-    // The credential minted for a project-home session's agent, which its tools present to this
-    // daemon; `None` for every other role.
-    agent_session_token: Option<&str>,
+    // for a main, its launch, carried out at spawn once nothing before can refuse. Ordinary: no role.
+    role: StartRole<'_>,
     // A checkout to run in directly (a project's home worktree) instead of cutting a session
     // worktree. Empty cuts one, as every other claude-cli start does.
     repo_path: &str,
@@ -237,22 +235,13 @@ pub(crate) async fn spawn_claude_cli_session_inner(
 
     env_extra.extend(provider_route.map(|route| route.env).unwrap_or_default());
     env_extra.extend(config.claude_cli_renderer_env());
-    let role_launch = claude_cli_spawn_steps::start_role_launch(
-        config,
-        tddy_data_dir,
-        &session_dir,
-        session_id,
-        session_role,
-        agent_session_token,
-    )?;
-    env_extra.extend(role_launch.env);
 
     // The role is on disk before the agent exists, so the daemon never reads a home session as ordinary.
     claude_cli_spawn_steps::record_role_before_spawn(
         &session_dir,
         session_id,
         project_id,
-        session_role,
+        role.name,
         &worktree_path,
         managed_codebase,
     )?;
@@ -272,7 +261,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             managed,
             append_system_prompt_file,
             env_extra,
-            role_args: role_launch.extra_args,
+            main: role.main,
         },
     )
     .await?;
@@ -293,7 +282,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             Some(ssh_alias.to_string())
         },
         managed_codebase,
-        session_role: Some(session_role.to_string()).filter(|role| !role.is_empty()),
+        session_role: Some(role.name.to_string()).filter(|role| !role.is_empty()),
         ..tddy_session_split::service_util::starting_session_metadata(
             session_id,
             project_id,

@@ -1,6 +1,7 @@
 //! Unit tests: what a claude-cli start launches its agent with, beyond the managed workflow's own.
 
 use super::*;
+use crate::project_home_launch::{project_home_launch, ProjectHomeLaunch, RoleLaunch};
 
 fn the_accounts_git_pairs() -> Vec<(String, String)> {
     vec![

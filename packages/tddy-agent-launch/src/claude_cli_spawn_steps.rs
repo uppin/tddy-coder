@@ -285,111 +285,6 @@ pub(crate) fn role_allowed_tools_args(session_role: Option<&str>) -> Vec<String>
         .collect()
 }
 
-/// What a project-home (main) agent's launch is built from. See [`project_home_launch`].
-pub(crate) struct ProjectHomeLaunch<'a> {
-    pub(crate) config: &'a DaemonConfig,
-    /// The data dir the daemon *resolved*: an embedded host's agent-tool socket path digests it.
-    pub(crate) tddy_data_dir: &'a Path,
-    /// Where the main's MCP config and role prompt are written.
-    pub(crate) session_dir: &'a Path,
-    /// The main's own session id, which its tool calls name.
-    pub(crate) session_id: &'a str,
-    /// A credential minted for the agent; never the caller's own.
-    pub(crate) agent_session_token: &'a str,
-    /// The toolchain's `tddy-tools`, absolute.
-    pub(crate) tddy_tools_path: &'a Path,
-}
-
-/// The flags and environment a session's role adds to its agent's launch.
-#[derive(Debug, Default)]
-pub(crate) struct RoleLaunch {
-    pub(crate) extra_args: Vec<String>,
-    pub(crate) env: Vec<(String, String)>,
-}
-
-/// A main's launch: `tddy-tools --mcp` as its only MCP server, reaching this daemon as the main
-/// (agent-tool socket on an embedded host, HTTP otherwise), every native filesystem and shell tool
-/// withdrawn, its tool set pre-approved, and the role prompt appended.
-///
-/// No `--permission-prompt-tool`: a main is an interactive terminal, so a call outside its
-/// pre-approved set prompts its operator there.
-pub(crate) fn project_home_launch(launch: ProjectHomeLaunch<'_>) -> Result<RoleLaunch, Status> {
-    let ProjectHomeLaunch {
-        config,
-        tddy_data_dir,
-        session_dir,
-        session_id,
-        agent_session_token,
-        tddy_tools_path,
-    } = launch;
-    let prompt_file = session_dir.join(PROJECT_HOME_PROMPT_BASENAME);
-    std::fs::write(&prompt_file, PROJECT_HOME_PROMPT).map_err(|e| {
-        Status::internal(format!(
-            "failed to write the main's role prompt {}: {e}",
-            prompt_file.display()
-        ))
-    })?;
-
-    let mut extra_args =
-        role_allowed_tools_args(Some(tddy_core::session_metadata::PROJECT_HOME_ROLE));
-    for tool in tddy_session_split::split_session::NATIVE_FILESYSTEM_TOOLS {
-        extra_args.push("--disallowedTools".to_string());
-        extra_args.push((*tool).to_string());
-    }
-    extra_args.push("--append-system-prompt-file".to_string());
-    extra_args.push(prompt_file.to_string_lossy().into_owned());
-    extra_args.extend(tddy_session_split::agent_argv::tddy_tools_only_mcp_args(
-        session_dir,
-        tddy_tools_path,
-    )?);
-
-    // The main's own id: its record holds the home worktree, so the daemon runs its tools there
-    // under the project-home role guard. The socket is set only where something serves it.
-    let env = tddy_session_split::split_session::colocated_jail_tool_env(
-        &daemon_hook_urls::local_daemon_hook_url(config),
-        session_id,
-        agent_session_token,
-        tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir),
-    )
-    .env_pairs();
-    Ok(RoleLaunch { extra_args, env })
-}
-
-/// What a main is told it is, appended to its system prompt.
-const PROJECT_HOME_PROMPT: &str = include_str!("project_home_prompt.md");
-
-/// The main's role prompt, under its session dir.
-const PROJECT_HOME_PROMPT_BASENAME: &str = "project-home-prompt.md";
-
-/// What a starting session's role adds to its agent's launch: a main's wiring
-/// ([`project_home_launch`]) under the credential minted for its agent, and nothing for any other
-/// role — an ordinary session's argv and environment are unchanged.
-pub(super) fn start_role_launch(
-    config: &DaemonConfig,
-    tddy_data_dir: &Path,
-    session_dir: &Path,
-    session_id: &str,
-    session_role: &str,
-    agent_session_token: Option<&str>,
-) -> Result<RoleLaunch, Status> {
-    if session_role != tddy_core::session_metadata::PROJECT_HOME_ROLE {
-        return Ok(RoleLaunch::default());
-    }
-    let agent_session_token = agent_session_token.ok_or_else(|| {
-        Status::internal("a project-home session was started without its agent's credential")
-    })?;
-    project_home_launch(ProjectHomeLaunch {
-        config,
-        tddy_data_dir,
-        session_dir,
-        session_id,
-        agent_session_token,
-        tddy_tools_path: &tddy_session_split::svc_resolve_tddy_tools_path::resolve_tddy_tools_path(
-            config,
-        )?,
-    })
-}
-
 /// Record a session's standing role in its `.session.yaml` before its agent is spawned, so there is
 /// no moment in which the agent runs and the daemon reads the session as ordinary. The record is
 /// complete as far as a spawn-less session can be, and the spawn's own write replaces it with the pid.
@@ -430,8 +325,8 @@ pub(super) struct ClaudeCliProcess<'a> {
     pub(super) managed: Option<tddy_cli_sessions::session_toolcall::ManagedWorkflow>,
     pub(super) append_system_prompt_file: Option<PathBuf>,
     pub(super) env_extra: Vec<(String, String)>,
-    /// The flags the session's role adds; see [`start_role_launch`].
-    pub(super) role_args: Vec<String>,
+    /// A main's launch, carried out only now that nothing before the spawn can refuse the start.
+    pub(super) main: Option<crate::project_home_launch::MainLaunchPlan<'a>>,
 }
 
 pub(super) async fn spawn_claude_cli_process(
@@ -451,8 +346,9 @@ pub(super) async fn spawn_claude_cli_process(
         managed,
         append_system_prompt_file,
         env_extra,
-        role_args,
+        main,
     } = launch;
+    let role_launch = crate::project_home_launch::RoleLaunch::of(main)?;
     let handle = manager
         .start_with_options(
             &session_id_owned,
@@ -464,8 +360,8 @@ pub(super) async fn spawn_claude_cli_process(
             dangerously_skip_permissions,
             false,
             append_system_prompt_file.as_deref(),
-            role_args,
-            env_extra,
+            role_launch.extra_args,
+            env_extra.into_iter().chain(role_launch.env).collect(),
             Some(os_user),
         )
         .await

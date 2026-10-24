@@ -80,9 +80,7 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             // A spawned child conversation is never a managed-codebase session.
             false,
             // A spawned child conversation has no standing role.
-            "",
-            // Nor an agent credential, which only a project-home main is given.
-            None,
+            crate::project_home_launch::StartRole::ordinary(),
             // A child conversation cuts its own worktree.
             "",
             // The orchestrator's owner's vault: a child is the same owner's, on the same project.

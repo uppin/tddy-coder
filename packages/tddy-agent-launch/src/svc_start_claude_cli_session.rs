@@ -108,18 +108,13 @@ impl LaunchSessions {
                 self.host.session_account_access(session_token),
             )
         });
-        // A main's agent reaches this daemon's tools under a credential of its own, minted from
-        // the caller's: the caller's lives minutes, the agent hours. A refusal fails the start.
-        let agent_session_token = (session_role == tddy_core::session_metadata::PROJECT_HOME_ROLE)
-            .then(|| self.split_sessions.agent_session_token_for(session_token))
-            .transpose()?;
         spawn_claude_cli_session_inner(
             &self.config,
             &self.tddy_data_dir,
             &self.claude_cli_manager,
             os_user,
             session_id,
-            sessions_base,
+            sessions_base.clone(),
             model,
             project_id,
             branch_worktree_intent,
@@ -146,8 +141,7 @@ impl LaunchSessions {
             create_remote_branch,
             ssh_config_host,
             managed_codebase,
-            session_role,
-            agent_session_token.as_deref(),
+            self.start_role(session_role, session_id, &sessions_base, session_token)?,
             repo_path,
             &self.host.session_account_access(session_token),
             route_sources,

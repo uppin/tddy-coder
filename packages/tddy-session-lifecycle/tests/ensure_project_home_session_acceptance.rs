@@ -123,6 +123,17 @@ impl ALaunch {
             .expect("a value follows the flag")
     }
 
+    /// Every value following `flag` on the argv line, in order.
+    fn values_of(&self, flag: &str) -> Vec<&str> {
+        self.argv()
+            .split(' ')
+            .collect::<Vec<_>>()
+            .windows(2)
+            .filter(|pair| pair[0] == flag)
+            .map(|pair| pair[1])
+            .collect()
+    }
+
     /// The environment variable `key` as the stub saw it; empty when unset.
     fn env(&self, key: &str) -> &str {
         let needle = format!("ENVDUMP {key}=[");
@@ -554,15 +565,22 @@ async fn an_ensured_main_has_no_native_shell_or_file_tools() {
     let launch = world.launch_of(&main.session_id).await;
 
     // Then every native shell and file tool is withdrawn, so its only reach is the daemon's
-    for native in ["Bash", "Edit", "Write", "Read", "Grep", "Glob"] {
-        assert!(
-            launch
-                .argv()
-                .contains(&format!("--disallowedTools {native} ")),
-            "{native} is withdrawn; argv: {}",
-            launch.argv()
-        );
-    }
+    assert_eq!(
+        launch.values_of("--disallowedTools"),
+        [
+            "Read",
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "NotebookEdit",
+            "Bash",
+            "BashOutput",
+            "KillShell",
+            "Glob",
+            "Grep",
+            "LS",
+        ]
+    );
 }
 
 #[tokio::test]
@@ -584,15 +602,10 @@ async fn an_ensured_main_is_told_it_is_the_projects_main() {
 }
 
 #[tokio::test]
-async fn a_resumed_main_is_wired_to_its_tools_again_with_a_fresh_token() {
+async fn a_resumed_main_is_wired_to_its_tools_again_under_a_credential_of_its_own() {
     // Given a main that ran and was stopped
     let world = a_daemon_with_a_project();
     let main = world.a_running_main().await;
-    let first_token = world
-        .launch_of(&main.session_id)
-        .await
-        .env("TDDY_REMOTE_SESSION_TOKEN")
-        .to_string();
     world.stop(&main.session_id).await;
 
     // When it is ensured again, which resumes it
@@ -609,9 +622,15 @@ async fn a_resumed_main_is_wired_to_its_tools_again_with_a_fresh_token() {
         launch.argv()
     );
     assert_eq!(launch.env("TDDY_REMOTE_SESSION_ID"), main.session_id);
-    // And it holds a newly minted credential, not the one its previous process had
-    assert_ne!(launch.env("TDDY_REMOTE_SESSION_TOKEN"), "");
-    assert_ne!(launch.env("TDDY_REMOTE_SESSION_TOKEN"), first_token);
+    // And it holds a credential of its own that this daemon accepts now. Nothing persists the
+    // previous process's token, so a resume can only mint; two mints in one second sign the same
+    // claims and are byte-identical, which is why freshness is asserted as validity, not inequality.
+    let agent_token = launch.env("TDDY_REMOTE_SESSION_TOKEN");
+    assert_ne!(agent_token, a_caller_token());
+    this_daemons_session_tokens()
+        .verifier()
+        .verify_now(agent_token)
+        .expect("the resumed main's token verifies under this daemon's key");
 }
 
 #[tokio::test]

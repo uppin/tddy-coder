@@ -72,7 +72,7 @@ server behind them, kept native Bash, and had no idea it was main.
 ### State B (Target)
 
 ```rust
-// packages/tddy-agent-launch/src/claude_cli_spawn_steps.rs
+// packages/tddy-agent-launch/src/project_home_launch.rs
 pub(crate) struct ProjectHomeLaunch<'a> {
     pub(crate) config: &'a DaemonConfig,
     pub(crate) tddy_data_dir: &'a Path,     // the *resolved* one: the socket path digests it
@@ -91,10 +91,16 @@ pub(crate) struct RoleLaunch {
 pub(crate) fn project_home_launch(launch: ProjectHomeLaunch<'_>) -> Result<RoleLaunch, Status>;
 ```
 
-- Start: `LaunchSessions::start_claude_cli_session` mints (via `SplitSessions`) when the role is
-  `project-home` and threads the token to `spawn_claude_cli_session_inner`, which calls
-  `project_home_launch` and merges `extra_args`/`env` into the spawn. Ordinary sessions: unchanged.
-- Resume: one call replaces `role_allowed_tools_args` in `resume_claude_cli_session`.
+- Start: `LaunchSessions::start_claude_cli_session` builds the role as a `StartRole { name, main }`
+  (`LaunchSessions::start_role`, which mints via `SplitSessions` only for `project-home` and writes
+  nothing) and passes it to `spawn_claude_cli_session_inner` in place of the bare role name.
+  `spawn_claude_cli_process` carries out the `MainLaunchPlan` (prompt file + MCP config written
+  there, so a start refused earlier leaves nothing on disk) and merges its `extra_args`/`env`. Child and conversation spawns pass
+  `StartRole::ordinary()`. Ordinary sessions: unchanged.
+- Resume: `LaunchSessions::resumed_role(..)?.after_split(split)` replaces the split `match` and
+  `role_allowed_tools_args` in `resume_claude_cli_session`.
+- One place (`MainLaunchPlan::launch`) resolves `tddy-tools` and builds a main's launch; start and
+  resume both plan it through `LaunchSessions::main_plan`.
 - `tddy-session-split`: a `pub` way to mint an agent token from a caller token
   (`SplitSessions::mint_agent_session_token` or equivalent); `colocated_jail_tool_env` and
   `NATIVE_FILESYSTEM_TOOLS` are already `pub`.
@@ -148,7 +154,7 @@ Every acceptance criterion in the PRD has at least one test; start and resume ea
 - `an_ensured_main_is_given_a_token_of_its_own_that_verifies_as_the_caller` — `TDDY_REMOTE_SESSION_TOKEN` is not the caller's token and verifies under this daemon's tokens with the caller's login
 - `an_ensured_main_has_no_native_shell_or_file_tools` — `--disallowedTools` for each of `Bash`, `Edit`, `Write`, `Read`, `Grep`, `Glob`
 - `an_ensured_main_is_told_it_is_the_projects_main` — `--append-system-prompt-file` names a file that mentions `StartProjectSession` and `ListProjectSessions` and says it has no shell
-- `a_resumed_main_is_wired_to_its_tools_again_with_a_fresh_token` — stop, advance, ensure → resumed argv has `--mcp-config`, env has the main's id and a token different from the first launch's
+- `a_resumed_main_is_wired_to_its_tools_again_under_a_credential_of_its_own` — stop, ensure → resumed argv has `--strict-mcp-config`, env has the main's id and a token that is not the caller's and verifies now (two mints in one second are byte-identical, so freshness is validity, not inequality)
 
 Dropped while writing them: *a main whose caller cannot be verified is refused*. The ensure resolves
 the caller through the daemon's user resolver before anything is minted, so an unverifiable token is
@@ -172,7 +178,6 @@ the existing `claude_cli_session_acceptance.rs` argv cases, which run with no ro
 
 - ✅ `project_home_launch` implemented; the red-phase `todo!()` and its TODO are gone.
 - A project-home start or resume now **fails** when the toolchain's `tddy-tools` cannot be found (`resolve_tddy_tools_path` refuses a missing binary). Deliberate: a main without its MCP server is the bug this fixes. Ordinary sessions are unaffected.
-- `start_role_launch` takes 6 parameters (repo budget 5) — checked at `/analyze-code-issues`.
 
 ## Decisions & Trade-offs
 
@@ -196,7 +201,8 @@ the existing `claude_cli_session_acceptance.rs` argv cases, which run with no ro
 
 - `tddy-agent-launch` does not depend on `tddy-sandbox-recipes`, so the MCP-only argv is a new `tddy_session_split::agent_argv::tddy_tools_only_mcp_args`, which `split_claude_extra_args` now also uses (split argv byte-identical).
 - The mint is the existing `SplitSessions::agent_session_token_for`, widened to `pub` (no second method).
-- `resume_claude_cli_session`: 144 → 146 lines (within the ≤ 2 budget); the role wiring is `LaunchSessions::resumed_role_launch`.
+- `resume_claude_cli_session`: 144 → 146 lines at green; refactored to 142 lines with the split `match` moved into `RoleLaunch::after_split` and the role wiring in `LaunchSessions::resumed_role`.
+- Refactor: `spawn_claude_cli_session_inner` back to 310 lines / 29 params (a `StartRole` replaces `session_role`); `start_claude_cli_session` back to 119 lines; role-launch items moved to `project_home_launch.rs`.
 
 ### From @validate-changes (Change Validation)
 
