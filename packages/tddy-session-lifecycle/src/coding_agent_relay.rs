@@ -139,6 +139,7 @@ fn bind_private_socket(dir: &Path) -> Result<PrivateSocket, SubagentError> {
         .mode(0o700)
         .create(dir)
         .map_err(|e| SubagentError::from(format!("creating {}: {e}", dir.display())))?;
+    make_owner_only(dir)?;
     let path = dir.join(format!(
         "r{}-{}.sock",
         std::process::id(),
@@ -153,6 +154,29 @@ fn bind_private_socket(dir: &Path) -> Result<PrivateSocket, SubagentError> {
     let listener = tokio::net::UnixListener::bind(&path)
         .map_err(|e| SubagentError::from(format!("binding {}: {e}", path.display())))?;
     Ok(PrivateSocket { listener, path })
+}
+
+/// Hold `dir` to what its creation asked for: `DirBuilder` leaves a directory that already existed
+/// as it found it. Whoever can open a socket in it can connect before the supervisor does and speak
+/// for the agent, so it must be this daemon's own (and not a symlink to somewhere else), and it is
+/// narrowed to owner-only.
+fn make_owner_only(dir: &Path) -> Result<(), SubagentError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let metadata = std::fs::symlink_metadata(dir)
+        .map_err(|e| SubagentError::from(format!("inspecting {}: {e}", dir.display())))?;
+    // SAFETY: `geteuid` reads this process's effective uid; it has no preconditions.
+    let this_uid = unsafe { libc::geteuid() };
+    if !metadata.is_dir() || metadata.uid() != this_uid {
+        return Err(SubagentError::from(format!(
+            "the relay socket directory {} is not a directory this daemon owns",
+            dir.display()
+        )));
+    }
+    if metadata.mode() & 0o077 != 0 {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| SubagentError::from(format!("narrowing {}: {e}", dir.display())))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -252,6 +276,38 @@ mod tests {
         assert!(refusal.contains("allowed_relay_tool_paths"), "{refusal}");
         assert!(refusal.contains("allowed_session_users"), "{refusal}");
         assert!(refusal.contains("allowed_env_keys"), "{refusal}");
+    }
+
+    #[tokio::test]
+    async fn a_relay_directory_left_open_to_others_is_narrowed_to_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let (endpoint, _supervisor, _dir) = an_endpoint(Ok(()));
+        std::fs::create_dir_all(&endpoint.socket_dir).expect("pre-existing dir");
+        std::fs::set_permissions(&endpoint.socket_dir, std::fs::Permissions::from_mode(0o777))
+            .expect("open it up");
+
+        let _stream = start_relayed(&endpoint, "dev", &a_command())
+            .await
+            .expect("relayed");
+
+        let mode = std::fs::metadata(&endpoint.socket_dir)
+            .expect("dir")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[tokio::test]
+    async fn a_relay_directory_that_is_a_symlink_is_refused_before_asking() {
+        let (endpoint, supervisor, dir) = an_endpoint(Ok(()));
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).expect("target");
+        std::os::unix::fs::symlink(&elsewhere, &endpoint.socket_dir).expect("symlink");
+
+        let refusal = start_relayed(&endpoint, "dev", &a_command()).await;
+
+        assert!(refusal.is_err());
+        assert!(supervisor.seen.lock().expect("seen").is_empty());
     }
 
     #[tokio::test]

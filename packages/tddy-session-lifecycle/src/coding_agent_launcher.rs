@@ -4,9 +4,9 @@
 //! refused with a typed reason rather than started some weaker way:
 //!
 //! - **The session's OS user** — [`crate::coding_agent_as_user`]: run behind `setpriv` when this
-//!   daemon is privileged; refused when it is not (a supervised host: `tddy-supervisor`'s
-//!   `SpawnSession` gives a child no stdio, so the ACP driver cannot talk to it).
-//!   FIXME(acp-subagent): a supervisor request that relays a child's stdio.
+//!   daemon is privileged; on a supervised host started by `tddy-supervisor`'s `SpawnRelayed`,
+//!   which relays the child's stdio over a socket ([`crate::coding_agent_relay`]); refused when
+//!   neither is available.
 //! - **A provider account's route** — resolved from the session owner's vault through
 //!   [`tddy_agent_launch::session_provider_route::resolve_session_route`], exactly as a tool session
 //!   resolves it, and applied per harness: environment and secret environment for all of them,

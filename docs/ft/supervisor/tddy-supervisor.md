@@ -82,6 +82,13 @@ failure is the opaque denial and nothing is forked. The child's exit status and 
   goes through the supervisor too. The supervisor finds git as the first executable `git` on **its own**
   `PATH` (the unit's environment, never the caller's), so the value is `which git` in the supervisor's
   environment; matching is verbatim, with no symlink resolution.
+- **A coding agent runs as the session user only if its harness is in `allowed_relay_tool_paths`.** The
+  list is empty in the shipped template, so a supervised install starts no coding-agent subagent as
+  another user until the operator lists each harness binary by the absolute path the daemon resolves
+  (`codex-acp` in the install's bin directory, `opencode`, and `bunx` for `claude-acp`). Arguments are not
+  allowlisted, so listing `bunx` admits any package `bunx` can fetch, run as the session user. The
+  launch's provider-route variables and `OPENCODE_CONFIG_CONTENT` must be in `allowed_env_keys` too. The
+  daemon turns the supervisor's opaque denial into an error naming these three lists.
 - **`allowed_env_keys` is a deny, not a filter.** A request naming an unlisted key is refused outright.
   An ordinary session spawn sends no environment, so the shipped empty policy works — but a user whose
   `~/.tddy/config.yaml` sets `spawn_path_extra` makes the daemon send `PATH`, which must then be listed.

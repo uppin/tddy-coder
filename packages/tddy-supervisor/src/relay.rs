@@ -44,7 +44,7 @@ pub async fn connect_to_callers_socket(
     path: &Path,
     caller_uid: u32,
 ) -> Result<UnixStream, SupervisorError> {
-    refuse_unless_absolute_plain(path)?;
+    crate::policy::plain_absolute_path(path)?;
     let metadata = std::fs::symlink_metadata(path).map_err(|e| {
         log::warn!(target: "tddy_supervisor::relay", "relay socket {} unusable: {e}", path.display());
         SupervisorError::Denied
@@ -71,19 +71,6 @@ pub async fn connect_to_callers_socket(
             );
             Err(SupervisorError::Denied)
         }
-    }
-}
-
-fn refuse_unless_absolute_plain(path: &Path) -> Result<(), SupervisorError> {
-    use std::path::Component;
-    let plain = path.is_absolute()
-        && path
-            .components()
-            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
-    if plain {
-        Ok(())
-    } else {
-        Err(SupervisorError::Denied)
     }
 }
 

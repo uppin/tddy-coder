@@ -98,9 +98,12 @@ impl PrivilegedSurface {
         let policy = &self.config.spawn_policy;
         // The relay allowlist first: with it empty (the default) nothing below runs at all.
         let program = policy::resolve_relay_tool_path(policy, &request.tool_path)?;
-        let resolved = self.resolve_spawn(
+        // `resolve_spawn_of`, not `resolve_spawn`: the relay allowlist has passed the program, and
+        // resolving it against `allowed_tool_paths` as well would make a relayed harness need both
+        // lists — and so grant it `SpawnSession` too.
+        let resolved = self.resolve_spawn_of(
             &request.os_user,
-            &program,
+            program,
             request.working_dir.as_deref(),
             None,
             &request.env,
@@ -182,7 +185,9 @@ impl PrivilegedSurface {
         self.resolve_spawn_of(os_user, program, working_dir, scope, env)
     }
 
-    /// The rest of [`Self::resolve_spawn`], for a `program` the tool allowlist has already passed.
+    /// The rest of [`Self::resolve_spawn`], for a `program` an allowlist has already passed —
+    /// `allowed_tool_paths` for a session, sandbox or clone, `allowed_relay_tool_paths` for a
+    /// relayed spawn.
     fn resolve_spawn_of(
         &self,
         os_user: &str,
