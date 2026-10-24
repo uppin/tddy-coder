@@ -9,6 +9,7 @@ pub mod claude_argv;
 pub mod claude_hooks;
 pub mod cli_harness;
 pub mod cli_harness_muse;
+pub mod cli_harness_warp;
 pub mod cursor_hooks;
 pub mod provider_route;
 pub mod provider_route_file;

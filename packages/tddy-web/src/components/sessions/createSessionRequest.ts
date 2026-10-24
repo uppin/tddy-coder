@@ -4,7 +4,13 @@ import type {
   StartSessionRequestInit,
 } from "../../hooks/useSessionAttachments";
 
-export type SessionType = "tool" | "claude-cli" | "cursor-cli" | "opencode-cli" | "muse-cli";
+export type SessionType =
+  | "tool"
+  | "claude-cli"
+  | "cursor-cli"
+  | "opencode-cli"
+  | "muse-cli"
+  | "warp-cli";
 
 /**
  * Whether the daemon cuts the session's worktree itself — and so can push the new branch to origin

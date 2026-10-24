@@ -95,6 +95,7 @@ fn a_claude_cli_session(session_id: &str, worktree: &Path) -> SessionMetadata {
         session_type: Some("claude-cli".to_string()),
         model: None,
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: Some(HOOK_TOKEN.to_string()),
         sandbox: None,

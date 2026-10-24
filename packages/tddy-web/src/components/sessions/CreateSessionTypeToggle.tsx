@@ -12,6 +12,7 @@ const SESSION_TYPE_OPTIONS: { id: SessionType; label: string }[] = [
   { id: "cursor-cli", label: "Cursor CLI" },
   { id: "opencode-cli", label: "OpenCode" },
   { id: "muse-cli", label: "Muse Code" },
+  { id: "warp-cli", label: "Warp" },
 ];
 
 /**

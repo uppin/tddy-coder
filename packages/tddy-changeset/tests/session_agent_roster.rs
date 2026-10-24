@@ -52,6 +52,7 @@ fn a_session_metadata(session_id: &str) -> SessionMetadata {
         session_type: Some("claude-cli".to_string()),
         model: Some("claude-opus-5".to_string()),
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: None,
         sandbox: Some(true),
