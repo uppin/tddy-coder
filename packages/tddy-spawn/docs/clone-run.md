@@ -3,8 +3,9 @@
 `clone_run::clone_with_progress(os_user, git_url, destination, env, on_started, on_progress)`
 (`src/clone_run.rs`) is the one implementation of a clone for the in-process and forked-worker backends.
 `spawner::clone_as_user_with_env` is a thin call into it with no-op callbacks, and the worker's
-`CloneRequest::run` calls it directly. The supervised backend runs its own `git clone` in
-`tddy-supervisor` and reports no progress.
+`CloneRequest::run` calls it directly. The supervised backend is
+`supervisor_spawn::clone_repo_via_supervisor_with_progress` (same callbacks), described
+[below](#supervised-clones).
 
 ## What it does
 
@@ -34,6 +35,28 @@ leaves only a `.partial-*` sibling, which no "already present" check matches.
 that is already gone is not an error. It reaches ssh and index-pack as well as git. The running
 `clone_with_progress` then sees git exit unsuccessfully and removes the partial directory. Unix only;
 elsewhere `stop` returns an error. Cancelling a start (`#start-progress` 8/8) is its caller.
+
+## Supervised clones
+
+Under `tddy-supervisor` the daemon cannot fork git as another user, so
+`supervisor_spawn::clone_repo_via_supervisor_with_progress(socket, os_user, git_url, dest, env,
+on_started, on_progress)` makes one server-streaming `CloneRepository` call. The supervisor does steps
+3–5 above itself, as root dropping to `os_user`: `git clone --progress -- <url> <dest>.partial-<random>`,
+stderr piped, rename on success, removal on failure. The stream is `Started{pid}`, one `Progress{line}`
+per line git wrote, then `Exited{code, stderr_tail}`, sent only once the filesystem is final.
+
+- `Started` → `on_started(CloneHandle::through_supervisor(socket, pid))`. That handle's `stop()` calls
+  `StopSession(pid)` on a helper thread with its own runtime (it may be called from inside the daemon's
+  runtime); the supervisor then removes the partial directory.
+- `Progress` lines go through the same `git_progress::parse` and `ProgressThrottle` as a local clone.
+- `Exited` with `code: Some(0)` is success; anything else fails with `git clone failed: <how> (dest=…):
+  <stderr_tail>`. `code: None` means git was ended by a signal (`signal` is never set).
+- A refusal (user, tool or environment policy) fails the call before any event. Dropping the receiver
+  closes the connection, and the supervisor stops a clone nobody is listening to.
+
+The daemon no longer resolves git: the supervisor finds it on **its own** `PATH` and that path must be in
+`spawn_policy.allowed_tool_paths`. `clone_repo_via_supervisor` is the no-callback wrapper, used by
+`CreateProject` / `AddProjectToHost`, which report no progress.
 
 ## `git_progress`
 

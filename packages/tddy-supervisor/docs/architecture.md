@@ -221,6 +221,24 @@ otherwise the privileged surface becomes a liveness oracle for arbitrary host pr
 is gated the same way, and more strictly: a *retained-exited* pid is refused too, because the kernel is
 free to have reissued it.
 
+### Streamed clones
+
+`CloneRepository` (`src/clone.rs`) is a supervised session with two differences. Its `SpawnPlan` output
+is `ChildOutput::CaptureStderr` (sessions get `Discard`, managed services `Inherit`), so
+`Supervisor::spawn_session_capturing_stderr` hands back the pipe; and it clones into a random
+`<destination>.partial-*` sibling. The handler checks user, tool and environment before forking —
+git is the first executable `git` on the supervisor's own `PATH`, then `resolve_tool_path` against
+`allowed_tool_paths`, so the RPC widens nothing. A thread reads stderr (split on `\r` and `\n`) into
+`Progress` events and keeps the last 8 non-progress lines; a task waits on
+`Supervisor::wait_for_session_exit(pid)`, drains stderr for at most 2 s more, renames or removes the
+partial directory as root, and only then sends `Exited`. The session table records an exit code, not a
+signal, so `Exited.signal` is never set and `code: None` reads as "signalled". A send that fails (the
+caller hung up) stops the clone. The client side keeps the connection alive in an `Arc` guard shared
+with the stream, so the event receiver outlives the `SupervisorClient` that made the call.
+
+The partial directory sits in a user-writable parent and is renamed/removed by root; its name is random
+and `remove_dir_all` does not follow symlinks.
+
 ## Restart policy
 
 `restart.rs` is pure, so the timing policy is testable without waiting for it. `record_exit` resets the

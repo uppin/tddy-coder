@@ -38,7 +38,7 @@ refuses a request naming an unlisted key
 |---|---|
 | in-process | `clone_run::clone_with_progress` (and its thin wrapper `spawner::clone_as_user_with_env`) sets it on the `git` child |
 | forked worker | `CloneRequest.env`, a `BTreeMap<String, String>` marked `#[serde(default)]`; the worker runs `CloneRequest::run`, which calls `clone_with_progress` |
-| supervisor | `supervisor_spawn::clone_repo_via_supervisor_with_env` puts it in the request's `env` |
+| supervisor | `supervisor_spawn::clone_repo_via_supervisor_with_progress` puts it in the `CloneRepository` request's `env` |
 
 A request from a daemon that predates the field decodes with an empty environment.
 

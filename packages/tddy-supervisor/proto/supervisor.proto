@@ -150,7 +150,10 @@ message CloneProgressLine {
 }
 
 message CloneExited {
+  // Git's exit code. Unset when git was ended by a signal (a stopped clone).
   optional int32 code = 1;
+  // Reserved for the signal that ended git; never set today, because the supervisor's session table
+  // records an exit code and not the signal. Read `code` being unset as "ended by a signal".
   optional int32 signal = 2;
   // The last lines git wrote to stderr: its own explanation of a failure.
   string stderr_tail = 3;

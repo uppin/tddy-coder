@@ -66,8 +66,9 @@ the daemon and refuses every spawn request — which is the correct reading of a
 ### The prerequisites that bite
 
 - **`allowed_tool_paths` must include git's absolute path** or repo cloning is denied, because cloning
-  now goes through the supervisor too. The value is `which git` on the daemon's `PATH`; matching is
-  verbatim, with no symlink resolution.
+  goes through the supervisor too. The supervisor finds git as the first executable `git` on **its own**
+  `PATH` (the unit's environment, never the caller's), so the value is `which git` in the supervisor's
+  environment; matching is verbatim, with no symlink resolution.
 - **`allowed_env_keys` is a deny, not a filter.** A request naming an unlisted key is refused outright.
   An ordinary session spawn sends no environment, so the shipped empty policy works — but a user whose
   `~/.tddy/config.yaml` sets `spawn_path_extra` makes the daemon send `PATH`, which must then be listed.
@@ -95,6 +96,7 @@ owning declared services:
 | `SpawnSession` | an allowlisted tool as an allowlisted OS user |
 | `SpawnSandbox` | the same, jailed: user/mount/net namespaces, bind mounts, private root |
 | `SessionStatus` / `StopSession` | the supervisor reaps its own children, so it is the only process that can answer |
+| `CloneRepository` | `git clone --progress` as an allowlisted OS user, **streamed**: `Started{pid}`, git's progress lines, `Exited{code, stderr_tail}`. Same user, tool (git on the supervisor's `PATH`, allowlisted) and environment checks as `SpawnSession`; a refusal fails the call. Clones into a random `.partial-*` sibling renamed into place on success, removed otherwise. `StopSession(pid)` stops it, as does the caller hanging up |
 | `CreateScope` / `AttachPid` / `DestroyScope` | cgroup v2 scopes inside the subtree it owns |
 
 Requested resource limits are **clamped down to policy ceilings, not rejected** — a session that asks
@@ -147,6 +149,9 @@ because quietly spawning as the daemon user instead is the regression this featu
 - [x] A session's cgroup scope is removed when the session ends.
 - [x] A managed service is told the supervisor socket; a service's `env:` cannot override it; a session spawn is not told it.
 - [x] A daemon started by the supervisor spawns and clones through it with no `supervisor:` block; one started otherwise forks its own worker; neither passes the variable on to children it spawns itself.
+- [x] A supervised clone streams git's progress, then succeeds; a failed one's error carries git's own message.
+- [x] A supervised clone asking for an env key outside `allowed_env_keys` is refused, as `SpawnSession` is.
+- [x] Stopping a supervised clone (`StopSession(pid)`) ends git and leaves no destination directory.
 - [ ] **Not yet proven on a real host:** a session for OS user `alice` running as `alice` while the daemon runs as `tddy`; enforced cgroup limits; `stop_session` against a live supervisor. These need root plus a second account, and are the subject of a planned VM-backed acceptance test — see [docs/dev/TODO.md](../../dev/TODO.md).
 
 ## Related
