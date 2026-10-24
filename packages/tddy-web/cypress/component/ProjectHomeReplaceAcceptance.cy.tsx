@@ -94,7 +94,7 @@ it("Replace main opens the setup form saying the current main will be stopped", 
   setup.clickReplaceMain(ALPHA);
 
   // Then
-  cy.location("hash").should("match", new RegExp(`^#/sessions/project-home/${ALPHA}/replace(\\?|$)`));
+  setup.assertAtSetupFor(ALPHA, { replacing: true });
   setup.pane(ALPHA).should("contain", "Replace main for alpha");
   setup.replacingNotice(ALPHA).should("exist");
   setup.form(ALPHA).should("exist");
@@ -109,13 +109,8 @@ it("starting from the replace form ensures main with a start spec and selects th
   setup.startMain();
 
   // Then
-  cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(SessionService.method.ensureProjectHomeSession);
-    expect(calls).to.have.length(1);
-    expect(calls[0].projectId).to.equal(ALPHA);
-    expect(calls[0].start).to.include({ sessionType: "claude-cli" });
-  });
-  cy.location("hash").should("match", new RegExp(`^#/sessions/${NEW_MAIN_SESSION_ID}(\\?|$)`));
+  setup.assertEnsuredOnce(backend, { projectId: ALPHA, start: { sessionType: "claude-cli" } });
+  setup.assertSessionSelected(NEW_MAIN_SESSION_ID);
 });
 
 it("a main the daemon no longer has opens the setup form", () => {
@@ -126,14 +121,12 @@ it("a main the daemon no longer has opens the setup form", () => {
   setup.clickMain(ALPHA);
 
   // Then the daemon was asked for main, and its answer sent the operator to set main up
-  cy.wrap(backend).should((b) => {
-    expect(b.callsTo(SessionService.method.ensureProjectHomeSession)).to.have.length(1);
-  });
-  cy.location("hash").should("match", new RegExp(`^#/sessions/project-home/${ALPHA}(\\?|$)`));
+  setup.assertEnsuredOnce(backend, { projectId: ALPHA, start: null });
+  setup.assertAtSetupFor(ALPHA);
   setup.pane(ALPHA).should("contain", "Set up main for alpha");
 });
 
-it("main reflects the selected host's project row", () => {
+it("the pinned entry stands for the selected host's main, not the first-listed host's", () => {
   // When the project is listed first on a host with no main for it, then on the selected host
   theSessionsScreen(replacesMain, [ALPHA_ON_ANOTHER_HOST_WITHOUT_MAIN, ALPHA_WITH_MAIN]);
 

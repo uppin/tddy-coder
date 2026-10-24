@@ -49,6 +49,9 @@ use crate::project_home_start_spec::{
 };
 use crate::session_coordinate_handlers::SESSION_SERVICE;
 
+/// The RPC this module answers: its peer-routing method name and its log prefix.
+const ENSURE_RPC: &str = "EnsureProjectHomeSession";
+
 /// Serializes ensures, so two clicks cannot both find no main and start two.
 static ENSURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -91,12 +94,7 @@ impl LaunchSessions {
         // daemon's to answer, the way `GetWorktreeSnapshot` is routed.
         if let Some(answered) = self
             .peer_routing
-            .rpc_served_by_peer(
-                SESSION_SERVICE,
-                "EnsureProjectHomeSession",
-                &req.daemon_instance_id,
-                &req,
-            )
+            .rpc_served_by_peer(SESSION_SERVICE, ENSURE_RPC, &req.daemon_instance_id, &req)
             .await?
         {
             return Ok(Response::new(answered));
@@ -161,7 +159,7 @@ impl LaunchSessions {
         if self.is_running(&main).await {
             return Ok((main.session_id, EnsureOutcome::Running));
         }
-        self.resume_stopped_home(session_token, &scope.project, &scope.sessions_base, &main)
+        self.resume_stopped_home(session_token, scope, &main)
             .await?;
         Ok((main.session_id, EnsureOutcome::Resumed))
     }
@@ -207,8 +205,7 @@ impl LaunchSessions {
         previous: &session_reader::SessionEntry,
     ) -> Result<(), Status> {
         // The worktree outlives the main it was made for; the new one starts at today's ref.
-        fast_forward_home_worktree(home, &main_branch_ref_of(project)?)
-            .map_err(|e| Status::failed_precondition(format!("home worktree: {e}")))?;
+        fast_forward_home(home, project)?;
         // TODO: a previous main whose pid is alive but whose terminal this daemon no longer
         // serves (a daemon restart) is left running
         // (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
@@ -217,7 +214,7 @@ impl LaunchSessions {
                 .stop_session(&previous.session_id)
                 .await;
             log::info!(
-                "EnsureProjectHomeSession: stopped main {} of project {} to replace it",
+                "{ENSURE_RPC}: stopped main {} of project {} to replace it",
                 previous.session_id,
                 project.project_id
             );
@@ -240,15 +237,14 @@ impl LaunchSessions {
             .session_id;
         if let Err(status) = record_main(&scope.projects_dir, project_id, Some(&started)) {
             log::error!(
-                "EnsureProjectHomeSession: stopping main {started} of project {project_id}: \
-                 {}",
+                "{ENSURE_RPC}: stopping main {started} of project {project_id}: {}",
                 status.message
             );
             self.claude_cli_manager.stop_session(&started).await;
             return Err(status);
         }
         log::info!(
-            "EnsureProjectHomeSession: started main {started} for project {project_id} as {}",
+            "{ENSURE_RPC}: started main {started} for project {project_id} as {}",
             scope.os_user
         );
         Ok(started)
@@ -271,8 +267,7 @@ impl LaunchSessions {
         };
         if !unified_session_dir_path(&scope.sessions_base, session_id).is_dir() {
             log::info!(
-                "EnsureProjectHomeSession: main {session_id} of project {} no longer exists; \
-                 clearing it",
+                "{ENSURE_RPC}: main {session_id} of project {} no longer exists; clearing it",
                 project.project_id
             );
             record_main(&scope.projects_dir, &project.project_id, None)?;
@@ -305,22 +300,21 @@ impl LaunchSessions {
         self.claude_cli_manager.get(session_id).await.is_some()
     }
 
+    /// Fast-forward a stopped main's home worktree to the project's main branch ref, then resume
+    /// it in the same conversation.
     async fn resume_stopped_home(
         &self,
         session_token: &str,
-        project: &ProjectData,
-        sessions_base: &Path,
+        scope: &HomeScope,
         stopped: &session_reader::SessionEntry,
     ) -> Result<(), Status> {
-        let session_dir = unified_session_dir_path(sessions_base, &stopped.session_id);
+        let session_dir = unified_session_dir_path(&scope.sessions_base, &stopped.session_id);
         let metadata = read_session_metadata(&session_dir)
             .map_err(|e| Status::internal(format!("home session metadata: {e}")))?;
         let home = metadata.repo_path.map(PathBuf::from).ok_or_else(|| {
             Status::failed_precondition("the home session has no worktree to resume in")
         })?;
-        let main_ref = main_branch_ref_of(project)?;
-        fast_forward_home_worktree(&home, &main_ref)
-            .map_err(|e| Status::failed_precondition(format!("home worktree: {e}")))?;
+        fast_forward_home(&home, &scope.project)?;
         self.resume_session_at_session_coordinate(Request::direct(ResumeSessionRequest {
             session_token: session_token.to_string(),
             session_id: stopped.session_id.clone(),
@@ -362,6 +356,16 @@ fn main_branch_ref_of(project: &ProjectData) -> Result<String, Status> {
         })
 }
 
+/// Fast-forward `home` to `project`'s main branch ref.
+fn fast_forward_home(home: &Path, project: &ProjectData) -> Result<(), Status> {
+    fast_forward_home_worktree(home, &main_branch_ref_of(project)?).map_err(home_worktree_failure)
+}
+
+/// A home worktree that could not be made or moved: the project is not in a state main can run in.
+fn home_worktree_failure(error: impl std::fmt::Display) -> Status {
+    Status::failed_precondition(format!("home worktree: {error}"))
+}
+
 /// The project's home worktree, created at its main branch ref when absent.
 fn home_worktree_for(project: &ProjectData) -> Result<PathBuf, Status> {
     let main_repo = tddy_session_split::service_util::project_repo_root(project)?;
@@ -372,7 +376,7 @@ fn home_worktree_for(project: &ProjectData) -> Result<PathBuf, Status> {
         &project.project_id,
         &main_branch_ref_of(project)?,
     )
-    .map_err(|e| Status::failed_precondition(format!("home worktree: {e}")))
+    .map_err(home_worktree_failure)
 }
 
 /// Record (`Some`) or clear (`None`) `project_id`'s main in the projects store.

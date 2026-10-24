@@ -19,6 +19,9 @@ const SESSION_TYPE_OPTIONS: { id: SessionType; label: string }[] = [
   { id: "muse-cli", label: "Muse Code" },
 ];
 
+/** The id of the element saying why `sessionType` is disabled; the button is described by it. */
+const reasonIdOf = (sessionType: SessionType) => `create-session-type-reason-${sessionType}`;
+
 /**
  * Session type toggle — which backend the session is started as. Presentational: the selection
  * itself stays in `CreateSessionPane`, which every other field is derived from.
@@ -39,7 +42,7 @@ export function CreateSessionTypeToggle({
             type="button"
             data-testid={`create-session-type-${id}`}
             aria-pressed={sessionType === id}
-            aria-describedby={reason !== null ? `create-session-type-reason-${id}` : undefined}
+            aria-describedby={reason !== null ? reasonIdOf(id) : undefined}
             disabled={reason !== null}
             onClick={() => setSessionType(id)}
             className={`px-3 py-1.5 rounded-md text-sm border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -57,7 +60,7 @@ export function CreateSessionTypeToggle({
           {disabled.map(({ id, label, reason }) => (
             <li key={id}>
               <span className="font-medium">{label}:</span>{" "}
-              <span id={`create-session-type-reason-${id}`} data-testid={`create-session-type-reason-${id}`}>
+              <span id={reasonIdOf(id)} data-testid={reasonIdOf(id)}>
                 {reason}
               </span>
             </li>

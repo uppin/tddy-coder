@@ -112,6 +112,20 @@ export function CreateSessionClaudeCliFields({
     </>
   );
 
+  const toggleManagedCodebase = (on: boolean) => {
+    setManagedCodebase(on);
+    // Switching the orchestration off resets what a managed session was going to be given, rather
+    // than leaving the values to be stripped at submit: a request that disagrees with the screen is
+    // how a picked agent went missing without an error. Both controls stay visible either way —
+    // they are placement-independent — so this is a reset the operator can see, not a hidden value
+    // dropped at the wire.
+    if (!on) {
+      setSemanticIndex(false);
+      setSelectedAgentIds([]);
+    }
+    applyPlacement("managed", on);
+  };
+
   return (
     <>
       {modelField}
@@ -164,19 +178,7 @@ export function CreateSessionClaudeCliFields({
               type="checkbox"
               className="h-4 w-4 rounded border-input"
               checked={managedCodebase}
-              onChange={(e) => {
-                setManagedCodebase(e.target.checked);
-                // Switching the orchestration off resets what a managed session was going to be
-                // given, rather than leaving the values to be stripped at submit: a request that
-                // disagrees with the screen is how a picked agent went missing without an error.
-                // Both controls stay visible either way — they are placement-independent — so
-                // this is a reset the operator can see, not a hidden value dropped at the wire.
-                if (!e.target.checked) {
-                  setSemanticIndex(false);
-                  setSelectedAgentIds([]);
-                }
-                applyPlacement("managed", e.target.checked);
-              }}
+              onChange={(e) => toggleManagedCodebase(e.target.checked)}
             />
             Managed codebase
           </label>

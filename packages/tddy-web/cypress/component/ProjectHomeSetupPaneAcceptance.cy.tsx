@@ -17,6 +17,7 @@ import type { ProjectEntry } from "../../src/gen/project_pb";
 import { SessionEntrySchema, SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { whyMainCannotRun } from "../../src/components/sessions/projectHomeSessionTypes";
+import { ProjectHomeSetupPane } from "../../src/components/sessions/ProjectHomeSetupPane";
 import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
@@ -73,7 +74,7 @@ it("clicking main on a project with no main opens the New-session form for that 
   setup.clickMain(BETA);
 
   // Then
-  cy.location("hash").should("match", new RegExp(`^#/sessions/project-home/${BETA}(\\?|$)`));
+  setup.assertAtSetupFor(BETA);
   setup.pane(BETA).should("contain", "Set up main for beta");
   setup.form(BETA).should("exist");
   setup.submitButton().should("have.text", "Start main session");
@@ -121,18 +122,11 @@ it("Start main session ensures main with the form's model, permission mode and i
   setup.startMain();
 
   // Then
-  cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(SessionService.method.ensureProjectHomeSession);
-    expect(calls).to.have.length(1);
-    expect(calls[0].projectId).to.equal(BETA);
-    expect(calls[0].start).to.include({
-      sessionType: "claude-cli",
-      model: "sonnet",
-      permissionMode: "plan",
-      initialPrompt: "Watch the stack",
-    });
+  setup.assertEnsuredOnce(backend, {
+    projectId: BETA,
+    start: { sessionType: "claude-cli", model: "sonnet", permissionMode: "plan", initialPrompt: "Watch the stack" },
   });
-  cy.location("hash").should("match", new RegExp(`^#/sessions/${MAIN_SESSION_ID}(\\?|$)`));
+  setup.assertSessionSelected(MAIN_SESSION_ID);
   setup.pane(BETA).should("not.exist");
 });
 
@@ -158,7 +152,7 @@ it("Cancel closes the pane back to the drawer root", () => {
   setup.cancel();
 
   // Then
-  cy.location("hash").should("match", /^#\/sessions(\?|$)/);
+  setup.assertAtDrawerRoot();
   setup.pane(BETA).should("not.exist");
 });
 
@@ -172,4 +166,29 @@ it("says so when the host does not list the project, and offers nothing to start
   // Then
   setup.unknownProject("proj-unlisted").should("contain", "proj-unlisted");
   setup.form("proj-unlisted").should("not.exist");
+});
+
+it("says the host is not connected when no wire reaches it, and offers no form", () => {
+  // Given a registry row for beta, but no daemon any wire reaches
+  const onStart = cy.stub().as("onStart").resolves();
+
+  // When
+  cy.mount(
+    withSelectedDaemon(
+      <ProjectHomeSetupPane
+        projectId={BETA}
+        project={{ projectId: BETA, name: "beta", mainBranchRef: "origin/master" }}
+        replacing={false}
+        daemonInstanceId={DEFAULT_TEST_DAEMON.instanceId}
+        sessionToken="fake-token"
+        onStart={onStart}
+        onClose={cy.stub()}
+      />,
+      [],
+    ),
+  );
+
+  // Then
+  setup.unreachableHost(BETA).should("contain", "Not connected to");
+  setup.form(BETA).should("not.exist");
 });

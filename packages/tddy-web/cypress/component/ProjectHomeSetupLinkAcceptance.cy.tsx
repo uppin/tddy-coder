@@ -28,7 +28,6 @@ import {
   projectsAppPage,
 } from "../support/rpc/projectsAppPageFixtures";
 import { projectHomeSetupPage as setup } from "../support/pages/projectHomeSetupPage";
-import { byTestId, sessionsDrawerProjectHome } from "../support/testIds";
 
 const ALPHA = { projectId: "proj-alpha", name: "alpha" };
 const BETA = { projectId: "proj-beta", name: "beta" };
@@ -110,7 +109,7 @@ it("clicking main on a project with no main asks to set one up for that project"
   aDrawer({ onEnsure, onSetUpProjectHome });
 
   // When
-  byTestId(sessionsDrawerProjectHome(BETA.projectId)).click();
+  setup.clickMain(BETA.projectId);
 
   // Then the operator is sent to set main up, and nothing is started
   cy.get("@onSetUpProjectHome").should("have.been.calledOnceWith", BETA.projectId);
@@ -118,11 +117,11 @@ it("clicking main on a project with no main asks to set one up for that project"
 });
 
 it("offers the main entry of a project with no main as an action, not as disabled", () => {
-  // Given
+  // When
   aDrawer({ onEnsure: cy.stub().resolves(), onSetUpProjectHome: cy.stub() });
 
   // Then
-  byTestId(sessionsDrawerProjectHome(BETA.projectId)).should("not.have.attr", "aria-disabled", "true");
+  setup.mainEntry(BETA.projectId).should("not.have.attr", "aria-disabled", "true");
 });
 
 it("clicking main on a project whose main is set up still starts it", () => {
@@ -132,7 +131,7 @@ it("clicking main on a project whose main is set up still starts it", () => {
   aDrawer({ onEnsure, onSetUpProjectHome });
 
   // When
-  byTestId(sessionsDrawerProjectHome(ALPHA.projectId)).click();
+  setup.clickMain(ALPHA.projectId);
 
   // Then
   cy.get("@onEnsure").should("have.been.calledOnceWith", ALPHA.projectId);

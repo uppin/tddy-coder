@@ -14,7 +14,7 @@ use tddy_session_lifecycle::agent_list_mapping::agent_allowlist_rows;
 ///
 /// A registry this daemon has but cannot read is an error, not "there are no assistants" — a session
 /// started against a missing agent id fails much later and much less clearly.
-pub(crate) async fn listed_agents(
+pub(super) async fn listed_agents(
     config: &DaemonConfig,
     tddy_data_dir: &Path,
     model_registry: Option<&ModelRegistryStore>,

@@ -8,30 +8,27 @@ use tddy_projects::project_storage::{self, ProjectData};
 const ALPHA: &str = "11111111-2222-4333-8444-555555555555";
 const MAIN_SESSION: &str = "main-0000-0000-0000-000000000000";
 
-/// A registry file holding one project row as an older daemon wrote it — with a home agent.
-fn a_registry_written_with_a_home_agent() -> tempfile::TempDir {
+/// A registry file holding one project row, `extra` appended to the row's keys.
+fn a_registry_with_alpha(extra: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("projects.yaml"),
         format!(
-            "projects:\n  - project_id: {ALPHA}\n    name: alpha\n    git_url: https://github.com/acme/alpha.git\n    main_repo_path: /repos/alpha\n    home_agent: claude\n"
+            "projects:\n  - project_id: {ALPHA}\n    name: alpha\n    git_url: https://github.com/acme/alpha.git\n    main_repo_path: /repos/alpha\n{extra}"
         ),
     )
     .unwrap();
     dir
 }
 
+/// A registry file holding one project row as an older daemon wrote it — with a home agent.
+fn a_registry_written_with_a_home_agent() -> tempfile::TempDir {
+    a_registry_with_alpha("    home_agent: claude\n")
+}
+
 /// A registry file holding one project row with no main recorded.
 fn a_registry_with_no_main() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("projects.yaml"),
-        format!(
-            "projects:\n  - project_id: {ALPHA}\n    name: alpha\n    git_url: https://github.com/acme/alpha.git\n    main_repo_path: /repos/alpha\n"
-        ),
-    )
-    .unwrap();
-    dir
+    a_registry_with_alpha("")
 }
 
 fn stored_row(dir: &std::path::Path) -> ProjectData {
@@ -115,6 +112,12 @@ fn recording_on_an_unknown_project_is_an_error() {
     // When
     let outcome = project_storage::set_project_home_session(dir.path(), ALPHA, Some(MAIN_SESSION));
 
-    // Then
-    assert!(outcome.is_err());
+    // Then the error names the project, and the registry is left empty
+    let error = outcome
+        .expect_err("an unknown project is refused")
+        .to_string();
+    assert!(error.contains(ALPHA), "names the project: {error}");
+    assert!(project_storage::read_projects(dir.path())
+        .expect("read registry")
+        .is_empty());
 }

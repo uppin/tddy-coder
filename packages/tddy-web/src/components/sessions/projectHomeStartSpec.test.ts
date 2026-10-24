@@ -48,8 +48,13 @@ function aClaudeCliForm(overrides: Partial<CreateSessionFormValues> = {}): Creat
 
 describe("buildProjectHomeStartSpec", () => {
   it("carries the session type, model, provider, permission mode and initial prompt the operator chose", () => {
-    const spec = buildProjectHomeStartSpec(aClaudeCliForm());
+    // Given
+    const form = aClaudeCliForm();
 
+    // When
+    const spec = buildProjectHomeStartSpec(form);
+
+    // Then
     expect(spec).toMatchObject({
       sessionType: "claude-cli",
       model: "sonnet",
@@ -64,8 +69,13 @@ describe("buildProjectHomeStartSpec", () => {
   });
 
   it("carries no project, branch, stack or placement fields", () => {
-    const spec = buildProjectHomeStartSpec(aClaudeCliForm());
+    // Given a form still holding a project, branch, stack and placement
+    const form = aClaudeCliForm();
 
+    // When
+    const spec = buildProjectHomeStartSpec(form);
+
+    // Then
     expect(Object.keys(spec).sort()).toEqual([
       "dangerouslySkipPermissions",
       "initialPrompt",
@@ -77,5 +87,16 @@ describe("buildProjectHomeStartSpec", () => {
       "sessionType",
       "specializedAgents",
     ]);
+  });
+
+  it("withdraws a permission bypass the form's placement withdrew", () => {
+    // Given
+    const form = aClaudeCliForm({ dangerouslySkipPermissions: true, placementWithdrawsPermissionBypass: true });
+
+    // When
+    const spec = buildProjectHomeStartSpec(form);
+
+    // Then
+    expect(spec.dangerouslySkipPermissions).toBe(false);
   });
 });

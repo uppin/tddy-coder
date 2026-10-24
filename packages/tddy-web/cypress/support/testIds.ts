@@ -1062,6 +1062,11 @@ export const sessionsProjectHomeSetup = (projectId: string) =>
 export const sessionsProjectHomeSetupUnknown = (projectId: string) =>
   `sessions-project-home-setup-unknown-${projectId}`;
 
+/** `[data-testid="sessions-project-home-setup-unreachable-<projectId>"]` — shown instead of the form
+ *  when no wire reaches the host main would run on. */
+export const sessionsProjectHomeSetupUnreachable = (projectId: string) =>
+  `sessions-project-home-setup-unreachable-${projectId}`;
+
 /** `[data-testid="sessions-drawer-project-home-error-<projectId>"]` — why the last ensure failed. */
 export const sessionsDrawerProjectHomeError = (projectId: string) =>
   `sessions-drawer-project-home-error-${projectId}`;

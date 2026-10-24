@@ -31,6 +31,11 @@ export function CreateSessionPermissionFields({
   applyPlacement,
   placementFixed = false,
 }: CreateSessionPermissionFieldsProps) {
+  const toggleSandbox = (on: boolean) => {
+    setSandbox(on);
+    applyPlacement("sandbox", on);
+  };
+
   return (
     <>
       <div>
@@ -85,10 +90,7 @@ export function CreateSessionPermissionFields({
               type="checkbox"
               className="h-4 w-4 rounded border-input"
               checked={sandbox}
-              onChange={(e) => {
-                setSandbox(e.target.checked);
-                applyPlacement("sandbox", e.target.checked);
-              }}
+              onChange={(e) => toggleSandbox(e.target.checked)}
             />
             Sandbox
           </label>

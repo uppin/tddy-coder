@@ -199,7 +199,9 @@ peer routing).
 - `setting_up_main_with_a_requested_role_is_refused_and_starts_nothing`
 - `replacing_a_running_main_stops_it_and_records_the_new_session`
 - `a_replaced_main_is_still_listed_with_its_role`
-- kept: `a_project_home_session_is_listed_with_its_role`, `an_ensured_project_home_agent_is_pre_approved_the_project_home_tool_set`, `a_start_session_naming_a_role_is_refused_and_starts_nothing`
+- kept: `a_project_home_session_is_listed_with_its_role`, `an_ensured_main_is_pre_approved_the_project_home_tool_set`, `a_start_session_naming_a_role_is_refused_and_starts_nothing`
+- added at green / review: `setting_up_main_over_ssh_is_refused_and_starts_nothing`, `setting_up_main_with_a_profile_that_runs_cursor_cli_is_refused`, `setting_up_main_as_an_agent_clone_is_refused`, `setting_up_main_as_a_split_agent_is_refused`, `a_refused_replace_leaves_the_running_main_running_and_recorded`, `two_concurrent_set_ups_record_one_main_and_the_other_is_replaced`
+- fixture shared with `project_home_idle_stop_acceptance.rs` in `tests/project_home_support/mod.rs`
 
 ### tddy-session-lifecycle — `tests/project_home_idle_stop_acceptance.rs` (fixture only)
 
@@ -300,9 +302,37 @@ Fixture sets main up with a claude-cli spec instead of a `home_agent:` row; test
 
 ### From /validate-tests
 
+All fixed (2026-10-24):
+
+- [x] `ensure_project_home_session_acceptance.rs` — `two_concurrent_set_ups_…` assumed the first-polled future wins the lock (order-dependent); now asserts one `started` + one `replaced` whichever order.
+- [x] same file — the 6-line set-up chain repeated 7×; `World::a_running_main()`. Worktree checks via `home_worktree_of` / `head_of` / `is_detached`, so the first test is no longer an assertion roulette of raw git calls.
+- [x] same file — `replacing_a_running_main_…` read `manager.get(..).is_none()` beside an `is_served` helper; uses the helper. `an_ensured_main_is_pre_approved_…` had no When.
+- [x] same file — tool-session refusal checked `contains("tool")` (matches anything); now `"a tool session"`. Role refusal now asserts it names `session_role`.
+- [x] `ensure_…` + `project_home_idle_stop_acceptance.rs` — ~110 lines of daemon/repo/stub fixture duplicated; moved to `tests/project_home_support/mod.rs` (every item used by both binaries — no dead code, no `allow`). Idle-stop's `World` doc still described the removed harness profiles; fixed. Idle-stop's set-up chain repeated 4×; `a_running_main()`.
+- [x] `project_home_session_storage.rs` — two near-identical registry fixtures → `a_registry_with_alpha(extra)`; `recording_on_an_unknown_project_is_an_error` asserted only `is_err()`; now that the error names the project and nothing was written.
+- [x] `project_home_session_entry.rs` — `std::mem::forget(tempdir)` leaked a config dir per test; config is written into the test's data dir.
+- [x] Cypress specs — raw `cy.location("hash")` regexes, inline `backend.callsTo(...)` wire inspection and raw `[data-testid^=…]` selectors in test bodies moved to `projectHomeSetupPage` (`assertAtSetupFor`, `assertSessionSelected`, `assertAtDrawerRoot`, `assertEnsuredOnce`, `assertNoPinnedEntryIn`, `groupHeaderOrder`); `5000` timeout named `RENDER_WAIT`; `clickReplaceMain` reuses `replaceAction`. `ProjectHomeSetupLinkAcceptance` used raw `byTestId(sessionsDrawerProjectHome(..))` → page object.
+- [x] `ProjectHomeReplaceAcceptance` — vague "main reflects the selected host's project row" renamed to what it pins.
+- [x] I6 gap — `ProjectHomeSetupPane` with no reachable host had no test; added "says the host is not connected when no wire reaches it, and offers no form" (`sessionsProjectHomeSetupUnreachable` id).
+- [x] bun — `projectHomeStartSpec.test.ts` / new `projectHomeGroups.test.ts` cases got Given/When/Then; added edge cases: a withdrawn permission bypass is withdrawn in the spec, an empty `homeSessionId` reads as no main.
+
 ### From /validate-prod-ready
 
+No blockers. Only the two tracked `TODO`s (see Technical Debt) remain. Fixed:
+
+- [x] `tddy-daemon-rpc/src/catalog/agent_rows.rs` — `listed_agents` stayed `pub(crate)` after its only out-of-module caller (`home_agent_handler.rs`) was deleted; narrowed to `pub(super)`.
+
 ### From /analyze-clean-code
+
+All fixed:
+
+- [x] `svc_ensure_project_home.rs` — the fast-forward + `failed_precondition("home worktree: …")` mapping was written 3×; `fast_forward_home` / `home_worktree_failure`. The RPC name literal (routing + 4 log prefixes) → `ENSURE_RPC`. `resume_stopped_home` took project and sessions base separately (4 params) → takes the `HomeScope` (3).
+- [x] `ProjectHomeSetupPane.tsx` — one ~85-line component, ternary in ternary (nesting 5), notice+Cancel block duplicated → `ProjectHomeSetupBody` + `SetupNotice`.
+- [x] `ProjectHomeEntry.tsx` — Replace action extracted to `ReplaceMainButton`.
+- [x] `CreateSessionTypeToggle.tsx` — reason element id built twice → `reasonIdOf`.
+- [x] `CreateSessionClaudeCliFields.tsx` / `CreateSessionPermissionFields.tsx` — wrapping the toggles in `!placementFixed` pushed inline `onChange` bodies to nesting 5; named `toggleManagedCodebase` / `toggleSandbox`.
+
+Review items, not regressions: `CreateSessionPane` (498) and `SessionsDrawerScreen` (497) are at budget and their component functions are far over 40 lines (pre-existing; tracked in `docs/dev/todo/2026-10-23-session-drawer-grew-past-500-by-project-groups.md`); neither grew in this pass. `ensure_project_home_session_acceptance.rs` is 690 lines (829 before this pass) — splitting it would need its `World` in the shared module, where the methods only one binary calls would be dead code in the other.
 
 ## Validation Results
 
@@ -319,9 +349,22 @@ Open: a Projects card's "Set up main" link reflects the card's primary host, the
 
 ### /validate-tests
 
+**Last run**: 2026-10-24 — ✅ fixed. Tests analyzed: 22 + 5 (lifecycle), 5 (projects), 2 (daemon-rpc), 31 Cypress (ProjectHome* + SessionsDrawerProjectHome), 30 bun. Critical: 1 (order-dependent concurrency test). Warnings: 11. Description-body mismatches: 1 (vague name). All fixed — see *Refactoring Needed*.
+
 ### /validate-prod-ready
 
+**Last run**: 2026-10-24 — ✅ Ready. Mock/fake code: 0. Dev fallbacks: 0. TODO/FIXME: 2, both tracked (Technical Debt). Unused code: 1 (fixed). Debug output: 0 (`log::info!`/`log::error!` only).
+
 ### /analyze-clean-code
+
+**Last run**: 2026-10-24 — **Score: A** after fixes (was C: `ProjectHomeSetupPane` nesting 5, two toggle handlers at nesting 5). Must-refactor: 0 remaining. Needs-attention: 0 remaining in code this change added. Pre-existing oversized components noted above.
+
+Scoped verification after all three passes:
+
+- `cargo test -p tddy-session-lifecycle --test ensure_project_home_session_acceptance --test project_home_idle_stop_acceptance -p tddy-projects --test project_home_session_storage -p tddy-daemon-rpc --test project_home_session_entry --test rpc_handlers_shape -p tddy-service --test unbundle_service_split` — 22 / 5 / 5 / 2 / 10 / 28 passed, 0 failed.
+- `cargo test -p tddy-agent-launch --lib` — 152 passed, 0 failed; clippy `-D warnings --all-targets` + fmt on `tddy-agent-launch`, `tddy-daemon-rpc`, `tddy-projects`, `tddy-session-lifecycle` — clean
+- `bun test src/components/sessions src/utils src/routing src/components/projects` — 693 passed, 0 failed.
+- Cypress component, 8 specs (ProjectHome*, SessionsDrawerProjectHome, SessionsDrawer, CreateSessionPane, CreateSessionAcceptance, ProjectsScreenAcceptance) — 108 passed, 0 failed (setup pane 8, incl. the new unreachable-host test).
 
 ## TODO
 
@@ -340,12 +383,12 @@ Open: a Projects card's "Set up main" link reflects the card's primary host, the
 - [x] Validate changes (/validate-changes)
 - [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap

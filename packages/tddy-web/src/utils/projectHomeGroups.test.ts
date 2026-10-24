@@ -82,12 +82,15 @@ describe("projectHomeSlot", () => {
   });
 
   it("keeps a project-home session that is not the recorded main as a row", () => {
+    // Given a replaced main beside the recorded one, both carrying the role
     const replaced = aSession("old", ALPHA.projectId, PROJECT_HOME_ROLE);
     const main = aSession("h", ALPHA.projectId, PROJECT_HOME_ROLE);
     const group = { ...aGroup(ALPHA), sessions: [replaced, main] };
 
+    // When
     const slot = projectHomeSlot(group, [HOME]);
 
+    // Then
     expect(slot.homeSession?.sessionId).toBe("h");
     expect(slot.rows.map((s) => s.sessionId)).toEqual(["old"]);
   });
@@ -112,6 +115,17 @@ describe("projectHomesOnHost", () => {
 
     // Then
     expect(homes).toEqual([{ projectId: ALPHA.projectId, mainBranchRef: "origin/main", homeSessionId: "home-b" }]);
+  });
+
+  it("reads an empty home session id as main not set up", () => {
+    // Given
+    const rows = [aProjectRow(ALPHA.projectId, "host-a", "")];
+
+    // When
+    const homes = projectHomesOnHost(rows, "host-a");
+
+    // Then
+    expect(homes).toEqual([{ projectId: ALPHA.projectId, mainBranchRef: "origin/main", homeSessionId: null }]);
   });
 
   it("gives a project with no row on that host no home", () => {

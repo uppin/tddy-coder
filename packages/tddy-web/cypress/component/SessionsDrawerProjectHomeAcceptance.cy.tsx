@@ -24,13 +24,13 @@ import { SessionDrawer, type ProjectHomeInfo } from "../../src/components/sessio
 import { useEnsureProjectHome } from "../../src/components/sessions/useEnsureProjectHome";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { mountWithRpc } from "../support/rpc/inMemory";
+import { projectHomeSetupPage as drawer } from "../support/pages/projectHomeSetupPage";
 import {
   byTestId,
   sessionsDrawerItem,
   sessionsDrawerProjectGroup,
   sessionsDrawerProjectGroupHeader,
   sessionsDrawerProjectHome,
-  sessionsDrawerProjectHomeReplace,
 } from "../support/testIds";
 
 const ALPHA = { projectId: "proj-alpha", name: "alpha" };
@@ -132,7 +132,8 @@ it("each project group shows a pinned main entry first, labelled with main's mod
 
   // Then
   rowOrderIn(ALPHA.projectId).its(0).should("equal", sessionsDrawerProjectHome(ALPHA.projectId));
-  byTestId(sessionsDrawerProjectHome(ALPHA.projectId))
+  drawer
+    .mainEntry(ALPHA.projectId)
     .should("contain", "main")
     .and("contain", "origin/main")
     .and("contain", "opus");
@@ -152,15 +153,10 @@ it("clicking a set-up main ensures it without a start spec and selects it", () =
   );
 
   // When
-  byTestId(sessionsDrawerProjectHome(ALPHA.projectId)).click();
+  drawer.clickMain(ALPHA.projectId);
 
   // Then
-  cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(SessionService.method.ensureProjectHomeSession);
-    expect(calls).to.have.length(1);
-    expect(calls[0]).to.include({ projectId: ALPHA.projectId });
-    expect(calls[0].start).to.equal(undefined);
-  });
+  drawer.assertEnsuredOnce(backend, { projectId: ALPHA.projectId, start: null });
   cy.get("@onSelected").should("have.been.calledOnceWith", ALPHA_HOME_SESSION.sessionId);
 });
 
@@ -181,7 +177,7 @@ it("a project with no main starts nothing and shows no hint", () => {
   aDrawer([aSession("b1", BETA.projectId)], onEnsure);
 
   // When
-  byTestId(sessionsDrawerProjectHome(BETA.projectId)).click();
+  drawer.clickMain(BETA.projectId);
 
   // Then
   byTestId(sessionsDrawerProjectGroup(BETA.projectId)).should("not.contain", "Projects screen");
@@ -193,9 +189,7 @@ it("the Other group has no pinned entry", () => {
   aDrawer([aSession("a1", ALPHA.projectId), aSession("orphan", "")]);
 
   // Then
-  byTestId(sessionsDrawerProjectGroup("other"))
-    .find("[data-testid^='sessions-drawer-project-home-']")
-    .should("not.exist");
+  drawer.assertNoPinnedEntryIn("other");
   byTestId(sessionsDrawerItem("orphan")).should("exist");
 });
 
@@ -205,12 +199,12 @@ it("a project whose main is not listed yet still shows its pinned entry", () => 
 
   // Then alpha's group exists for its pinned entry alone, ordered before beta's
   rowOrderIn(ALPHA.projectId).should("deep.equal", [sessionsDrawerProjectHome(ALPHA.projectId)]);
-  cy.get("[data-testid^='sessions-drawer-project-group-header-']").then(($headers) => {
-    expect([...$headers].map((h) => h.getAttribute("data-testid"))).to.deep.equal([
+  drawer
+    .groupHeaderOrder()
+    .should("deep.equal", [
       sessionsDrawerProjectGroupHeader(ALPHA.projectId),
       sessionsDrawerProjectGroupHeader(BETA.projectId),
     ]);
-  });
 });
 
 it("a project with no main and no session gets no group", () => {
@@ -237,8 +231,8 @@ it("a set-up main offers Replace main; a project with no main does not", () => {
   aDrawer([ALPHA_HOME_SESSION, aSession("b1", BETA.projectId)]);
 
   // Then
-  byTestId(sessionsDrawerProjectHomeReplace(ALPHA.projectId)).should("exist");
-  byTestId(sessionsDrawerProjectHomeReplace(BETA.projectId)).should("not.exist");
+  drawer.replaceAction(ALPHA.projectId).should("exist");
+  drawer.replaceAction(BETA.projectId).should("not.exist");
 });
 
 it("Replace main asks to set that project's main up again, and starts nothing", () => {
@@ -248,7 +242,7 @@ it("Replace main asks to set that project's main up again, and starts nothing", 
   aDrawer([ALPHA_HOME_SESSION], onEnsure, onReplace);
 
   // When
-  byTestId(sessionsDrawerProjectHomeReplace(ALPHA.projectId)).click();
+  drawer.clickReplaceMain(ALPHA.projectId);
 
   // Then
   cy.get("@onReplace").should("have.been.calledOnceWith", ALPHA.projectId);

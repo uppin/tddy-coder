@@ -26,12 +26,12 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 const PROJECT_ID: &str = "11111111-2222-4333-8444-555555555555";
 const MAIN_SESSION: &str = "main-0000-0000-0000-000000000000";
 
-fn a_daemon_config(os_user: &str) -> DaemonConfig {
+/// A daemon config mapping `testuser` to `os_user`, written under `dir` (the test's data dir, so it
+/// is removed with it).
+fn a_daemon_config(dir: &Path, os_user: &str) -> DaemonConfig {
     let yaml = format!("users:\n  - github_user: \"testuser\"\n    os_user: \"{os_user}\"\n");
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.yaml");
+    let path = dir.join("config.yaml");
     std::fs::write(&path, yaml).unwrap();
-    std::mem::forget(dir);
     DaemonConfig::load(&path).unwrap()
 }
 
@@ -108,7 +108,10 @@ async fn list_projects_reports_the_recorded_home_session_id() {
     // Given
     let data = tempfile::tempdir().unwrap();
     a_registered_project(data.path(), &os_user(), Some(MAIN_SESSION));
-    let daemon = a_daemon(a_daemon_config(&os_user()), data.path().to_path_buf());
+    let daemon = a_daemon(
+        a_daemon_config(data.path(), &os_user()),
+        data.path().to_path_buf(),
+    );
 
     // When
     let listed = the_listed_project(&daemon).await;
@@ -122,7 +125,10 @@ async fn list_projects_reports_no_home_session_for_a_project_without_main() {
     // Given
     let data = tempfile::tempdir().unwrap();
     a_registered_project(data.path(), &os_user(), None);
-    let daemon = a_daemon(a_daemon_config(&os_user()), data.path().to_path_buf());
+    let daemon = a_daemon(
+        a_daemon_config(data.path(), &os_user()),
+        data.path().to_path_buf(),
+    );
 
     // When
     let listed = the_listed_project(&daemon).await;

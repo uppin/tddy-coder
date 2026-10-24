@@ -67,16 +67,7 @@ export function ProjectHomeEntry(props: {
           )}
         </button>
         {hasMain && onReplaceProjectHome && (
-          <button
-            type="button"
-            data-testid={`sessions-drawer-project-home-replace-${home.projectId}`}
-            aria-label="Replace main"
-            title="Replace main"
-            onClick={() => onReplaceProjectHome(home.projectId)}
-            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <Replace className="h-3.5 w-3.5" />
-          </button>
+          <ReplaceMainButton projectId={home.projectId} onReplace={onReplaceProjectHome} />
         )}
       </div>
       {error !== null && (
@@ -89,5 +80,27 @@ export function ProjectHomeEntry(props: {
         </div>
       )}
     </div>
+  );
+}
+
+/** A set-up main's **Replace main** action: opens the setup pane in replace mode. */
+function ReplaceMainButton({
+  projectId,
+  onReplace,
+}: {
+  projectId: string;
+  onReplace: (projectId: string) => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      data-testid={`sessions-drawer-project-home-replace-${projectId}`}
+      aria-label="Replace main"
+      title="Replace main"
+      onClick={() => onReplace(projectId)}
+      className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+    >
+      <Replace className="h-3.5 w-3.5" />
+    </button>
   );
 }
