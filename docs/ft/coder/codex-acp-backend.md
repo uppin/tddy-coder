@@ -24,6 +24,12 @@
 
 ## Coexistence with `CodexBackend`
 
+**Shared ACP driver:** `codex-acp` runs on the same ACP client driver as `claude-acp` and `opencode`
+(see [OpenCode ACP backend § Behavior](opencode-acp-backend.md#behavior)): off a provider route the
+requested model is set on the session and one the agent does not advertise is refused naming the
+advertised ones; dropping the backend ends the agent process. The `codex login` retry above runs once
+per failed session call, and a failed login is the error reported.
+
 **`--agent codex`** remains the JSONL **`codex exec`** integration. Operators choose per session whether to use ACP or JSONL; both backends share **`codex_thread_id`** persistence rules in **`workflow/task.rs`**.
 
 ## Related documentation
