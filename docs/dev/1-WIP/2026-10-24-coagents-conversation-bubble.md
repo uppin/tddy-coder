@@ -153,7 +153,31 @@ Build the stub first (`cargo build -p tddy-acp-stub`).
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- **Live append is not wired (open; PRD "live while it runs").** `CodingAgentSession::record_updates_with`
+  has no production caller, so a coding-agent turn is recorded only when it ends
+  (`packages/tddy-session-agents/src/coding_agent.rs:250`, TODO). The recorder needs the conversation id,
+  which the open path does not receive: `open_agent_conversation` mints it, but `AgentSessions::open_owned`
+  / `open_local` and `open_coding_agent_session` do not take it. Options: (A) thread `conversation_id`
+  through the `AgentSessions` port and `open_coding_agent_session` (changes a frozen port signature and its
+  test implementation); (B) a defaulted method on `SubagentSession` that installs the sink after open
+  (crosses into `tddy-discovery`). The turn-end record must also be split: the prompt moves to turn start,
+  the stream owns text and tool calls, and turn end writes only the permission entry and the stop reason.
+  Non-streaming model loops still need the full turn at turn end, so this needs a per-session "streams"
+  signal, and a turn that dies mid-stream must still get a stop reason.
+- **Live tail is not published (open).** A conversation's frames are not published to any hub, so its
+  replay ends with the recorded transcript (`packages/tddy-session-activity/src/service/conversation_replay.rs:37`,
+  TODO). The hub the session replay uses, `tddy_daemon_kernel::AgentActivityHub`, carries activity records,
+  not ACP frames, and the recording side has no hub handle. Needs a conversation-frame channel in
+  `tddy-daemon-kernel` and a port field.
+- **Live title gap.** Live frames are titled per record (`frame_for_agent_activity`), so a bubble first seen
+  live keeps its opening call's title (the agent only) until reload, because the web keeps the first title
+  it shows (`acpReplayProjection.ts`).
+- **Title separator and label.** The title is `<agent id>: <first prompt summary>`, the summary being the
+  first line capped to 80 characters. The label is the agent id because `AgentActivityRecord` carries no
+  label. The Cypress fixture `SubagentConversationBubbleAcceptance.cy.tsx` hand-writes ` · `; align the
+  fixture with the server format or change the server.
+- **`AgentActivityOverlay` is not wired.** It has no production mount and does not pass `onSubagentClick`, so
+  subagent entries are inert there. Known TODO: `docs/dev/todo/2026-10-23-agent-activity-overlay-has-no-production-mount.md`.
 
 ## Decisions & Trade-offs
 
@@ -161,6 +185,12 @@ _(populated during development)_
   `frame_for_agent_activity` keeps the web a pure projection.
 - **A dialog, not a tab.** Tabs are the operator's own conversations; a dialog matches the detail
   dialog the pane already uses.
+- **Recording failure fails the turn.** Developer decision: a daemon-run turn that cannot be recorded
+  returns an error naming the recording failure and delivers no answer.
+- **A host that records no conversations refuses conversation replay.** `tddy-coder`'s activity service
+  answers `NOT_FOUND` naming the conversation instead of serving its session transcript.
+- **Test 11 corrected to the exclusive bound.** The fixture puts the tool call at seq 1, and `before_seq` is
+  an exclusive bound, so the one older frame is `before_seq: 1` (developer decision). The contract had `2`.
 
 ## Refactoring Needed
 
@@ -186,7 +216,7 @@ _(populated during development)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [ ] TDD Green — implement with quality code (partial: all 17 target tests green, plus the fold-title, recording-failure and conversation-refusal tests; the daemon live append and the live tail are open, see Technical Debt)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-service -p tddy-session-agents -p tddy-session-activity -p tddy-daemon-rpc`; the new Cypress spec) — verify 100% pass
