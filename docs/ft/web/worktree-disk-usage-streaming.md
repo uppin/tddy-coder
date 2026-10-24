@@ -34,13 +34,13 @@ A new component in `tddy-daemon::worktrees` owns the size lifecycle. It is creat
 ### RPC surface (`ConnectionService`)
 
 - **New server-streaming `StreamWorktreeStats(StreamWorktreeStatsRequest) returns (stream WorktreeStatsEvent)`.** Authenticates `session_token`. Emits a first `WorktreeStatsEvent` carrying the full snapshot of the project's worktrees (each with `size_status` + `size_calculated_at_unix_ms` + cheap eager diff/branch), then one event per worktree as its size flips `Calculating → Cached`. When the request's `recalculate_all` is set, every worktree is (re)enqueued on subscribe; otherwise only worktrees currently `None` are lazily enqueued (opening the feed calculates what has never been calculated). The stream stays open until the client unsubscribes (mirrors `StreamHostStats`).
-- **New unary `CalculateWorktreeSize(CalculateWorktreeSizeRequest) returns (CalculateWorktreeSizeResponse)`.** Enqueues a (re)calculation for one worktree (membership-gated by `git worktree list`, like `RemoveWorktree`); the result surfaces on any open `StreamWorktreeStats`. Used by the Worktrees screen's per-row control and by the Session Inspector's Refresh.
+- **New unary `CalculateWorktreeSize(CalculateWorktreeSizeRequest) returns (CalculateWorktreeSizeResponse)`.** Enqueues a (re)calculation for one worktree (membership-gated by `git worktree list`, like `RemoveWorktree`); the result surfaces on any open `StreamWorktreeStats`. Used by the Worktree pane's Refresh (Session Inspector and Worktrees screen).
 - **`WorktreeRow` gains** `WorktreeSizeStatus size_status` and `int64 size_calculated_at_unix_ms`. `WorktreeSizeStatus` is `{ UNSPECIFIED, NONE, CALCULATING, CACHED }`.
 - **`ListWorktreesForProject` stays** (unary cached read) for non-streaming callers; it now reports the size status from the calculator. It no longer performs the eager size walk on `refresh: true` — size is the calculator's job. **Non-breaking:** existing callers keep working.
 
 ### Web
 
-- **Worktrees screen (`WorktreesScreen` / `WorktreesAppPage`).** Adds a **Status** column showing `None` / `Calculating` / `Cached` and, for `Cached`, a relative "last calculated" label. Adds a **Recalculate all** control (opens/re-subscribes `StreamWorktreeStats` with `recalculate_all`) and a per-row **Calculate / Recalculate** control (`CalculateWorktreeSize`). Rows update live from the stream: a worktree shows `Calculating` (no size yet) then its size once the increment arrives. A new `useWorktreeStatsStream` hook owns the subscription (mirrors `useHostStats`).
+- **Worktrees screen (`WorktreesScreen` / `WorktreesAppPage`).** A side panel lists the project's worktrees by name with their disk usage, **biggest first** (see [worktrees.md](worktrees.md)). A worktree never sized shows a spinner while it is calculated, with an "n of m" progress bar above the list; a **Refresh** button re-subscribes `StreamWorktreeStats` with `recalculate_all`. Sizes are also remembered in the browser, so the list is on screen before the daemon answers (shown stale). The selected worktree's pane is `SessionWorktreeTab`. A new `useWorktreeStatsStream` hook owns the subscription (mirrors `useHostStats`).
 - **Session Inspector → Worktree tab (`SessionWorktreeTab`).** Replaces the 10-minute `ListWorktreesForProject` poll with the stream filtered to the session's own worktree. On open, if the worktree is `None`, the tab is calculated lazily (via the stream's default enqueue) and shows `Calculating` → size. **Refresh** calls `CalculateWorktreeSize` for that one worktree.
 
 ## Acceptance criteria
@@ -55,22 +55,22 @@ A new component in `tddy-daemon::worktrees` owns the size lifecycle. It is creat
 
 ### Web — Worktrees screen (Cypress component)
 
-- [ ] Each worktree row shows its size status; a `None` worktree shows no byte size and a "Calculate" control.
-- [ ] A `Calculating` worktree shows a calculating indicator and no byte size yet.
-- [ ] A `Cached` worktree shows its formatted size and a "last calculated" label.
-- [ ] "Recalculate all" invokes the project-wide recalculation.
-- [ ] A row's "Calculate" invokes calculation for that single worktree's path only.
+- [ ] Worktrees are listed by name with their formatted size beside them, biggest first; a never-sized worktree is last.
+- [ ] A worktree being calculated shows a spinner, and the list shows "n of m" progress; the bar is gone once every size is known.
+- [ ] A size remembered from the last visit is shown (stale) before the daemon answers, and stays beside the spinner during a recalculation.
+- [ ] **Refresh** re-subscribes with `recalculate_all`.
+- [ ] Selecting a worktree shows it in the Worktree pane.
 
 ## Testing plan
 
 - **Level:** Rust integration (daemon library) + Cypress component (web).
 - **Rust:** `packages/tddy-worktree-service/tests/worktree_size_calculator_acceptance.rs` — status model, `None→Calculating→Cached` transitions with recorded timestamp, semaphore-bounded concurrency (=2) via a gated injectable sizer, persistence-without-recompute, single-worktree recalculation isolation. Run: `cargo test -p tddy-worktree-service --test worktree_size_calculator_acceptance`.
-- **Web:** `packages/tddy-web/cypress/component/WorktreesScreenDiskUsage.cy.tsx` — status rendering (None/Calculating/Cached + last-calculated label), Recalculate all, per-row Calculate. Run: `bun run cypress:component`.
+- **Web:** `packages/tddy-web/cypress/component/WorktreesScreenDiskUsage.cy.tsx` — `WorktreesScreen*.cy.tsx`, `WorktreesStreamingAcceptance.cy.tsx` — sorting, progress/spinner, remembered sizes, Refresh; unit `src/lib/worktreeList.test.ts`. Run: `bun run cypress:component`.
 - **Deferred to `/red` (needs proto regen):** wire-level `StreamWorktreeStats` daemon RPC test (snapshot-first + per-worktree increments, `recalculate_all`) and the `useWorktreeStatsStream` streaming-hook test — both depend on the regenerated `connection_pb.ts` / prost types and land with the green proto change.
 
 ## Scope
 
-- **In scope:** per-worktree lazy size lifecycle; daemon-global semaphore (default 2); `None/Calculating/Cached` + last-calculated time; `StreamWorktreeStats` (snapshot + increments) and `CalculateWorktreeSize`; Worktrees screen status column + recalculate controls; Session Inspector Worktree tab on the stream.
+- **In scope:** per-worktree lazy size lifecycle; daemon-global semaphore (default 2); `None/Calculating/Cached` + last-calculated time; `StreamWorktreeStats` (snapshot + increments) and `CalculateWorktreeSize`; Worktrees screen sorted size list, progress and Refresh; Session Inspector Worktree tab on the stream.
 - **Out of scope:** live partial-byte progress during a walk (final value only); making `git diff` lazy (stays eager); per-project (rather than daemon-global) semaphores; routing worktree RPCs to remote hosts (local daemon only, unchanged); removing `ListWorktreesForProject`.
 
 ## Related documentation

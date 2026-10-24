@@ -1,44 +1,34 @@
-import { useCallback, useEffect, useState } from "react";
-import { type ProjectEntry } from "../../gen/project_pb";
-import { ProjectService } from "../../gen/project_pb";
-import { HostService, type EligibleDaemonEntry } from "../../gen/host_pb";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ProjectEntry, ProjectService } from "../../gen/project_pb";
 import { WorktreeService } from "../../gen/worktree_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { AppShell } from "../shell/AppShell";
+import { SessionWorktreeTab } from "../sessions/SessionWorktreeTab";
+import { ScrollArea } from "../ui/scroll-area";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
-import { WorktreesScreen, type WorktreesScreenMockRow } from "./WorktreesScreen";
+import { WorktreesScreen } from "./WorktreesScreen";
 import { useWorktreeStatsStream } from "../../rpc/useWorktreeStatsStream";
-import { formatLastCalculated, type WorktreeStatsRow } from "../../lib/worktreeSize";
+import {
+  mergeWorktreeItems,
+  readRememberedWorktrees,
+  sortWorktreesBySize,
+  writeRememberedWorktrees,
+} from "../../lib/worktreeList";
 import { PARAM_PROJECT } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
 
-const selectClassName =
-  "box-border min-w-[12rem] max-w-[24rem] rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-
-/** Map one streamed domain row to the presentational `WorktreesScreen` row shape. */
-function toScreenRow(row: WorktreeStatsRow, nowMs: number): WorktreesScreenMockRow {
-  return {
-    path: row.path,
-    branch: row.branch,
-    status: row.status,
-    sizeLabel: row.status === "cached" ? row.sizeLabel : undefined,
-    lastCalculatedLabel: formatLastCalculated(row.calculatedAtUnixMs, nowMs),
-    changedFiles: row.changedFiles,
-    linesAdded: row.linesAdded,
-    linesRemoved: row.linesRemoved,
-  };
-}
-
 /**
- * Full-page Worktrees view: lists worktrees for a selected project via the local daemon
- * (WorktreeService RPCs are not routed to remote hosts yet). Disk sizes stream in lazily
- * via `StreamWorktreeStats` — each worktree shows its size lifecycle (None / Calculating / Cached),
- * a per-row Calculate control, and a project-wide Recalculate-all.
+ * Full-page Worktrees view, laid out like the Sessions screen: a side panel of the selected
+ * project's worktrees — by name, biggest on-disk size first — and the selected worktree's pane (the
+ * Session Inspector's Worktree tab) beside it.
  *
- * TODO(follow-up): migrate the Session Inspector's Worktree tab (`SessionWorktreeTab` /
- * `useSessionWorktreeStats`) off its 10-minute `ListWorktreesForProject` poll onto this same stream;
- * out of scope for this milestone (would break `SessionWorktreeTabAcceptance`).
+ * The list is on screen as soon as the page opens: the worktrees and sizes remembered from the last
+ * visit show first (marked stale), then `StreamWorktreeStats` supplies the daemon's current list and
+ * its persisted sizes, and sizes it has never computed are calculated on the spot, with progress
+ * above the list. Refresh recalculates every worktree.
+ *
+ * WorktreeService RPCs are not routed to remote hosts yet, so the list is the local daemon's.
  */
 export function WorktreesAppPage({
   onNavigate,
@@ -46,18 +36,11 @@ export function WorktreesAppPage({
   onNavigate: (path: string) => void;
 }) {
   const { isAuthenticated, login, sessionToken } = useAuthContext();
-  // Three services, one daemon: the project registry stayed on `ProjectService`, the daemon
-  // roster moved to `host.HostService`, and the worktree reads and writes to
-  // `worktree.WorktreeService`.
-  const client = useDaemonClient(ProjectService);
-  const hostClient = useDaemonClient(HostService);
+  const projectClient = useDaemonClient(ProjectService);
   const worktreeClient = useDaemonClient(WorktreeService);
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);
-  // The project filter is `?project=` — "the worktrees of project X" is a destination worth
-  // linking to. `daemonId` below stays local state: it is a create-worktree form field, and the
-  // list itself is local-daemon-only (see the note above), so it is not a destination.
+  // The project filter is `?project=` — "the worktrees of project X" is a destination worth linking to.
   const { location, setParams } = useAppLocation();
   const projectId = location.params[PARAM_PROJECT] ?? "";
   const setProjectId = useCallback(
@@ -65,27 +48,17 @@ export function WorktreesAppPage({
       setParams({ [PARAM_PROJECT]: next === "" ? null : next }, options),
     [setParams],
   );
-  const [daemonId, setDaemonId] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
-  const { rows, recalculateAll, refresh, calculate } = useWorktreeStatsStream(projectId);
-
-  const loadProjectsAndDaemons = useCallback(() => {
-    if (!sessionToken) return;
-    client
-      ?.listProjects({ sessionToken })
-      .then((res) => setProjects(res.projects))
-      .catch(() => setProjects([]));
-    hostClient
-      ?.listEligibleDaemons({ sessionToken })
-      .then((res) => setDaemons(res.daemons))
-      .catch(() => setDaemons([]));
-  }, [client, hostClient, sessionToken]);
+  const { rows, recalculateAll, refresh } = useWorktreeStatsStream(projectId);
 
   useEffect(() => {
     if (!sessionToken || !isAuthenticated) return;
-    loadProjectsAndDaemons();
-  }, [sessionToken, isAuthenticated, loadProjectsAndDaemons]);
+    projectClient
+      ?.listProjects({ sessionToken })
+      .then((res) => setProjects(res.projects))
+      .catch(() => setProjects([]));
+  }, [projectClient, sessionToken, isAuthenticated]);
 
   // Resolve the filter against the loaded projects and write the answer back: a URL naming a
   // project that is not registered (or none at all) settles on the first listed one, so the address
@@ -99,31 +72,27 @@ export function WorktreesAppPage({
     setProjectId(projects[0]?.projectId ?? "", { replace: true });
   }, [projects, projectId, setProjectId]);
 
+  // What the last visit saw, read once per project — the list this page opens on.
+  const [remembered, setRemembered] = useState(() => readRememberedWorktrees(projectId));
   useEffect(() => {
-    const local = daemons.find((d) => d.isLocal);
-    if (local) {
-      setDaemonId(local.instanceId);
-      return;
-    }
-    if (daemons.length > 0) {
-      setDaemonId(daemons[0].instanceId);
-    }
-  }, [daemons]);
+    setRemembered(readRememberedWorktrees(projectId));
+    setSelectedPath(null);
+  }, [projectId]);
 
-  const handleDelete = async (path: string) => {
-    if (!sessionToken || !projectId.trim() || !worktreeClient) return;
-    setError(null);
-    try {
-      await worktreeClient.removeWorktree({
-        sessionToken,
-        projectId: projectId.trim(),
-        worktreePath: path,
-      });
-      refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to remove worktree");
-    }
-  };
+  const items = useMemo(
+    () => sortWorktreesBySize(mergeWorktreeItems(rows, remembered)),
+    [rows, remembered],
+  );
+
+  // Remember the sizes the daemon has answered, for the next visit.
+  useEffect(() => {
+    if (projectId === "" || rows.length === 0) return;
+    writeRememberedWorktrees(projectId, items);
+  }, [projectId, rows, items]);
+
+  // The pane always shows a worktree: the biggest one until the operator picks another, and the
+  // next biggest when the shown one is deleted.
+  const selected = items.find((i) => i.path === selectedPath) ?? items[0] ?? null;
 
   if (!isAuthenticated) {
     return (
@@ -136,88 +105,46 @@ export function WorktreesAppPage({
     );
   }
 
-  const localDaemon = daemons.find((d) => d.isLocal);
-  const worktreesHostNote =
-    daemonId && localDaemon && daemonId !== localDaemon.instanceId
-      ? "Worktree list and actions use the local daemon only; switch the host back to the local instance to manage worktrees."
-      : null;
-
-  const nowMs = Date.now();
-  const screenRows = rows.map((row) => toScreenRow(row, nowMs));
-
   return (
-    <AppShell title="Worktrees" onNavigate={onNavigate} variant="scroll">
-      <p className="max-w-2xl text-sm text-muted-foreground">
-        Select a project to view git worktrees and their diff stats. Each worktree's on-disk size is
-        calculated lazily and streamed in — use a row's <strong>Calculate</strong> to size one
-        worktree, or <strong>Recalculate all</strong> to re-size the whole project. Delete removes a
-        secondary worktree only.
-      </p>
-
-      <div className="mt-4 flex flex-wrap items-end gap-4">
-        <div className="flex min-w-[10rem] flex-col gap-1">
-          <label className="text-sm font-medium" htmlFor="worktrees-project">
-            Project
-          </label>
-          <select
-            id="worktrees-project"
-            data-testid="worktrees-project-select"
-            className={selectClassName}
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-          >
-            <option value="">—</option>
-            {projects.map((p) => (
-              <option key={p.projectId} value={p.projectId}>
-                {p.name || p.projectId}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex min-w-[10rem] flex-col gap-1">
-          <label className="text-sm font-medium" htmlFor="worktrees-host">
-            Host (informational)
-          </label>
-          <select
-            id="worktrees-host"
-            data-testid="worktrees-host-select"
-            className={selectClassName}
-            value={daemonId}
-            onChange={(e) => setDaemonId(e.target.value)}
-          >
-            {daemons.map((d) => (
-              <option key={d.instanceId} value={d.instanceId}>
-                {d.label || d.instanceId}
-                {d.isLocal ? " (local)" : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {worktreesHostNote ? (
-        <p className="mt-3 max-w-2xl text-sm text-amber-600 dark:text-amber-500">{worktreesHostNote}</p>
-      ) : null}
-
-      {error ? (
-        <p className="mt-3 text-sm text-destructive" data-testid="worktrees-error">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="mt-6">
-        <WorktreesScreen
-          worktrees={screenRows}
-          onConfirmDelete={(path) => void handleDelete(path)}
-          onCalculate={(path) => calculate(path)}
-          onRecalculateAll={() => recalculateAll()}
-          emptyHint={
-            projectId.trim() === ""
-              ? "Select a project to list worktrees."
-              : "No worktrees for this project yet."
-          }
-        />
-      </div>
+    <AppShell title="Worktrees" onNavigate={onNavigate} variant="fullbleed" requiresHost>
+      <WorktreesScreen
+        projects={projects}
+        projectId={projectId}
+        onSelectProject={setProjectId}
+        items={items}
+        selectedPath={selected?.path ?? null}
+        onSelect={setSelectedPath}
+        onRefresh={recalculateAll}
+        emptyHint={
+          projectId.trim() === ""
+            ? "Select a project to list worktrees."
+            : "No worktrees for this project yet."
+        }
+      >
+        {selected ? (
+          <>
+            <div className="px-3 py-2 border-b border-border">
+              <div data-testid="worktrees-selected-name" className="text-sm font-semibold truncate">
+                {selected.name}
+              </div>
+              <div className="text-xs text-muted-foreground truncate">{selected.path}</div>
+            </div>
+            <ScrollArea className="flex-1 min-h-0">
+              <SessionWorktreeTab
+                key={selected.path}
+                client={worktreeClient ?? null}
+                sessionToken={sessionToken ?? ""}
+                projectId={projectId}
+                repoPath={selected.path}
+                onDeleted={() => {
+                  setSelectedPath(null);
+                  refresh();
+                }}
+              />
+            </ScrollArea>
+          </>
+        ) : null}
+      </WorktreesScreen>
     </AppShell>
   );
 }

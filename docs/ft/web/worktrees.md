@@ -21,9 +21,13 @@ The **`worktrees`** module provides:
 
 ### Web UI (`tddy-web`)
 
-In **daemon mode**, the shell **hamburger menu** (top left) includes **Worktrees**, navigating to **`/worktrees`** (client-side routing; use the Vite dev URL from **`./web-dev`**). **`WorktreesAppPage`** loads **`ListProjects`** and **`ListEligibleDaemons`**, lets the user pick a **project** and a **host** (informational; worktree RPCs always hit the local daemon today), **Refresh stats** (**`ListWorktreesForProject`** with **`refresh: true`**), and lists rows via **`ListWorktreesForProject`** (**`refresh: false`** on load). **Delete** calls **`RemoveWorktree`** then reloads the list.
+In **daemon mode**, the shell **hamburger menu** (top left) includes **Worktrees**, navigating to **`/worktrees`**. The screen has the Sessions screen's layout: a **side panel** and a **main pane**.
 
-**`WorktreesScreen`** renders a table with path, branch (with optional **(stale)**), size label, changed files, +/- lines, and a two-step **Delete** → **Confirm delete** action. Component tests mount the screen with mocked rows.
+- **Side panel.** A **project selector** (kept in `?project=`), a **Refresh** button that recalculates every worktree's size, and the project's worktrees listed **by name** (the directory name; the path and branch are in the row's tooltip) with their **disk usage** beside each. The list is **sorted by disk size, biggest first**; a worktree with no known size sorts last.
+- **Main pane.** The selected worktree (the biggest until another is picked) shown in the same **Worktree pane** as the Session Inspector's Worktree tab (`SessionWorktreeTab`): Disk, Last calculated, Branch, Changed files, Refresh, Clear and a two-step Delete. There is no Restore, since the worktree has no session to be restored from. Deleting drops the worktree from the list and selects the next biggest.
+- **No waiting.** The list opens on the worktrees and sizes remembered in the browser from the last visit (sizes shown in italics as stale). `StreamWorktreeStats` then supplies the daemon's current list with its **persisted** sizes, and any worktree never sized is calculated on the spot — a spinner on its row and a "Calculating disk usage… n of m" progress bar above the list. During a recalculation a row keeps its previous size beside the spinner until the new one arrives.
+
+Worktree RPCs always hit the local daemon today, so there is no host selector.
 
 ## Operator references
 
@@ -31,7 +35,7 @@ In **daemon mode**, the shell **hamburger menu** (top left) includes **Worktrees
 |-------|--------|
 | Stats baseline | Per-worktree **`git diff --numstat HEAD`** (working tree vs **`HEAD`**). |
 | Cache location | **`TDDY_PROJECTS_STATS_ROOT`** or default **`~/.tddy/projects`** / **`{project_id}/worktree_stats.json`**. |
-| Tests | **`cargo test -p tddy-daemon`** — **`worktrees_acceptance`**, **`worktrees_rpc`**; Cypress **`cypress/component/WorktreesScreen.cy.tsx`**. |
+| Tests | **`cargo test -p tddy-daemon`** — **`worktrees_acceptance`**, **`worktrees_rpc`**; Cypress **`WorktreesScreen.cy.tsx`**, **`WorktreesScreenDiskUsage.cy.tsx`**, **`WorktreesAppPage.cy.tsx`**, **`WorktreesStreamingAcceptance.cy.tsx`**; unit **`src/lib/worktreeList.test.ts`**. |
 
 ## Related documentation
 
