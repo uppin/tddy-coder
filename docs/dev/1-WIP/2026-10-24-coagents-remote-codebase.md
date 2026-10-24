@@ -5,7 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — four crates, relay forwarding (a cross-daemon RPC seam), a roster on a new session type
 **Branch**: `feature/coagents/remote-codebase`, base `feature/coagents/clone-placement` (#724) — `#coagents` 6/8
-**PR**: _assigned at wave 1_
+**PR**: [#725](https://github.com/uppin/tddy-coder/pull/725)
 
 ## Initial Discovery
 
@@ -52,14 +52,12 @@ acceptance — bodies `TODO(remote-codebase)` — and the failing tests below.
 
 ## Green wave
 
-**Wave:** 3 of 4
-**Greenable independently:** no — needs n2's coding-agent conversation behaviour
-**Concurrent with:** n3, n5, n7
+**Wave:** 4 of 4 (moved from 3 at the contract: a real edge n7 → n8)
+**Greenable independently:** no — needs n2's coding-agent conversation behaviour and n7's placement behaviour
+**Concurrent with:** n4, n6
 **Blocks:** none
 
-    n1 → n2      n2 → n3, n5, n7, n8      n3 → n4, n6      n5 → n6
-
-(n8 also reads n7's `placement` field — published surface, not behaviour; its clone test 6 needs n7 green.)
+    n1 → n2      n2 → n3, n5, n7, n8      n3 → n4, n6      n5 → n6      n7 → n8
 
 ## Affected Packages
 
@@ -106,19 +104,30 @@ laptop: main agent ─MCP─ tddy-tools --mcp ─HTTP─ relay ─LiveKit─ cod
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/remote_codebase_subagent_acceptance.rs` (new):
+`packages/tddy-session-tool-client/tests/daemon_http_rpc_acceptance.rs` — `daemon_http_rpc::DaemonHttpRpcClient` against a raw TCP daemon stub (fail at its `TODO(remote-codebase)`):
 
-1. `a_workspace_session_started_with_a_coding_agent_has_it_on_its_roster`
-2. `a_workspace_session_refuses_a_model_agent_or_a_foreign_owner`
-3. `a_conversation_through_the_relay_runs_on_the_workspace_worktree`
-4. `prompt_await_permission_and_cancel_cross_the_relay`
-5. `a_workspace_session_without_agents_has_no_roster`
-6. `a_clone_placed_agent_through_the_relay_pulls_into_the_workspace_worktree`
+1. `a_unary_call_posts_the_request_bytes_to_the_service_method_and_returns_the_answer` — `POST /rpc/<service>/<method>`, `application/proto`
+2. `a_server_stream_yields_each_enveloped_message_until_end_of_stream` — `application/connect+proto` envelopes, end-of-stream flag 2
+3. `a_connect_error_answer_is_the_status_it_names` — `{"code":"not_found"}` → `NOT_FOUND`
+4. `an_error_at_the_end_of_a_stream_is_delivered_as_its_last_item`
 
-`packages/tddy-tools-cli/tests/remote_cli_subcommand_acceptance.rs` (extend):
+`packages/tddy-tools/tests/relay_conversation_link_acceptance.rs` (`#[serial]`, remote-codebase env):
 
-7. `remote_start_session_passes_each_agent`
-8. `subagent_tools_are_advertised_in_remote_mode_with_a_roster`
+5. `the_relay_transport_carries_the_conversation_rpcs` — `AgentConversationLink::connect()` succeeds over `DaemonHttp` (today: refused)
+
+`packages/tddy-session-agents/tests/workspace_roster_admission.rs` — `workspace_roster::workspace_roster_admits`:
+
+6. `a_coding_agent_of_the_codebase_daemon_is_admitted`
+7. `a_model_agent_is_refused_naming_it`
+8. `a_coding_agent_of_another_daemon_is_refused_naming_it` — also the case #721 moved here ("a coding agent owned by another daemon is refused")
+
+`packages/tddy-tools-cli/tests/remote_cli_subcommand_acceptance.rs` (extended):
+
+9. `remote_start_session_passes_each_agent` — `specializedAgents` on the workspace `StartSession`
+
+**Changed from the plan:** the relay needs no new forward — it is an ordinary daemon whose `PeerRoutedSessionAgents` already forwards conversation RPCs by `daemon_instance_id`; what was missing is a client that can speak to it over HTTP (1–5). The two-daemon end-to-end suite (relay + codebase daemon over LiveKit, plan tests 3, 4, 6) is left to green: it needs the LiveKit testkit and every predecessor green, and green writes it in `tddy-daemon-rpc/tests/remote_codebase_subagent_acceptance.rs` once 1–9 pass. Plan test 8 (tools advertised in remote mode) follows from 5 — advertisement already keys on a non-empty roster stream, which the link now opens.
+
+**Baseline (2026-10-24, isolated `CARGO_TARGET_DIR`):** scoped clippy clean for `tddy-session-tool-client tddy-tools tddy-session-agents`; the 7 existing `remote` CLI tests pass.
 
 ## Technical Debt & Production Readiness
 
@@ -152,10 +161,10 @@ _(populated during development)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
