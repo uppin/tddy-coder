@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — proto contract change (`supervisor.proto`), two crates (`tddy-supervisor`, `tddy-spawn`), a privileged spawned-process seam with a new streaming RPC
-**Stack**: #start-progress 6/8. Base: `feature/start-progress/clone-progress`.
+**Stack**: #start-progress 6/8. PR: #739. Base: `feature/start-progress/clone-progress`.
 
 ## Initial Discovery
 
@@ -61,7 +61,7 @@ message CloneExited { optional int32 code = 1; optional int32 signal = 2; string
 
 ```rust
 // tddy-supervisor/src/client.rs
-impl SupervisorClient { pub async fn clone_repository(&self, req: CloneRequest) -> Result<impl Stream<Item = Result<CloneEvent, SupervisorError>>, SupervisorError>; }
+impl SupervisorClient { pub async fn clone_repository(&self, req: wire::CloneRepositoryRequest) -> Result<tokio::sync::mpsc::Receiver<Result<wire::CloneEvent, SupervisorError>>, SupervisorError>; }
 // tddy-spawn/src/supervisor_spawn.rs
 pub async fn clone_repo_via_supervisor_with_progress(socket: &Path, os_user: &str, git_url: &str, dest: &Path,
     env: BTreeMap<String,String>, on_started: impl FnOnce(CloneHandle), on_progress: impl FnMut(GitProgress)) -> anyhow::Result<()>;
@@ -124,11 +124,19 @@ that in-process supervisor.
 
 | Test | File | Validates |
 |---|---|---|
-| `a_supervised_clone_streams_progress_then_exits_zero` | `packages/tddy-supervisor/tests/supervisor_clone_stream.rs` (new) | stream shape |
+| `a_supervised_clone_streams_progress_then_exits_zero` | `packages/tddy-supervisor/tests/supervisor_clone_progress.rs` (new) | stream shape |
 | `a_failed_supervised_clone_ends_with_gits_stderr_tail` | same | error text |
 | `a_supervised_clone_with_an_unlisted_env_key_is_refused` | same | policy unchanged |
 | `stopping_a_supervised_clone_ends_git_and_leaves_no_destination` | same | `StopSession(pid)` + cleanup |
 | `the_daemon_reports_supervised_clone_progress_through_the_clone_callbacks` | `packages/tddy-spawn/tests/supervised_clone_progress.rs` (new) | daemon side |
+
+⚠ **At the contract commit:** the three supervisor tests are written (Linux-only, like every supervisor
+test that forks — they compile on macOS and run on CI). **Deferred to `/green`:**
+`stopping_a_supervised_clone_ends_git_and_leaves_no_destination` (needs a clone slow enough to stop, i.e.
+a way to point the supervisor's git at a fake one, which `/green` designs) and the daemon-side
+`the_daemon_reports_supervised_clone_progress_through_the_clone_callbacks` (needs a running supervisor
+from `tddy-spawn`'s tests). `futures-util` added to `tddy-supervisor` with the developer's approval
+(2026-10-24): the generated server's stream type is a `futures_util::Stream`.
 
 ## Technical Debt & Production Readiness
 
@@ -157,10 +165,10 @@ that in-process supervisor.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests (`./test -p tddy-supervisor -p tddy-spawn`); full-workspace result from CI

@@ -368,6 +368,20 @@ impl SupervisorService for SupervisorServiceImpl {
         Ok(Response::new(protocol::session_status_to_wire(status)))
     }
 
+    type CloneRepositoryStream = std::pin::Pin<
+        Box<dyn futures_util::Stream<Item = Result<wire::CloneEvent, Status>> + Send>,
+    >;
+
+    async fn clone_repository(
+        &self,
+        request: Request<wire::CloneRepositoryRequest>,
+    ) -> Result<Response<Self::CloneRepositoryStream>, Status> {
+        self.authorize_peer()?;
+        // TODO(supervised-clone-progress): implement — resolve under spawn policy, git clone --progress, stream
+        let _ = request;
+        Err(Status::unimplemented("CloneRepository"))
+    }
+
     async fn stop_session(
         &self,
         request: Request<wire::SessionRef>,

@@ -173,6 +173,22 @@ impl SupervisorClient {
         protocol::session_status_from_wire(status).map_err(protocol::error_from_status)
     }
 
+    /// Clone a repository as an allowlisted OS user, receiving git's progress as it is written; the
+    /// stream ends after `Exited`.
+    pub async fn clone_repository(
+        &self,
+        request: wire::CloneRepositoryRequest,
+    ) -> Result<
+        tokio::sync::mpsc::Receiver<Result<wire::CloneEvent, SupervisorError>>,
+        SupervisorError,
+    > {
+        // TODO(supervised-clone-progress): implement as a server-streaming call
+        let _ = request;
+        Err(SupervisorError::Unavailable {
+            message: "clone_repository: not implemented".to_string(),
+        })
+    }
+
     /// Create a cgroup v2 scope with limits clamped to policy ceilings.
     pub async fn create_scope(
         &self,

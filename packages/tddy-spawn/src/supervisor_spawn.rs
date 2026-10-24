@@ -384,3 +384,22 @@ async fn wait_for_exit(client: &SupervisorClient, pid: u32) -> anyhow::Result<Op
         }
     }
 }
+
+/// Clone `git_url` into `destination` as `os_user` through the supervisor at `socket_path`, with
+/// `env` on the git child: `on_started` once git runs (its handle stops it via `StopSession`),
+/// `on_progress` for each throttled progress line. Fails with git's own stderr tail.
+pub async fn clone_repo_via_supervisor_with_progress(
+    socket_path: &Path,
+    os_user: &str,
+    git_url: &str,
+    destination: &Path,
+    env: BTreeMap<String, String>,
+    on_started: impl FnOnce(crate::clone_run::CloneHandle),
+    on_progress: impl FnMut(crate::git_progress::GitProgress),
+) -> anyhow::Result<()> {
+    // TODO(supervised-clone-progress): implement over SupervisorClient::clone_repository
+    let _ = (socket_path, os_user, git_url, destination, env);
+    drop(on_started);
+    drop(on_progress);
+    anyhow::bail!("clone_repo_via_supervisor_with_progress: not implemented")
+}

@@ -33,6 +33,11 @@ service SupervisorService {
   // resolve to the method of that name declared just above rather than to the message.
   rpc SessionStatus(SessionRef) returns (.supervisor.SessionStatus);
   rpc StopSession(SessionRef) returns (.supervisor.SessionStatus);
+  // Clone a repository as an allowlisted OS user, streaming git's progress: `git clone --progress`
+  // under the same user and environment policy as SpawnSession, into a temporary sibling of
+  // `destination` renamed into place on success. The first event names the clone's pid (StopSession
+  // stops it); the last says how git exited. The one server-streaming RPC on this surface.
+  rpc CloneRepository(CloneRepositoryRequest) returns (stream CloneEvent);
 
   // cgroup v2 scope lifecycle inside the subtree the supervisor owns.
   rpc CreateScope(CreateScopeRequest) returns (ScopeHandle);
@@ -115,6 +120,40 @@ message SandboxMount {
   string source = 1;
   string target = 2;
   bool readonly = 3;
+}
+
+message CloneRepositoryRequest {
+  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  string os_user = 1;
+  string git_url = 2;
+  // Absolute; created by the clone. An existing destination is left alone (the clone is skipped).
+  string destination = 3;
+  // Keys must appear in the policy's allowed_env_keys.
+  map<string, string> env = 4;
+}
+
+message CloneEvent {
+  oneof event {
+    CloneStarted started = 1;
+    CloneProgressLine progress = 2;
+    CloneExited exited = 3;
+  }
+}
+
+message CloneStarted {
+  uint32 pid = 1;
+}
+
+// One line of git's stderr progress, as git wrote it.
+message CloneProgressLine {
+  string line = 1;
+}
+
+message CloneExited {
+  optional int32 code = 1;
+  optional int32 signal = 2;
+  // The last lines git wrote to stderr: its own explanation of a failure.
+  string stderr_tail = 3;
 }
 
 // Addresses one session by the pid the supervisor reported when it spawned it.
