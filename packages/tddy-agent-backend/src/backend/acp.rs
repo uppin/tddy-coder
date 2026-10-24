@@ -1,296 +1,27 @@
-//! ACP backend that communicates with an ACP agent over stdio.
+//! ACP backend for Claude: `claude-agent-acp` over stdio, on the shared [`AcpDriver`].
 //!
-//! Spawns a subprocess (e.g. tddy-acp-stub for tests, or bunx claude-agent-acp for production)
-//! and speaks JSON-RPC 2.0 over stdin/stdout using the agent-client-protocol SDK.
+//! Spawns the agent (or `tddy-acp-stub` in tests) and speaks JSON-RPC 2.0 over its stdin and stdout
+//! through the driver. What is Claude's own is its provider route, which reaches the agent as its
+//! environment; the session, the prompt, the cancel and the permission answers are the driver's.
 
-use super::acp_updates::{allow_once, record_session_update};
-use super::routed::route_child_env;
-use super::{InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
+use super::acp_driver::{self, AcpAgentCommand, AcpDriver, AllowOnce, DriverSlot, NoHooks};
+use super::{InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
-use agent_client_protocol::{self as acp, Agent as _, Client};
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
-use tokio::sync::{mpsc, oneshot};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-
-/// Accumulator for ACP session notifications during a prompt turn.
-#[derive(Debug, Default)]
-struct AcpAccumulator {
-    output: String,
-    session_id: Option<String>,
-    questions: Vec<super::ClarificationQuestion>,
-    progress_sink: Option<ProgressSink>,
-}
-
-/// Command sent from ClaudeAcpBackend to the worker thread.
-#[allow(clippy::large_enum_variant)]
-enum AcpCommand {
-    Prompt {
-        request: InvokeRequest,
-        response_tx: oneshot::Sender<Result<InvokeResponse, BackendError>>,
-    },
-    ListModels {
-        response_tx: oneshot::Sender<Result<super::BackendModels, BackendError>>,
-    },
-    #[allow(dead_code)]
-    Shutdown,
-}
-
-/// Client implementation that accumulates session notifications and handles permission requests.
-struct TddyAcpClient {
-    accumulator: Arc<Mutex<AcpAccumulator>>,
-    auto_approve: Arc<Mutex<bool>>,
-}
-
-#[async_trait::async_trait(?Send)]
-impl Client for TddyAcpClient {
-    async fn session_notification(&self, args: acp::SessionNotification) -> acp::Result<()> {
-        if let Ok(mut acc) = self.accumulator.lock() {
-            acc.session_id
-                .get_or_insert_with(|| args.session_id.0.to_string());
-            let acc = &mut *acc;
-            record_session_update(&mut acc.output, acc.progress_sink.as_ref(), args.update);
-        }
-        Ok(())
-    }
-
-    async fn request_permission(
-        &self,
-        _args: acp::RequestPermissionRequest,
-    ) -> acp::Result<acp::RequestPermissionResponse> {
-        let approve = self.auto_approve.lock().map(|g| *g).unwrap_or(true);
-        if approve {
-            Ok(allow_once())
-        } else {
-            Err(acp::Error::method_not_found())
-        }
-    }
-}
-
-/// Runs the ACP worker on a dedicated thread with LocalSet.
-fn run_acp_worker(
-    agent_path: PathBuf,
-    agent_args: Vec<String>,
-    route: Option<HarnessRoute>,
-    mut cmd_rx: mpsc::Receiver<AcpCommand>,
-) {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("acp worker runtime");
-    let local_set = tokio::task::LocalSet::new();
-    rt.block_on(local_set.run_until(async move {
-        let mut child = match spawn_agent(&agent_path, &agent_args, route.as_ref()).await {
-            Ok(c) => c,
-            Err(e) => {
-                while let Some(cmd) = cmd_rx.recv().await {
-                    match cmd {
-                        AcpCommand::Prompt { response_tx, .. } => {
-                            let _ = response_tx.send(Err(e.clone()));
-                        }
-                        AcpCommand::ListModels { response_tx } => {
-                            let _ = response_tx.send(Err(e.clone()));
-                        }
-                        AcpCommand::Shutdown => {}
-                    }
-                }
-                return;
-            }
-        };
-
-        let stdout = child.stdout.take().expect("stdout");
-        let stdin = child.stdin.take().expect("stdin");
-        let outgoing = stdin.compat_write();
-        let incoming = stdout.compat();
-
-        let accumulator = Arc::new(Mutex::new(AcpAccumulator::default()));
-        let auto_approve_flag = Arc::new(Mutex::new(true));
-        let client = TddyAcpClient {
-            accumulator: accumulator.clone(),
-            auto_approve: auto_approve_flag.clone(),
-        };
-
-        let (conn, handle_io) = acp::ClientSideConnection::new(client, outgoing, incoming, |fut| {
-            tokio::task::spawn_local(fut);
-        });
-
-        tokio::task::spawn_local(handle_io);
-
-        let mut sessions: HashMap<String, String> = HashMap::new();
-        let mut initialized = false;
-
-        while let Some(cmd) = cmd_rx.recv().await {
-            match cmd {
-                AcpCommand::Prompt {
-                    request,
-                    response_tx,
-                } => {
-                    let auto_approve = true;
-                    if let Ok(mut acc) = accumulator.lock() {
-                        *acc = AcpAccumulator {
-                            output: String::new(),
-                            session_id: None,
-                            questions: vec![],
-                            progress_sink: request.progress_sink.clone(),
-                        };
-                    }
-                    if let Ok(mut ap) = auto_approve_flag.lock() {
-                        *ap = auto_approve;
-                    }
-
-                    if !initialized {
-                        let init_req = acp::InitializeRequest::new(acp::ProtocolVersion::V1)
-                            .client_info(
-                                acp::Implementation::new("tddy-coder", env!("CARGO_PKG_VERSION"))
-                                    .title("TDDY Coder"),
-                            );
-                        if let Err(e) = conn.initialize(init_req).await {
-                            let _ = response_tx.send(Err(BackendError::InvocationFailed(format!(
-                                "ACP initialize failed: {}",
-                                e
-                            ))));
-                            continue;
-                        }
-                        initialized = true;
-                    }
-
-                    let cwd = request
-                        .working_dir
-                        .clone()
-                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-                    let acp_session_id = match &request.session {
-                        Some(SessionMode::Resume(id)) => sessions.get(id).cloned(),
-                        _ => None,
-                    };
-                    let acp_session_id = match acp_session_id {
-                        Some(sid) => acp::SessionId::new(sid),
-                        None => {
-                            let new_req = acp::NewSessionRequest::new(cwd.clone());
-                            match conn.new_session(new_req).await {
-                                Ok(r) => {
-                                    let sid = r.session_id.0.clone();
-                                    if let Some(SessionMode::Fresh(id)) = &request.session {
-                                        sessions.insert(id.clone(), sid.to_string());
-                                    }
-                                    acp::SessionId::new(sid)
-                                }
-                                Err(e) => {
-                                    let _ = response_tx.send(Err(BackendError::InvocationFailed(
-                                        format!("ACP new_session failed: {}", e),
-                                    )));
-                                    continue;
-                                }
-                            }
-                        }
-                    };
-
-                    let acp_session_id_str = acp_session_id.0.to_string();
-                    let prompt_blocks: Vec<acp::ContentBlock> = vec![request.prompt.clone().into()];
-                    let prompt_req = acp::PromptRequest::new(acp_session_id, prompt_blocks);
-                    match conn.prompt(prompt_req).await {
-                        Ok(_) => {
-                            let acc = accumulator.lock().map(|a| AcpAccumulator {
-                                output: a.output.clone(),
-                                session_id: a.session_id.clone(),
-                                questions: a.questions.clone(),
-                                progress_sink: None,
-                            });
-                            let (output, session_id, questions) = match acc {
-                                Ok(a) => (
-                                    a.output,
-                                    a.session_id.or_else(|| Some(acp_session_id_str.clone())),
-                                    a.questions,
-                                ),
-                                Err(_) => (String::new(), Some(acp_session_id_str), vec![]),
-                            };
-                            let resp = InvokeResponse {
-                                output,
-                                exit_code: 0,
-                                session_id,
-                                questions,
-                                raw_stream: None,
-                                stderr: None,
-                            };
-                            let _ = response_tx.send(Ok(resp));
-                        }
-                        Err(e) => {
-                            let _ = response_tx.send(Err(BackendError::InvocationFailed(format!(
-                                "ACP prompt failed: {}",
-                                e
-                            ))));
-                        }
-                    }
-                }
-                AcpCommand::ListModels { response_tx } => {
-                    if !initialized {
-                        let init_req = acp::InitializeRequest::new(acp::ProtocolVersion::V1)
-                            .client_info(
-                                acp::Implementation::new("tddy-coder", env!("CARGO_PKG_VERSION"))
-                                    .title("TDDY Coder"),
-                            );
-                        if let Err(e) = conn.initialize(init_req).await {
-                            let _ = response_tx.send(Err(BackendError::InvocationFailed(format!(
-                                "ACP initialize failed: {}",
-                                e
-                            ))));
-                            continue;
-                        }
-                        initialized = true;
-                    }
-                    let cwd = std::env::current_dir().unwrap_or_default();
-                    let new_req = acp::NewSessionRequest::new(cwd);
-                    let result = match conn.new_session(new_req).await {
-                        Ok(r) => super::acp_models_from_session_state(r.models.as_ref()),
-                        Err(e) => Err(BackendError::InvocationFailed(format!(
-                            "ACP new_session failed: {}",
-                            e
-                        ))),
-                    };
-                    let _ = response_tx.send(result);
-                }
-                AcpCommand::Shutdown => break,
-            }
-        }
-    }));
-}
-
-async fn spawn_agent(
-    agent_path: &PathBuf,
-    agent_args: &[String],
-    route: Option<&HarnessRoute>,
-) -> Result<tokio::process::Child, BackendError> {
-    let mut cmd = tokio::process::Command::new(agent_path);
-    for arg in agent_args {
-        cmd.arg(arg);
-    }
-    if let Some(route) = route {
-        cmd.envs(route_child_env(route));
-    }
-    cmd.stdin(std::process::Stdio::piped());
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::null());
-    cmd.spawn().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            BackendError::BinaryNotFound(agent_path.to_string_lossy().to_string())
-        } else {
-            BackendError::InvocationFailed(e.to_string())
-        }
-    })
-}
+use std::sync::{Arc, Mutex};
 
 /// Backend that invokes an ACP agent subprocess via the Agent Client Protocol.
 ///
-/// The worker thread spawns the agent once, when it starts, so it starts on the first command
-/// rather than at construction: a route set by [`ClaudeAcpBackend::with_provider_route`] has to be
-/// known before the agent exists.
+/// The driver spawns the agent when the first request needs it, so it starts on first use rather
+/// than at construction: a route set by [`ClaudeAcpBackend::with_provider_route`] has to be known
+/// before the agent exists.
 pub struct ClaudeAcpBackend {
     agent_path: PathBuf,
     agent_args: Vec<String>,
     /// The provider route the agent runs on (`with_provider_route`); `None` for the vendor.
     provider_route: Option<HarnessRoute>,
-    worker: OnceLock<mpsc::Sender<AcpCommand>>,
+    driver: DriverSlot,
 }
 
 impl std::fmt::Debug for ClaudeAcpBackend {
@@ -325,26 +56,31 @@ impl ClaudeAcpBackend {
             agent_path,
             agent_args,
             provider_route: None,
-            worker: OnceLock::new(),
+            driver: Mutex::new(None),
         }
     }
 
-    /// Run the agent on `route`. A worker started before the route was set runs the vendor:
-    /// dropping its channel ends it, and the next command starts one on the route.
+    /// Run the agent on `route`. A driver started before the route was set runs the vendor: it is
+    /// dropped here, which ends its child, and the next request starts one on the route.
     pub(super) fn set_provider_route(&mut self, route: HarnessRoute) {
         self.provider_route = Some(route);
-        self.worker = OnceLock::new();
+        self.driver = Mutex::new(None);
     }
 
-    /// The worker's command channel, starting the worker on first use.
-    fn commands(&self) -> &mpsc::Sender<AcpCommand> {
-        self.worker.get_or_init(|| {
-            let (cmd_tx, cmd_rx) = mpsc::channel(16);
-            let agent_path = self.agent_path.clone();
-            let agent_args = self.agent_args.clone();
-            let route = self.provider_route.clone();
-            std::thread::spawn(move || run_acp_worker(agent_path, agent_args, route, cmd_rx));
-            cmd_tx
+    /// The driver, started on first use. The route's environment is given to the agent child.
+    fn driver(&self) -> Result<Arc<AcpDriver>, BackendError> {
+        acp_driver::started(&self.driver, || {
+            let command = AcpAgentCommand {
+                program: self.agent_path.clone(),
+                args: self.agent_args.clone(),
+                env: self
+                    .provider_route
+                    .as_ref()
+                    .map(acp_driver::route_env)
+                    .unwrap_or_default(),
+                cwd: None,
+            };
+            AcpDriver::spawn(command, Arc::new(AllowOnce), Arc::new(NoHooks))
         })
     }
 }
@@ -352,17 +88,10 @@ impl ClaudeAcpBackend {
 #[async_trait::async_trait]
 impl super::CodingBackend for ClaudeAcpBackend {
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.commands()
-            .send(AcpCommand::Prompt {
-                request,
-                response_tx,
-            })
-            .await
-            .map_err(|_| BackendError::InvocationFailed("ACP worker channel closed".to_string()))?;
-        response_rx.await.map_err(|_| {
-            BackendError::InvocationFailed("ACP worker dropped response".to_string())
-        })?
+        let driver = self.driver()?;
+        let open = acp_driver::open_for_request(&request, self.provider_route.is_some())?;
+        let session = driver.open_session(open).await?;
+        acp_driver::answer(&driver, session, request.prompt, request.progress_sink).await
     }
 
     fn name(&self) -> &str {
@@ -370,13 +99,6 @@ impl super::CodingBackend for ClaudeAcpBackend {
     }
 
     async fn list_models(&self) -> Result<super::BackendModels, BackendError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.commands()
-            .send(AcpCommand::ListModels { response_tx })
-            .await
-            .map_err(|_| BackendError::InvocationFailed("ACP worker channel closed".to_string()))?;
-        response_rx.await.map_err(|_| {
-            BackendError::InvocationFailed("ACP worker dropped response".to_string())
-        })?
+        self.driver()?.list_models().await
     }
 }
