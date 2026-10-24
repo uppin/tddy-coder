@@ -13,10 +13,8 @@ use tddy_daemon_kernel::os_user_resolution::resolve_os_user;
 use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 use tddy_rpc::{Request, RequestTransport, Response, Status};
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
-use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::ResumeSessionResponse as ConnResumeSessionResponse;
 use tddy_service::proto::session::SessionEntry as ConnSessionEntry;
-use tddy_service::proto::session::StartSessionEvent as ConnStartSessionEvent;
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, GetWorktreeSnapshotRequest,
     GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionResponse,
@@ -28,9 +26,6 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_session_split::service_util;
 use tddy_spawn::spawner;
 
-use crate::start_keepalive::{
-    with_activity_keepalive, STARTING_ACTIVITY, START_KEEPALIVE_INTERVAL,
-};
 use tddy_worktree_service::stream::MpscResultStream;
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
@@ -343,56 +338,22 @@ impl LaunchSessions {
         }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<StartSessionEvent, Status>>();
-        // The work runs on its own task so progress reaches the client while the host is still
-        // materializing, rather than all at once after the start completes. A failure terminates
-        // the stream with the status — a result event is only ever sent on success.
-        let service = self.clone();
-        let (conn_progress_tx, conn_progress_rx) =
-            tokio::sync::mpsc::unbounded_channel::<Result<ConnStartSessionEvent, Status>>();
-        let session_tx = tx.clone();
-        let forwarding = tokio::spawn(async move {
-            let mut conn_progress_rx = conn_progress_rx;
-            while let Some(item) = conn_progress_rx.recv().await {
-                let mapped = match item {
-                    Ok(ev) => crate::family_proto_bridge::wire_same(&ev),
-                    Err(s) => Err(s),
-                };
-                if session_tx.send(mapped).is_err() {
-                    break;
-                }
-            }
-        });
-        tokio::spawn(async move {
-            let sink = AttachmentProgressSink::streaming(conn_progress_tx);
-            // Kept alive for the whole start, not only while a project is provisioned: a worktree cut
-            // or an index build can be quiet for longer than the relay tolerates.
-            let started = with_activity_keepalive(
-                &sink,
-                START_KEEPALIVE_INTERVAL,
-                STARTING_ACTIVITY,
-                service.start_session_core(req, &sink),
+        // The start runs as a task of the daemon's registry: it names itself first (`started`), so
+        // the caller can cancel it, and its `CancellationToken` reaches the clone and every step
+        // after it.
+        self.task_registry
+            .spawn(
+                crate::start_task::StartTask {
+                    service: self.clone(),
+                    req,
+                    tx,
+                    daemon_instance_id: local_instance_id_for_config(&self.config),
+                },
+                crate::start_task::START_TASK_KIND,
+                "",
+                Vec::new(),
             )
             .await;
-            // The terminal event goes out only after every progress event ahead of it has been
-            // forwarded: they travel through the forwarding task, so sending the terminal one
-            // directly would let it overtake a phase's end. Dropping the sink closes the channel
-            // that task drains.
-            drop(sink);
-            if let Err(err) = forwarding.await {
-                log::warn!("StreamStartSession: the start's progress forwarding task ended abnormally: {err}");
-            }
-            let event = match started {
-                Ok(response) => match crate::family_proto_bridge::wire_same(&response.into_inner())
-                {
-                    Ok(session_result) => Ok(StartSessionEvent {
-                        event: Some(StartSessionEventKind::Result(session_result)),
-                    }),
-                    Err(status) => Err(status),
-                },
-                Err(status) => Err(status),
-            };
-            let _ = tx.send(event);
-        });
         Ok(Response::new(MpscResultStream::from(rx)))
     }
 }

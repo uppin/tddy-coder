@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tddy_service::proto::session::CloneProgress;
+use tddy_spawn::clone_run::CloneHandle;
 use tddy_spawn::git_progress::GitProgress;
 use tddy_spawn::spawn_worker::WorkerEvent;
 use tddy_spawn::supervisor_client::SpawnBackendChoice;
@@ -34,12 +35,14 @@ pub(crate) struct CloneBackend {
 
 impl CloneBackend {
     /// Clone `git_url` into `dest` as the OS user, with `env` on the `git` child, handing each
-    /// throttled line of git's progress to `on_progress`. Blocks.
+    /// throttled line of git's progress to `on_progress`, and the handle that stops the clone to
+    /// `on_started` once git runs. Blocks.
     pub(crate) fn clone_repo(
         &self,
         git_url: &str,
         dest: &Path,
         env: &BTreeMap<String, String>,
+        on_started: impl FnOnce(CloneHandle),
         mut on_progress: impl FnMut(GitProgress),
     ) -> Result<(), String> {
         match &self.choice {
@@ -52,27 +55,33 @@ impl CloneBackend {
                         git_url,
                         dest,
                         env.clone(),
-                        |_| {},
+                        on_started,
                         on_progress,
                     ),
                 )
                 .map_err(|e| format!("{e:#}")),
             SpawnBackendChoice::ForkedWorker => match &self.spawn_client {
-                Some(client) => client
-                    .clone_repo_observed(
-                        spawn_worker::CloneRequest {
-                            os_user: self.os_user.clone(),
-                            git_url: git_url.to_string(),
-                            destination: dest.display().to_string(),
-                            env: env.clone(),
-                        },
-                        |event| {
-                            if let WorkerEvent::CloneProgress(progress) = event {
-                                on_progress(progress);
-                            }
-                        },
-                    )
-                    .map_err(|e| e.to_string()),
+                Some(client) => {
+                    let mut on_started = Some(on_started);
+                    client
+                        .clone_repo_observed(
+                            spawn_worker::CloneRequest {
+                                os_user: self.os_user.clone(),
+                                git_url: git_url.to_string(),
+                                destination: dest.display().to_string(),
+                                env: env.clone(),
+                            },
+                            |event| match event {
+                                WorkerEvent::Started { pid } => {
+                                    if let Some(on_started) = on_started.take() {
+                                        on_started(CloneHandle::for_process_group(pid));
+                                    }
+                                }
+                                WorkerEvent::CloneProgress(progress) => on_progress(progress),
+                            },
+                        )
+                        .map_err(|e| e.to_string())
+                }
                 // No forked worker at all: clone in this process.
                 None => {
                     let pairs: Vec<(&str, &str)> =
@@ -82,7 +91,7 @@ impl CloneBackend {
                         git_url,
                         dest,
                         &pairs,
-                        |_| {},
+                        on_started,
                         on_progress,
                     )
                     .map_err(|e| e.to_string())

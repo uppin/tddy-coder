@@ -10,6 +10,7 @@ use tddy_discovery::harness_profile::{load_harness_profiles, HarnessProfile};
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
+use tddy_task::CancellationToken;
 
 use crate::harness_profile_start::profile_start;
 use crate::launch_ports::LaunchSessions;
@@ -30,9 +31,21 @@ impl LaunchSessions {
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
+        self.start_session_core_cancellable(req, progress, &CancellationToken::new())
+            .await
+    }
+
+    /// [`Self::start_session_core`] for a start that can be cancelled: once `cancel` is signalled the
+    /// clone is stopped, no further step begins and the start ends `CANCELLED`.
+    pub async fn start_session_core_cancellable(
+        &self,
+        req: StartSessionRequest,
+        progress: &AttachmentProgressSink,
+        cancel: &CancellationToken,
+    ) -> Result<Response<StartSessionResponse>, Status> {
         refuse_a_requested_role(&req)?;
         let req = self.apply_harness_profile(req)?;
-        self.start_session_with_role(req, progress).await
+        self.start_session_with_role(req, progress, cancel).await
     }
 
     /// Start `req`, its harness profile already applied, with the standing role it carries.
@@ -43,8 +56,9 @@ impl LaunchSessions {
         &self,
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
+        cancel: &CancellationToken,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        self.start_session_on_request(req, progress).await
+        self.start_session_on_request(req, progress, cancel).await
     }
 
     /// `req` as the profile its `agent` names in `<tddyhome>/agents/` would start it; `req`

@@ -231,7 +231,11 @@ impl LaunchSessions {
     ) -> Result<String, Status> {
         let project_id = &scope.project.project_id;
         let started = self
-            .start_session_with_role(start, &AttachmentProgressSink::discarding())
+            .start_session_with_role(
+                start,
+                &AttachmentProgressSink::discarding(),
+                &tddy_task::CancellationToken::new(),
+            )
             .await?
             .into_inner()
             .session_id;

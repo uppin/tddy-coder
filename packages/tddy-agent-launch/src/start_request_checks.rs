@@ -163,6 +163,7 @@ impl LaunchSessions {
         req: &StartSessionRequest,
         os_user: &str,
         progress: &AttachmentProgressSink,
+        cancel: &tddy_task::CancellationToken,
     ) -> Result<(), Status> {
         let project_id = req.project_id.trim();
         if !project_id.is_empty() {
@@ -180,6 +181,7 @@ impl LaunchSessions {
                     &req.session_token,
                     req.agent_clone.as_ref(),
                     progress,
+                    cancel,
                 ),
             )
             .await?;

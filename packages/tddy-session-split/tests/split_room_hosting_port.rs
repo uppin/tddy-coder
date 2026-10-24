@@ -33,8 +33,9 @@ use tddy_service::proto::session::start_phase::{Boundary, Step};
 use tddy_service::proto::session::start_session_event::Event;
 use tddy_service::proto::session::{
     DeleteSessionRequest, DeleteSessionResponse, StartKeepAlive, StartPhase, StartSessionEvent,
-    StartSessionRequest, StartSessionResponse,
+    StartSessionRequest, StartSessionResponse, StartTaskStarted,
 };
+use tddy_service::proto::tasks::{CancelTaskRequest, CancelTaskResponse};
 use tddy_session_agents::agent_host_callbacks::{AgentHostCallbacks, AgentRoster};
 use tddy_session_agents::session_agent_clone::{
     HostedAgentClones, HostedClone, SessionAgentCloneStore,
@@ -46,6 +47,7 @@ use tddy_session_split::split_ports::{
     SplitHost, SplitSessionAgents, SplitSessionFiles, SplitSessions,
 };
 use tddy_session_split::split_session::{split_remote_tool_env_from_join, SplitSpawnTarget};
+use tddy_task::CancellationToken;
 use tokio::sync::mpsc;
 
 #[test]
@@ -147,6 +149,7 @@ async fn a_split_start_relays_the_codebase_hosts_worktree_step_and_keep_alives()
                 &daemon.a_caller_token_with_seconds_left(600),
             ),
             &AttachmentProgressSink::streaming(tx),
+            &CancellationToken::new(),
         )
         .await;
 
@@ -193,6 +196,7 @@ async fn a_split_start_whose_codebase_host_answers_deadline_exceeded_reports_tha
                 &daemon.a_caller_token_with_seconds_left(600),
             ),
             &AttachmentProgressSink::discarding(),
+            &CancellationToken::new(),
         )
         .await
         .expect_err("the codebase host failed the start");
@@ -211,10 +215,62 @@ async fn a_split_start_whose_codebase_host_answers_deadline_exceeded_reports_tha
     );
 }
 
+#[tokio::test]
+async fn cancelling_a_split_start_cancels_the_codebase_hosts_task() {
+    // Given a codebase host that has named the task it runs its half as, and is still cutting
+    let daemon = a_facilitating_daemon_whose_codebase_host(a_codebase_host_that_never_finishes());
+    let cancel = CancellationToken::new();
+    let (tx, mut progress) = mpsc::unbounded_channel();
+    let request =
+        a_split_claude_cli_request(CODEBASE_HOST, &daemon.a_caller_token_with_seconds_left(600));
+    let sink = AttachmentProgressSink::streaming(tx);
+    let start = daemon.split.start_split_claude_cli_session(
+        "operator",
+        CODEBASE_HOST,
+        &request,
+        &sink,
+        &cancel,
+    );
+    tokio::pin!(start);
+    let relayed_task = loop {
+        tokio::select! {
+            result = &mut start => panic!("the start ended before it was cancelled: {result:?}"),
+            Some(Ok(event)) = progress.recv() => {
+                if let Some(Event::Started(started)) = event.event {
+                    break started;
+                }
+            }
+        }
+    };
+
+    // When the operator cancels the start
+    cancel.cancel();
+    let ended = start
+        .await
+        .expect_err("a cancelled start does not complete");
+
+    // Then the codebase host's task was cancelled, its workspace session torn down, and the start
+    // ended CANCELLED; the operator was told the codebase host's own task id to address
+    assert_eq!(ended.code, tddy_rpc::Code::Cancelled, "ended: {ended:?}");
+    assert_eq!(relayed_task.task_id, CODEBASE_TASK);
+    assert_eq!(
+        daemon.codebase_host.cancelled.lock().unwrap().clone(),
+        vec![CODEBASE_TASK.to_string()],
+        "the codebase host was asked to cancel its task"
+    );
+    let created = daemon.codebase_host.the_checkout_it_created();
+    assert_eq!(
+        daemon.codebase_host.deleted.lock().unwrap().clone(),
+        vec![created.codebase_session_id],
+        "the workspace session it was asked for is torn down"
+    );
+}
+
 // ─── the facilitating daemon ────────────────────────────────────────────────────
 
 const FACILITATING_HOST: &str = "workstation-a";
 const CODEBASE_HOST: &str = "workstation-b";
+const CODEBASE_TASK: &str = "codebase-start-task";
 const OPERATOR_LOGIN: &str = "uppin";
 
 /// The daemon running the split agent: its split topic as the host builds it, with the split-room
@@ -314,6 +370,7 @@ impl AFacilitatingDaemon {
                 codebase_host,
                 &a_split_claude_cli_request(codebase_host, caller_token),
                 &AttachmentProgressSink::discarding(),
+                &CancellationToken::new(),
             )
             .await;
         let stopped_at = match started {
@@ -481,7 +538,21 @@ impl SplitRoomHosting for RecordedSplitRooms {
 struct ACodebaseHost {
     started: Mutex<Vec<StartSessionRequest>>,
     deleted: Mutex<Vec<String>>,
+    /// The tasks it was asked to cancel.
+    cancelled: Mutex<Vec<String>>,
     fails_with: Option<Status>,
+    /// Names its task, then keeps cutting: its stream never ends.
+    never_finishes: bool,
+    /// The open streams of a start that never finishes, held so their senders stay alive.
+    open_streams: Mutex<Vec<mpsc::Sender<Result<Vec<u8>, Status>>>>,
+}
+
+/// A codebase host that names its task and then goes on cutting the worktree until cancelled.
+fn a_codebase_host_that_never_finishes() -> ACodebaseHost {
+    ACodebaseHost {
+        never_finishes: true,
+        ..ACodebaseHost::default()
+    }
 }
 
 /// A codebase host whose streamed start keeps itself alive and then fails with `status`.
@@ -543,9 +614,25 @@ impl PeerForwarder for ACodebaseHost {
         body: Vec<u8>,
     ) -> Result<Vec<u8>, Status> {
         assert_eq!(
-            (peer_id, service),
-            (CODEBASE_HOST, "session.SessionService"),
-            "a split start talks to the codebase host's session service only"
+            peer_id, CODEBASE_HOST,
+            "a split start talks to its codebase host"
+        );
+        if (service, method) == ("tasks.TaskService", "CancelTask") {
+            let request =
+                CancelTaskRequest::decode(body.as_slice()).expect("a forwarded CancelTask decodes");
+            self.cancelled
+                .lock()
+                .expect("cancelled tasks lock")
+                .push(request.task_id);
+            return Ok(CancelTaskResponse {
+                ok: true,
+                message: String::new(),
+            }
+            .encode_to_vec());
+        }
+        assert_eq!(
+            service, "session.SessionService",
+            "a split start talks to the codebase host's session and task services only"
         );
         match method {
             "StartSession" => {
@@ -598,14 +685,22 @@ impl PeerForwarder for ACodebaseHost {
             .expect("started sessions lock")
             .push(request);
         let (tx, frames) = mpsc::channel(8);
-        let mut script = vec![
+        let mut script = Vec::new();
+        if self.never_finishes {
+            script.push(Ok(an_event(Event::Started(StartTaskStarted {
+                task_id: CODEBASE_TASK.to_string(),
+                daemon_instance_id: CODEBASE_HOST.to_string(),
+            }))));
+        }
+        script.extend([
             Ok(an_event(a_worktree_phase(Boundary::Begin))),
             Ok(an_event(Event::KeepAlive(StartKeepAlive {
                 activity: "worktree".to_string(),
             }))),
-        ];
+        ]);
         match &self.fails_with {
             Some(status) => script.push(Err(status.clone())),
+            None if self.never_finishes => {}
             None => {
                 script.push(Ok(an_event(a_worktree_phase(Boundary::End))));
                 script.push(Ok(an_event(Event::Result(StartSessionResponse {
@@ -618,6 +713,12 @@ impl PeerForwarder for ACodebaseHost {
             tx.send(frame)
                 .await
                 .expect("the relay reads the codebase host's frames");
+        }
+        if self.never_finishes {
+            self.open_streams
+                .lock()
+                .expect("open streams lock")
+                .push(tx);
         }
         Ok(frames)
     }

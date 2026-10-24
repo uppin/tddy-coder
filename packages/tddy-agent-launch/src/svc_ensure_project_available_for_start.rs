@@ -1,5 +1,6 @@
 use crate::clone_backend::{clone_progress_event, CloneBackend};
 use crate::clone_planner::ClonePlanner;
+use crate::clone_stopper::CloneStopper;
 use crate::launch_ports::LaunchSessions;
 use std::path::Path;
 use std::path::PathBuf;
@@ -24,6 +25,7 @@ pub(super) struct ProjectClone {
     planner: ClonePlanner,
     facilitating_remote_url: Option<String>,
     progress: AttachmentProgressSink,
+    cancel: tddy_task::CancellationToken,
 }
 
 pub(super) fn spawn_project_clone(
@@ -41,6 +43,7 @@ pub(super) fn spawn_project_clone(
         planner,
         facilitating_remote_url,
         progress,
+        cancel,
     } = launch;
     let handle = tokio::task::spawn_blocking(move || {
         let backend = CloneBackend {
@@ -50,7 +53,7 @@ pub(super) fn spawn_project_clone(
             runtime,
         };
         let cloner = |git_url: &str, dest: &Path| {
-            clone_as_a_start_step(&backend, &planner, &progress, git_url, dest)
+            clone_as_a_start_step(&backend, &planner, &progress, &cancel, git_url, dest)
         };
         let provisioned = if let Some(remote_url) = facilitating_remote_url {
             tddy_projects::project_provision::ensure_project_available_from_facilitator(
@@ -88,16 +91,23 @@ fn clone_as_a_start_step(
     backend: &CloneBackend,
     planner: &ClonePlanner,
     progress: &AttachmentProgressSink,
+    cancel: &tddy_task::CancellationToken,
     git_url: &str,
     dest: &Path,
 ) -> Result<(), String> {
     progress.begin_phase(StartStep::Clone);
     // The plan (and the grant it holds) lives until this clone has ended.
     let planned = planner.plan(git_url)?;
+    // Cancelling the start stops git through the handle the backend hands back once it runs.
+    let stopper = CloneStopper::watching(cancel, &backend.runtime);
     backend
-        .clone_repo(git_url, dest, planned.env(), |line| {
-            progress.clone_progress(clone_progress_event(line))
-        })
+        .clone_repo(
+            git_url,
+            dest,
+            planned.env(),
+            |handle| stopper.started(handle),
+            |line| progress.clone_progress(clone_progress_event(line)),
+        )
         .map_err(|e| planned.explain_failure(e))?;
     progress.end_phase(StartStep::Clone);
     Ok(())
@@ -125,6 +135,7 @@ impl LaunchSessions {
         session_token: &str,
         agent_clone: Option<&tddy_service::proto::session::AgentClonePlacement>,
         progress: &AttachmentProgressSink,
+        cancel: &tddy_task::CancellationToken,
     ) -> Result<project_storage::ProjectData, Status> {
         // Resolved lazily: only a peer-provisioned clone needs a base path. A locally-registered
         // project (the common case) never consults it, so a `None` here must not fail the start —
@@ -207,11 +218,16 @@ impl LaunchSessions {
             runtime,
             facilitating_remote_url,
             progress: progress.clone(),
+            cancel: cancel.clone(),
         });
 
         // No deadline: a clone is as slow as its repository and its network, and it reports its
         // progress while it runs. Only the operator's stop (or the client hanging up) ends it early.
-        match handle.await {
+        let cloned = handle.await;
+        // A clone that ended because the start was cancelled reports that, not the failure its
+        // stopped git process left behind.
+        crate::svc_start_session_core::refuse_a_cancelled_start(cancel)?;
+        match cloned {
             Ok(res) => res.inspect_err(|status| {
                 log::warn!(
                     "ensure_project_available_for_start: clone of project {project_id} failed: {status}"
