@@ -12920,6 +12920,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tddy-agent-backend",
  "tddy-core",
  "tddy-rpc",
  "tddy-service",

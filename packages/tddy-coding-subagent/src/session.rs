@@ -15,6 +15,7 @@ use tddy_discovery::subagent::{
     preview_of, ContentBlock, MessageDescriptor, MessageId, MessageRole, PermissionRequestView,
     PromptOutcome, StopReason, SubagentError, SubagentSession, ToolCallDescriptor, TurnRequest,
 };
+use tokio::sync::broadcast;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::parked_permissions::{nothing_pending, ParkedPermissions};
@@ -22,6 +23,9 @@ use crate::parked_permissions::{nothing_pending, ParkedPermissions};
 /// The prompt a conversation is answering, shared with its cancel handles. A turn holds the slot
 /// for as long as it runs, so a cancel waits for the turn to end before it returns.
 type InFlightSlot = AsyncMutex<Option<InFlightPrompt>>;
+
+/// How far a subscriber to a coding agent's updates may fall behind before it misses some.
+const UPDATE_STREAM_CAPACITY: usize = 1024;
 
 /// One conversation with a coding agent: one agent process, one ACP session.
 ///
@@ -47,6 +51,9 @@ pub struct CodingAgentSession {
     history: Vec<String>,
     /// Receives every update of every later turn as it streams; set by [`Self::record_updates_with`].
     recorder: Option<AcpUpdateSink>,
+    /// Every update of every turn as it streams, for [`SubagentSession::updates`]. Each update goes
+    /// here alongside the recorder and the turn's own list, so all of them see the same stream.
+    update_stream: broadcast::Sender<AcpUpdate>,
 }
 
 /// One `session/prompt` the session has sent and has not yet seen end.
@@ -115,6 +122,7 @@ impl CodingAgentSession {
             next_ordinal: 1,
             history: Vec::new(),
             recorder: None,
+            update_stream: broadcast::channel(UPDATE_STREAM_CAPACITY).0,
         })
     }
 
@@ -180,10 +188,13 @@ impl CodingAgentSession {
         let updates = Arc::new(Mutex::new(Vec::new()));
         let sink_updates = Arc::clone(&updates);
         let recorder = self.recorder.clone();
+        let stream = self.update_stream.clone();
         let sink: AcpUpdateSink = Arc::new(move |update| {
             if let Some(recorder) = &recorder {
                 recorder(update.clone());
             }
+            // A send with no subscriber is not an error: nothing is streaming this conversation.
+            let _ = stream.send(update.clone());
             sink_updates
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -511,5 +522,9 @@ impl SubagentSession for CodingAgentSession {
     fn tail(&self, max_messages: usize) -> Vec<String> {
         let skip = self.history.len().saturating_sub(max_messages);
         self.history[skip..].to_vec()
+    }
+
+    fn updates(&self) -> Option<broadcast::Receiver<AcpUpdate>> {
+        Some(self.update_stream.subscribe())
     }
 }

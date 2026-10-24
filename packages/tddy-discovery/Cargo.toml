@@ -21,6 +21,8 @@ serde_yaml = "0.9"
 # deadlines a deferred turn and a roster reconnect are bounded by.
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 tddy-core = { path = "../tddy-core" }
+# `AcpUpdate`: the stream a coding-agent session exposes through `SubagentSession::updates`.
+tddy-agent-backend = { path = "../tddy-agent-backend" }
 # roster: `connection.SessionAgentService`'s messages — the roster frames this crate follows and
 # the conversation RPCs it opens. `#unbundle` node 5 moved the roster here because it is a
 # stateful layer over this crate's own subagent traits; the protos it speaks are tddy-service's.
