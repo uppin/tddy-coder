@@ -237,11 +237,11 @@ the timing tests as the coverage.
 - [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests (`./test -p tddy-daemon-kernel -p tddy-session-split -p tddy-session-agents -p tddy-agent-launch -p tddy-session-lifecycle`); full-workspace result (incl. the LiveKit cross-host case) from CI
+- [x] Update documentation with progress
+- [x] Run scoped tests (`./test -p tddy-daemon-kernel -p tddy-session-split -p tddy-session-agents -p tddy-agent-launch -p tddy-session-lifecycle`); full-workspace result (incl. the LiveKit cross-host case) from CI
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped clippy, `cargo fmt`)
+- [x] Linting and formatting (scoped clippy, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
