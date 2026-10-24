@@ -66,9 +66,9 @@ Refused starts:
 
 | Request | Status |
 |---|---|
-| `sandbox = true` | `FAILED_PRECONDITION` — the sandbox runner does not host Warp |
+| `sandbox = true` | `FAILED_PRECONDITION` — "the sandbox runner does not host warp-cli" |
 | `managed_codebase = true` | `INVALID_ARGUMENT` — Warp has no workflow of its own for a managed codebase to drive |
-| a provider account chosen (`provider_account_id`) | `INVALID_ARGUMENT` — "warp-cli does not accept a provider account; it runs on your own Warp sign-in" |
+| a provider account chosen (`provider_account_id`) | `INVALID_ARGUMENT` — "Warp cannot be pointed at another provider; it always runs on its own vendor" (the refusal Cursor gets) |
 
 A person's **Default for** a harness has no Warp row, so a start that names no account never picks
 one up.

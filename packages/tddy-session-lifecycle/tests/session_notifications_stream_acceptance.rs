@@ -93,6 +93,7 @@ fn write_claude_cli_session(sessions_base: &Path, session_id: &str, repo_path: &
         session_type: Some("claude-cli".to_string()),
         model: Some("claude-opus-5".to_string()),
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: Some("Running".to_string()),
         hook_token: Some(TEST_HOOK_TOKEN.to_string()),
         sandbox: None,

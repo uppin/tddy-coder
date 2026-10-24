@@ -58,6 +58,7 @@ async fn list_sessions_unit_returns_new_metadata_fields() {
         session_type: Some("tool".to_string()),
         model: None,
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: None,
         sandbox: None,

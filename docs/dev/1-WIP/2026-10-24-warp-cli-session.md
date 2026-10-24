@@ -7,7 +7,7 @@
 a spawned-process seam (PTY exit watcher reading the capture after `pty_done`); exit-vs-read ordering;
 a `SessionMetadata` field touching ~50 struct literals
 **Stack**: `#warp-agent` 1/2 — branch `feature/warp-agent/warp-cli-session`, base `master`
-**PR**: _(set in wave 2)_
+**PR**: [#717](https://github.com/uppin/tddy-coder/pull/717)
 
 ## Initial Discovery
 
@@ -97,8 +97,9 @@ Failing tests come with it. The successor node compiles against the descriptor w
   values are real; `argv: warp_argv` has a `todo!()` body.
 - `pub fn resume_token_from_output(output: &[u8]) -> Option<String>` (`todo!()`).
 - `pub fn warp_cli_models() -> BackendModels` (`todo!()`).
-- `Harness::WarpCli` with its `id()` / `ALL` / `product()` arms. `route_supported` and `route_body`
-  arms are `todo!()`.
+- `Harness::WarpCli` with its `id()` / `ALL` / `product()` arms, and Cursor's `HarnessCannotBeRouted`
+  arm in `route_supported` / `route_body`. These are real: a `todo!()` would panic every existing test
+  that walks `Harness::ALL`.
 - `SessionMetadata.harness_resume_token`, added with every literal site updated (`None`). This is real,
   not stubbed: it is a field, and the workspace must compile.
 - Web: `SessionType` includes `"warp-cli"`. The toggle entry is real, and the request/model-optional
@@ -155,7 +156,7 @@ handful of string lists. Warp breaks two of the assumptions earlier harnesses co
 ## Scope
 
 - [ ] **Descriptor**: `WARP_CLI`, `warp_argv`, `warp_cli_models`, registered fifth
-- [ ] **Route**: `Harness::WarpCli` refusing every preset, with a message naming the person's own Warp sign-in
+- [ ] **Route**: `Harness::WarpCli` refusing every preset as Cursor is refused (`HarnessCannotBeRouted`). A routed start checks routability **before** the empty-model check, so the refusal names Warp
 - [ ] **Context**: `"warp"` globs `AGENTS.md`, `.agents/**`, `WARP.md`
 - [ ] **Metadata**: `harness_resume_token` field plus literal sites
 - [ ] **Token capture**: parser plus watcher at start and resume
@@ -205,9 +206,14 @@ handful of string lists. Warp breaks two of the assumptions earlier harnesses co
   It runs for every CLI harness launched through the generic path. Only Warp prints the line, so the
   other harnesses never record a token.
 - **Resume**: the generic resume passes `conversation_id: meta.harness_resume_token.as_deref()`.
-- `Harness::WarpCli`: `route_supported` refuses every preset, with the message "warp-cli does not
-  accept a provider account; it runs on your own Warp sign-in". A `warp-cli` start naming
-  `provider_account_id` is refused `INVALID_ARGUMENT` before anything is cut or spawned.
+- `Harness::WarpCli` joins Cursor's `HarnessCannotBeRouted` arm, so the refusal reads "Warp cannot be
+  pointed at another provider; it always runs on its own vendor". `route_on_account` checks
+  `harness_routable` **before** its empty-model refusal. A `warp-cli` start naming
+  `provider_account_id` is therefore refused `INVALID_ARGUMENT`, naming Warp, before anything is cut
+  or spawned.
+- A sandboxed `warp-cli` start is refused `FAILED_PRECONDITION` naming the runner ("the sandbox runner
+  does not host warp-cli") **before** the jail route is resolved. Today the route is resolved first, so
+  the refusal reads "needs a provider account".
 - `context_globs_for_agent("warp")` = `AGENTS.md`, `.agents/**`, `WARP.md`.
 - `worktree_removal_applies_to` includes `warp-cli`.
 - Web: `SessionType` includes `"warp-cli"`, with toggle entry `{ id: "warp-cli", label: "Warp" }`.
@@ -295,6 +301,9 @@ and one prints nothing, exiting 0.
 ## Acceptance Tests
 
 ### tddy-agent-backend — `packages/tddy-agent-backend/tests/warp_cli_acceptance.rs`
+
+Red state, verified 2026-10-24 (`cargo test -p tddy-agent-backend`): 7 of 9 fail on `todo!()`. `warp_is_registered_as_a_cli_harness` and `warp_accepts_no_provider_account` pass, because they assert published surface. The extended registry and route tests pass; `warp_reads_warp_md_on_top_of_the_shared_base` fails.
+
 - [ ] **Unit**: `warp_is_registered_as_a_cli_harness` — `cli_harness("warp-cli")` has label "Warp", binary `warp`, env `TDDY_WARP_CLI`, context agent `warp`
 - [ ] **Unit**: `a_warp_session_starts_with_no_arguments` — a fresh launch, even with a model and prompt set, gives `["warp"]`
 - [ ] **Unit**: `a_resumed_warp_session_continues_its_recorded_conversation` — resume with `conversation_id = "tok-123"` gives `["warp", "--resume", "tok-123"]`
@@ -309,6 +318,9 @@ and one prints nothing, exiting 0.
 - [ ] **Unit (extended)**: `context_globs_acceptance.rs` → a `warp` case: `AGENTS.md`, `.agents/**`, `WARP.md`
 
 ### tddy-session-lifecycle — `packages/tddy-session-lifecycle/tests/warp_cli_session.rs`
+
+Red state, verified 2026-10-24: 12 of 13 fail. Most fail on the `warp_argv` `todo!()`. The sandbox and provider-account tests fail on today's refusal messages. The managed-codebase refusal already passes, on the generic CLI-harness check.
+
 - [ ] **Integration**: `starting_a_warp_session_launches_warp_with_no_arguments`
 - [ ] **Integration**: `a_warp_session_records_its_type_and_worktree_and_no_model`
 - [ ] **Integration**: `a_warp_session_runs_in_its_own_worktree_on_a_warp_cli_branch`
@@ -331,12 +343,15 @@ and one prints nothing, exiting 0.
 - [ ] **Unit**: `a_recorded_resume_token_round_trips_through_session_yaml`
 
 ### tddy-web — `packages/tddy-web/cypress/component/CreateSessionWarpAcceptance.cy.tsx`
+
+Red state, verified 2026-10-24: both fail. Create is disabled with no model, and the model/provider field renders.
+
 - [ ] **Component**: "starts a warp-cli session with no model"
 - [ ] **Component**: "offers no model or provider field for Warp"
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- [ ] **Ordering constraint for green**: the watcher must write `harness_resume_token` **before** the terminal is deregistered from `CliSessionManager`. `an_exit_that_prints_no_token_keeps_the_recorded_one` waits for deregistration and then asserts; it is deterministic only under that ordering. Alternatively, give the watcher an observable completion signal, and wait on that in the test instead.
 
 ## Decisions & Trade-offs
 
@@ -360,6 +375,8 @@ _(populated during development)_
 
 ### From @red (TDD Red Phase)
 
+- [ ] `tddy-session-lifecycle/tests/warp_cli_session.rs` duplicates about 90 lines of daemon fixtures (`daemon_config_with_cli_harness_binary`, `session_host`, `create_test_repo_with_origin`, `register_project`) from `opencode_cli_session.rs`. Extract a shared `tests/support/` module used by both suites.
+
 ### From @validate-changes (Change Validation)
 
 ### From @validate-tests (Test Quality)
@@ -382,10 +399,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

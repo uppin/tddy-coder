@@ -25,9 +25,11 @@ pub fn profile_start(profile: &HarnessProfile) -> Result<ProfileStart, String> {
         )
     })?;
     let (session_type, agent) = match harness {
-        Harness::ClaudeCli | Harness::OpenCodeCli | Harness::MuseCli | Harness::CursorCli => {
-            (Some(harness.id().to_string()), None)
-        }
+        Harness::ClaudeCli
+        | Harness::OpenCodeCli
+        | Harness::MuseCli
+        | Harness::WarpCli
+        | Harness::CursorCli => (Some(harness.id().to_string()), None),
         Harness::Claude
         | Harness::ClaudeAcp
         | Harness::Codex

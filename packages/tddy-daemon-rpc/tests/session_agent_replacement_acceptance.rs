@@ -257,6 +257,7 @@ fn a_session(session_id: &str, session_type: &str, managed: bool) -> SessionMeta
         session_type: Some(session_type.to_string()),
         model: None,
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: None,
         sandbox: Some(managed),
