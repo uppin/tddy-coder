@@ -62,12 +62,31 @@ Do NOT assume the base is `origin/master`. Detect it:
 - Run `cargo clippy -- -D warnings` to check for lint issues.
 - If tests fail, stop and inform the user. Do not push broken code.
 
-### 6. Push and Create PR
+### 6. Ready or draft — wrap the docs before a PR is ready
+
+**A PR is opened (or marked) ready for review only after its docs are wrapped.** Readying is always
+the sequence *wrap the docs, then mark ready* — never the mark alone. Check what this branch's own
+commits added to the working-document directories:
+
+```bash
+git diff --name-only --diff-filter=A "origin/<detected-base>"...HEAD -- 'docs/dev/1-WIP/*' 'docs/ft/*/1-WIP/*'
+```
+
+- **Nothing listed** → no working docs to wrap; open the PR ready.
+- **Listed, and their planned scope is developed** (every box `[x]` or a user-approved deferral) →
+  run `/wrap-context-docs` (Stack Mode on a stack branch), commit the wrap, **then** push and open
+  the PR ready.
+- **Listed, and scope is still open** → open the PR with **`--draft`**. It is readied later by
+  `/pr-wrap`, which wraps first (step 7) and marks ready second (step 8). Say so in the output.
+
+Inherited parent documents (not in the list above) never decide this — they are their own PR's to wrap.
+
+### 7. Push and Create PR
 
 - Push the branch to the remote:
   - Normal push: `git push -u origin <branch-name>` (first push) or `git push` (update).
   - **If the local branch has diverged from its remote tracking branch** (e.g., local was rebased; `git status` shows "have diverged"): a normal push is rejected. Ask the user before force-pushing, and use `git push --force-with-lease` (safe — aborts if the remote moved since your last fetch). **Never** `--force` to `master`/`main`, and never force-push without explicit user consent.
-- Create the PR using `gh pr create --base <detected-base> --head <branch-name>` with:
+- Create the PR using `gh pr create --base <detected-base> --head <branch-name>` — plus `--draft` when step 6 said so — with:
   - A concise title (under 70 characters). **On a stack branch**, close the title with the stack group — `<type>(<scope>): <what this PR delivers> (#<stack-slug> K/N)` — and write the subject as the capability *shipped*, never as a phase (`red`, `stubs`, `WIP`). The title becomes the squash-merge commit on `master` and cannot be fixed afterwards; see the `pr-stack` skill.
   - A body with a summary of changes and a test plan
   - If updating an existing PR, skip `gh pr create` (the push already updated it); just present the existing PR URL.
@@ -78,5 +97,6 @@ Do NOT assume the base is `origin/master`. Detect it:
 
 - PR URL
 - The detected base branch and whether this PR is part of a stack (with the parent PR number)
+- Ready or draft, and why: which working docs were wrapped first, or which are still open
 - Summary of what was included
 - Any files that were intentionally excluded and why

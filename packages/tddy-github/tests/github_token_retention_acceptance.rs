@@ -5,7 +5,8 @@
 //! PR-Stack screen reported "no PR" for a live open PR. Three constraints shape how:
 //!
 //! - the authorize request must ask for `repo`; `read:user` alone cannot read a private repo's PRs,
-//! - a **stub/demo** login must retain nothing — its token is synthetic, and a demo shows no PRs
+//! - a **stub/demo** login must retain no token — its token is synthetic, and a demo shows no PRs;
+//!   its operator still gets a vault, which seals nothing from the login
 //!   rather than an error (D12),
 //! - the retained token must never reach the client: the session token is handed to a browser over a
 //!   plain-http LAN origin, so it stays an identity assertion only.
@@ -30,7 +31,9 @@ use tddy_github::{
     SessionTokenSigner, StubGitHubProvider, GITHUB_PROVIDER,
 };
 use tddy_rpc::Request;
-use tddy_service::proto::auth::{AuthService, ExchangeCodeRequest, ExchangeCodeResponse};
+use tddy_service::proto::auth::{
+    AuthService, ExchangeCodeRequest, ExchangeCodeResponse, VaultState,
+};
 
 const GRANTED_TOKEN: &str = "gho_granted_by_the_operator";
 
@@ -231,7 +234,7 @@ async fn keeps_the_servers_storage_path_out_of_the_failure_the_client_is_shown()
 }
 
 #[tokio::test]
-async fn retains_nothing_for_a_stub_login() {
+async fn retains_no_github_token_for_a_stub_login() {
     // Given — the demo/stub provider, whose access token is synthetic
     let storage = tempfile::tempdir().expect("a temporary directory");
     let stub = StubGitHubProvider::new("https://github.com", "client-id");
@@ -247,21 +250,26 @@ async fn retains_nothing_for_a_stub_login() {
     let (_, state) = stub
         .authorize_url()
         .expect("the stub issues an authorize URL");
-    let service =
-        a_signed_service(stub).with_credential_vaults(Arc::new(SessionVaults::new(storage.path())));
+    let vaults = Arc::new(SessionVaults::new(storage.path()));
+    let service = a_signed_service(stub).with_credential_vaults(Arc::clone(&vaults));
 
-    // When
+    // When the demo operator signs in and creates their vault
     let resp = exchange(&service, "demo-code", &state).await;
+    vaults
+        .create("demo", &SecretString::new("a demo vault passphrase"))
+        .expect("a stub sign-in permits creating the vault");
 
-    // Then — a demo login holds no credential at all, so its PR lookups read as "no PRs" rather
-    // than as a credential that GitHub would reject: no vault, and no key to one
-    let left_behind: Vec<_> = std::fs::read_dir(storage.path())
-        .expect("the storage directory is readable")
-        .map(|entry| entry.expect("an entry").file_name())
-        .collect();
+    // Then — a demo login holds no credential, so its PR lookups read as "no PRs" rather than as
+    // a credential that GitHub would reject: the login was asked for a first passphrase, and the
+    // vault it created holds nothing
+    let held = vaults
+        .get("demo")
+        .expect("the vault is open")
+        .list(None)
+        .expect("the vault is readable");
     assert_eq!(
-        (left_behind, resp.vault_unlock_key),
-        (Vec::new(), String::new())
+        (resp.vault_state, resp.vault_unlock_key, held.len()),
+        (VaultState::Uninitialized as i32, String::new(), 0)
     );
 }
 

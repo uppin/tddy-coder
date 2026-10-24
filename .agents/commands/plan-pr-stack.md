@@ -480,7 +480,8 @@ Every node is now a one-commit draft PR. Before wave 2 touches any branch:
    ```
 
    Two traps: it defaults to `--base main`, so pass `$TRUNK` explicitly; and **never `--open`**,
-   which would mark every draft ready for review and trigger each one's wrap. `link` reuses the PRs
+   which would mark every draft ready for review before any of their docs are wrapped — readying is
+   always *wrap the docs, then mark ready*, one node at a time through its own `/pr-wrap`. `link` reuses the PRs
    that already exist and never removes one, so re-running it with the full list is also how you
    extend the stack later. `gh stack view` reads *local* tracking and will say "not part of a stack"
    after a `link` — that is expected, not a failure; the stack lives on GitHub.
@@ -783,8 +784,9 @@ is invisible to everyone above you. **Push at every milestone**, not only at the
 milestone is production code whose own tests already pass. A **signature change is the urgent one** —
 push it on its own, immediately, ahead of the implementation behind it.
 
-**Ready each node on its own gate.** Wrapping is triggered by setting a PR ready for review, and each
-node wraps and is readied by its own `/pr-wrap` when its planned scope is done — independent of the
+**Ready each node on its own gate.** Readying a PR means **wrapping its docs, then marking it ready
+for review** — never the mark alone — and each node wraps and is readied by its own `/pr-wrap` when
+its planned scope is done — independent of the
 state of its parents. Nodes link to each other by branch/PR number only, so wrap order never leaves a
 dangling reference. *Landing* is the part that stays bottom-up.
 

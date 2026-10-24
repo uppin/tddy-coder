@@ -176,7 +176,7 @@ The in-memory provider the acceptance suites and demo deployments use. It makes 
   no registered user, is an `Err`. The stub never answers `SlowDown`, `Denied` or `Expired`; those
   are covered against `RealGitHubProvider` over loopback HTTP.
 - `issues_usable_access_token()` is `false`: the stub's token is synthetic, so a stub login retains
-  no GitHub credential by construction.
+  no GitHub credential by construction. It still gets a credential vault (see *Retention* below).
 
 The stub serves both flows. A daemon running it declares the redirect flow to its dashboard.
 
@@ -205,7 +205,10 @@ rules:
    otherwise held in memory until it opens. The login reports the vault's state (`vault_state`)
    and, when open, an unlock key for its lineage (`vault_unlock_key`). A failed write fails the
    login; a closed vault never does. A provider whose `issues_usable_access_token()` is `false` (the
-   stub) retains nothing and reports `NONE`, as does a service built without vaults.
+   stub) retains no token: the login goes through `SessionVaults::sign_in_without_credential`, which
+   hands an open vault's unlock key or leaves a credential-free mark that permits choosing the
+   passphrase, and reports the vault's real state. `UnlockVault` and `ResetVault` serve it like any
+   login. Only a service built without vaults reports `NONE`.
 3. **Minting** — the `v2` access and refresh tokens ([session-token.md](./session-token.md)).
    Without a signer the login fails `failed_precondition`.
 
@@ -254,7 +257,7 @@ is `src/auth_service/vault.rs`, with the unlock throttle in `src/auth_service/va
 |---|---|
 | `tests/real_provider_over_http.rs` | `RealGitHubProvider` against a GitHub served on loopback by `axum` (a dev-dependency only). The device flow's start, each poll state, `slow_down` widening (named, unnamed, twice in a row, and refused for want of an open attempt), an unknown error code, the attempt window's pruning, a full public-client sign-in hitting `/login/device/code`, `/login/oauth/access_token` and `/user` in order, and that **no part of any device-flow request — path, query, headers or body — carries the secret**. `exchange_code`'s success path and every one of its error returns: a forged state, the token leg's transport, status and parse failures, the user leg's transport, status and parse failures, and a public client's refusal. Its `authorize_url` refusal too |
 | `src/auth_service.rs` (inline) | the proto mapping of `SlowDown`, `Denied` and `Expired` to `(state, interval_seconds)` through a scripted provider; admission being told the transport a redirect login and a device login each completed over; a refused admission failing the login with the daemon's reason |
-| `tests/github_token_retention_acceptance.rs` | retention through `ExchangeCode` into the operator's vault under their GitHub login; a vault that can no longer be written failing the login, with the server's storage path kept out of what the client is shown; a stub retaining nothing; the GitHub token kept out of everything the client receives; and the authorize URL's `repo` scope |
+| `tests/github_token_retention_acceptance.rs` | retention through `ExchangeCode` into the operator's vault under their GitHub login; a vault that can no longer be written failing the login, with the server's storage path kept out of what the client is shown; a stub retaining no GitHub token while its operator creates a vault that holds nothing; the GitHub token kept out of everything the client receives; and the authorize URL's `repo` scope |
 | `src/auth_service/vault/backoff.rs` (inline) | the free wrong answers, the doubling wait and its ceiling, per login |
 
 `AuthServiceImpl::exchange_code` (the service) and `RealGitHubProvider::exchange_code` (the
