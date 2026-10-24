@@ -2,7 +2,7 @@
  * Unit tests for which session types can run a project's main, and the reason each other type
  * gives in the setup form.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 
 import { describe, expect, it } from "bun:test";

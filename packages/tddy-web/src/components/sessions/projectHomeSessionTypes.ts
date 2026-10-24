@@ -7,7 +7,7 @@
  * daemon refuses them on its own (`EnsureProjectHomeSession`), so this is the explanation, not the
  * guard.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 
 import type { SessionType } from "./createSessionRequest";

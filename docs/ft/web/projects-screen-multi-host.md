@@ -85,22 +85,19 @@ gh](../daemon/project-concept.md#local-gh)).
   names no GitHub host is said so, not guessed. See
 [Project concept § Account assignment](../daemon/project-concept.md#account-assignment).
 
-## Home agent
+## Main session
 
-Each project card has a **Home agent** picker ([project concept § Home
-agent](../daemon/project-concept.md#home-agent)): **Not set** plus one option per agent the selected
-daemon's catalog lists (`ListAgents`, harness profiles included), labelled by the agent's label.
+Each project card links to the project's **main** session
+([project concept § Project-home session](../daemon/project-concept.md#project-home-session)) on the
+card's primary host (the first host the project is listed on):
 
-- Choosing sends **`SetProjectHomeAgent`** to the project's first host; choosing **Not set** clears it.
-- A refused change shows the daemon's reason on that card, and the picker keeps showing the stored
-  value.
-- A stored id the catalog no longer lists is shown as its own option, *`<id>` (not listed by this
-  daemon)*, so the card never reads **Not set** while a value is stored.
-- With no agents listed and nothing stored the picker is not shown.
-- **`#/projects?project=<id>`** focuses that project's picker and scrolls it into view once the
-  project is listed. Focus is taken once per arrival; a later projects poll does not pull it back.
-  The session drawer's pinned **main** entry offers the same picker in its own setup pane
-  ([session drawer § Pinned main entry](session-drawer.md#pinned-main-entry)).
+- **Set up main** when that host's row records no main → `#/sessions/project-home/<id>`, the sessions
+  drawer's setup pane ([session drawer § Pinned main entry](session-drawer.md#pinned-main-entry)).
+- **Open main** when it records one → `#/sessions/<homeSessionId>`.
+
+The link is `project-main-session-link-<id>`. Main is configured in the drawer's setup pane, which
+acts on the drawer's selected host: when that is not the card's primary host, the link reflects one
+host and the pane acts on another.
 
 ## Adding a project to a host
 

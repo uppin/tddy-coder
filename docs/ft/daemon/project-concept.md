@@ -18,7 +18,7 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 | `main_branch_ref` | Optional. Remote-tracking ref (`origin/<path>`) used as the integration base for worktree fetch and checkout (e.g. `origin/main`, `origin/release/2025`). Set/updated from the Projects UI. Omitted (legacy) rows resolve live at resolution time (`origin/master` → `origin/main` → `origin/HEAD`); see [Git integration base ref](../coder/git-integration-base-ref.md). |
 | `accounts` | Optional. The accounts the project uses, as provider and account id pairs, at most one per provider. Ids are minted by the credential vault of the host that stored them. Empty means no account is assigned. Set from the Projects UI; see [Account assignment](#account-assignment). |
 | `local_gh` | Optional, off by default. The project's sessions take their GitHub identity from the host's own `gh` login instead of an account; see [Local gh](#local-gh). |
-| `home_agent` | Optional. The agent (a `CatalogService.ListAgents` id) the project's project-home session runs; see [Home agent](#home-agent). Absent means none is configured. |
+| `home_session_id` | Optional, per host. The session the project runs as its **main** ([project-home session](#project-home-session)) on this host, recorded by `EnsureProjectHomeSession`. Absent means main is not set up. A `home_agent` key in an older row is ignored on read and not written back. |
 | `host_repo_paths` | Per-host (or per-daemon-instance) checkout paths keyed by host key; see multi-host daemon docs. |
 
 ## Account assignment
@@ -53,21 +53,6 @@ login rather than a vault account ([per-project GitHub identity](github-identity
   uses this host's row: Local gh when set, the vault assignment as before.
 - **Local gh needs a readable git URL**: its host decides which `gh` login is asked, and one that
   cannot be read is refused rather than assumed to be `github.com`.
-
-## Home agent
-
-A project can name the agent its **project-home session** runs, chosen from the Projects screen.
-
-- **Set with `SetProjectHomeAgent`** (`project_id`, `home_agent`, `daemon_instance_id`), routed to one
-  host exactly like `SetProjectDefaultBranch`. An empty `home_agent` clears the setting.
-- **Only a listed agent is stored.** A non-empty id the writing daemon's `ListAgents` does not list is
-  refused with `InvalidArgument` and nothing is written — a typo surfaces where it was entered, not
-  when the home session later fails to start. A forwarded write is checked against the peer's own
-  catalog.
-- **Rows written by older daemons** have no `home_agent` key and read as unset; clearing writes no key.
-- `ListProjects` reports it as `ProjectEntry.home_agent` (empty = unset).
-- Like the account list, the write reaches one host (see
-  [the open TODO](../../dev/todo/2026-10-14-project-account-assignment-reaches-one-host.md)).
 
 ## Storage
 
@@ -110,20 +95,59 @@ The **`tddy-daemon`** binary is the multi-user orchestrator: serves the web bund
 
 ## Project-home session
 
-A project has at most one **project-home session** per host: a standing, **read-only**,
-managed-codebase session running the project's **home agent**, pinned first in the project's group in
-the session drawer ([Session drawer § Pinned main entry](../web/session-drawer.md#pinned-main-entry)).
+A project has at most one **project-home session** per host, its **main**: a standing,
+**read-only**, managed-codebase `claude-cli` session on the project's home worktree, pinned first in
+the project's group in the session drawer
+([Session drawer § Pinned main entry](../web/session-drawer.md#pinned-main-entry)). The project
+records which session it is as `home_session_id` on that host's row; `ListProjects` reports it as
+`ProjectEntry.home_session_id` (empty = main is not set up). The session is found by that id, never
+by scanning for the role.
 
-`SessionService.EnsureProjectHomeSession(project_id, daemon_instance_id)` owns its lifecycle and
-answers `{ session, outcome }`:
+`SessionService.EnsureProjectHomeSession(project_id, daemon_instance_id, start?)` owns its lifecycle
+and answers `{ session, outcome }`. Without `start` it reaches the recorded main:
 
-| What exists for the project on that host | Outcome |
+| What the project records on that host | Outcome |
 |---|---|
-| No home agent set | refused, `FAILED_PRECONDITION` ("set one on the Projects screen"); nothing starts |
-| A home agent that is not a harness profile, or whose harness cannot enforce managed-codebase mode (anything but `claude-cli`; see [the cursor-cli TODO](../../dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md)) | refused, `FAILED_PRECONDITION` naming the harness; nothing starts |
-| No project-home session | the **home worktree** is created and a managed session is started on it with the home agent → `started` |
-| A stopped one | the home worktree is fast-forwarded to the fetched main branch ref, then the session is resumed — same conversation → `resumed` |
-| A running one (its pid is alive, or the daemon still serves its terminal) | returned unchanged → `running` |
+| No main | `NOT_FOUND` ("project X has no main session: set one up"); nothing starts |
+| A main whose session directory no longer exists | the record is cleared, then `NOT_FOUND` as above |
+| A main whose session record cannot be read | `INTERNAL`; the record is kept |
+| A stopped main | the home worktree is fast-forwarded to the fetched main branch ref, then the session is resumed — same conversation → `resumed` |
+| A running main (its pid is alive, or the daemon still serves its terminal) | returned unchanged → `running` |
+
+With `start` (a `StartSessionRequest`, built by the New-session form's
+[main variant](../web/session-drawer.md#main-variant)) it sets main up, or replaces it:
+
+1. **The spec is checked; nothing starts or stops when it is refused.**
+   - A `session_role` → `PERMISSION_DENIED`: the role is granted by the daemon, never requested.
+   - A placement other than the home worktree on this host — `sandbox`, `sandboxed_codebase`,
+     `codebase_daemon_instance_id`, `ssh_config_host`, `agent_clone`, `split_agent` →
+     `INVALID_ARGUMENT` naming the field. A sandboxed main is refused because the sandboxed
+     `claude-cli` start does not carry the session's role.
+   - The harness profile named by `agent` is applied, then any session type but `claude-cli` →
+     `FAILED_PRECONDITION` naming the type (`tool` for an empty one) and that main could not be kept
+     read-only. Only `claude-cli` can enforce managed-codebase mode: Cursor CLI has no tool
+     allowlist, and Tool, OpenCode and Muse Code sessions have no managed mode. A profile cannot
+     swap a type in after this check.
+2. **The daemon places the spec.** It sets `project_id`, `repo_path` (the home worktree, created at
+   the main branch ref when absent), `managed_codebase = true` and `session_role = project-home`,
+   and clears the branch fields (`branch_worktree_intent`, `selected_branch_to_work_on`,
+   `new_branch_name`, `selected_integration_base_ref`, `create_remote_branch`,
+   `on_branch_conflict`), the stack fields and `daemon_instance_id`. Everything else the spec chose
+   is kept: model, provider account, `provider_built_in`, agent, permission mode,
+   `dangerously_skip_permissions`, initial prompt, specialized agents, semantic index.
+3. **The start is checked as the start path checks it** (model, recipe, provider route), so a
+   refused replace leaves the running main running and recorded.
+4. **A recorded main is made way for.** The home worktree is fast-forwarded, and a recorded main
+   this daemon serves is stopped. It keeps its record and role, so it stays read-only, and is listed
+   as an ordinary session from then on. A main whose process outlived a daemon restart is not
+   served, so it is not stopped.
+5. **Main starts and is recorded** → `replaced` when a main was recorded, `started` otherwise
+   (including after a stale record was cleared). A start that fails past the checks (the agent does
+   not spawn) leaves the old main stopped but still recorded, so an ensure without `start` resumes
+   it. A started main whose id cannot be recorded is stopped again and the error returned.
+
+A main that existed before the project recorded one (found only by its role) is not adopted: it is
+an ordinary, still read-only session, and main is set up once more.
 
 - **Role.** The session's `.session.yaml` carries `session_role: project-home`, and `ListSessions`
   reports it as `SessionEntry.session_role` (empty for every other session). The role is written into
@@ -146,20 +170,21 @@ answers `{ session, outcome }`:
   and unix socket, the sandbox socket — the runner rebinds the question to the jail's own session —
   and LiveKit) and advertises only what the daemon admits. A failed or timed-out ask (10 s) fails
   `tools/list` with an error naming the reason, rather than offering a catalog of its own. The
-  co-located claude-cli home agent is also started (and resumed) with one `--allowedTools` per tool of
+  co-located claude-cli main is also started (and resumed) with one `--allowedTools` per tool of
   that set, which pre-approves them; it does not restrict — enforcement stays the daemon's.
 - **Hosts.** A request whose `daemon_instance_id` names another daemon is forwarded to it (as
   `GetWorktreeSnapshot` is); empty or the local instance is answered locally. Each host has its own
   home session for a project.
-- Ensures are serialized on a daemon, so two clicks never start two home sessions. Deleting the
-  home session is allowed; the next ensure starts a new one. Because it is managed, it opens with the
-  activity sidebar.
-- The "running" decision is a heuristic with one known false positive — a live pid with no served
-  terminal ([TODO](../../dev/todo/2026-10-23-project-home-running-heuristic.md)).
+- **Serialized.** Ensures are serialized on a daemon, and each reads the project's record only once
+  it holds its turn, so two concurrent set-ups record one main: one answers `started`, the other
+  `replaced`. Deleting main is allowed; the next ensure answers `NOT_FOUND` and clears the record.
+  Because main is managed, it opens with the activity sidebar.
+- The "running" decision is a heuristic with one known false positive: a live pid with no served
+  terminal reads as running.
 
 ### Project-home tools
 
-Four exec tools give the read-only home agent its reach over **its own project's** sessions. Only a
+Four exec tools give the read-only main its reach over **its own project's** sessions. Only a
 session whose record carries the `project-home` role may run them; any other caller is refused with
 `PERMISSION_DENIED` naming the role.
 

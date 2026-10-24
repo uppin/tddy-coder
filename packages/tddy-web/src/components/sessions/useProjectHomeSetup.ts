@@ -12,7 +12,7 @@ import { useAppLocation } from "../../routing/useAppLocation";
  * main already set up (read from `/sessions/project-home/:projectId[/replace]`), and the moves onto
  * and off it.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 export function useProjectHomeSetup(): {
   /** The open setup pane's route; `null` when the pane is not open. */

@@ -77,33 +77,45 @@ Implementation: `groupSessionsByProject` (`src/utils/sessionProjectGroups.ts`),
 
 Each **project** group starts with a pinned **main** entry for the project's
 [project-home session](../daemon/project-concept.md#project-home-session): the label `main`, the
-project's main branch ref, the home agent's label (from `ListAgents`, else its id) and, once the
-session exists, its status dot.
+project's main branch ref, main's model and, once main is listed, its status dot. The project is
+*configured* when its `ListProjects` row on the selected host records a main
+(`ProjectEntry.home_session_id`); only the selected host's row counts, because main is per host and
+the entry acts on that host.
 
-- **Click** calls `EnsureProjectHomeSession` for the project on the selected host and selects the
-  session it answers — started, resumed or already running. A refusal is shown under the entry.
-- **No home agent**: the entry starts nothing and shows no hint. Clicking it opens the **setup pane**
-  in the detail area at `#/sessions/project-home/<id>` (a pushed history entry, so Back returns to
-  what was showing): *Set up main for &lt;project&gt;*, the project's **Home agent** picker, focused
-  (the same picker as [Projects § Home agent](projects-screen-multi-host.md#home-agent)), and
-  **Start main session**. Choosing an agent stores it with `SetProjectHomeAgent` on the selected host
-  and re-reads `ListProjects`, so the entry shows the agent's label and **Start main session** is
-  enabled; a refusal is shown under the picker. **Start main session** calls
-  `EnsureProjectHomeSession` and selects the session it answers, which replaces the pane; a refusal
-  is shown in the pane. **Cancel** returns to `#/sessions`. A project id the host does not list says
-  so and offers nothing to start. On mobile the click also closes the session list. The entry is
+- **Click on a configured entry** calls `EnsureProjectHomeSession` for the project on the selected
+  host with no start spec, and selects the session it answers — resumed or already running. A
+  refusal is shown under the entry. When the daemon answers `NOT_FOUND` (the recorded main no longer
+  exists, and the daemon cleared it), the drawer re-reads `ListProjects` and opens the setup pane.
+- **No main set up**: the entry starts nothing and shows no hint. Clicking it opens the **setup
+  pane** in the detail area at `#/sessions/project-home/<id>` (a pushed history entry, so Back
+  returns to what was showing). On mobile the click also closes the session list. The entry is
   `aria-disabled` only where no setup handler is wired (`onSetUpProjectHome` absent).
-- **Not repeated**: the project-home session (`sessionRole === "project-home"`) is not listed again
-  among the group's rows.
-- **A project with no session yet** still gets its group when it has a home agent, so the pinned
-  entry is how its first session starts; it is placed among the others by the same name order. A
-  project with neither a session nor a home agent gets no group.
+- **Replace main**: a configured entry has a **Replace main** action
+  (`sessions-drawer-project-home-replace-<id>`) that opens the setup pane in replace mode at
+  `#/sessions/project-home/<id>/replace`. It starts nothing itself.
+- **Setup pane**: *Set up main for &lt;project&gt;* (or *Replace main for &lt;project&gt;*), a line
+  saying what main is, and the [New-session form in its main variant](#main-variant). In replace
+  mode the pane also says that starting stops the current main and that it stays in the list as an
+  ordinary session (`sessions-project-home-setup-replacing-<id>`). **Start main session** calls
+  `EnsureProjectHomeSession` with the form's start spec on the selected host, then selects and
+  attaches the session it answers as a created session is, which replaces the pane; a refusal is
+  shown in the form with the daemon's reason. **Cancel** returns to `#/sessions`. A project id the
+  host does not list says so and offers nothing to start
+  (`sessions-project-home-setup-unknown-<id>`), and so does a host no wire reaches
+  (`sessions-project-home-setup-unreachable-<id>`).
+- **Not repeated**: the session the project records as its main is not listed again among the
+  group's rows. Any other session carrying the `project-home` role (a main that was replaced) is an
+  ordinary row.
+- **A project with no session yet** still gets its group when it has a main, so the pinned entry is
+  how main is reached; it is placed among the others by the same name order. A project with neither
+  a session nor a main gets no group.
 - The **Other** group has no pinned entry.
 
 Implementation: `ProjectHomeEntry`, `ProjectHomeSetupPane`, `useProjectHomeSetup`,
-`useEnsureProjectHome`, `useSessionsDrawerProjectHomes` (`src/components/sessions/`),
-`projectHomeSlot` and `withProjectHomeGroups` (`src/utils/projectHomeGroups.ts`),
-`sessionsProjectHomeSetupPath` (`src/routing/appRoutes.ts`).
+`useProjectHomeStartSubmit`, `useEnsureProjectHome`, `useSessionsDrawerProjectHomes`
+(`src/components/sessions/`), `projectHomesOnHost`, `projectHomeSlot` and `withProjectHomeGroups`
+(`src/utils/projectHomeGroups.ts`), `sessionsProjectHomeSetupPath` and
+`parseSessionsProjectHomeSetup` (`src/routing/appRoutes.ts`).
 
 ## Indicator Token
 
@@ -417,6 +429,8 @@ SESSIONS_DRAWER_ROUTE = "/sessions"
 isSessionsDrawerPath(pathname)                     // /sessions and /sessions/:id
 sessionsDrawerPathForSession(sessionId)            // builds /sessions/<encoded-id>
 parseSessionsDrawerSessionId(pathname)             // extracts decoded id or null
+sessionsProjectHomeSetupPath(projectId, { replacing }) // /sessions/project-home/<id>[/replace]
+parseSessionsProjectHomeSetup(pathname)            // { projectId, replacing } or null
 ```
 
 ## UI Primitives
@@ -429,7 +443,7 @@ Adds to `src/components/ui/`:
 
 - `ListSessions` — session list with `isActive`, `createdAt`, `repoPath`, `workflowGoal`, `pendingElicitation`; fanned out per-host and merged (see [Cross-Host Active Sessions](#cross-host-active-sessions); liveness is derived client-side from common-room participants, not from this RPC)
 - `ConnectSession` / `ResumeSession` — attach to a running or paused session
-- `EnsureProjectHomeSession` — the pinned **main** entry: start, resume or reach the project's home session (see [Pinned main entry](#pinned-main-entry)); `ListAgents` labels its home agent
+- `EnsureProjectHomeSession` — the pinned **main** entry: reach or resume the project's recorded main, or set it up (or replace it) from the main variant's start spec (see [Pinned main entry](#pinned-main-entry))
 - `StreamTerminalOutput` / `SendTerminalInput` (`terminal_session.TerminalSessionService`) — gRPC
   terminal stream (claude-cli path)
 - `DeleteSession` — delete session (two-click confirm)
@@ -613,6 +627,24 @@ host restarted. It only watches: it never starts a load, nor the index daemon. W
 no index daemon is running yet, or it stopped — it shows nothing and watches again after 1 s, 2 s, 4 s …
 up to 30 s, so a load started later appears within that wait; a watch the host refuses is not repeated,
 and the indicator names why.
+
+### Main variant
+
+The [setup pane](#pinned-main-entry) renders the form as its **main** variant
+(`CreateSessionPane.projectHome`: `projectId`, `daemonInstanceId`, `onStart`):
+
+- The project and host are fixed. The host and project selects, branch mode, PR-stack parent,
+  attachments and the placement controls (sandbox, managed codebase, sandboxed codebase, split) are
+  not shown: main always runs managed on its project's home worktree on that host.
+- The session-type toggle shows every type. Only **Claude CLI** can be chosen, and it is selected
+  when the form opens. Every other type is disabled, with its reason listed under the toggle
+  (`create-session-type-reason-<type>`, `whyMainCannotRun` in `projectHomeSessionTypes.ts`):
+  - **Cursor CLI** has no tool allowlist, so it could still use its own file tools;
+  - **Tool**, **OpenCode** and **Muse Code** cannot run in managed-codebase mode.
+- Model, provider account, permission mode and initial prompt are offered as for Claude CLI.
+- The submit button reads **Start main session**. It hands `buildProjectHomeStartSpec(form)`
+  (`createSessionRequest.ts`), the Claude CLI start request without project, branch or placement
+  fields, to `onStart` instead of calling `StreamStartSession`; a rejection is shown in the form.
 
 ### Post-Create
 

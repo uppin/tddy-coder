@@ -14,7 +14,7 @@ import type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
  * **Replace main** (`onReplaceProjectHome`), which opens the setup pane in replace mode.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 export function ProjectHomeEntry(props: {
   home: ProjectHomeInfo;

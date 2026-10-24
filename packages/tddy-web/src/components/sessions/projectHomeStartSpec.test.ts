@@ -2,7 +2,7 @@
  * Unit tests for the start spec the main variant of the New-session form sends: what the operator
  * chose goes out, and the fields the daemon owns for main do not.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 
 import { describe, expect, it } from "bun:test";

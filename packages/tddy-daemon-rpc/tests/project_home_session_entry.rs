@@ -1,7 +1,7 @@
 //! Acceptance: `ListProjects` reports the session a project records as its main
 //! (`ProjectEntry.home_session_id`), and an empty id for a project whose main is not set up.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+//! PRD: docs/ft/web/session-drawer.md
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

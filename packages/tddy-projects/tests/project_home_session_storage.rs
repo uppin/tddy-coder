@@ -1,7 +1,7 @@
 //! A project row's main session (`home_session_id`) in `projects.yaml`: how it is recorded,
 //! cleared and read back, and what becomes of the `home_agent` key an older daemon wrote.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+//! PRD: docs/ft/web/session-drawer.md
 
 use tddy_projects::project_storage::{self, ProjectData};
 

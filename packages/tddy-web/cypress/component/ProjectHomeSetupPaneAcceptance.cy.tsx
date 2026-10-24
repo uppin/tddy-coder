@@ -7,7 +7,7 @@
  * returns.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 
 import React from "react";

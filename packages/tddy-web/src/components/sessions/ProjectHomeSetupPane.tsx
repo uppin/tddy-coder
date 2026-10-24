@@ -17,7 +17,7 @@ import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
  * wire reaches any more (the registry keeps its last good list, so the project can still be named).
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 export function ProjectHomeSetupPane(props: ProjectHomeSetupPaneProps): React.ReactElement {
   const { projectId, project, replacing, onClose } = props;

@@ -25,7 +25,7 @@ export interface EnsureProjectHomeHandlers {
  * New-session form's start spec. A refusal rejects with the daemon's reason, which the pinned entry
  * or the setup form shows (`#project-home` 4/7).
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 export function useEnsureProjectHome(
   client: Client<typeof SessionService> | null,

@@ -15,7 +15,7 @@ export interface SessionsDrawerProjectHomes {
  * `instanceId` — the host the entry ensures main on and the setup pane starts it on (see
  * `projectHomesOnHost`). An empty `homeSessionId` — main not set up — is `null`.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 export function useSessionsDrawerProjectHomes(
   projects: ReadonlyArray<ProjectEntry>,

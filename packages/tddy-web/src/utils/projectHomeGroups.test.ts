@@ -3,7 +3,7 @@
  * entry, and which sessions a group still lists as rows.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry (`#project-home` 4/7).
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md — main is the session
+ * PRD: docs/ft/web/session-drawer.md — main is the session
  * the project records (`homeSessionId`), not whichever session carries the role.
  */
 

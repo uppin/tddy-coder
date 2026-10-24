@@ -5,7 +5,7 @@
  *
  * All raw selectors and wire inspection live here; test bodies call named methods.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";

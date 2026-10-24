@@ -123,8 +123,7 @@ message ProjectEntry {
   // login` on each host, as the session's OS user) instead of from a vault account. A project with
   // this set has no github entry in `accounts`. See docs/ft/daemon/github-identity.md.
   bool local_gh = 9;
-  // Was the agent a project's project-home session ran; main is now set up from a New-session
-  // spec and recorded as `home_session_id`.
+  // Retired: the agent name a project's project-home session ran (`home_agent`).
   reserved 10;
   reserved "home_agent";
   // The session this project runs as its **main** (project-home session) on this host, recorded by

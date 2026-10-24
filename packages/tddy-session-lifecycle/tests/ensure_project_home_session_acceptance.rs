@@ -5,7 +5,7 @@
 //! caller-set role are refused; a recorded session that no longer exists is cleared.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home session.
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+//! PRD: docs/ft/web/session-drawer.md
 
 mod ensure_project_home_world;
 mod project_home_support;

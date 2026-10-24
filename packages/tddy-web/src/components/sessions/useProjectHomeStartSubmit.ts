@@ -17,7 +17,7 @@ export interface CreateSessionFooterSubmit {
  * starting a session itself, and a refusal is shown in the form's own error line. Without
  * `projectHome` the form's ordinary submit (`created`) is returned unchanged.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
+ * PRD: docs/ft/web/session-drawer.md
  */
 export function useProjectHomeStartSubmit(
   projectHome: CreateSessionProjectHome | undefined,
