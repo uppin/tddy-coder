@@ -48,6 +48,7 @@ fn an_entry(agent_id: &str) -> SessionAgentEntry {
         last_activity: None,
         kind: 0,
         harness: String::new(),
+        placement: 0,
     }
 }
 

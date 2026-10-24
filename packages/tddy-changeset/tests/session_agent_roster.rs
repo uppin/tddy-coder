@@ -33,6 +33,7 @@ fn an_agent_record(agent_id: &str) -> SessionAgentRecord {
         codebase_session_id: None,
         kind: Default::default(),
         harness: None,
+        placement: Default::default(),
     }
 }
 

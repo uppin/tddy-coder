@@ -313,3 +313,48 @@ describe("CreateSession agent picker — coding agents", () => {
     byTestId(`${createSessionAgentOption(LINTER_ON_B)}-kind`).should("not.exist");
   });
 });
+
+describe("CreateSession agent picker — placement", () => {
+  beforeEach(() => {
+    cy.viewport(1280, 900);
+  });
+
+  it("an agent can be attached with clone placement", () => {
+    // Given
+    const hostA = mountPicker(aDaemonOfferingAgents([]));
+    openTheAgentPicker();
+    pickTheAgent(EXPLORER_ON_A);
+
+    // When
+    byTestId(`${createSessionAgentOption(EXPLORER_ON_A)}-placement`).select("clone");
+    startTheSession();
+
+    // Then
+    cy.wrap(null).should(() => {
+      const starts = recordedFields(hostA.callsTo(SessionService.method.startSession)) as {
+        specializedAgents: string[];
+        clonePlacedAgents: string[];
+      }[];
+      expect(starts.map((req) => req.clonePlacedAgents)).to.deep.equal([[EXPLORER_ON_A]]);
+      expect(starts.map((req) => req.specializedAgents)).to.deep.equal([[EXPLORER_ON_A]]);
+    });
+  });
+
+  it("an agent picked without choosing a placement works on the session's worktree", () => {
+    // Given
+    const hostA = mountPicker(aDaemonOfferingAgents([]));
+    openTheAgentPicker();
+
+    // When
+    pickTheAgent(EXPLORER_ON_A);
+    startTheSession();
+
+    // Then
+    cy.wrap(null).should(() => {
+      const starts = recordedFields(hostA.callsTo(SessionService.method.startSession)) as {
+        clonePlacedAgents: string[];
+      }[];
+      expect(starts.map((req) => req.clonePlacedAgents)).to.deep.equal([[]]);
+    });
+  });
+});

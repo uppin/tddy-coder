@@ -35,6 +35,7 @@ mod sync_worktree_choice;
 pub mod tool_list_announcer;
 mod worktree_answer;
 mod worktree_reset_port;
+pub mod worktree_route;
 mod worktree_sync_port;
 
 /// The in-session tool client, re-exported at the path it was reached by while it lived here.

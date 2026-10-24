@@ -124,6 +124,7 @@ async fn a_session_conversing_with_a_local_agent(model: StubModel) -> Conversing
             session_id: session_id.clone(),
             daemon_instance_id: String::new(),
             agent_id: agent_id.clone(),
+            placement: 0,
         }))
         .await
         .expect("attaching a local agent must succeed");

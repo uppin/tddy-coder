@@ -34,6 +34,7 @@ pub fn roster_record(
         codebase_session_id: None,
         kind: tddy_core::AgentKindRecord::Model,
         harness: None,
+        placement: Default::default(),
     })
 }
 
