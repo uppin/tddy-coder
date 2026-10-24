@@ -3,7 +3,7 @@
 //!
 //! The lines are git's own (2.4x), including the `remote: ` prefix and the `, done.` tail.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-clone-progress.md
+//! Feature docs: docs/ft/daemon/project-concept.md
 
 use std::time::{Duration, Instant};
 

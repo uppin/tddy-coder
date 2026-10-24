@@ -62,6 +62,7 @@ impl CloneHandle {
 /// Signal a process group; a group that is already gone is not an error.
 #[cfg(unix)]
 fn signal_group(group: libc::pid_t, signal: libc::c_int) -> std::io::Result<()> {
+    // SAFETY: killpg takes plain integers and touches no memory of this process.
     if unsafe { libc::killpg(group, signal) } == 0 {
         return Ok(());
     }
@@ -74,6 +75,7 @@ fn signal_group(group: libc::pid_t, signal: libc::c_int) -> std::io::Result<()> 
 
 #[cfg(unix)]
 fn group_exists(group: libc::pid_t) -> bool {
+    // SAFETY: signal 0 only probes for the group's existence; no memory is touched.
     unsafe { libc::killpg(group, 0) == 0 }
 }
 
@@ -164,7 +166,7 @@ fn run_into(
     partial: &Path,
     env: &[(&str, &str)],
     on_started: impl FnOnce(CloneHandle),
-    mut on_progress: impl FnMut(GitProgress),
+    on_progress: impl FnMut(GitProgress),
 ) -> anyhow::Result<()> {
     use std::os::unix::process::CommandExt;
     use std::process::Stdio;
@@ -203,23 +205,7 @@ fn run_into(
         .stderr
         .take()
         .ok_or_else(|| anyhow::anyhow!("git clone: stderr was not piped"))?;
-    let mut throttle = ProgressThrottle::new();
-    let mut tail = std::collections::VecDeque::new();
-    for_each_stderr_line(stderr, |line| {
-        match parse(line) {
-            Some(progress) => {
-                if throttle.admit(&progress, std::time::Instant::now()) {
-                    on_progress(progress);
-                }
-            }
-            None => {
-                tail.push_back(line.to_string());
-                if tail.len() > ERROR_TAIL_LINES {
-                    tail.pop_front();
-                }
-            }
-        };
-    });
+    let tail = report_progress(stderr, on_progress);
 
     let status = staged
         .child
@@ -229,8 +215,32 @@ fn run_into(
     if status.success() {
         return Ok(());
     }
-    let tail: Vec<String> = tail.into_iter().collect();
     anyhow::bail!("git clone failed ({status}): {}", tail.join("\n"))
+}
+
+/// Read git's stderr to its end, handing each throttled progress line to `on_progress`. Returns
+/// git's last [`ERROR_TAIL_LINES`] lines that were not progress — what a failure is explained by.
+#[cfg(unix)]
+fn report_progress(
+    stderr: impl std::io::Read,
+    mut on_progress: impl FnMut(GitProgress),
+) -> Vec<String> {
+    let mut throttle = ProgressThrottle::new();
+    let mut tail = std::collections::VecDeque::new();
+    for_each_stderr_line(stderr, |line| match parse(line) {
+        Some(progress) => {
+            if throttle.admit(&progress, std::time::Instant::now()) {
+                on_progress(progress);
+            }
+        }
+        None => {
+            tail.push_back(line.to_string());
+            if tail.len() > ERROR_TAIL_LINES {
+                tail.pop_front();
+            }
+        }
+    });
+    tail.into_iter().collect()
 }
 
 /// Call `on_line` with each non-empty line of `reader`, where git ends a line with `\r` while a

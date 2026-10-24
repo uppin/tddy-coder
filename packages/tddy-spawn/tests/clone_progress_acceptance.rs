@@ -5,7 +5,7 @@
 //! git pack and transfer objects, so it reports progress). The stopped clone uses a fake `git` on the
 //! child's `PATH`, carried in the clone's own environment. Everything runs as the current OS user.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-clone-progress.md
+//! Feature docs: docs/ft/daemon/project-concept.md
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;

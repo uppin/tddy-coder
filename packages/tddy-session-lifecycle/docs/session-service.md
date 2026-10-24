@@ -33,7 +33,7 @@ one discards. Each session type's start reports its slow steps through the sink 
 
 | Start | Steps reported |
 |---|---|
-| claude-cli | worktree (`cut_claude_cli_worktree`), semantic index when requested, agent (`spawn_claude_cli_process`) |
+| claude-cli | clone when the project is not on the host (`provision_project_for_start`, with git's progress), worktree (`cut_claude_cli_worktree`), semantic index when requested, agent (`spawn_claude_cli_process`) |
 | cursor-cli | the same three, in `spawn_cursor_cli_session_reporting`; `spawn_cursor_cli_session_inner` is its wrapper for a caller with nobody watching |
 | workspace | worktree (the seed), semantic index when requested; the jail is built after the index and reports nothing |
 

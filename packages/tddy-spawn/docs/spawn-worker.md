@@ -33,7 +33,9 @@ Newline-delimited JSON, one line per message.
   `WorkerRequest` flattened beside its id. Ids are assigned by the client from a per-client counter.
 - **Event** (worker → daemon): `{"line":"event","id":N,"event":{"kind":"started","pid":P}}` — something
   that happened to request `N` before its result. `Started { pid }` is sent as soon as a clone's `git`
-  child is running (`clone_as_user_observed` hands the pid out between `spawn` and `wait_with_output`).
+  child is running (`clone_run::clone_with_progress` hands its `CloneHandle` out between `spawn` and
+  `wait`); `CloneProgress(GitProgress)` (`"kind":"clone_progress"`) for each throttled line of git's
+  progress, all before the clone's result. See [clone-run.md](clone-run.md).
 - **Result** (worker → daemon): `{"line":"result","id":N,"response":…}` — the last line for request `N`.
 
 Worker and daemon are one binary image (fork without exec), so there is no version skew to negotiate.

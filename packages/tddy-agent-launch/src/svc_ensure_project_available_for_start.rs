@@ -49,19 +49,8 @@ pub(super) fn spawn_project_clone(
             os_user: os_user_owned,
             runtime,
         };
-        let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
-            // The clone is a step of its own, and only a clone that runs reports it: a project that
-            // is already present never reaches this closure.
-            progress.begin_phase(StartStep::Clone);
-            // The plan (and the grant it holds) lives until this clone has ended.
-            let planned = planner.plan(git_url)?;
-            backend
-                .clone_repo(git_url, dest, planned.env(), |line| {
-                    progress.clone_progress(clone_progress_event(line))
-                })
-                .map_err(|e| planned.explain_failure(e))?;
-            progress.end_phase(StartStep::Clone);
-            Ok(())
+        let cloner = |git_url: &str, dest: &Path| {
+            clone_as_a_start_step(&backend, &planner, &progress, git_url, dest)
         };
         let provisioned = if let Some(remote_url) = facilitating_remote_url {
             tddy_projects::project_provision::ensure_project_available_from_facilitator(
@@ -91,6 +80,29 @@ pub(super) fn spawn_project_clone(
     });
     handle
 }
+
+/// Clone `git_url` into `dest` as the start's `STEP_CLONE`, feeding git's progress into `progress`.
+/// The clone is a step of its own, and only a clone that runs reports it: a project that is already
+/// present never reaches the cloner that calls this.
+fn clone_as_a_start_step(
+    backend: &CloneBackend,
+    planner: &ClonePlanner,
+    progress: &AttachmentProgressSink,
+    git_url: &str,
+    dest: &Path,
+) -> Result<(), String> {
+    progress.begin_phase(StartStep::Clone);
+    // The plan (and the grant it holds) lives until this clone has ended.
+    let planned = planner.plan(git_url)?;
+    backend
+        .clone_repo(git_url, dest, planned.env(), |line| {
+            progress.clone_progress(clone_progress_event(line))
+        })
+        .map_err(|e| planned.explain_failure(e))?;
+    progress.end_phase(StartStep::Clone);
+    Ok(())
+}
+
 impl LaunchSessions {
     /// Ensure the project's working copy exists on this (local) host before a session starts,
     /// auto-cloning it when missing: from the local registry's `git_url` if the project is already

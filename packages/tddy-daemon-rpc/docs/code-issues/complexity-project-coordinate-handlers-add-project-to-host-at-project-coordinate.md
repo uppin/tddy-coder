@@ -1,6 +1,6 @@
 # complexity: add_project_to_host_at_project_coordinate
 
-**Location:** `packages/tddy-daemon-rpc/src/project/coordinate_handlers.rs:186` — `add_project_to_host_at_project_coordinate` (now on `ProjectRpcHandler`)
+**Location:** `packages/tddy-daemon-rpc/src/project/coordinate_handlers.rs:203` — `add_project_to_host_at_project_coordinate` (now on `ProjectRpcHandler`)
 **Moved:** 2026-09-23 by #520 (#carve 11) — from `packages/tddy-session-lifecycle/src/connection_service/project_coordinate_handlers.rs:189`; body unchanged except crate paths (`crate::livekit_peer_discovery` → `tddy_daemon_livekit::…`, `hooks_and_urls::` → `entries::`), which rustfmt re-wraps (178 → 174 lines)
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
@@ -8,7 +8,7 @@
 **CRAP:** **CRAP 702** · complexity 26 · rank 7/50 in this crate · **never executed by any test**
 **Thresholds breached:** length 178 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — partially fixed 2026-10-24 by #738 (153 → 119); still over the 60-line ceiling — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -18,6 +18,7 @@
 | 2026-09-18 | 178 | 6 | 9 | 15 | first detection |
 | 2026-09-23 | 174 | 6 | 9 | 15 | moved to `tddy-daemon-rpc` by #520, at `project/coordinate_handlers.rs:186`; −4 lines is rustfmt re-wrapping the shortened paths (`hooks_and_urls::` → `entries::`, `service_util::` dropped), no logic change. Nesting and early exits identical to the lifecycle original |
 | 2026-09-24 | 174 | 6 | 9 | 15 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count, nesting and exits; still at `coordinate_handlers.rs:186`. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD. CRAP not re-run |
+| 2026-10-24 | 119 | — | — | — | **Better, not clean** — #738 (`#start-progress` 5/8): the inline clone dispatch (supervisor / forked worker / in-process, each under `spawn_blocking_with_timeout` / `await_supervised_with_timeout`) became one call to `ProjectRpcHandler::clone_without_deadline` (42 lines, shared with `create_project_at_project_coordinate`, 109 → 75). 153 at the merge-base (`:191`), 119 at HEAD (`:203`), brace matching. The validation and idempotent-return legs remain inline. CRAP not re-derived |
 | 2026-10-24 | 153 | — | — | — | touched by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`) and **unchanged by it**: one line in the `ProjectData` literal, `home_agent: None` → `home_session_id: None`. The function is 153 lines, fn line to closing brace at `:191`, at both revisions. `/analyze-code-issues` re-run on `tddy-daemon-rpc` (287 tests across 85 files, join 66.8%): complexity 23, **now entered** (CRAP **23**, rank 13/50; it was 702, never executed). That is owed to `tests/add_project_to_host_acceptance.rs`, which exists at the merge-base too, not to this branch |
 
 ## What the tool found

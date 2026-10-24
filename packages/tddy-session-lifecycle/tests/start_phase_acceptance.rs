@@ -289,7 +289,7 @@ async fn semantic_index_phase_is_streamed_when_enabled() {
 
 // ---------------------------------------------------------------------------------------------
 // A start that has to clone its project
-// (docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-clone-progress.md)
+// (docs/ft/daemon/project-concept.md)
 
 /// A daemon whose project is registered by URL only: its working copy does not exist yet, so a start
 /// clones it from a local repository served over `file://` (which makes git report progress).

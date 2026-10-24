@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-daemon-rpc/src/project/coordinate_handlers.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-24 — `/pr-wrap` step 3.5 file-length gate on #509 (`#keyring` 2/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **586 production lines** (no `#[cfg(test)]`; 2026-10-23) · budget 500 · **1.3× over** (528 at detection)
+**Metrics:** **564 production lines** (no `#[cfg(test)]`; 2026-10-24) · budget 500 · **1.3× over** (528 at detection)
 **Thresholds breached:** length 650 > 500
 **Restructure:** not designed
 **Status:** Open — **unclaimed** — regressed 2026-10-04 (+122, #512); split deferred with the developer's consent, see [`docs/dev/todo/2026-10-04-keyring-assignments-grew-project-coordinate-handlers.md`](../../../../docs/dev/todo/2026-10-04-keyring-assignments-grew-project-coordinate-handlers.md)
@@ -56,3 +56,12 @@ adds `home_agent: None` to two `ProjectData` literals (+2) and moves the peer-ro
 per-host RPCs each carried into `project/coordinate_route.rs` (`coordinate_route`, −68); its own RPC
 lives in the new `project/home_agent_handler.rs`. Still 86 over budget; Seam A
 (`add_project_to_host_at_project_coordinate`, now 153 lines) alone would close it. Not claimed by any PR.
+
+## Measurement update 2026-10-24 — `#start-progress` 5/8 (#738)
+
+**Better, not clean:** 586 → 564 production lines (same `awk` count on merge-base and HEAD). The two
+inline clone dispatches in `create_project_at_project_coordinate` and
+`add_project_to_host_at_project_coordinate`, each wrapped in a deadline, became one
+`clone_without_deadline` method (−22). Still 64 over budget; Seam A (`add_project_to_host_at_project_coordinate`,
+now 119 lines) alone would close it. Not split here (alert-only: this PR did not grow the file). Not
+claimed by any PR.
