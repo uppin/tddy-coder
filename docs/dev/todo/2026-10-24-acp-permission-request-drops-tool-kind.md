@@ -2,7 +2,7 @@
 
 **Category:** Deferred from `coagents` (#coagents 3/8, `permission-yield`, #722)
 
-**Source:** [`2026-10-24-coagents-permission-yield.md`](../1-WIP/2026-10-24-coagents-permission-yield.md)
+**Source:** [`2026-10-24-coagents-permission-yield.md`](../changesets/2026-10-24-coagents-permission-yield.md)
 — the `PermissionToolCall.kind` of a coding subagent's yielded request.
 
 ## What is wrong

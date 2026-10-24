@@ -5,7 +5,7 @@
 //! [`super::StopReason::PermissionRequested`] and the request, and `subagent_resume { permission }`
 //! delivers the answer to the same, still-running agent turn.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-permission-yield.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § A coding subagent's permission request is the caller's to answer
 
 /// The tool call the agent asks permission for.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

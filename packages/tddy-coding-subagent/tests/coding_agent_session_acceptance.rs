@@ -12,7 +12,7 @@ use std::time::Duration;
 use serial_test::serial;
 use tddy_agent_backend::{AcpAgentCommand, OpenSession};
 use tddy_coding_subagent::CodingAgentSession;
-use tddy_discovery::subagent::{StopReason, SubagentSession, TurnRequest};
+use tddy_discovery::subagent::{PermissionAnswer, StopReason, SubagentSession, TurnRequest};
 
 const TURN_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -304,17 +304,31 @@ async fn a_permission_request_yields_instead_of_being_auto_answered() {
 #[serial]
 async fn cancelling_a_running_turn_returns_cancelled() {
     // Given
-    // The turn asks one permission before it holds: its recorded outcome is the sign the turn is
-    // running inside the agent.
+    // The turn asks one permission before it holds: once it is answered, the agent's recorded
+    // outcome is the sign the turn is running inside the agent.
     let mut held = a_turn();
     held["permission_requests"] = serde_json::json!([{ "title": "Run cargo test" }]);
     held["hold_until_cancel"] = serde_json::json!(true);
     let agent = a_coding_agent().answering(held);
     let mut session = agent.start().await;
     // Taken before the turn, as the conversation table does: `subagent_cancel` arrives while
-    // `subagent_prompt` holds the session.
+    // `subagent_resume` holds the session.
     let cancel = session.cancel_handle();
-    let turn = tokio::spawn(async move { session.prompt("Work").await });
+    let turn = tokio::spawn(async move {
+        let paused = session.prompt("Work").await?;
+        let request_id = paused
+            .permission_request
+            .expect("the turn yielded its permission request")
+            .request_id;
+        session
+            .take_turn(
+                TurnRequest::resuming().with_permission_answer(PermissionAnswer::Selected {
+                    request_id,
+                    option_id: "allow-once".to_string(),
+                }),
+            )
+            .await
+    });
     agent.wait_for("permission_outcome").await;
 
     // When

@@ -17,7 +17,7 @@ use tddy_discovery::subagent::{
 };
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::parked_permissions::ParkedPermissions;
+use crate::parked_permissions::{nothing_pending, ParkedPermissions};
 
 /// The prompt a conversation is answering, shared with its cancel handles. A turn holds the slot
 /// for as long as it runs, so a cancel waits for the turn to end before it returns.
@@ -255,10 +255,7 @@ async fn settle(flight: &mut InFlightPrompt, permissions: &ParkedPermissions) ->
 /// The new prompt a turn that starts a prompt carries, or why it cannot start one.
 fn new_prompt(request: &TurnRequest) -> Result<String, SubagentError> {
     if let Some(answer) = request.permission_answer() {
-        return Err(SubagentError::from(format!(
-            "no permission request is pending, so the answer to '{}' has nothing to answer",
-            answer.request_id()
-        )));
+        return Err(SubagentError::from(nothing_pending(answer)));
     }
     request.prompt_text().map(str::to_string).ok_or_else(|| {
         SubagentError::from("a coding agent has nothing to resume: it takes a new prompt each turn")
@@ -377,28 +374,8 @@ impl CancelHandle {
         // A turn that is running holds the slot, so this waits for it to end. A turn paused on a
         // request is driven to its end here, and its result waits for the next turn to take.
         let mut slot = in_flight.lock().await;
-        if let Some(flight) = slot.as_mut() {
-            if flight.result.is_none() {
-                let waited = tokio::time::timeout(CANCEL_SETTLE_DEADLINE, async {
-                    loop {
-                        // A request the agent parks while it winds down is answered as cancelled
-                        // too, so the wait cannot stall on a question nothing will answer.
-                        permissions.cancel_pending();
-                        tokio::select! {
-                            end = flight.ended.as_mut() => break end,
-                            () = permissions.parked() => {}
-                        }
-                    }
-                })
-                .await;
-                match waited {
-                    Ok(end) => flight.result = Some(end),
-                    Err(_) => log::warn!(
-                        "the coding agent did not end its cancelled turn within {CANCEL_SETTLE_DEADLINE:?}; \
-                         the turn is left to the session's drop"
-                    ),
-                }
-            }
+        if let Some(flight) = slot.as_mut().filter(|flight| flight.result.is_none()) {
+            drive_cancelled_turn_to_its_end(flight, &permissions).await;
         }
         Ok(())
     }
@@ -427,6 +404,33 @@ fn refuse_loop_only(request: &TurnRequest) -> Result<(), SubagentError> {
     match refused.iter().find(|(set, _)| *set) {
         Some((_, option)) => Err(SubagentError::unsupported_by_coding_agent(option)),
         None => Ok(()),
+    }
+}
+
+/// Wait, up to [`CANCEL_SETTLE_DEADLINE`], for a cancelled prompt to end, keeping its result for
+/// the next turn to take. Past the deadline the prompt is left to the session's drop.
+async fn drive_cancelled_turn_to_its_end(
+    flight: &mut InFlightPrompt,
+    permissions: &ParkedPermissions,
+) {
+    let waited = tokio::time::timeout(CANCEL_SETTLE_DEADLINE, async {
+        loop {
+            // A request the agent parks while it winds down is answered as cancelled too, so the
+            // wait cannot stall on a question nothing will answer.
+            permissions.cancel_pending();
+            tokio::select! {
+                end = flight.ended.as_mut() => break end,
+                () = permissions.parked() => {}
+            }
+        }
+    })
+    .await;
+    match waited {
+        Ok(end) => flight.result = Some(end),
+        Err(_) => log::warn!(
+            "the coding agent did not end its cancelled turn within {CANCEL_SETTLE_DEADLINE:?}; \
+             the turn is left to the session's drop"
+        ),
     }
 }
 

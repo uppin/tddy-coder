@@ -4,7 +4,7 @@
 //! The stub agent asks through `session/request_permission` and records the outcome it was given
 //! (`TDDY_ACP_STUB_RECORD`), so what the agent received is observed, not inferred.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-permission-yield.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § A coding subagent's permission request is the caller's to answer
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -94,11 +94,26 @@ impl AskingAgent {
     fn recorded(&self, event: &str) -> Vec<serde_json::Value> {
         recorded_events(&self.record_path(), event)
     }
+
+    /// Wait until the agent has recorded `event`, failing past [`TURN_DEADLINE`]. The agent records
+    /// a `session/cancel` notification on its own schedule, after the cancelled turn has ended.
+    async fn wait_for(&self, event: &str) {
+        tokio::time::timeout(TURN_DEADLINE, async {
+            while self.recorded(event).is_empty() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the agent recorded `{event}` in time"));
+    }
 }
 
+/// The agent's recorded `event`s. The agent appends to its record while a test reads it, so only
+/// complete (newline-ended) lines are read: a trailing fragment is a line still being written.
 fn recorded_events(path: &Path, event: &str) -> Vec<serde_json::Value> {
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
+    let record = std::fs::read_to_string(path).unwrap_or_default();
+    let complete = record.rfind('\n').map_or("", |end| &record[..end]);
+    complete
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("record line is JSON"))
         .filter(|line| line["event"] == event)
@@ -296,5 +311,6 @@ async fn cancelling_while_a_request_is_pending_returns_cancelled() {
 
     // Then
     assert_eq!(agent.received_outcomes(), ["cancelled"]);
+    agent.wait_for("cancel").await;
     assert_eq!(agent.recorded("cancel").len(), 1);
 }

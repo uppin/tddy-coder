@@ -59,12 +59,10 @@ impl ParkedPermissions {
     pub fn answer(&self, answer: &PermissionAnswer) -> Result<(), String> {
         let mut state = self.state();
         let decision = decision_for(state.queue.front(), answer)?;
-        let parked = state.queue.pop_front().ok_or_else(|| {
-            format!(
-                "no permission request is pending, so the answer to '{}' has nothing to answer",
-                answer.request_id()
-            )
-        })?;
+        let parked = state
+            .queue
+            .pop_front()
+            .ok_or_else(|| nothing_pending(answer))?;
         parked.decided.send(decision).map_err(|_| {
             format!(
                 "the coding agent stopped waiting for permission request '{}'",
@@ -90,16 +88,21 @@ impl ParkedPermissions {
     }
 }
 
+/// Why `answer` is refused when no permission request is pending.
+pub(crate) fn nothing_pending(answer: &PermissionAnswer) -> String {
+    format!(
+        "no permission request is pending, so the answer to '{}' has nothing to answer",
+        answer.request_id()
+    )
+}
+
 /// The decision `answer` delivers to the request at the front of the queue, or why it cannot.
 fn decision_for(
     front: Option<&Parked>,
     answer: &PermissionAnswer,
 ) -> Result<PermissionDecision, String> {
     let Some(parked) = front else {
-        return Err(format!(
-            "no permission request is pending, so the answer to '{}' has nothing to answer",
-            answer.request_id()
-        ));
+        return Err(nothing_pending(answer));
     };
     let pending = &parked.view.request_id;
     if pending != answer.request_id() {

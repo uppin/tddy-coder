@@ -1966,6 +1966,13 @@ impl SubagentSession for SpecializedSubagentSession {
         // malformed request costs no model turn (AC5). The replacement is refused on the same
         // discipline, for the same reason.
         validate_yield_conditions(request.yield_conditions()).map_err(SubagentError)?;
+        // A model loop never asks permission, so an answer has nothing to answer.
+        if let Some(answer) = request.permission_answer() {
+            return Err(SubagentError(format!(
+                "this subagent is a model loop, which never asks permission: the answer to '{}' has nothing to answer",
+                answer.request_id()
+            )));
+        }
         if let Some(replacement) = request.replacement() {
             validate_replacement(replacement).map_err(SubagentError)?;
         }

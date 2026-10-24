@@ -1,7 +1,7 @@
 //! The daemon's half of a coding agent's permission request on the wire: the request rides the
 //! final frame of the turn that paused on it.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-permission-yield.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § A coding subagent's permission request is the caller's to answer
 
 use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{

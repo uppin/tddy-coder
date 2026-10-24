@@ -30,7 +30,7 @@ See [Session agent roster § Coding agents](../daemon/session-agent-roster.md#co
 | `session/new` (`NewSessionRequest`)               | `subagent_new_session` — input `{ agent?, sessionId?, cwd? }` → `{ sessionId }` |
 | Client-chosen `SessionId`                         | `sessionId` input — the **main agent** decides the conversation id; a fresh id is generated only when omitted |
 | `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock], graceMs?, maxTurns?, syncWorktree? }` → the turn's outcome, or `{ responseId, pending: true }` once `graceMs` elapses |
-| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, replacement?, resetWorktree?, syncWorktree?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that resumes a yielded conversation with the caller's replacement call and result |
+| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, replacement?, permission?, resetWorktree?, syncWorktree?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that resumes a yielded conversation with the caller's replacement call and result |
 | *(no ACP counterpart)*                            | `subagent_await` — input `{ responseId, timeoutMs? }` → the same outcome, or `{ responseId, pending: true }` again |
 | `PromptResponse.stopReason`                       | output field `stopReason`: `"end_turn"` \| `"max_turn_requests"` \| `"cancelled"` \| `"context_exhausted"` |
 | Response `content` (`ContentBlock[]`)             | output field `content`: `[{ "type": "text", "text": "..." }]` |
@@ -301,6 +301,35 @@ on an open conversation and **sends no new prompt turn**.
   never reshapes the history it is refused from.
 - A resume queues exactly as a prompt does — a conversation runs one turn at a time — and reports
   `queuePosition` / `queueSize`, `graceMs` and `responseId` identically.
+
+### A coding subagent's permission request is the caller's to answer
+
+A coding subagent (Claude Code, Codex or OpenCode over ACP) asks before it edits or runs something
+its policy does not pre-approve. That question goes to **the agent that invoked it**: the turn ends
+with `stopReason: "permission_requested"` and a `permissionRequest`
+`{ requestId, toolCall: { title, kind, rawInput? }, options: [{ optionId, name, kind }] }`. The
+subagent is paused, not finished — its ACP prompt stays in flight, waiting on the answer.
+
+- **The caller answers with `subagent_resume`.** `permission: { requestId, optionId }` delivers one
+  of the request's options; `permission: { requestId, cancelled: true }` answers it as cancelled.
+  The call returns the rest of that same turn — the same outcome shape, which may be another
+  `permission_requested` with a fresh `requestId` — under the grace period and `responseId` /
+  `subagent_await` like any turn. The decision is the caller's: it may decide on its own or ask the
+  user first; `subagent_resume`'s description says so.
+- **Always yield.** There is no per-entry auto-allow list.
+- **One question at a time.** Requests the agent raises while one is pending queue behind it, oldest
+  first. While one is pending, `subagent_prompt` is refused naming its `requestId`; so is a resume
+  with no `permission`, or one naming another request, or an `optionId` the request did not offer —
+  and the request stays pending. An answer with nothing pending is refused too.
+- **Cancelling while one is pending** answers every parked request as cancelled, sends
+  `session/cancel`, and waits (bounded, 10 s) for the turn to end as `cancelled`.
+- **Across daemons.** The request rides the final `AgentConversationChunk`
+  (`permission_request_json`) and the answer rides `ResumeAgentConversationRequest`
+  (`permission_answer_json`), so a conversation another daemon serves behaves the same.
+- **`model` agents never ask.** A resume carrying a `permission` to an OpenAI-loop agent is refused
+  before the model is called.
+- **Known gap:** `toolCall.kind` is always `other` — the ACP driver drops the agent's tool kind
+  ([`docs/dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md`](../../dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md)).
 
 ### A turn in which no tool call succeeded is an error
 
@@ -903,6 +932,17 @@ fully migrated onto the array model.
 
 Verified at the request seams and against real git repositories; **no test runs a real jail end to
 end** (this needs a sandbox the development host cannot start).
+
+### Coding-subagent permission requests (`tddy-discovery`, `tddy-coding-subagent`, `tddy-session-agents`, `tddy-tools`)
+
+- [x] A subagent permission request ends the call with `permission_requested` and the request's tool call and options.
+- [x] `subagent_resume` with an option continues the same subagent turn, and the agent receives that option.
+- [x] A cancelled answer reaches the agent as cancelled.
+- [x] A continuation longer than the grace period returns a `responseId` and is awaitable (the generic resume path; no permission-specific test).
+- [x] A prompt while a request is pending is refused naming the request.
+- [x] A resume naming another request id, or with no permission, is refused naming the pending one.
+- [x] `subagent_cancel` while pending returns `cancelled` and the agent sees the request cancelled.
+- [x] The same holds when the conversation is served by another daemon — proven in two halves: the in-jail client's frame parse and resume encode, and the daemon's frames.
 
 ## Non-goals (out of scope for v1)
 

@@ -1,7 +1,7 @@
 //! `subagent_resume`'s `permission` argument — the main agent's answer to a coding subagent's
 //! pending permission request.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-permission-yield.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § A coding subagent's permission request is the caller's to answer
 
 use tddy_discovery::subagent::PermissionAnswer;
 use tddy_tools::permission_answer_arg::parse_permission_answer;

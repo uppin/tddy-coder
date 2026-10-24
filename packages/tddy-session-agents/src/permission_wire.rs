@@ -1,7 +1,7 @@
 //! A coding agent's permission request on the conversation wire: the request the final frame of a
 //! paused turn names, and the answer a resume carries back to the agent.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-permission-yield.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § A coding subagent's permission request is the caller's to answer
 
 use tddy_discovery::subagent::{PermissionAnswer, PermissionRequestView, TurnRequest};
 

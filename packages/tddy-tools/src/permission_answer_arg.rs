@@ -1,7 +1,7 @@
 //! `subagent_resume`'s `permission` argument: the caller's answer to a coding subagent's pending
 //! permission request.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-permission-yield.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § A coding subagent's permission request is the caller's to answer
 
 use tddy_discovery::subagent::PermissionAnswer;
 
@@ -57,21 +57,30 @@ pub fn parse_permission_answer(
             ))
         }
     };
-    match (object.get("optionId"), object.get("cancelled")) {
+    answer_of(request_id, object.get("optionId"), object.get("cancelled")).map(Some)
+}
+
+/// The answer an `optionId` or a `cancelled` flag gives `request_id`: exactly one of the two.
+fn answer_of(
+    request_id: String,
+    option: Option<&serde_json::Value>,
+    cancelled: Option<&serde_json::Value>,
+) -> Result<PermissionAnswer, String> {
+    match (option, cancelled) {
         (Some(_), Some(_)) => Err(format!(
             "{PERMISSION_ARG} names both optionId and cancelled; an answer is one or the other"
         )),
         (Some(option), None) => match option.as_str() {
-            Some(option_id) if !option_id.is_empty() => Ok(Some(PermissionAnswer::Selected {
+            Some(option_id) if !option_id.is_empty() => Ok(PermissionAnswer::Selected {
                 request_id,
                 option_id: option_id.to_string(),
-            })),
+            }),
             _ => Err(format!(
                 "{PERMISSION_ARG}.optionId must name one of the request's options[].optionId"
             )),
         },
         (None, Some(cancelled)) => match cancelled.as_bool() {
-            Some(true) => Ok(Some(PermissionAnswer::Cancelled { request_id })),
+            Some(true) => Ok(PermissionAnswer::Cancelled { request_id }),
             _ => Err(format!(
                 "{PERMISSION_ARG}.cancelled must be true to answer the request as cancelled; to choose an option, give its optionId"
             )),
