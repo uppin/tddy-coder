@@ -2015,7 +2015,7 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
 ///
 /// Queues exactly as a prompt does: a conversation runs one turn at a time, so a resume accepted
 /// while a turn is in flight waits behind it and reports `queuePosition` / `queueSize`.
-async fn subagent_resume_tool(args: serde_json::Value) -> String {
+pub async fn subagent_resume_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
     };
@@ -2067,21 +2067,14 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
     };
-    // A deferral is refused rather than dropped: running the turn without it would answer nothing
-    // and leave the request pending with the main agent, which the caller did not ask for. The
-    // daemon's resume request has no field to carry it yet, so the refusal stands until one lands.
-    match crate::permission_deferral_arg::parse_permission_deferral(&args) {
-        Ok(None) => {}
-        // TODO(web-approvals): blocked — ResumeAgentConversationRequest has no deferral field; decision pending
-        Ok(Some(_)) => {
-            return subagent_error_json(format!(
-                "{} is not yet carried to the daemon: a permission request cannot be handed to the user from subagent_resume yet; answer it with {} instead",
-                crate::permission_deferral_arg::DEFER_ARG,
-                crate::permission_answer_arg::PERMISSION_ARG
-            ))
-        }
+    // A deferral hands the pending request to the user: the daemon holds the turn until the user
+    // answers it, and the call returns pending with `awaitingUser` (see `take_a_turn`). Combined
+    // with an answer it is refused, naming both, by the parser.
+    let request = match crate::permission_deferral_arg::parse_permission_deferral(&args) {
+        Ok(Some(request_id)) => request.deferring_permission_to_user(request_id),
+        Ok(None) => request,
         Err(e) => return subagent_error_json(e),
-    }
+    };
     let request = match crate::permission_answer_arg::parse_permission_answer(&args) {
         Ok(Some(answer)) => request.with_permission_answer(answer),
         Ok(None) => request,
@@ -2170,6 +2163,7 @@ async fn take_a_turn(session_id: &str, request: TurnRequest, grace: std::time::D
     let Some(conv) = sessions.open.get(session_id) else {
         return subagent_error_json(format!("unknown subagent session: {session_id}"));
     };
+    let awaiting_user = request.permission_deferred_to_user().is_some();
     let turn = DeferredTurn {
         response_id: uuid::Uuid::new_v4().to_string(),
         conversation_id: session_id.to_string(),
@@ -2192,6 +2186,9 @@ async fn take_a_turn(session_id: &str, request: TurnRequest, grace: std::time::D
         provider.as_deref(),
         running.abort_handle(),
     );
+    if awaiting_user {
+        sessions.pending.mark_awaiting_user(&response_id);
+    }
     let mut watched = sessions
         .pending
         .watch(&response_id)
@@ -2224,7 +2221,7 @@ async fn take_a_turn(session_id: &str, request: TurnRequest, grace: std::time::D
 /// An unknown id is refused naming it rather than waited on — an await that blocked out its timeout
 /// on an id nothing was ever stored under is indistinguishable from a slow turn, and would have the
 /// agent poll forever for an answer that is not coming (criterion 29).
-async fn subagent_await_tool(args: serde_json::Value) -> String {
+pub async fn subagent_await_tool(args: serde_json::Value) -> String {
     let Some(response_id) = args.get("responseId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: responseId");
     };
@@ -2881,8 +2878,9 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
          A conversation runs one turn at a time, so a turn with a `queuePosition` above 0 has not \
          started: that many turns accepted before it on the same conversation are still \
          outstanding, and the number falls as they end. `queueSize` is every turn still \
-         outstanding on that conversation, this one included. Collecting an outcome does not \
-         consume it: the same responseId can be awaited again.",
+         outstanding on that conversation, this one included. A turn that handed a permission \
+         request to the user reports `awaitingUser: true` while the user has not answered it. \
+         Collecting an outcome does not consume it: the same responseId can be awaited again.",
         subagent_await_schema(),
     );
     router.add_route(subagent_route(await_tool, |args| {

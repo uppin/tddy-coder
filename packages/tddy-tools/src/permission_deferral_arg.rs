@@ -14,9 +14,11 @@ pub fn defer_property() -> serde_json::Value {
         "type": "string",
         "description": "Hand the pending permission request with this `requestId` to the user: \
                         it shows in the subagent's conversation view with its options, and the \
-                        user's choice is delivered to the subagent. Returns {responseId, pending, \
-                        awaitingUser}; collect the rest of the turn with subagent_await. You may \
-                        still answer it yourself with `permission` — the first answer wins."
+                        user's choice is delivered to the subagent. The call returns {responseId, \
+                        pending: true, awaitingUser: true} until the user answers; collect the rest \
+                        of the turn with subagent_await. Until then this conversation takes no \
+                        other turn, so `permission` cannot answer the request in the meantime. \
+                        Cannot be combined with `permission`."
     })
 }
 

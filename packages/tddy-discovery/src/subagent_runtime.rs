@@ -196,6 +196,9 @@ struct PendingTurn {
     arrived: u64,
     publish: tokio::sync::watch::Sender<TurnState>,
     abort: tokio::task::AbortHandle,
+    /// Whether the turn handed a permission request to the user and is waiting for its answer. Set by
+    /// [`PendingTurns::mark_awaiting_user`]; reported as `awaitingUser` while the turn is pending.
+    awaiting_user: bool,
 }
 
 impl PendingTurn {
@@ -244,8 +247,25 @@ impl PendingTurns {
                 arrived,
                 publish,
                 abort,
+                awaiting_user: false,
             },
         );
+    }
+
+    /// Record that the turn registered under `response_id` handed a permission request to the user
+    /// and is waiting for its answer. Ignored for an id this table never registered.
+    pub fn mark_awaiting_user(&mut self, response_id: &str) {
+        if let Some(turn) = self.turns.get_mut(response_id) {
+            turn.awaiting_user = true;
+        }
+    }
+
+    /// Whether the turn under `response_id` is waiting on the user's answer to a permission request
+    /// it handed them.
+    pub fn awaiting_user(&self, response_id: &str) -> bool {
+        self.turns
+            .get(response_id)
+            .is_some_and(|turn| turn.awaiting_user)
     }
 
     /// How many turns on the same conversation were accepted before `response_id` and have not
@@ -493,7 +513,7 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
 /// for a conversation another daemon runs, whose endpoint this process cannot see.
 pub fn pending_turn_json(pending: &PendingTurns, response_id: &str) -> String {
     let provider = pending.provider_of(response_id);
-    serde_json::json!({
+    let mut reply = serde_json::json!({
         "responseId": response_id,
         "pending": true,
         "queuePosition": pending.queue_position(response_id),
@@ -503,8 +523,12 @@ pub fn pending_turn_json(pending: &PendingTurns, response_id: &str) -> String {
         "provider": provider,
         "providerQueuePosition": pending.provider_queue_position(response_id),
         "providerQueueSize": provider.map(|provider| pending.provider_queue_size(provider)),
-    })
-    .to_string()
+    });
+    // Present only while the turn waits on the user: a turn the main agent keeps reports nothing new.
+    if pending.awaiting_user(response_id) {
+        reply["awaitingUser"] = serde_json::json!(true);
+    }
+    reply.to_string()
 }
 
 /// One conversation as the shared [`tddy_core::token_accounting::ConversationRecord`] shape used by
