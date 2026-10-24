@@ -120,7 +120,7 @@ impl ProjectRpcHandler {
         let dest_path = destination.clone();
         let timeout = self.config.spawn_worker_request_timeout();
 
-        match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+        match self.spawn_backend.clone() {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 await_supervised_with_timeout(
                     timeout,
@@ -274,7 +274,7 @@ impl ProjectRpcHandler {
         let dest_path = destination.clone();
         let timeout = self.config.spawn_worker_request_timeout();
 
-        match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+        match self.spawn_backend.clone() {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 await_supervised_with_timeout(
                     timeout,

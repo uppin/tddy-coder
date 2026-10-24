@@ -54,6 +54,12 @@ impl DaemonSessionHost {
         self.spawn_client.clone()
     }
 
+    /// The privileged spawn backend this daemon was started with.
+    #[must_use]
+    pub fn spawn_backend(&self) -> tddy_spawn::supervisor_client::SpawnBackendChoice {
+        self.spawn_backend.clone()
+    }
+
     /// The common-room LiveKit slot a request is forwarded to a peer through, when configured.
     #[must_use]
     pub fn common_room_livekit_room(
@@ -206,6 +212,7 @@ impl DaemonSessionHost {
             presenter_observer_deps: self.presenter_observer_deps(),
             user_resolver: self.user_resolver.clone(),
             spawn_client: self.spawn_client.clone(),
+            spawn_backend: self.spawn_backend.clone(),
             askpass: self.askpass.clone(),
             workspace_sandboxes: Arc::clone(&self.workspace_sandboxes),
             rpc_activity: self.rpc_activity.clone(),

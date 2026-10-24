@@ -11,9 +11,9 @@
 # stray connect() nor a later `systemctl preset-all` can bring a second daemon back.
 #
 # --user AND THE SUPERVISOR ARE MUTUALLY EXCLUSIVE, and --user means NO SUPERVISOR AT ALL: that mode
-# installs a tddy-daemon.service *user* unit and no supervisor unit, no supervisor.yaml and no
-# `supervisor:` block in daemon.yaml. Two reasons, both structural. A rootless supervisor can neither
-# setuid to another OS user, nor own a delegated cgroup subtree, nor bind a root-owned socket — it
+# installs a tddy-daemon.service *user* unit and no supervisor unit or supervisor.yaml. Two reasons,
+# both structural. A rootless supervisor can neither setuid to another OS user, nor own a delegated
+# cgroup subtree, nor bind a root-owned socket — it
 # would broker nothing, so it is pure overhead. And a single-user install has no privilege separation
 # to provide in the first place: the daemon already runs as the only user involved. --user is therefore
 # the no-supervisor deployment described in docs/dev/tddy-daemon.service.example (that example is the
@@ -97,8 +97,9 @@
 #                        is the one install creates, chowns and locks down to mode 0700.
 #
 #   INSTALL_SUPERVISOR_SOCKET_PATH  Where tddy-supervisor.socket creates the privileged RPC socket
-#                        (default: /run/tddy-supervisor.sock). Written into the socket unit,
-#                        supervisor.yaml and daemon.yaml's supervisor.socket_path, so all three agree.
+#                        (default: /run/tddy-supervisor.sock). Written into the socket unit and
+#                        supervisor.yaml, so both agree. daemon.yaml does not name it: tddy-supervisor
+#                        tells the daemon the path through its environment (TDDY_SUPERVISOR_SOCKET).
 #                        Ignored by --user, which installs no supervisor.
 #   INSTALL_DAEMON_SOCKET_PATH  Where the supervisor binds the daemon's client-facing socket
 #                        (default: /run/tddy-daemon.sock). Written into the tddy-daemon service's
@@ -331,8 +332,8 @@ DAEMON_GROUP="${INSTALL_DAEMON_GROUP:-$DAEMON_USER}"
 SOCKET_GROUP="${INSTALL_SOCKET_GROUP:-tddy-clients}"
 UNIT_SOCKET_PATH="${SYSTEMD_DIR}/tddy-supervisor.socket"
 # Where systemd creates the supervisor socket. Written into the socket unit's ListenStream, and into
-# both supervisor.yaml (socket.path) and daemon.yaml (supervisor.socket_path) when this run creates
-# them; the supervisor adopts the passed fd instead of binding it.
+# supervisor.yaml (socket.path) when this run creates that file; the supervisor adopts the passed fd
+# instead of binding it. The daemon is never told this path through daemon.yaml.
 SUPERVISOR_SOCKET_PATH="${INSTALL_SUPERVISOR_SOCKET_PATH:-/run/tddy-supervisor.sock}"
 
 # AppArmor profile granting the daemon binary the unprivileged user namespaces the Linux cgroups
@@ -477,49 +478,79 @@ render_template() {
 
 # drop_top_level_yaml_block FILE KEY
 #
-# Removes a top-level `KEY:` mapping from a file this run just rendered — the key line, everything
-# indented under it, and the comment block documenting it directly above — and installs the result
-# atomically. The comment goes with the block because a config that explains a setting it does not
-# have is worse than either alone.
+# Removes the top-level `KEY:` mapping from FILE: the key line (with or without a trailing comment),
+# every indented line under it, and the comment lines directly above it with no blank line between.
+# Those comments document the mapping and go with it. Every other line is copied unchanged, in order,
+# and the result is installed atomically. Returns 0 when it removed the block; returns 1, leaving FILE
+# untouched, when there is no such block.
 #
-# Used for `supervisor:` in a --user install. daemon.yaml.production declares that block for the
-# supervised deployment, and an unreachable supervisor FAILS every spawn by design (there is no
-# fallback to in-process spawning), so a rootless daemon that would dial a socket nothing binds must
-# not carry it at all.
+# The rewrite keeps FILE's mode and owner (cp -p): harden_installed_path only ever narrows an
+# operator's mode, so a daemon.yaml that was 0600 must stay 0600 rather than come back world-readable.
+#
+# Used on an existing daemon.yaml in both system and --user installs. tddy-supervisor tells the daemon
+# its socket through the environment, so a `supervisor:` key left by an earlier install is obsolete,
+# and the daemon refuses to start while one is present.
 drop_top_level_yaml_block() {
-  local file="$1" key="$2" tmp
+  local file="$1" key="$2" tmp grep_status=0
+
+  # Presence first, with the same line rule the awk program below applies. An absent block leaves
+  # FILE untouched, and a file that cannot be read is an error rather than "no block".
+  grep -Eq "^${key}:([[:space:]]|\$)" "$file" || grep_status=$?
+  if [[ "$grep_status" -eq 1 ]]; then
+    return 1
+  fi
+  if [[ "$grep_status" -ne 0 ]]; then
+    echo "install: cannot read ${file} to look for the ${key} block; it is left unchanged" >&2
+    exit 1
+  fi
+
   tmp="$(mktemp "${file}.XXXXXX")" || {
     echo "install: cannot create a temporary file next to ${file}" >&2
     exit 1
   }
-  if ! awk -v key="${key}:" '
-    function flush() { for (i = 1; i <= buffered; i++) print buffer[i]; buffered = 0 }
+  # cp -p gives the temporary file FILE's mode and owner; awk then truncates it and writes the result.
+  if ! cp -p "$file" "$tmp" || ! awk -v key="${key}:" '
+    function is_key(line) {
+      return line == key || index(line, key " ") == 1 || index(line, key "\t") == 1
+    }
+    function emit(    i) {
+      for (i = 1; i <= held; i++) print buffer[i]
+      held = 0
+    }
+    # Comment and blank lines wait in buffer: only the line after them decides whether they belong to
+    # the block being dropped, to the key that follows them, or to neither.
+    /^#/ || /^$/ { buffer[++held] = $0; next }
+    # An indented line under the dropped key is part of the block, and so are the comments and blank
+    # lines held in front of it.
+    dropping && /^[ \t]/ { held = 0; next }
     {
-      # Hold comments and blank lines back: whether they document the next key or the one being
-      # dropped is only decided by the line that follows them.
-      if ($0 ~ /^#/ || $0 == "") { buffer[++buffered] = $0; next }
-      if (dropping) {
-        if ($0 ~ /^[[:space:]]/) { buffered = 0; next }
-        dropping = 0
+      dropping = 0
+      if (is_key($0)) {
+        # Comment lines directly above the key, with no blank line between, are the block itself.
+        n = held
+        while (n > 0 && buffer[n] ~ /^#/) n--
+        for (i = 1; i <= n; i++) print buffer[i]
+        held = 0
+        dropping = 1
+        next
       }
-      if ($0 == key) { buffered = 0; dropping = 1; next }
-      flush()
+      emit()
       print
     }
-    END { flush() }
+    END { emit() }
   ' "$file" >"$tmp"; then
     rm -f "$tmp"
     echo "install: failed removing the ${key} block from ${file}; it is left unchanged" >&2
     exit 1
   fi
-  chmod 0644 "$tmp"
-  mv -f "$tmp" "$file"
-  if grep -q "^${key}:" "$file"; then
-    echo "install: ${file} still declares a top-level ${key}: block after removing it — the template" >&2
-    echo "install: ${ROOT_DIR}/daemon.yaml.production must have changed shape. A --user install has no" >&2
-    echo "install: supervisor, and the daemon fails every spawn dialing one that is absent." >&2
+  if grep -Eq "^${key}:([[:space:]]|\$)" "$tmp"; then
+    rm -f "$tmp"
+    echo "install: ${file} still declares a top-level ${key}: block that cannot be removed automatically;" >&2
+    echo "install: it is left unchanged. Delete that block by hand and re-run install." >&2
     exit 1
   fi
+  mv -f "$tmp" "$file"
+  return 0
 }
 
 # verify_unit_running UNIT SAMPLES
@@ -1096,35 +1127,23 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo "install: missing ${ROOT_DIR}/daemon.yaml.production" >&2
     exit 1
   fi
-  echo "install: creating ${CONFIG_FILE} from daemon.yaml.production (placeholders: __INSTALL_BIN_DIR__, __WEB_BUNDLE_PATH__, __DAEMON_LOG_DIR__, __AUTH_STORAGE_DIR__, __SUPERVISOR_SOCKET_PATH__, __DAEMON_SOCKET_PATH__)"
+  echo "install: creating ${CONFIG_FILE} from daemon.yaml.production (placeholders: __INSTALL_BIN_DIR__, __WEB_BUNDLE_PATH__, __DAEMON_LOG_DIR__, __AUTH_STORAGE_DIR__, __DAEMON_SOCKET_PATH__)"
   render_template "${ROOT_DIR}/daemon.yaml.production" "$CONFIG_FILE" \
     "__INSTALL_BIN_DIR__=${BIN_DIR}" \
     "__WEB_BUNDLE_PATH__=${WEB_BUNDLE_DIR}" \
     "__DAEMON_LOG_DIR__=${DAEMON_LOG_DIR}" \
     "__AUTH_STORAGE_DIR__=${AUTH_STORAGE_DIR}" \
-    "__SUPERVISOR_SOCKET_PATH__=${SUPERVISOR_SOCKET_PATH}" \
     "__DAEMON_SOCKET_PATH__=${DAEMON_SOCKET_PATH}"
   if ! "$want_supervisor"; then
-    echo "install: (--user) removing the supervisor: block from ${CONFIG_FILE} (no supervisor is installed)"
-    drop_top_level_yaml_block "$CONFIG_FILE" supervisor
     echo "install:   sessions stay with the daemon's own forked spawn worker, as the invoking user"
   fi
 else
   echo "install: keeping existing config (not overwriting): ${CONFIG_FILE}"
-  if "$want_supervisor"; then
-    if ! grep -q '^supervisor:' "$CONFIG_FILE"; then
-      echo "install:   NOTE: ${CONFIG_FILE} declares no supervisor socket. Sessions are spawned by the" >&2
-      echo "install:   daemon's own forked worker as ${DAEMON_USER} either way today — no daemon code path" >&2
-      echo "install:   reads this block yet — but declaring it now means the host delegates spawning (and" >&2
-      echo "install:   fails closed instead of silently downgrading) as soon as that wiring lands:" >&2
-      echo "install:     supervisor:" >&2
-      echo "install:       socket_path: ${SUPERVISOR_SOCKET_PATH}" >&2
-    fi
-  elif grep -q '^supervisor:' "$CONFIG_FILE"; then
-    echo "install:   WARNING: ${CONFIG_FILE} declares a supervisor socket, but a --user install installs" >&2
-    echo "install:   no supervisor — nothing binds that path. Once the daemon routes spawning through a" >&2
-    echo "install:   supervisor, an unreachable one FAILS every spawn (there is deliberately no fallback" >&2
-    echo "install:   to in-process spawning). Remove the supervisor: block from ${CONFIG_FILE}." >&2
+  # tddy-supervisor tells the daemon its socket through the environment, so a `supervisor:` block an
+  # earlier install rendered is obsolete, and the daemon refuses to start while one is present. Remove
+  # it in both modes and say so; every other line the operator wrote is kept as it was.
+  if drop_top_level_yaml_block "$CONFIG_FILE" supervisor; then
+    echo "install:   removed the obsolete \`supervisor:\` block from ${CONFIG_FILE}; tddy-supervisor now tells the daemon its socket"
   fi
 fi
 
@@ -1252,7 +1271,7 @@ Description=tddy-supervisor privileged RPC socket
 # systemd creates this socket as root:${SOCKET_GROUP} at mode 0660 (the docker.sock model) and the
 # supervisor adopts the passed fd via LISTEN_FDS. Group membership only gets a client as far as
 # connect(): every request is authorized by SO_PEERCRED against the uids of declared services.
-# Must match supervisor.yaml socket.path/group/mode and daemon.yaml supervisor.socket_path.
+# Must match supervisor.yaml socket.path/group/mode.
 ListenStream=${SUPERVISOR_SOCKET_PATH}
 SocketUser=root
 SocketGroup=${SOCKET_GROUP}
@@ -1283,9 +1302,6 @@ if "$want_supervisor"; then
   warn_unless_file_declares "$SUPERVISOR_CONFIG_FILE" "$SUPERVISOR_SOCKET_PATH" \
     "socket.path — the privileged RPC socket systemd creates and the supervisor adopts" \
     "Set socket.path to it, or delete ${SUPERVISOR_CONFIG_FILE} and re-run install."
-  warn_unless_file_declares "$CONFIG_FILE" "$SUPERVISOR_SOCKET_PATH" \
-    "supervisor.socket_path — the privileged socket the daemon dials" \
-    "Set supervisor.socket_path to it, or delete ${CONFIG_FILE} and re-run install to regenerate it."
   warn_unless_file_declares "$UNIT_SOCKET_PATH" "ListenStream=${SUPERVISOR_SOCKET_PATH}" \
     "ListenStream — where systemd actually creates the privileged socket" \
     "Re-run with --update-systemd-unit to rewrite the unit from this script's template."

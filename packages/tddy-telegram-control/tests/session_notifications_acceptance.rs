@@ -152,6 +152,7 @@ fn a_service_with_both_subscribers(
         tddy_data_dir,
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&a_daemon_config()),
         hooks,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),

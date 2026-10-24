@@ -279,13 +279,19 @@ pub struct SpawnPlan {
 /// The supervisor's own environment is not a neutral starting point. On a real host it is whatever the
 /// unit's `Environment=` and `EnvironmentFile=` put there, which is where operators keep credentials,
 /// and the supervisor is uid 0 when it reads them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnvironmentBase {
-    /// The supervisor's own environment, verbatim.
+    /// The supervisor's own environment, verbatim, plus [`SUPERVISOR_SOCKET_ENV`] naming the socket
+    /// this supervisor listens on.
     ///
     /// For a *declared managed service* only. Root wrote that declaration, and an operator who sets
     /// `RUST_LOG` on the supervisor unit expects it to reach the daemon exactly as it does today.
-    Inherited,
+    /// The socket travels in this variant, rather than with every spawn, so that only a managed
+    /// service can ever be told where the supervisor listens.
+    Inherited {
+        /// `socket.path` from `supervisor.yaml`.
+        supervisor_socket: PathBuf,
+    },
     /// `PATH`, the account's own `HOME`/`USER`/`LOGNAME`, and the host's locale. Nothing else.
     ///
     /// For a session, which runs as somebody else on a caller's behalf and has no claim on anything
@@ -1347,8 +1353,8 @@ impl ChildEnvironment {
         handover: Option<&SocketHandover>,
     ) -> std::io::Result<ChildEnvironment> {
         let hands_over_listener = handover.is_some();
-        let mut values: BTreeMap<OsString, OsString> = match plan.environment {
-            EnvironmentBase::Inherited => std::env::vars_os().collect(),
+        let mut values: BTreeMap<OsString, OsString> = match &plan.environment {
+            EnvironmentBase::Inherited { .. } => std::env::vars_os().collect(),
             EnvironmentBase::Minimal => minimal_environment(),
         };
         for (key, value) in &plan.env {
@@ -1371,6 +1377,16 @@ impl ChildEnvironment {
         // descriptor 3 happened to be as a listener.
         for variable in ACTIVATION_VARIABLES {
             values.remove(OsStr::new(variable));
+        }
+        // The same rule for the supervisor's own socket: last, and dropped for every child before
+        // anything is added back, so neither a caller nor an inherited value can tell a child where
+        // the supervisor listens. Only a declared managed service is told.
+        values.remove(OsStr::new(SUPERVISOR_SOCKET_ENV));
+        if let EnvironmentBase::Inherited { supervisor_socket } = &plan.environment {
+            values.insert(
+                OsString::from(SUPERVISOR_SOCKET_ENV),
+                supervisor_socket.clone().into_os_string(),
+            );
         }
         if let Some(handover) = handover {
             values.insert(
@@ -1589,8 +1605,11 @@ mod tests {
             self
         }
 
-        fn inheriting_the_supervisors_environment(mut self) -> Self {
-            self.plan.environment = EnvironmentBase::Inherited;
+        /// A declared managed service, under a supervisor listening at `supervisor_socket`.
+        fn inheriting_the_supervisors_environment(mut self, supervisor_socket: &str) -> Self {
+            self.plan.environment = EnvironmentBase::Inherited {
+                supervisor_socket: PathBuf::from(supervisor_socket),
+            };
             self
         }
 
@@ -2352,7 +2371,7 @@ mod tests {
         // Given
         std::env::set_var("TDDY_SUPERVISOR_UNIT_LOG_LEVEL", "debug");
         let plan = a_spawn_plan()
-            .inheriting_the_supervisors_environment()
+            .inheriting_the_supervisors_environment("/run/tddy-supervisor.sock")
             .build();
 
         // When
@@ -2363,6 +2382,67 @@ mod tests {
         assert_eq!(
             environment.get("TDDY_SUPERVISOR_UNIT_LOG_LEVEL"),
             Some(&"debug".to_string())
+        );
+    }
+
+    #[test]
+    fn tells_a_declared_service_where_the_supervisor_listens() {
+        // Given a declared service under a supervisor listening at a known socket
+        let plan = a_spawn_plan()
+            .inheriting_the_supervisors_environment("/run/tddy-supervisor.sock")
+            .build();
+
+        // When
+        let environment = environment_of(&plan);
+
+        // Then
+        assert_eq!(
+            environment.get(SUPERVISOR_SOCKET_ENV),
+            Some(&"/run/tddy-supervisor.sock".to_string())
+        );
+    }
+
+    #[test]
+    fn does_not_tell_a_session_where_the_supervisor_listens() {
+        // Given a session spawn
+        let plan = a_spawn_plan().build();
+
+        // When
+        let environment = environment_of(&plan);
+
+        // Then — only a managed service may reach the privileged socket by being told it
+        assert_eq!(environment.get(SUPERVISOR_SOCKET_ENV), None);
+    }
+
+    #[test]
+    fn a_session_request_cannot_tell_a_session_where_the_supervisor_listens() {
+        // Given a session whose caller names the variable
+        let plan = a_spawn_plan()
+            .with_requested_env(SUPERVISOR_SOCKET_ENV, "/tmp/forged.sock")
+            .build();
+
+        // When
+        let environment = environment_of(&plan);
+
+        // Then — the variable is reserved for the supervisor to set, so the request's value is dropped
+        assert_eq!(environment.get(SUPERVISOR_SOCKET_ENV), None);
+    }
+
+    #[test]
+    fn a_service_env_entry_cannot_override_the_supervisor_socket() {
+        // Given a declared service whose `env:` names the variable, as supervisor.yaml could
+        let plan = a_spawn_plan()
+            .inheriting_the_supervisors_environment("/run/tddy-supervisor.sock")
+            .with_requested_env(SUPERVISOR_SOCKET_ENV, "/tmp/forged.sock")
+            .build();
+
+        // When
+        let environment = environment_of(&plan);
+
+        // Then — the supervisor's own value wins over the overlay
+        assert_eq!(
+            environment.get(SUPERVISOR_SOCKET_ENV),
+            Some(&"/run/tddy-supervisor.sock".to_string())
         );
     }
 

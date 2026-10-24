@@ -40,9 +40,14 @@ async fn a_built_daemon_advertises_the_key_it_signs_session_tokens_with() {
     let room = format!("runtime-signing-lobby-{}", uuid::Uuid::new_v4());
     let data_dir = tempfile::tempdir().expect("a data directory");
     let config = a_daemon_config(&livekit.get_ws_url(), &room, data_dir.path());
-    let daemon = runtime::build(config.clone(), RuntimeOptions::for_embedded())
-        .await
-        .expect("the runtime builds");
+    let daemon = runtime::build(
+        config.clone(),
+        RuntimeOptions::for_embedded(
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        ),
+    )
+    .await
+    .expect("the runtime builds");
     let tasks = daemon.tasks.spawn();
 
     // When a peer in that room reads the daemon's advertisement

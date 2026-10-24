@@ -152,7 +152,7 @@ impl LaunchSessions {
                 .await
         };
 
-        let spawn_backend = tddy_spawn::supervisor_client::spawn_backend_choice(&self.config);
+        let spawn_backend = self.spawn_backend.clone();
         // `ensure_project_available_locally` clones synchronously while the supervisor's client is
         // async. Handing the closure a runtime handle keeps that seam here: the closure already runs
         // on a blocking thread, which is precisely where awaiting a future by blocking belongs.

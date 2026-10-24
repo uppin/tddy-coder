@@ -57,10 +57,14 @@ pub fn run() -> anyhow::Result<()> {
         source.workspace_root.display()
     );
 
-    // Fork the spawn worker before anything starts a runtime: `fork` from a multi-threaded process
-    // can deadlock, and every line below this one may touch Tauri's. Skipped on a supervised host,
-    // where `tddy-supervisor` spawns sessions instead.
-    let spawn_backend = tddy_spawn::supervisor_client::spawn_backend_choice(&config);
+    // Decided before anything starts a runtime, from how this process was started. Fork the spawn
+    // worker before anything starts a runtime: `fork` from a multi-threaded process can deadlock,
+    // and every line below this one may touch Tauri's. Skipped on a supervised host, where
+    // `tddy-supervisor` spawns sessions instead.
+    let spawn_backend =
+        tddy_spawn::supervisor_client::SpawnBackendChoice::from_environment(|key| {
+            std::env::var_os(key)
+        });
     let spawn_client = tddy_spawn::supervisor_client::spawn_worker_for(&spawn_backend)?;
     #[cfg(unix)]
     if let Some((_, worker_pid)) = spawn_client.as_ref() {
@@ -90,7 +94,7 @@ pub fn run() -> anyhow::Result<()> {
         ])
         .on_page_load(reap_the_departing_pages_connections)
         .setup(move |app| {
-            start_daemon(app, config, config_path, spawn_client)?;
+            start_daemon(app, config, config_path, spawn_client, spawn_backend)?;
             open_dashboard_window(app, dashboard)?;
             Ok(())
         })
@@ -201,6 +205,7 @@ fn start_daemon(
     config: tddy_daemon::config::DaemonConfig,
     config_path: PathBuf,
     spawn_client: Option<(tddy_spawn::spawn_worker::SpawnClient, i32)>,
+    spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice,
 ) -> anyhow::Result<()> {
     let handle = app.handle().clone();
     // Loopback only, on a port the OS assigns, served by this process: an address configured for a
@@ -227,7 +232,7 @@ fn start_daemon(
     let (state, shutdown) = tauri::async_runtime::block_on(async move {
         let daemon = runtime::build(
             config,
-            RuntimeOptions::for_embedded()
+            RuntimeOptions::for_embedded(spawn_backend)
                 .with_config_path(Some(config_path))
                 // Reaches the auth services and stops there — never the configuration a settings
                 // update writes back.

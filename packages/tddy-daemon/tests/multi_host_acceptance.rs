@@ -311,6 +311,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         sessions_b.path().to_path_buf(),
         user_resolver.clone(),
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
@@ -381,6 +382,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         sessions_a.path().to_path_buf(),
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_daemon_livekit::peer_routing::peer_routing_over(
             &config_a,
             Some(

@@ -101,6 +101,7 @@ fn a_host_with_nothing_wired() -> AHostWithNothingWired {
         sessions.path().to_path_buf(),
         Arc::new(move |token| (token == TEST_TOKEN).then(|| user.clone())),
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),

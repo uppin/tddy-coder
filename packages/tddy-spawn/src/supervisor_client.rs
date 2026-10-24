@@ -4,46 +4,37 @@
 //! sessions, clone repos and build sandbox jails. On an unsupervised host it keeps the forked
 //! spawn worker (`crate::spawn_worker`) and whatever its own systemd unit grants it.
 //!
-//! Which of the two applies is decided from config alone, before any I/O, so the decision is
-//! testable and cannot change under a transient connection failure.
+//! Which of the two applies is decided from how the process was started, before any I/O, so the
+//! decision is testable and cannot change under a transient connection failure.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use tddy_supervisor::spawn_broker::SUPERVISOR_SOCKET_ENV;
 use tddy_supervisor::SupervisorClient;
-
-use tddy_daemon_kernel::config::DaemonConfig;
 
 /// Which mechanism this daemon uses to spawn processes it may not spawn itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpawnBackendChoice {
     /// Delegate to `tddy-supervisor` over this socket.
     Supervisor { socket_path: PathBuf },
-    /// No supervisor configured: fork a spawn worker before tokio starts, as today.
+    /// Not started by a supervisor: fork a spawn worker before tokio starts.
     ForkedWorker,
 }
 
 impl SpawnBackendChoice {
     /// Decide the spawn backend from how this process was started: `Supervisor` when
-    /// `tddy-supervisor` told it its socket (`TDDY_SUPERVISOR_SOCKET`), `ForkedWorker` otherwise.
+    /// `tddy-supervisor` told it its socket ([`SUPERVISOR_SOCKET_ENV`]), `ForkedWorker` otherwise.
     /// `env` reads one variable (`std::env::var_os` in production), so the decision is testable
     /// without touching process-wide state.
-    pub fn from_environment(
-        env: impl Fn(&str) -> Option<std::ffi::OsString>,
-    ) -> SpawnBackendChoice {
-        // TODO(supervisor-handoff): implement
-        let _ = env;
-        SpawnBackendChoice::ForkedWorker
-    }
-}
-
-/// Decide the spawn backend from configuration. Pure — performs no I/O.
-pub fn spawn_backend_choice(config: &DaemonConfig) -> SpawnBackendChoice {
-    match &config.supervisor {
-        Some(supervisor) => SpawnBackendChoice::Supervisor {
-            socket_path: supervisor.socket_path.clone(),
-        },
-        None => SpawnBackendChoice::ForkedWorker,
+    pub fn from_environment(env: impl Fn(&str) -> Option<OsString>) -> SpawnBackendChoice {
+        match env(SUPERVISOR_SOCKET_ENV) {
+            Some(socket_path) => SpawnBackendChoice::Supervisor {
+                socket_path: PathBuf::from(socket_path),
+            },
+            None => SpawnBackendChoice::ForkedWorker,
+        }
     }
 }
 
@@ -79,8 +70,8 @@ pub fn spawn_worker_for(
 /// Connect to the supervisor.
 ///
 /// An unreachable supervisor is a hard error. The caller must fail the operation rather than
-/// spawn anything itself — see `SupervisorClientConfig`. The error names the socket, because the
-/// operator's next question is always which path the daemon was looking at.
+/// spawn anything itself — see [`SpawnBackendChoice::Supervisor`]. The error names the socket,
+/// because the operator's next question is always which path the daemon was looking at.
 pub async fn connect_supervisor(socket_path: &Path) -> anyhow::Result<SupervisorClient> {
     SupervisorClient::connect(socket_path)
         .await

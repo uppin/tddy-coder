@@ -4,9 +4,6 @@
 #   __WEB_BUNDLE_PATH__          — static web root (default: /usr/local/share/tddy/web)
 #   __DAEMON_LOG_DIR__           — daemon file-log dir (default: /var/log/tddy-daemon; --user: XDG state dir)
 #   __AUTH_STORAGE_DIR__         — OAuth/token storage base (default: /var/lib/tddy; --user: XDG data dir)
-#   __SUPERVISOR_SOCKET_PATH__   — tddy-supervisor's socket (INSTALL_SUPERVISOR_SOCKET_PATH). System
-#                                  mode only: a --user install has no supervisor, and install omits
-#                                  the `supervisor:` block entirely there.
 #   __DAEMON_SOCKET_PATH__       — this daemon's own client socket (INSTALL_DAEMON_SOCKET_PATH); the
 #                                  same value goes into supervisor.yaml, so the two cannot drift
 
@@ -32,15 +29,13 @@ web_bundle_path: "__WEB_BUNDLE_PATH__"
 # — see the `github:` block below.
 auth_storage: "__AUTH_STORAGE_DIR__/auth"
 
-# tddy-supervisor — the root process that started this daemon as an unprivileged child. This block
-# says where to reach its privileged RPC socket. It is parsed and validated at startup, and the same
-# path is written into supervisor.yaml, so the two agree.
-#
-# The presence of this block is the switch. With it, session spawning and repo cloning are delegated
-# over this socket, and the daemon does not fork a spawn worker at all. An unreachable or refusing
-# supervisor FAILS the operation — there is deliberately no fallback to in-process spawning, because
-# that would silently downgrade an isolated session to one running as the daemon user. Remove the
-# block to go back to the daemon's own forked worker.
+# tddy-supervisor, the root process that started this daemon as an unprivileged child, tells the daemon
+# its privileged RPC socket through the environment (TDDY_SUPERVISOR_SOCKET), so this file names no
+# supervisor. While that variable is set, session spawning and repo cloning are delegated over that
+# socket, and the daemon forks no spawn worker of its own. An unreachable or refusing supervisor FAILS
+# the operation — there is deliberately no fallback to in-process spawning, because that would silently
+# downgrade an isolated session to one running as the daemon user. A `supervisor:` block left in this
+# file by an earlier install is refused at startup; ./install removes it on upgrade.
 #
 # For a delegated spawn to be permitted, supervisor.yaml's spawn_policy must list the tool paths the
 # daemon will name — including git's absolute path for cloning — and, if any session user's
@@ -62,10 +57,6 @@ auth_storage: "__AUTH_STORAGE_DIR__/auth"
 # cursor-cli / PTY session types (pty_runtime.rs drops privilege by shelling out to `setpriv`, which
 # an unprivileged daemon cannot do). Both are recorded under "Known incomplete" in
 # docs/dev/TODO.md, under the tddy-supervisor follow-ups.
-#
-# Remove this block only for a no-supervisor deployment (no supervisor unit, daemon started directly).
-supervisor:
-  socket_path: "__SUPERVISOR_SOCKET_PATH__"
 
 # Where this daemon serves its local ConnectionService. Named explicitly, not left to the
 # XDG_RUNTIME_DIR/run fallback: on a supervised host the supervisor binds this path as root and

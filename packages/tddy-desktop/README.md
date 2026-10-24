@@ -30,7 +30,7 @@ The Rust crate is a workspace member (`tddy-desktop`), so `cargo build --workspa
 ### The daemon it hosts
 
 The application assembles the daemon with **`tddy_daemon::runtime::build`** under
-**`RuntimeOptions::for_embedded()`** — the same roster the **`tddy-daemon`** binary assembles,
+**`RuntimeOptions::for_embedded(spawn_backend)`** — the same roster the **`tddy-daemon`** binary assembles,
 minus the HTTP listener and systemd socket activation. The spawn worker is forked *before* any
 async runtime exists, because `fork` from a multi-threaded process can deadlock.
 

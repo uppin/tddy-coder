@@ -7,8 +7,9 @@
 # between users, and the daemon needs the two host grants further down to sandbox at all.
 # Do not install this unit alongside tddy-supervisor.service — the daemon would be started twice.
 #
-# For the supervised deployment, see tddy-supervisor.service.example (and remove `supervisor:` from
-# daemon.yaml here, or the daemon will fail every spawn trying to reach a supervisor that is absent).
+# For the supervised deployment, see tddy-supervisor.service.example. daemon.yaml never names a
+# supervisor: tddy-supervisor tells the daemon its socket through the environment. Here, with no
+# supervisor, delete any `supervisor:` block from daemon.yaml, or the daemon refuses to start.
 #
 # Runs unprivileged (User=tddy) with cgroup v2 delegation + an AppArmor userns grant, so the Linux
 # sandbox works without root. Copy to /etc/systemd/system/tddy-daemon.service and adjust.

@@ -15,6 +15,7 @@ use tddy_daemon_kernel::SessionUserResolver;
 use tddy_host_service::multi_host::EligibleDaemonSource;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_spawn::spawn_worker::SpawnClient;
+use tddy_spawn::supervisor_client::SpawnBackendChoice;
 
 /// The project RPCs, holding only what they read: the caller's identity, the projects store under
 /// `tddy_data_dir`, the peers a listing fans out to, and the spawn client a clone runs through.
@@ -24,6 +25,7 @@ pub struct ProjectRpcHandler {
     tddy_data_dir: PathBuf,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     spawn_client: Option<Arc<SpawnClient>>,
+    spawn_backend: SpawnBackendChoice,
     common_room_livekit_room: Option<CommonRoom>,
 }
 
@@ -37,6 +39,7 @@ impl ProjectRpcHandler {
             tddy_data_dir: host.tddy_data_dir().to_path_buf(),
             eligible_daemon_source: host.eligible_daemon_source(),
             spawn_client: host.spawn_client(),
+            spawn_backend: host.spawn_backend(),
             common_room_livekit_room: host.common_room_livekit_room(),
         }
     }

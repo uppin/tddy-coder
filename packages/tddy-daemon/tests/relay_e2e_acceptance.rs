@@ -210,6 +210,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
             sessions_b.path().to_path_buf(),
             valid_user_resolver(),
             None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config_b), // B has no discovery of its own — it only serves its local tools
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(ClaudeCliSessionManager::new()),
@@ -264,6 +265,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         sessions_a.path().to_path_buf(),
         valid_user_resolver(),
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_daemon_livekit::peer_routing::peer_routing_over(
             &config_a,
             Some(LiveKitDiscoveryHandles {

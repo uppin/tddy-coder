@@ -50,10 +50,15 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("tddy-daemon loaded config from {}", config_path.display());
 
+    // Decided once, here, from how this process was started — before tokio, and never re-read from
+    // config. A process `tddy-supervisor` started spawns through it; any other forks a worker below.
+    let spawn_backend =
+        tddy_spawn::supervisor_client::SpawnBackendChoice::from_environment(|key| {
+            std::env::var_os(key)
+        });
     // Fork spawn worker before tokio — fork() from multi-threaded process can deadlock. Skipped
     // entirely on a supervised host: there, `tddy-supervisor` spawns sessions, and a worker the
     // daemon could reach for would be a way to spawn one with less isolation than it asked for.
-    let spawn_backend = tddy_spawn::supervisor_client::spawn_backend_choice(&config);
     let spawn_client = tddy_spawn::supervisor_client::spawn_worker_for(&spawn_backend)?;
     #[cfg(unix)]
     if let Some((_, worker_pid)) = spawn_client.as_ref() {
@@ -92,7 +97,7 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(async move {
         let daemon = runtime::build(
             config,
-            RuntimeOptions::for_binary()
+            RuntimeOptions::for_binary(spawn_backend)
                 .with_config_path(Some(config_path.to_path_buf()))
                 .with_relay_idle_timeout(relay_idle_timeout)
                 .with_spawn_worker(spawn_client),

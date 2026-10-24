@@ -27,6 +27,7 @@ fn make_unit_service(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
         sessions_base.clone(),
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),

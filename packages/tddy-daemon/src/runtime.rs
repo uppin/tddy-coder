@@ -74,6 +74,10 @@ pub struct RuntimeOptions {
     /// either because `tddy-supervisor` does it (see [`tddy_spawn::supervisor_client`]) or because the
     /// host has no worker to offer.
     pub spawn_client: Option<(tddy_spawn::spawn_worker::SpawnClient, i32)>,
+    /// The privileged spawn backend, chosen once before the runtime started from the environment
+    /// (`tddy_spawn::supervisor_client::SpawnBackendChoice::from_environment`). Carried beside
+    /// `spawn_client`, which is handed over only when the backend is a forked worker.
+    pub spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice,
     /// The YAML file this daemon was loaded from, which `daemon_config.DaemonConfigService` writes
     /// an accepted update back to. `None` — a host that configured the daemon in code — makes every
     /// update a refusal, because there is nowhere to persist one.
@@ -89,30 +93,33 @@ impl std::fmt::Debug for RuntimeOptions {
                 "spawn_worker",
                 &self.spawn_client.as_ref().map(|(_, pid)| pid),
             )
+            .field("spawn_backend", &self.spawn_backend)
             .field("config_path", &self.config_path)
             .finish()
     }
 }
 
 impl RuntimeOptions {
-    /// Options for the `tddy-daemon` binary.
-    pub fn for_binary() -> Self {
+    /// Options for the `tddy-daemon` binary, which spawns through `spawn_backend`.
+    pub fn for_binary(spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice) -> Self {
         Self {
             host: RuntimeHost::Binary,
             oauth_redirect_uri: None,
             relay_idle_timeout: None,
             spawn_client: None,
+            spawn_backend,
             config_path: None,
         }
     }
 
-    /// Options for a process that embeds the daemon.
-    pub fn for_embedded() -> Self {
+    /// Options for a process that embeds the daemon, which spawns through `spawn_backend`.
+    pub fn for_embedded(spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice) -> Self {
         Self {
             host: RuntimeHost::Embedded,
             oauth_redirect_uri: None,
             relay_idle_timeout: None,
             spawn_client: None,
+            spawn_backend,
             config_path: None,
         }
     }

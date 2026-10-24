@@ -84,9 +84,12 @@ async fn a_running_binary_daemon() -> ARunningDaemon {
     let socket_path = home.path().join("tddy-daemon.sock");
     let config = a_binary_daemon_config(a_free_tcp_port().await, home.path(), &socket_path);
 
-    let runtime = runtime::build(config, RuntimeOptions::for_binary())
-        .await
-        .expect("the binary runtime did not build");
+    let runtime = runtime::build(
+        config,
+        RuntimeOptions::for_binary(tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker),
+    )
+    .await
+    .expect("the binary runtime did not build");
     let tasks = runtime.tasks.spawn();
 
     ARunningDaemon {

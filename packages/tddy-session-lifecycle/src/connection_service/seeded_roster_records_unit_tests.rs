@@ -28,6 +28,7 @@ fn a_daemon_with_no_peers(tddy_data_dir: std::path::PathBuf) -> DaemonSessionHos
         tddy_data_dir,
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),

@@ -18,6 +18,7 @@ use tddy_service::proto::project::{
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_session_lifecycle::user_sessions_path;
+use tddy_spawn::supervisor_client::SpawnBackendChoice;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -86,7 +87,9 @@ impl Host {
             .to_string()
     }
 
-    fn unsupervised_config(&self) -> DaemonConfig {
+    /// A daemon config that names no supervisor. Whether one brokers the clone is decided by how the
+    /// daemon was started, which each test hands to [`Self::daemon_for`] directly.
+    fn a_config(&self) -> DaemonConfig {
         load_config(&format!(
             r#"
 repos_base_path: "{repos}"
@@ -99,24 +102,19 @@ users:
         ))
     }
 
-    fn supervised_by_a_missing_supervisor_config(&self) -> DaemonConfig {
-        load_config(&format!(
-            r#"
-repos_base_path: "{repos}"
-supervisor:
-  socket_path: "{socket}"
-users:
-  - github_user: "{MAPPED_GITHUB_USER}"
-    os_user: "{os_user}"
-"#,
-            repos = self.repos_base.path().display(),
-            socket = self.data_dir.path().join("no-supervisor.sock").display(),
-            os_user = self.os_user,
-        ))
+    /// A socket no `tddy-supervisor` is listening on.
+    fn missing_supervisor_socket(&self) -> PathBuf {
+        self.data_dir.path().join("no-supervisor.sock")
     }
 
-    /// The daemon, where `TEST_TOKEN` authenticates as `github_user`.
-    fn daemon_for(&self, config: DaemonConfig, github_user: &'static str) -> TestDaemon {
+    /// The daemon, where `TEST_TOKEN` authenticates as `github_user` and clones through
+    /// `spawn_backend`.
+    fn daemon_for(
+        &self,
+        config: DaemonConfig,
+        github_user: &'static str,
+        spawn_backend: SpawnBackendChoice,
+    ) -> TestDaemon {
         let tddy_data_dir = self.data_dir.path().to_path_buf();
         let sessions_base = tddy_data_dir.clone();
         let sessions_base_resolver: SessionsBaseResolver =
@@ -131,6 +129,7 @@ users:
             tddy_data_dir,
             user_resolver,
             None,
+            spawn_backend,
             tddy_daemon_livekit::peer_routing::peer_routing_over(
                 &config,
                 Some(LiveKitDiscoveryHandles {
@@ -144,7 +143,11 @@ users:
     }
 
     fn daemon(&self) -> TestDaemon {
-        self.daemon_for(self.unsupervised_config(), MAPPED_GITHUB_USER)
+        self.daemon_for(
+            self.a_config(),
+            MAPPED_GITHUB_USER,
+            SpawnBackendChoice::ForkedWorker,
+        )
     }
 
     fn clone_destination(&self, name: &str) -> PathBuf {
@@ -352,7 +355,11 @@ async fn create_project_rejects_an_unknown_session() {
 async fn create_project_rejects_a_github_user_with_no_os_user() {
     // Given
     let host = a_host();
-    let daemon = host.daemon_for(host.unsupervised_config(), "unmapped-github-user");
+    let daemon = host.daemon_for(
+        host.a_config(),
+        "unmapped-github-user",
+        SpawnBackendChoice::ForkedWorker,
+    );
 
     // When
     let code = refusal(&daemon, a_request("alpha", "https://example.com/alpha.git")).await;
@@ -377,11 +384,14 @@ async fn create_project_registers_nothing_when_the_clone_fails() {
 
 #[tokio::test]
 async fn create_project_registers_nothing_when_the_declared_supervisor_is_unreachable() {
-    // Given
+    // Given a daemon started by a supervisor whose socket is not running
     let host = a_host();
     let daemon = host.daemon_for(
-        host.supervised_by_a_missing_supervisor_config(),
+        host.a_config(),
         MAPPED_GITHUB_USER,
+        SpawnBackendChoice::Supervisor {
+            socket_path: host.missing_supervisor_socket(),
+        },
     );
 
     // When

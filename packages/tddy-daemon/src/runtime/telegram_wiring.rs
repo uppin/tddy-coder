@@ -156,6 +156,7 @@ pub(super) fn build_telegram(
         tddy_telegram_control::telegram_session_control::TelegramWorkflowSpawn {
             config: Arc::new(config.clone()),
             spawn_client: spawn_client_for_telegram(options),
+            spawn_backend: options.spawn_backend.clone(),
             os_user: user.clone(),
             tddy_data_dir: tddy_data_dir.to_path_buf(),
             projects_dir_override: None,

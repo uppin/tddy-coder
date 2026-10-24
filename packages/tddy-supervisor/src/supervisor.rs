@@ -257,6 +257,9 @@ pub struct Supervisor {
     /// of one.
     sessions: Mutex<SessionTable>,
     forks: Arc<ForkBroker>,
+    /// `socket.path` from the config: the privileged socket every managed service is told about,
+    /// through [`EnvironmentBase::Inherited`].
+    supervisor_socket: PathBuf,
     /// Held while a start is between `fork` and having its pid recorded, so a reap cannot see the
     /// exit of a process nothing has claimed yet. Async, because the fork round-trip is awaited.
     spawn_gate: tokio::sync::Mutex<()>,
@@ -327,6 +330,7 @@ impl Supervisor {
             slots: Mutex::new(slots),
             sessions: Mutex::new(SessionTable::default()),
             forks,
+            supervisor_socket: config.socket.path.clone(),
             spawn_gate: tokio::sync::Mutex::new(()),
             shutting_down: AtomicBool::new(false),
         }))
@@ -586,7 +590,7 @@ impl Supervisor {
             let slot = &slots[index];
             (
                 slot.service.name.clone(),
-                slot.spawn_plan(),
+                slot.spawn_plan(&self.supervisor_socket),
                 slot.socket_handover(),
             )
         };
@@ -847,7 +851,7 @@ fn lock_or_recover<'a, T>(lock: &'a Mutex<T>, what: &str) -> MutexGuard<'a, T> {
 }
 
 impl Slot {
-    fn spawn_plan(&self) -> SpawnPlan {
+    fn spawn_plan(&self, supervisor_socket: &Path) -> SpawnPlan {
         SpawnPlan {
             program: self.service.exec_start.clone(),
             args: self.service.args.clone(),
@@ -864,8 +868,11 @@ impl Slot {
             // So a managed service's output reaches the same journal the supervisor's does.
             inherit_output: true,
             // A declared service is root's own decision, and an operator who sets a variable on the
-            // supervisor unit means it for the services under it.
-            environment: EnvironmentBase::Inherited,
+            // supervisor unit means it for the services under it. It is also the only child told
+            // where the supervisor listens — see [`EnvironmentBase::Inherited`].
+            environment: EnvironmentBase::Inherited {
+                supervisor_socket: supervisor_socket.to_path_buf(),
+            },
             // A managed service is a host service, not a sandboxed session.
             sandbox: None,
         }

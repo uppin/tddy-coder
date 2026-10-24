@@ -8,6 +8,28 @@ use crate::config::DaemonConfig;
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// Refuse a `supervisor:` block, which a `daemon.yaml` written before `tddy-supervisor` told the
+/// daemon its socket still carries.
+///
+/// Checked on the untyped document, before typed deserialization, so the operator is told the
+/// block is obsolete and what to do about it, rather than getting serde's bare `unknown field`.
+/// Refusing it, rather than ignoring it, is what keeps a leftover block from quietly looking like
+/// a setting that still does something.
+fn refuse_obsolete_supervisor_block(contents: &str, path: &std::path::Path) -> anyhow::Result<()> {
+    let document: serde_yaml::Value = serde_yaml::from_str(contents)
+        .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
+    let declares_supervisor = document
+        .as_mapping()
+        .is_some_and(|top_level| top_level.contains_key("supervisor"));
+    if declares_supervisor {
+        anyhow::bail!(
+            "{}: the `supervisor:` block is obsolete — tddy-supervisor now tells the daemon its socket. Delete the block.",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 impl DaemonConfig {
     /// Default subdirectory under home for cloned project repos when `repos_base_path` is unset.
     pub fn repos_base_path_or_default(&self) -> &str {
@@ -18,6 +40,7 @@ impl DaemonConfig {
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("failed to read config {}: {}", path.display(), e))?;
+        refuse_obsolete_supervisor_block(&contents, path)?;
         let config: Self = serde_yaml::from_str(&contents)
             .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
         config

@@ -88,6 +88,7 @@ fn service_with_known_remote_peer(config: DaemonConfig, sessions_base: PathBuf) 
         sessions_base,
         user_resolver_valid(),
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_daemon_livekit::peer_routing::peer_routing_over(&config, Some(discovery)),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
@@ -209,6 +210,7 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
         sessions_tmp.path().to_path_buf(),
         user_resolver_valid(),
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
@@ -286,6 +288,7 @@ async fn list_exec_tools_with_unknown_instance_id_returns_invalid_argument() {
         sessions_tmp.path().to_path_buf(),
         user_resolver_valid(),
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&test_config()), // no livekit discovery
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),

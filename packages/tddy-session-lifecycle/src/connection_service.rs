@@ -86,6 +86,9 @@ pub struct DaemonSessionHost {
     tddy_data_dir: PathBuf,
     user_resolver: tddy_daemon_kernel::SessionUserResolver,
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
+    /// Chosen once at startup, beside `spawn_client`: the privileged backend this host spawns and
+    /// clones through. Never re-derived from config.
+    spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice,
     /// The peers this daemon may route a request to and the common-room slot it forwards through —
     /// shared with the families served above this crate, which route against the same roster.
     peer_routing: crate::peer_routing::PeerRouting,

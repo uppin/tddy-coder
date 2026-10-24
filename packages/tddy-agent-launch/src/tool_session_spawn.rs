@@ -185,7 +185,7 @@ impl LaunchSessions {
         let startup_watch = spawner::StartupWatch::from_config(&self.config);
         let coder_config_path = self.config.coder_config_path.clone();
         let purpose = plan.purpose;
-        let result = match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+        let result = match self.spawn_backend.clone() {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
                 let spawn_req = spawn_worker::build_spawn_request(

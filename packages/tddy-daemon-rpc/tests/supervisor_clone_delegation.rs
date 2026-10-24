@@ -18,6 +18,7 @@ use tddy_service::proto::project::{
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
+use tddy_spawn::supervisor_client::SpawnBackendChoice;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -28,12 +29,12 @@ fn current_username() -> String {
     std::env::var("USER").expect("USER must be set to resolve the target account")
 }
 
-fn a_supervised_config(os_user: &str, repos_base: &Path, missing_socket: &Path) -> DaemonConfig {
+/// A daemon config that names no supervisor: whether one brokers the clone is decided by how the
+/// daemon was started, and the test hands that decision to the host directly.
+fn a_config_for(os_user: &str, repos_base: &Path) -> DaemonConfig {
     let yaml = format!(
         r#"
 repos_base_path: "{repos}"
-supervisor:
-  socket_path: "{socket}"
 livekit:
   url: "ws://127.0.0.1:7880"
   api_key: "test-key"
@@ -43,7 +44,6 @@ users:
     os_user: "{os_user}"
 "#,
         repos = repos_base.display(),
-        socket = missing_socket.display(),
     );
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
@@ -53,7 +53,11 @@ users:
     DaemonConfig::load(&path).expect("config must parse")
 }
 
-fn a_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
+fn a_service(
+    config: DaemonConfig,
+    tddy_data_dir: PathBuf,
+    spawn_backend: SpawnBackendChoice,
+) -> TestDaemon {
     let sessions_base = tddy_data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -67,6 +71,7 @@ fn a_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
         tddy_data_dir,
         user_resolver,
         None,
+        spawn_backend,
         tddy_daemon_livekit::peer_routing::peer_routing_over(
             &config,
             Some(LiveKitDiscoveryHandles {
@@ -81,15 +86,18 @@ fn a_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
 
 #[tokio::test]
 async fn refuses_to_clone_a_project_when_the_declared_supervisor_is_unreachable() {
-    // Given a host configured for a supervisor that is not running
+    // Given a host started by a supervisor whose socket is not running
     let os_user = current_username();
     let data_dir = tempfile::tempdir().unwrap();
     let repos_base = tempfile::tempdir().unwrap();
     let sockets = tempfile::tempdir().unwrap();
     let missing_socket = sockets.path().join("tddy-supervisor.sock");
     let service = a_service(
-        a_supervised_config(&os_user, repos_base.path(), &missing_socket),
+        a_config_for(&os_user, repos_base.path()),
         data_dir.path().to_path_buf(),
+        SpawnBackendChoice::Supervisor {
+            socket_path: missing_socket.clone(),
+        },
     );
 
     // When

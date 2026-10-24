@@ -128,6 +128,8 @@ pub(super) fn read_recipe_from_changeset(session_dir: &Path) -> anyhow::Result<O
 pub struct TelegramWorkflowSpawn {
     pub config: Arc<DaemonConfig>,
     pub spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
+    /// Chosen once at startup, beside `spawn_client`. Never re-derived from config.
+    pub spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice,
     pub os_user: String,
     /// tddy home data directory (config is the single source of truth).
     pub tddy_data_dir: PathBuf,
@@ -268,7 +270,7 @@ impl TelegramWorkflowSpawn {
         new_session_id: &str,
     ) -> anyhow::Result<spawner::SpawnResult> {
         let timeout = self.config.spawn_worker_request_timeout();
-        match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+        match self.spawn_backend.clone() {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 let inputs = self.resolve_spawn_inputs(project_id, agent, recipe)?;
                 let req = spawn_worker::build_spawn_request(

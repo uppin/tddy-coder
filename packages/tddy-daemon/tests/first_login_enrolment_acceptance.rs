@@ -63,7 +63,10 @@ const POLLS_BEFORE_GIVING_UP: usize = 5;
 #[tokio::test]
 async fn a_desktops_first_device_login_is_authorized_at_once() {
     // Given a freshly installed desktop, which maps nobody
-    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded()).await;
+    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded(
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+    ))
+    .await;
 
     // When its operator signs in with the device flow, in the desktop's own window
     let token = desktop.a_device_login(&Via::TheDesktopWindow).await;
@@ -80,7 +83,10 @@ async fn a_desktops_first_device_login_is_authorized_at_once() {
 #[tokio::test]
 async fn a_desktops_first_device_login_is_written_down_as_its_only_row() {
     // Given a freshly installed desktop, which maps nobody
-    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded()).await;
+    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded(
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+    ))
+    .await;
 
     // When its operator signs in with the device flow, in the desktop's own window
     desktop.a_device_login(&Via::TheDesktopWindow).await;
@@ -95,7 +101,10 @@ async fn a_desktops_first_device_login_is_written_down_as_its_only_row() {
 #[tokio::test]
 async fn a_second_account_on_an_enrolled_desktop_is_refused_and_not_enrolled() {
     // Given a desktop its operator has already signed in to
-    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded()).await;
+    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded(
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+    ))
+    .await;
     desktop.a_device_login(&Via::TheDesktopWindow).await;
 
     // When a different GitHub account signs in and calls a token-gated RPC
@@ -122,7 +131,10 @@ async fn a_second_account_on_an_enrolled_desktop_is_refused_and_not_enrolled() {
 #[serial]
 async fn a_device_login_over_the_common_room_is_not_enrolled_on_an_unenrolled_desktop() {
     // Given a freshly installed desktop serving its roster on a LiveKit room, and a peer in it
-    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded()).await;
+    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded(
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+    ))
+    .await;
     let room_peer = a_room_peer_of(&desktop).await;
 
     // When the peer completes a device login over the room and calls a token-gated RPC
@@ -142,7 +154,10 @@ async fn a_device_login_over_the_common_room_is_not_enrolled_on_an_unenrolled_de
 async fn a_desktop_still_enrols_its_window_login_after_a_common_room_login_was_not() {
     // Given a freshly installed desktop on which a room peer has already signed in, as somebody
     // else, over the LiveKit room
-    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded()).await;
+    let desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded(
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+    ))
+    .await;
     let room_peer = a_room_peer_of(&desktop).await;
     desktop
         .a_redirect_login(&room_peer.via, SOMEBODY_ELSES_CODE)
@@ -162,7 +177,10 @@ async fn a_desktop_still_enrols_its_window_login_after_a_common_room_login_was_n
 async fn a_device_login_over_the_agent_tool_socket_is_not_enrolled_on_an_unenrolled_desktop() {
     // Given a freshly installed desktop serving its agent tool socket, and a co-located process
     // connected to it
-    let mut desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded()).await;
+    let mut desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded(
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+    ))
+    .await;
     let agent = an_agent_on_the_tool_socket_of(&mut desktop).await;
 
     // When that process completes a device login over the socket and calls a token-gated RPC
@@ -181,7 +199,10 @@ async fn a_device_login_over_the_agent_tool_socket_is_not_enrolled_on_an_unenrol
 async fn a_desktop_still_enrols_its_window_login_after_an_agent_tool_socket_login_was_not() {
     // Given a freshly installed desktop on which a co-located process has already signed in, as
     // somebody else, over the agent tool socket
-    let mut desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded()).await;
+    let mut desktop = a_deployment_mapping_nobody(RuntimeOptions::for_embedded(
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+    ))
+    .await;
     let agent = an_agent_on_the_tool_socket_of(&mut desktop).await;
     desktop.a_redirect_login(&agent, SOMEBODY_ELSES_CODE).await;
 
@@ -198,7 +219,10 @@ async fn a_desktop_still_enrols_its_window_login_after_an_agent_tool_socket_logi
 #[tokio::test]
 async fn a_server_mapping_nobody_enrols_no_one_and_refuses_as_it_always_has() {
     // Given a server deployment whose installer mapped nobody
-    let server = a_deployment_mapping_nobody(RuntimeOptions::for_binary()).await;
+    let server = a_deployment_mapping_nobody(RuntimeOptions::for_binary(
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+    ))
+    .await;
 
     // When somebody signs in and calls a token-gated RPC
     let token = server.a_device_login(&Via::TheDesktopWindow).await;
@@ -219,7 +243,13 @@ async fn a_desktop_given_no_config_file_to_enrol_into_refuses_to_assemble() {
     let config = a_config_mapping_nobody(&dir).await;
 
     // When the embedded daemon is assembled
-    let built = runtime::build(config, RuntimeOptions::for_embedded()).await;
+    let built = runtime::build(
+        config,
+        RuntimeOptions::for_embedded(
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        ),
+    )
+    .await;
 
     // Then it refuses, naming what is missing, rather than starting a desktop no login can enrol
     let refusal = built.err().map(|e| e.to_string());
