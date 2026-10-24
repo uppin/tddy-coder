@@ -45,6 +45,9 @@ pub struct TurnRequest {
     /// The caller asked that this turn run on the conversation worktree as it stands, without taking
     /// in the caller's current files (`syncWorktree: false`).
     skip_sync: bool,
+    /// The answer to the conversation's pending permission request — a coding agent's turn
+    /// continues with it. Refused by a model-loop session, which never asks.
+    permission_answer: Option<super::permission::PermissionAnswer>,
 }
 
 impl TurnRequest {
@@ -62,6 +65,17 @@ impl TurnRequest {
     /// everything it has already read, which is the cost the resume exists to avoid.
     pub fn resuming() -> Self {
         Self::default()
+    }
+
+    /// Answer the conversation's pending permission request, continuing the turn it paused.
+    pub fn with_permission_answer(mut self, answer: super::permission::PermissionAnswer) -> Self {
+        self.permission_answer = Some(answer);
+        self
+    }
+
+    /// The permission answer this turn carries, if any.
+    pub fn permission_answer(&self) -> Option<&super::permission::PermissionAnswer> {
+        self.permission_answer.as_ref()
     }
 
     /// Go back to `id` first, discarding everything the conversation appended after it.

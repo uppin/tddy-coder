@@ -196,6 +196,13 @@ impl AgentConversationLink {
             .unwrap_or_default()
     }
 
+    /// The caller's answer to the conversation's pending permission request, as the JSON object
+    /// `ResumeAgentConversationRequest.permission_answer_json` carries; empty when it answers none.
+    fn encode_permission_answer(_request: &TurnRequest) -> String {
+        // TODO(permission-yield): implement
+        String::new()
+    }
+
     /// The caller's yield conditions as the JSON array the requests carry — the same shape the
     /// MCP tools parse, string-typed like `stop_reason` on the way back.
     fn encode_yield_conditions(request: &TurnRequest) -> String {
@@ -222,6 +229,7 @@ impl AgentConversationLink {
                 max_turns: request.requested_max_turns(),
                 yield_conditions_json: Self::encode_yield_conditions(request),
                 replacement_json: Self::encode_replacement(request),
+                permission_answer_json: Self::encode_permission_answer(request),
             }));
         };
         if let Some(rewind_point) = request.rewind_point() {
@@ -518,6 +526,8 @@ fn parse_stop_reason(reason: &str) -> Result<StopReason, String> {
         // The wire spelling for a turn the caller's condition on a tool call stopped at that
         // call.
         "YieldedToCaller" => Ok(StopReason::YieldedToCaller),
+        // The wire spelling for a coding agent's turn paused on a permission request.
+        "PermissionRequested" => Ok(StopReason::PermissionRequested),
         other => Err(format!(
             "PromptAgentConversation ended with stop reason '{other}', which this build does not \
              recognise — the two hosts disagree about how a turn ends"

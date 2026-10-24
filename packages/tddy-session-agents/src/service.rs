@@ -429,6 +429,7 @@ pub fn agent_stop_reason(reason: tddy_discovery::subagent::StopReason) -> &'stat
         tddy_discovery::subagent::StopReason::ContextExhausted => "ContextExhausted",
         tddy_discovery::subagent::StopReason::MaxTokens => "MaxTokens",
         tddy_discovery::subagent::StopReason::YieldedToCaller => "YieldedToCaller",
+        tddy_discovery::subagent::StopReason::PermissionRequested => "PermissionRequested",
     }
 }
 
