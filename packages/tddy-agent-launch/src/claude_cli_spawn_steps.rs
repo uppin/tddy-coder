@@ -285,6 +285,37 @@ pub(crate) fn role_allowed_tools_args(session_role: Option<&str>) -> Vec<String>
         .collect()
 }
 
+/// What a project-home (main) agent's launch is built from. See [`project_home_launch`].
+pub(crate) struct ProjectHomeLaunch<'a> {
+    pub(crate) config: &'a DaemonConfig,
+    /// The data dir the daemon *resolved*: an embedded host's agent-tool socket path digests it.
+    pub(crate) tddy_data_dir: &'a Path,
+    /// Where the main's MCP config and role prompt are written.
+    pub(crate) session_dir: &'a Path,
+    /// The main's own session id, which its tool calls name.
+    pub(crate) session_id: &'a str,
+    /// A credential minted for the agent; never the caller's own.
+    pub(crate) agent_session_token: &'a str,
+    /// The toolchain's `tddy-tools`, absolute.
+    pub(crate) tddy_tools_path: &'a Path,
+}
+
+/// The flags and environment a session's role adds to its agent's launch.
+#[derive(Debug, Default)]
+pub(crate) struct RoleLaunch {
+    pub(crate) extra_args: Vec<String>,
+    pub(crate) env: Vec<(String, String)>,
+}
+
+/// A main's launch: `tddy-tools --mcp` as its only MCP server, reaching this daemon as the main
+/// (agent-tool socket on an embedded host, HTTP otherwise), every native filesystem and shell tool
+/// withdrawn, its tool set pre-approved, and the role prompt appended.
+pub(crate) fn project_home_launch(launch: ProjectHomeLaunch<'_>) -> Result<RoleLaunch, Status> {
+    // TODO(2026-10-24-project-home-agent-tools): implement in green.
+    let _ = launch;
+    todo!("project_home_launch: the main's MCP wiring, native-tool withdrawal and role prompt")
+}
+
 /// Record a session's standing role in its `.session.yaml` before its agent is spawned, so there is
 /// no moment in which the agent runs and the daemon reads the session as ordinary. The record is
 /// complete as far as a spawn-less session can be, and the spawn's own write replaces it with the pid.

@@ -6,9 +6,11 @@
 //! Every item here is used by both suites, so neither test binary carries dead code.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory};
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_github::GitHubUser;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse,
@@ -20,8 +22,36 @@ use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-pub const VALID_TOKEN: &str = "valid-token";
 pub const PROJECT_ID: &str = "proj-home";
+
+/// This daemon's signing identity. A main's agent is given a credential of its own, minted under the
+/// verified caller, so the daemon must be able to verify the caller's token and sign the agent's.
+pub fn this_daemons_session_tokens() -> &'static SessionTokens {
+    static TOKENS: OnceLock<SessionTokens> = OnceLock::new();
+    TOKENS.get_or_init(|| {
+        let home = tempfile::tempdir().expect("a directory for the daemon's key");
+        let key = DaemonSigningKey::load_or_generate(&home.path().join("signing_key.pem"))
+            .expect("the daemon generates its keypair");
+        SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory))
+    })
+}
+
+/// The credential the browser presents, signed with [`this_daemons_session_tokens`]'s key. Minted
+/// once and shared, because the requests and the daemon's user resolver have to agree on the very
+/// same string.
+pub fn a_caller_token() -> &'static str {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    TOKEN.get_or_init(|| {
+        this_daemons_session_tokens()
+            .signer()
+            .mint_access(&GitHubUser {
+                id: 4242,
+                login: current_os_user(),
+                avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+                name: "Test User".to_string(),
+            })
+    })
+}
 
 /// A daemon serving one project: what a suite's `World` holds, beside the project's repo.
 pub struct HomeDaemon {
@@ -61,7 +91,7 @@ pub async fn ensure_main(
 ) -> Result<EnsureProjectHomeSessionResponse, tddy_rpc::Status> {
     service
         .ensure_project_home_session(Request::direct(EnsureProjectHomeSessionRequest {
-            session_token: VALID_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
             project_id: PROJECT_ID.to_string(),
             daemon_instance_id: String::new(),
             start,
@@ -153,7 +183,7 @@ fn minimal_service_with_manager(
         Arc::new(move |_| Some(sessions_base.clone()));
     let resolved_user = current_os_user();
     let user_resolver: UserResolver =
-        Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
+        Arc::new(move |token| (token == a_caller_token()).then(|| resolved_user.clone()));
     DaemonSessionHost::new(
         config.clone(),
         sessions_base_resolver,
@@ -164,9 +194,10 @@ fn minimal_service_with_manager(
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
     )
+    .with_session_tokens(this_daemons_session_tokens().clone())
 }
 
-/// Executable stub that dumps both its argv and `TDDY_SOCKET`, then stays alive like an agent
+/// Executable stub that dumps its argv, `TDDY_SOCKET` and the `TDDY_REMOTE_*` transport, then stays alive like an agent
 /// waiting for input — so a started main is still running when it is ensured again, and the idle
 /// reaper (which only considers live processes) is not racing a process exit. `cat` ends when the
 /// session is stopped (SIGTERM) or its terminal closes.
@@ -174,7 +205,16 @@ fn write_argv_and_env_script(dir: &Path) -> PathBuf {
     let script_path = dir.join("stub_claude_argv_env.sh");
     std::fs::write(
         &script_path,
-        "#!/bin/sh\necho \"ARGV: $@\"\necho \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\nexec cat >/dev/null\n",
+        concat!(
+            "#!/bin/sh\n",
+            "echo \"ARGV: $@\"\n",
+            "echo \"ENVDUMP TDDY_SOCKET=[$TDDY_SOCKET]\"\n",
+            "echo \"ENVDUMP TDDY_REMOTE_SESSION_ID=[$TDDY_REMOTE_SESSION_ID]\"\n",
+            "echo \"ENVDUMP TDDY_REMOTE_SESSION_TOKEN=[$TDDY_REMOTE_SESSION_TOKEN]\"\n",
+            "echo \"ENVDUMP TDDY_REMOTE_DAEMON_URL=[$TDDY_REMOTE_DAEMON_URL]\"\n",
+            "echo \"ENVDUMP TDDY_REMOTE_DAEMON_SOCKET=[$TDDY_REMOTE_DAEMON_SOCKET]\"\n",
+            "exec cat >/dev/null\n",
+        ),
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;

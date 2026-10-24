@@ -13,7 +13,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use ensure_project_home_world::{a_claude_cli_spec, a_daemon_with_a_project, World};
-use project_home_support::{git, PROJECT_ID, VALID_TOKEN};
+use project_home_support::{a_caller_token, git, PROJECT_ID};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, SessionEntry,
@@ -43,7 +43,7 @@ impl World {
         self.home
             .service
             .ensure_project_home_session(Request::direct(EnsureProjectHomeSessionRequest {
-                session_token: VALID_TOKEN.to_string(),
+                session_token: a_caller_token().to_string(),
                 project_id: PROJECT_ID.to_string(),
                 daemon_instance_id: daemon_instance_id.to_string(),
                 start: Some(spec),

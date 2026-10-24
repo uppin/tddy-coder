@@ -10,12 +10,12 @@
 mod ensure_project_home_world;
 mod project_home_support;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ensure_project_home_world::{
     a_claude_cli_spec, a_daemon_with_a_project, a_daemon_with_a_project_recording, World,
 };
-use project_home_support::{git, PROJECT_ID, VALID_TOKEN};
+use project_home_support::{a_caller_token, git, this_daemons_session_tokens, PROJECT_ID};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
     AgentClonePlacement, ListSessionsRequest, SessionEntry, SessionService as SessionServiceTrait,
@@ -41,7 +41,7 @@ impl World {
         self.home
             .service
             .list_sessions(Request::direct(ListSessionsRequest {
-                session_token: VALID_TOKEN.to_string(),
+                session_token: a_caller_token().to_string(),
             }))
             .await
             .expect("ListSessions")
@@ -72,6 +72,82 @@ impl World {
             .expect("the agent is running");
         a_capture_showing(&handle.capture, "ARGV", PTY_STUB_OUTPUT).await
     }
+
+    /// What `session_id`'s agent was launched with, once the stub has echoed all of it.
+    async fn launch_of(&self, session_id: &str) -> ALaunch {
+        let handle = self
+            .home
+            .manager
+            .get(session_id)
+            .await
+            .expect("the agent is running");
+        // The stub's last line, so everything before it is in the capture too.
+        let shown = a_capture_showing(
+            &handle.capture,
+            "ENVDUMP TDDY_REMOTE_DAEMON_SOCKET=[",
+            PTY_STUB_OUTPUT,
+        )
+        .await;
+        ALaunch { shown }
+    }
+
+    fn session_dir_of(&self, session_id: &str) -> PathBuf {
+        self.home.data.path().join("sessions").join(session_id)
+    }
+}
+
+/// One launch of a stub `claude`, as it echoed its argv and its `TDDY_REMOTE_*` environment.
+struct ALaunch {
+    shown: String,
+}
+
+impl ALaunch {
+    /// The argv line, flags separated by single spaces.
+    fn argv(&self) -> &str {
+        let start = self.shown.find("ARGV: ").expect("the stub echoed its argv") + "ARGV: ".len();
+        let rest = &self.shown[start..];
+        rest[..rest.find(['\r', '\n']).unwrap_or(rest.len())].trim_end()
+    }
+
+    /// The value following `flag` on the argv line.
+    fn value_of(&self, flag: &str) -> &str {
+        let needle = format!("{flag} ");
+        let argv = self.argv();
+        let start = argv
+            .find(&needle)
+            .unwrap_or_else(|| panic!("the agent was launched with {flag}; argv: {argv}"))
+            + needle.len();
+        argv[start..].split(' ').next().expect("a value follows the flag")
+    }
+
+    /// The environment variable `key` as the stub saw it; empty when unset.
+    fn env(&self, key: &str) -> &str {
+        let needle = format!("ENVDUMP {key}=[");
+        let start = self
+            .shown
+            .find(&needle)
+            .unwrap_or_else(|| panic!("the stub echoed {key}"))
+            + needle.len();
+        let rest = &self.shown[start..];
+        &rest[..rest.find(']').expect("the dumped value is closed")]
+    }
+}
+
+/// The URL a daemon with no `listen:` port of its own is reached on locally — the fixture's config
+/// names none, so this is the daemon the main runs under.
+fn this_daemons_local_url() -> String {
+    tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(
+        &tddy_daemon_kernel::config::DaemonConfig::default(),
+    )
+}
+
+/// The `tddy-tools` server entry an MCP config at `path` registers.
+fn the_tddy_tools_server_in(path: &Path) -> serde_json::Value {
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(path).expect("the MCP config the main was given exists"),
+    )
+    .expect("the MCP config is JSON");
+    config["mcpServers"]["tddy-tools"].clone()
 }
 
 #[tokio::test]
@@ -392,6 +468,144 @@ async fn an_ensured_main_is_pre_approved_the_project_home_tool_set() {
 }
 
 #[tokio::test]
+async fn an_ensured_main_loads_tddy_tools_as_its_only_mcp_server() {
+    // Given a main the ensure has started
+    let world = a_daemon_with_a_project();
+    let main = world.a_running_main().await;
+
+    // When its launch is read
+    let launch = world.launch_of(&main.session_id).await;
+
+    // Then it loads the MCP config written into its own session dir, and no other
+    let mcp_config = PathBuf::from(launch.value_of("--mcp-config"));
+    assert_eq!(
+        mcp_config,
+        world
+            .session_dir_of(&main.session_id)
+            .join("claude-mcp-config.json")
+    );
+    assert!(
+        launch.argv().contains("--strict-mcp-config"),
+        "only that config is loaded; argv: {}",
+        launch.argv()
+    );
+    // And that config runs the toolchain's `tddy-tools` as an MCP server
+    let server = the_tddy_tools_server_in(&mcp_config);
+    assert_eq!(server["args"], serde_json::json!(["--mcp"]));
+    let command = PathBuf::from(server["command"].as_str().expect("a command path"));
+    assert!(command.is_absolute(), "an absolute binary: {command:?}");
+    assert_eq!(command.file_name().unwrap(), "tddy-tools");
+}
+
+#[tokio::test]
+async fn an_ensured_mains_tools_reach_this_daemon_as_the_main() {
+    // Given a main the ensure has started on a daemon that serves HTTP
+    let world = a_daemon_with_a_project();
+    let main = world.a_running_main().await;
+
+    // When its launch is read
+    let launch = world.launch_of(&main.session_id).await;
+
+    // Then its tools address this daemon over its local URL, as the main itself
+    assert_eq!(launch.env("TDDY_REMOTE_SESSION_ID"), main.session_id);
+    assert_eq!(launch.env("TDDY_REMOTE_DAEMON_URL"), this_daemons_local_url());
+    // And no agent-tool socket, which only an embedded daemon serves
+    assert_eq!(launch.env("TDDY_REMOTE_DAEMON_SOCKET"), "");
+}
+
+#[tokio::test]
+async fn an_ensured_main_is_given_a_token_of_its_own_that_verifies_as_the_caller() {
+    // Given a main the ensure has started
+    let world = a_daemon_with_a_project();
+    let main = world.a_running_main().await;
+
+    // When its launch is read
+    let launch = world.launch_of(&main.session_id).await;
+    let agent_token = launch.env("TDDY_REMOTE_SESSION_TOKEN");
+
+    // Then it holds a credential that is not the caller's own short-lived one
+    assert_ne!(agent_token, "");
+    assert_ne!(agent_token, a_caller_token());
+    // And this daemon verifies it as the caller, which is how its tool calls are authorized
+    let claims = this_daemons_session_tokens()
+        .verifier()
+        .verify_now(agent_token)
+        .expect("the main's token verifies under this daemon's key");
+    let caller = this_daemons_session_tokens()
+        .verifier()
+        .verify_now(a_caller_token())
+        .expect("the caller's token verifies");
+    assert_eq!(claims.login, caller.login);
+}
+
+#[tokio::test]
+async fn an_ensured_main_has_no_native_shell_or_file_tools() {
+    // Given a main the ensure has started
+    let world = a_daemon_with_a_project();
+    let main = world.a_running_main().await;
+
+    // When its launch is read
+    let launch = world.launch_of(&main.session_id).await;
+
+    // Then every native shell and file tool is withdrawn, so its only reach is the daemon's
+    for native in ["Bash", "Edit", "Write", "Read", "Grep", "Glob"] {
+        assert!(
+            launch
+                .argv()
+                .contains(&format!("--disallowedTools {native} ")),
+            "{native} is withdrawn; argv: {}",
+            launch.argv()
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_ensured_main_is_told_it_is_the_projects_main() {
+    // Given a main the ensure has started
+    let world = a_daemon_with_a_project();
+    let main = world.a_running_main().await;
+
+    // When the prompt it is launched with is read
+    let launch = world.launch_of(&main.session_id).await;
+    let prompt = std::fs::read_to_string(launch.value_of("--append-system-prompt-file"))
+        .expect("the role prompt file exists");
+
+    // Then it names the tools a main sees and starts the project's sessions with
+    assert!(prompt.contains("ListProjectSessions"), "prompt: {prompt}");
+    assert!(prompt.contains("StartProjectSession"), "prompt: {prompt}");
+    // And tells it that it has no shell
+    assert!(prompt.contains("no shell"), "prompt: {prompt}");
+}
+
+#[tokio::test]
+async fn a_resumed_main_is_wired_to_its_tools_again_with_a_fresh_token() {
+    // Given a main that ran and was stopped
+    let world = a_daemon_with_a_project();
+    let main = world.a_running_main().await;
+    let first_token = world
+        .launch_of(&main.session_id)
+        .await
+        .env("TDDY_REMOTE_SESSION_TOKEN")
+        .to_string();
+    world.stop(&main.session_id).await;
+
+    // When it is ensured again, which resumes it
+    world.ensure().await.expect("ensuring a stopped main resumes it");
+    let launch = world.launch_of(&main.session_id).await;
+
+    // Then the resumed agent loads its tools and reaches this daemon as the main
+    assert!(
+        launch.argv().contains("--strict-mcp-config"),
+        "argv: {}",
+        launch.argv()
+    );
+    assert_eq!(launch.env("TDDY_REMOTE_SESSION_ID"), main.session_id);
+    // And it holds a newly minted credential, not the one its previous process had
+    assert_ne!(launch.env("TDDY_REMOTE_SESSION_TOKEN"), "");
+    assert_ne!(launch.env("TDDY_REMOTE_SESSION_TOKEN"), first_token);
+}
+
+#[tokio::test]
 async fn a_start_session_naming_a_role_is_refused_and_starts_nothing() {
     // Given a daemon a client can start sessions on
     let world = a_daemon_with_a_project();
@@ -401,7 +615,7 @@ async fn a_start_session_naming_a_role_is_refused_and_starts_nothing() {
         .home
         .service
         .start_session(Request::direct(StartSessionRequest {
-            session_token: VALID_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
             project_id: PROJECT_ID.to_string(),
             session_role: PROJECT_HOME_ROLE.to_string(),
             ..a_claude_cli_spec()

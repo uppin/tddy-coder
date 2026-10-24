@@ -229,6 +229,174 @@ fn an_ordinary_spawn_adds_no_allowed_tools() {
     assert!(role_allowed_tools_args(Some("some-other-role")).is_empty());
 }
 
+const A_MAIN: &str = "01a16dc6-ab4c-7dc3-844e-baca4514f86e";
+const A_MINTED_TOKEN: &str = "minted-for-the-agent";
+
+/// A main's launch on `config` / `data_dir`, written into a fresh session dir.
+struct AMainLaunch {
+    session_dir: tempfile::TempDir,
+    launch: RoleLaunch,
+}
+
+impl AMainLaunch {
+    fn on(config: &DaemonConfig, data_dir: &Path) -> Self {
+        let session_dir = tempfile::tempdir().expect("a temporary session dir");
+        let launch = project_home_launch(ProjectHomeLaunch {
+            config,
+            tddy_data_dir: data_dir,
+            session_dir: session_dir.path(),
+            session_id: A_MAIN,
+            agent_session_token: A_MINTED_TOKEN,
+            tddy_tools_path: Path::new("/opt/tddy/bin/tddy-tools"),
+        })
+        .expect("a main's launch is built");
+        Self {
+            session_dir,
+            launch,
+        }
+    }
+
+    fn env(&self, key: &str) -> Option<&str> {
+        self.launch
+            .env
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
+    fn values_of(&self, flag: &str) -> Vec<&str> {
+        self.launch
+            .extra_args
+            .windows(2)
+            .filter(|pair| pair[0] == flag)
+            .map(|pair| pair[1].as_str())
+            .collect()
+    }
+
+    fn has_flag(&self, flag: &str) -> bool {
+        self.launch.extra_args.iter().any(|arg| arg == flag)
+    }
+}
+
+#[test]
+fn on_an_embedded_host_a_main_reaches_the_daemon_over_its_agent_tool_socket() {
+    // Given a desktop daemon, whose agent-tool socket is bound
+    let host = AnEmbeddedHost::with_its_agent_tool_socket_bound();
+
+    // When a main's launch is built there
+    let main = AMainLaunch::on(&host.config, host.data_dir());
+
+    // Then its tools are pointed at that socket, which `tddy-tools` prefers over any URL
+    assert_eq!(
+        main.env("TDDY_REMOTE_DAEMON_SOCKET"),
+        Some(host.agent_tool_socket().as_str())
+    );
+}
+
+#[test]
+fn on_a_regular_host_a_main_reaches_the_daemon_over_its_http_url_and_no_socket() {
+    // Given a binary daemon, which serves HTTP and binds no agent-tool socket
+    let host = ARegularHost::without_an_agent_tool_socket();
+
+    // When a main's launch is built there
+    let main = AMainLaunch::on(&host.config, host.data_dir());
+
+    // Then its tools reach this daemon's local URL, and name no socket nobody serves
+    assert_eq!(
+        main.env("TDDY_REMOTE_DAEMON_URL"),
+        Some(daemon_hook_urls::local_daemon_hook_url(&host.config).as_str())
+    );
+    assert_eq!(main.env("TDDY_REMOTE_DAEMON_SOCKET"), None);
+}
+
+#[test]
+fn a_mains_tools_carry_its_own_session_id_and_the_minted_token() {
+    // Given a binary daemon
+    let host = ARegularHost::without_an_agent_tool_socket();
+
+    // When a main's launch is built there
+    let main = AMainLaunch::on(&host.config, host.data_dir());
+
+    // Then every tool call names the main itself, under the credential minted for it
+    assert_eq!(main.env("TDDY_REMOTE_SESSION_ID"), Some(A_MAIN));
+    assert_eq!(main.env("TDDY_REMOTE_SESSION_TOKEN"), Some(A_MINTED_TOKEN));
+}
+
+#[test]
+fn a_main_loads_only_the_tddy_tools_mcp_server_from_its_session_dir() {
+    // Given a binary daemon
+    let host = ARegularHost::without_an_agent_tool_socket();
+
+    // When a main's launch is built there
+    let main = AMainLaunch::on(&host.config, host.data_dir());
+
+    // Then the one MCP config it loads is in its session dir, and no other config is loaded
+    let config_path = main.session_dir.path().join("claude-mcp-config.json");
+    assert_eq!(
+        main.values_of("--mcp-config"),
+        vec![config_path.to_str().unwrap()]
+    );
+    assert!(main.has_flag("--strict-mcp-config"));
+    // And that config runs the given tddy-tools as an MCP server
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).expect("the config exists"))
+            .expect("the config is JSON");
+    assert_eq!(
+        config["mcpServers"]["tddy-tools"]["command"],
+        "/opt/tddy/bin/tddy-tools"
+    );
+    assert_eq!(
+        config["mcpServers"]["tddy-tools"]["args"],
+        serde_json::json!(["--mcp"])
+    );
+}
+
+#[test]
+fn a_main_is_pre_approved_its_tool_set_and_denied_every_native_filesystem_tool() {
+    // Given a binary daemon
+    let host = ARegularHost::without_an_agent_tool_socket();
+
+    // When a main's launch is built there
+    let main = AMainLaunch::on(&host.config, host.data_dir());
+
+    // Then it is pre-approved exactly the project-home tool set
+    assert_eq!(
+        main.values_of("--allowedTools"),
+        tddy_tool_engine::read_only::project_home_allowed_tools()
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+    );
+    // And every native filesystem and shell tool is withdrawn outright
+    assert_eq!(
+        main.values_of("--disallowedTools"),
+        tddy_session_split::split_session::NATIVE_FILESYSTEM_TOOLS.to_vec()
+    );
+}
+
+#[test]
+fn a_mains_role_prompt_is_written_to_its_session_dir_and_appended() {
+    // Given a binary daemon
+    let host = ARegularHost::without_an_agent_tool_socket();
+
+    // When a main's launch is built there
+    let main = AMainLaunch::on(&host.config, host.data_dir());
+
+    // Then one prompt file, inside its session dir, is appended to its system prompt
+    let prompt_files = main.values_of("--append-system-prompt-file");
+    assert_eq!(prompt_files.len(), 1);
+    let prompt_file = Path::new(prompt_files[0]);
+    assert_eq!(prompt_file.parent(), Some(main.session_dir.path()));
+    // And it tells the agent what it is and how it reaches the project's sessions
+    let prompt = std::fs::read_to_string(prompt_file).expect("the prompt file exists");
+    assert!(prompt.contains("main"), "prompt: {prompt}");
+    assert!(prompt.contains("no shell"), "prompt: {prompt}");
+    assert!(prompt.contains("ListProjectSessions"), "prompt: {prompt}");
+    assert!(prompt.contains("StartProjectSession"), "prompt: {prompt}");
+    assert!(prompt.contains("ReadSessionWorktree"), "prompt: {prompt}");
+    assert!(prompt.contains("DiffSessionWorktree"), "prompt: {prompt}");
+}
+
 #[test]
 fn a_role_is_on_disk_before_the_agent_is_spawned() {
     // Given a session directory a start has just created
