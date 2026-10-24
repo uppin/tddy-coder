@@ -98,7 +98,8 @@ fn a_daemon_cloning_from(git_url: &str) -> ADaemon {
 }
 
 /// A daemon whose project is already on disk, at a repository whose worktree cut is slow: its
-/// `post-checkout` hook touches `cut_began` and then sleeps.
+/// `post-checkout` hook leaves an untracked file in the new worktree (as an agent would, and which
+/// makes `git worktree remove` refuse it), touches `cut_began`, and then sleeps.
 struct ADaemonWithASlowCut {
     service: DaemonSessionHost,
     repo: tempfile::TempDir,
@@ -114,7 +115,10 @@ fn a_daemon_whose_worktree_cut_is_slow() -> ADaemonWithASlowCut {
     let hook = repo.path().join(".git").join("hooks").join("post-checkout");
     std::fs::write(
         &hook,
-        format!("#!/bin/sh\ntouch '{}'\nsleep 3\n", cut_began.display()),
+        format!(
+            "#!/bin/sh\ntouch scratch-the-agent-left\ntouch '{}'\nsleep 3\n",
+            cut_began.display()
+        ),
     )
     .expect("write the hook");
     std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755))
@@ -346,7 +350,7 @@ async fn cancelling_during_the_worktree_cut_leaves_no_session_directory_or_workt
     assert_eq!(
         worktrees_of(daemon.repo.path()).len(),
         1,
-        "no worktree left behind beside the main checkout: {:?}",
-        worktrees_of(daemon.repo.path())
+        "no worktree left behind beside the main checkout:\n{}",
+        git(daemon.repo.path(), &["worktree", "list", "--porcelain"])
     );
 }

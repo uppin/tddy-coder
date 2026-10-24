@@ -404,6 +404,9 @@ fn remove_session_worktree(
                     worktree,
                     session_id
                 );
+                // The checkout is gone, but the project's repository still registers it: a stale
+                // `git worktree list` row that also holds the worktree's name and its branch.
+                prune_worktree_registration(projects_dir, metadata.as_ref(), &worktree, session_id);
             } else {
                 log::info!(
                     "delete_session_directory: leaving worktree {:?} for {} intact (not a daemon-managed worktree — e.g. a client-supplied repo_path checkout)",
