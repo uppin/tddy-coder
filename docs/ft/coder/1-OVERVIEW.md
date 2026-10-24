@@ -80,6 +80,7 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
+| [One ACP client driver](1-WIP/PRD-2026-10-24-coagents-acp-driver.md) | [Codex ACP backend](codex-acp-backend.md), [OpenCode ACP backend](opencode-acp-backend.md) — one shared ACP worker for `claude-acp` / `codex-acp` / `opencode`: model, cancel, MCP servers, permission handler (`#coagents` 1/8) |
 
 ## Integration Points
 
