@@ -117,6 +117,44 @@ fn escape_codes_around_the_resume_line_are_ignored() {
 }
 
 #[test]
+fn a_window_title_set_before_the_resume_line_is_ignored() {
+    // Given: OSC sequences closed by BEL and by ST, the second one naming a different token
+    let output =
+        b"\x1b]0;warp --resume tok-in-title\x07\x1b]2;tab\x1b\\  warp --resume tok-shown\r\n";
+
+    // When
+    let token = resume_token_from_output(output);
+
+    // Then: only the printed line counts, and nothing of either title leaks into it
+    assert_eq!(token.as_deref(), Some("tok-shown"));
+}
+
+#[test]
+fn a_device_control_string_after_the_resume_line_is_ignored() {
+    // Given: a DCS query, holding a resume line of its own, after the printed one
+    let output = b"warp --resume tok-shown\r\n\x1bP+q544e\x1b\\\x1bPwarp --resume tok-in-dcs\x1b\\";
+
+    // When
+    let token = resume_token_from_output(output);
+
+    // Then
+    assert_eq!(token.as_deref(), Some("tok-shown"));
+}
+
+#[test]
+fn single_character_escapes_inside_the_resume_line_are_ignored() {
+    // Given: a charset designation (an intermediate byte, then a final one) and a keypad-mode
+    // escape between the words of the line
+    let output = b"\x1b(Bwarp \x1b=--resume\x1b> tok-123\r\n";
+
+    // When
+    let token = resume_token_from_output(output);
+
+    // Then
+    assert_eq!(token.as_deref(), Some("tok-123"));
+}
+
+#[test]
 fn output_without_a_resume_line_names_no_token() {
     // Given: a run killed before Warp could print its banner
     let output = b"\x1b[1mWarp\x1b[0m agent ready\r\n> write the tests\r\n";

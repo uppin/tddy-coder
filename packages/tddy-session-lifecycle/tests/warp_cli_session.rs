@@ -17,7 +17,9 @@ use tddy_service::proto::session::{
 };
 use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_last_appended_argv};
+use tddy_testing_commons::stub_scripts::{
+    a_stub_agent_script, appended_invocation_count, read_last_appended_argv,
+};
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -113,6 +115,27 @@ impl WarpDaemon {
         eventually("the stub warp to record a spawn", SPAWN_OBSERVE, || {
             read_last_appended_argv(&self.argv_log)
         })
+        .await
+    }
+
+    /// The args of the `run`th `warp` spawn (counted from 1), waiting for the stub to record it.
+    async fn spawn_args_of_run(&self, run: usize) -> Vec<String> {
+        eventually(
+            &format!("the stub warp to record spawn {run}"),
+            SPAWN_OBSERVE,
+            || {
+                if appended_invocation_count(&self.argv_log) < run {
+                    return Err(format!("fewer than {run} spawns recorded"));
+                }
+                let log = std::fs::read_to_string(&self.argv_log).map_err(|e| e.to_string())?;
+                let line = log.lines().nth(run - 1).unwrap_or_default();
+                Ok(if line.is_empty() {
+                    Vec::new()
+                } else {
+                    line.split('\t').map(str::to_string).collect()
+                })
+            },
+        )
         .await
     }
 
@@ -262,18 +285,25 @@ async fn a_warp_session_records_the_resume_token_warp_prints_on_exit() {
     daemon.recorded_token_becomes(&session_id, "tok-1").await;
 }
 
+/// The whole round trip on one session: the token the first run printed is what its resume passes.
+/// That the resume waits for the recorder of the run before it (rather than racing it) is pinned
+/// deterministically in `tddy-cli-sessions/tests/exit_hook.rs`.
 #[tokio::test]
-async fn a_warp_session_that_is_seen_to_have_exited_already_records_its_resume_token() {
+async fn resuming_a_warp_session_after_it_exits_continues_the_conversation_it_printed() {
     // Given: a stub that prints its banner and exits at once
     let daemon = a_warp_daemon(OnExit::PrintsANewTokenEachRun);
     let session_id = daemon.start(a_warp_start_request()).await.unwrap();
-
-    // When: the session is first seen to have exited (its terminal gone)
     daemon.warp_has_exited(&session_id).await;
 
-    // Then: the token is on disk already, with no further waiting, so a resume now continues it
-    let meta = read_session_metadata(&daemon.session_dir(&session_id)).unwrap();
-    assert_eq!(meta.harness_resume_token.as_deref(), Some("tok-1"));
+    // When: the session is resumed the moment its warp is seen gone
+    daemon.resume(&session_id).await.unwrap();
+
+    // Then: the second run continues the conversation the first one printed
+    let second_run = daemon.spawn_args_of_run(2).await;
+    assert_eq!(
+        second_run,
+        vec!["--resume".to_string(), "tok-1".to_string()]
+    );
 }
 
 #[tokio::test]

@@ -8,6 +8,17 @@ use tddy_core::cli_harness::{CliHarness, CliLaunch};
 
 use super::pty_spawn::ExitHook;
 
+/// What a [`CliSessionManager::launch_cli_harness`] launch adds to the harness's own argv.
+#[derive(Default)]
+pub struct HarnessLaunchExtras {
+    /// Follow the harness's argv (a provider route's `--model`).
+    pub args: Vec<String>,
+    /// Applied to the child on top of the daemon's (a route's configuration variable and key).
+    pub env: Vec<(String, String)>,
+    /// Runs to completion once the process has exited, before its terminal is deregistered.
+    pub on_exit: Option<ExitHook>,
+}
+
 use super::MAIN_TERMINAL_ID;
 
 use std::sync::Arc;
@@ -18,22 +29,18 @@ impl CliSessionManager {
     /// Spawn `harness` for `session_id` in `worktree_path`, its argv built by the registry from
     /// `launch` (`launch.resume` continues the worktree's session instead of starting one).
     ///
-    /// `extra_args` follow the harness's own argv (a provider route's `--model`), and `env` is
-    /// applied to the child on top of the daemon's (a route's configuration variable and key).
-    /// `on_exit` runs to completion once the process has exited, before its terminal is deregistered.
-    #[allow(clippy::too_many_arguments)]
+    /// `extras` adds to that launch: arguments after the harness's own argv, environment on top of
+    /// the daemon's, and the work to finish once the process exits (see [`HarnessLaunchExtras`]).
     pub async fn launch_cli_harness(
         &self,
         harness: &CliHarness,
         session_id: &str,
         worktree_path: PathBuf,
         launch: &CliLaunch<'_>,
-        extra_args: Vec<String>,
-        env: Vec<(String, String)>,
-        on_exit: Option<ExitHook>,
+        extras: HarnessLaunchExtras,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let mut argv = (harness.argv)(launch);
-        argv.extend(extra_args);
+        argv.extend(extras.args);
         self.spawn_tool(
             session_id,
             MAIN_TERMINAL_ID,
@@ -41,9 +48,9 @@ impl CliSessionManager {
             worktree_path,
             launch.model,
             argv,
-            env,
+            extras.env,
             None,
-            on_exit,
+            extras.on_exit,
         )
         .await
     }
