@@ -7,8 +7,9 @@
 //! reads it back off the terminal with [`resume_token_from_output`] and hands it to the next launch
 //! as [`CliLaunch::conversation_id`].
 //!
-//! TODO(warp-cli-facts): the argv and the exit banner follow Warp's published reference, unchecked
-//! against a real `warp` (docs/dev/todo/2026-10-24-warp-cli-facts-unconfirmed.md).
+//! TODO(warp-cli-facts): the argv is verified against the real Warp Agent CLI (`warp --help`,
+//! v0.2026.10.21); the exit banner's exact wording is still unobserved
+//! (docs/dev/todo/2026-10-24-warp-cli-facts-unconfirmed.md).
 
 use crate::backend::BackendModels;
 use crate::cli_harness::{CliHarness, CliLaunch, CliModelSource};
