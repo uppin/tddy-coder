@@ -52,6 +52,17 @@ pub fn coder_activity_entry(svc: Arc<SessionConnectionService>) -> ServiceEntry 
     }
 }
 
+/// The refusal for a request addressed to a subagent conversation's transcript.
+///
+/// This host records no conversations: the daemon that runs one keeps its transcript. The only
+/// transcript this participant holds is the session's, so answering a conversation request with it
+/// would hand the caller another transcript as if it were the conversation's.
+fn conversation_not_recorded(conversation_id: &str) -> Status {
+    Status::not_found(format!(
+        "conversation '{conversation_id}' is not recorded on this host"
+    ))
+}
+
 /// Families M and N at the coder's participant, over any `tddy-rpc` transport.
 struct CoderActivityRpc {
     svc: Arc<SessionConnectionService>,
@@ -130,6 +141,11 @@ impl RpcService for CoderActivityRpc {
                         ))));
                     }
                 };
+                if !req.conversation_id.is_empty() {
+                    return RpcResult::ServerStream(Err(conversation_not_recorded(
+                        &req.conversation_id,
+                    )));
+                }
                 let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
 
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, Status>>(
@@ -323,6 +339,9 @@ impl RpcService for CoderActivityRpc {
                         ))));
                     }
                 };
+                if !req.conversation_id.is_empty() {
+                    return RpcResult::Unary(Err(conversation_not_recorded(&req.conversation_id)));
+                }
                 match tddy_service::acp_replay::tool_call_detail(
                     &self.svc.agent_activity_dir,
                     &req.tool_call_id,
@@ -350,6 +369,9 @@ impl RpcService for CoderActivityRpc {
                         ))));
                     }
                 };
+                if !req.conversation_id.is_empty() {
+                    return RpcResult::Unary(Err(conversation_not_recorded(&req.conversation_id)));
+                }
                 // A transcript that cannot be read is an error, never an empty page: an empty page
                 // means "you have reached the head", and a reader told that stops paging for good.
                 let transcript = match tddy_service::acp_replay::read_session_transcript(
@@ -1067,6 +1089,143 @@ mod tests {
 
         // Then — the status is NOT_FOUND
         assert_eq!(status.code(), tddy_rpc::Code::NotFound);
+    }
+
+    /// A direct request carrying `req`, for the arms that refuse a conversation's transcript.
+    fn direct_message(req: &impl Message) -> RpcMessage {
+        RpcMessage::new(
+            req.encode_to_vec(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        )
+    }
+
+    /// A session dir whose transcript holds one frame of the session's own. A refusal is only
+    /// meaningful against a transcript that a handler ignoring the conversation id would serve.
+    fn a_session_transcript_with_one_frame(dir: &std::path::Path) {
+        tddy_service::acp_replay::append_acp_frame(
+            dir,
+            &tddy_service::acp_replay::agent_text_frame("the session's own answer", 1_000),
+        )
+        .unwrap();
+    }
+
+    /// A conversation id on `StreamAcpReplay` is refused NOT_FOUND, naming the conversation, rather
+    /// than replaying the session's transcript as if it were the conversation's.
+    #[tokio::test]
+    async fn stream_acp_replay_refuses_a_conversation_this_host_does_not_record() {
+        // Given — a session dir holding a transcript, and a replay addressed to a conversation
+        let dir = tempfile::tempdir().unwrap();
+        a_session_transcript_with_one_frame(dir.path());
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events);
+        let req = StreamAcpReplayRequest {
+            session_token: "caller-token".to_string(),
+            session_id: "sess-1".to_string(),
+            daemon_instance_id: String::new(),
+            mode: StreamMode::SnapshotThenLive as i32,
+            page_size: 0,
+            conversation_id: "conv-1".to_string(),
+        };
+
+        // When — the StreamAcpReplay arm is dispatched for that conversation
+        let result = rpc
+            .handle_rpc(ACTIVITY_SERVICE, "StreamAcpReplay", &direct_message(&req))
+            .await;
+
+        // Then — the stream is refused NOT_FOUND, naming the conversation
+        let status = match result {
+            RpcResult::ServerStream(Err(status)) => status,
+            RpcResult::ServerStream(Ok(_)) => panic!("expected NOT_FOUND, got a replay stream"),
+            _ => panic!("expected a server stream, got a unary result"),
+        };
+        assert_eq!(status.code(), tddy_rpc::Code::NotFound);
+        assert!(
+            status.message().contains("conversation 'conv-1'"),
+            "the refusal names the conversation: {}",
+            status.message()
+        );
+    }
+
+    /// A conversation id on `GetAcpToolCallDetail` is refused NOT_FOUND, naming the conversation,
+    /// even for a tool call id the session's transcript does hold.
+    #[tokio::test]
+    async fn get_acp_tool_call_detail_refuses_a_conversation_this_host_does_not_record() {
+        // Given — a session dir whose transcript holds the call, and a detail request for it
+        // addressed to a conversation
+        let dir = tempfile::tempdir().unwrap();
+        tddy_service::acp_replay::append_acp_frame(
+            dir.path(),
+            &tddy_service::acp_replay::frame_for_agent_activity(&a_completed_record("call-1")),
+        )
+        .unwrap();
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events);
+        let req = GetAcpToolCallDetailRequest {
+            session_token: "caller-token".to_string(),
+            session_id: "sess-1".to_string(),
+            daemon_instance_id: String::new(),
+            tool_call_id: "call-1".to_string(),
+            conversation_id: "conv-1".to_string(),
+        };
+
+        // When — the GetAcpToolCallDetail arm is dispatched for that conversation
+        let result = rpc
+            .handle_rpc(
+                ACTIVITY_SERVICE,
+                "GetAcpToolCallDetail",
+                &direct_message(&req),
+            )
+            .await;
+
+        // Then — the call is refused NOT_FOUND, naming the conversation
+        let status = match result {
+            RpcResult::Unary(Err(status)) => status,
+            RpcResult::Unary(Ok(_)) => panic!("expected NOT_FOUND, got a detail response"),
+            _ => panic!("expected a unary result, got a server stream"),
+        };
+        assert_eq!(status.code(), tddy_rpc::Code::NotFound);
+        assert!(
+            status.message().contains("conversation 'conv-1'"),
+            "the refusal names the conversation: {}",
+            status.message()
+        );
+    }
+
+    /// A conversation id on `GetAcpReplayPage` is refused NOT_FOUND, naming the conversation, rather
+    /// than paging the session's transcript.
+    #[tokio::test]
+    async fn get_acp_replay_page_refuses_a_conversation_this_host_does_not_record() {
+        // Given — a session dir holding a transcript, and a page request addressed to a conversation
+        let dir = tempfile::tempdir().unwrap();
+        a_session_transcript_with_one_frame(dir.path());
+        let (events, _keepalive) = broadcast::channel(16);
+        let rpc = rpc_for(dir.path(), events);
+        let req = GetAcpReplayPageRequest {
+            session_token: "caller-token".to_string(),
+            session_id: "sess-1".to_string(),
+            daemon_instance_id: String::new(),
+            before_seq: 1,
+            page_size: 10,
+            conversation_id: "conv-1".to_string(),
+        };
+
+        // When — the GetAcpReplayPage arm is dispatched for that conversation
+        let result = rpc
+            .handle_rpc(ACTIVITY_SERVICE, "GetAcpReplayPage", &direct_message(&req))
+            .await;
+
+        // Then — the page is refused NOT_FOUND, naming the conversation
+        let status = match result {
+            RpcResult::Unary(Err(status)) => status,
+            RpcResult::Unary(Ok(_)) => panic!("expected NOT_FOUND, got a page"),
+            _ => panic!("expected a unary result, got a server stream"),
+        };
+        assert_eq!(status.code(), tddy_rpc::Code::NotFound);
+        assert!(
+            status.message().contains("conversation 'conv-1'"),
+            "the refusal names the conversation: {}",
+            status.message()
+        );
     }
 
     /// Dispatch the `StreamAcpReplay` arm and hand back its byte-frame stream, failing loudly on
