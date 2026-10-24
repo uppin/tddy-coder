@@ -5,7 +5,7 @@
 //! Every test here needs a service or session the supervisor actually started, so the whole file is
 //! Linux-only — see the note in `support`'s header.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-supervisor-handoff.md
+//! Feature docs: docs/ft/supervisor/tddy-supervisor.md
 #![cfg(target_os = "linux")]
 
 mod support;

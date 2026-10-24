@@ -275,7 +275,7 @@ why this crate depends on `ed25519-dalek` directly (to decode SPKI).
 every other service the stack registered for local callers.
 
 `tests/local_socket_family_wiring_acceptance.rs` is the guard on what `runtime.rs` actually hands
-the socket. It builds the binary runtime with `runtime::build(…, RuntimeOptions::for_binary())`,
+the socket. It builds the binary runtime with `runtime::build(…, RuntimeOptions::for_binary(SpawnBackendChoice::ForkedWorker))`,
 starts it, dials the Unix socket it assembled in a temp dir, and calls one method of each of the
 session, Project, Catalog, ExecTool and PR-stack families, and asserts that each is answered by its
 handler rather than by the transport's `Unimplemented`. The token-bearing calls carry a token no

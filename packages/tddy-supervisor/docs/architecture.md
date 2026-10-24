@@ -158,6 +158,15 @@ simply wait.
 A service that declared no socket gets no fd and no `LISTEN_*` at all — the activation variables are
 stripped *after* the request's own env, so neither inheritance nor a request can forge one.
 
+**A managed service is told the supervisor's socket.** `ChildEnvironment::build` removes
+`TDDY_SUPERVISOR_SOCKET` from every child's environment, then — for a declared managed service only —
+sets it to `socket.path` *after* the service's `env:` overlay, as with `LISTEN_*`, so `supervisor.yaml`
+cannot set or override it and a session spawn never receives it. The value travels in
+`EnvironmentBase::Inherited { supervisor_socket }`, supplied by `Slot::spawn_plan`; a session's
+`Minimal` base has no field that could carry it. This is how `tddy-daemon` learns it is supervised —
+there is no `supervisor:` key in `daemon.yaml`. Pinned by `tests/supervisor_service_environment.rs`
+(Linux only).
+
 `ForkBroker` reserves fd 3 at startup, because `Command::spawn` reports exec failures over a
 `SOCK_SEQPACKET` pair opened just before the fork: had that landed on fd 3, a *failed* exec would have
 looked successful. (In both real deployments fd 3 is already occupied — by tokio's epoll fd when

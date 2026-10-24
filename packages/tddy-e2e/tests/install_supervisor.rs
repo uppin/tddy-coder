@@ -639,7 +639,7 @@ fn installs_the_worktree_mirror_so_it_can_be_run_from_the_path() {
 
 // ---------------------------------------------------------------------------------------------
 // The daemon learns it is supervised from the supervisor, not from daemon.yaml
-// (docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-supervisor-handoff.md)
+// (docs/ft/daemon/systemd-install.md)
 // ---------------------------------------------------------------------------------------------
 
 fn declares_a_top_level(yaml: &str, key: &str) -> bool {

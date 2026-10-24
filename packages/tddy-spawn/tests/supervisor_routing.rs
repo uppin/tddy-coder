@@ -5,7 +5,7 @@
 //! socket in `TDDY_SUPERVISOR_SOCKET`; anything else — the desktop app, `./install --user`, a
 //! daemon run by hand — forks its own spawn worker. There is no config switch to drift from that.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-supervisor-handoff.md
+//! Feature docs: docs/ft/daemon/systemd-install.md
 
 use std::ffi::OsString;
 use std::path::PathBuf;

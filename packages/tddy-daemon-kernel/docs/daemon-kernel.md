@@ -399,7 +399,7 @@ test-owned pipe, record encoding). `tddy-spawn/tests/pre_exec_safety.rs` scans t
 
 ## `config` layout
 
-`config.rs` holds `DaemonConfig` with its `Default` and its field-level `impl`, `SupervisorClientConfig`,
+`config.rs` holds `DaemonConfig` with its `Default` and its field-level `impl`,
 `TelegramConfig`, `ListenConfig`, `LiveKitConfig`, the serde defaults those name, and the facades below.
 About 440 production lines (production code excluding `#[cfg(test)]` items). Eight modules under
 `src/config/` hold the rest:
@@ -422,3 +422,10 @@ paths are unchanged for them. **Seven items have no path outside the crate:** `L
 a public path, add it to a `pub use` in `config.rs` (for example `pub use sections::{LocalConfig, …};`).
 `ListenConfig` and `LiveKitConfig` stay in `config.rs` because the serde defaults they name are not contiguous
 with them.
+
+**There is no `supervisor:` section.** Whether a daemon spawns through `tddy-supervisor` follows from how it
+was started (`TDDY_SUPERVISOR_SOCKET`, read by `tddy_spawn::supervisor_client::SpawnBackendChoice`), not from
+config. `DaemonConfig::load` checks the untyped YAML before typed deserialization and refuses a top-level
+`supervisor:` key with a message naming the block as obsolete and saying to delete it, rather than serde's bare
+`unknown field` (`daemon_methods.rs`; pinned by `a_daemon_yaml_with_a_supervisor_block_is_refused_as_obsolete`).
+`./install` removes the block from an existing `daemon.yaml` on upgrade.
