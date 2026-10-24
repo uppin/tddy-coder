@@ -26,5 +26,6 @@ pub use parked_permissions::ParkedPermissions;
 pub use permissions::DenyAndRecord;
 pub use session::{CancelHandle, CodingAgentSession};
 pub use transports::{
-    permission_policy_of, transport_of, PermissionPolicy, Transport, HEADLESS_HARNESSES,
+    permission_policy_of, transport_and_policy_wire, transport_of, PermissionPolicy, Transport,
+    HEADLESS_HARNESSES,
 };

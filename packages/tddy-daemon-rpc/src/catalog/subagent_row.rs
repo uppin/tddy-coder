@@ -39,6 +39,8 @@ pub(super) fn coding_agent_info(
     daemon_instance_id: &str,
 ) -> Result<SubagentInfo, tddy_core::AgentIdError> {
     let record = coding_agent_record(def, daemon_instance_id)?;
+    let (transport, permission_policy) =
+        tddy_coding_subagent::transport_and_policy_wire(record.harness.as_deref().unwrap_or(""));
     Ok(SubagentInfo {
         agent_id: record.agent_id,
         label: record.label.unwrap_or_else(|| record.name.clone()),
@@ -49,9 +51,8 @@ pub(super) fn coding_agent_info(
         tools: record.tools,
         kind: agent_kind_to_wire(record.kind) as i32,
         harness: record.harness.unwrap_or_default(),
-        // TODO(acp-subagent): implement — the row's `transport` and `permission_policy`
-        transport: String::new(),
-        permission_policy: String::new(),
+        transport,
+        permission_policy,
     })
 }
 
