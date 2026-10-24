@@ -1,4 +1,4 @@
-//! `CodingAgentSession` — a `SubagentSession` whose turns a coding agent takes, over ACP.
+//! `CodingAgentSession` — a `SubagentSession` whose turns a coding agent takes, over ACP or headless.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_agent_backend::{
-    AcpAgentCommand, AcpDriver, AcpStopReason, AcpToolStatus, AcpTurnEnd, AcpUpdate, AcpUpdateSink,
+    AcpAgentCommand, AcpConversation, AcpDriver, AcpStopReason, AcpToolStatus, AcpTurnEnd,
+    AcpUpdate, AcpUpdateSink, ConversationDriver, HeadlessCommand, HeadlessDriver, HeadlessHarness,
     NoHooks, OpenSession,
 };
 use tddy_discovery::openai::TokenUsage;
@@ -27,19 +28,24 @@ type InFlightSlot = AsyncMutex<Option<InFlightPrompt>>;
 /// How far a subscriber to a coding agent's updates may fall behind before it misses some.
 const UPDATE_STREAM_CAPACITY: usize = 1024;
 
-/// One conversation with a coding agent: one agent process, one ACP session.
+/// One conversation with a coding agent: an ACP session over one agent process, or a headless CLI
+/// conversation that resumes its CLI's own session turn by turn.
 ///
-/// A turn is one `session/prompt`; its outcome carries the agent's text, `end_turn` /
-/// `cancelled` / …, and one message descriptor per tool call the turn made. A permission request the
-/// agent raises pauses the turn: it ends with [`StopReason::PermissionRequested`] and the request,
-/// and the prompt stays in flight until a later turn answers the request and the agent finishes.
-/// Options that act on an OpenAI-loop transcript (`fromMessageId`, `correction`, `replacement`,
-/// `yieldConditions`, `maxTurns`) are refused with [`SubagentError::unsupported_by_coding_agent`].
+/// A turn is one `session/prompt` (ACP) or one CLI invocation (headless); its outcome carries the
+/// agent's text, `end_turn` / `cancelled` / …, and one message descriptor per tool call the turn
+/// made. A permission request the agent raises pauses the turn: it ends with
+/// [`StopReason::PermissionRequested`] and the request, and the prompt stays in flight until a later
+/// turn answers the request and the agent finishes. Options that act on an OpenAI-loop transcript
+/// (`fromMessageId`, `correction`, `replacement`, `yieldConditions`, `maxTurns`) are refused with
+/// [`SubagentError::unsupported_by_coding_agent`].
 ///
-/// Dropping the session drops the driver, which terminates the agent process.
+/// Dropping the session drops its conversation, which terminates the agent process (or the CLI turn
+/// in flight).
 pub struct CodingAgentSession {
-    driver: Arc<AcpDriver>,
-    acp_session_id: String,
+    conversation: Arc<dyn ConversationDriver>,
+    /// The ACP conversation `conversation` is, when this session runs over ACP: its driver reports
+    /// the agent process id. `None` for a headless session, whose CLI runs once per turn.
+    acp: Option<Arc<AcpConversation>>,
     permissions: Arc<ParkedPermissions>,
     /// The prompt the agent is still answering, held across the turns a permission request pauses
     /// it for. `None` when no prompt is in flight.
@@ -103,6 +109,23 @@ impl CodingAgentSession {
         Self::opened(driver, permissions, open, model).await
     }
 
+    /// A headless conversation: `command` runs the harness's CLI once per turn, and every turn after
+    /// the first resumes the session the CLI named on the first. Nothing runs until a turn is taken.
+    pub async fn start_headless(
+        harness: HeadlessHarness,
+        command: HeadlessCommand,
+        model: String,
+    ) -> Result<Self, SubagentError> {
+        let conversation: Arc<dyn ConversationDriver> =
+            Arc::new(HeadlessDriver::new(harness, command));
+        Ok(Self::with_conversation(
+            conversation,
+            None,
+            Arc::new(ParkedPermissions::default()),
+            model,
+        ))
+    }
+
     async fn opened(
         driver: AcpDriver,
         permissions: Arc<ParkedPermissions>,
@@ -113,9 +136,27 @@ impl CodingAgentSession {
             .open_session(open)
             .await
             .map_err(|e| SubagentError::from(format!("could not open the coding agent: {e}")))?;
-        Ok(Self {
-            driver: Arc::new(driver),
-            acp_session_id: opened.session_id,
+        let acp = Arc::new(AcpConversation {
+            driver,
+            session_id: opened.session_id,
+        });
+        Ok(Self::with_conversation(
+            acp.clone(),
+            Some(acp),
+            permissions,
+            model,
+        ))
+    }
+
+    fn with_conversation(
+        conversation: Arc<dyn ConversationDriver>,
+        acp: Option<Arc<AcpConversation>>,
+        permissions: Arc<ParkedPermissions>,
+        model: String,
+    ) -> Self {
+        Self {
+            conversation,
+            acp,
             permissions,
             in_flight: Arc::new(AsyncMutex::new(None)),
             model,
@@ -123,7 +164,13 @@ impl CodingAgentSession {
             history: Vec::new(),
             recorder: None,
             update_stream: broadcast::channel(UPDATE_STREAM_CAPACITY).0,
-        })
+        }
+    }
+
+    /// The handle this session's turns park their permission requests on. A caller that answers
+    /// those requests (the daemon) holds this handle rather than the session.
+    pub fn permissions(&self) -> Arc<ParkedPermissions> {
+        Arc::clone(&self.permissions)
     }
 
     /// Send every ACP update of every later turn to `sink`, as it streams — how a daemon-run
@@ -139,16 +186,16 @@ impl CodingAgentSession {
     // this; n3 permission-yield wires it.
     pub fn cancel_handle(&self) -> CancelHandle {
         CancelHandle {
-            driver: Arc::downgrade(&self.driver),
+            conversation: Arc::downgrade(&self.conversation),
             permissions: Arc::downgrade(&self.permissions),
             in_flight: Arc::downgrade(&self.in_flight),
-            session_id: self.acp_session_id.clone(),
         }
     }
 
-    /// The agent process's id, while it runs.
+    /// The agent process's id, while it runs. `None` for a headless session, whose CLI process
+    /// exists only for the length of a turn.
     pub fn agent_pid(&self) -> Option<u32> {
-        self.driver.agent_pid()
+        self.acp.as_ref().and_then(|acp| acp.driver.agent_pid())
     }
 
     /// One message of this turn, under the next id this conversation mints.
@@ -200,12 +247,11 @@ impl CodingAgentSession {
                 .unwrap_or_else(|e| e.into_inner())
                 .push(update);
         });
-        let driver = Arc::clone(&self.driver);
-        let session_id = self.acp_session_id.clone();
+        let conversation = Arc::clone(&self.conversation);
         let text = prompt.clone();
         let ended = Box::pin(async move {
-            driver
-                .prompt(&session_id, text, Some(sink), None)
+            conversation
+                .prompt_turn(text, Some(sink))
                 .await
                 .map_err(|e| SubagentError::from(format!("the coding agent's turn failed: {e}")))
         });
@@ -369,31 +415,30 @@ impl MessageShape {
 pub const CANCEL_SETTLE_DEADLINE: Duration = Duration::from_secs(10);
 
 /// Cancels a [`CodingAgentSession`]'s running turn. Every permission request the turn is parked on
-/// is answered as cancelled first, then `session/cancel` is sent. The call returns once the turn
-/// has ended, or after [`CANCEL_SETTLE_DEADLINE`]; the turn then ends as cancelled. Cloneable and
-/// `Send`, so it can be held apart from the session. It does not keep the agent process alive: once
-/// the session is dropped there is nothing left to cancel.
+/// is answered as cancelled first, then the turn is cancelled (`session/cancel` over ACP). The call
+/// returns once the turn has ended, or after [`CANCEL_SETTLE_DEADLINE`]; the turn then ends as
+/// cancelled. Cloneable and `Send`, so it can be held apart from the session. It does not keep the
+/// agent process alive: once the session is dropped there is nothing left to cancel.
 #[derive(Clone)]
 pub struct CancelHandle {
-    driver: Weak<AcpDriver>,
+    conversation: Weak<dyn ConversationDriver>,
     permissions: Weak<ParkedPermissions>,
     in_flight: Weak<InFlightSlot>,
-    session_id: String,
 }
 
 impl CancelHandle {
     pub async fn cancel(&self) -> Result<(), SubagentError> {
         // The session owns all three; once it is gone there is no turn left to cancel.
-        let (Some(driver), Some(permissions), Some(in_flight)) = (
-            self.driver.upgrade(),
+        let (Some(conversation), Some(permissions), Some(in_flight)) = (
+            self.conversation.upgrade(),
             self.permissions.upgrade(),
             self.in_flight.upgrade(),
         ) else {
             return Ok(());
         };
         permissions.cancel_pending();
-        driver
-            .cancel(&self.session_id)
+        conversation
+            .cancel_turn()
             .await
             .map_err(|e| SubagentError::from(format!("could not cancel the coding agent: {e}")))?;
         // A turn that is running holds the slot, so this waits for it to end. A turn paused on a
