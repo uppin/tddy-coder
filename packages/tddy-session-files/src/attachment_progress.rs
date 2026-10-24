@@ -97,8 +97,12 @@ impl AttachmentProgressSink {
     /// Reports a line of the clone's progress (`STEP_CLONE`). A closed receiver is ignored, as for
     /// [`Self::report`].
     pub fn clone_progress(&self, progress: tddy_service::proto::session::CloneProgress) {
-        // TODO(clone-progress): implement
-        let _ = progress;
+        let Some(tx) = self.tx.as_ref() else {
+            return;
+        };
+        let _ = tx.send(Ok(StartSessionEvent {
+            event: Some(StartSessionEventKind::CloneProgress(progress)),
+        }));
     }
 
     /// Passes on an event another daemon reported for its half of this start (a split start's
