@@ -47,6 +47,7 @@ pub struct ServiceFixture {
     stability_threshold_ms: u64,
     declares_socket: bool,
     declares_host_socket: bool,
+    env: Vec<(String, String)>,
 }
 
 /// A managed service that stays alive until something kills it.
@@ -59,6 +60,7 @@ pub fn a_service(name: &str) -> ServiceFixture {
         stability_threshold_ms: 10_000,
         declares_socket: false,
         declares_host_socket: false,
+        env: Vec::new(),
     }
 }
 
@@ -94,6 +96,12 @@ impl ServiceFixture {
     /// difference between "reported nothing" and "was handed nothing".
     pub fn declaring_no_socket(mut self) -> Self {
         self.declares_socket = false;
+        self
+    }
+
+    /// Declares `key: value` in the service's `env:` block.
+    pub fn with_env(mut self, key: &str, value: &str) -> Self {
+        self.env.push((key.to_string(), value.to_string()));
         self
     }
 
@@ -207,7 +215,7 @@ impl SupervisorFixture {
                     "      initial_backoff_ms: {initial_backoff_ms}\n",
                     "      max_backoff_ms: 1000\n",
                     "      stability_threshold_ms: {stability_threshold_ms}\n",
-                    "{socket}{host_sockets}",
+                    "{env}{socket}{host_sockets}",
                 ),
                 name = service.name,
                 script = script.display(),
@@ -215,6 +223,16 @@ impl SupervisorFixture {
                 max_retries = service.max_retries,
                 initial_backoff_ms = service.initial_backoff_ms,
                 stability_threshold_ms = service.stability_threshold_ms,
+                env = if service.env.is_empty() {
+                    String::new()
+                } else {
+                    let entries: String = service
+                        .env
+                        .iter()
+                        .map(|(key, value)| format!("      {key}: \"{value}\"\n"))
+                        .collect();
+                    format!("    env:\n{entries}")
+                },
                 socket = if service.declares_socket {
                     format!(
                         "    socket:\n      path: {}\n      mode: \"0660\"\n",
@@ -596,6 +614,7 @@ pub fn a_tool_that_records_its_parent() -> ToolFixture {
                 "  echo \"ppid=$PPID\"\n",
                 "  echo \"pgid=$(awk '{{print $5}}' /proc/self/stat)\"\n",
                 "  echo \"pid=$$\"\n",
+                "  echo \"supervisor_socket=${{TDDY_SUPERVISOR_SOCKET:-unset}}\"\n",
                 "}} > {log}\n",
                 "exec sleep 600",
             ),
@@ -630,6 +649,15 @@ impl ToolFixture {
             .get("pid")
             .and_then(|value| value.parse().ok())
             .expect("tool recorded its own pid")
+    }
+
+    /// Block until the tool has recorded the supervisor socket it was told, or `unset`.
+    pub async fn await_recorded_supervisor_socket(&self) -> String {
+        self.await_report()
+            .await
+            .get("supervisor_socket")
+            .cloned()
+            .expect("tool recorded the supervisor socket variable")
     }
 
     async fn await_report(&self) -> BTreeMap<String, String> {
@@ -872,6 +900,7 @@ const HANDOFF_REPORT_BODY: &str = "\
   echo \"listen_pid=${LISTEN_PID:-unset}\"
   echo \"own_pid=$$\"
   echo \"listen_fdnames=${LISTEN_FDNAMES:-unset}\"
+  echo \"supervisor_socket=${TDDY_SUPERVISOR_SOCKET:-unset}\"
   if [ -S /proc/self/fd/4 ]; then echo \"fd4=socket\"; else echo \"fd4=absent\"; fi
   if [ -S /proc/self/fd/3 ]; then echo \"fd3=socket\"; else echo \"fd3=absent\"; fi
 } > __REPORT__

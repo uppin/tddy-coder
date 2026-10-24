@@ -80,6 +80,7 @@ fn test_service(os_user: &str) -> TestDaemon {
         data_dir,
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_daemon_livekit::peer_routing::peer_routing_over(
             &test_config_for_os_user(os_user),
             Some(LiveKitDiscoveryHandles {

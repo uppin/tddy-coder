@@ -43,8 +43,9 @@ pub fn verify_env_override_references(contents: &str) {
         "INSTALL_CONFIG_DIR",
         "INSTALL_SYSTEMD_DIR",
         "INSTALL_WEB_BUNDLE_DIR",
-        // The supervisor socket path appears in three places install writes (supervisor.yaml,
-        // daemon.yaml, tddy-supervisor.socket), so it has to be overridable in one place.
+        // The supervisor socket path appears in two places install writes (supervisor.yaml,
+        // tddy-supervisor.socket), so it has to be overridable in one place. daemon.yaml carries
+        // no copy: tddy-supervisor tells the daemon its socket through the environment.
         "INSTALL_SUPERVISOR_SOCKET_PATH",
         "INSTALL_DAEMON_SOCKET_PATH",
     ] {

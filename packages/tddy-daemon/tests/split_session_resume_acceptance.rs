@@ -239,6 +239,7 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHost 
         tddy_data_dir,
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_daemon_livekit::peer_routing::peer_routing_over(
             &config,
             Some(LiveKitDiscoveryHandles {
@@ -839,6 +840,7 @@ async fn refuse_a_resume_that_cannot_read_the_roster(
         tddy_data_dir,
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_daemon_livekit::peer_routing::peer_routing_over(&config, discovery),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),

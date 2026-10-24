@@ -185,11 +185,6 @@ pub struct DaemonConfig {
     /// resolved at bind time).
     #[serde(default)]
     pub local: LocalConfig,
-    /// Privileged broker this daemon delegates spawning and cgroup work to (see
-    /// `SupervisorClientConfig`). Absent = no supervisor on this host: the daemon keeps its own
-    /// forked spawn worker and whatever privilege its own unit grants it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub supervisor: Option<SupervisorClientConfig>,
     /// The warm code-intelligence index daemon this daemon starts, supervises and stops (see
     /// [`IndexDaemonConfig`]). Absent = [`IndexDaemonConfig::default`]; the section only overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -214,19 +209,6 @@ pub struct DaemonConfig {
     /// transport message-size limit.
     #[serde(default = "default_max_attachment_bytes")]
     pub max_attachment_bytes: u64,
-}
-
-/// Where to reach `tddy-supervisor` (`supervisor:` YAML section).
-///
-/// Presence of this section is the switch: with it, session spawning, repo cloning and sandbox
-/// jailing all go to the supervisor, and a supervisor that cannot be reached fails the operation.
-/// There is deliberately no fallback — quietly spawning a session as the daemon user instead of
-/// the requested user would turn an outage into a silent loss of isolation.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct SupervisorClientConfig {
-    /// Absolute path of the supervisor's unix socket, e.g. `/run/tddy-supervisor.sock`.
-    pub socket_path: PathBuf,
 }
 
 /// 64 MiB — comfortably above a screenshot, a PDF spec or a log excerpt, well below anything that
@@ -271,7 +253,6 @@ impl Default for DaemonConfig {
             keyring: None,
             sandbox_cgroup: None,
             local: LocalConfig::default(),
-            supervisor: None,
             index_daemon: None,
             project_home: None,
             debug: None,
@@ -851,6 +832,24 @@ mod startup_and_warmup_timing_tests {
         assert!(
             message.contains("session_room.poll_interval_ms") && message.contains("100"),
             "the refusal must name the field and the floor; got {message}"
+        );
+    }
+
+    #[test]
+    fn a_daemon_yaml_with_a_supervisor_block_is_refused_as_obsolete() {
+        // Given a daemon.yaml written before tddy-supervisor told the daemon its socket
+        let refused =
+            a_daemon_loaded_from("supervisor:\n  socket_path: /run/tddy-supervisor.sock\n")
+                .expect_err("an obsolete supervisor block must not load");
+
+        // Then the refusal names the block, says why it is obsolete and what to do, rather than
+        // serde's bare "unknown field"
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("`supervisor:`")
+                && message.contains("obsolete")
+                && message.contains("Delete the block"),
+            "the refusal must name the block and the remedy; got {message}"
         );
     }
 

@@ -368,6 +368,7 @@ fn session_host(config: DaemonConfig, sessions_base: PathBuf) -> DaemonSessionHo
         tddy_data_dir,
         Arc::new(|token| (token == VALID_TOKEN).then(|| OWNER.to_string())),
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),

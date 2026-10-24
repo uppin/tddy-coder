@@ -5,6 +5,16 @@ clones repositories through a **spawn worker**: a child process forked by `fork_
 async runtime starts, so no tokio thread can hold an allocator or libc lock across the fork. The daemon
 talks to it through `SpawnClient` over two close-on-exec pipes.
 
+**Which backend applies** is decided once, before any thread starts, by
+`supervisor_client::SpawnBackendChoice::adopt_from_environment`: `Supervisor { socket_path }` when
+`tddy-supervisor` started the process with `TDDY_SUPERVISOR_SOCKET`, `ForkedWorker` otherwise. There is
+no config switch. `tddy-daemon` `main` and `tddy-desktop` `run` then call
+`consume_from_process_environment()`, which removes the variable from the process environment while
+that is still sound, so no child the daemon spawns itself inherits it. `spawn_worker_for` forks the
+worker only for `ForkedWorker`; the choice is carried in `RuntimeOptions` and injected into every
+spawn and clone site, and an unreachable supervisor fails the operation (`connect_supervisor`) with no
+fallback to a worker.
+
 ## Modules
 
 | Module | Holds |

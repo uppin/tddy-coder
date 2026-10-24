@@ -104,6 +104,13 @@ for too much runs smaller rather than failing to start. An omitted limit still r
 an error whether a user, path or scope exists. An allowlisted account missing from the host is refused
 identically to one the policy never listed.
 
+**Tells the daemon it is supervised.** Every managed service the supervisor starts is given the path of
+its privileged socket in **`TDDY_SUPERVISOR_SOCKET`**, set after the service's `env:` overlay so
+`supervisor.yaml` cannot set or override it; sessions it spawns never receive it. A daemon started this
+way spawns and clones through the supervisor; one started any other way (Tddy Desktop, `--user`, by hand)
+forks its own spawn worker. `daemon.yaml` has no `supervisor:` key — see
+[systemd install](../daemon/systemd-install.md).
+
 ## `--user` installs no supervisor
 
 `./install --systemd --user` installs a per-user `tddy-daemon` unit and **no supervisor**. Rootless, a
@@ -138,6 +145,8 @@ because quietly spawning as the daemon user instead is the regression this featu
 - [x] `SpawnSandbox` builds a real jail — user/mount/net namespaces, private root, bind mounts — with privilege surrendered before any namespace exists.
 - [x] The supervisor prepares its delegated cgroup subtree at startup and refuses to run if it cannot.
 - [x] A session's cgroup scope is removed when the session ends.
+- [x] A managed service is told the supervisor socket; a service's `env:` cannot override it; a session spawn is not told it.
+- [x] A daemon started by the supervisor spawns and clones through it with no `supervisor:` block; one started otherwise forks its own worker; neither passes the variable on to children it spawns itself.
 - [ ] **Not yet proven on a real host:** a session for OS user `alice` running as `alice` while the daemon runs as `tddy`; enforced cgroup limits; `stop_session` against a live supervisor. These need root plus a second account, and are the subject of a planned VM-backed acceptance test — see [docs/dev/TODO.md](../../dev/TODO.md).
 
 ## Related

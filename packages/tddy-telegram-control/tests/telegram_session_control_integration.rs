@@ -53,6 +53,7 @@ fn harness_with_workflow_projects(
     let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
         config: Arc::new(DaemonConfig::default()),
         spawn_client: None,
+        spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         os_user: "n/a".to_string(),
         tddy_data_dir: sessions_base.clone(),
         projects_dir_override: Some(projects_dir),
@@ -1234,6 +1235,7 @@ fn harness_with_workflow_projects_and_agents(
     let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
         config: Arc::new(config),
         spawn_client: None,
+        spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         os_user: "n/a".to_string(),
         tddy_data_dir: sessions_base.clone(),
         projects_dir_override: Some(projects_dir),

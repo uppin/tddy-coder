@@ -90,6 +90,7 @@ impl ADaemonWithOneProject {
         let workflow_spawn = Arc::new(TelegramWorkflowSpawn {
             config: Arc::new(config),
             spawn_client: None,
+            spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             os_user: "n/a".to_string(),
             tddy_data_dir: self.sessions_base.clone(),
             projects_dir_override: Some(self.projects_dir.clone()),

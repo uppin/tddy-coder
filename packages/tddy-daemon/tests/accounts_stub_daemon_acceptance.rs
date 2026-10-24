@@ -120,7 +120,7 @@ async fn a_stub_daemon_for(user: &str) -> AStubDaemon {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let runtime = runtime::build(
         a_stub_config_for(user, &dir).await,
-        RuntimeOptions::for_binary(),
+        RuntimeOptions::for_binary(tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker),
     )
     .await
     .expect("the daemon runtime builds");

@@ -15,12 +15,10 @@
 # either renders a wrong path here — the supervisor then fails to start on it, loudly. ./install does
 # not use sed for this reason; see its render_template.)
 #
-# The daemon's `supervisor:` block — add to dev.daemon.yaml to point it at this socket:
-#   supervisor:
-#     socket_path: <REPO_ROOT>/tmp/tddy-supervisor.sock
-# It is parsed and validated, but no daemon code path routes spawning through the supervisor yet, so
-# with or without it the dev daemon still spawns sessions in its own forked worker as you (see "Known
-# incomplete" in docs/dev/TODO.md). ./web-dev starts no supervisor.
+# dev.daemon.yaml names no supervisor: this file's services get TDDY_SUPERVISOR_SOCKET in their
+# environment, and the daemon declared below finds its supervisor through that variable, so its
+# session spawning and repo cloning go through this socket. ./web-dev starts no supervisor; a daemon
+# started by hand without one forks its own spawn worker, as you.
 
 socket:
   path: REPO_ROOT/tmp/tddy-supervisor.sock

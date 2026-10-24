@@ -214,6 +214,7 @@ fn a_daemon(sessions_base: PathBuf, discovery: Option<LiveKitDiscoveryHandles>) 
             sessions_base,
             user_resolver_valid(),
             None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_daemon_livekit::peer_routing::peer_routing_over(&test_config(), discovery),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(ClaudeCliSessionManager::new()),

@@ -63,7 +63,7 @@ WantedBy=multi-user.target
 # [Socket]
 # # Root-owned with group access (the docker.sock model). Group membership only gets a client as far
 # # as connect(): every request is authorized by SO_PEERCRED against the uids of declared services.
-# # Must match supervisor.yaml socket.path/group/mode and daemon.yaml supervisor.socket_path.
+# # Must match supervisor.yaml socket.path/group/mode.
 # ListenStream=/run/tddy-supervisor.sock
 # SocketUser=root
 # SocketGroup=tddy-clients

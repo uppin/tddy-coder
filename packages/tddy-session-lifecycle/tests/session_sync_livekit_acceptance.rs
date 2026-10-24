@@ -244,6 +244,7 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
             data_dir.clone(),
             user_resolver.clone(),
             None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
             tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
             Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),

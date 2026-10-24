@@ -194,6 +194,7 @@ impl BuildContext {
             tddy_data_dir.clone(),
             user_resolver,
             options.spawn_client.clone(),
+            options.spawn_backend.clone(),
             tddy_daemon_livekit::peer_routing::peer_routing_over(config, livekit_discovery),
             self.operator_channel(),
             Arc::clone(shared_claude_cli_manager),

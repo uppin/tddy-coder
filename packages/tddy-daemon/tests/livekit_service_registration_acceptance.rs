@@ -55,7 +55,9 @@ async fn a_built_daemon() -> (Vec<ServiceEntry>, tempfile::TempDir) {
     let data_dir = tempfile::tempdir().expect("a data directory");
     let entries = runtime::build(
         a_daemon_config_with_a_livekit_block(data_dir.path()),
-        RuntimeOptions::for_embedded(),
+        RuntimeOptions::for_embedded(
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        ),
     )
     .await
     .expect("the runtime did not build")

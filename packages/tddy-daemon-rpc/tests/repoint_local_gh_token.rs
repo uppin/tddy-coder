@@ -179,6 +179,7 @@ impl World {
                 data_dir,
                 user_resolver,
                 None,
+                tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
                 tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
                 Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
                 Arc::new(CliSessionManager::new()),

@@ -60,6 +60,7 @@ fn a_split_session_whose_codebase_read_may_take(budget_secs: u64) -> ASplitSessi
         data_dir.path().to_path_buf(),
         users,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),

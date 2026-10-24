@@ -636,3 +636,69 @@ fn installs_the_worktree_mirror_so_it_can_be_run_from_the_path() {
     );
     assert_mode(&installed, 0o755);
 }
+
+// ---------------------------------------------------------------------------------------------
+// The daemon learns it is supervised from the supervisor, not from daemon.yaml
+// (docs/ft/daemon/systemd-install.md)
+// ---------------------------------------------------------------------------------------------
+
+fn declares_a_top_level(yaml: &str, key: &str) -> bool {
+    yaml.lines()
+        .any(|line| line.starts_with(&format!("{key}:")))
+}
+
+#[test]
+fn a_fresh_install_renders_no_supervisor_block() {
+    // Given
+    let tree = an_install_tree();
+
+    // When
+    tree.install();
+
+    // Then — tddy-supervisor tells the daemon its socket; daemon.yaml carries no switch to drift
+    let daemon_config = tree.installed_config("daemon.yaml");
+    assert!(
+        !declares_a_top_level(&daemon_config, "supervisor"),
+        "a fresh daemon.yaml has no supervisor: block:\n{daemon_config}"
+    );
+}
+
+#[test]
+fn upgrading_removes_the_supervisor_block_from_an_existing_daemon_yaml_and_says_so() {
+    // Given — a host whose daemon.yaml still carries the block (as every system install did)
+    let tree = an_install_tree();
+    tree.install();
+    tree.overwrite_installed_config(
+        "daemon.yaml",
+        "users: []\n# The privileged socket.\nsupervisor:\n  socket_path: \"/run/tddy-supervisor.sock\"\nallowed_tools: []\n",
+    );
+
+    // When
+    let output = tree.attempt_install_with(&[]);
+
+    // Then — the block is gone, everything else the operator wrote is kept, and the run says so
+    assert!(
+        output.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let daemon_config = tree.installed_config("daemon.yaml");
+    assert!(
+        !declares_a_top_level(&daemon_config, "supervisor"),
+        "the obsolete block is removed:\n{daemon_config}"
+    );
+    assert!(
+        declares_a_top_level(&daemon_config, "users")
+            && declares_a_top_level(&daemon_config, "allowed_tools"),
+        "the operator's other settings are kept:\n{daemon_config}"
+    );
+    let narration = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        narration.contains("removed the obsolete `supervisor:` block"),
+        "the install reports the removal:\n{narration}"
+    );
+}

@@ -53,13 +53,15 @@ async fn builds_the_same_service_roster_for_the_embedded_runtime_as_for_the_bina
     // When it is built once for the binary and once for an embedding process
     let binary = runtime::build(
         a_daemon_config_with_a_livekit_block(port, data_dir.path()),
-        RuntimeOptions::for_binary(),
+        RuntimeOptions::for_binary(tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker),
     )
     .await
     .expect("the binary runtime did not build");
     let embedded = runtime::build(
         a_daemon_config_with_a_livekit_block(port, data_dir.path()),
-        RuntimeOptions::for_embedded(),
+        RuntimeOptions::for_embedded(
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        ),
     )
     .await
     .expect("the embedded runtime did not build");
@@ -77,7 +79,9 @@ async fn leaves_the_configured_web_port_unbound_when_built_for_an_embedded_host(
     // When the runtime is built for an embedding process
     let _runtime = runtime::build(
         a_daemon_config_with_a_livekit_block(port, data_dir.path()),
-        RuntimeOptions::for_embedded(),
+        RuntimeOptions::for_embedded(
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        ),
     )
     .await
     .expect("the embedded runtime did not build");
@@ -100,8 +104,10 @@ async fn keeps_a_host_supplied_oauth_redirect_out_of_the_configuration_it_would_
     // When a host serves the callback itself and says where it listens
     let runtime = runtime::build(
         config,
-        RuntimeOptions::for_embedded()
-            .with_oauth_redirect(Some("http://127.0.0.1:8899/auth/callback".to_string())),
+        RuntimeOptions::for_embedded(
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        )
+        .with_oauth_redirect(Some("http://127.0.0.1:8899/auth/callback".to_string())),
     )
     .await
     .expect("the runtime did not build");

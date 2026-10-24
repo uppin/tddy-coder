@@ -28,6 +28,7 @@ use tddy_service::proto::session::SessionAttachment;
 use tddy_session_agents::session_agent_clone::HostedAgentClones;
 use tddy_session_agents::session_agent_inference::SessionAgentInferenceStore;
 use tddy_spawn::spawn_worker::SpawnClient;
+use tddy_spawn::supervisor_client::SpawnBackendChoice;
 use tddy_task::TaskRegistry;
 
 use crate::host_session_socket::HostSessionSockets;
@@ -103,6 +104,9 @@ pub struct LaunchSessions {
     pub presenter_observer_deps: PresenterObserverDeps,
     pub user_resolver: SessionUserResolver,
     pub spawn_client: Option<Arc<SpawnClient>>,
+    /// Which privileged backend spawns and clones on this host, chosen once at startup. Read beside
+    /// `spawn_client`, never re-derived from config.
+    pub spawn_backend: SpawnBackendChoice,
     /// Where a clone's `SSH_ASKPASS` helper asks for a key passphrase. `None` on a host without a
     /// daemon runtime, whose SSH clones are then given no helper.
     pub askpass: Option<Arc<tddy_host_service::askpass::AskpassEndpoint>>,

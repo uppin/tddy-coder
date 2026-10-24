@@ -190,6 +190,7 @@ async fn a_daemon(
         sessions.path().to_path_buf(),
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_daemon_livekit::peer_routing::peer_routing_over(
             &config,
             Some(LiveKitDiscoveryHandles {

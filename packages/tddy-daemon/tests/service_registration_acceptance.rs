@@ -65,8 +65,10 @@ async fn the_services_an_assembled_daemon_registers() -> Vec<String> {
     // login is enrolled into; nothing here signs in, so the file is never written.
     let runtime = runtime::build(
         a_daemon_config_with_github_auth(port, &tddy_data_dir),
-        RuntimeOptions::for_embedded()
-            .with_config_path(Some(tddy_data_dir.path().join("daemon.yaml"))),
+        RuntimeOptions::for_embedded(
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        )
+        .with_config_path(Some(tddy_data_dir.path().join("daemon.yaml"))),
     )
     .await
     .expect("the daemon runtime did not build");

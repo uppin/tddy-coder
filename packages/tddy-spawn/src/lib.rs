@@ -8,7 +8,7 @@
 //!
 //! # The fork happens before tokio starts
 //!
-//! `main.rs` calls [`supervisor_client::spawn_backend_choice`] and then
+//! `main.rs` calls [`supervisor_client::SpawnBackendChoice::from_environment`] and then
 //! [`supervisor_client::spawn_worker_for`] **before** it builds the tokio runtime. That ordering is
 //! not incidental: forking a process that already has a multi-threaded runtime is unsound, because
 //! only the calling thread survives the fork and any lock the others held is held forever. Anything

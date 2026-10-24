@@ -87,6 +87,7 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         sessions.path().to_path_buf(),
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         crate::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(CliSessionManager::new()),

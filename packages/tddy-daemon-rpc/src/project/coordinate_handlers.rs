@@ -114,13 +114,13 @@ impl ProjectRpcHandler {
                 .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
             base.join(name)
         };
-        let spawn_client = self.spawn_client.clone();
+        let spawn_client = self.clone_backend.worker.clone();
         let os_user_owned = os_user.to_string();
         let git_url_owned = git_url.to_string();
         let dest_path = destination.clone();
         let timeout = self.config.spawn_worker_request_timeout();
 
-        match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+        match self.clone_backend.choice.clone() {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 await_supervised_with_timeout(
                     timeout,
@@ -268,13 +268,13 @@ impl ProjectRpcHandler {
                 .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
             base.join(name)
         };
-        let spawn_client = self.spawn_client.clone();
+        let spawn_client = self.clone_backend.worker.clone();
         let os_user_owned = os_user.to_string();
         let git_url_owned = git_url.to_string();
         let dest_path = destination.clone();
         let timeout = self.config.spawn_worker_request_timeout();
 
-        match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+        match self.clone_backend.choice.clone() {
             tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 await_supervised_with_timeout(
                     timeout,

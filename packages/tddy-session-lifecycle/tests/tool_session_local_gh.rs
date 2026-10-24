@@ -156,6 +156,7 @@ spawn_startup_poll_interval_ms: 10
         data_dir.to_path_buf(),
         Arc::new(|token| (token == TEST_TOKEN).then(|| OWNER.to_string())),
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
