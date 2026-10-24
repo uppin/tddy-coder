@@ -13,6 +13,7 @@ use tddy_service::proto::exec_tools::{
     DiffOp, ExecuteToolRequest, PullOp, PullRangeOp, RemoveOp, ResetOp, SyncOp,
 };
 
+use crate::daemon_http_rpc::DaemonHttpRpcClient;
 use crate::room_transport::dispatch_request_via_livekit;
 use crate::room_transport::LiveKitRoomKey;
 use crate::rpc_transports::connect_sandbox_ipc;
@@ -174,7 +175,7 @@ async fn ask_conversation_worktree(
                 session_token,
                 daemon_instance_id,
             };
-            ask_daemon_over_http(&daemon_url, &request(envelope)).await
+            ask_daemon_over_http(&daemon_url, request(envelope)).await
         }
         SessionToolTransport::LiveKit {
             url,
@@ -241,72 +242,12 @@ async fn ask_daemon(
     }
 }
 
-/// The same call over the daemon's HTTP Connect endpoint.
-async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRequest) -> String {
-    let body = connect_json_body(request);
-    let url = format!(
-        "{}/exec_tools.ExecToolService/ConversationWorktree",
-        daemon_url.trim_end_matches('/')
-    );
-    let answered = reqwest::Client::new()
-        .post(&url)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await;
-    match answered {
-        Ok(resp) => match resp.json::<serde_json::Value>().await {
-            Ok(body) => match body.get("result_json").and_then(|v| v.as_str()) {
-                Some(result) => result.to_string(),
-                None => error_body(format!("relay answered without a result: {body}")),
-            },
-            Err(e) => error_body(format!("relay parse error: {e}")),
-        },
-        Err(e) => error_body(format!("relay connection error: {e}")),
-    }
-}
-
-/// The Connect JSON body of a `ConversationWorktree` request: the request's fields, and the chosen
-/// operation as a key of its own.
-pub(crate) fn connect_json_body(request: &ConversationWorktreeRequest) -> serde_json::Value {
-    let mut fields = serde_json::Map::from_iter([
-        (
-            "session_token".to_string(),
-            request.session_token.clone().into(),
-        ),
-        ("session_id".to_string(), request.session_id.clone().into()),
-        (
-            "daemon_instance_id".to_string(),
-            request.daemon_instance_id.clone().into(),
-        ),
-        (
-            "conversation_id".to_string(),
-            request.conversation_id.clone().into(),
-        ),
-    ]);
-    match &request.op {
-        Some(Op::Pull(_)) => fields.insert("pull".to_string(), serde_json::json!({})),
-        Some(Op::Remove(_)) => fields.insert("remove".to_string(), serde_json::json!({})),
-        Some(Op::Reset(reset)) => fields.insert(
-            "reset".to_string(),
-            serde_json::json!({ "commit": reset.commit }),
-        ),
-        Some(Op::Diff(diff)) => fields.insert(
-            "diff".to_string(),
-            serde_json::json!({ "from": diff.from, "to": diff.to }),
-        ),
-        Some(Op::PullRange(range)) => fields.insert(
-            "pull_range".to_string(),
-            serde_json::json!({
-                "from": range.from,
-                "to": range.to,
-                "already_pulled": range.already_pulled
-            }),
-        ),
-        Some(Op::Sync(_)) => fields.insert("sync".to_string(), serde_json::json!({})),
-        None => None,
-    };
-    serde_json::Value::Object(fields)
+/// The same call over the daemon's HTTP Connect endpoint: the protobuf unary transport the daemon's
+/// `/rpc` route serves, which is also the transport the RPC arm above speaks.
+async fn ask_daemon_over_http(daemon_url: &str, request: ConversationWorktreeRequest) -> String {
+    let client: Arc<dyn tddy_rpc::RpcClientTransport> =
+        Arc::new(DaemonHttpRpcClient::new(daemon_url));
+    ask_daemon(&client, request).await
 }
 
 fn error_body(message: String) -> String {
