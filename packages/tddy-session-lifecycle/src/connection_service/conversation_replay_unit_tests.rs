@@ -168,7 +168,8 @@ async fn a_conversation_page_is_served_from_the_conversations_transcript() {
             session_token: "valid".to_string(),
             session_id: SESSION_ID.to_string(),
             daemon_instance_id: String::new(),
-            before_seq: 2,
+            // `before_seq` is exclusive (activity.proto): the page before seq 1 is the text at seq 0.
+            before_seq: 1,
             page_size: 1,
             conversation_id: "conv-1".to_string(),
         }))

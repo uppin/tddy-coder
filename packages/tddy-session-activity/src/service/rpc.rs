@@ -1,4 +1,5 @@
 use crate::service::activity_delta_frames;
+use crate::service::conversation_replay;
 use crate::service::ports::{DeltaLookup, DeltaScope};
 use crate::service::relayed;
 use crate::service::streamed;
@@ -190,6 +191,22 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
 
+        // A subagent conversation replays its own recorded transcript, and only that: its frames are not
+        // published to the hub, so there is no live tail for this stream to relay.
+        if !req.conversation_id.is_empty() {
+            let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
+            let transcript = conversation_replay::recorded_transcript(
+                &session_dir,
+                &req.session_id,
+                &req.conversation_id,
+            )?;
+            return Ok(streamed(conversation_replay::replay_frames(
+                &transcript,
+                mode,
+                req.page_size,
+            )));
+        }
+
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<AcpReplayFrame>();
 
         // Snapshot-then-live (the default and proto3 zero value) replays the persisted transcript
@@ -274,8 +291,17 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
 
-        let detail = tddy_service::acp_replay::tool_call_detail(&session_dir, &req.tool_call_id)
-            .map_err(|e| Status::internal(format!("read transcript: {e}")))?;
+        let detail = if req.conversation_id.is_empty() {
+            tddy_service::acp_replay::tool_call_detail(&session_dir, &req.tool_call_id)
+                .map_err(|e| Status::internal(format!("read transcript: {e}")))?
+        } else {
+            let transcript = conversation_replay::recorded_transcript(
+                &session_dir,
+                &req.session_id,
+                &req.conversation_id,
+            )?;
+            tddy_service::acp_replay::tool_call_detail_in(&transcript, &req.tool_call_id)
+        };
         match detail {
             None => Err(Status::not_found(format!(
                 "no tool call with id {} in session {}",
@@ -300,8 +326,16 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
 
         // A transcript that cannot be read is an error, never an empty page: an empty page means
         // "you have reached the head", and a reader told that stops paging for good.
-        let transcript = tddy_service::acp_replay::read_session_transcript(&session_dir)
-            .map_err(|e| Status::internal(format!("read transcript: {e}")))?;
+        let transcript = if req.conversation_id.is_empty() {
+            tddy_service::acp_replay::read_session_transcript(&session_dir)
+                .map_err(|e| Status::internal(format!("read transcript: {e}")))?
+        } else {
+            conversation_replay::recorded_transcript(
+                &session_dir,
+                &req.session_id,
+                &req.conversation_id,
+            )?
+        };
         let page = tddy_service::acp_replay::page_before(
             &transcript,
             req.before_seq,

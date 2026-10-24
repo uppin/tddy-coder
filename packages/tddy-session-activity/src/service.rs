@@ -22,6 +22,7 @@
 //! `session_list_enrichment`, which serves `ListSessions` — family C, which this node keeps in the
 //! daemon. [`SessionLabels`] is the seam.
 
+mod conversation_replay;
 mod hook_reports;
 pub(crate) mod ports;
 mod rpc;
