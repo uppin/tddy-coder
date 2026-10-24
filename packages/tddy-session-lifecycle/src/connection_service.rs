@@ -146,6 +146,9 @@ pub struct DaemonSessionHost {
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
     agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
+    /// The live frames of every daemon-run subagent conversation. One channel per conversation, shared
+    /// by the session-agents recorder that publishes into it and the activity replay that tails it.
+    agent_conversation_frames: Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames>,
     /// What each agent session's own conversation says its agent is doing
     /// (`docs/ft/daemon/agent-session-status.md`), which `ListSessions` reports. Beside the hub it
     /// subscribes to, and shared across clones so the seed a listing paid for is not re-read by the

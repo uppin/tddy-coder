@@ -338,6 +338,9 @@ fn a_daemon_serving(session_dir: &Path) -> SessionAgentServiceImpl {
         )),
         clones,
         conversations: Arc::new(OpenAgentConversations::new()),
+        conversation_frames: Arc::new(
+            tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
+        ),
         admission: Arc::new(NoOtherPort),
         catalog: Arc::new(NoOtherPort),
         broadcast: Arc::new(NoOtherPort),

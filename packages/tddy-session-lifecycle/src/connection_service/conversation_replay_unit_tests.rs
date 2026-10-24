@@ -7,6 +7,7 @@ use futures_util::StreamExt;
 use std::time::Duration;
 use tddy_core::agent_activity::{AgentActivityRecord, STATUS_COMPLETED};
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_daemon_kernel::conversation_frames::{ConversationFrame, ConversationFrames};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_service::acp_replay::{agent_text_frame, append_acp_frame, frame_for_agent_activity};
 use tddy_service::proto::activity::{
@@ -213,4 +214,124 @@ async fn a_conversation_tool_call_detail_is_served_by_conversation_id() {
         raw_input,
         serde_json::json!({ "file_path": "src/parser.rs" })
     );
+}
+
+#[tokio::test]
+async fn a_conversation_replay_delivers_a_frame_recorded_after_it_subscribed_once() {
+    // Given a conversation whose two recorded frames the replay sends, and a stream open on it
+    let temp = tempfile::tempdir().unwrap();
+    a_session_with_a_recorded_conversation(temp.path());
+    let service = a_service(temp.path().to_path_buf());
+    let frames = service.conversation_frames();
+    let mut stream = service
+        .activity_service()
+        .stream_acp_replay(Request::direct(replaying("conv-1")))
+        .await
+        .expect("the conversation replays")
+        .into_inner();
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("a recorded frame in time")
+            .expect("a frame")
+            .expect("not an error");
+    }
+
+    // When the recorder publishes a copy of a frame the replay already sent (seq 1), then a frame recorded
+    // after the stream opened (seq 2)
+    frames.publish(
+        SESSION_ID,
+        "conv-1",
+        ConversationFrame {
+            seq: 1,
+            frame: agent_text_frame("A copy the replay already sent.", 1_000),
+        },
+    );
+    frames.publish(
+        SESSION_ID,
+        "conv-1",
+        ConversationFrame {
+            seq: 2,
+            frame: agent_text_frame("A new answer.", 2_000),
+        },
+    );
+
+    // Then the next frame is the new one, at its position, and the copy was not sent a second time
+    let envelope = tokio::time::timeout(Duration::from_secs(1), stream.next())
+        .await
+        .expect("the live frame in time")
+        .expect("a frame")
+        .expect("not an error");
+    assert_eq!(envelope.seq, 2);
+    let live: tddy_service::proto::acp::AcpAgentMessage =
+        prost::Message::decode(&envelope.acp_agent_message[..]).expect("decode");
+    assert_eq!(agent_text(&live), "A new answer.");
+}
+
+#[tokio::test]
+async fn a_conversation_replay_that_falls_behind_skips_ahead_and_keeps_streaming() {
+    // Given a conversation stream open on its two recorded frames
+    let temp = tempfile::tempdir().unwrap();
+    a_session_with_a_recorded_conversation(temp.path());
+    let service = a_service(temp.path().to_path_buf());
+    let frames = service.conversation_frames();
+    let mut stream = service
+        .activity_service()
+        .stream_acp_replay(Request::direct(replaying("conv-1")))
+        .await
+        .expect("the conversation replays")
+        .into_inner();
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("a recorded frame in time")
+            .expect("a frame")
+            .expect("not an error");
+    }
+
+    // When the recorder publishes more frames than the channel holds before the reader runs (the test runtime
+    // is single-threaded, so the relay cannot drain the channel mid-burst), and the burst's seqs are 2 to
+    // `burst_last_seq`
+    let burst_len = ConversationFrames::CAPACITY as u64 + 10;
+    let burst_last_seq = 1 + burst_len;
+    for seq in 2..=burst_last_seq {
+        frames.publish(
+            SESSION_ID,
+            "conv-1",
+            ConversationFrame {
+                seq,
+                frame: agent_text_frame(&format!("A burst frame, seq {seq}."), seq as i64),
+            },
+        );
+    }
+
+    // Then the reader skips the frames the channel dropped and reads on from the oldest one it still holds, in order
+    let oldest_held_seq = burst_last_seq + 1 - ConversationFrames::CAPACITY as u64;
+    for expected in oldest_held_seq..=burst_last_seq {
+        let envelope = tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("a burst frame in time")
+            .expect("the stream is still open")
+            .expect("not an error");
+        assert_eq!(envelope.seq, expected);
+    }
+
+    // And a frame recorded after the skip still reaches the reader, so the fall-behind did not end the stream
+    frames.publish(
+        SESSION_ID,
+        "conv-1",
+        ConversationFrame {
+            seq: burst_last_seq + 1,
+            frame: agent_text_frame("A frame after the skip.", 3_000),
+        },
+    );
+    let envelope = tokio::time::timeout(Duration::from_secs(1), stream.next())
+        .await
+        .expect("the frame after the skip in time")
+        .expect("the stream is still open")
+        .expect("not an error");
+    assert_eq!(envelope.seq, burst_last_seq + 1);
+    let live: tddy_service::proto::acp::AcpAgentMessage =
+        prost::Message::decode(&envelope.acp_agent_message[..]).expect("decode");
+    assert_eq!(agent_text(&live), "A frame after the skip.");
 }

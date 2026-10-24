@@ -130,6 +130,9 @@ pub struct ActivityPorts {
     /// `call_id`s. Consumed unchanged: the sandbox subsystem publishes into this same hub, so a
     /// second one here would leave an in-jail tool call invisible to every stream.
     pub activity: Arc<AgentActivityHub>,
+    /// The live frames of every daemon-run subagent conversation, keyed by session and conversation. The
+    /// session-agents recorder publishes into the same channel, so a conversation's replay tails it.
+    pub conversation_frames: Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames>,
     /// Where this host publishes its session notifications. `None` means nothing is listening:
     /// the two reports skip publishing, and `StreamSessionNotifications` has no feed to hand a
     /// client and says so.

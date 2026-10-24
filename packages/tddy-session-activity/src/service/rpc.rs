@@ -191,20 +191,18 @@ impl tddy_service::proto::activity::ActivityService for ActivityServiceImpl {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
 
-        // A subagent conversation replays its own recorded transcript, and only that: its frames are not
-        // published to the hub, so there is no live tail for this stream to relay.
+        // A subagent conversation replays its own recorded transcript, then tails the frames the conversation
+        // records while the stream is open. Its frames are published to their own channel, not the session hub.
         if !req.conversation_id.is_empty() {
             let mode = StreamMode::try_from(req.mode).unwrap_or(StreamMode::SnapshotThenLive);
-            let transcript = conversation_replay::recorded_transcript(
+            return conversation_replay::stream_conversation(
+                &self.ports.conversation_frames,
                 &session_dir,
                 &req.session_id,
                 &req.conversation_id,
-            )?;
-            return Ok(streamed(conversation_replay::replay_frames(
-                &transcript,
                 mode,
                 req.page_size,
-            )));
+            );
         }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<AcpReplayFrame>();

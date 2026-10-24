@@ -90,6 +90,7 @@ impl DaemonSessionHost {
             // The same `Arc` the sandbox tool handler and the hook path publish into, so an in-jail
             // tool call and a `claude` hook reach one stream.
             activity: Arc::clone(&self.agent_activity_hub),
+            conversation_frames: Arc::clone(&self.agent_conversation_frames),
             session_labels: Arc::new(SessionsNamedAsListSessionsNamesThem),
             deltas: Arc::clone(&self.session_delta_stores),
             notifications: self.session_notification_bus.clone(),
