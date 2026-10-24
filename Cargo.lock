@@ -13754,6 +13754,7 @@ dependencies = [
  "prost 0.13.5",
  "rstest 0.24.0",
  "serde_json",
+ "tddy-agent-backend",
  "tddy-coding-subagent",
  "tddy-core",
  "tddy-daemon-extensions",

@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::conversation_recorder::ConversationRecorder;
 use tddy_discovery::subagent::SubagentSession;
 use tokio::sync::{Mutex, Notify};
 
@@ -28,6 +29,9 @@ pub enum AgentConversation {
         /// Signalled when the conversation is closed. `notify_one` rather than `notify_waiters`, so
         /// a cancel that lands between the turn being spawned and its first await is still seen.
         closed: Arc<Notify>,
+        /// Records the conversation's turns as they run: the transcript a replay reads, and the frames a
+        /// replay tails. Opened with the session, before its first turn.
+        recorder: Arc<ConversationRecorder>,
     },
     /// The turn loop runs on `daemon_instance_id`; this daemon forwards to it.
     Remote {
@@ -73,6 +77,7 @@ pub enum PromptRouting {
     Local {
         session: Arc<Mutex<Box<dyn SubagentSession>>>,
         closed: Arc<Notify>,
+        recorder: Arc<ConversationRecorder>,
     },
     Remote(String),
 }
@@ -109,12 +114,14 @@ impl OpenAgentConversations {
             AgentConversation::Local {
                 session,
                 closed,
+                recorder,
                 agent_id,
                 ..
             } => Some((
                 PromptRouting::Local {
                     session: Arc::clone(session),
                     closed: Arc::clone(closed),
+                    recorder: Arc::clone(recorder),
                 },
                 agent_id.clone(),
             )),

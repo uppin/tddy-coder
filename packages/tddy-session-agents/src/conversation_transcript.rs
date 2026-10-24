@@ -16,12 +16,22 @@ use tddy_service::proto::acp::{
 };
 use tddy_service::subagent_conversation_replay::append_conversation_frame;
 
-/// Record one finished turn of `conversation_id` under `session_dir`: the prompt that started it
-/// (`None` for a resume), the tool calls it made, its text, a pending permission request, and the stop
-/// reason — as ACP frames stamped `at_unix_ms`.
+/// How a turn ended, for the frames its end writes.
+pub enum TurnEnd<'a> {
+    /// The turn returned an outcome, which says whether it stopped or paused on a permission request.
+    Answered(&'a PromptOutcome),
+    /// The turn returned an error before it answered.
+    Failed,
+    /// The conversation was closed while the turn was in flight.
+    Closed,
+}
+
+/// Record one finished turn of `conversation_id` under `session_dir`: the prompt that started it (`None` for a
+/// resume), the tool calls it made, its text, a pending permission request, and the stop reason — as ACP frames
+/// stamped `at_unix_ms`.
 ///
-/// Called once per turn, with the turn's outcome. Nothing is streamed into the transcript alongside it,
-/// so a turn's frames are written exactly once.
+/// Called once per turn, with the turn's outcome. Nothing is streamed into the transcript alongside it, so a
+/// turn's frames are written exactly once.
 pub fn record_turn(
     session_dir: &Path,
     conversation_id: &str,
@@ -29,7 +39,7 @@ pub fn record_turn(
     outcome: &PromptOutcome,
     at_unix_ms: i64,
 ) -> io::Result<()> {
-    for frame in turn_frames(prompt, outcome, at_unix_ms) {
+    for frame in whole_turn_frames(prompt, outcome, at_unix_ms) {
         append_conversation_frame(session_dir, conversation_id, &frame)?;
     }
     Ok(())
@@ -43,15 +53,21 @@ pub fn now_unix_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// The frames of one turn in the order it happened: the prompt, the tool calls, the answer, the pending
-/// permission request, then the stop reason.
-fn turn_frames(prompt: Option<&str>, outcome: &PromptOutcome, at: i64) -> Vec<AcpAgentMessage> {
+/// The frame a turn's prompt is recorded as: the operator's question, echoed as a user message.
+pub(crate) fn user_prompt_frame(prompt: &str, at: i64) -> AcpAgentMessage {
+    session_update_frame(user_message_chunk(prompt.to_string()), at)
+}
+
+/// The frames of one turn recorded whole, in the order it happened: the prompt, the tool calls, the answer,
+/// then the turn's end.
+pub(crate) fn whole_turn_frames(
+    prompt: Option<&str>,
+    outcome: &PromptOutcome,
+    at: i64,
+) -> Vec<AcpAgentMessage> {
     let mut frames = Vec::new();
     if let Some(prompt) = prompt {
-        frames.push(session_update_frame(
-            user_message_chunk(prompt.to_string()),
-            at,
-        ));
+        frames.push(user_prompt_frame(prompt, at));
     }
     frames.extend(
         outcome
@@ -67,17 +83,33 @@ fn turn_frames(prompt: Option<&str>, outcome: &PromptOutcome, at: i64) -> Vec<Ac
             .filter(|block| block.block_type == "text" && !block.text.is_empty())
             .map(|block| agent_text_frame(&block.text, at)),
     );
-    if let Some(request) = &outcome.permission_request {
-        frames.push(permission_frame(request, at));
-    }
-    if let Some(stop_reason) = acp_stop_reason(outcome.stop_reason) {
-        frames.push(prompt_response(0, stop_reason));
-    }
+    frames.extend(turn_end_frames(TurnEnd::Answered(outcome), at));
     frames
 }
 
-/// A tool call a turn's message reports, as a tool-call entry named by its tool. A message that says its
-/// call failed records the entry failed.
+/// The frames a turn's end writes: the pending permission request when the turn paused on one, then the stop
+/// reason. A streamed conversation writes these alone, its text and tool calls having been written as they
+/// arrived.
+pub(crate) fn turn_end_frames(end: TurnEnd<'_>, at: i64) -> Vec<AcpAgentMessage> {
+    match end {
+        TurnEnd::Answered(outcome) => {
+            let mut frames = Vec::new();
+            if let Some(request) = &outcome.permission_request {
+                frames.push(permission_frame(request, at));
+            }
+            if let Some(stop_reason) = acp_stop_reason(outcome.stop_reason) {
+                frames.push(prompt_response(0, stop_reason));
+            }
+            frames
+        }
+        // A turn that failed has no stop reason the protocol names, so its stop is recorded as unspecified.
+        TurnEnd::Failed => vec![prompt_response(0, AcpStopReason::Unspecified)],
+        TurnEnd::Closed => vec![prompt_response(0, AcpStopReason::Cancelled)],
+    }
+}
+
+/// A tool call a turn's message reports, as a tool-call entry named by its tool. A message that says its call
+/// failed records the entry failed.
 fn tool_message_frame(message: &MessageDescriptor, at: i64) -> AcpAgentMessage {
     let title = message
         .tool
@@ -105,8 +137,8 @@ fn tool_message_frame(message: &MessageDescriptor, at: i64) -> AcpAgentMessage {
     )
 }
 
-/// A pending permission request, as a tool-call entry that names the tool it asks to run. The whole
-/// request, options included, is its input, so the detail dialog shows what the operator is asked.
+/// A pending permission request, as a tool-call entry that names the tool it asks to run. The whole request,
+/// options included, is its input, so the detail dialog shows what the operator is asked.
 fn permission_frame(request: &PermissionRequestView, at: i64) -> AcpAgentMessage {
     session_update_frame(
         SessionUpdate {
@@ -125,9 +157,9 @@ fn permission_frame(request: &PermissionRequestView, at: i64) -> AcpAgentMessage
     )
 }
 
-/// The ACP stop reason a turn's outcome ends with. A turn paused on a permission request has not ended,
-/// so it has none — its pending request entry stands in for it. `ContextExhausted` is the model refusing
-/// the turn; `YieldedToCaller` ends the turn where the caller asked it to stop.
+/// The ACP stop reason a turn's outcome ends with. A turn paused on a permission request has not ended, so it
+/// has none — its pending request entry stands in for it. `ContextExhausted` is the model refusing the turn;
+/// `YieldedToCaller` ends the turn where the caller asked it to stop.
 fn acp_stop_reason(reason: StopReason) -> Option<AcpStopReason> {
     match reason {
         StopReason::EndTurn | StopReason::YieldedToCaller => Some(AcpStopReason::EndTurn),

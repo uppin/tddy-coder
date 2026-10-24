@@ -247,10 +247,6 @@ impl AgentRoster {
         })?;
         let launch = self.coding_agent_launch(session_id, session_dir, record, session_token)?;
         let session = start_coding_agent_session(launcher.as_ref(), &launch).await?;
-        // TODO(conversation-bubble): a coding agent's turn is recorded from its outcome when it ends
-        // (`conversation_transcript::record_turn`). Streaming it live means calling
-        // `CodingAgentSession::record_updates_with` here, and that needs the turn-end record to skip the
-        // text and tool calls the stream already wrote, so the two do not both land in the transcript.
         Ok(Box::new(session))
     }
 }

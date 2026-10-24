@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tddy_agent_backend::AcpUpdate;
 use tddy_core::SessionAgentRecord;
 use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{
@@ -14,7 +15,9 @@ use tddy_discovery::subagent::{
     StopReason, SubagentError, SubagentSession, TurnRequest,
 };
 use tddy_rpc::{Request, Status};
-use tddy_service::proto::acp::{acp_agent_message, session_update, AcpAgentMessage};
+use tddy_service::proto::acp::{
+    acp_agent_message, session_update, AcpAgentMessage, StopReason as AcpStopReason,
+};
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, OpenAgentConversationRequest, PromptAgentConversationRequest,
     ResumeAgentConversationRequest, SessionAgentRoster, SessionAgentService,
@@ -32,6 +35,7 @@ use tddy_session_agents::session_agent_roster::SessionAgentRosterStore;
 use tddy_session_agents::session_agent_status::SessionAgentActivityStore;
 use tddy_session_agents::{OpenAgentConversations, SessionAgentServiceImpl};
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{broadcast, Notify};
 
 /// What each recorded frame is, as `user:<text>`, `agent:<text>`, `tool:<title>` or
 /// `permission:<title>`.
@@ -326,6 +330,14 @@ impl AgentConversationPeers for NoOtherPort {
 
 /// The service, serving `session_dir` and holding nothing but the conversation under test.
 fn a_daemon_serving(session_dir: &Path) -> SessionAgentServiceImpl {
+    a_daemon_serving_with(session_dir, Arc::new(OwnedLoopAnswering))
+}
+
+/// The service, serving `session_dir` with the agent sessions `sessions` opens.
+fn a_daemon_serving_with(
+    session_dir: &Path,
+    sessions: Arc<dyn AgentSessions>,
+) -> SessionAgentServiceImpl {
     let session_dir: PathBuf = session_dir.to_path_buf();
     let clones = Arc::new(SessionAgentCloneStore::new());
     SessionAgentServiceImpl::new(SessionAgentPorts {
@@ -344,7 +356,7 @@ fn a_daemon_serving(session_dir: &Path) -> SessionAgentServiceImpl {
         admission: Arc::new(NoOtherPort),
         catalog: Arc::new(NoOtherPort),
         broadcast: Arc::new(NoOtherPort),
-        sessions: Arc::new(OwnedLoopAnswering),
+        sessions,
         peers: Arc::new(NoOtherPort),
     })
 }
@@ -412,4 +424,249 @@ async fn a_turn_that_cannot_be_recorded_fails_naming_the_recording_and_delivers_
         "the failure names the recording: {}",
         status.message()
     );
+}
+
+/// The text a streaming coding agent sends before its turn ends.
+const STREAMED_TEXT: &str = "Let me find where main is defined.";
+
+/// A turn loop that streams its text and a tool call while its turn is open, then ends the turn: with an
+/// answer once `release` is signalled (or at once when there is none), or with an error when `dies`.
+struct StreamsItsTurn {
+    updates: broadcast::Sender<AcpUpdate>,
+    release: Option<Arc<Notify>>,
+    dies: bool,
+}
+
+impl StreamsItsTurn {
+    fn holding_until(release: Arc<Notify>) -> Self {
+        Self {
+            updates: broadcast::channel(16).0,
+            release: Some(release),
+            dies: false,
+        }
+    }
+
+    fn dying_after_streaming() -> Self {
+        Self {
+            updates: broadcast::channel(16).0,
+            release: None,
+            dies: true,
+        }
+    }
+}
+
+#[async_trait]
+impl SubagentSession for StreamsItsTurn {
+    async fn take_turn(&mut self, _request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
+        let _ = self
+            .updates
+            .send(AcpUpdate::Text(STREAMED_TEXT.to_string()));
+        let _ = self.updates.send(AcpUpdate::ToolCall {
+            id: "call-1".to_string(),
+            title: "Read".to_string(),
+            kind: "read".to_string(),
+            raw_input: Some(serde_json::json!({ "file_path": "src/parser.rs" })),
+        });
+        if let Some(release) = &self.release {
+            release.notified().await;
+        }
+        if self.dies {
+            return Err(SubagentError::from("the coding agent went away"));
+        }
+        Ok(PromptOutcome::new(
+            StopReason::EndTurn,
+            vec![ContentBlock::text(THE_ANSWER)],
+            TokenUsage::default(),
+        ))
+    }
+
+    async fn prompt(&mut self, _text: &str) -> Result<PromptOutcome, SubagentError> {
+        Err(SubagentError::from(
+            "these tests take turns through take_turn".to_string(),
+        ))
+    }
+
+    fn model(&self) -> &str {
+        "fastcontext-tools-32k:latest"
+    }
+
+    fn cumulative_usage(&self) -> TokenUsage {
+        TokenUsage::default()
+    }
+
+    fn context_tokens(&self) -> u64 {
+        0
+    }
+
+    fn tail(&self, _max_messages: usize) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn updates(&self) -> Option<broadcast::Receiver<AcpUpdate>> {
+        Some(self.updates.subscribe())
+    }
+}
+
+/// A host that holds the clone for the session and opens the one loop it was given.
+struct OwnedLoopOnce(std::sync::Mutex<Option<Box<dyn SubagentSession>>>);
+
+#[async_trait]
+impl AgentSessions for OwnedLoopOnce {
+    fn hosts_a_clone_for(&self, _session_id: &str) -> bool {
+        true
+    }
+
+    async fn open_owned(
+        &self,
+        _session_id: &str,
+        _agent_id: &str,
+        _system_prompt: Option<&str>,
+    ) -> Result<Option<Box<dyn SubagentSession>>, Status> {
+        Ok(self.0.lock().expect("the loop").take())
+    }
+
+    async fn open_local(
+        &self,
+        _session_id: &str,
+        _session_dir: &Path,
+        _record: &SessionAgentRecord,
+        _session_token: &str,
+        _system_prompt: Option<&str>,
+    ) -> Result<Box<dyn SubagentSession>, Status> {
+        Err(Status::internal(
+            "this host holds the clone, so the conversation's loop is opened as its owner",
+        ))
+    }
+
+    fn refuse_unready_clone(
+        &self,
+        _session_id: &str,
+        _record: &SessionAgentRecord,
+    ) -> Result<(), Status> {
+        Ok(())
+    }
+
+    async fn refuse_departed_owner(&self, _daemon_instance_id: &str) -> Result<(), Status> {
+        Ok(())
+    }
+}
+
+/// The stop reasons a transcript records, in order.
+fn stop_reasons(frames: &[AcpAgentMessage]) -> Vec<AcpStopReason> {
+    frames
+        .iter()
+        .filter_map(|frame| match &frame.msg {
+            Some(acp_agent_message::Msg::Prompt(response)) => {
+                AcpStopReason::try_from(response.stop_reason).ok()
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The conversation's transcript once it holds at least `count` frames, read as it is written.
+async fn recorded_frames_of_at_least(session_dir: &Path, count: usize) -> Vec<AcpAgentMessage> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let frames = read_conversation_transcript(session_dir, CONVERSATION)
+            .expect("read")
+            .unwrap_or_default();
+        if frames.len() >= count || std::time::Instant::now() >= deadline {
+            return frames;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_streamed_turns_text_and_tool_calls_are_recorded_before_the_turn_ends() {
+    // Given a conversation whose agent streams its text and a tool call, and holds its turn open
+    let session_dir = tempfile::tempdir().expect("a temporary session directory");
+    let release = Arc::new(Notify::new());
+    let sessions = Arc::new(OwnedLoopOnce(std::sync::Mutex::new(Some(Box::new(
+        StreamsItsTurn::holding_until(Arc::clone(&release)),
+    )))));
+    let daemon = a_daemon_serving_with(session_dir.path(), sessions);
+    daemon
+        .open_agent_conversation(an_open_of_the_conversation())
+        .await
+        .expect("the conversation opens");
+    let response = daemon
+        .prompt_agent_conversation(a_prompt_on_the_conversation())
+        .await
+        .expect("the turn starts");
+    let mut frames = response.into_inner().into_receiver();
+
+    // When the agent has streamed its text and its tool call, and the turn is still open
+    let recorded = recorded_frames_of_at_least(session_dir.path(), 3).await;
+
+    // Then the prompt, the text and the tool call are in the transcript, and the turn has not ended
+    assert_eq!(
+        shapes(&recorded),
+        [
+            "user:where is main?",
+            &format!("agent:{STREAMED_TEXT}"),
+            "tool:Read"
+        ]
+    );
+    assert_eq!(stop_reasons(&recorded), Vec::<AcpStopReason>::new());
+
+    // When the turn is released and ends with its answer
+    release.notify_one();
+    while frames.recv().await.is_some() {}
+
+    // Then the turn's stop reason is written after what streamed
+    let recorded = read_conversation_transcript(session_dir.path(), CONVERSATION)
+        .expect("read")
+        .expect("recorded");
+    assert_eq!(stop_reasons(&recorded), [AcpStopReason::EndTurn]);
+    assert_eq!(recorded.len(), 4, "{:?}", shapes(&recorded));
+}
+
+#[tokio::test]
+async fn a_streamed_turn_that_dies_mid_stream_still_records_a_stop_and_fails_the_rpc() {
+    // Given a conversation whose agent streams its text and a tool call, then fails before answering
+    let session_dir = tempfile::tempdir().expect("a temporary session directory");
+    let sessions = Arc::new(OwnedLoopOnce(std::sync::Mutex::new(Some(Box::new(
+        StreamsItsTurn::dying_after_streaming(),
+    )))));
+    let daemon = a_daemon_serving_with(session_dir.path(), sessions);
+    daemon
+        .open_agent_conversation(an_open_of_the_conversation())
+        .await
+        .expect("the conversation opens");
+
+    // When a prompt is taken on it
+    let response = daemon
+        .prompt_agent_conversation(a_prompt_on_the_conversation())
+        .await
+        .expect("the turn starts");
+    let mut frames = response.into_inner().into_receiver();
+    let mut received = Vec::new();
+    while let Some(item) = frames.recv().await {
+        received.push(item);
+    }
+
+    // Then the RPC returns the error, and the transcript holds the prompt, what streamed, and a stop
+    assert_eq!(received.len(), 1, "{received:?}");
+    let status = received
+        .remove(0)
+        .expect_err("a turn that fails mid-stream returns its error");
+    assert!(
+        status.message().contains("the coding agent went away"),
+        "{}",
+        status.message()
+    );
+    let recorded = read_conversation_transcript(session_dir.path(), CONVERSATION)
+        .expect("read")
+        .expect("recorded");
+    assert_eq!(
+        shapes(&recorded),
+        [
+            "user:where is main?",
+            &format!("agent:{STREAMED_TEXT}"),
+            "tool:Read"
+        ]
+    );
+    assert_eq!(stop_reasons(&recorded), [AcpStopReason::Unspecified]);
 }

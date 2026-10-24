@@ -33,6 +33,7 @@ pub mod clone_readiness;
 pub mod coding_agent;
 pub mod conversation_cancel_forward;
 pub mod conversation_open_forward;
+pub mod conversation_recorder;
 pub mod conversation_transcript;
 pub mod departed_daemon;
 pub mod exec_tool_caller;
