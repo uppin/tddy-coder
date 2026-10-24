@@ -24,9 +24,15 @@ pub struct ProjectRpcHandler {
     user_resolver: SessionUserResolver,
     tddy_data_dir: PathBuf,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
-    spawn_client: Option<Arc<SpawnClient>>,
-    spawn_backend: SpawnBackendChoice,
+    clone_backend: CloneBackend,
     common_room_livekit_room: Option<CommonRoom>,
+}
+
+/// Where a clone runs: the backend this daemon was started with, and the forked worker that backend
+/// uses when it is not the supervisor. One field because the two are only ever read together.
+struct CloneBackend {
+    choice: SpawnBackendChoice,
+    worker: Option<Arc<SpawnClient>>,
 }
 
 impl ProjectRpcHandler {
@@ -38,8 +44,10 @@ impl ProjectRpcHandler {
             user_resolver: host.user_resolver(),
             tddy_data_dir: host.tddy_data_dir().to_path_buf(),
             eligible_daemon_source: host.eligible_daemon_source(),
-            spawn_client: host.spawn_client(),
-            spawn_backend: host.spawn_backend(),
+            clone_backend: CloneBackend {
+                choice: host.spawn_backend(),
+                worker: host.spawn_client(),
+            },
             common_room_livekit_room: host.common_room_livekit_room(),
         }
     }
