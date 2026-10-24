@@ -176,7 +176,7 @@ fn with_state_of(
 pub struct SubagentEntry {
     /// `SUBAGENT_TOOL_CALL_PREFIX` + the conversation id.
     pub tool_call_id: String,
-    /// `"<agent>: <first prompt>"`, from the parts this call names. The fold replaces it with the title
+    /// `"<agent> · <first prompt>"`, from the parts this call names. The fold replaces it with the title
     /// of the whole conversation, since one call may name only the agent or only the prompt.
     pub title: String,
     pub status: ToolCallStatus,
@@ -209,7 +209,7 @@ fn conversation_named_by(record: &AgentActivityRecord) -> Option<String> {
         .map(str::to_string)
 }
 
-/// `"<agent>: <first prompt>"` from the parts the calls name, or the conversation id when they name
+/// `"<agent> · <first prompt>"` from the parts the calls name, or the conversation id when they name
 /// neither. The agent is the id a `subagent_new_session` call named it by, because an activity record
 /// carries no label: the label lives on the roster row. The prompt is the first call's that carries one.
 fn conversation_title(conversation_id: &str, inputs: &[serde_json::Value]) -> String {
@@ -221,7 +221,7 @@ fn conversation_title(conversation_id: &str, inputs: &[serde_json::Value]) -> St
     if parts.is_empty() {
         conversation_id.to_string()
     } else {
-        parts.join(": ")
+        parts.join(" · ")
     }
 }
 

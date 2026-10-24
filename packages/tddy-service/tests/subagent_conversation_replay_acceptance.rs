@@ -279,7 +279,7 @@ fn a_folded_entry_is_titled_by_its_agent_and_its_first_prompt() {
 
     // Then — one entry, titled by the agent and the conversation's first prompt
     assert_eq!(folded.len(), 1, "{folded:?}");
-    assert_eq!(title_of(&folded[0]), "FastContext@udoo: Find the parser");
+    assert_eq!(title_of(&folded[0]), "FastContext@udoo · Find the parser");
 }
 
 #[test]
@@ -331,6 +331,6 @@ fn a_prompt_in_the_title_is_its_first_line_capped_to_a_fixed_length() {
     // Then — the title carries the first line only, cut to the cap and marked as cut
     assert_eq!(
         title_of(&folded[0]),
-        format!("FastContext@udoo: {}…", "a".repeat(80))
+        format!("FastContext@udoo · {}…", "a".repeat(80))
     );
 }
