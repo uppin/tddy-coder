@@ -51,8 +51,8 @@ export function useCreateSessionModel({
   // harness, and a tool session runs the agent it picked. The daemon says which accounts that
   // harness can run on and why not; the form keeps no matrix of its own.
   // TODO(tool-route): the catalog does not say which agents are specialized definitions, which are
-  // not harnesses; for one of those the daemon's reason ("unknown harness") shows in this field
-  // (docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md).
+  // not harnesses; for one of those the form still asks the daemon, which answers "unknown harness"
+  // and so hides the field (docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md).
   const providerHarness = sessionType === "tool" ? selectedAgentId || null : sessionType;
   const providerRoutes = useProviderRoutes(accountsClient, sessionToken, providerHarness);
   // A provider choice belongs to the harness it was made for: switching session type or agent

@@ -1,6 +1,7 @@
 /**
- * Acceptance tests: choosing where a claude-cli session's Claude Code runs — Anthropic (built in)
- * or one of the person's provider accounts — in the New-session form.
+ * Acceptance tests: choosing where a claude-cli session's Claude Code runs — its default (the
+ * vendor) or one of the person's provider accounts — in the New-session form. The field is offered
+ * only for a harness that can run on another provider, and only when an account can drive it.
  *
  * The options and whether each account can drive the harness come from the daemon
  * (`ListProviderRoutes`); the form only renders them. Choosing an account switches the model list
@@ -98,11 +99,14 @@ describe("CreateSessionPane — the provider a claude-cli session runs on", () =
     cy.viewport(1280, 800);
   });
 
-  it("defaults to the built-in vendor and offers the accounts the daemon marks usable", () => {
+  it("starts on Default and offers the accounts the daemon marks usable", () => {
     mountWith(aBackendWithAMetaAccount());
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
     byTestId(TEST_IDS.createSessionProviderSelect).should("have.value", "builtin");
+    byTestId(TEST_IDS.createSessionProviderSelect)
+      .find("option[value='builtin']")
+      .should("have.text", "Default");
     byTestId(TEST_IDS.createSessionProviderSelect).within(() => {
       cy.get("option[value='meta-hackathon']").should("not.be.disabled");
       cy.get("option[value='baseten-kimi']").should("be.disabled");
@@ -141,19 +145,40 @@ describe("CreateSessionPane — the provider a claude-cli session runs on", () =
     });
   });
 
-  it("shows why Cursor cannot run on a provider account instead of a picker", () => {
+  it("offers no provider field for a harness that cannot run on another provider", () => {
     mountWith(aBackendWithAMetaAccount());
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+    byTestId(TEST_IDS.createSessionProviderField).should("exist");
 
     byTestId(TEST_IDS.createSessionTypeCursorCliBtn).click();
 
-    byTestId(TEST_IDS.createSessionProviderSelect).should("not.exist");
-    byTestId(TEST_IDS.createSessionProviderUnavailable).should(
-      "contain.text",
-      "Cursor's agent cannot use another provider",
-    );
+    byTestId(TEST_IDS.createSessionProviderField).should("not.exist");
   });
 
-  it("says why the accounts could not be listed, and still offers the built-in vendor", () => {
+  it("offers no provider field when no account can drive the harness", () => {
+    const backend = aBackendWithoutRoutes().onUnary(AccountsService.method.listProviderRoutes, () => ({
+      harnessRoutable: true,
+      harnessReason: "",
+      options: [
+        {
+          accountId: "baseten-kimi",
+          label: "Kimi on Baseten",
+          preset: "baseten",
+          supported: false,
+          reason: "Claude Code needs an endpoint that serves Anthropic Messages",
+        },
+      ],
+    }));
+    mountWith(backend);
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+
+    cy.wrap(null).should(() => {
+      expect(backend.callsTo(AccountsService.method.listProviderRoutes)).to.not.be.empty;
+    });
+    byTestId(TEST_IDS.createSessionProviderField).should("not.exist");
+  });
+
+  it("says why the accounts could not be listed", () => {
     const backend = aBackendWithoutRoutes().failWith(
       AccountsService.method.listProviderRoutes,
       Code.FailedPrecondition,
@@ -162,7 +187,6 @@ describe("CreateSessionPane — the provider a claude-cli session runs on", () =
     mountWith(backend);
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
-    byTestId(TEST_IDS.createSessionProviderSelect).should("have.value", "builtin");
     byTestId(TEST_IDS.createSessionProviderError).should(
       "contain.text",
       "no route matrix is wired",

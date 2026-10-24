@@ -1,9 +1,10 @@
 /**
- * Where a session's harness runs: its own vendor ("Anthropic (built in)" for Claude Code), or one of
- * the person's provider accounts. The options and whether each is usable come from the daemon
- * (`ListProviderRoutes`); the web keeps no harness-to-provider matrix of its own.
+ * Where a session's harness runs: its default (its own vendor), or one of the person's provider
+ * accounts. The options and whether each is usable come from the daemon (`ListProviderRoutes`); the
+ * web keeps no harness-to-provider matrix of its own.
  *
- * A harness that cannot run on any provider (Cursor) shows the daemon's reason instead of a select.
+ * The field is offered only when there is a choice to make: a harness that cannot run on another
+ * provider (Cursor), or one no account can drive, renders nothing.
  */
 
 import { inputClass, labelClass } from "./createSessionFormStyles";
@@ -21,12 +22,11 @@ export interface ProviderRouteChoice {
 export interface CreateSessionProviderFieldProps {
   /** False when the harness cannot run on any provider account. */
   harnessRoutable: boolean;
-  harnessReason: string;
   choices: ProviderRouteChoice[];
-  /** `"builtin"` for the vendor, else an account id. */
+  /** `"builtin"` for the default (the vendor), else an account id. */
   value: string;
   onChange: (value: string) => void;
-  /** Why the daemon could not list the accounts; shown under the select, never swallowed. */
+  /** Why the daemon could not list the accounts; shown in place of the select, never swallowed. */
   error?: string | null;
 }
 
@@ -35,24 +35,26 @@ export const BUILT_IN_PROVIDER = "builtin";
 
 export function CreateSessionProviderField({
   harnessRoutable,
-  harnessReason,
   choices,
   value,
   onChange,
   error = null,
 }: CreateSessionProviderFieldProps) {
-  if (!harnessRoutable) {
+  if (error !== null) {
     return (
-      <div>
+      <div data-testid="create-session-provider-field">
         <span className={labelClass}>Provider</span>
-        <p data-testid="create-session-provider-unavailable" className="text-sm text-muted-foreground">
-          {harnessReason}
+        <p data-testid="create-session-provider-error" className="text-sm text-destructive">
+          {error}
         </p>
       </div>
     );
   }
+  if (!harnessRoutable || !choices.some((choice) => choice.supported)) {
+    return null;
+  }
   return (
-    <div>
+    <div data-testid="create-session-provider-field">
       <label className={labelClass} htmlFor="create-session-provider">
         Provider
       </label>
@@ -63,10 +65,7 @@ export function CreateSessionProviderField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
-        {/* TODO(tool-route): this is the vendor of a Claude Code session only; a Codex tool session
-            runs on OpenAI, so its built-in option needs the harness's vendor name from the daemon
-            (docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md). */}
-        <option value={BUILT_IN_PROVIDER}>Anthropic (built in)</option>
+        <option value={BUILT_IN_PROVIDER}>Default</option>
         {choices.map((choice) => (
           <option
             key={choice.accountId}
@@ -78,11 +77,6 @@ export function CreateSessionProviderField({
           </option>
         ))}
       </select>
-      {error !== null && (
-        <p data-testid="create-session-provider-error" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
     </div>
   );
 }

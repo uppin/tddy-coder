@@ -105,14 +105,12 @@ describe("CreateSessionPane — a tool session's agent on a provider account", (
     });
   });
 
-  it("shows why the cursor agent cannot run on a provider account", () => {
+  it("offers no provider field for the cursor agent, which cannot run on another provider", () => {
     mountWith(aBackend());
+    byTestId(TEST_IDS.createSessionProviderField).should("exist");
 
     byTestId(TEST_IDS.createSessionAgentSelect).select("cursor");
 
-    byTestId(TEST_IDS.createSessionProviderUnavailable).should(
-      "contain.text",
-      "Cursor's agent cannot use another provider",
-    );
+    byTestId(TEST_IDS.createSessionProviderField).should("not.exist");
   });
 });

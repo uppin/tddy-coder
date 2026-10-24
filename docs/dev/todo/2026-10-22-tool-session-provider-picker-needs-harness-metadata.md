@@ -3,25 +3,16 @@
 **Category:** Deferred from `#provider-route` 4/9 (#665)
 **Source:** `/pr-wrap` on `feature/provider-route/tool-route` (two `TODO(tool-route)` markers)
 
-The create-session provider field is offered for tool sessions now, keyed by the selected agent. Two
-things it shows are not right for every agent:
+The create-session provider field is offered for tool sessions now, keyed by the selected agent.
 
-1. **The built-in option is always labelled "Anthropic (built in)"**
-   (`packages/tddy-web/src/components/sessions/CreateSessionProviderField.tsx`). For a `codex` or
-   `codex-acp` tool session the vendor is OpenAI.
-2. **A specialized agent definition shows the daemon's "unknown harness" reason**
-   (`packages/tddy-web/src/components/sessions/CreateSessionPane.tsx`). The agent catalog does not say
-   which agents are definitions rather than harnesses, so the form asks `ListProviderRoutes` for one
-   anyway.
+~~**The built-in option is always labelled "Anthropic (built in)"**~~ — closed: the option is labelled
+**Default**, which is true for every harness, so it needs no vendor name from the daemon.
 
-Neither is dangerous: the start is refused for a definition with an account, and the built-in option
-sends the same request whatever its label.
+What is left: **the pane asks `ListProviderRoutes` for a specialized agent definition**
+(`packages/tddy-web/src/components/sessions/useCreateSessionModel.ts`). The agent catalog does not say
+which agents are definitions rather than harnesses, so the form asks anyway. The daemon answers
+"unknown harness", which now hides the field instead of showing that reason, so nothing wrong is
+visible — but it is a request that should not be made.
 
-**Why deferred:** both need the daemon to say more — a vendor name on `ListProviderRoutesResponse` and a
-harness/definition flag on the catalog's agents — which is a change to `accounts.proto` and the
-`RouteSupport` port. `#provider-route` 5/9 edits that same message and service, so adding it here
-would conflict on the cascade, and keeping a vendor table in the web would restate the daemon's matrix.
-
-**What would close it:** `ListProviderRoutesResponse.harness_vendor` (from `Harness`), the field's
-built-in option labelled from it, and the pane not asking for routes for an agent the catalog marks as
-a definition.
+**What would close it:** a harness/definition flag on the catalog's agents, and the pane not asking
+for routes for an agent the catalog marks as a definition.
