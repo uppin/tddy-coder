@@ -320,7 +320,6 @@ export function CreateSessionPane({
       {accountsClient && providerHarness !== null && (
         <CreateSessionProviderField
           harnessRoutable={providerRoutes.harnessRoutable}
-          harnessReason={providerRoutes.harnessReason}
           choices={providerRoutes.choices}
           value={providerChoice ?? BUILT_IN_PROVIDER}
           onChange={setProviderChoice}

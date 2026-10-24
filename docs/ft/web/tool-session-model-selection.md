@@ -150,21 +150,22 @@ when that is an absolute path, as it does Cursor's.
 
 ## Provider
 
-For the CLI session types (`claude-cli`, `cursor-cli`) the form shows a **Provider** field beside the
-model: where the session's harness runs — its own vendor, or one of the person's
-[provider accounts](../daemon/provider-accounts.md). It is shown only when the form was given an
-`accounts.AccountsService` client; without one every session runs on its vendor. A **tool session**
-shows it too, for the agent it picked (`claude`, `claude-acp`, `codex`, `codex-acp`; `cursor` shows
-the daemon's reason).
+The form shows a **Provider** field beside the model: where the session's harness runs — its
+default (its own vendor), or one of the person's [provider accounts](../daemon/provider-accounts.md).
+It is asked for the harness the session runs: a CLI session type names it, and a **tool session**
+runs the agent it picked. It is shown only when the form was given an `accounts.AccountsService`
+client; without one every session runs on its vendor.
 
 - The options come from `ListProviderRoutes(harness)`; the form keeps no harness-to-provider matrix
-  of its own. For `claude-cli` the select's first option is **Anthropic (built in)**, selected by
-  default; each account follows by its label, and an account the harness cannot run on is listed
-  disabled with the daemon's reason after its label (and as its tooltip).
-- For a harness no account can run (`cursor-cli`), the field shows the daemon's reason in place of
-  a select (`create-session-provider-unavailable`).
-- A `ListProviderRoutes` failure is shown under the select (`create-session-provider-error`), never
-  swallowed; the vendor option remains.
+  of its own. The select's first option is **Default**, selected by default; each account follows by
+  its label, and an account the harness cannot run on is listed disabled with the daemon's reason
+  after its label (and as its tooltip).
+- The field is shown only when there is a choice to make (`create-session-provider-field`). A
+  harness no account can run (`cursor-cli`, the `cursor` agent, an agent that is not a harness) and a
+  harness none of the person's accounts can drive show no field at all, and the session runs on its
+  default.
+- A `ListProviderRoutes` failure is shown in place of the select (`create-session-provider-error`),
+  never swallowed; the session runs on its default.
 - Choosing an account switches the model list from `ListAgentModels` to
   `ListProviderAccountModels(account_id)` — the account's own models — and preselects the first.
   Choosing the vendor again switches back to the vendor's catalog.
