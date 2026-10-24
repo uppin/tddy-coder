@@ -108,12 +108,12 @@ stays wedged behind the hung request for good. Clone progress (node 5) needs eve
 
 ## Scope
 
-- [ ] Wire types with request ids, events and results
-- [ ] Worker: thread per request, single write lock, request id echoed on every line
-- [ ] Client: reader thread, per-request channels, `clone_repo_observed`
-- [ ] Worker EOF fails every pending request naming the worker pid
-- [ ] `spawn_worker.rs` does not grow; new code in `spawn_worker/`
-- [ ] Docs: `tddy-spawn` README worker section
+- [x] Wire types with request ids, events and results
+- [x] Worker: thread per request, single write lock, request id echoed on every line
+- [x] Client: reader thread, per-request channels, `clone_repo_observed`
+- [x] Worker EOF fails every pending request naming the worker pid
+- [x] `spawn_worker.rs` does not grow; new code in `spawn_worker/`
+- [~] Docs: `tddy-spawn` worker section — the README this names does not exist, and `packages/tddy-spawn/docs/` is written only by the wrap's changeset transfer; the protocol is recorded in State B and Decisions below until then
 
 ## Technical Changes
 
@@ -124,7 +124,8 @@ with write-then-read under separate locks; no tests fork or drive the worker.
 
 ### State B
 Requests are `{"id":N,"op":…,"payload":…}`; the worker spawns a thread per request and writes
-`{"op":"event","id":N,…}` / `{"op":"result","id":N,…}` lines under one `Mutex<File>`. The client owns
+`{"line":"event","id":N,"event":{"kind":"started","pid":P}}` / `{"line":"result","id":N,"response":…}` lines
+under one `Mutex<File>`. (The `line` tag, not `op`, is what `worker_concurrency_acceptance` pins.) The client owns
 a reader thread holding `HashMap<RequestId, Sender<WorkerLine>>`; callers block on their own receiver.
 EOF drains the map with `"spawn worker pid=<n> exited; request <id> abandoned"`.
 
@@ -154,6 +155,14 @@ exists to avoid. The production fork path's only change is the loop it runs, whi
 
 ## Technical Debt & Production Readiness
 
+- **Load-sensitive acceptance bound (not fixed here).** `a_fast_clone_completes_while_a_slow_clone_is_still_running`
+  asserts a quick clone finishes within 2 s of wall clock. Under host load average ~113 it failed 2 of 12 runs
+  (quick clone 3.3–3.6 s, `id -un` and `sh` spawns starved); at load ~70 it passed 10 of 10. No lock spans a
+  request in the worker or the client path, so this is process-spawn latency, not serialization. The test file
+  is outside this node's scope: flagged for a human to decide whether the bound should widen.
+- **Package docs deferred to the wrap.** `packages/tddy-spawn/README.md` (named in Affected Packages) does not
+  exist; `packages/tddy-spawn/docs/` is written only by the wrap's changeset transfer.
+
 ## Decisions & Trade-offs
 
 - **Thread per request, not fork per request.** Forking a thread-bearing worker is safe now that
@@ -162,6 +171,16 @@ exists to avoid. The production fork path's only change is the loop it runs, whi
 - **Events are exercised through real ops.** No test-only request kind; `Started { pid }` is real
   behaviour (node 8 uses the pid to stop a clone).
 - **No version skew to handle.** Worker and daemon are one binary image (fork without exec).
+- **The clone pid comes through a sibling, not a new signature.** `clone_as_user_observed` takes an
+  `on_started` callback and `clone_as_user_with_env` keeps its signature (it delegates with a no-op):
+  `tddy-agent-launch`, `tddy-spawn`'s clone-privilege test and node 1 all call it directly. The change
+  inside it is `spawn` + `wait_with_output` in place of `output`, which is what `Command::output` does.
+- **The worker's pipes are close-on-exec.** `libc::pipe` leaves them inheritable, so a long-running
+  `tddy-coder` the worker execs would keep the response pipe's write end open after the worker died: the
+  daemon would never see EOF and its pending requests would hang. Found while greening; the change is
+  confined to `fork_spawn_worker`'s two pipes.
+- **The worker drains before it exits.** The request loop runs on scoped threads, so EOF on the request
+  pipe returns only after every request still running has written its result.
 
 ## Refactoring Needed
 ### From /validate-changes
@@ -185,12 +204,12 @@ exists to avoid. The production fork path's only change is the loop it runs, whi
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests (`./test -p tddy-spawn`); full-workspace result from CI
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [~] Run scoped tests (`./test -p tddy-spawn`); full-workspace result from CI — scoped: library 39/39, `worker_concurrency_acceptance` 5/5, the other suites green; inherited node-1 red, not this node's: `clone_privilege_acceptance` (1), `pre_exec_safety` (2)
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped clippy, `cargo fmt`)
+- [x] Linting and formatting (scoped clippy, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap

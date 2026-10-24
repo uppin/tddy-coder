@@ -632,6 +632,19 @@ pub fn clone_as_user_with_env(
     destination: &Path,
     extra_env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
+    clone_as_user_observed(os_user, git_url, destination, extra_env, |_| {})
+}
+
+/// [`clone_as_user_with_env`], calling `on_started` with the `git clone` child's pid as soon as the
+/// child is running, before the clone finishes. A spawn worker reports that pid to its caller.
+#[cfg(unix)]
+pub fn clone_as_user_observed(
+    os_user: &str,
+    git_url: &str,
+    destination: &Path,
+    extra_env: &[(&str, &str)],
+    on_started: impl FnOnce(u32),
+) -> anyhow::Result<()> {
     let dest_str = destination
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("destination path is not valid UTF-8"))?;
@@ -683,6 +696,7 @@ pub fn clone_as_user_with_env(
     let staged = StagedCommand::new(cmd, &format!("clone {}", destination.display()), change)
         .spawn()
         .map_err(|e| anyhow::anyhow!("git clone: {}", e))?;
+    on_started(staged.child.id());
     let output = staged
         .child
         .wait_with_output()
@@ -707,6 +721,17 @@ pub fn clone_as_user_with_env(
     _git_url: &str,
     _destination: &Path,
     _extra_env: &[(&str, &str)],
+) -> anyhow::Result<()> {
+    anyhow::bail!("clone_as_user is only supported on Unix")
+}
+
+#[cfg(not(unix))]
+pub fn clone_as_user_observed(
+    _os_user: &str,
+    _git_url: &str,
+    _destination: &Path,
+    _extra_env: &[(&str, &str)],
+    _on_started: impl FnOnce(u32),
 ) -> anyhow::Result<()> {
     anyhow::bail!("clone_as_user is only supported on Unix")
 }
