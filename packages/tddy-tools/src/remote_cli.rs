@@ -249,7 +249,8 @@ async fn run_start_session(args: StartSessionArgs) -> Result<()> {
     let body = serde_json::json!({
         "sessionToken": token,
         "sessionType": "workspace",
-        "daemonInstanceId": ""
+        "daemonInstanceId": "",
+        "specializedAgents": args.agents,
     });
 
     let resp = match connect_post(&base_url, "session.SessionService", "StartSession", body).await {
