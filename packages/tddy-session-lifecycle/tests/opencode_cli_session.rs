@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_core::session_metadata::read_session_metadata;
-use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ListSessionsRequest, ResumeSessionRequest,
@@ -18,13 +17,15 @@ use tddy_service::proto::session::{
 };
 use tddy_session_lifecycle::claude_cli_session::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+
+mod cli_harness_support;
+use cli_harness_support::{
+    create_test_repo_with_origin, daemon_config_with_cli_harness_binary, register_project,
+    session_host, VALID_TOKEN,
+};
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_last_appended_argv};
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
-type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
-type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "fireworks/kimi-k2";
 const MUSE_MODEL: &str = "muse-wonder-1.0";
 const TEST_PROJECT_ID: &str = "opencode-project";
@@ -58,7 +59,11 @@ fn a_daemon_with_a_stub_for(session_type: &str, stub_name: &str) -> CliHarnessDa
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let sessions_dir = tempfile::tempdir().unwrap();
-    register_project(&sessions_dir.path().join("projects"), repo_dir.path());
+    register_project(
+        &sessions_dir.path().join("projects"),
+        repo_dir.path(),
+        TEST_PROJECT_ID,
+    );
     let stub_dir = tempfile::tempdir().unwrap();
     let argv_log = stub_dir.path().join("argv.log");
     let binary = a_stub_agent_script(stub_dir.path(), stub_name)
@@ -662,84 +667,4 @@ async fn a_muse_session_is_listed_with_its_agent_and_model() {
     assert_eq!(entry.session_type, "muse-cli");
     assert_eq!(entry.agent, "muse-cli");
     assert_eq!(entry.model, MUSE_MODEL);
-}
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-fn daemon_config_with_cli_harness_binary(session_type: &str, binary: &Path) -> DaemonConfig {
-    let dir = tempfile::tempdir().unwrap();
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "testuser"
-    os_user: "testuser"
-allowed_tools:
-  - path: /bin/true
-    label: true
-cli_harnesses:
-  {session_type}:
-    binary_path: {binary}
-"#,
-        binary = binary.display()
-    );
-    let config_path = dir.path().join("daemon.yaml");
-    std::fs::write(&config_path, yaml).unwrap();
-    DaemonConfig::load(&config_path).expect("config must parse")
-}
-
-fn session_host(
-    config: DaemonConfig,
-    sessions_base: PathBuf,
-    manager: Arc<CliSessionManager>,
-) -> DaemonSessionHost {
-    let tddy_data_dir = sessions_base.clone();
-    let sessions_base_resolver: SessionsBaseResolver =
-        Arc::new(move |_| Some(sessions_base.clone()));
-    let user_resolver: UserResolver =
-        Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
-    DaemonSessionHost::new(
-        config.clone(),
-        sessions_base_resolver,
-        tddy_data_dir,
-        user_resolver,
-        None,
-        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
-        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
-        manager,
-    )
-}
-
-fn create_test_repo_with_origin(dir: &Path) {
-    let run = |args: &[&str], envs: &[(&str, &str)]| {
-        let mut cmd = std::process::Command::new("git");
-        cmd.args(args).current_dir(dir);
-        for (k, v) in envs {
-            cmd.env(k, v);
-        }
-        cmd.output().expect("git command failed");
-    };
-    let author_env = &[
-        ("GIT_AUTHOR_NAME", "Test"),
-        ("GIT_AUTHOR_EMAIL", "t@t.com"),
-        ("GIT_COMMITTER_NAME", "Test"),
-        ("GIT_COMMITTER_EMAIL", "t@t.com"),
-    ];
-    run(&["init", "-b", "main"], &[]);
-    run(&["config", "user.email", "t@t.com"], &[]);
-    run(&["config", "user.name", "Test"], &[]);
-    run(&["commit", "--allow-empty", "-m", "init"], author_env);
-    run(&["remote", "add", "origin", dir.to_str().unwrap()], &[]);
-    run(&["push", "-u", "origin", "main"], &[]);
-}
-
-fn register_project(projects_dir: &Path, repo_path: &Path) {
-    std::fs::create_dir_all(projects_dir).unwrap();
-    let yaml = format!(
-        "projects:\n  - project_id: {}\n    name: opencode-project\n    git_url: \"\"\n    main_repo_path: {}\n",
-        TEST_PROJECT_ID,
-        repo_path.to_str().unwrap()
-    );
-    std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
 }
