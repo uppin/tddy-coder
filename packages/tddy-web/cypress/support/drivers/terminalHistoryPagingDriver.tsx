@@ -514,6 +514,12 @@ export function aTerminalWithHistoryPaging() {
       return this;
     },
 
+    /** Assert the "View history" affordance is not offered. */
+    expectViewHistoryAbsent() {
+      byTestId(TEST_IDS.viewHistory).should("not.exist");
+      return this;
+    },
+
     /**
      * Assert the LIVE terminal buffer contains the given texts in order. Reads the hidden
      * `terminal-buffer-text` mirror (the live terminal — scrollback 0, current screen only).

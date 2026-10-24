@@ -163,6 +163,13 @@ user sees a single seamless terminal surface rather than a split pane.
   background fill. After the first fill, the live pane shows a **"View history"** affordance
   (`data-testid="view-history"`) instead, which swaps to the page pane instantly (no re-fetch).
   The page pane shows a **"Back to live"** affordance (`data-testid="back-to-live"`).
+- **Neither "Load earlier output" nor "View history" is offered while the live terminal's program
+  owns navigation** — it is on the alternate screen (DEC `1049` / `1047` / `47`) or tracks the mouse
+  (DEC `1000` / `1002` / `1003`). Such a TUI (the Claude CLI's fullscreen renderer, a pager) scrolls
+  its own output, and its alternate-screen repaints never become scrollback, so the history replay
+  would hold frames rather than a transcript. The offer returns once the program gives both up.
+  Mouse tracking counts on its own because a reattach learns it from the daemon's replayed mode
+  prologue, which does not carry the alternate screen. "Back to live" is never withheld.
 - The **page pane renders in a greyish history color scheme** (`data-color-scheme="history"`): a
   grey theme on the page terminal plus a `grayscale` CSS filter on the pane, which also
   desaturates SGR-palette and truecolor output that a theme alone cannot reach.
@@ -317,8 +324,13 @@ Consumed from the unification changeset (forward-chunk shape):
      page terminal so the user lands on the newest pre-anchor line (seamless).
   5. Live bytes continue flowing to the live terminal throughout — no buffering, no reset.
 - "Load earlier output" renders while `historyFetcher` is provided, the anchor is captured and not
-  `atOldest`, and `!filled && !loading`. "View history" renders on the live pane once `filled`.
-  "Back to live" renders on the page pane.
+  `atOldest`, `!filled && !loading`, and the live TUI does not own navigation. "View history"
+  renders on the live pane once `filled`, under the same navigation condition. "Back to live"
+  renders on the page pane.
+- **TUI owns navigation:** after every live chunk that switches a DEC private mode or hard-resets
+  the terminal (`ESC c`) — including chunks buffered until the terminal is ready —
+  `GhosttyTerminalSession` re-reads `isAlternateScreen() || hasMouseTracking()` from the live
+  terminal. ghostty-web holds that state and reports no changes, so the chunk is the only signal.
 - The page pane carries `data-color-scheme="history"` and a `grayscale` filter; the page terminal
   is constructed with a grey theme.
 - **Page terminal Scrollbar mirror:** the page terminal's `getScrollbar()` is mirrored to a hidden
@@ -380,6 +392,9 @@ Consumed from the unification changeset (forward-chunk shape):
     valid client (a real `pty_done`) evicts the runtime.
 13. **History renders in a greyish color scheme.** While the page pane is foreground it carries
     `data-color-scheme="history"` and a `grayscale` filter; the live pane has no filter.
+14. **No history offer while a full-screen TUI owns navigation.** While the live terminal is on the
+    alternate screen or tracks the mouse, neither "Load earlier output" nor "View history" renders;
+    leaving both restores the offer. A user already viewing history keeps "Back to live".
 
 ## Decisions & trade-offs
 
