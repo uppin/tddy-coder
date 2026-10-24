@@ -90,17 +90,15 @@ passes it as `ProjectsScreen.focusedProjectId`; the matching card gets `focusHom
 `ProjectHomeAgent.focused`. The picker focuses its `<select>` and calls
 `scrollIntoView({ block: "center" })` in an effect keyed on `focused` and on whether the picker is
 rendered, so it fires once the project is listed and a later poll does not steal focus back. The
-sessions drawer builds that location with `routing/projectSetupLocation.ts`
-(`projectSetupLocation(location, projectId)`: `withPath` to `PROJECTS_ROUTE`, which keeps `host` and
-drops the Sessions screen's params, then `withParams` with `PARAM_PROJECT`) and pushes it from
-`useSessionsDrawerInspector().openProjectSetup`, wired to `SessionDrawer.onSetUpProjectHome` →
-`ProjectHomeEntry`.
+address is a deep link only; the sessions drawer sets a project's home agent in its own
+`ProjectHomeSetupPane` (`components/sessions/`), which renders the same `ProjectHomeAgent` with
+`focused` and stores through `SetProjectHomeAgent` on the selected host (`useProjectHomeSetup`).
 
 Test IDs: `project-home-agent-select-<projectId>`, `project-home-agent-error-<projectId>`; page-object
 helpers `homeAgentValue`, `homeAgentOptionLabels`, `setHomeAgent`, `homeAgentError`. Acceptance:
 `cypress/component/ProjectsScreenHomeAgentAcceptance.cy.tsx`,
 `cypress/component/ProjectHomeSetupLinkAcceptance.cy.tsx` (drawer click → setup, focus from
-`PARAM_PROJECT`); unit: `src/routing/projectSetupLocation.test.ts`.
+`PARAM_PROJECT`), `cypress/component/ProjectHomeSetupPaneAcceptance.cy.tsx` (the drawer's setup pane).
 
 ## Role derivation
 

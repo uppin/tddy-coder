@@ -99,8 +99,8 @@ daemon's catalog lists (`ListAgents`, harness profiles included), labelled by th
 - With no agents listed and nothing stored the picker is not shown.
 - **`#/projects?project=<id>`** focuses that project's picker and scrolls it into view once the
   project is listed. Focus is taken once per arrival; a later projects poll does not pull it back.
-  (The session drawer's pinned **main** entry no longer navigates here: it opens the same picker in
-  its own setup pane — [session drawer § Pinned main entry](session-drawer.md#pinned-main-entry).)
+  The session drawer's pinned **main** entry offers the same picker in its own setup pane
+  ([session drawer § Pinned main entry](session-drawer.md#pinned-main-entry)).
 
 ## Adding a project to a host
 
