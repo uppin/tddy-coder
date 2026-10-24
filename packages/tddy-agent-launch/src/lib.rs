@@ -68,6 +68,8 @@ pub mod worktree_source;
 
 mod cli_harness_jail;
 #[cfg(test)]
+mod cli_harness_start_checks_unit_tests;
+#[cfg(test)]
 mod cli_route_launch_tests;
 #[cfg(test)]
 mod conversation_spawn_wiring_tests;

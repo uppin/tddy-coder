@@ -11,9 +11,10 @@
   `settled_resume_token` waits on `CliSessionManager::exit_hook_settled`, then re-reads the token.
 - `opencode_cli_spawn.rs`: the recorder is handed to `launch_cli_harness` at start and resume; the
   generic resume passes the recorded token as `CliLaunch.conversation_id`.
-- `cli_harness_jail::require_sandbox_hosts`, called in `cli_branch_starts.rs`: a sandboxed start of a
-  harness the runner does not host is `FAILED_PRECONDITION` "the sandbox runner does not host <type>"
-  before the provider route is resolved.
+- `start_request_checks::refuse_an_unsupported_cli_harness_start` (the managed-codebase refusal and
+  `cli_harness_jail::require_sandbox_hosts`), called first in `start_cli_harness`: a sandboxed start
+  of a harness the runner does not host is `FAILED_PRECONDITION` "the sandbox runner does not host
+  <type>" before the provider route is resolved. Unit tests: `cli_harness_start_checks_unit_tests.rs`.
 - `route_on_account` checks `harness_routable` before the empty-model refusal, so a `warp-cli` start
   naming an account is refused naming Warp.
 - `harness_profile_start.rs`: the `Harness::WarpCli` arm. No new arm in `start_session_on_request` or

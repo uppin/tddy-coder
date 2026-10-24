@@ -2,7 +2,9 @@ use std::path::Path;
 
 use tddy_core::{write_session_github_source, SessionGithubSource};
 
+use crate::cli_harness_jail::require_sandbox_hosts;
 use crate::stack_seed_validation::validate_stack_seed_base_session;
+use tddy_core::cli_harness::CliHarness;
 
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_split::service_util;
@@ -53,6 +55,26 @@ pub(crate) fn record_requested_github_source(
         .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
     write_session_github_source(session_dir, source)
         .map_err(|e| Status::internal(format!("failed to record the session's GitHub source: {e}")))
+}
+
+/// A start of a registered CLI harness that cannot be served is refused before anything is
+/// created: none of them has a workflow of its own for a managed codebase to drive, and a sandboxed
+/// one must be a harness the sandbox runner hosts (refused naming the runner, before any provider
+/// route is resolved).
+pub(crate) fn refuse_an_unsupported_cli_harness_start(
+    harness: &CliHarness,
+    req: &StartSessionRequest,
+) -> Result<(), Status> {
+    if req.managed_codebase {
+        return Err(Status::invalid_argument(format!(
+            "managed_codebase is not supported for {} sessions",
+            harness.session_type
+        )));
+    }
+    if req.sandbox {
+        require_sandbox_hosts(harness)?;
+    }
+    Ok(())
 }
 
 /// claude-cli and cursor-cli always need a model: a start naming either type without one is

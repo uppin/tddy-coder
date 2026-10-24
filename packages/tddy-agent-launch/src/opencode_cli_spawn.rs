@@ -269,8 +269,11 @@ impl crate::launch_ports::LaunchSessions {
         os_user: &str,
         req: &ResumeSessionRequest,
         session_dir: &Path,
-        metadata: SessionMetadata,
+        mut metadata: SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
+        // The previous run's recorder may still be writing the token it printed as it exited.
+        metadata.harness_resume_token =
+            settled_resume_token(&self.claude_cli_manager, &req.session_id, session_dir).await?;
         let identity = self.host.session_identity(
             os_user,
             &req.session_id,
@@ -316,7 +319,7 @@ async fn resume_cli_harness_session(
     let ResumedSession {
         session_id,
         session_dir,
-        mut meta,
+        meta,
         git_environment,
     } = session;
     let worktree_path = meta
@@ -331,8 +334,6 @@ async fn resume_cli_harness_session(
         )));
     }
 
-    // The previous run's recorder may still be writing the token it printed as it exited.
-    meta.harness_resume_token = settled_resume_token(cli_manager, session_id, session_dir).await?;
     let route = resume_cli_route(account_access, harness, session_dir)?;
     let binary = harness_binary(config, harness);
     let (token_recorder, token_arm) = resume_token_recorder(session_dir.to_path_buf());
