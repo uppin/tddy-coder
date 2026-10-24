@@ -23,6 +23,7 @@ import {
   parseSessionsDrawerSessionId,
   SESSIONS_NEW_ROUTE,
   SESSIONS_PROJECT_HOME_SETUP_ROUTE,
+  parseSessionsProjectHomeSetup,
   parseSessionsProjectHomeSetupProjectId,
   sessionsProjectHomeSetupPath,
   isSessionsNewPath,
@@ -347,6 +348,44 @@ describe("sessions project-home setup route", () => {
   it("names no project without a project segment", () => {
     // When
     const result = parseSessionsProjectHomeSetupProjectId(SESSIONS_PROJECT_HOME_SETUP_ROUTE);
+    // Then
+    expect(result).toBeNull();
+  });
+
+  it("routes the replace form of the path to the sessions drawer screen", () => {
+    // When
+    const result = isSessionsDrawerPath(sessionsProjectHomeSetupPath("proj-beta", { replacing: true }));
+    // Then
+    expect(result).toBe(true);
+  });
+
+  it("reads the replace form of the path as replacing that project's main", () => {
+    // Given
+    const path = sessionsProjectHomeSetupPath("team/proj beta", { replacing: true });
+    // When
+    const result = parseSessionsProjectHomeSetup(path);
+    // Then
+    expect(path).toBe("/sessions/project-home/team%2Fproj%20beta/replace");
+    expect(result).toEqual({ projectId: "team/proj beta", replacing: true });
+  });
+
+  it("reads the plain path as setting main up, not replacing it", () => {
+    // When
+    const result = parseSessionsProjectHomeSetup(sessionsProjectHomeSetupPath("proj-beta"));
+    // Then
+    expect(result).toEqual({ projectId: "proj-beta", replacing: false });
+  });
+
+  it("reads a project whose id is the replace segment as that project", () => {
+    // When
+    const result = parseSessionsProjectHomeSetup(sessionsProjectHomeSetupPath("replace"));
+    // Then
+    expect(result).toEqual({ projectId: "replace", replacing: false });
+  });
+
+  it("does not read the replace form as a session id", () => {
+    // When
+    const result = parseSessionsDrawerSessionId(sessionsProjectHomeSetupPath("proj-beta", { replacing: true }));
     // Then
     expect(result).toBeNull();
   });

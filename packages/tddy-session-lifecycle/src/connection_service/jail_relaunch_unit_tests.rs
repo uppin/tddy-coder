@@ -235,7 +235,6 @@ async fn a_sandboxed_workspace_session_served_by(
             host_repo_paths: Default::default(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
             home_session_id: None,
         }],
     )

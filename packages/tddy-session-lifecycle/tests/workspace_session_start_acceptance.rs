@@ -97,7 +97,6 @@ fn register_project(sessions_base: &Path, repo_path: &Path, main_branch_ref: Opt
             host_repo_paths: Default::default(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
             home_session_id: None,
         }],
     )

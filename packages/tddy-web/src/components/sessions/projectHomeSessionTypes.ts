@@ -13,7 +13,22 @@
 import type { SessionType } from "./createSessionRequest";
 
 /** Why `sessionType` cannot run main, or `null` when it can. */
-export function whyMainCannotRun(_sessionType: SessionType): string | null {
-  // TODO: implement (docs/dev/1-WIP/2026-10-24-project-home-from-new-session-form.md).
-  throw new Error("whyMainCannotRun is not implemented");
+export function whyMainCannotRun(sessionType: SessionType): string | null {
+  switch (sessionType) {
+    case "claude-cli":
+      return null;
+    case "cursor-cli":
+      // docs/dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md
+      return "Cursor CLI has no tool allowlist, so it could still use its own file tools and main would not stay read-only.";
+    case "tool":
+      return cannotRunManaged("Tool sessions");
+    case "opencode-cli":
+      return cannotRunManaged("OpenCode");
+    case "muse-cli":
+      return cannotRunManaged("Muse Code");
+  }
+}
+
+function cannotRunManaged(label: string): string {
+  return `${label} cannot run in managed-codebase mode, so main would not stay read-only.`;
 }

@@ -21,7 +21,6 @@ fn a_project_row(local_gh: bool) -> ProjectData {
         host_repo_paths: HashMap::new(),
         accounts: Vec::new(),
         local_gh,
-        home_agent: None,
         home_session_id: None,
     }
 }

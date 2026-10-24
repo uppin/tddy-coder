@@ -54,12 +54,4 @@ impl ProjectHandler for ProjectRpcHandler {
         self.set_project_accounts_at_project_coordinate(request)
             .await
     }
-
-    async fn set_project_home_agent(
-        &self,
-        request: Request<tddy_service::proto::project::SetProjectHomeAgentRequest>,
-    ) -> Result<Response<tddy_service::proto::project::SetProjectHomeAgentResponse>, Status> {
-        self.set_project_home_agent_at_project_coordinate(request)
-            .await
-    }
 }

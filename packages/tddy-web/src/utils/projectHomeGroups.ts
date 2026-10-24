@@ -5,8 +5,11 @@ import type { KnownProject, ProjectSessionGroup } from "./sessionProjectGroups";
 export interface ProjectHomeInfo {
   projectId: string;
   mainBranchRef: string;
-  /** The home agent's label; `null` when no home agent is set. */
-  homeAgentLabel: string | null;
+  /**
+   * The session the project records as its main (`ProjectEntry.homeSessionId`); `null` when main
+   * has not been set up. Configured iff non-null.
+   */
+  homeSessionId: string | null;
 }
 
 /** `SessionEntry.sessionRole` of a project's project-home session. */
@@ -21,8 +24,9 @@ export interface ProjectHomeSlot {
 
 /**
  * Splits a group into its pinned home entry and its rows. The pinned entry stands for the
- * project-home session, so that session is not repeated as a row. The **Other** group, and a
- * project absent from `homes`, have no pinned entry and keep every session as a row.
+ * project's recorded main, so that session is not repeated as a row. Any other session carrying
+ * the project-home role — a main that was replaced — is an ordinary row. The **Other** group, and
+ * a project absent from `homes`, have no pinned entry and keep every session as a row.
  */
 export function projectHomeSlot(
   group: ProjectSessionGroup,
@@ -31,29 +35,31 @@ export function projectHomeSlot(
   const home =
     group.projectId === null ? undefined : homes.find((h) => h.projectId === group.projectId);
   if (!home) return { home, homeSession: null, rows: group.sessions };
+  const isHome = (s: SessionEntry) =>
+    home.homeSessionId !== null && s.sessionId === home.homeSessionId;
   return {
     home,
-    homeSession: group.sessions.find((s) => s.sessionRole === PROJECT_HOME_ROLE) ?? null,
-    rows: group.sessions.filter((s) => s.sessionRole !== PROJECT_HOME_ROLE),
+    homeSession: group.sessions.find((s) => isHome(s)) ?? null,
+    rows: group.sessions.filter((s) => !isHome(s)),
   };
 }
 
 /**
- * Adds an empty group for each known project that has a home agent but no session yet, so its
+ * Adds an empty group for each known project that has a main but no listed session yet, so its
  * pinned **main** entry — the way to start that project's home session — is reachable before the
  * project has any session (`#project-home` 4/7). The session grouping itself
  * (`groupSessionsByProject`, `#project-home` 2/7) is untouched: this only fills in the groups it
  * leaves out, ordered among the others by the same name rule, ahead of the trailing **Other** group.
  *
- * A project without a home agent gets no empty group: its entry could only show a hint.
+ * A project without a main gets no empty group: its entry could only show a hint.
  */
 export function withProjectHomeGroups(
   groups: ProjectSessionGroup[],
   projects: ReadonlyArray<KnownProject>,
-  homes: ReadonlyArray<Pick<ProjectHomeInfo, "projectId" | "homeAgentLabel">>,
+  homes: ReadonlyArray<Pick<ProjectHomeInfo, "projectId" | "homeSessionId">>,
 ): ProjectSessionGroup[] {
   const grouped = new Set(groups.map((g) => g.projectId));
-  const startable = new Set(homes.filter((h) => h.homeAgentLabel !== null).map((h) => h.projectId));
+  const startable = new Set(homes.filter((h) => h.homeSessionId !== null).map((h) => h.projectId));
   const added: ProjectSessionGroup[] = projects
     .filter((p) => startable.has(p.projectId) && !grouped.has(p.projectId))
     .map((p) => ({ projectId: p.projectId, label: p.name, sessions: [] }));

@@ -1,49 +1,36 @@
 import { useCallback } from "react";
-import type { Client } from "@connectrpc/connect";
-import type { ProjectService } from "../../gen/project_pb";
 import {
-  parseSessionsProjectHomeSetupProjectId,
+  parseSessionsProjectHomeSetup,
   sessionsProjectHomeSetupPath,
   SESSIONS_DRAWER_ROUTE,
+  type SessionsProjectHomeSetupRoute,
 } from "../../routing/appRoutes";
 import { useAppLocation } from "../../routing/useAppLocation";
 
 /**
- * The sessions drawer's home-agent setup pane: which project it is open for (read from
- * `/sessions/project-home/:projectId`), the moves onto and off it, and the `SetProjectHomeAgent`
- * call its picker makes on the selected host. A stored choice re-reads the registry
- * (`onStored`), so the pinned **main** entry and the pane's Start button both see it.
+ * The sessions drawer's main setup pane: which project it is open for and whether it replaces a
+ * main already set up (read from `/sessions/project-home/:projectId[/replace]`), and the moves onto
+ * and off it.
+ *
+ * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
  */
-export function useProjectHomeSetup(input: {
-  projectClient: Client<typeof ProjectService> | null;
-  sessionToken: string;
-  selectedInstanceId: string;
-  onStored: () => void;
-}) {
-  const { projectClient, sessionToken, selectedInstanceId, onStored } = input;
+export function useProjectHomeSetup(): {
+  /** The open setup pane's route; `null` when the pane is not open. */
+  setup: SessionsProjectHomeSetupRoute | null;
+  open: (projectId: string, options?: { replacing?: boolean }) => void;
+  close: () => void;
+} {
   const { location, navigate } = useAppLocation();
-  const setupProjectId = parseSessionsProjectHomeSetupProjectId(location.path);
+  const setup = parseSessionsProjectHomeSetup(location.path);
 
-  // A pushed entry: the operator clicked "main", so Back returns them to what they were looking at.
+  // A pushed entry: the operator clicked "main" (or Replace main), so Back returns them to what they
+  // were looking at.
   const open = useCallback(
-    (projectId: string) => navigate(sessionsProjectHomeSetupPath(projectId)),
+    (projectId: string, options: { replacing?: boolean } = {}) =>
+      navigate(sessionsProjectHomeSetupPath(projectId, options)),
     [navigate],
   );
   const close = useCallback(() => navigate(SESSIONS_DRAWER_ROUTE), [navigate]);
 
-  const setHomeAgent = useCallback(
-    async (projectId: string, homeAgent: string): Promise<void> => {
-      if (!projectClient) throw new Error("not connected to a daemon");
-      await projectClient.setProjectHomeAgent({
-        sessionToken,
-        projectId,
-        homeAgent,
-        daemonInstanceId: selectedInstanceId,
-      });
-      onStored();
-    },
-    [projectClient, sessionToken, selectedInstanceId, onStored],
-  );
-
-  return { setupProjectId, open, close, setHomeAgent };
+  return { setup, open, close };
 }

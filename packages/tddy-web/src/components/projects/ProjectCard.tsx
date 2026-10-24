@@ -9,12 +9,12 @@ import {
   LocalGhToggle,
   type LoadHostGithubCli,
 } from "./ProjectLocalGh";
-import { ProjectHomeAgent } from "./ProjectHomeAgent";
+import { ProjectMainSessionLink } from "./ProjectMainSessionLink";
 import type { ProjectsScreenProps } from "./ProjectsScreen";
 
 /**
- * One logical project on the Projects screen: its default branch, account assignment, Local gh, home
- * agent, the hosts it lives on, and add-to-host. Its branch load and every action taken on it share
+ * One logical project on the Projects screen: its default branch, account assignment, Local gh, the
+ * link to its main session, the hosts it lives on, and add-to-host. Its branch load and every action taken on it share
  * one failure slot, rendered on the card.
  */
 
@@ -25,7 +25,8 @@ export interface ProjectGroup {
   mainBranchRef: string;
   accounts: { provider: string; accountId: string }[];
   localGh: boolean;
-  homeAgent: string;
+  /** The session the project records as its main; empty when main is not set up. */
+  homeSessionId: string;
   hosts: { daemonInstanceId: string; mainRepoPath: string }[];
 }
 
@@ -51,9 +52,6 @@ export function ProjectCard({
   accounts,
   onSetProjectAccounts,
   loadHostGithubCli,
-  agents,
-  onSetHomeAgent,
-  focusHomeAgent = false,
 }: {
   group: ProjectGroup;
   daemons: DaemonHost[];
@@ -63,10 +61,6 @@ export function ProjectCard({
   accounts: ProjectsScreenProps["accounts"];
   onSetProjectAccounts: ProjectsScreenProps["onSetProjectAccounts"];
   loadHostGithubCli: LoadHostGithubCli;
-  agents: { id: string; label: string }[];
-  onSetHomeAgent: ProjectsScreenProps["onSetHomeAgent"];
-  /** Focus this card's home-agent picker and scroll it into view. */
-  focusHomeAgent?: boolean;
 }) {
   const hostingIds = useMemo(
     () => new Set(group.hosts.map((h) => h.daemonInstanceId)),
@@ -178,20 +172,7 @@ export function ProjectCard({
         </select>
       </div>
 
-      {onSetHomeAgent ? (
-        <ProjectHomeAgent
-          project={{ projectId: group.projectId, homeAgent: group.homeAgent }}
-          agents={agents}
-          focused={focusHomeAgent}
-          onChange={(agentId) =>
-            onSetHomeAgent({
-              projectId: group.projectId,
-              homeAgent: agentId,
-              daemonInstanceId: primaryHost,
-            })
-          }
-        />
-      ) : null}
+      <ProjectMainSessionLink projectId={group.projectId} homeSessionId={group.homeSessionId} />
 
       <LocalGhToggle projectId={group.projectId} checked={group.localGh} onChange={setLocalGh} />
 

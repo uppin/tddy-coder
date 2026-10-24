@@ -40,6 +40,12 @@ export interface CreateSessionClaudeCliFieldsProps {
   sessionToken: string;
   sshConfigHost: string;
   setSshConfigHost: (sshConfigHost: string) => void;
+  /**
+   * The placement is not the operator's to choose: main runs managed on its project's home
+   * worktree, so the Sandbox, Sandboxed codebase and Managed codebase controls (and the codebase
+   * host under the last) are not offered.
+   */
+  placementFixed?: boolean;
 }
 
 /** Claude CLI session fields. */
@@ -76,6 +82,7 @@ export function CreateSessionClaudeCliFields({
   sessionToken,
   sshConfigHost,
   setSshConfigHost,
+  placementFixed = false,
 }: CreateSessionClaudeCliFieldsProps) {
   /**
    * The specialized-agent picker and the Semantic index, offered on **every** claude-cli placement.
@@ -118,14 +125,17 @@ export function CreateSessionClaudeCliFields({
         sandbox={sandbox}
         setSandbox={setSandbox}
         applyPlacement={applyPlacement}
+        placementFixed={placementFixed}
       />
 
-      <CreateSessionSandboxedCodebaseToggle
-        sandboxedCodebase={sandboxedCodebase}
-        sandboxedCodebaseUnavailableReason={sandboxedCodebaseUnavailableReason}
-        jailSharesTheFilesystemRoot={jailSharesTheFilesystemRoot}
-        applyPlacement={applyPlacement}
-      />
+      {!placementFixed && (
+        <CreateSessionSandboxedCodebaseToggle
+          sandboxedCodebase={sandboxedCodebase}
+          sandboxedCodebaseUnavailableReason={sandboxedCodebaseUnavailableReason}
+          jailSharesTheFilesystemRoot={jailSharesTheFilesystemRoot}
+          applyPlacement={applyPlacement}
+        />
+      )}
 
       <div>
         <label className={labelClass} htmlFor="create-session-initial-prompt">
@@ -146,46 +156,48 @@ export function CreateSessionClaudeCliFields({
           a recipe, a seeded changeset and a toolcall listener. It is the orchestration axis and
           confines nothing, so it composes with any placement — including the jailed codebase.
           See docs/ft/coder/managed-codebase-workflow.md. */}
-      <div>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            data-testid="create-session-managed-codebase-toggle"
-            type="checkbox"
-            className="h-4 w-4 rounded border-input"
-            checked={managedCodebase}
-            onChange={(e) => {
-              setManagedCodebase(e.target.checked);
-              // Switching the orchestration off resets what a managed session was going to be
-              // given, rather than leaving the values to be stripped at submit: a request that
-              // disagrees with the screen is how a picked agent went missing without an error.
-              // Both controls stay visible either way — they are placement-independent — so
-              // this is a reset the operator can see, not a hidden value dropped at the wire.
-              if (!e.target.checked) {
-                setSemanticIndex(false);
-                setSelectedAgentIds([]);
-              }
-              applyPlacement("managed", e.target.checked);
-            }}
-          />
-          Managed codebase
-        </label>
-        {managedCodebase && (
-          <CreateSessionManagedCodebaseFields
-            isSplitCodebase={isSplitCodebase}
-            recipe={recipe}
-            setRecipe={setRecipe}
-            canChooseCodebaseHost={canChooseCodebaseHost}
-            codebaseDaemonInstanceId={codebaseDaemonInstanceId}
-            setCodebaseDaemonInstanceId={setCodebaseDaemonInstanceId}
-            daemons={daemons}
-            sessionType={sessionType}
-            sshListDaemonId={sshListDaemonId}
-            sessionToken={sessionToken}
-            sshConfigHost={sshConfigHost}
-            setSshConfigHost={setSshConfigHost}
-          />
-        )}
-      </div>
+      {!placementFixed && (
+        <div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              data-testid="create-session-managed-codebase-toggle"
+              type="checkbox"
+              className="h-4 w-4 rounded border-input"
+              checked={managedCodebase}
+              onChange={(e) => {
+                setManagedCodebase(e.target.checked);
+                // Switching the orchestration off resets what a managed session was going to be
+                // given, rather than leaving the values to be stripped at submit: a request that
+                // disagrees with the screen is how a picked agent went missing without an error.
+                // Both controls stay visible either way — they are placement-independent — so
+                // this is a reset the operator can see, not a hidden value dropped at the wire.
+                if (!e.target.checked) {
+                  setSemanticIndex(false);
+                  setSelectedAgentIds([]);
+                }
+                applyPlacement("managed", e.target.checked);
+              }}
+            />
+            Managed codebase
+          </label>
+          {managedCodebase && (
+            <CreateSessionManagedCodebaseFields
+              isSplitCodebase={isSplitCodebase}
+              recipe={recipe}
+              setRecipe={setRecipe}
+              canChooseCodebaseHost={canChooseCodebaseHost}
+              codebaseDaemonInstanceId={codebaseDaemonInstanceId}
+              setCodebaseDaemonInstanceId={setCodebaseDaemonInstanceId}
+              daemons={daemons}
+              sessionType={sessionType}
+              sshListDaemonId={sshListDaemonId}
+              sessionToken={sessionToken}
+              sshConfigHost={sshConfigHost}
+              setSshConfigHost={setSshConfigHost}
+            />
+          )}
+        </div>
+      )}
 
       {placementIndependentFields}
     </>

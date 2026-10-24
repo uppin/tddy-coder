@@ -163,14 +163,14 @@ harness profile named by `ProjectData.home_agent`; the home session is found by 
 
 ## Implementation Milestones
 
-- [ ] Proto + gen (`scripts/generated-code.sh write packages/tddy-web` and the rust-typescript-tests tree)
-- [ ] `ProjectData.home_session_id` + `set_project_home_session`; literal sweep (`cargo check --all-targets` per crate)
-- [ ] Ensure with/without spec, refusals, replace, stale clearing
-- [ ] `SetProjectHomeAgent` removed end to end
-- [ ] `whyMainCannotRun` + `buildProjectHomeStartSpec`
-- [ ] Form variant + setup pane + routing replace mode
-- [ ] Pinned entry by id, label, Replace main, stale redirect
-- [ ] Projects card link; picker deleted
+- [x] Proto + gen (`scripts/generated-code.sh write packages/tddy-web` and the rust-typescript-tests tree)
+- [x] `ProjectData.home_session_id` + `set_project_home_session`; literal sweep (`cargo check --all-targets` per crate)
+- [x] Ensure with/without spec, refusals, replace, stale clearing
+- [x] `SetProjectHomeAgent` removed end to end
+- [x] `whyMainCannotRun` + `buildProjectHomeStartSpec`
+- [x] Form variant + setup pane + routing replace mode
+- [x] Pinned entry by id, label, Replace main, stale redirect
+- [x] Projects card link; picker deleted
 
 ## Testing Plan
 
@@ -278,6 +278,9 @@ Fixture sets main up with a claude-cli spec instead of a `home_agent:` row; test
 
 ## Technical Debt & Production Readiness
 
+- `TODO` `packages/tddy-agent-launch/src/project_home_start_spec.rs` — carry `session_role` on the sandboxed claude-cli path, then allow a sandboxed main.
+- `TODO` `packages/tddy-agent-launch/src/svc_ensure_project_home.rs` (replace branch) — a recorded main whose process outlived a daemon restart is not served, so Replace main cannot stop it ([running heuristic TODO](../todo/2026-10-23-project-home-running-heuristic.md)).
+
 ## Decisions & Trade-offs
 
 - **Read-only kept** (developer): only `claude-cli`; other types shown disabled with a reason.
@@ -287,6 +290,7 @@ Fixture sets main up with a claude-cli spec instead of a `home_agent:` row; test
 - **Replace main** (developer): stops the recorded main; the old session keeps its role and record.
 - **Sandbox refused for main** (planner, approved with PRD): the sandboxed claude-cli path drops `session_role`. TODO to file at green: carry the role on the sandboxed path, then allow it.
 - **No adoption of a pre-existing role-tagged main** (planner, approved with PRD): users set main up once again.
+- **Green additions** (implementer, kept): the type check runs on the spec *after* a harness profile named by `agent` is applied (so a cursor-cli profile cannot pass as claude-cli) — `start_session_core` now applies the profile and `start_session_with_role` takes a resolved request; `agent_clone` / `split_agent` are refused too; stack fields are cleared with the branch fields; replacing fast-forwards the home worktree before stopping the old main; a stale id is cleared and the outcome is `started`; a recorded id whose record is unreadable is `INTERNAL`, not cleared. `ProjectRpcHandler` lost `model_registry`, its field budget is 7 → 6.
 - **Daemon overwrites location fields** of the spec (project, repo path, branch, managed, role) rather than refusing them — they are the daemon's by definition of main; placement and role are refused because silently dropping them would change what the operator asked for.
 
 ## Refactoring Needed
@@ -319,7 +323,7 @@ Fixture sets main up with a claude-cli spec instead of a `home_agent:` row; test
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

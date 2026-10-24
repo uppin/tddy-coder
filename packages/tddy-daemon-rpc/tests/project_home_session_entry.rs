@@ -78,7 +78,6 @@ fn a_registered_project(data_dir: &Path, os_user: &str, home_session_id: Option<
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
             home_session_id: home_session_id.map(str::to_string),
         },
     )

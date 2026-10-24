@@ -5,7 +5,9 @@ import type { BranchWorktreeIntent } from "../../lib/branchConflict";
 import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useSessionAttachments } from "../../hooks/useSessionAttachments";
 import { useAvailableAgents } from "./useAvailableAgents";
-import type { SessionType } from "./createSessionRequest";
+import type { CreateSessionFormValues, SessionType } from "./createSessionRequest";
+import { whyMainCannotRun } from "./projectHomeSessionTypes";
+import { useProjectHomeStartSubmit } from "./useProjectHomeStartSubmit";
 import { CreateSessionTypeToggle } from "./CreateSessionTypeToggle";
 import { CreateSessionModelField } from "./CreateSessionModelField";
 import { BUILT_IN_PROVIDER, CreateSessionProviderField } from "./CreateSessionProviderField";
@@ -52,12 +54,16 @@ export function CreateSessionPane({
   onCancel,
   onCreated,
   initialValues,
+  projectHome,
 }: CreateSessionPaneProps) {
   const daemons = useDaemons();
   const { selectedInstanceId } = useSelectedDaemon();
 
-  const [sessionType, setSessionType] = useState<SessionType>(initialValues?.sessionType ?? "tool");
-  const [projectId, setProjectId] = useState(initialValues?.projectId ?? "");
+  // The main variant fixes the project and host, and opens on the one type that can run main.
+  const [sessionType, setSessionType] = useState<SessionType>(
+    projectHome ? "claude-cli" : (initialValues?.sessionType ?? "tool"),
+  );
+  const [projectId, setProjectId] = useState(projectHome?.projectId ?? initialValues?.projectId ?? "");
   // The *name* of the agent the operator picked (`claude`, an assistant's name). Which host offers it
   // is `daemonInstanceId`, and the pair is resolved against the fleet's catalog by `selectedAgent`
   // below — so a Host change re-points the same name rather than invalidating the selection.
@@ -89,7 +95,7 @@ export function CreateSessionPane({
   // pre-filled host falls through to the selected daemon so the Host <select>'s displayed option
   // matches the value it will submit.
   const [daemonInstanceId, setDaemonInstanceId] = useState(
-    initialValues?.daemonInstanceId || selectedInstanceId || "",
+    projectHome?.daemonInstanceId || initialValues?.daemonInstanceId || selectedInstanceId || "",
   );
 
   // The whole session list as the daemon reported it. Kept raw because two pickers draw different
@@ -235,54 +241,50 @@ export function CreateSessionPane({
     startPhase,
   } = sessionAttachments;
 
-  const {
-    submitting,
-    error,
-    branchConflict,
-    setBranchConflict,
-    isSubmitEnabled,
-    handleSubmit,
-    resolveBranchConflict,
-  } = useCreateSessionSubmit({
-    form: {
-      sessionToken,
-      projectId,
-      branchIntent,
-      newBranchName,
-      createRemoteBranch,
-      selectedBaseBranch,
-      selectedBranchToWorkOn,
-      daemonInstanceId,
-      sessionType,
-      toolPath,
-      selectedAgentId,
-      recipe,
-      stackParent,
-      stackNodeId,
-      stackParentDaemonInstanceId,
-      prStackBaseSessionId,
-      model,
-      providerAccountId,
-      providerBuiltIn: providerChoice === BUILT_IN_PROVIDER,
-      permissionMode,
-      dangerouslySkipPermissions,
-      placementWithdrawsPermissionBypass,
-      initialPrompt,
-      sandbox,
-      managedCodebase,
-      sandboxedCodebase,
-      isSplitCodebase,
-      selectedAgentIds,
-      semanticIndex,
-      codebaseDaemonInstanceId,
-      sshConfigHost,
-    },
+  const form: CreateSessionFormValues = {
+    sessionToken,
+    projectId,
+    branchIntent,
+    newBranchName,
+    createRemoteBranch,
+    selectedBaseBranch,
+    selectedBranchToWorkOn,
+    daemonInstanceId,
+    sessionType,
+    toolPath,
+    selectedAgentId,
+    recipe,
+    stackParent,
+    stackNodeId,
+    stackParentDaemonInstanceId,
+    prStackBaseSessionId,
+    model,
+    providerAccountId,
+    providerBuiltIn: providerChoice === BUILT_IN_PROVIDER,
+    permissionMode,
+    dangerouslySkipPermissions,
+    placementWithdrawsPermissionBypass,
+    initialPrompt,
+    sandbox,
+    managedCodebase,
+    sandboxedCodebase,
+    isSplitCodebase,
+    selectedAgentIds,
+    semanticIndex,
+    codebaseDaemonInstanceId,
+    sshConfigHost,
+  };
+  const created = useCreateSessionSubmit({
+    form,
     attachmentProblem,
     resetAttachmentProgress,
     stageAttachments,
     startSessionStreamed,
     onCreated,
   });
+  const { branchConflict, setBranchConflict, resolveBranchConflict } = created;
+  const { submitting, error, isSubmitEnabled, handleSubmit } =
+    useProjectHomeStartSubmit(projectHome, form, created);
 
   const modelField = (
     <CreateSessionModelField agentModels={agentModels} model={model} setModel={setModel} />
@@ -301,21 +303,27 @@ export function CreateSessionPane({
       data-testid="create-session-pane"
       className="flex flex-col h-full overflow-y-auto p-4 space-y-4"
     >
-      <h2 className="text-sm font-semibold">New session</h2>
+      {!projectHome && <h2 className="text-sm font-semibold">New session</h2>}
 
-      {/* Session type toggle */}
-      <CreateSessionTypeToggle sessionType={sessionType} setSessionType={setSessionType} />
-
-      <CreateSessionHostAndProjectFields
-        daemons={daemons}
-        daemonInstanceId={daemonInstanceId}
-        setDaemonInstanceId={setDaemonInstanceId}
-        projects={projects}
-        projectOptions={projectOptions}
-        projectsError={projectsError}
-        projectId={projectId}
-        setProjectId={setProjectId}
+      {/* Session type toggle; the main variant disables every type that cannot run main. */}
+      <CreateSessionTypeToggle
+        sessionType={sessionType}
+        setSessionType={setSessionType}
+        disabledReason={projectHome && whyMainCannotRun}
       />
+
+      {!projectHome && (
+        <CreateSessionHostAndProjectFields
+          daemons={daemons}
+          daemonInstanceId={daemonInstanceId}
+          setDaemonInstanceId={setDaemonInstanceId}
+          projects={projects}
+          projectOptions={projectOptions}
+          projectsError={projectsError}
+          projectId={projectId}
+          setProjectId={setProjectId}
+        />
+      )}
 
       {accountsClient && providerHarness !== null && (
         <CreateSessionProviderField
@@ -403,45 +411,51 @@ export function CreateSessionPane({
           sessionToken={sessionToken}
           sshConfigHost={sshConfigHost}
           setSshConfigHost={setSshConfigHost}
+          placementFixed={projectHome !== undefined}
         />
       )}
 
-      <CreateSessionStackParentSelect
-        stackParentOptions={stackParentOptions}
-        stackParent={stackParent}
-        setStackParent={setStackParent}
-        sessionsError={sessionsError}
-      />
+      {/* main's worktree, branch and stack are its project's; it is started with nothing attached. */}
+      {!projectHome && (
+        <>
+          <CreateSessionStackParentSelect
+            stackParentOptions={stackParentOptions}
+            stackParent={stackParent}
+            setStackParent={setStackParent}
+            sessionsError={sessionsError}
+          />
 
-      <CreateSessionBranchFields
-        branchIntent={branchIntent}
-        setBranchIntent={setBranchIntent}
-        baseBranchLabel={initialValues?.baseBranchLabel}
-        initialStackParent={initialValues?.stackParent}
-        baseBranchOptions={baseBranchOptions}
-        selectedBaseBranch={selectedBaseBranch}
-        setSelectedBaseBranch={setSelectedBaseBranch}
-        newBranchName={newBranchName}
-        setNewBranchName={setNewBranchName}
-        sessionType={sessionType}
-        createRemoteBranch={createRemoteBranch}
-        setCreateRemoteBranch={setCreateRemoteBranch}
-        remoteBranches={remoteBranches}
-        remoteBranchesError={remoteBranchesError}
-        selectedBranchToWorkOn={selectedBranchToWorkOn}
-        setSelectedBranchToWorkOn={setSelectedBranchToWorkOn}
-      />
+          <CreateSessionBranchFields
+            branchIntent={branchIntent}
+            setBranchIntent={setBranchIntent}
+            baseBranchLabel={initialValues?.baseBranchLabel}
+            initialStackParent={initialValues?.stackParent}
+            baseBranchOptions={baseBranchOptions}
+            selectedBaseBranch={selectedBaseBranch}
+            setSelectedBaseBranch={setSelectedBaseBranch}
+            newBranchName={newBranchName}
+            setNewBranchName={setNewBranchName}
+            sessionType={sessionType}
+            createRemoteBranch={createRemoteBranch}
+            setCreateRemoteBranch={setCreateRemoteBranch}
+            remoteBranches={remoteBranches}
+            remoteBranchesError={remoteBranchesError}
+            selectedBranchToWorkOn={selectedBranchToWorkOn}
+            setSelectedBranchToWorkOn={setSelectedBranchToWorkOn}
+          />
 
-      <CreateSessionAttachmentsSection
-        sessionAttachments={sessionAttachments}
-        client={client}
-        sessionFilesClient={sessionFilesClient}
-        worktreeClient={worktreeClient}
-        sessionToken={sessionToken}
-        submitting={submitting}
-        projects={projects}
-        projectId={projectId}
-      />
+          <CreateSessionAttachmentsSection
+            sessionAttachments={sessionAttachments}
+            client={client}
+            sessionFilesClient={sessionFilesClient}
+            worktreeClient={worktreeClient}
+            sessionToken={sessionToken}
+            submitting={submitting}
+            projects={projects}
+            projectId={projectId}
+          />
+        </>
+      )}
 
       {/* The step of the start the host is in, while it is streaming one. */}
       <CreateSessionStartPhase step={startPhase} />
@@ -461,6 +475,7 @@ export function CreateSessionPane({
         isSubmitEnabled={isSubmitEnabled}
         onCancel={onCancel}
         handleSubmit={handleSubmit}
+        submitLabel={projectHome ? "Start main session" : undefined}
       />
 
       {/* Branch-conflict prompt — an overlay over this form, which stays mounted with its values so

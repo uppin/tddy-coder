@@ -85,9 +85,6 @@ export function buildStartSessionRequest(
     model,
     providerAccountId,
     providerBuiltIn,
-    permissionMode,
-    dangerouslySkipPermissions,
-    placementWithdrawsPermissionBypass,
     initialPrompt,
     sandbox,
     managedCodebase,
@@ -208,26 +205,12 @@ export function buildStartSessionRequest(
     stackParent,
     stackParentDaemonInstanceId,
     stackNodeId,
-    sessionType: "claude-cli",
-    model,
-    providerAccountId,
-    providerBuiltIn,
-    permissionMode,
-    dangerouslySkipPermissions: placementWithdrawsPermissionBypass
-      ? false
-      : dangerouslySkipPermissions,
-    initialPrompt,
+    ...claudeCliAgentChoices(form),
     sandbox,
     managedCodebase,
     // The third placement. Choosing it cleared the two above and the codebase host in the form,
     // so they go out cleared here without being restated — the request says what the screen says.
     sandboxedCodebase,
-    // Both ride along on any placement, split or jailed or neither, and on whether the codebase is
-    // managed or not — an agent reads the codebase through its own placement, and the index is
-    // built wherever the worktree is. Nothing gates them here: the picker and the toggle are shown
-    // on every claude-cli placement, so what the form holds is what the screen showed.
-    specializedAgents: selectedAgentIds,
-    semanticIndex,
     // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
     // codebase installs, so a placement chosen before the toggle was switched off would name a
     // combination the daemon refuses.
@@ -237,11 +220,35 @@ export function buildStartSessionRequest(
 }
 
 /**
+ * What the operator chose for a claude-cli agent, independent of where it runs: model, provider,
+ * permissions, first prompt, specialized agents and semantic index. Shared by the New-session
+ * request and the main start spec so the two cannot drift.
+ */
+function claudeCliAgentChoices(form: CreateSessionFormValues) {
+  return {
+    sessionType: "claude-cli",
+    model: form.model,
+    providerAccountId: form.providerAccountId,
+    providerBuiltIn: form.providerBuiltIn,
+    permissionMode: form.permissionMode,
+    dangerouslySkipPermissions: form.placementWithdrawsPermissionBypass
+      ? false
+      : form.dangerouslySkipPermissions,
+    initialPrompt: form.initialPrompt,
+    // Both ride along on any placement, split or jailed or neither, and on whether the codebase is
+    // managed or not — an agent reads the codebase through its own placement, and the index is
+    // built wherever the worktree is. Nothing gates them here: the picker and the toggle are shown
+    // on every claude-cli placement, so what the form holds is what the screen showed.
+    specializedAgents: form.selectedAgentIds,
+    semanticIndex: form.semanticIndex,
+  } satisfies StartSessionRequestInit;
+}
+
+/**
  * The start spec the main variant of the form sends in `EnsureProjectHomeSession.start`: the
  * claude-cli request without the fields the daemon owns for main — project, branch, placement and
  * stack — so the spec says only what the operator chose.
  */
-export function buildProjectHomeStartSpec(_form: CreateSessionFormValues): StartSessionRequestInit {
-  // TODO: implement (docs/dev/1-WIP/2026-10-24-project-home-from-new-session-form.md).
-  throw new Error("buildProjectHomeStartSpec is not implemented");
+export function buildProjectHomeStartSpec(form: CreateSessionFormValues): StartSessionRequestInit {
+  return claudeCliAgentChoices(form);
 }

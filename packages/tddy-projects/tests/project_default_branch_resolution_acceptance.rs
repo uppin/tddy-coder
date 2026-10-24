@@ -93,7 +93,6 @@ fn legacy_project_resolves_its_default_live_from_the_repository_not_a_hardcoded_
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
             home_session_id: None,
         },
     )
@@ -131,7 +130,6 @@ fn a_stored_default_branch_wins_over_the_legacy_probe() {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
             home_session_id: None,
         },
     )
@@ -163,7 +161,6 @@ fn any_remote_branch_including_a_slashed_name_is_a_valid_stored_default() {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
             home_session_id: None,
         },
     );
@@ -190,7 +187,6 @@ fn a_default_branch_with_shell_metacharacters_is_still_rejected() {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
             home_session_id: None,
         },
     );

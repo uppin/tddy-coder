@@ -73,16 +73,14 @@ interface SessionDrawerProps {
    * 2/7). A session whose project is not here lands in the trailing **Other** group.
    */
   projects?: ReadonlyArray<{ projectId: string; name: string }>;
-  /**
-   * What each project group's pinned **main** entry shows (`#project-home` 4/7): the project's main
-   * branch ref and its home agent's label (`null` when no home agent is set — the entry then shows
-   * a hint instead of starting anything). A project absent here gets no pinned entry.
-   */
+  /** Each project group's pinned **main** entry (`#project-home` 4/7); absent: no pinned entry. */
   projectHomes?: ReadonlyArray<ProjectHomeInfo>;
   /** Start, resume or reach the project's home session. Rejects with the daemon's reason. */
   onEnsureProjectHome?: (projectId: string) => Promise<void>;
-  /** Take the operator to set a home agent for a project that has none — its pinned entry's click. */
+  /** Take the operator to set main up for a project that has none — its pinned entry's click. */
   onSetUpProjectHome?: (projectId: string) => void;
+  /** Take the operator to set main up again — a set-up main's **Replace main** action. */
+  onReplaceProjectHome?: (projectId: string) => void;
 }
 
 export type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
@@ -112,14 +110,14 @@ export function SessionDrawer({
   projectHomes = [],
   onEnsureProjectHome,
   onSetUpProjectHome,
+  onReplaceProjectHome,
 }: SessionDrawerProps) {
   const owningHost: OwningHostInfo = {
     selectedInstanceId,
     hostLabelForInstance,
   };
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(readCollapsedProjects);
-  // A project with a home agent but no session yet still gets its group, so its pinned entry is
-  // reachable; only when the pinned entry can act at all.
+  // A project with a main but no listed session still gets its group, when its entry can act.
   const projectGroups = withProjectHomeGroups(
     groupSessionsByProject(sessions, projects),
     projects,
@@ -259,6 +257,7 @@ export function SessionDrawer({
                     selected={homeSession !== null && homeSession.sessionId === selectedSessionId}
                     onEnsure={onEnsureProjectHome}
                     onSetUpProjectHome={onSetUpProjectHome}
+                    onReplaceProjectHome={onReplaceProjectHome}
                   />
                 )}
                 <SessionGroupBody

@@ -16,6 +16,7 @@ import type { BranchWorktreeIntent } from "../../lib/branchConflict";
 import type { InitialAttachment } from "./attachments/pendingAttachment";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import type { SessionType } from "./createSessionRequest";
+import type { StartSessionRequestInit } from "../../hooks/useSessionAttachments";
 
 type ConnectionClient = Client<typeof SessionService>;
 type ProjectClient = Client<typeof ProjectService>;
@@ -113,4 +114,25 @@ export interface CreateSessionPaneProps {
   onCancel: () => void;
   onCreated: (sessionId: string) => void;
   initialValues?: CreateSessionInitialValues;
+  /**
+   * Opens the form in its **main** variant, setting up (or replacing) a project's main session:
+   * project and host are fixed, branch, stack, attachments and placement are not offered, only
+   * the session types that can run main are selectable, and submitting hands the start spec to
+   * `onStart` instead of starting a session itself. Absent: the ordinary New-session form.
+   */
+  projectHome?: CreateSessionProjectHome;
+}
+
+/** What the main variant of the form sets up. See `CreateSessionPaneProps.projectHome`. */
+export interface CreateSessionProjectHome {
+  projectId: string;
+  /** The host main runs on — the one `EnsureProjectHomeSession` is addressed to. */
+  daemonInstanceId: string;
+  /** The project already has a main, which starting stops and replaces. */
+  replacing: boolean;
+  /**
+   * Sets main up from the form's start spec (`buildProjectHomeStartSpec`). Rejects with the
+   * daemon's reason, which the form shows.
+   */
+  onStart: (spec: StartSessionRequestInit) => Promise<void>;
 }

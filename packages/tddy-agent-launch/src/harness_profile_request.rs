@@ -31,23 +31,25 @@ impl LaunchSessions {
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
         refuse_a_requested_role(&req)?;
+        let req = self.apply_harness_profile(req)?;
         self.start_session_with_role(req, progress).await
     }
 
-    /// Start `req` with the standing role it carries. Reached only from inside the daemon —
-    /// `EnsureProjectHomeSession` is the one caller — never from a request a client sent.
+    /// Start `req`, its harness profile already applied, with the standing role it carries.
+    /// Reached only from inside the daemon — `EnsureProjectHomeSession` is the one caller, and it
+    /// applies the profile itself so it can check the session type the profile resolves to —
+    /// never from a request a client sent.
     pub(crate) async fn start_session_with_role(
         &self,
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        let req = self.apply_harness_profile(req)?;
         self.start_session_on_request(req, progress).await
     }
 
     /// `req` as the profile its `agent` names in `<tddyhome>/agents/` would start it; `req`
     /// unchanged when its `agent` names no profile.
-    fn apply_harness_profile(
+    pub(crate) fn apply_harness_profile(
         &self,
         req: StartSessionRequest,
     ) -> Result<StartSessionRequest, Status> {

@@ -82,17 +82,6 @@ mod tests {
             > {
                 Err(tddy_rpc::Status::unimplemented("test stub"))
             }
-            async fn set_project_home_agent(
-                &self,
-                _request: tddy_rpc::Request<
-                    tddy_service::proto::project::SetProjectHomeAgentRequest,
-                >,
-            ) -> Result<
-                tddy_rpc::Response<tddy_service::proto::project::SetProjectHomeAgentResponse>,
-                tddy_rpc::Status,
-            > {
-                Err(tddy_rpc::Status::unimplemented("test stub"))
-            }
         }
 
         let entry = build_project_entry(ProjectServiceImpl::new(Arc::new(Noop)));

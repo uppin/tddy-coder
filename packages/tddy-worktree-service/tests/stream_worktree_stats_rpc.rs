@@ -134,7 +134,6 @@ fn a_project_with_a_secondary_worktree() -> Fixture {
             host_repo_paths: std::collections::HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
             home_session_id: None,
         },
     )

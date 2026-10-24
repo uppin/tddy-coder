@@ -3,6 +3,11 @@ import type { SessionType } from "./createSessionRequest";
 export interface CreateSessionTypeToggleProps {
   sessionType: SessionType;
   setSessionType: (sessionType: SessionType) => void;
+  /**
+   * Why a type cannot be chosen here, or `null` when it can. A type with a reason is shown
+   * disabled, its reason listed under the toggle. Absent: every type can be chosen.
+   */
+  disabledReason?: (sessionType: SessionType) => string | null;
 }
 
 /** The session types the toggle offers, in order, with the label each button shows. */
@@ -21,25 +26,44 @@ const SESSION_TYPE_OPTIONS: { id: SessionType; label: string }[] = [
 export function CreateSessionTypeToggle({
   sessionType,
   setSessionType,
+  disabledReason = () => null,
 }: CreateSessionTypeToggleProps) {
+  const options = SESSION_TYPE_OPTIONS.map((option) => ({ ...option, reason: disabledReason(option.id) }));
+  const disabled = options.filter((option) => option.reason !== null);
   return (
-    <div className="flex gap-2">
-      {SESSION_TYPE_OPTIONS.map(({ id, label }) => (
-        <button
-          key={id}
-          type="button"
-          data-testid={`create-session-type-${id}`}
-          aria-pressed={sessionType === id}
-          onClick={() => setSessionType(id)}
-          className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
-            sessionType === id
-              ? "bg-primary text-primary-foreground border-primary"
-              : "bg-background text-foreground border-input hover:bg-muted"
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
+    <>
+      <div className="flex gap-2">
+        {options.map(({ id, label, reason }) => (
+          <button
+            key={id}
+            type="button"
+            data-testid={`create-session-type-${id}`}
+            aria-pressed={sessionType === id}
+            aria-describedby={reason !== null ? `create-session-type-reason-${id}` : undefined}
+            disabled={reason !== null}
+            onClick={() => setSessionType(id)}
+            className={`px-3 py-1.5 rounded-md text-sm border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              sessionType === id
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-foreground border-input hover:bg-muted"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {disabled.length > 0 && (
+        <ul className="space-y-1 text-xs text-muted-foreground">
+          {disabled.map(({ id, label, reason }) => (
+            <li key={id}>
+              <span className="font-medium">{label}:</span>{" "}
+              <span id={`create-session-type-reason-${id}`} data-testid={`create-session-type-reason-${id}`}>
+                {reason}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

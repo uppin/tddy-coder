@@ -116,8 +116,8 @@ function rowOrderIn(projectId: string): Cypress.Chainable<string[]> {
     .then(($rows) =>
       [...$rows]
         .map((el) => el.getAttribute("data-testid")!)
-        // A row's own parts (status dot, label) and the entry's error are not rows.
-        .filter((id) => !/^sessions-drawer-(item-(status|label)|project-home-error)-/.test(id)),
+        // A row's own parts (status dot, label) and the entry's error and Replace action are not rows.
+        .filter((id) => !/^sessions-drawer-(item-(status|label)|project-home-(error|replace))-/.test(id)),
     );
 }
 

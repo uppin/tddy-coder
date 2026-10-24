@@ -100,7 +100,6 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 default_remote: String::new(),
                 accounts: Vec::new(),
                 local_gh: false,
-                home_agent: String::new(),
                 home_session_id: String::new(),
             },
             ProtoProjectEntry {
@@ -113,7 +112,6 @@ impl EligibleDaemonSource for TestPeerProjectsSource {
                 default_remote: String::new(),
                 accounts: Vec::new(),
                 local_gh: false,
-                home_agent: String::new(),
                 home_session_id: String::new(),
             },
         ]

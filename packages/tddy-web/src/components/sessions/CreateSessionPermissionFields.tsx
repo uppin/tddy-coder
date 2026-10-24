@@ -11,6 +11,8 @@ export interface CreateSessionPermissionFieldsProps {
   sandbox: boolean;
   setSandbox: (sandbox: boolean) => void;
   applyPlacement: (toggled: CodebasePlacementChoice, on: boolean) => void;
+  /** The placement is not the operator's to choose (main's): the Sandbox toggle is not offered. */
+  placementFixed?: boolean;
 }
 
 /**
@@ -27,6 +29,7 @@ export function CreateSessionPermissionFields({
   sandbox,
   setSandbox,
   applyPlacement,
+  placementFixed = false,
 }: CreateSessionPermissionFieldsProps) {
   return (
     <>
@@ -74,21 +77,23 @@ export function CreateSessionPermissionFields({
           placement it confines the codebase host — the jail runs on the daemon holding the
           checkout, not the agent host. The combination with codebase_daemon_instance_id is
           admitted and the jail is placed on the codebase host. */}
-      <div>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            data-testid="create-session-sandbox-toggle"
-            type="checkbox"
-            className="h-4 w-4 rounded border-input"
-            checked={sandbox}
-            onChange={(e) => {
-              setSandbox(e.target.checked);
-              applyPlacement("sandbox", e.target.checked);
-            }}
-          />
-          Sandbox
-        </label>
-      </div>
+      {!placementFixed && (
+        <div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              data-testid="create-session-sandbox-toggle"
+              type="checkbox"
+              className="h-4 w-4 rounded border-input"
+              checked={sandbox}
+              onChange={(e) => {
+                setSandbox(e.target.checked);
+                applyPlacement("sandbox", e.target.checked);
+              }}
+            />
+            Sandbox
+          </label>
+        </div>
+      )}
     </>
   );
 }

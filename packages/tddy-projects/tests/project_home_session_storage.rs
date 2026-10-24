@@ -100,7 +100,10 @@ fn clearing_the_home_session_writes_no_key() {
     // Then
     assert_eq!(stored_row(dir.path()).home_session_id, None);
     let yaml = the_registry_file(dir.path());
-    assert!(!yaml.contains("home_session_id"), "unexpected key in:\n{yaml}");
+    assert!(
+        !yaml.contains("home_session_id"),
+        "unexpected key in:\n{yaml}"
+    );
 }
 
 #[test]

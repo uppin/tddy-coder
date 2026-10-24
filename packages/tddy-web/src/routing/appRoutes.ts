@@ -155,25 +155,57 @@ export function isSessionsNewPath(pathname: string): boolean {
 }
 
 /**
- * Prefix of the pane that sets up a project's home agent: `/sessions/project-home/:projectId`, where
- * a click on the drawer's pinned **main** entry lands when the project has no home agent. Two
+ * Prefix of the pane that sets up a project's **main** session: `/sessions/project-home/:projectId`,
+ * where a click on the drawer's pinned **main** entry lands when the project has no main, and
+ * `/sessions/project-home/:projectId/replace`, where its **Replace main** action lands. Two or three
  * segments, so it can never be read as a session id.
  */
 export const SESSIONS_PROJECT_HOME_SETUP_ROUTE = `${SESSIONS_DRAWER_ROUTE}/project-home`;
 
-/** Builds the `/sessions/project-home/:projectId` path for the given project id. */
-export function sessionsProjectHomeSetupPath(projectId: string): string {
-  return `${SESSIONS_PROJECT_HOME_SETUP_ROUTE}/${encodeURIComponent(projectId)}`;
+/** The trailing segment that opens the setup pane in replace mode. */
+const PROJECT_HOME_REPLACE_SEGMENT = "replace";
+
+/** Which project the setup pane is open for, and whether it replaces a main already set up. */
+export interface SessionsProjectHomeSetupRoute {
+  projectId: string;
+  replacing: boolean;
 }
 
-/** Extracts the project id from `/sessions/project-home/:projectId`; `null` for any other path. */
+/**
+ * Builds the `/sessions/project-home/:projectId` path for the given project id, or its
+ * `/replace` form when `replacing`.
+ */
+export function sessionsProjectHomeSetupPath(
+  projectId: string,
+  options: { replacing?: boolean } = {},
+): string {
+  const path = `${SESSIONS_PROJECT_HOME_SETUP_ROUTE}/${encodeURIComponent(projectId)}`;
+  return options.replacing ? `${path}/${PROJECT_HOME_REPLACE_SEGMENT}` : path;
+}
+
+/**
+ * Reads `/sessions/project-home/:projectId` and `/sessions/project-home/:projectId/replace`;
+ * `null` for any other path.
+ */
+export function parseSessionsProjectHomeSetup(pathname: string): SessionsProjectHomeSetupRoute | null {
+  const plain = decodeSegment(singleSegmentAfter(pathname, SESSIONS_PROJECT_HOME_SETUP_ROUTE));
+  if (plain !== null) return { projectId: plain, replacing: false };
+  // The project id is encoded, so a literal `/` can only be the one before the replace segment.
+  const replaceSuffix = `/${PROJECT_HOME_REPLACE_SEGMENT}`;
+  if (!pathname.endsWith(replaceSuffix)) return null;
+  const setupPath = pathname.slice(0, -replaceSuffix.length);
+  const projectId = decodeSegment(singleSegmentAfter(setupPath, SESSIONS_PROJECT_HOME_SETUP_ROUTE));
+  return projectId === null ? null : { projectId, replacing: true };
+}
+
+/** Extracts the project id from either setup path; `null` for any other path. */
 export function parseSessionsProjectHomeSetupProjectId(pathname: string): string | null {
-  return decodeSegment(singleSegmentAfter(pathname, SESSIONS_PROJECT_HOME_SETUP_ROUTE));
+  return parseSessionsProjectHomeSetup(pathname)?.projectId ?? null;
 }
 
 /**
  * Returns true for `/sessions` (the drawer root), `/sessions/:id` (deep links), `/sessions/new` and
- * `/sessions/project-home/:projectId` — every path the sessions drawer screen owns.
+ * `/sessions/project-home/:projectId[/replace]` — every path the sessions drawer screen owns.
  * Does NOT match `/sessions-extra` or other paths that merely start with `/sessions`.
  */
 export function isSessionsDrawerPath(pathname: string): boolean {

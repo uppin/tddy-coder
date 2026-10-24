@@ -1,9 +1,5 @@
 //! The agent rows `CatalogService.ListAgents` answers with: the config allowlist, the model
 //! registry's assistants, and the harness profiles under `<data>/agents`.
-//!
-//! One assembly for every caller that needs the catalog. A caller that checks an id against the
-//! catalog (the project home agent) accepts exactly the ids the picker is offered, because both read
-//! these rows.
 
 use std::path::Path;
 

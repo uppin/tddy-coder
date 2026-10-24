@@ -1052,21 +1052,10 @@ export const sessionsDrawerProjectHome = (projectId: string) =>
   `sessions-drawer-project-home-${projectId}`;
 
 /** `[data-testid="sessions-project-home-setup-<projectId>"]` — the detail pane a click on a pinned
- *  **main** entry opens when the project has no home agent (`/sessions/project-home/:projectId`). */
+ *  **main** entry opens when the project has no main (`/sessions/project-home/:projectId`), or its
+ *  **Replace main** action opens (`…/replace`). */
 export const sessionsProjectHomeSetup = (projectId: string) =>
   `sessions-project-home-setup-${projectId}`;
-
-/** `[data-testid="sessions-project-home-setup-start-<projectId>"]` — the pane's Start main session button. */
-export const sessionsProjectHomeSetupStart = (projectId: string) =>
-  `sessions-project-home-setup-start-${projectId}`;
-
-/** `[data-testid="sessions-project-home-setup-close-<projectId>"]` — the pane's Cancel button. */
-export const sessionsProjectHomeSetupClose = (projectId: string) =>
-  `sessions-project-home-setup-close-${projectId}`;
-
-/** `[data-testid="sessions-project-home-setup-error-<projectId>"]` — why the pane's last start failed. */
-export const sessionsProjectHomeSetupError = (projectId: string) =>
-  `sessions-project-home-setup-error-${projectId}`;
 
 /** `[data-testid="sessions-project-home-setup-unknown-<projectId>"]` — shown when the host does not
  *  list the project the pane names. */
@@ -1564,15 +1553,6 @@ export const projectAccountUnavailable = (projectId: string, provider: string) =
 /** `[data-testid="project-local-gh-toggle-<projectId>"]` — the checkbox that sets a project to take
  *  its GitHub identity from each host's own `gh` login instead of a vault account. */
 export const projectLocalGhToggle = (projectId: string) => `project-local-gh-toggle-${projectId}`;
-
-/** `[data-testid="project-home-agent-select-<projectId>"]` — the agent the project's project-home
- *  session runs (`#project-home` 1/7). */
-export const projectHomeAgentSelect = (projectId: string) =>
-  `project-home-agent-select-${projectId}`;
-
-/** `[data-testid="project-home-agent-error-<projectId>"]` — why the last home agent change was
- *  refused, on that project's card. */
-export const projectHomeAgentError = (projectId: string) => `project-home-agent-error-${projectId}`;
 
 /** `[data-testid="project-host-gh-<projectId>-<daemonInstanceId>"]` — on a Local gh project's host
  *  row: whether that host's `gh` is logged in for the project's GitHub host, and as whom. */

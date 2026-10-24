@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_rpc::{Code, Request};
 use tddy_projects::project_storage;
+use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, ListSessionsRequest,
     SessionEntry, SessionService as SessionServiceTrait, StartSessionRequest,
@@ -454,7 +454,10 @@ async fn setting_up_main_as_cursor_cli_is_refused_naming_the_type_and_starts_not
     };
 
     // When
-    let refusal = world.set_up_main(spec).await.expect_err("cursor-cli is refused");
+    let refusal = world
+        .set_up_main(spec)
+        .await
+        .expect_err("cursor-cli is refused");
 
     // Then
     assert_eq!(refusal.code(), Code::FailedPrecondition);
@@ -478,7 +481,10 @@ async fn setting_up_main_as_a_tool_session_is_refused_and_starts_nothing() {
     };
 
     // When
-    let refusal = world.set_up_main(spec).await.expect_err("a tool session is refused");
+    let refusal = world
+        .set_up_main(spec)
+        .await
+        .expect_err("a tool session is refused");
 
     // Then
     assert_eq!(refusal.code(), Code::FailedPrecondition);
@@ -500,7 +506,10 @@ async fn setting_up_main_in_a_sandbox_is_refused_and_starts_nothing() {
     };
 
     // When
-    let refusal = world.set_up_main(spec).await.expect_err("a sandbox is refused");
+    let refusal = world
+        .set_up_main(spec)
+        .await
+        .expect_err("a sandbox is refused");
 
     // Then
     assert_eq!(refusal.code(), Code::InvalidArgument);
@@ -517,7 +526,10 @@ async fn setting_up_main_with_a_requested_role_is_refused_and_starts_nothing() {
     };
 
     // When
-    let refusal = world.set_up_main(spec).await.expect_err("a requested role is refused");
+    let refusal = world
+        .set_up_main(spec)
+        .await
+        .expect_err("a requested role is refused");
 
     // Then
     assert_eq!(refusal.code(), Code::PermissionDenied);
