@@ -115,6 +115,14 @@ printf '%s\n' "$TDDY_STUB_LINE" >> "{target}"
         self
     }
 
+    /// Raw `sh` to run after everything added so far — for a stub that prints what its agent
+    /// prints as it exits, then exits.
+    pub fn then_running(mut self, sh: &str) -> Self {
+        self.body.push_str(sh.trim_end());
+        self.body.push('\n');
+        self
+    }
+
     /// Stay alive reading stdin, standing in for an agent that holds its PTY open.
     pub fn then_reading_stdin(mut self) -> Self {
         self.body.push_str("exec cat\n");

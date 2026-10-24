@@ -65,6 +65,7 @@ fn write_claude_cli_session(
         session_type: Some("claude-cli".to_string()),
         model: Some("claude-opus-4-8".to_string()),
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: initial_activity_status.map(str::to_owned),
         hook_token: Some(hook_token.to_string()),
         sandbox: None,

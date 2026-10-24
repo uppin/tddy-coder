@@ -252,6 +252,7 @@ impl SessionMetadataBuilder {
             session_type: self.session_type,
             model: self.model,
             cursor_chat_id: None,
+            harness_resume_token: None,
             activity_status: self.activity_status,
             hook_token: self.hook_token,
             sandbox: self.sandbox,

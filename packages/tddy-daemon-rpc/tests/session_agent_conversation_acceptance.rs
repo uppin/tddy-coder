@@ -166,6 +166,7 @@ fn a_managed_session(session_id: &str) -> SessionMetadata {
         session_type: Some("claude-cli".to_string()),
         model: None,
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: None,
         sandbox: Some(true),
