@@ -591,3 +591,92 @@ describe("Terminal history paging — overlay double-buffer", () => {
     terminal.expectNoHistoryFetchStarted();
   });
 });
+
+// A full-screen TUI that owns navigation (alternate screen, or mouse tracking) scrolls its own
+// output, and its alternate-screen repaints never become scrollback — so the history replay holds
+// frames, not a transcript, and the terminal does not offer it.
+describe("Terminal history paging — while a full-screen TUI owns navigation", () => {
+  it("hides Load earlier output while the live terminal is on the alternate screen", () => {
+    // Given
+    const terminal = aTerminalWithHistoryPaging()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME)
+      .expectAffordanceVisible();
+
+    // When
+    terminal.enterLiveAltScreen();
+
+    // Then
+    terminal.expectAffordanceAbsent();
+  });
+
+  it("offers Load earlier output again once the TUI leaves the alternate screen", () => {
+    // Given
+    const terminal = aTerminalWithHistoryPaging()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME);
+    terminal.enterLiveAltScreen();
+    terminal.expectAffordanceAbsent();
+
+    // When
+    terminal.exitLiveAltScreen();
+
+    // Then
+    terminal.expectAffordanceVisible();
+  });
+
+  it("hides Load earlier output while the TUI tracks the mouse on the normal screen — what a reattach to a fullscreen Claude learns from the replayed mouse modes", () => {
+    // Given
+    const terminal = aTerminalWithHistoryPaging()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME)
+      .expectAffordanceVisible();
+
+    // When
+    terminal.enableLiveMouseTracking(true);
+
+    // Then
+    terminal.expectAffordanceAbsent();
+  });
+
+  it("hides View history once a filled session's TUI enters the alternate screen", () => {
+    // Given — history was loaded and the user is back on the live pane
+    const terminal = aTerminalWithHistoryPaging()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME)
+      .activateLoadEarlier()
+      .expectHistoryFetchPending()
+      .resolveHistoryChunk(OLDER_CHUNK_FINAL)
+      .expectPageForeground()
+      .activateBackToLive()
+      .expectViewHistoryVisible();
+
+    // When
+    terminal.enterLiveAltScreen();
+
+    // Then
+    terminal.expectViewHistoryAbsent();
+  });
+
+  it("keeps Back to live while the user is viewing history and the TUI enters the alternate screen", () => {
+    // Given — the user is viewing history
+    const terminal = aTerminalWithHistoryPaging()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME)
+      .activateLoadEarlier()
+      .expectHistoryFetchPending()
+      .resolveHistoryChunk(OLDER_CHUNK_FINAL)
+      .expectPageForeground();
+
+    // When
+    terminal.enterLiveAltScreen();
+
+    // Then
+    terminal.expectBackToLiveVisible();
+  });
+});
