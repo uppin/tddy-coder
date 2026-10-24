@@ -61,7 +61,7 @@
 //!
 //! # Forwarding and `RpcClient`
 //!
-//! Each [`forward_start_session_via_livekit`] call uses [`Room::subscribe`] and
+//! Each [`forward_stream_start_session_via_livekit`] call uses [`Room::subscribe`] and
 //! [`RpcClient::new_shared`](tddy_livekit::RpcClient::new_shared), which **spawns a background task** to consume that
 //! subscription until the receiver is dropped. Repeated forwards therefore add redundant handlers;
 //! acceptable when forwards are rare. A future optimization is a **single** room-scoped dispatcher
@@ -1380,8 +1380,6 @@ pub use tddy_daemon_kernel::peer_calls::{
     forward_read_host_document as forward_read_host_document_via_livekit,
     forward_set_project_accounts as forward_set_project_accounts_via_livekit,
     forward_set_project_default_branch as forward_set_project_default_branch_via_livekit,
-    forward_start_session as forward_start_session_via_livekit,
-    forward_start_session_within as forward_start_session_via_livekit_within,
     forward_stream_execute_tool as forward_stream_execute_tool_via_livekit,
     forward_stream_read_host_document as forward_stream_read_host_document_via_livekit,
     forward_stream_start_session as forward_stream_start_session_via_livekit,

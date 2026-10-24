@@ -13747,6 +13747,7 @@ dependencies = [
  "tddy-room-client",
  "tddy-rpc",
  "tddy-service",
+ "tddy-session-files",
  "tddy-session-sync",
  "tddy-subagent-worktree",
  "tddy-testing-commons",

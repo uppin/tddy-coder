@@ -4,6 +4,7 @@ use tddy_core::session_lifecycle::validate_session_id_segment;
 
 use tddy_service::proto::session::SplitAgentPlacement;
 
+use tddy_daemon_kernel::peer_calls::ForwardedStartFailure;
 use tddy_rpc::Status;
 
 use crate::workspace_session;
@@ -22,22 +23,20 @@ use crate::workspace_session;
 /// such session" proves the session was never created, or only that it did not exist yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitStartFailure {
-    /// A verdict was reached within the deadline — the peer refused, answered something
-    /// unusable, or the agent spawn on this host failed. Whatever the peer holds now is final.
+    /// The codebase host answered — with any status, its own `DEADLINE_EXCEEDED` included — or the
+    /// agent spawn on this host failed. Whatever the peer holds now is final.
     PeerAnswered,
-    /// The forwarded start ran out of time. The peer is still free to finish the work it was
-    /// doing, so nothing about its current state is final.
-    ForwardDeadline,
+    /// The codebase host went silent for the relay's idle window. It is still free to finish the
+    /// work it was doing, so nothing about its current state is final.
+    PeerSilent,
 }
 
 impl SplitStartFailure {
-    /// Classify the error a forwarded start came back with. Only [`Code::DeadlineExceeded`] leaves
-    /// the peer still working — every other status means it answered.
-    pub fn from_forward_error(status: &Status) -> Self {
-        if status.code == tddy_rpc::Code::DeadlineExceeded {
-            Self::ForwardDeadline
-        } else {
-            Self::PeerAnswered
+    /// Classify a forwarded start's failure: only silence leaves the peer's state open.
+    pub fn from_forward_failure(failure: &ForwardedStartFailure) -> Self {
+        match failure {
+            ForwardedStartFailure::PeerAnswered(_) => Self::PeerAnswered,
+            ForwardedStartFailure::PeerSilent(_) => Self::PeerSilent,
         }
     }
 }

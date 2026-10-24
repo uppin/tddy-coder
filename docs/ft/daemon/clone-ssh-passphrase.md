@@ -81,11 +81,10 @@ No ssh-agent is ever started by the daemon.
   token the daemon did not issue, or one whose clone has ended, is refused without raising a prompt.
 - **A prompt belongs to one operator.** It is shown only to the GitHub user whose session started the
   clone, and only that user can answer it.
-- **A forwarded start is not abandoned while someone types.** A `StartSession` forwarded to a peer waits
-  the same budget a split session's forwarded start does (the peer's clone deadline plus one forward
-  deadline, 330 seconds by default) instead of the 30-second forward deadline. A streamed start carries a
-  keep-alive event every 5 seconds while the host provisions, so the relay's 30-second idle timeout still
-  ends a stream whose peer has gone silent.
+- **A forwarded start is not abandoned while someone types.** A `StartSession` forwarded to a peer has no
+  overall deadline: it rides a streamed forward, and the peer sends a keep-alive event every 5 seconds for
+  the whole life of the start — provisioning, a passphrase prompt, the worktree cut — so the relay's
+  30-second per-frame idle timeout only ends a start whose peer has gone silent.
 
 ## Acceptance criteria
 
@@ -104,8 +103,8 @@ No ssh-agent is ever started by the daemon.
 - [x] The prompt reaches only the GitHub user whose session started the clone.
 - [x] The decrypted passphrase appears in no log line, response or error; a token the daemon did not issue
       is refused; a token stops working when its clone ends.
-- [x] A forwarded start, unary or streamed, is bounded by the split-start budget, not the 30-second forward
-      deadline.
+- [x] A forwarded start, unary or streamed, has no overall deadline: the peer's keep-alives keep it open,
+      and only 30 seconds of peer silence ends it.
 - [x] The create-session form shows the dialog while a start waits, encrypts under the host's pinned key,
       follows the codebase host on a split start, and clears when answered, cancelled or ended.
 - [x] The forked-worker and supervised backends carry the clone's environment, and the keys it may set are
@@ -114,7 +113,7 @@ No ssh-agent is ever started by the daemon.
 
 ## Known limits
 
-- The forwarding deadline and the keep-alive are pinned as values and as a unit-tested idle policy; no test
+- The relayed forward and the keep-alive are pinned over a scripted in-memory peer on a paused clock; no test
   drives a forward over a real LiveKit room.
 - Only the clone a session start runs asks. Other daemon-run git over SSH (fetch, push, worktree sync, the
   project coordinate handlers' clone) cannot ask; the first clone usually leaves the key in the agent, so

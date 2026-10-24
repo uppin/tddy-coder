@@ -20,6 +20,8 @@ use tddy_service::proto::session::StartSessionRequest;
 
 use tddy_rpc::Status;
 
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
+
 use crate::agent_host_callbacks::AgentRoster;
 
 impl AgentRoster {
@@ -44,6 +46,7 @@ impl AgentRoster {
         daemon_instance_id: &str,
         codebase_session_id: &str,
         session_token: &str,
+        progress: &AttachmentProgressSink,
     ) -> Result<(), Status> {
         let slot = self
             .peer_routing
@@ -89,16 +92,17 @@ impl AgentRoster {
             }),
             ..StartSessionRequest::default()
         };
-        // The split forward's deadline, for the split forward's reason: giving up after the ordinary
-        // forward deadline would mean erroring while the peer is still cloning, and a peer that carried on would
-        // leave a checkout on a host nobody is watching.
-        let answered = peer_calls::forward_start_session_within(
+        // Relayed rather than deadline-bound: the peer clones and cuts the checkout while its stream
+        // stays alive, and only a silent peer ends the forward. Giving up on a clock would error while
+        // the peer is still cloning, leaving a checkout on a host nobody is watching.
+        let answered = peer_calls::forward_start_session_relaying(
             &slot,
             daemon_instance_id,
             &request,
-            crate::agent_roster::split_forward_deadline(&self.config),
+            &|event| progress.relay(event),
         )
-        .await?;
+        .await
+        .map_err(peer_calls::ForwardedStartFailure::into_status)?;
         let created = answered.session_id.trim();
         if created != codebase_session_id {
             // A peer that ignored `requested_session_id` cannot give the guarantee above, so what it

@@ -20,12 +20,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use prost::Message;
+use tddy_daemon_extensions::PeerForwarder;
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_kernel::peer_calls::forward_start_session_relaying;
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
-use tddy_rpc::Request;
+use tddy_rpc::{Request, Status};
+use tddy_service::proto::session::start_session_event::Event;
 use tddy_service::proto::session::{
-    DeleteSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
+    DeleteSessionRequest, SessionService as SessionServiceTrait, StartKeepAlive, StartSessionEvent,
+    StartSessionRequest, StartSessionResponse,
 };
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::{
@@ -68,29 +74,6 @@ users:
   - github_user: "testuser"
     os_user: "testuser"
 daemon_instance_id: "{LOCAL_INSTANCE_ID}"
-"#
-    );
-    serde_yaml::from_str(&yaml).expect("config must parse")
-}
-
-/// An ordinary forward deadline that is not the 30 s default, so a split forward that ignored the
-/// setting would not add it.
-const CONFIGURED_PEER_FORWARD_SECS: u64 = 45;
-
-/// A daemon that gives a spawn — its own, and by assumption a peer's — `secs` to finish, and an
-/// ordinary forward `CONFIGURED_PEER_FORWARD_SECS`.
-///
-/// Deliberately not the 300 s default: a deadline that merely *happened* to exceed the budget on
-/// the default configuration would look right while ignoring the setting entirely.
-fn config_allowing_a_worktree_to_take_secs(secs: u64) -> DaemonConfig {
-    let yaml = format!(
-        r#"
-users:
-  - github_user: "testuser"
-    os_user: "testuser"
-daemon_instance_id: "{LOCAL_INSTANCE_ID}"
-spawn_worker_request_timeout_secs: {secs}
-peer_forward_timeout_secs: {CONFIGURED_PEER_FORWARD_SECS}
 "#
     );
     serde_yaml::from_str(&yaml).expect("config must parse")
@@ -605,60 +588,108 @@ async fn start_session_with_a_known_codebase_daemon_and_no_livekit_room_fails_pr
 }
 
 // ---------------------------------------------------------------------------
-// The split forward's deadline
+// A split start has no overall deadline
 // ---------------------------------------------------------------------------
 //
-// A split start is served by the codebase daemon resolving the project — cloning it first if it does
-// not have it — and cutting a worktree, work that daemon bounds by its own
-// `spawn_worker_request_timeout` (300 s by default). The ordinary forward deadline
-// (`peer_forward_timeout_secs`, 30 s by default) is far shorter, so a plain forward would give up
-// while the peer was still building and leave the checkout behind on a host the operator may not
-// be watching. That is one of the two criticals this changeset fixes; the
-// other half — naming the B-side session before asking for it — is pinned by
-// `a_worktree_failure_on_the_codebase_daemon_leaves_no_session_behind` in the cross-host suite.
+// A split start is served by the codebase daemon resolving the project and cutting a worktree, work
+// that can run for minutes. The forward used to give up at a fixed budget, so it errored while the
+// peer was still building and stranded the checkout. Now the forward is a relayed stream that only the
+// peer's silence ends: a live codebase host keeps it open with keep-alives for as long as its work
+// takes.
 //
-// A real slow peer is not reproducible here, and simulating one with sleeps would test the sleep.
-// What is worth pinning is the property: the deadline is derived from the configured budget and
-// strictly exceeds it.
+// The common room is a LiveKit connection this harness does not hold, so the test drives the forward a
+// split start makes over a scripted codebase host, on the paused clock.
 
-#[tokio::test]
-async fn the_split_forward_waits_out_the_worktree_budget_plus_one_ordinary_forward() {
-    // Given a daemon configured to allow ten minutes for a worktree
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = service_with_known_codebase_peer_and_config(
-        sessions_tmp.path().to_path_buf(),
-        config_allowing_a_worktree_to_take_secs(600),
-    );
+/// How often the scripted codebase host reports that it is still cutting the worktree.
+const CODEBASE_KEEP_ALIVE_EVERY: Duration = Duration::from_secs(5);
 
-    // When
-    let deadline = service.split_forward_deadline();
-
-    // Then — the peer's whole budget, plus one ordinary forward deadline of round-trip headroom.
-    // This daemon can only assume the peer's budget matches its own, which is why the configured
-    // value is what it waits out rather than a constant.
-    assert_eq!(
-        deadline,
-        Duration::from_secs(600) + Duration::from_secs(CONFIGURED_PEER_FORWARD_SECS),
-        "the split forward must be derived from spawn_worker_request_timeout_secs; got {deadline:?}"
-    );
+/// A codebase host whose worktree cut takes `cut_takes`, reporting a keep-alive every
+/// [`CODEBASE_KEEP_ALIVE_EVERY`] until it answers with its result.
+struct ASlowCodebaseHost {
+    cut_takes: Duration,
 }
 
-#[tokio::test]
-async fn the_split_forward_outlives_the_worktree_budget_the_codebase_daemon_gives_itself() {
-    // Given a daemon on the default configuration
-    let sessions_tmp = tempfile::tempdir().unwrap();
-    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
-    let peers_worktree_budget = DaemonConfig::default().spawn_worker_request_timeout();
+fn a_start_event(event: Event) -> Result<Vec<u8>, Status> {
+    Ok(StartSessionEvent { event: Some(event) }.encode_to_vec())
+}
 
-    // When
-    let deadline = service.split_forward_deadline();
+#[async_trait::async_trait]
+impl PeerForwarder for ASlowCodebaseHost {
+    async fn is_connected(&self) -> bool {
+        true
+    }
 
-    // Then — erroring while the peer is still building is the state that stranded a worktree, so
-    // this must never be the shorter of the two. The cost is a vanished peer surfacing after this
-    // wait rather than after the forward deadline, which the PRD accepts as the cheaper failure.
+    async fn call_unary(
+        &self,
+        peer_id: &str,
+        service: &str,
+        method: &str,
+        _body: Vec<u8>,
+    ) -> Result<Vec<u8>, Status> {
+        Err(Status::unimplemented(format!(
+            "{peer_id} serves {service}/{method} only as a stream"
+        )))
+    }
+
+    async fn call_server_stream(
+        &self,
+        _peer_id: &str,
+        _service: &str,
+        _method: &str,
+        _body: Vec<u8>,
+    ) -> Result<tokio::sync::mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let keep_alives = self.cut_takes.as_secs() / CODEBASE_KEEP_ALIVE_EVERY.as_secs();
+        tokio::spawn(async move {
+            for _ in 0..keep_alives {
+                tokio::time::sleep(CODEBASE_KEEP_ALIVE_EVERY).await;
+                let keep_alive = Event::KeepAlive(StartKeepAlive {
+                    activity: "worktree".to_string(),
+                });
+                if tx.send(a_start_event(keep_alive)).await.is_err() {
+                    return;
+                }
+            }
+            let result = Event::Result(StartSessionResponse {
+                session_id: "ws-1".to_string(),
+                ..Default::default()
+            });
+            let _ = tx.send(a_start_event(result)).await;
+        });
+        Ok(rx)
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_split_start_outlives_the_old_budget_while_the_codebase_host_keeps_it_alive() {
+    // Given a codebase host whose worktree cut runs past the budget the forward used to give up at,
+    // keeping the stream alive the whole time
+    let config = DaemonConfig::default();
+    let old_budget = config.spawn_worker_request_timeout() + config.peer_forward_timeout();
+    let room = CommonRoom::new(
+        Arc::new(ASlowCodebaseHost {
+            cut_takes: old_budget + Duration::from_secs(70),
+        }),
+        &config,
+    );
+    let started_at = tokio::time::Instant::now();
+
+    // When the split start's forward runs
+    let response = forward_start_session_relaying(
+        &room,
+        CODEBASE_PEER_ID,
+        &StartSessionRequest::default(),
+        &|_| {},
+    )
+    .await
+    .expect("a codebase host that keeps the stream alive completes the start");
+
+    // Then its result comes back, after the old budget had already run out
+    assert_eq!(response.session_id, "ws-1");
+    let elapsed = started_at.elapsed();
     assert!(
-        deadline > peers_worktree_budget,
-        "the split forward deadline ({deadline:?}) must outlast the worktree budget the codebase daemon gives itself ({peers_worktree_budget:?})"
+        elapsed > old_budget,
+        "the start ran for {elapsed:?}, past the old budget of {old_budget:?}"
     );
 }
 

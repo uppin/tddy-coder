@@ -4,6 +4,7 @@ pub mod agent_credentials;
 pub mod attached_initial_prompt;
 pub mod service_util;
 pub mod split_claude_cli_start;
+pub mod split_forward_stream;
 pub mod split_ports;
 pub mod split_session;
 pub mod split_start;

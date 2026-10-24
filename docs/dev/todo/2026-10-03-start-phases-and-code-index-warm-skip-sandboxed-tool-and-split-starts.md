@@ -6,7 +6,9 @@
 and was removed from this entry: a worktree's index warms when its Code pane opens or its agent first
 calls a code tool, and the session header follows the worktree's index (`code_index.WatchRoot`), not a
 per-session record, so every kind of session shows its load whoever started it. What remains is the
-**start-phase** half. (The filename keeps its original slug because
+**start-phase** half.
+**Narrowed:** 2026-10-24 by `#start-progress` 4/8 (#737) — the **split starts** report their phases now:
+the worktree step relayed from the codebase host, the agent step (`STEP_AGENT`) from the agent host. (The filename keeps its original slug because
 `packages/tddy-agent-launch/src/svc_start_session_core.rs` names it.)
 
 ## What is not done
@@ -16,7 +18,6 @@ workspace** starts only. These starts report no phases:
 
 - the sandboxed claude-cli and cursor-cli starts;
 - the tool start;
-- the split starts;
 - children spawned by a pr-stack orchestrator or a grill-me conversation (their handlers pass
   `AttachmentProgressSink::discarding()`).
 

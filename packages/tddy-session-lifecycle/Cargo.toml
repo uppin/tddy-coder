@@ -109,6 +109,8 @@ http = "1"
 tokio-stream = "0.1"
 
 [dev-dependencies]
+# `test-util`: a paused clock drives the split-start keep-alive test past the old 300 s budget.
+tokio = { version = "1", features = ["test-util"] }
 # The acceptance suites dispatch through the very client the in-jail MCP server uses, over the same
 # in-jail socket, rather than re-implementing its wire format.
 tddy-session-tool-client = { path = "../tddy-session-tool-client" }

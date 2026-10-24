@@ -7,6 +7,8 @@ use uuid::Uuid;
 
 use tddy_rpc::Status;
 
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
+
 use crate::agent_host_callbacks::AgentRoster;
 
 impl AgentRoster {
@@ -90,6 +92,9 @@ impl AgentRoster {
                     &daemon_instance_id,
                     &clone_id,
                     &session_token,
+                    // Background work with no stream to report into: the roster entry carries the
+                    // outcome, not the peer's progress.
+                    &AttachmentProgressSink::discarding(),
                 )
                 .await
             {

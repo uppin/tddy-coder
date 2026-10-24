@@ -3,8 +3,6 @@
 //! with — so they live here rather than in the LiveKit plugin, which re-exports them under their old
 //! `*_via_livekit` names until its last caller moves.
 
-use std::time::Duration;
-
 use prost::Message;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
@@ -12,6 +10,7 @@ use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, SetProjectAccountsRequest,
     SetProjectAccountsResponse, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
 };
+use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::{
     DeleteSessionRequest, DeleteSessionResponse, StartSessionEvent, StartSessionRequest,
     StartSessionResponse,
@@ -25,6 +24,7 @@ use tddy_service::proto::session_files::{
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::peer_forwarding::CommonRoom;
+use crate::stream_relay::RelayFailure;
 
 /// Encode `request`, forward it to `service`/`method` on the peer, and decode the answer as `Resp`;
 /// an undecodable answer is `Internal`, naming the response type.
@@ -48,41 +48,6 @@ fn short_type_name<T>() -> &'static str {
     full.rsplit("::").next().unwrap_or(full)
 }
 
-/// Forward **StartSession** to another daemon in the common room, under the room's forward deadline.
-///
-/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer_within`].
-pub async fn forward_start_session(
-    room: &CommonRoom,
-    peer_instance_id: &str,
-    request: &StartSessionRequest,
-) -> Result<StartSessionResponse, Status> {
-    forward_start_session_within(room, peer_instance_id, request, room.forward_timeout()).await
-}
-
-/// [`forward_start_session`] with an explicit deadline.
-///
-/// A start the peer serves by cloning a project and cutting a worktree outlasts the ordinary forward
-/// deadline; see [`CommonRoom::forward_to_peer_within`].
-pub async fn forward_start_session_within(
-    room: &CommonRoom,
-    peer_instance_id: &str,
-    request: &StartSessionRequest,
-    deadline: Duration,
-) -> Result<StartSessionResponse, Status> {
-    let body = request.encode_to_vec();
-    let out = room
-        .forward_to_peer_within(
-            peer_instance_id,
-            "session.SessionService",
-            "StartSession",
-            body,
-            deadline,
-        )
-        .await?;
-    StartSessionResponse::decode(out.as_slice())
-        .map_err(|e| Status::internal(format!("decode StartSessionResponse: {e}")))
-}
-
 /// Forward **StreamStartSession** to another daemon in the common room, yielding the peer's
 /// start-session events (attachment progress, then the terminal result).
 ///
@@ -98,12 +63,78 @@ pub async fn forward_stream_start_session(
         "session.SessionService",
         "StreamStartSession",
         request.encode_to_vec(),
-        |bytes| {
-            StartSessionEvent::decode(bytes.as_slice())
-                .map_err(|e| Status::internal(format!("decode StartSessionEvent from peer: {e}")))
-        },
+        decode_start_session_event,
     )
     .await
+}
+
+/// Why a forwarded start did not produce a session.
+#[derive(Debug)]
+pub enum ForwardedStartFailure {
+    /// The peer answered with this status — whatever its code, including `DEADLINE_EXCEEDED` from
+    /// the peer's own deadlines. The peer has said what happened.
+    PeerAnswered(Status),
+    /// The peer sent nothing for [`crate::peer_forwarding::PEER_FORWARD_STREAM_IDLE_TIMEOUT`]: it
+    /// may still be working, so whatever it was building may still appear.
+    PeerSilent(Status),
+}
+
+impl ForwardedStartFailure {
+    /// The status to hand the caller.
+    pub fn into_status(self) -> Status {
+        match self {
+            ForwardedStartFailure::PeerAnswered(status)
+            | ForwardedStartFailure::PeerSilent(status) => status,
+        }
+    }
+}
+
+impl From<RelayFailure> for ForwardedStartFailure {
+    fn from(failure: RelayFailure) -> Self {
+        match failure {
+            RelayFailure::Peer(status) => ForwardedStartFailure::PeerAnswered(status),
+            RelayFailure::Silent(status) => ForwardedStartFailure::PeerSilent(status),
+        }
+    }
+}
+
+/// Forward a start to `peer_instance_id` as **StreamStartSession**, handing every non-terminal event
+/// the peer sends (phases, keep-alives, progress) to `relay` as it arrives, and returning the peer's
+/// result. There is no overall deadline: the relay's per-frame idle timeout ends a start whose peer
+/// has gone silent, and a live peer keeps it open with keep-alives.
+pub async fn forward_start_session_relaying(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &StartSessionRequest,
+    relay: &(dyn Fn(StartSessionEvent) + Send + Sync),
+) -> Result<StartSessionResponse, ForwardedStartFailure> {
+    let mut events = room
+        .forward_server_stream_classified(
+            peer_instance_id,
+            "session.SessionService",
+            "StreamStartSession",
+            request.encode_to_vec(),
+            decode_start_session_event,
+        )
+        .await?;
+    while let Some(item) = events.recv().await {
+        match item {
+            Ok(StartSessionEvent {
+                event: Some(StartSessionEventKind::Result(response)),
+            }) => return Ok(response),
+            Ok(event) => relay(event),
+            Err(failure) => return Err(failure.into()),
+        }
+    }
+    // The peer closed its stream cleanly without a result: no session was reported, so the start failed.
+    Err(ForwardedStartFailure::PeerAnswered(Status::internal(
+        "the peer ended its start stream without a result",
+    )))
+}
+
+fn decode_start_session_event(bytes: Vec<u8>) -> Result<StartSessionEvent, Status> {
+    StartSessionEvent::decode(bytes.as_slice())
+        .map_err(|e| Status::internal(format!("decode StartSessionEvent from peer: {e}")))
 }
 
 /// Forward **DeleteSession** to another daemon in the common room.

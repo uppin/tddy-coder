@@ -27,6 +27,10 @@ use tddy_session_agents::peer_session_answer::resolve_exec_tool_worktree;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_session_split::service_util;
 use tddy_spawn::spawner;
+
+use crate::start_keepalive::{
+    with_activity_keepalive, STARTING_ACTIVITY, START_KEEPALIVE_INTERVAL,
+};
 use tddy_worktree_service::stream::MpscResultStream;
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
@@ -360,7 +364,15 @@ impl LaunchSessions {
         });
         tokio::spawn(async move {
             let sink = AttachmentProgressSink::streaming(conn_progress_tx);
-            let started = service.start_session_core(req, &sink).await;
+            // Kept alive for the whole start, not only while a project is provisioned: a worktree cut
+            // or an index build can be quiet for longer than the relay tolerates.
+            let started = with_activity_keepalive(
+                &sink,
+                START_KEEPALIVE_INTERVAL,
+                STARTING_ACTIVITY,
+                service.start_session_core(req, &sink),
+            )
+            .await;
             // The terminal event goes out only after every progress event ahead of it has been
             // forwarded: they travel through the forwarding task, so sending the terminal one
             // directly would let it overtake a phase's end. Dropping the sink closes the channel

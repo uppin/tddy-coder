@@ -1,3 +1,4 @@
+use crate::split_forward_stream::forward_split_start;
 use crate::split_start::SplitStartFailure;
 
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
@@ -7,6 +8,7 @@ use uuid::Uuid;
 
 use tddy_rpc::Status;
 
+use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_rpc::Response;
@@ -92,16 +94,16 @@ impl SplitSessions {
             &session_id,
             &codebase_session_id,
         )?;
-        let forwarded = tddy_daemon_kernel::peer_calls::forward_start_session_within(
+        let workspace = match forward_split_start(
             &slot,
             codebase_instance_id,
             &workspace_req,
-            agent_roster::split_forward_deadline(&self.config),
+            progress,
         )
-        .await;
-        let workspace = match forwarded {
+        .await
+        {
             Ok(workspace) => workspace,
-            Err(status) => {
+            Err(failure) => {
                 // The peer may have created the session and its worktree, may have failed part-way
                 // through, or may never have started — none of which this side can distinguish. The
                 // teardown covers all three, because the id was ours to begin with.
@@ -110,10 +112,10 @@ impl SplitSessions {
                     codebase_instance_id,
                     &codebase_session_id,
                     &req.session_token,
-                    SplitStartFailure::from_forward_error(&status),
+                    SplitStartFailure::from_forward_failure(&failure),
                 )
                 .await;
-                return Err(status);
+                return Err(failure.into_status());
             }
         };
         // A branch another session owns is reported, not created: the peer built nothing, so the
@@ -146,6 +148,7 @@ impl SplitSessions {
         // Nothing about the peer's LiveKit fields is checked here any more: a codebase daemon hosts
         // no room. It holds a checkout and answers `GetWorktreeSnapshot` and tool calls about it,
         // both of which this daemon reaches over the peer routing it already uses.
+        progress.begin_phase(StartStep::Agent);
         let started = self
             .spawn_split_agent(
                 os_user,
@@ -160,7 +163,10 @@ impl SplitSessions {
             .await;
 
         match started {
-            Ok(response) => Ok(response),
+            Ok(response) => {
+                progress.end_phase(StartStep::Agent);
+                Ok(response)
+            }
             Err(status) => {
                 // The agent spawn is this daemon's own work: the peer already answered, and
                 // whatever it built is there to be reclaimed.
