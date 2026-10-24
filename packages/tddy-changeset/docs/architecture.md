@@ -54,6 +54,17 @@ start is what the resume sees. A missing file is `Ok(None)`; an unreadable or ma
 `WorkflowError::ChangesetInvalid`. See
 [Claude Code CLI session § Persistence and resume](../../../docs/ft/daemon/claude-cli-session.md#persistence-and-resume).
 
+## Harness resume token (`session_metadata`)
+
+`SessionMetadata.harness_resume_token: Option<String>` (`#[serde(default, skip_serializing_if =
+"Option::is_none")]`, so a session without one writes no field) is the handle a CLI harness printed for
+continuing its conversation when it last exited — Warp's `warp --resume <TOKEN>`, read back off the
+terminal by `tddy-agent-launch`'s resume-token recorder. A resume passes it to the harness as
+`CliLaunch.conversation_id`. It is absent until a run has printed one, and for harnesses that print none;
+it is generic, and separate from Cursor's `cursor_chat_id`, which is minted before the spawn. Unit tests
+in `session_metadata.rs`: `a_session_without_a_resume_token_writes_no_resume_token_field`,
+`a_recorded_resume_token_round_trips_through_session_yaml`.
+
 ## Changeset (`changeset`)
 
 - **Changeset**: Unified manifest in plan directory. Replaces `.session` and `.impl-session`. Contains name, initial_prompt, clarification_qa, models, sessions (with system_prompt_file per session), state, artifacts, discovery, worktree, branch, branch_suggestion, worktree_suggestion, repo_path, optional **effective_worktree_integration_base_ref** (remote-tracking ref used to create the worktree), optional **worktree_integration_base_ref** (user-selected chain-PR base when present).

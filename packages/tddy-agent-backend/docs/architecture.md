@@ -61,13 +61,13 @@ applied by the caller (`tddy-agent-launch` for a PTY, the backends in [Routed ba
 
 | Item | Role |
 |---|---|
-| `Harness` | the ten harnesses: `Claude`, `ClaudeAcp`, `ClaudeCli`, `Codex`, `CodexAcp`, `OpenCode`, `OpenCodeCli`, `MuseCli`, `Cursor`, `CursorCli`. `from_agent_or_session_type(id)` / `id()` are inverse over the agent ids and session types; `stub`, `tool` and specialized-agent names are `None` |
+| `Harness` | the eleven harnesses: `Claude`, `ClaudeAcp`, `ClaudeCli`, `Codex`, `CodexAcp`, `OpenCode`, `OpenCodeCli`, `MuseCli`, `Cursor`, `CursorCli`, `WarpCli`. `from_agent_or_session_type(id)` / `id()` are inverse over the agent ids and session types; `stub`, `tool` and specialized-agent names are `None` |
 | `RouteTarget { preset, endpoints: RouteEndpoints, api_key: RouteSecret, model }` | one account and the model every model choice is pinned to. `RouteEndpoints` holds the `anthropic_messages`, `openai_responses`, `openai_chat` roots |
 | `RouteSecret` | a credential value whose `Debug` is `RouteSecret(<redacted>)`; `expose()` is for the one place that hands it to a child |
 | `HarnessRoute { env, secret_env, files: Vec<RouteFile>, args }` | what the harness is launched with; the key is only ever in `secret_env` |
-| `RouteRefusal` | `HarnessCannotBeRouted` (Cursor), `ProtocolNotServed { needs }`, `PresetNotAccepted` (Muse Code: Meta only), `NotYetRoutable(harness)`; `Display` is the sentence an operator reads |
+| `RouteRefusal` | `HarnessCannotBeRouted` (Cursor and Warp: every preset refused, "<harness> cannot be pointed at another provider; it always runs on its own vendor"), `ProtocolNotServed { needs }`, `PresetNotAccepted` (Muse Code: Meta only), `NotYetRoutable(harness)`; `Display` is the sentence an operator reads |
 | `route_supported(harness, preset, protocols)` | the capability matrix, answered without building a route; `protocols` are the wire spellings `anthropic-messages`, `openai-responses`, `openai-chat` |
-| `resolve_route(harness, target)` | the route. Claude Code (all three harnesses): `ANTHROPIC_BASE_URL` = the Anthropic Messages root, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` = the model; secret `ANTHROPIC_AUTH_TOKEN`; args `--model <model>`. OpenCode (`OpenCode`, `OpenCodeCli`): files `[opencode.json]` (`opencode_config_for`), secret `TDDY_OPENCODE_PROVIDER_KEY` (`OPENCODE_ROUTE_KEY_ENV`), args `--model tddy-route/<model>`; an account serving neither OpenAI protocol is `ProtocolNotServed`. Codex (`Codex`, `CodexAcp`, in `provider_route/codex.rs`): secret `TDDY_ROUTE_API_KEY` (`CODEX_ROUTE_KEY_ENV`); args `-c model_provider="tddy-route"`, `-c model_providers.tddy-route.{name,base_url,env_key,wire_api="responses"}` (`CODEX_ROUTE_PROVIDER_ID`), `-m <model>` — values are TOML basic strings, the key is never an argument. Only an account serving OpenAI Responses (`ProtocolNotServed` otherwise); the provider's `name` is the preset label from a closed table (`meta`, `openai-compatible`) — a preset outside it is `NotYetRoutable`, and `tddy-agent-launch`'s `codex_declares_every_responses_preset_under_the_label_the_accounts_table_gives_it` ties the table to `tddy_accounts::presets()`. Cursor: `HarnessCannotBeRouted`. Muse Code: `NotYetRoutable` Muse Code (`MuseCli`, in `provider_route.rs`): a `meta` account only (`PresetNotAccepted` otherwise); secret `META_API_KEY` (`cli_harness_muse::MUSE_ROUTE_KEY_ENV`) and nothing else — no env, file or argument, so the session keeps its own `--model` |
+| `resolve_route(harness, target)` | the route. Claude Code (all three harnesses): `ANTHROPIC_BASE_URL` = the Anthropic Messages root, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` = the model; secret `ANTHROPIC_AUTH_TOKEN`; args `--model <model>`. OpenCode (`OpenCode`, `OpenCodeCli`): files `[opencode.json]` (`opencode_config_for`), secret `TDDY_OPENCODE_PROVIDER_KEY` (`OPENCODE_ROUTE_KEY_ENV`), args `--model tddy-route/<model>`; an account serving neither OpenAI protocol is `ProtocolNotServed`. Codex (`Codex`, `CodexAcp`, in `provider_route/codex.rs`): secret `TDDY_ROUTE_API_KEY` (`CODEX_ROUTE_KEY_ENV`); args `-c model_provider="tddy-route"`, `-c model_providers.tddy-route.{name,base_url,env_key,wire_api="responses"}` (`CODEX_ROUTE_PROVIDER_ID`), `-m <model>` — values are TOML basic strings, the key is never an argument. Only an account serving OpenAI Responses (`ProtocolNotServed` otherwise); the provider's `name` is the preset label from a closed table (`meta`, `openai-compatible`) — a preset outside it is `NotYetRoutable`, and `tddy-agent-launch`'s `codex_declares_every_responses_preset_under_the_label_the_accounts_table_gives_it` ties the table to `tddy_accounts::presets()`. Cursor and Warp: `HarnessCannotBeRouted`. Muse Code: `NotYetRoutable` Muse Code (`MuseCli`, in `provider_route.rs`): a `meta` account only (`PresetNotAccepted` otherwise); secret `META_API_KEY` (`cli_harness_muse::MUSE_ROUTE_KEY_ENV`) and nothing else — no env, file or argument, so the session keeps its own `--model` |
 | `opencode_config_for(target) -> Option<RouteFile>` | the `opencode.json` declaring the account as provider `OPENCODE_ROUTE_PROVIDER_ID` (`tddy-route`) and selecting `target.model` on it: `@ai-sdk/openai` over the Responses root with `include: ["reasoning.encrypted_content"]` when the account serves Responses, `@ai-sdk/openai-compatible` over the Chat root otherwise; `apiKey` is `{env:TDDY_OPENCODE_PROVIDER_KEY}`, never the key. `None` when the account serves neither — the wire is selected through a private `OpenAiWire`, so no input panics |
 | `RouteChoice { BuiltIn, Account(id) }`, `RouteSources { session, agent_definition, user_default }`, `choose_route` | precedence: session over agent definition over the person's default; `BuiltIn` at a level overrides everything below it; `None` is the vendor |
 
@@ -110,20 +110,20 @@ argv and env.
 
 The coding agents a session runs interactively in a terminal pane, one **descriptor** per session
 type, in the order the web's session-type toggle offers them: `claude-cli`, `cursor-cli`,
-`opencode-cli`, `muse-cli`. Code that needs a per-session-type answer asks the registry
+`opencode-cli`, `muse-cli`, `warp-cli`. Code that needs a per-session-type answer asks the registry
 (`cli_harness(session_type) -> Option<&'static CliHarness>`, `cli_harnesses()`) instead of matching on
 the string, so a further harness is one more descriptor. A descriptor may live in a module of its own
-(`cli_harness_muse::MUSE_CLI`, a `const` so the registry array can hold its value). `tddy_core::cli_harness`
+(`cli_harness_muse::MUSE_CLI`, `cli_harness_warp::WARP_CLI`, each a `const` so the registry array can hold its value). `tddy_core::cli_harness`
 re-exports the registry.
 
-| `CliHarness` field | `claude-cli` | `cursor-cli` | `opencode-cli` | `muse-cli` |
-|---|---|---|---|---|
-| `label` | Claude CLI | Cursor CLI | OpenCode | Muse Code |
-| `route_harness` | `ClaudeCli` | `CursorCli` | `OpenCodeCli` | `MuseCli` |
-| `context_agent` | `claude` | `cursor` | `opencode` | `muse` |
-| `default_binary` / `binary_env` | `claude` / `TDDY_CLAUDE_BINARY` | `agent` / `TDDY_CURSOR_AGENT` | `opencode` / `TDDY_OPENCODE_CLI` | `muse` / `TDDY_MUSE_CLI` |
-| `route_config_env` | — | — | `OPENCODE_CONFIG` | — |
-| `models` | `Curated(claude_cli_models)` | `Curated(cursor_cli_models)` | `ListedByBinary(["models"])` | `Curated(muse_cli_models)`: `muse-spark-1.3` (default), `muse-wonder-1.0` |
+| `CliHarness` field | `claude-cli` | `cursor-cli` | `opencode-cli` | `muse-cli` | `warp-cli` |
+|---|---|---|---|---|---|
+| `label` | Claude CLI | Cursor CLI | OpenCode | Muse Code | Warp |
+| `route_harness` | `ClaudeCli` | `CursorCli` | `OpenCodeCli` | `MuseCli` | `WarpCli` |
+| `context_agent` | `claude` | `cursor` | `opencode` | `muse` | `warp` |
+| `default_binary` / `binary_env` | `claude` / `TDDY_CLAUDE_BINARY` | `agent` / `TDDY_CURSOR_AGENT` | `opencode` / `TDDY_OPENCODE_CLI` | `muse` / `TDDY_MUSE_CLI` | `warp` / `TDDY_WARP_CLI` |
+| `route_config_env` | — | — | `OPENCODE_CONFIG` | — | — |
+| `models` | `Curated(claude_cli_models)` | `Curated(cursor_cli_models)` | `ListedByBinary(["models"])` | `Curated(muse_cli_models)`: `muse-spark-1.3` (default), `muse-wonder-1.0` | `Curated(warp_cli_models)`: empty, no default |
 
 `argv: fn(&CliLaunch) -> Vec<String>` builds the argument list, binary first, from a `CliLaunch`
 (`binary`, `model`, `session_id`, `conversation_id`, `initial_prompt`, `permission_mode`,
@@ -131,20 +131,36 @@ re-exports the registry.
 plus a non-blank positional prompt; Cursor's is `[--resume <chat>] [--model <m>] [<prompt>]`;
 OpenCode's is `[--model <m>] [--prompt <p>]` on a start and `--continue` alone on a resume; Muse
 Code's is `[--model <m>] [<prompt>]` on a start (a blank prompt is none) and `--continue` alone on a
-resume.
+resume. Warp's is the binary alone on a start, whatever model and prompt are set, and
+`--resume <conversation_id>` on a resume when `conversation_id` is non-blank (a resume without one
+starts fresh, never a bare `--resume`); model, prompt and permission fields are ignored.
+
+Warp prints its resume handle only as it exits, so `cli_harness_warp::resume_token_from_output(&[u8])
+-> Option<String>` reads it back from a terminal's raw output: it strips escape sequences — CSI
+(`ESC [` … a final byte), the string sequences OSC, DCS, SOS, PM and APC (closed by BEL or `ESC \`),
+and other escapes (intermediate bytes, then one final byte) — turns `\r` into line breaks, and returns
+the word after the **last** `warp --resume` on a line; `None` when there is none. `tddy-agent-launch`
+records it as `SessionMetadata.harness_resume_token` and passes it back as `CliLaunch.conversation_id`.
 `models_from_listing(stdout)` reads a `ListedByBinary` harness's catalogue, one `provider/model` per
 line, blank lines skipped, the first the default. `resolve_agent_models` answers a CLI harness from its
 descriptor: curated, or by running its binary (`BackendCliPaths.opencode_cli_path` overrides the
 `opencode` binary); a binary that fails is an error, never an empty list.
 
-The `opencode` row of `context_globs_for_agent` is `AGENTS.md`, `.agents/**`, `opencode.json`,
-`.opencode/**`; the `muse` row is `AGENTS.md`, `.agents/**`, `.muse/**`.
+`context_globs_for_agent` and `SHARED_CONTEXT_GLOBS` (`AGENTS.md`, `.agents/**`) live in
+`backend/context_globs.rs`, re-exported as `backend::context_globs_for_agent`. The `opencode` row is
+`AGENTS.md`, `.agents/**`, `opencode.json`, `.opencode/**`; the `muse` row is `AGENTS.md`,
+`.agents/**`, `.muse/**`; the `warp` row is `AGENTS.md`, `.agents/**`, `WARP.md`.
 
 Muse Code's argv, its key variable and its `.muse/` tree come from secondary sources, not a real
 `muse` (`TODO(muse-cli-facts)`, `docs/dev/todo/2026-10-22-muse-code-cli-facts-unconfirmed.md`).
+Warp's argv and exit line follow Warp's published reference, unchecked against a real `warp`
+(`TODO(warp-cli-facts)`).
 
 Tests: `tests/cli_harness_acceptance.rs` (the registry, OpenCode's argv and listing),
 `tests/muse_cli_acceptance.rs` (Muse Code's descriptor, argv, route and curated models),
+`tests/warp_cli_acceptance.rs` (Warp's descriptor, argv, the resume-token reader — escape codes
+including OSC, DCS and single-character escapes, `\r`, several lines, none — the route refusal and the
+empty catalogue), `tests/context_globs_acceptance.rs` (the per-agent rows),
 `tests/opencode_model_catalog.rs` (`resolve_agent_models("opencode-cli")` against a stub binary).
 
 ## Token accounting (`token_accounting`)

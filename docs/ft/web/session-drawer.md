@@ -510,6 +510,10 @@ A toggle at the top of the form switches between:
 
 - **Tool** — spawns `tddy-coder` via `StartSession` RPC (requires project + agent)
 - **Claude CLI** — spawns the Claude Code CLI directly (requires project + model)
+- **Cursor CLI**, **OpenCode**, **Muse Code** — the other registered CLI harnesses (requires project + model)
+- **Warp** — spawns Warp's Agent CLI ([Warp CLI session](../daemon/warp-cli-session.md)); requires only
+  a project. It shows no **Model** or **Provider** field — Warp's model is chosen inside Warp — and
+  sends `sessionType: "warp-cli"` with `model: ""`
 
 ### Fields
 
@@ -640,7 +644,7 @@ The [setup pane](#pinned-main-entry) renders the form as its **main** variant
   when the form opens. Every other type is disabled, with its reason listed under the toggle
   (`create-session-type-reason-<type>`, `whyMainCannotRun` in `projectHomeSessionTypes.ts`):
   - **Cursor CLI** has no tool allowlist, so it could still use its own file tools;
-  - **Tool**, **OpenCode** and **Muse Code** cannot run in managed-codebase mode.
+  - **Tool**, **OpenCode**, **Muse Code** and **Warp** cannot run in managed-codebase mode.
 - Model, provider account, permission mode and initial prompt are offered as for Claude CLI.
 - The submit button reads **Start main session**. It hands `buildProjectHomeStartSpec(form)`
   (`createSessionRequest.ts`), the Claude CLI start request without project, branch or placement

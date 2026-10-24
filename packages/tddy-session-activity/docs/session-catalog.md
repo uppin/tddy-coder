@@ -41,9 +41,9 @@ below it: its dependents are lifecycle, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-
 | `src/session_deletion.rs` (unit) | 12 |
 | `src/session_list_enrichment.rs` (unit) | 27 |
 | `src/session_reader.rs` (unit) | 1 |
-| `tests/worktree_removal_eligibility.rs` | 5: which session types remove a daemon-managed worktree on delete |
+| `tests/worktree_removal_eligibility.rs` | 8: which session types remove a daemon-managed worktree on delete — `claude-cli`, `opencode-cli`, `muse-cli`, `warp-cli` and `workspace` do (`worktree_removal_applies_to`); `tool`, an unrecorded type and `cursor-cli` do not |
 
-These 45 are the crate's only tests; the activity service itself has none of its own (see the
+These 48 are the crate's only tests; the activity service itself has none of its own (see the
 [README](../README.md#testing)).
 
 ## Related
