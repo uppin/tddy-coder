@@ -115,6 +115,12 @@ impl CodingAgentSession {
         })
     }
 
+    /// Send every ACP update of every later turn to `sink`, as it streams — how a daemon-run
+    /// conversation's transcript records the agent's tool calls while the turn is still running.
+    pub fn record_updates_with(&mut self, _sink: tddy_agent_backend::AcpUpdateSink) {
+        // TODO(conversation-bubble): implement
+    }
+
     /// A handle that cancels this session's running turn without holding the session — what the
     /// conversation table uses when `subagent_cancel` arrives while a prompt holds the session.
     // TODO(acp-subagent n3): the conversation table holds Box<dyn SubagentSession> and cannot reach

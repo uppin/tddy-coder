@@ -437,6 +437,9 @@ mod report_session_status_unit_tests;
 #[cfg(test)]
 mod agent_activity_unit_tests;
 
+#[cfg(test)]
+mod conversation_replay_unit_tests;
+
 /// Resuming a session must relaunch its child with the *same* coding agent and workflow recipe it
 /// was originally started with — read back from the persisted `.session.yaml`. Before this,
 /// `ResumeSession` hard-coded `agent: None` / `recipe: None`, so tddy-coder fell back to its

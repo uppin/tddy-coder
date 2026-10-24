@@ -5,7 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — proto change (three replay requests), three Rust crates plus the web, a persisted transcript store, live-stream ordering
 **Branch**: `feature/coagents/conversation-bubble`, base `feature/coagents/permission-yield` (#722) — `#coagents` 4/8
-**PR**: _assigned at wave 1_
+**PR**: [#723](https://github.com/uppin/tddy-coder/pull/723)
 
 ## Initial Discovery
 
@@ -113,26 +113,43 @@ dialog (`mountWithRpc` + `aReplayBackend` extended with a conversation axis).
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/conversation_transcript_acceptance.rs` (new):
+Build the stub first (`cargo build -p tddy-acp-stub`).
 
-1. `a_coding_agent_turn_is_replayable_by_conversation`
-2. `a_daemon_run_model_agent_turn_is_replayable_by_conversation`
-3. `a_permission_request_is_recorded_as_a_transcript_entry`
-4. `a_conversation_page_and_tool_detail_are_served_by_conversation_id`
+`packages/tddy-service/tests/subagent_conversation_replay_acceptance.rs` — the store and the fold (`tddy_service::subagent_conversation_replay`):
 
-`packages/tddy-service/src/acp_replay.rs` (unit):
+1. `subagent_calls_for_one_conversation_fold_into_one_tool_call` — `new_session`, `prompt`, `await` on `conv-1` around an unrelated `Read` → `["subagent:conv-1", "r1"]`
+2. `the_folded_entry_status_follows_the_last_call` — a running `prompt` after a completed `new_session` → one entry, in progress
+3. `subagent_calls_for_two_conversations_are_two_entries`
+4. `a_conversation_transcript_reads_back_what_was_appended_in_order`
+5. `a_conversation_that_recorded_nothing_reads_as_not_recorded` — **passes at contract** (the TODO answers `None`)
 
-5. `subagent_calls_for_one_conversation_fold_into_one_tool_call`
-6. `the_folded_entry_status_follows_the_last_call`
-7. `subagent_calls_for_two_conversations_are_two_entries`
+`packages/tddy-session-agents/tests/conversation_transcript_record.rs` — recording a daemon-run turn (`conversation_transcript::record_turn`):
 
-`packages/tddy-web/cypress/component/SubagentConversationBubbleAcceptance.cy.tsx` (new, mounts `SessionWithActivitySidebar`):
+6. `a_finished_turn_records_its_prompt_and_answer` — `["user:where is main?", "agent:main is in src/main.rs"]`
+7. `a_turn_paused_on_a_permission_request_records_the_request` — an entry `Permission: Run cargo test`
 
-8. `one subagent conversation renders as one bubble with its agent label and status`
-9. `clicking the bubble opens the conversation transcript`
-10. `a new frame in the conversation appears in the open dialog`
-11. `a tool call in the conversation opens its detail`
-12. `an unrecorded conversation's bubble says it was not recorded`
+`packages/tddy-coding-subagent/tests/conversation_updates_acceptance.rs` — live updates (`CodingAgentSession::record_updates_with`; needs #721 green):
+
+8. `every_update_of_a_turn_reaches_the_recorder_in_order`
+
+`packages/tddy-session-lifecycle/src/connection_service/conversation_replay_unit_tests.rs` — the replay RPCs with `conversation_id`, beside the existing activity unit tests:
+
+9. `stream_acp_replay_with_a_conversation_replays_that_conversations_transcript` — the conversation's text, not the session's
+10. `a_conversation_that_recorded_nothing_is_not_found_naming_it`
+11. `a_conversation_page_is_served_from_the_conversations_transcript`
+12. `a_conversation_tool_call_detail_is_served_by_conversation_id`
+
+`packages/tddy-web/cypress/component/SubagentConversationBubbleAcceptance.cy.tsx` (mounts `SessionWithActivitySidebar` over `aConversationReplayBackend`, a per-conversation fake added to `cypress/support/rpc/acpReplay.ts`) — all fail: no `data-message-kind="subagent"` entry yet:
+
+13. `one subagent conversation renders as one bubble with its agent label and status`
+14. `clicking the bubble opens the conversation transcript`
+15. `a new frame in the conversation appears in the open dialog`
+16. `a tool call in the conversation opens its detail`
+17. `an unrecorded conversation's bubble says it was not recorded` — `subagent-conversation-not-recorded`
+
+**Changed from the plan:** the daemon-RPC suite moved from a new `tddy-daemon-rpc` file to `tddy-session-lifecycle`'s unit tests, where `ActivityService` is already exercised directly with seeded transcripts — no launcher or coding agent is needed to prove the replay axis. Recording is proved at its seam (6–8) rather than through a whole daemon turn, which needs #721's harness. The "recorded" flag was dropped from the folded entry: an unrecorded conversation is told apart by the replay's `NOT_FOUND` (10, 17), which needs no field the fold could get wrong. Published surface also includes `SUBAGENT_TOOL_CALL_PREFIX` (Rust and TS), `conversation_transcript_dir`, `subagentConversationIdOf`, `AgentTranscriptView.onSubagentClick`, `useAcpReplay({ conversationId })`, `SubagentConversationDialog`.
+
+**Baseline (2026-10-24):** `cargo check --all-targets` clean for `tddy-service tddy-session-activity tddy-session-lifecycle tddy-coder tddy-daemon-rpc tddy-session-agents tddy-coding-subagent`; scoped clippy `-D warnings` clean; the existing activity unit tests compile with the new field.
 
 ## Technical Debt & Production Readiness
 
@@ -165,10 +182,10 @@ _(populated during development)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
