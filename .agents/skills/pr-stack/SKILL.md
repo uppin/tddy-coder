@@ -175,8 +175,15 @@ mistake, and it costs the stack throughput for nothing.
 2. **Concatenate the waves** — all of wave 1, then all of wave 2, and so on. That much is forced by
    the real edges.
 3. **Sort inside each wave by what waits on the node**: most transitive dependents first, nodes
-   nothing depends on last. Break a remaining tie with the reading order you would have chosen
-   anyway — usually the most foundational node first.
+   nothing depends on last. Break a remaining tie by **earliest dependencies first**: the node whose
+   highest dependency sits lowest in the line goes first, because it can be rebased and greened
+   first. Only then use the reading order you would have chosen anyway.
+4. **Label the nodes by their place in the line.** Once the line is settled, node `n<k>` is the
+   `k`-th from the bottom, the same `K` as in its PR title. Read bottom to top, the labels count
+   up: `n1 · n2 n3 · n4 n5 n6`. Interview sketches can use working names. A label that stays from an
+   earlier order is a defect. `n1 · n2 · n3 n5 n7 · n8 n4 n6` tells a planner reading it that n4
+   comes before n5, and the line says otherwise. Relabel whenever the line changes (see
+   [Reordering a registered stack](#reordering-a-registered-stack)).
 
 **The waves never step back.** Read bottom to top, the line's wave numbers are non-decreasing. Wave
 1 above wave 2 (`1 1 2 1 1`) is illegal even though every edge is still satisfied. The wave-1 node
@@ -222,6 +229,12 @@ Every branch in one stack shares a namespace: `feature/<stack-slug>/<node>` — 
 `feature/auth/token-store`, `feature/auth/middleware`. That is what makes a stack's branches group
 together in a branch list, and it pairs with the `(#<stack-slug> K/N)` group in the PR titles so one
 word identifies the stack in both places. Do not invent `pr-2-auth`.
+
+**`<node>` names what the node delivers. It never contains a position or a node number:** not
+`n4-headless`, not `2-middleware`, not `step3`. A position changes whenever the line is reordered
+(step 4 of *Order inside a wave*), but a branch name stays. A number in it then contradicts
+the node's current label and misleads whoever plans from it next. Worktree names follow the same
+rule: `yolo-<slug>-<node>`, never `yolo-<slug>-n<k>`.
 
 ### Registering is the last planning step, not an optional extra
 
@@ -313,7 +326,10 @@ order:
    reopened.
 4. Force-push the rebuilt branches with lease, bottom-up.
 5. Renumber every `K` that changed. That covers titles and also commit subjects, PR bodies and doc
-   headers carrying `#<slug> K/N`. See [Renumbering](#renumbering-when-the-stack-changes-shape).
+   headers carrying `#<slug> K/N`. **Relabel the nodes too**: every `n<k>` in the changesets'
+   `## Green wave` and `## Dependencies`, in the discovery files and in any ledger now names the
+   node's new position. Branch names do not change, which is why they carry no number. See
+   [Renumbering](#renumbering-when-the-stack-changes-shape).
 6. `gh stack link --base <trunk> <PRs in the new order>`, then restore the borrowed worktree's
    branch.
 

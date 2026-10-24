@@ -115,7 +115,10 @@ Run the interview from `.agents/skills/planning/references/planning-phase.md` **
 
    - The line is the **waves concatenated**: all of wave 1, then all of wave 2, and so on.
    - **Inside a wave, blockers lead.** Sort by what waits on the node — most transitive dependents
-     first, nodes nothing depends on last, remaining ties by the most foundational first.
+     first, nodes nothing depends on last. Break ties by **earliest dependencies first** (the node
+     whose highest dependency sits lowest in the line), then by the most foundational node.
+   - **Then relabel.** Node `n<k>` is the `k`-th node from the bottom of the line, so the labels count
+     up along it (`n1 · n2 n3 · n4 n5`). Never carry interview-order labels into the plan.
    - **The waves never step back along the line.** Read bottom to top, the wave numbers form a
      non-decreasing run (`1 1 1 2 2 3`, never `1 2 1`). A wave-2 node below a wave-1 node is
      **illegal**, even when every real edge is still satisfied: the wave-1 node above it can no
@@ -259,7 +262,9 @@ What this step produces is agreement, not a file. Settle and write down for your
   (`parents`), which are what determine merge order.
 
 Branch names are `feature/<stack-slug>/<node>` — every node sharing one namespace. Do not invent
-`pr-2-<slug>`; that shape belongs to a different repo.
+`pr-2-<slug>`; that shape belongs to a different repo. **`<node>` is a name, never a number or a
+position** (`headless-driver`, not `n4-headless-driver`). A reorder changes positions and leaves
+branch names alone, so a number in a branch name ends up contradicting the node's label.
 
 ## Pass 1 — plan every node and open its draft PR (commit 1 of each)
 
@@ -489,11 +494,21 @@ Every node is now a one-commit draft PR. Before pass 2 touches any branch:
    extend the stack later. `gh stack view` reads *local* tracking and will say "not part of a stack"
    after a `link` — that is expected, not a failure; the stack lives on GitHub.
 
-5. **Delete the Step 2 whole-work discovery source** — every node now has its own
+5. **Re-assess the order, then rebase — MANDATORY.** Writing every node's documents is the first
+   time each node's real edges are written down. Recompute the waves from the pass-1
+   `## Green wave` sections and check the line against Step 1 question 7. The waves must never
+   step back, each wave must be sorted blockers first with ties broken by earliest dependencies,
+   and the labels must count up along the line. If any check fails, reorder **now**, while each branch
+   holds one commit and nothing has been implemented. Follow the `pr-stack` skill § *Reordering a
+   registered stack*, including the relabel, then re-run items 2–4. Whether or not the order
+   changed, cascade `/pr-stack-rebase from #1 to #<n>` so every branch contains its parent's
+   **current** tip. A fix-up a parent got after its child was cut must not be missing from the
+   child when pass 2 starts.
+6. **Delete the Step 2 whole-work discovery source** — every node now has its own
    `{slug}-initial-discovery.md`. **Ask the user before deleting** (CLAUDE.md). It was never staged,
    so this drops an untracked file; wrap of the root node must never be the thing that removes it. If
    any node still lacks a companion, **keep** the file and stop here.
-6. **Report pass 1 to the user** — the final title list with PR numbers and URLs, each node's
+7. **Report pass 1 to the user** — the final title list with PR numbers and URLs, each node's
    branch/base, and the order. State plainly that **no node is ready for `/green` yet**: the drafts are
    plans, and pass 2 is about to rewrite every branch above the roots. Then continue into pass 2
    without waiting — the per-node acceptance-test review in Step 6e is where the user gates each node.
@@ -624,6 +639,9 @@ framework-specific reference for the test type. Fluent-tests style is mandatory 
   Still `draft=true`, still based on its parent, and `changedFiles` covering only this node's docs,
   surface and tests. An inherited file or a parent's doc in that list means 6b did not finish cleanly
   — go back to it before moving up.
+- **Re-assess the order after every contract push, not only when you notice a new edge.** Re-read
+  this node's `## Green wave` against the line, and confirm the waves still never step back, ties
+  still go to the earliest dependencies, and the labels still count up.
 - **Re-check the wave order when a node's tests reveal a new edge.** Writing the tests is what
   settles the real edges, and a new one can push a node into a later wave than a node above it in
   the line. Example: node 7's tests need nodes 2 and 5, which moves node 7 into wave 2 while nodes
@@ -688,9 +706,13 @@ though every layer is still a valid topological sort. Reorder it before Step 8:
    force-push the rebuilt branches with lease. If you push before repointing, a PR can auto-merge
    into its old base.
 3. **Renumber** every PR whose `K` changed. That means the title, and also each commit subject and
-   body, PR body and discovery header that carries `#<slug> K/N`, all bottom-up in one pass. Then
-   re-run `gh stack link --base "$TRUNK"` in the new order.
+   body, PR body and discovery header that carries `#<slug> K/N`, all bottom-up in one pass.
+   **Relabel** every node as well, so each `n<k>` in the changesets and discovery files is its new
+   position. Then re-run `gh stack link --base "$TRUNK"` in the new order.
 4. Re-run this check. It must pass before Step 8 runs.
+
+The check also fails, with the same fix, when the labels do not count up along the line, or when two
+nodes in one wave with the same dependent count sit later-dependencies-first.
 
 ### Step 8: Cascade `/pr-stack-rebase` over the whole stack — MANDATORY
 
@@ -841,6 +863,12 @@ actionable the moment some node builds the seam.
   inside each wave a node other waves depend on comes ahead of one nothing waits on (most transitive
   dependents first). Topology permits any intra-wave order; that is why this one must be chosen and
   justified, not left to the order the nodes were named in.
+- **Labels are line positions; branch names carry none.** `n<k>` is the `k`-th node from the bottom,
+  so the labels count up along the line. Relabel on every reorder. `<node>` in
+  `feature/<slug>/<node>` and in worktree names is a descriptive name, never a number.
+- **Re-assess and rebase after each pass.** Run the order check and a cascade rebase at the pass-1
+  checkpoint (Step 5), re-assess after every pass-2 contract push (6g), and repeat at the completion
+  gate (Steps 7b and 8).
 - **The line never returns to an earlier wave.** Read bottom to top, wave numbers never decrease.
   This holds at planning (Step 1), whenever pass 2 finds a new edge (Step 6), and at the completion
   gate (Step 7b). A node pushed into a later wave moves up the line. "Its predecessors are still
@@ -903,7 +931,8 @@ actionable the moment some node builds the seam.
 /plan-pr-stack
   record ORIGINAL_BRANCH (stop if detached) and TRUNK
   interview → decompose into vertical slices → real edges → GREEN WAVES
-  → line = waves concatenated, blockers leading each wave (most dependents first)
+  → line = waves concatenated, blockers leading each wave (most dependents first,
+           ties: earliest dependencies first) → relabel n1..nN bottom-up
   → whole-work discovery
   → cross-check docs/dev/todo/ → size each fix: in-node, prerequisite PR, or its own node
   → settle order, slug, owned surfaces, per-node draft-PR contracts
@@ -911,14 +940,17 @@ actionable the moment some node builds the seam.
         git checkout -b feature/<slug>/<node>   (off its parent; root off origin/$TRUNK)
         PRD + changeset (4 headings) + discovery → commit 1 (docs only)
         git push -u origin HEAD → gh pr create --draft --base <parent> → title → draft PR live
-  → checkpoint: verify every base, revise every title, delete whole-work discovery (ask), report
+  → checkpoint: verify every base, revise every title, register
+        → RE-ASSESS order (waves, ties, labels) → reorder + relabel if wrong → cascade rebase
+        → delete whole-work discovery (ask), report
   → PASS 2 (per node, in this worktree, in dependency order)
         git checkout feature/<slug>/<node> → /pr-stack-rebase (single; picks up the parent's surface)
         build + baseline → owned API surface → failing acceptance tests (USER REVIEW)
         → failing unit/integration tests → commit 2 → git push origin HEAD
-        new edge moves a node to a later wave? → reorder now, before the next node
+        re-assess the order; a new edge moves a node to a later wave? → reorder now
   → git checkout ORIGINAL_BRANCH   # if that was master, this worktree is on master again
-  → wave-order check: line's wave run never decreases, else reorder + renumber + re-link
+  → wave-order check: wave run never decreases, ties earliest-deps, labels count up,
+        else reorder + renumber + relabel + re-link
   → /pr-stack-rebase from #1 to #n   # completion gate: every layer already current, leak-free
   → (per node, in the implementer's own worktree, when its parents have shipped)
         /green            → ALWAYS /pr-stack-rebase first, then the dependency gate; commit + push

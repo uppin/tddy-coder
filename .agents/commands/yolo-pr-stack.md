@@ -191,6 +191,18 @@ A node is **ready** when all of these hold:
    Its worktree is not created, and no subagent starts. Wave 1 nodes have no dependencies. `/green`
    would stop at its dependency gate (`green.md` 0b) anyway, so an early start is only a wasted
    worktree.
+3b. **Its branch already contains every delivered dependency.** For each dependency, its pushed head
+   must be an ancestor of this node's branch:
+   ```bash
+   git merge-base --is-ancestor "origin/feature/<slug>/<dep>" "origin/feature/<slug>/<node>" \
+     || echo STALE
+   ```
+   A green that lands below a node leaves every layer between them stale. A node dispatched on that
+   lineage stops at `/green`'s dependency gate having done nothing, which wastes a slot and a
+   worktree. When the check prints `STALE`, mark the row `blocked:lineage`. Then cascade
+   `/pr-stack-rebase` from the lowest stale layer up to this node, but only if none of those layers
+   is pinned and none has unpushed work. If one is, wait for its pipeline. Run the check again
+   before dispatching.
 4. No node it needs is in a 🔴 stopped state. Mark it **blocked**, not failed, and say which node
    blocks it.
 5. The running count is below the **concurrency cap**.
@@ -202,6 +214,12 @@ cargo builds compete for the machine. Say the cap in the Step 1 decomposition ap
 change it before anything is created. Say there too that a **sweep node** will be appended at the tail
 (see *The sweep node*), with its scope unknown until the stack has been implemented. Nodes that are
 ready beyond the cap queue in stack order, blockers first.
+
+**Re-assess the order after each pass, and after every `[G]` that reports.** A green can settle an
+edge that the contract only guessed at. Re-run `plan-pr-stack` Step 7b's checks: the waves never
+step back, ties go to the earliest dependencies, and the labels count up along the line. If a check
+fails, **stop dispatching above the affected layer**, say so, and reorder once the pipelines on
+those branches have drained. A reorder rewrites branches the pipelines have checked out.
 
 ### Which nodes qualify
 
@@ -217,7 +235,7 @@ report says so. A changeset that names a different implementer wins.
 ### Ledger
 
 Keep one file in the scratchpad: `yolo-pr-stack-<slug>.md`, one row per node — branch, PR number,
-worktree path, stage (`queued · G · W · F · done · stopped:<stage> · blocked:n<j> · manual`), the
+worktree path, stage (`queued · G · W · F · done · stopped:<stage> · blocked:n<j> · blocked:lineage · manual`), the
 complexity score, **model · effort used per stage with the reason** (both attempts, when retried),
 head SHA at the last report. Update it on every report. It is the orchestrator's memory across a
 context reset: after one, re-derive stages from `git worktree list`, the branches' pushed state and
@@ -229,7 +247,7 @@ committed.
 ### 0 — Ephemeral worktree
 
 ```bash
-W="$(dirname "$PWD")/yolo-<slug>-n<k>"                   # a sibling of the planning worktree
+W="$(dirname "$PWD")/yolo-<slug>-<node>"                 # a sibling; named, never numbered
 git fetch origin "feature/<slug>/<node>"
 git worktree add "$W" "feature/<slug>/<node>"            # must succeed: nothing pins the branch
 git -C "$W" status --porcelain | grep -v '^?? '          # must be empty
