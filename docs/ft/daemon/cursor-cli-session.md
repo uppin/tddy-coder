@@ -2,6 +2,8 @@
 
 > **Related:** [Claude Code CLI session](claude-cli-session.md) — sibling session type; shares `CliSessionManager`, `StreamSessionTerminalIO`, and web terminal mounting.
 > **Related:** [OpenCode CLI session](opencode-cli-session.md) — sibling session type; Cursor and OpenCode share the daemon-cut worktree provisioning (`cli_session_worktree.rs`).
+>
+> **Also runs as an agent tab:** the harness can be opened as an extra terminal inside another session, beside that session's main agent in its worktree — see [Session terminal tabs](../web/session-terminal-tabs.md).
 
 ## Summary
 

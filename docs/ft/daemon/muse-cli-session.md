@@ -4,6 +4,8 @@
 > start and resume path with; [Claude Code CLI session](claude-cli-session.md) and
 > [Cursor Agent CLI session](cursor-cli-session.md). All four are registered through one **CLI harness
 > descriptor** and share `CliSessionManager`, `StreamSessionTerminalIO` and the web terminal mount.
+>
+> **Also runs as an agent tab:** the harness can be opened as an extra terminal inside another session, beside that session's main agent in its worktree — see [Session terminal tabs](../web/session-terminal-tabs.md).
 
 ## Summary
 

@@ -30,6 +30,10 @@ stdin channel + exit-monitor cleanup).
 The first additional tool is **Bash** — a shell tool defined the same way the Claude CLI tool is,
 but it takes **no inputs** and simply opens on the session's worktree directory.
 
+A started terminal can instead run any registered CLI harness — an **agent terminal**: Warp, Claude
+Code, Cursor Agent, OpenCode or Muse Code beside the session's main agent, in the same worktree. See
+[Agent terminals](#agent-terminals).
+
 Every tool carries a stable **terminal id**: the original `claude` tool is identified by the
 reserved id `"main"` (kind `"claude-cli"`), and each started Bash tool gets a fresh id (kind
 `"bash"`). Clients manage tools over RPC — start, stop, list — and address a specific tool's I/O by
@@ -47,17 +51,20 @@ session and manage them over RPC, so I can run a shell in the session's worktree
 1. Every tool is identified. The main `claude` tool is listed under the reserved id `"main"`;
    started Bash tools receive fresh, unique ids distinct from `"main"`.
 2. `ListTerminalSessions(session_id)` returns one `TerminalSessionInfo{terminal_id, kind, pid}`
-   per running tool of that session — `kind` is `"claude-cli"` for `"main"` and **`"bash"`** for
-   started Bash tools. *(Updated: 2026-06-25 — kind `"shell"` → `"bash"`.)*
+   per running tool of that session — `kind` is the main tool's session type (`"claude-cli"`, …) for
+   `"main"`, **`"bash"`** for started Bash tools, and the harness's session type (`"warp-cli"`,
+   `"muse-cli"`, …) for a started agent terminal.
 
 ### Start / Stop
-3. `StartTerminalSession(session_id)` starts a **Bash tool**: it spawns the OS user's login shell in
-   the session's worktree, with **no inputs**, and returns the new `terminal_id`. The shell is the
+3. `StartTerminalSession(session_id, kind)` starts the tool `kind` names, in the session's worktree,
+   and returns the new `terminal_id`. An empty `kind` (or `"bash"`) is the **Bash tool**: the OS
+   user's login shell, with no inputs; any other `kind` is a registered CLI harness, started as an
+   [agent terminal](#agent-terminals). The shell is the
    user's passwd `pw_shell`, else the serving process's `$SHELL`, else `/bin/bash` — the passwd entry
    first because a daemon started by systemd or nix has a `$SHELL` of its own that is not the target
    user's interactive shell, and a terminal opened with it comes up in the wrong shell with none of
    the user's rc files. A `pw_shell` that refuses logins (`/usr/sbin/nologin`, `/bin/false`) is
-   skipped. *(Updated: 2026-06-25 — the started tool is the defined Bash tool.)*
+   skipped.
 4. The Bash tool uses the same PTY mechanic as the main tool: stdin is writable, output is
    broadcast and captured for replay.
 5. `StopTerminalSession(session_id, terminal_id)` terminates the tool's process and removes it from
@@ -76,6 +83,45 @@ session and manage them over RPC, so I can run a shell in the session's worktree
 ### Auth
 9. Every RPC validates `session_token` (→ GitHub user → OS user) exactly like the existing session
    RPCs; an invalid token yields `UNAUTHENTICATED`.
+
+## Agent terminals
+
+`StartTerminalSessionRequest.kind` (field 4) chooses what a started terminal runs. Empty or `"bash"`
+is the login shell; otherwise it is the session type of a registered CLI harness — `claude-cli`,
+`cursor-cli`, `opencode-cli`, `muse-cli`, `warp-cli`. A kind names a registered harness, never a
+command line, so a client cannot make the daemon run an arbitrary binary through a terminal.
+
+An agent kind spawns that harness's **fresh interactive start**, as its CLI harness descriptor builds
+it for a default launch, in the session's worktree under a fresh UUIDv7 `terminal_id`:
+
+- no model, no first prompt, no resume, no provider route;
+- a fresh conversation id for a harness that takes one (Claude Code's `--session-id`), never the
+  session's own;
+- no chat id for Cursor, which starts a new chat.
+
+The binary is resolved exactly as for that harness's own sessions: its env var, then
+`cli_harnesses.<type>.binary_path` in `daemon.yaml`, then the default name on `PATH`.
+`ListTerminalSessions` lists the tab with the harness's session type as its `kind`, and
+`StopTerminalSession` kills it and removes it from the list.
+
+Refusals:
+
+| Request | Status |
+|---|---|
+| `kind` is neither empty, `bash`, nor a registered harness | `INVALID_ARGUMENT` "unknown terminal kind …"; nothing is spawned |
+| an agent kind on a **room-backed** (tddy-coder) session | `INVALID_ARGUMENT` "this session's terminals run bash only" |
+| any started terminal on a **sandboxed** session | `FAILED_PRECONDITION` |
+| the harness binary cannot be spawned | the spawn error, as for a Bash tool |
+
+Like Bash tools, agent terminals get **no session environment** — no git identity, no `TDDY_SOCKET`,
+no provider route, no `os_user` — are not stopped by `DeleteSession` or the main tool's exit, and are
+**not persisted**: they do not resume after a daemon restart or a session resume. The web surface is
+the `+` menu of [Session Terminal Tabs](../web/session-terminal-tabs.md).
+
+Known limitation: an agent terminal gets no hooks or activity status of its own. A `claude-cli` tab
+inside a `claude-cli` session shares the worktree's `.claude/settings.local.json` hooks, so its
+activity may be reported against the main session — see
+[`docs/dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md`](../../dev/todo/2026-10-24-claude-agent-tab-shares-session-hooks.md).
 
 ## Terminal Control Ownership (Single-Screen Mutex)
 
@@ -322,8 +368,8 @@ relay exits with it rather than waiting for a participant nobody put there. See
 > bridge for Bash tools** (coder/LiveKit sessions serve `terminal_id`-addressed terminal RPCs from
 > their own participant; see [Session Participant RPC & Metadata](../coder/session-participant-rpc.md)).
 > The PTY plumbing that both the daemon and the coder use now lives in the shared `tddy-pty` crate.
-- Tools that take inputs. The API leaves room for them, but the only tool added now is Bash, which
-  takes no inputs. *(Added: 2026-06-25.)*
+- Tools that take inputs. A `kind` is a tool choice, not tool inputs: Bash and agent terminals both
+  start with no per-start inputs.
 - Configurable Bash binary — the Bash tool is built-in (the OS user's login shell, falling back to
   `tddy_terminal_rpc::login_shell::DEFAULT_LOGIN_SHELL`); no config entry is required.
   *(Added: 2026-06-25.)*
@@ -332,7 +378,8 @@ relay exits with it rather than waiting for a participant nobody put there. See
 
 ### Registry & identity
 `ClaudeCliSessionManager`'s registry becomes two-level: `session_id → (terminal_id → PtyHandle)`.
-`PtyHandle` gains `terminal_id` and `kind` (kind in {`"claude-cli"`, `"bash"`}). The main `claude`
+`PtyHandle` carries `terminal_id` and `kind` (the main tool's session type, `"bash"`, or an agent
+terminal's harness session type). The main `claude`
 tool is inserted under the reserved id `MAIN_TERMINAL_ID = "main"`; `get(session_id)` remains a
 convenience that returns the `"main"` tool so existing call sites are unchanged. The PTY
 exit-monitor removes the tool by `(session_id, terminal_id)`.
@@ -342,7 +389,10 @@ exit-monitor removes the tool by `(session_id, terminal_id)`.
 `claude` tool (`build_claude_argv`) and the Bash tool (`[shell_path]`) share the same I/O
 threading, capture, and cleanup. The Bash tool's shell is resolved by
 `tddy_terminal_rpc::login_shell::login_shell_for` at the RPC layer; the manager takes a resolved
-`shell_path` argument (no test-only branches) and labels the instance kind `"bash"`. Bash takes no per-start inputs.
+`shell_path` argument (no test-only branches) and labels the instance kind `"bash"`. An agent
+terminal's argv is built by the daemon's terminal roster from the harness descriptor and spawned by
+`CliSessionManager::start_agent_terminal` under the harness's session type as its kind. Neither takes
+per-start inputs.
 
 ### Lifecycle
 `StopTerminalSession` signals the tool's pid (reusing the SIGTERM/SIGKILL helper used by session

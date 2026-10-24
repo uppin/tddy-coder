@@ -6,6 +6,8 @@
 
 > **Related:** [Cursor Agent CLI session](cursor-cli-session.md) — same daemon PTY manager and web terminal path with Cursor-specific hooks and argv.
 > **Related:** [OpenCode CLI session](opencode-cli-session.md) and [Muse Code CLI session](muse-cli-session.md) — the third and fourth CLI session types; all four are registered through one CLI harness descriptor.
+>
+> **Also runs as an agent tab:** the harness can be opened as an extra terminal inside another session, beside that session's main agent in its worktree — see [Session terminal tabs](../web/session-terminal-tabs.md).
 
 ## Summary
 
