@@ -1504,6 +1504,9 @@ export const prStackAddPlannedPrAncestorCheckbox = (nodeId: string) =>
 /** `[data-testid="project-card-<projectId>"]` — one card per logical project (may span hosts) */
 export const projectCard = (projectId: string) => `project-card-${projectId}`;
 
+/** `[data-testid="project-card-id-<projectId>"]` — the logical project id shown on its card */
+export const projectCardId = (projectId: string) => `project-card-id-${projectId}`;
+
 /** `[data-testid="project-host-row-<projectId>-<daemonInstanceId>"]` — one row per hosting daemon */
 export const projectHostRow = (projectId: string, daemonInstanceId: string) =>
   `project-host-row-${projectId}-${daemonInstanceId}`;

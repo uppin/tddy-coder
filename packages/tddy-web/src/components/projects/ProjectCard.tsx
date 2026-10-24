@@ -145,7 +145,15 @@ export function ProjectCard({
       data-testid={`project-card-${group.projectId}`}
       className="rounded-md border border-border p-4"
     >
-      <div className="mb-2 font-semibold">{group.name}</div>
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2">
+        <span className="font-semibold">{group.name}</span>
+        <span
+          data-testid={`project-card-id-${group.projectId}`}
+          className="select-all break-all font-mono text-xs text-muted-foreground"
+        >
+          {group.projectId}
+        </span>
+      </div>
       <div className="mb-3 text-sm text-muted-foreground">{group.gitUrl}</div>
       <InlineError testId={`project-card-error-${group.projectId}`} message={failure.error} className="mb-3" />
 
