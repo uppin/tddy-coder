@@ -1,19 +1,9 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
-import { ProjectService } from "../../gen/project_pb";
 import { SessionService, SessionEntrySchema } from "../../gen/session_pb";
-import { ActivityService } from "../../gen/activity_pb";
-import { AccountsService } from "../../gen/accounts_pb";
-import { CatalogService } from "../../gen/catalog_pb";
-import { ExecToolService } from "../../gen/exec_tools_pb";
-import { PrStackService } from "../../gen/pr_stack_pb";
-import { SessionAgentService } from "../../gen/session_agents_pb";
-import { SessionFilesService } from "../../gen/session_files_pb";
-import { TerminalSessionService } from "../../gen/terminal_session_pb";
-import { WorktreeService } from "../../gen/worktree_pb";
 import { useHostConnector } from "../../rpc/connections/registry";
-import { useDaemonClient, useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
@@ -32,6 +22,9 @@ import { detectIsMobile, useIsMobile } from "../../hooks/useIsMobile";
 import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
 import { isCliTerminalSession } from "../../constants/claudeCliModels";
 import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
+import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
+import { useProjectHomeSetup } from "./useProjectHomeSetup";
+import { ProjectHomeSetupPane } from "./ProjectHomeSetupPane";
 import { useSessionsDrawerAttachClaims } from "./useSessionsDrawerAttachClaims";
 import { useSessionsDrawerProjects } from "./useSessionsDrawerProjects";
 import { useSessionsDrawerProjectHomes } from "./useSessionsDrawerProjectHomes";
@@ -64,40 +57,19 @@ export function SessionsDrawerScreen({
   const { sessionToken: authSessionToken } = useAuthContext();
   const sessionToken = authSessionToken ?? "";
 
-  // SessionService is daemon-level RPC — routed to whichever daemon is currently selected over
-  // whichever wire reaches it (see `SelectedDaemonProvider` and `rpc/connections`).
-  // `null` until a daemon is selected and a wire reaches it; every call site below guards.
-  // The selected-daemon `client` still owns the CREATE flow (a new session is created on the
-  // selected host); cross-host interaction routes through `activeClient` (computed below).
-  const client = useDaemonClient(SessionService);
-  const projectClient = useDaemonClient(ProjectService);
-  // The worktree RPCs left `SessionService` for `worktree.WorktreeService`, so they need their
-  // own client — the same daemon, over the same wire, addressed under the service that now serves
-  // them. It follows `client`'s routing exactly (selected daemon here, owning host in
-  // `activeWorktreeClient` below) so the pane and its worktree reads cannot disagree about which
-  // host they are talking to.
-  const worktreeClient = useDaemonClient(WorktreeService);
-  // Likewise for the nine terminal RPCs, which left `SessionService` for
-  // `terminal_session.TerminalSessionService`. Same daemon, same wire, and the same routing as
-  // `client` — a runtime's control lease and its terminal I/O must reach the host the session's
-  // PTY actually lives on.
-  const terminalClient = useDaemonClient(TerminalSessionService);
-  // And for the thirteen file RPCs, which left it for `session_files.SessionFilesService`: the
-  // inspector's Files tab and the create form's attachment staging.
-  const sessionFilesClient = useDaemonClient(SessionFilesService);
-  // `#unbundle` node 7 took two more families out. The roster and conversation RPCs went to
-  // `session_agents.SessionAgentService` — the Add-agent flow and every conversation pane — and
-  // activity, notifications and ACP replay to `activity.ActivityService`. Same daemon, same wire
-  // and the same routing as `client`, for the same reason the three above follow it.
-  const sessionAgentClient = useDaemonClient(SessionAgentService);
-  const activityClient = useDaemonClient(ActivityService);
-  // `#unbundle` node 8 took families A, L and P to their own services on the same daemon and wire.
-  const catalogClient = useDaemonClient(CatalogService);
-  // The signed-in person's provider accounts live in this daemon's vault; the New-session form lists
-  // them for the harness it is about to start.
-  const accountsClient = useDaemonClient(AccountsService);
-  const execToolClient = useDaemonClient(ExecToolService);
-  const prStackClient = useDaemonClient(PrStackService);
+  const {
+    client,
+    projectClient,
+    worktreeClient,
+    terminalClient,
+    sessionFilesClient,
+    sessionAgentClient,
+    activityClient,
+    catalogClient,
+    accountsClient,
+    execToolClient,
+    prStackClient,
+  } = useSessionsDrawerClients();
 
   // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
   // dots are written into `sessionNotificationRegistry`, which each row reads for itself; what comes
@@ -134,15 +106,21 @@ export function SessionsDrawerScreen({
     handleInspectorClose,
     handleInspectorExpand,
     handleInspectorRestore,
-    openProjectSetup,
   } = useSessionsDrawerInspector();
 
   const claims = useSessionsDrawerAttachClaims();
   const { attachClaimRef, settleAttach, listGenerationRef, awaitingCreatedSessionIdRef, unknownSession, setUnknownSession } =
     claims;
 
-  const { projects, error: projectsError } = useSessionsDrawerProjects(projectClient, sessionToken);
-  const projectHomes = useSessionsDrawerProjectHomes(catalogClient, projects);
+  const { projects, error: projectsError, reload: reloadProjects } = useSessionsDrawerProjects(projectClient, sessionToken);
+  const { homes: projectHomes, agents } = useSessionsDrawerProjectHomes(catalogClient, projects);
+  const projectHomeSetup = useProjectHomeSetup({
+    projectClient,
+    sessionToken,
+    selectedInstanceId: selectedInstanceId ?? "",
+    onStored: reloadProjects,
+  });
+  const setupProjectId = projectHomeSetup.setupProjectId;
 
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
@@ -400,12 +378,24 @@ export function SessionsDrawerScreen({
             onEnsureProjectHome={(projectId) =>
               ensureProjectHome(projectId, selectedInstanceId ?? "")
             }
-            onSetUpProjectHome={openProjectSetup}
+            onSetUpProjectHome={(projectId) => {
+              if (isMobile) setSessionListOpen(false);
+              projectHomeSetup.open(projectId);
+            }}
           />
           {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
-          {unknownSession ? (
+          {setupProjectId !== null ? (
+            <ProjectHomeSetupPane
+              projectId={setupProjectId}
+              project={projects.find((p) => p.projectId === setupProjectId) ?? null}
+              agents={agents}
+              onSetHomeAgent={(agentId) => projectHomeSetup.setHomeAgent(setupProjectId, agentId)}
+              onStart={() => ensureProjectHome(setupProjectId, selectedInstanceId ?? "")}
+              onClose={projectHomeSetup.close}
+            />
+          ) : unknownSession ? (
             <SessionsDrawerUnknownSession onHome={handleUnknownHome} />
           ) : (
             <SessionMainPane

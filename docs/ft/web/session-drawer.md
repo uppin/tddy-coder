@@ -82,12 +82,17 @@ session exists, its status dot.
 
 - **Click** calls `EnsureProjectHomeSession` for the project on the selected host and selects the
   session it answers — started, resumed or already running. A refusal is shown under the entry.
-- **No home agent**: the entry shows a hint pointing at the Projects screen and starts nothing.
-  Clicking it opens **Projects** at `#/projects?project=<id>` on the same host, with that project's
-  **Home agent** picker focused and scrolled into view
-  ([Projects § Home agent](projects-screen-multi-host.md#home-agent)). It is a pushed history entry,
-  so Back returns to the drawer. The entry is `aria-disabled` only where no such navigation is wired
-  (`onSetUpProjectHome` absent).
+- **No home agent**: the entry starts nothing and shows no hint. Clicking it opens the **setup pane**
+  in the detail area at `#/sessions/project-home/<id>` (a pushed history entry, so Back returns to
+  what was showing): *Set up main for &lt;project&gt;*, the project's **Home agent** picker, focused
+  (the same picker as [Projects § Home agent](projects-screen-multi-host.md#home-agent)), and
+  **Start main session**. Choosing an agent stores it with `SetProjectHomeAgent` on the selected host
+  and re-reads `ListProjects`, so the entry shows the agent's label and **Start main session** is
+  enabled; a refusal is shown under the picker. **Start main session** calls
+  `EnsureProjectHomeSession` and selects the session it answers, which replaces the pane; a refusal
+  is shown in the pane. **Cancel** returns to `#/sessions`. A project id the host does not list says
+  so and offers nothing to start. On mobile the click also closes the session list. The entry is
+  `aria-disabled` only where no setup handler is wired (`onSetUpProjectHome` absent).
 - **Not repeated**: the project-home session (`sessionRole === "project-home"`) is not listed again
   among the group's rows.
 - **A project with no session yet** still gets its group when it has a home agent, so the pinned
@@ -95,9 +100,10 @@ session exists, its status dot.
   project with neither a session nor a home agent gets no group.
 - The **Other** group has no pinned entry.
 
-Implementation: `ProjectHomeEntry`, `useEnsureProjectHome`, `useSessionsDrawerProjectHomes`
-(`src/components/sessions/`), `projectHomeSlot` and `withProjectHomeGroups`
-(`src/utils/projectHomeGroups.ts`), `projectSetupLocation` (`src/routing/projectSetupLocation.ts`).
+Implementation: `ProjectHomeEntry`, `ProjectHomeSetupPane`, `useProjectHomeSetup`,
+`useEnsureProjectHome`, `useSessionsDrawerProjectHomes` (`src/components/sessions/`),
+`projectHomeSlot` and `withProjectHomeGroups` (`src/utils/projectHomeGroups.ts`),
+`sessionsProjectHomeSetupPath` (`src/routing/appRoutes.ts`).
 
 ## Indicator Token
 

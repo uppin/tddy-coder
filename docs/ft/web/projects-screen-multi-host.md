@@ -98,9 +98,9 @@ daemon's catalog lists (`ListAgents`, harness profiles included), labelled by th
   daemon)*, so the card never reads **Not set** while a value is stored.
 - With no agents listed and nothing stored the picker is not shown.
 - **`#/projects?project=<id>`** focuses that project's picker and scrolls it into view once the
-  project is listed. This is where the session drawer's pinned **main** entry sends an operator whose
-  project has no home agent ([session drawer § Pinned main entry](session-drawer.md#pinned-main-entry)).
-  Focus is taken once per arrival; a later projects poll does not pull it back.
+  project is listed. Focus is taken once per arrival; a later projects poll does not pull it back.
+  (The session drawer's pinned **main** entry no longer navigates here: it opens the same picker in
+  its own setup pane — [session drawer § Pinned main entry](session-drawer.md#pinned-main-entry).)
 
 ## Adding a project to a host
 

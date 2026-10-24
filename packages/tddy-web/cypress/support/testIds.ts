@@ -1051,10 +1051,27 @@ export const sessionsDrawerProjectGroupHeader = (projectKey: string) =>
 export const sessionsDrawerProjectHome = (projectId: string) =>
   `sessions-drawer-project-home-${projectId}`;
 
-/** `[data-testid="sessions-drawer-project-home-hint-<projectId>"]` — shown instead of starting when
- *  the project has no home agent. */
-export const sessionsDrawerProjectHomeHint = (projectId: string) =>
-  `sessions-drawer-project-home-hint-${projectId}`;
+/** `[data-testid="sessions-project-home-setup-<projectId>"]` — the detail pane a click on a pinned
+ *  **main** entry opens when the project has no home agent (`/sessions/project-home/:projectId`). */
+export const sessionsProjectHomeSetup = (projectId: string) =>
+  `sessions-project-home-setup-${projectId}`;
+
+/** `[data-testid="sessions-project-home-setup-start-<projectId>"]` — the pane's Start main session button. */
+export const sessionsProjectHomeSetupStart = (projectId: string) =>
+  `sessions-project-home-setup-start-${projectId}`;
+
+/** `[data-testid="sessions-project-home-setup-close-<projectId>"]` — the pane's Cancel button. */
+export const sessionsProjectHomeSetupClose = (projectId: string) =>
+  `sessions-project-home-setup-close-${projectId}`;
+
+/** `[data-testid="sessions-project-home-setup-error-<projectId>"]` — why the pane's last start failed. */
+export const sessionsProjectHomeSetupError = (projectId: string) =>
+  `sessions-project-home-setup-error-${projectId}`;
+
+/** `[data-testid="sessions-project-home-setup-unknown-<projectId>"]` — shown when the host does not
+ *  list the project the pane names. */
+export const sessionsProjectHomeSetupUnknown = (projectId: string) =>
+  `sessions-project-home-setup-unknown-${projectId}`;
 
 /** `[data-testid="sessions-drawer-project-home-error-<projectId>"]` — why the last ensure failed. */
 export const sessionsDrawerProjectHomeError = (projectId: string) =>

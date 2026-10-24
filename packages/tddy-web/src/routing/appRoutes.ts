@@ -155,14 +155,32 @@ export function isSessionsNewPath(pathname: string): boolean {
 }
 
 /**
- * Returns true for `/sessions` (the drawer root), `/sessions/:id` (deep links) and `/sessions/new` —
- * every path the sessions drawer screen owns.
+ * Prefix of the pane that sets up a project's home agent: `/sessions/project-home/:projectId`, where
+ * a click on the drawer's pinned **main** entry lands when the project has no home agent. Two
+ * segments, so it can never be read as a session id.
+ */
+export const SESSIONS_PROJECT_HOME_SETUP_ROUTE = `${SESSIONS_DRAWER_ROUTE}/project-home`;
+
+/** Builds the `/sessions/project-home/:projectId` path for the given project id. */
+export function sessionsProjectHomeSetupPath(projectId: string): string {
+  return `${SESSIONS_PROJECT_HOME_SETUP_ROUTE}/${encodeURIComponent(projectId)}`;
+}
+
+/** Extracts the project id from `/sessions/project-home/:projectId`; `null` for any other path. */
+export function parseSessionsProjectHomeSetupProjectId(pathname: string): string | null {
+  return decodeSegment(singleSegmentAfter(pathname, SESSIONS_PROJECT_HOME_SETUP_ROUTE));
+}
+
+/**
+ * Returns true for `/sessions` (the drawer root), `/sessions/:id` (deep links), `/sessions/new` and
+ * `/sessions/project-home/:projectId` — every path the sessions drawer screen owns.
  * Does NOT match `/sessions-extra` or other paths that merely start with `/sessions`.
  */
 export function isSessionsDrawerPath(pathname: string): boolean {
   return (
     pathname === SESSIONS_DRAWER_ROUTE ||
-    singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null
+    singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null ||
+    parseSessionsProjectHomeSetupProjectId(pathname) !== null
   );
 }
 

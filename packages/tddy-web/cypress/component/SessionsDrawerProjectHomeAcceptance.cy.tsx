@@ -1,8 +1,8 @@
 /**
  * Acceptance: each project group in the drawer starts with a pinned **main** entry for the
  * project-home session. Clicking it ensures that session (`EnsureProjectHomeSession`) and selects
- * it; the home session is not repeated among the group's rows; a project with no home agent shows
- * a hint instead; the **Other** group has no pinned entry; a project with a home agent and no
+ * it; the home session is not repeated among the group's rows; a project with no home agent starts
+ * nothing and shows no hint (its click opens the setup pane); the **Other** group has no pinned entry; a project with a home agent and no
  * session yet still gets its group, so the pinned entry is how its first session starts.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry (`#project-home` 4/7).
@@ -27,7 +27,6 @@ import {
   sessionsDrawerProjectGroup,
   sessionsDrawerProjectGroupHeader,
   sessionsDrawerProjectHome,
-  sessionsDrawerProjectHomeHint,
 } from "../support/testIds";
 
 const ALPHA = { projectId: "proj-alpha", name: "alpha" };
@@ -99,8 +98,8 @@ function rowOrderIn(projectId: string): Cypress.Chainable<string[]> {
     .then(($rows) =>
       [...$rows]
         .map((el) => el.getAttribute("data-testid")!)
-        // A row's own parts (status dot, label) and the entry's hint/error are not rows.
-        .filter((id) => !/^sessions-drawer-(item-(status|label)|project-home-(hint|error))-/.test(id)),
+        // A row's own parts (status dot, label) and the entry's error are not rows.
+        .filter((id) => !/^sessions-drawer-(item-(status|label)|project-home-error)-/.test(id)),
     );
 }
 
@@ -157,7 +156,7 @@ it("the home session is not repeated in its group's rows", () => {
   ]);
 });
 
-it("a project without a home agent shows a hint instead of starting", () => {
+it("a project without a home agent starts nothing and shows no hint", () => {
   // Given
   const onEnsure = cy.stub().as("onEnsure").resolves();
   aDrawer([aSession("b1", BETA.projectId)], onEnsure);
@@ -166,7 +165,7 @@ it("a project without a home agent shows a hint instead of starting", () => {
   byTestId(sessionsDrawerProjectHome(BETA.projectId)).click();
 
   // Then
-  byTestId(sessionsDrawerProjectHomeHint(BETA.projectId)).should("contain", "Projects");
+  byTestId(sessionsDrawerProjectGroup(BETA.projectId)).should("not.contain", "Projects screen");
   cy.get("@onEnsure").should("not.have.been.called");
 });
 

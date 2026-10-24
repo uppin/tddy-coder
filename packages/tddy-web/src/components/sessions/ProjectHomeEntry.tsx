@@ -8,8 +8,8 @@ import type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
  * The pinned **main** entry first in a project group (`#project-home` 4/7): label `main`, the
  * project's main branch ref, the home agent's label, and the home session's status dot once it
  * exists. Clicking it ensures the project-home session; a refusal is shown on the entry. With no
- * home agent it shows a hint pointing at the Projects screen and starts nothing: a click asks to set
- * one up (`onSetUpProjectHome`), and without that handler the entry is disabled.
+ * home agent it starts nothing: a click opens the setup pane for that project
+ * (`onSetUpProjectHome`), and without that handler the entry is disabled.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
  */
@@ -62,14 +62,6 @@ export function ProjectHomeEntry(props: {
           </span>
         )}
       </button>
-      {!hasHomeAgent && (
-        <div
-          data-testid={`sessions-drawer-project-home-hint-${home.projectId}`}
-          className="px-2 pb-1 text-xs text-muted-foreground"
-        >
-          Set a home agent for this project on the Projects screen to start its main session.
-        </div>
-      )}
       {error !== null && (
         <div
           data-testid={`sessions-drawer-project-home-error-${home.projectId}`}
