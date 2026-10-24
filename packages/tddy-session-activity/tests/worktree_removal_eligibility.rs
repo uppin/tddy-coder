@@ -63,3 +63,11 @@ fn a_muse_cli_session_is_eligible_for_worktree_removal() {
     // `is_daemon_managed_worktree`.
     assert!(worktree_removal_applies_to("muse-cli"));
 }
+
+#[test]
+fn a_warp_cli_session_is_eligible_for_worktree_removal() {
+    // Then — like opencode-cli and muse-cli, a warp-cli session's worktree is cut for it alone, so
+    // deleting the session must not leak it. A client-supplied checkout is still kept by
+    // `is_daemon_managed_worktree`.
+    assert!(worktree_removal_applies_to("warp-cli"));
+}

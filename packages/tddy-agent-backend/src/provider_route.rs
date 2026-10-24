@@ -36,6 +36,8 @@ pub enum Harness {
     OpenCodeCli,
     /// Muse Code's TUI in a PTY (session type `muse-cli`).
     MuseCli,
+    /// Warp's Agent CLI in a PTY (session type `warp-cli`).
+    WarpCli,
     /// Cursor's headless agent (tool-session agent `cursor`).
     Cursor,
     /// Cursor's agent in a PTY (session type `cursor-cli`).
@@ -62,12 +64,13 @@ impl Harness {
             Harness::OpenCode => "opencode",
             Harness::OpenCodeCli => "opencode-cli",
             Harness::MuseCli => "muse-cli",
+            Harness::WarpCli => "warp-cli",
             Harness::Cursor => "cursor",
             Harness::CursorCli => "cursor-cli",
         }
     }
 
-    const ALL: [Harness; 10] = [
+    const ALL: [Harness; 11] = [
         Harness::Claude,
         Harness::ClaudeAcp,
         Harness::ClaudeCli,
@@ -76,6 +79,7 @@ impl Harness {
         Harness::OpenCode,
         Harness::OpenCodeCli,
         Harness::MuseCli,
+        Harness::WarpCli,
         Harness::Cursor,
         Harness::CursorCli,
     ];
@@ -87,6 +91,7 @@ impl Harness {
             Harness::Codex | Harness::CodexAcp => "Codex",
             Harness::OpenCode | Harness::OpenCodeCli => "OpenCode",
             Harness::MuseCli => "Muse Code",
+            Harness::WarpCli => "Warp",
             Harness::Cursor | Harness::CursorCli => "Cursor",
         }
     }
@@ -226,7 +231,8 @@ pub fn route_supported(
             harness,
             preset: preset.to_string(),
         }),
-        Harness::Cursor | Harness::CursorCli => {
+        // Warp runs on the person's own Warp sign-in; it has no provider endpoint to redirect.
+        Harness::Cursor | Harness::CursorCli | Harness::WarpCli => {
             Err(RouteRefusal::HarnessCannotBeRouted { harness })
         }
     }
@@ -269,7 +275,7 @@ type RouteBody = fn(Harness, &RouteTarget) -> Result<HarnessRoute, RouteRefusal>
 fn route_body(harness: Harness) -> Result<RouteBody, RouteRefusal> {
     match harness {
         Harness::Claude | Harness::ClaudeAcp | Harness::ClaudeCli => Ok(claude_code_route),
-        Harness::Cursor | Harness::CursorCli => {
+        Harness::Cursor | Harness::CursorCli | Harness::WarpCli => {
             Err(RouteRefusal::HarnessCannotBeRouted { harness })
         }
         Harness::OpenCode | Harness::OpenCodeCli => Ok(opencode_route),

@@ -266,6 +266,7 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         session_type: Some("claude-cli".to_string()),
         model: Some("claude-opus-4-8".to_string()),
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: None,
         sandbox: None,

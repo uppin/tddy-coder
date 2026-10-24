@@ -44,7 +44,7 @@ pub fn is_daemon_managed_worktree(worktree: &Path) -> bool {
 pub fn worktree_removal_applies_to(session_type: &str) -> bool {
     matches!(
         session_type,
-        "claude-cli" | "opencode-cli" | "muse-cli" | "workspace"
+        "claude-cli" | "opencode-cli" | "muse-cli" | "warp-cli" | "workspace"
     )
 }
 
@@ -481,6 +481,7 @@ mod tests {
             session_type: None,
             model: None,
             cursor_chat_id: None,
+            harness_resume_token: None,
             activity_status: None,
             hook_token: None,
             sandbox: None,
@@ -643,6 +644,7 @@ mod tests {
             session_type: Some("workspace".to_string()),
             model: None,
             cursor_chat_id: None,
+            harness_resume_token: None,
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),
@@ -702,6 +704,7 @@ mod tests {
             session_type: Some("claude-cli".to_string()),
             model: Some("claude-opus-4-8".to_string()),
             cursor_chat_id: None,
+            harness_resume_token: None,
             activity_status: None,
             hook_token: None,
             sandbox: Some(true),

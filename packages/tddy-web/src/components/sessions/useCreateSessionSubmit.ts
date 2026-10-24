@@ -52,10 +52,14 @@ export function useCreateSessionSubmit({
     // An attachment the daemon would refuse (duplicate or unsafe basename) fails the whole creation,
     // so it is refused in the form instead.
     if (attachmentProblem !== null) return false;
-    // A model is always required and comes from the daemon-advertised catalog; a failed/loading
-    // probe leaves `model` empty, which disables Create (no fallback).
+    // A model is required and comes from the daemon-advertised catalog; a failed/loading probe
+    // leaves `model` empty, which disables Create (no fallback). Warp takes no model, so its Create
+    // needs only the project.
     if (sessionType === "tool") {
       return Boolean(projectId && selectedAgentId && toolPath && model);
+    }
+    if (sessionType === "warp-cli") {
+      return Boolean(projectId);
     }
     return Boolean(projectId && model);
   })();

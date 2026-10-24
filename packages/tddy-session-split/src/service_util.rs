@@ -97,6 +97,7 @@ pub fn starting_session_metadata(
         session_type: Some(session_type.to_string()),
         model: None,
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: None,
         sandbox: None,
