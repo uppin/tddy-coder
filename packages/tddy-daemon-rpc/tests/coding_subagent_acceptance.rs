@@ -512,7 +512,7 @@ async fn a_coding_agent_turn_answers_through_prompt_agent_conversation() {
 
     // Then
     assert_eq!(text, "fixed it");
-    assert_eq!(stop_reason, "end_turn");
+    assert_eq!(stop_reason, "EndTurn", "the wire spelling `agent_stop_reason` writes");
 }
 
 #[tokio::test]
