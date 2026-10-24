@@ -172,10 +172,9 @@ Build the stub first (`cargo build -p tddy-acp-stub`).
 - **Live title gap.** Live frames are titled per record (`frame_for_agent_activity`), so a bubble first seen
   live keeps its opening call's title (the agent only) until reload, because the web keeps the first title
   it shows (`acpReplayProjection.ts`).
-- **Title separator and label.** The title is `<agent id>: <first prompt summary>`, the summary being the
-  first line capped to 80 characters. The label is the agent id because `AgentActivityRecord` carries no
-  label. The Cypress fixture `SubagentConversationBubbleAcceptance.cy.tsx` hand-writes ` · `; align the
-  fixture with the server format or change the server.
+- **Title separator and label.** The title is `<agent id> · <first prompt summary>`, matching the PRD and
+  the Cypress fixture; the summary is the first line capped to 80 characters. The label is the agent id
+  because `AgentActivityRecord` carries no label.
 - **`AgentActivityOverlay` is not wired.** It has no production mount and does not pass `onSubagentClick`, so
   subagent entries are inert there. Known TODO: `docs/dev/todo/2026-10-23-agent-activity-overlay-has-no-production-mount.md`.
 
