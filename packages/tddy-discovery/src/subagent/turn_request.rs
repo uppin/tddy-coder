@@ -59,6 +59,16 @@ impl TurnRequest {
         }
     }
 
+    /// Put `preface` ahead of the new question this request asks, after a blank line. A request that
+    /// asks no new question is returned as it is: there is no prompt for the preface to ride on.
+    #[must_use]
+    pub fn with_prompt_preface(mut self, preface: &str) -> Self {
+        if let Some(prompt) = self.prompt.take() {
+            self.prompt = Some(format!("{preface}\n\n{prompt}"));
+        }
+        self
+    }
+
     /// Carry on from what the conversation already holds, sending no new user message.
     ///
     /// The plain case is a chain cut short by its budget: re-asking would make the agent re-read

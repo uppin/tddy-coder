@@ -224,6 +224,7 @@ impl AgentRoster {
             session_os_user,
             managed,
             session_token: session_token.to_string(),
+            conversation_id: None,
         })
     }
 
@@ -260,6 +261,9 @@ impl AgentRoster {
                 )
                 .await?;
                 launch.worktree = worktree.root().to_path_buf();
+                // Its exec calls run in the same worktree: the launch names the conversation, and
+                // the tool server hands that name to `tddy-tools` (see `CONVERSATION_ID_ENV`).
+                launch.conversation_id = Some(conversation_id.to_string());
                 Some(worktree)
             }
         };

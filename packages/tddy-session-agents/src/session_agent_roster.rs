@@ -143,8 +143,9 @@ impl SessionAgentRosterStore {
 
     /// Add one agent, or report the roster unchanged when it is already attached.
     ///
-    /// Idempotent on `agent_id`: a second attach of the same id returns the current roster, does
-    /// not bump `rev`, and publishes nothing.
+    /// Idempotent on `agent_id`: a second attach of the same id under the same placement returns the
+    /// current roster, does not bump `rev`, and publishes nothing. Under a different placement it is
+    /// refused, naming the placement the entry holds.
     pub fn attach(
         &self,
         session_id: &str,
@@ -152,7 +153,12 @@ impl SessionAgentRosterStore {
         record: SessionAgentRecord,
     ) -> Result<SessionAgentRoster, Status> {
         self.with_session(session_id, session_dir, |state, sources| {
-            if state.agents.iter().any(|a| a.agent_id == record.agent_id) {
+            if let Some(attached) = state.agents.iter().find(|a| a.agent_id == record.agent_id) {
+                crate::agent_placement::refuse_placement_change(
+                    session_id,
+                    Some(attached),
+                    record.placement,
+                )?;
                 return Ok(state.snapshot(session_id, sources));
             }
             let mut next = state.agents.clone();

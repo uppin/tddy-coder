@@ -10,8 +10,8 @@ use std::path::Path;
 use async_trait::async_trait;
 use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{
-    sync_refusal, PromptOutcome, SubagentError, SubagentSession, SyncAnswer, TurnRequest,
-    WorktreeSyncPort, SYNC_NOTICE_PATHS,
+    sync_notice, sync_refusal, PromptOutcome, SubagentError, SubagentSession, SyncAnswer,
+    TurnRequest, WorktreeSync, WorktreeSyncPort, SYNC_NOTICE_PATHS,
 };
 use tddy_rpc::Status;
 use tddy_subagent_worktree::{
@@ -114,23 +114,32 @@ impl CodingAgentConversationTurns {
 }
 
 /// Merge the caller's files into `worktree` before a coding agent's turn, refusing the turn when they
-/// conflict with work the conversation has not pulled.
+/// conflict with work the conversation has not pulled. Answers the merge when there was one, so the
+/// turn can tell the agent what changed.
 ///
 /// A free function over the worktree alone: a turn future must not hold a borrow of the session,
 /// which is not `Sync`.
-async fn take_in_callers_files(worktree: &ConversationWorktree) -> Result<(), SubagentError> {
-    // TODO(clone-placement): the coding agent is not told its files changed under it. Its ACP prompt
-    // has no channel the sync notice can ride on yet; a model loop gets the notice.
+async fn take_in_callers_files(
+    worktree: &ConversationWorktree,
+) -> Result<Option<WorktreeSync>, SubagentError> {
     match sync_with_caller(worktree).await? {
         SyncAnswer::Conflicted { paths, more_paths } => Err(sync_refusal(&paths, more_paths, None)),
-        SyncAnswer::Merged(_) | SyncAnswer::Nothing => Ok(()),
+        SyncAnswer::Merged(sync) => Ok(Some(sync)),
+        SyncAnswer::Nothing => Ok(None),
     }
 }
 
 #[async_trait]
 impl SubagentSession for CodingAgentConversationTurns {
     async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
-        take_in_callers_files(&self.worktree).await?;
+        // The sync notice rides on the prompt the agent is sent: the same words a model loop gives its
+        // model. A turn with no new prompt (answering a permission request) has nothing to ride on.
+        // TODO(clone-placement): a merge on a turn that carries no prompt is not announced to the
+        // agent; the notice would need to wait for the next prompt the turn sends.
+        let request = match take_in_callers_files(&self.worktree).await? {
+            Some(sync) => request.with_prompt_preface(&sync_notice(&sync)),
+            None => request,
+        };
         let outcome = self.session.take_turn(request).await;
         // The turn ran whether or not it answered: what it changed is on disk and is committed
         // even when the turn itself failed.
@@ -175,3 +184,6 @@ impl SubagentSession for CodingAgentConversationTurns {
         self.session.tail(max_messages)
     }
 }
+
+#[cfg(test)]
+mod sync_notice_tests;

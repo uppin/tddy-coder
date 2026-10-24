@@ -3,11 +3,41 @@
 //! `shared` is the session's own worktree — the agent edits the main agent's checkout. `clone` gives
 //! each conversation a worktree and branch of its own (see [`crate::clone_placement`]).
 
-use tddy_core::AgentPlacementRecord;
+use tddy_core::{AgentPlacementRecord, SessionAgentRecord};
 use tddy_rpc::Status;
 use tddy_service::proto::types::AgentPlacement;
 
 use crate::agent_host_callbacks::AgentRoster;
+
+/// Refuse an attach that would change the placement of an agent the session already holds.
+///
+/// A conversation's worktree is cut when it opens, from the placement the roster holds for its agent,
+/// so the entry already there cannot take a second placement. Answering the attach as an idempotent
+/// success would tell the caller a change happened that did not.
+pub(crate) fn refuse_placement_change(
+    session_id: &str,
+    attached: Option<&SessionAgentRecord>,
+    requested: AgentPlacementRecord,
+) -> Result<(), Status> {
+    match attached {
+        Some(entry) if entry.placement != requested => Err(Status::failed_precondition(format!(
+            "agent '{}' is already attached with {} placement in session '{session_id}'; detach it \
+             before attaching it with {} placement",
+            entry.agent_id,
+            placement_name(entry.placement),
+            placement_name(requested),
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// The word a placement is named by in a refusal.
+fn placement_name(placement: AgentPlacementRecord) -> &'static str {
+    match placement {
+        AgentPlacementRecord::Shared => "shared",
+        AgentPlacementRecord::Clone => "clone",
+    }
+}
 
 impl AgentRoster {
     /// [`Self::seeded_roster_records`] for a start that also names the agents whose conversations
