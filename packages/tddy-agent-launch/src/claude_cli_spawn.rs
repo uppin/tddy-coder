@@ -67,6 +67,9 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // The session's standing role. Recorded in the session's record before the agent is spawned, and
     // for "project-home" the agent is pre-approved that role's tool set. Empty for an ordinary session.
     session_role: &str,
+    // The credential minted for a project-home session's agent, which its tools present to this
+    // daemon; `None` for every other role.
+    agent_session_token: Option<&str>,
     // A checkout to run in directly (a project's home worktree) instead of cutting a session
     // worktree. Empty cuts one, as every other claude-cli start does.
     repo_path: &str,
@@ -234,6 +237,15 @@ pub(crate) async fn spawn_claude_cli_session_inner(
 
     env_extra.extend(provider_route.map(|route| route.env).unwrap_or_default());
     env_extra.extend(config.claude_cli_renderer_env());
+    let role_launch = claude_cli_spawn_steps::start_role_launch(
+        config,
+        tddy_data_dir,
+        &session_dir,
+        session_id,
+        session_role,
+        agent_session_token,
+    )?;
+    env_extra.extend(role_launch.env);
 
     // The role is on disk before the agent exists, so the daemon never reads a home session as ordinary.
     claude_cli_spawn_steps::record_role_before_spawn(
@@ -260,7 +272,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
             managed,
             append_system_prompt_file,
             env_extra,
-            session_role,
+            role_args: role_launch.extra_args,
         },
     )
     .await?;

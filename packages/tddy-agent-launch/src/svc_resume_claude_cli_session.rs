@@ -10,7 +10,7 @@ use tddy_rpc::Response;
 
 use std::path::PathBuf;
 
-use crate::claude_cli_spawn_steps::role_allowed_tools_args;
+use crate::claude_cli_spawn_steps::{project_home_launch, ProjectHomeLaunch, RoleLaunch};
 use crate::hooks_and_urls;
 
 use crate::launch_ports::LaunchSessions;
@@ -63,12 +63,14 @@ impl LaunchSessions {
             .or_else(|| meta.repo_path.as_ref().map(PathBuf::from))
             .unwrap_or_else(|| session_dir.clone());
         let is_split = split.is_some();
-        let (mut split_args, split_env) = match split {
+        let (mut split_args, mut split_env) = match split {
             Some(w) => (w.extra_args, w.env),
             None => (Vec::new(), Vec::new()),
         };
-        // A role's tool set is not in a persisted argv, so a resumed agent is given it again.
-        split_args.extend(role_allowed_tools_args(meta.session_role.as_deref()));
+        // A role's wiring is not in a persisted argv, so a resumed agent is given it again.
+        let role = self.resumed_role_launch(&meta, session_id, &session_dir, session_token)?;
+        split_args.extend(role.extra_args);
+        split_env.extend(role.env);
 
         let manager = Arc::clone(&self.claude_cli_manager);
         let session_id_owned = session_id.to_string();
@@ -166,6 +168,32 @@ impl LaunchSessions {
 }
 
 impl LaunchSessions {
+    /// What a resumed session's role adds to its agent's launch: a main is wired to its tools
+    /// again ([`project_home_launch`]) under a **freshly** minted credential — the one its previous
+    /// process held may have expired while it was stopped — and every other role adds nothing.
+    fn resumed_role_launch(
+        &self,
+        meta: &tddy_core::SessionMetadata,
+        session_id: &str,
+        session_dir: &Path,
+        session_token: &str,
+    ) -> Result<RoleLaunch, Status> {
+        if meta.session_role.as_deref() != Some(tddy_core::session_metadata::PROJECT_HOME_ROLE) {
+            return Ok(RoleLaunch::default());
+        }
+        project_home_launch(ProjectHomeLaunch {
+            config: &self.config,
+            tddy_data_dir: &self.tddy_data_dir,
+            session_dir,
+            session_id,
+            agent_session_token: &self.split_sessions.agent_session_token_for(session_token)?,
+            tddy_tools_path:
+                &tddy_session_split::svc_resolve_tddy_tools_path::resolve_tddy_tools_path(
+                    &self.config,
+                )?,
+        })
+    }
+
     /// The environment a resumed claude-cli agent starts from: the checkout's commit identity
     /// (`None` for a split agent), the split wiring, and the provider account the session's start
     /// recorded — re-read from the owner's vault, so a rotated key is what the resume runs on and a

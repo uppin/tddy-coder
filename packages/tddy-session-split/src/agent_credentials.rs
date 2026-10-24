@@ -38,16 +38,16 @@ pub(crate) fn mint_agent_session_token(
 
 /// The identity a caller's token *proves*, or a refusal.
 ///
-/// Shared by everything a split session start signs under the caller, because each of them
-/// (the agent's own token, the room poller's per-poll credential) is this daemon asserting an
-/// identity to another host: the login in the claims is what the codebase daemon looks up in its
-/// own `users[]` table to pick the OS user, so a token this daemon could not verify would be this
-/// daemon choosing a user on another host's behalf. Every failure is a refusal rather than a
-/// fallback to forwarding the caller's token: an expired, forged or malformed credential must not
-/// buy a minted one.
+/// Shared by everything a session start signs under the caller — a split or project-home agent's
+/// own token, the room poller's per-poll credential — so its refusal names no one placement. For a
+/// split session each is this daemon asserting an identity to another host: the login in the
+/// claims is what the codebase daemon looks up in its own `users[]` table to pick the OS user, so a
+/// token this daemon could not verify would be this daemon choosing a user on another host's
+/// behalf. Every failure is a refusal rather than a fallback to forwarding the caller's token: an
+/// expired, forged or malformed credential must not buy a minted one.
 fn verified_caller(tokens: &SessionTokens, caller_token: &str) -> Result<GitHubUser, Status> {
     let refused =
-        |why: String| Status::unauthenticated(format!("cannot wire a split session: {why}"));
+        |why: String| Status::unauthenticated(format!("cannot sign for the caller: {why}"));
     let claims = tokens.verifier().verify_now(caller_token).map_err(|e| {
         refused(match e {
             SessionTokenError::Expired => "the caller's session token has expired".to_string(),

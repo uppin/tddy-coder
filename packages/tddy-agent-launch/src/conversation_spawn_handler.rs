@@ -81,6 +81,8 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             false,
             // A spawned child conversation has no standing role.
             "",
+            // Nor an agent credential, which only a project-home main is given.
+            None,
             // A child conversation cuts its own worktree.
             "",
             // The orchestrator's owner's vault: a child is the same owner's, on the same project.

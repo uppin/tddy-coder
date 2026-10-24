@@ -12,7 +12,7 @@ mod project_home_support;
 use std::time::{Duration, SystemTime};
 
 use project_home_support::{
-    a_home_daemon, a_repo_with_origin_main, ensure_main, HomeDaemon, PROJECT_ID, a_caller_token,
+    a_caller_token, a_home_daemon, a_repo_with_origin_main, ensure_main, HomeDaemon, PROJECT_ID,
 };
 use tddy_rpc::Request;
 use tddy_service::proto::session::{

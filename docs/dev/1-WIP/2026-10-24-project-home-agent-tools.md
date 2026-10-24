@@ -1,7 +1,7 @@
 # Changeset: Project-home agent reaches its tools
 
 **Date**: 2026-10-24
-**Status**: 🚧 In progress — red: 6 acceptance + 6 unit tests failing, ready for green
+**Status**: 🚧 In progress — green: 12 planned tests pass; validating
 **Type**: Bug Fix
 
 ## Initial Discovery
@@ -46,12 +46,12 @@ server behind them, kept native Bash, and had no idea it was main.
 
 ## Scope
 
-- [ ] Main's launch wiring: MCP config, `TDDY_REMOTE_*` env per host kind, native-tool disallow list, role prompt file
-- [ ] Start: mint the agent token from the caller's and apply the wiring
-- [ ] Resume: same, with a fresh token
-- [ ] Mint refusal names the main, not "a split session"
-- [ ] Shared project-home test fixture: signer + signed caller token; stub dumps `TDDY_REMOTE_*`
-- [ ] TODOs for the two side findings (written in this planning pass)
+- [x] Main's launch wiring: MCP config, `TDDY_REMOTE_*` env per host kind, native-tool disallow list, role prompt file
+- [x] Start: mint the agent token from the caller's and apply the wiring
+- [x] Resume: same, with a fresh token
+- [x] Mint refusal no longer says "a split session" (now "cannot sign for the caller: …" — the same check backs the room-poll minter too)
+- [x] Shared project-home test fixture: signer + signed caller token; stub dumps `TDDY_REMOTE_*`
+- [x] TODOs for the two side findings (written in this planning pass)
 
 ## Technical Changes
 
@@ -109,10 +109,10 @@ pub(crate) fn project_home_launch(launch: ProjectHomeLaunch<'_>) -> Result<RoleL
 
 ## Implementation Milestones
 
-- [ ] `project_home_launch` passes its unit tests (embedded + binary hosts)
-- [ ] An ensured main is launched with the wiring (acceptance)
-- [ ] A resumed main is launched with the wiring and a fresh token (acceptance)
-- [ ] Ordinary claude-cli start unchanged (existing + new regression case)
+- [x] `project_home_launch` passes its unit tests (embedded + binary hosts)
+- [x] An ensured main is launched with the wiring (acceptance)
+- [x] A resumed main is launched with the wiring and a fresh token (acceptance)
+- [x] Ordinary claude-cli start unchanged (existing + new regression case)
 - [ ] `./test -p tddy-agent-launch -p tddy-session-lifecycle -p tddy-session-split` green
 
 ## Testing Plan
@@ -170,7 +170,9 @@ the existing `claude_cli_session_acceptance.rs` argv cases, which run with no ro
 
 ## Technical Debt & Production Readiness
 
-- 🔴 `project_home_launch` is a `todo!()` contract (`packages/tddy-agent-launch/src/claude_cli_spawn_steps.rs`, `TODO(2026-10-24-project-home-agent-tools)`); green replaces it. Until then the lib build warns that `ProjectHomeLaunch`'s fields are never read.
+- ✅ `project_home_launch` implemented; the red-phase `todo!()` and its TODO are gone.
+- A project-home start or resume now **fails** when the toolchain's `tddy-tools` cannot be found (`resolve_tddy_tools_path` refuses a missing binary). Deliberate: a main without its MCP server is the bug this fixes. Ordinary sessions are unaffected.
+- `start_role_launch` takes 6 parameters (repo budget 5) — checked at `/analyze-code-issues`.
 
 ## Decisions & Trade-offs
 
@@ -189,6 +191,12 @@ the existing `claude_cli_session_acceptance.rs` argv cases, which run with no ro
 ### From @red (TDD Red Phase)
 
 - Red-phase contract: `ProjectHomeLaunch`, `RoleLaunch`, `project_home_launch` (signatures as in State B). Green also wires the call sites (start mint + resume) — the acceptance tests fail on those, not on this function alone.
+
+### From @green
+
+- `tddy-agent-launch` does not depend on `tddy-sandbox-recipes`, so the MCP-only argv is a new `tddy_session_split::agent_argv::tddy_tools_only_mcp_args`, which `split_claude_extra_args` now also uses (split argv byte-identical).
+- The mint is the existing `SplitSessions::agent_session_token_for`, widened to `pub` (no second method).
+- `resume_claude_cli_session`: 144 → 146 lines (within the ≤ 2 budget); the role wiring is `LaunchSessions::resumed_role_launch`.
 
 ### From @validate-changes (Change Validation)
 
@@ -212,7 +220,7 @@ the existing `claude_cli_session_acceptance.rs` argv cases, which run with no ro
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-agent-launch -p tddy-session-split -p tddy-session-lifecycle`) — verify 100% pass

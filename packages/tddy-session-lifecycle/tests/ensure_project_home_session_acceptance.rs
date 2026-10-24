@@ -117,7 +117,10 @@ impl ALaunch {
             .find(&needle)
             .unwrap_or_else(|| panic!("the agent was launched with {flag}; argv: {argv}"))
             + needle.len();
-        argv[start..].split(' ').next().expect("a value follows the flag")
+        argv[start..]
+            .split(' ')
+            .next()
+            .expect("a value follows the flag")
     }
 
     /// The environment variable `key` as the stub saw it; empty when unset.
@@ -508,7 +511,10 @@ async fn an_ensured_mains_tools_reach_this_daemon_as_the_main() {
 
     // Then its tools address this daemon over its local URL, as the main itself
     assert_eq!(launch.env("TDDY_REMOTE_SESSION_ID"), main.session_id);
-    assert_eq!(launch.env("TDDY_REMOTE_DAEMON_URL"), this_daemons_local_url());
+    assert_eq!(
+        launch.env("TDDY_REMOTE_DAEMON_URL"),
+        this_daemons_local_url()
+    );
     // And no agent-tool socket, which only an embedded daemon serves
     assert_eq!(launch.env("TDDY_REMOTE_DAEMON_SOCKET"), "");
 }
@@ -590,7 +596,10 @@ async fn a_resumed_main_is_wired_to_its_tools_again_with_a_fresh_token() {
     world.stop(&main.session_id).await;
 
     // When it is ensured again, which resumes it
-    world.ensure().await.expect("ensuring a stopped main resumes it");
+    world
+        .ensure()
+        .await
+        .expect("ensuring a stopped main resumes it");
     let launch = world.launch_of(&main.session_id).await;
 
     // Then the resumed agent loads its tools and reaches this daemon as the main
