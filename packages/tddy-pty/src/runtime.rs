@@ -543,8 +543,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn output_written_just_after_the_child_exits_is_captured_when_the_exit_is_reported() {
         // Given a child that exits at once, leaving a process on its terminal that writes a line
-        // a moment later and then exits too
-        let task = a_running_shell("(trap '' HUP; sleep 0.3; printf 'late-line') & exit 0").await;
+        // a moment later and then exits too.
+        //
+        // The hangup is ignored in the child *before* it forks, so the background process is
+        // born ignoring it. Ignoring it inside the subshell instead races the child's exit: the
+        // child is the session leader, its exit sends SIGHUP to the terminal's foreground group
+        // (which, without job control, includes the subshell), and on a loaded machine that can
+        // land before the subshell has run its own `trap` — killing it, closing the terminal, and
+        // reporting the exit with nothing captured.
+        let task = a_running_shell("trap '' HUP; (sleep 0.3; printf 'late-line') & exit 0").await;
 
         // When the exit is reported
         assert!(
