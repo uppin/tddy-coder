@@ -28,7 +28,7 @@ use tddy_service::proto::session::{
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
-use crate::cli_resume_token::resume_token_recorder;
+use crate::cli_resume_token::{resume_token_recorder, settled_resume_token};
 use crate::cli_route_launch::{
     launch_model_for, resume_cli_route, start_cli_route, CliRouteLaunch,
 };
@@ -37,7 +37,7 @@ use crate::cli_session_worktree::{
 };
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::stack_parent::SpawnStackParent;
-use tddy_cli_sessions::cli_session_manager::ExitHook;
+use tddy_cli_sessions::cli_session_manager::{ExitHook, HarnessLaunchExtras};
 
 /// Everything one CLI harness start reads.
 pub(crate) struct CliHarnessStart<'a> {
@@ -218,9 +218,7 @@ pub(crate) async fn start_cli_harness_session(
             initial_prompt: Some(initial_prompt),
             ..CliLaunch::default()
         },
-        route.unwrap_or_default(),
-        env,
-        token_recorder,
+        launch_extras(route.unwrap_or_default(), env, token_recorder),
     )
     .await?;
     progress.end_phase(StartStep::Agent);
@@ -318,7 +316,7 @@ async fn resume_cli_harness_session(
     let ResumedSession {
         session_id,
         session_dir,
-        meta,
+        mut meta,
         git_environment,
     } = session;
     let worktree_path = meta
@@ -333,6 +331,8 @@ async fn resume_cli_harness_session(
         )));
     }
 
+    // The previous run's recorder may still be writing the token it printed as it exited.
+    meta.harness_resume_token = settled_resume_token(cli_manager, session_id, session_dir).await?;
     let route = resume_cli_route(account_access, harness, session_dir)?;
     let binary = harness_binary(config, harness);
     let (token_recorder, token_arm) = resume_token_recorder(session_dir.to_path_buf());
@@ -347,9 +347,7 @@ async fn resume_cli_harness_session(
             resume: true,
             ..CliLaunch::default()
         },
-        route,
-        git_environment,
-        token_recorder,
+        launch_extras(route, git_environment, token_recorder),
     )
     .await?;
 
@@ -370,28 +368,37 @@ async fn resume_cli_harness_session(
     }))
 }
 
-/// Spawn `harness` with `launch`, followed by the route's arguments and with its environment added.
-#[allow(clippy::too_many_arguments)]
+/// What a launch adds to the harness's argv: the route's arguments, `env` with the route's
+/// environment on top, and `on_exit` run once the process has exited.
+fn launch_extras(
+    route: CliRouteLaunch,
+    mut env: Vec<(String, String)>,
+    on_exit: ExitHook,
+) -> HarnessLaunchExtras {
+    env.extend(route.env);
+    HarnessLaunchExtras {
+        args: route.args,
+        env,
+        on_exit: Some(on_exit),
+    }
+}
+
+/// Spawn `harness` with `launch`, followed by `extras`.
 async fn launch(
     cli_manager: &Arc<CliSessionManager>,
     harness: &CliHarness,
     session_id: &str,
     worktree_path: &Path,
     launch: &CliLaunch<'_>,
-    route: CliRouteLaunch,
-    mut env: Vec<(String, String)>,
-    on_exit: ExitHook,
+    extras: HarnessLaunchExtras,
 ) -> Result<Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>, Status> {
-    env.extend(route.env);
     cli_manager
         .launch_cli_harness(
             harness,
             session_id,
             worktree_path.to_path_buf(),
             launch,
-            route.args,
-            env,
-            Some(on_exit),
+            extras,
         )
         .await
         .map_err(|e| Status::internal(format!("failed to spawn {}: {e}", harness.session_type)))
