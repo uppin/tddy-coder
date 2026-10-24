@@ -23,7 +23,7 @@ implements it once.
 | Module | Holds |
 |---|---|
 | `split_ports.rs` | `SplitSessions`, `trait SplitHost`, and the two aliases of the service surfaces its callbacks return (`SplitSessionFiles`, `SplitSessionAgents`) |
-| `svc_spawn_split_agent.rs` | `spawn_split_agent` (the agent half of a split session), cut into `host_split_room` (the session room over the remote checkout, through `SplitRoomHosting::host_remote_worktree`; a jailed-codebase start opens none), `split_agent_context_and_args` and `write_split_agent_metadata`, with `SplitAgentProcess<'a>` |
+| `svc_spawn_split_agent.rs` | `spawn_split_agent` (the agent half of a split session), cut into `host_split_room` (the session room over the remote checkout, through `SplitRoomHosting::host_remote_worktree`; a jailed-codebase start opens none), `split_agent_context_and_args` and `write_split_agent_metadata`, with `SplitAgentProcess<'a>`; `SplitSessions::agent_session_token_for` (`pub`) mints an agent's own credential from the verified caller — split and jailed-codebase agents, and the project-home main |
 | `svc_paired_codebase_teardown.rs` | `delete_paired_codebase_session`: tearing down the paired codebase session through `SplitHost::delete_session` |
 | `split_claude_cli_start.rs`, `split_start.rs` | `start_split_claude_cli_session`; `SplitStartFailure` and split-placement resolution |
 | `svc_split_context_from_codebase_host.rs` | the split agent's context read from the codebase host |
@@ -34,7 +34,7 @@ implements it once.
 | `svc_resolve_tddy_tools_path.rs` | `resolve_tddy_tools_path` and `agent_tool_socket_for_embedded_host`, both on the handle |
 | `service_util.rs` | the helpers several start, resume and spawn paths share |
 | `workspace_session.rs` | `workspace_sandbox_spec`, which sandbox provisioning and the jail rebuild both call, and the workspace session's own `.session.yaml` reads |
-| `split_session.rs`, `agent_argv.rs`, `agent_credentials.rs` | split-session start; native-tool constants, roster withdrawals and `split_claude_extra_args`; the token TTL, `mint_agent_session_token`, `verified_caller` and `RoomPollTokenMinter` |
+| `split_session.rs`, `agent_argv.rs`, `agent_credentials.rs` | split-session start; native-tool constants, roster withdrawals, `split_claude_extra_args` and `tddy_tools_only_mcp_args` (writes a session's `claude-mcp-config.json` registering `tddy-tools --mcp` and returns `--mcp-config` + `--strict-mcp-config`; shared with the project-home main's launch); the token TTL, `mint_agent_session_token`, `verified_caller` (refuses as "cannot sign for the caller") and `RoomPollTokenMinter` |
 
 ## `service_util.rs`
 
