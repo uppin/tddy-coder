@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use tddy_rpc::{BidiStreamOutput, RpcMessage, RpcResult, RpcService, ServiceEntry, Status};
 use tddy_terminal_rpc::{
     build_terminal_session_entry, ControlChange, ControlClaim, TerminalControl, TerminalDescriptor,
-    TerminalRoster, TerminalSessionPorts,
+    TerminalKind, TerminalLaunch, TerminalRoster, TerminalSessionPorts,
 };
 use tokio::sync::broadcast;
 
@@ -253,16 +253,25 @@ impl TerminalRoster for CoderTerminalRoster {
     /// is the point of serving one implementation on both. Quietly substituting would have this
     /// server succeed where the other fails, and tell the caller a terminal now exists in a
     /// session it does not.
-    async fn start(&self, session_id: &str, shell_path: &str) -> Result<String, Status> {
+    ///
+    /// A started terminal here is always the login shell: this participant runs no harness
+    /// registry, so a launch naming a harness is refused with `INVALID_ARGUMENT` rather than
+    /// answered with a shell the caller did not ask for.
+    async fn start(&self, session_id: &str, launch: &TerminalLaunch) -> Result<String, Status> {
         let served = self.svc.session_id.trim();
         if session_id != served {
             return Err(Status::failed_precondition(format!(
                 "this session participant runs session {served}, not {session_id}"
             )));
         }
+        if let TerminalKind::Agent(kind) = &launch.kind {
+            return Err(Status::invalid_argument(format!(
+                "this session's terminals run bash only, not {kind:?}"
+            )));
+        }
         self.svc
             .terminal_manager
-            .start_terminal(served, self.svc.worktree.clone(), shell_path)
+            .start_terminal(served, self.svc.worktree.clone(), &launch.login_shell)
             .await
             .map(|handle| handle.terminal_id.clone())
             .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))

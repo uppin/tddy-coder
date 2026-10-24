@@ -43,6 +43,32 @@ impl CliSessionManager {
         .await
     }
 
+    /// Start an **agent terminal** attached to `session_id`: the CLI harness `kind` names (its
+    /// session type, `"warp-cli"`, …) running `argv` in `worktree_path`. Returns the new handle with
+    /// a fresh `terminal_id` (never the reserved `MAIN_TERMINAL_ID`) and that kind.
+    pub async fn start_agent_terminal(
+        &self,
+        session_id: &str,
+        worktree_path: PathBuf,
+        kind: &str,
+        argv: Vec<String>,
+    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
+        let terminal_id = uuid::Uuid::now_v7().to_string();
+        self.spawn_tool(
+            session_id,
+            &terminal_id,
+            kind,
+            worktree_path,
+            "",
+            argv,
+            Vec::new(),
+            None,
+            // A tab's exit is never recorded: it carries no resume token of its own.
+            None,
+        )
+        .await
+    }
+
     /// Look up a specific tool of a session by `terminal_id` (use `MAIN_TERMINAL_ID` for the
     /// `claude` terminal).
     pub async fn get_terminal(

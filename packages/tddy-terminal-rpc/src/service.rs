@@ -4,16 +4,20 @@
 //! All nine methods are terminal behaviour this crate already owns: seven of them are the
 //! [`crate::bridge`] functions plus the auth gate in front of them, and the two lifecycle families
 //! (multiple terminals per session, the single-screen control mutex) are the state a *host* keeps
-//! about its own PTYs. That state is why the ports below are traits rather than values — resolving
-//! a session token to an OS user, spawning a login shell as that user and holding the control lease
-//! are all the serving host's answers, not this subsystem's behaviour.
+//! about its own PTYs. That state is why the host ports (declared in `ports`, re-exported here)
+//! are traits rather than values — resolving a session token to an OS user, spawning a terminal as
+//! that user and holding the control lease are all the serving host's answers, not this
+//! subsystem's behaviour.
 //!
 //! # What is deliberately not here
 //!
 //! Nothing resolves a `session_id` to a worktree, a task registry or a sandbox. The host's
-//! [`TerminalRoster`] and [`TerminalSessionStore`] impls do that, because a terminal's *origin*
-//! (a `CliSessionManager` task, a sandboxed session, a coder-local PTY) differs per host while the
-//! streaming, replay and control semantics above do not.
+//! [`TerminalRoster`] and [`TerminalSessionStore`](crate::session::TerminalSessionStore) impls do
+//! that, because a terminal's *origin* (a `CliSessionManager` task, a sandboxed session, a
+//! coder-local PTY) differs per host while the streaming, replay and control semantics above do
+//! not.
+
+mod ports;
 
 use std::sync::Arc;
 
@@ -36,7 +40,7 @@ use crate::proto::terminal_session::{
     WatchTerminalControlRequest,
 };
 use crate::proto::terminal_session::{TerminalSessionService, TerminalSessionServiceServer};
-use crate::session::{TerminalSession, TerminalSessionStore};
+use crate::session::TerminalSession;
 
 /// How many control events are buffered for a `WatchTerminalControl` subscriber before the relay
 /// waits on it.
@@ -46,106 +50,7 @@ use crate::session::{TerminalSession, TerminalSessionStore};
 /// answer there, rather than growing a queue nobody drains.
 const CONTROL_EVENT_CHANNEL_CAPACITY: usize = 16;
 
-/// Resolves a session token to the identity it authenticates, or `None` when the token is unknown
-/// or expired (`UNAUTHENTICATED`).
-pub type GithubUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-/// Maps an authenticated identity to the OS user this host runs its terminals as, or `None` when
-/// the identity has no mapping (`PERMISSION_DENIED` — only an operator can fix that, which is why
-/// it is a different refusal from an unknown token).
-pub type OsUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-/// The outcome of a [`TerminalControl::claim`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ControlClaim {
-    /// The caller now holds the lease and must present `control_token` on subsequent control RPCs.
-    Granted { control_token: String },
-    /// Another screen holds the lease.
-    Denied { holder_screen_id: String },
-}
-
-/// Broadcast payload emitted when a session's control lease changes hands.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ControlChange {
-    pub session_id: String,
-    pub holder_screen_id: String,
-}
-
-/// The single-screen terminal control mutex: at most one screen drives a session's terminals.
-///
-/// A port rather than state this crate keeps, because the lease is per *host*: the same session is
-/// served by exactly one daemon, and that daemon's other surfaces (session deletion, the LiveKit
-/// bridge) read and clear the same lease.
-#[async_trait]
-pub trait TerminalControl: Send + Sync {
-    /// Issue the lease, or refuse and name the holder. `steal` evicts the current holder.
-    async fn claim(&self, session_id: &str, screen_id: &str, steal: bool) -> ControlClaim;
-
-    /// Whether `control_token` may drive `session_id`'s terminals. A session with no lease is
-    /// uncontrolled and accepts any token, including the empty one.
-    async fn verify(&self, session_id: &str, control_token: &str) -> bool;
-
-    /// The screen holding the lease, or `None` when the session is uncontrolled.
-    async fn holder_screen_id(&self, session_id: &str) -> Option<String>;
-
-    /// Lease changes across all sessions; [`watch_terminal_control`] filters to its own.
-    ///
-    /// [`watch_terminal_control`]: TerminalSessionService::watch_terminal_control
-    fn subscribe(&self) -> broadcast::Receiver<ControlChange>;
-}
-
-/// One running terminal as `ListTerminalSessions` reports it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TerminalDescriptor {
-    pub terminal_id: String,
-    /// `"claude-cli"` for the reserved main tool, `"bash"` for a started shell.
-    pub kind: String,
-    pub pid: u32,
-}
-
-/// The terminals a host runs for a session: start a login shell, stop one, list them.
-///
-/// A port because every step needs host state this crate has none of — which worktree the session
-/// checked out and which task registry owns the child. Which *shell* to run is not among them:
-/// [`crate::login_shell::login_shell_for`] answers that here, so a host cannot start a terminal in
-/// a shell the target user does not have.
-#[async_trait]
-pub trait TerminalRoster: Send + Sync {
-    /// Start a terminal running `shell_path` for `session_id`, and return its fresh id (never
-    /// [`MAIN_TERMINAL_ID`]).
-    async fn start(&self, session_id: &str, shell_path: &str) -> Result<String, Status>;
-
-    /// Stop a started terminal. `false` when the session has no such terminal. The caller has
-    /// already refused [`MAIN_TERMINAL_ID`], which is not stoppable through this surface.
-    async fn stop(&self, session_id: &str, terminal_id: &str) -> bool;
-
-    /// Every running terminal of `session_id`, including [`MAIN_TERMINAL_ID`].
-    async fn list(&self, session_id: &str) -> Vec<TerminalDescriptor>;
-}
-
-/// Everything the nine handlers need from the host they run on.
-///
-/// A struct rather than six positional parameters: two of them are resolvers of the same shape
-/// (`&str -> Option<String>`) that a call site could silently swap for each other, which would
-/// answer every request with the wrong refusal.
-pub struct TerminalSessionPorts {
-    /// Session token to the identity it authenticates.
-    pub github_users: GithubUserResolver,
-    /// Authenticated identity to the OS user this host impersonates for it.
-    pub os_users: OsUserResolver,
-    /// Resolves `(session_id, terminal_id)` to the live terminal the streaming methods attach to.
-    pub terminals: Arc<dyn TerminalSessionStore>,
-    /// The session's control lease.
-    pub control: Arc<dyn TerminalControl>,
-    /// The session's running terminals.
-    pub roster: Arc<dyn TerminalRoster>,
-    /// The per-frame replay budget: how many bytes of retained output one open frame may carry.
-    ///
-    /// Injected because it is a *transport* limit — the largest message the host's gRPC / LiveKit
-    /// link accepts — rather than a property of the capture ring. Hosts that have no reason to
-    /// choose pass [`crate::bridge::DEFAULT_INITIAL_FRAME_BYTES`].
-    pub initial_frame_bytes: usize,
-}
+pub use ports::*;
 
 /// The `terminal_session.TerminalSessionService` implementation.
 pub struct TerminalSessionServiceImpl {
@@ -378,8 +283,11 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         let os_user = self.os_user(&req.session_token)?;
         let session_id = keyed_session_id(&req.session_id);
 
-        let shell_path = crate::login_shell::login_shell_for(&os_user);
-        let terminal_id = self.ports.roster.start(&session_id, &shell_path).await?;
+        let launch = TerminalLaunch {
+            kind: TerminalKind::from_request(&req.kind),
+            login_shell: crate::login_shell::login_shell_for(&os_user),
+        };
+        let terminal_id = self.ports.roster.start(&session_id, &launch).await?;
         Ok(Response::new(StartTerminalSessionResponse { terminal_id }))
     }
 

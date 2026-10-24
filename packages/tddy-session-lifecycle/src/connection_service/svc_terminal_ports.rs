@@ -10,15 +10,17 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tddy_core::cli_harness::{cli_harness, CliLaunch};
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{
-    ControlChange, ControlClaim, TerminalControl, TerminalDescriptor, TerminalRoster,
-    TerminalSessionPorts,
+    ControlChange, ControlClaim, TerminalControl, TerminalDescriptor, TerminalKind, TerminalLaunch,
+    TerminalRoster, TerminalSessionPorts,
 };
 use tokio::sync::broadcast;
 
 use super::DaemonSessionHost;
 use crate::cli_session_manager::CliSessionManager;
+use crate::config::DaemonConfig;
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 
 impl DaemonSessionHost {
@@ -81,9 +83,10 @@ impl DaemonSessionHost {
             control: Arc::new(CliManagerTerminalControl::new(Arc::clone(
                 &self.claude_cli_manager,
             ))),
-            roster: Arc::new(CliManagerTerminalRoster::new(Arc::clone(
-                &self.claude_cli_manager,
-            ))),
+            roster: Arc::new(CliManagerTerminalRoster::new(
+                Arc::clone(&self.claude_cli_manager),
+                self.config.clone(),
+            )),
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
         }
     }
@@ -130,30 +133,55 @@ impl TerminalControl for CliManagerTerminalControl {
 /// The terminals of a session, spawned as tasks by [`CliSessionManager`].
 struct CliManagerTerminalRoster {
     manager: Arc<CliSessionManager>,
+    config: DaemonConfig,
 }
 
 impl CliManagerTerminalRoster {
-    fn new(manager: Arc<CliSessionManager>) -> Self {
-        CliManagerTerminalRoster { manager }
+    fn new(manager: Arc<CliSessionManager>, config: DaemonConfig) -> Self {
+        CliManagerTerminalRoster { manager, config }
     }
 }
 
 #[async_trait]
 impl TerminalRoster for CliManagerTerminalRoster {
-    /// A started shell runs in the same worktree the session's agent does, which is why the main
-    /// terminal has to exist first: it is where that path is recorded.
-    async fn start(&self, session_id: &str, shell_path: &str) -> Result<String, Status> {
+    /// A started terminal runs in the same worktree the session's agent does, which is why the
+    /// main terminal has to exist first: it is where that path is recorded.
+    async fn start(&self, session_id: &str, launch: &TerminalLaunch) -> Result<String, Status> {
         let main = self
             .manager
             .get(session_id)
             .await
             .ok_or_else(|| Status::failed_precondition("session has no running terminal"))?;
         let worktree = main.worktree_path.clone();
-        let handle = self
-            .manager
-            .start_terminal(session_id, worktree, shell_path)
-            .await
-            .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?;
+        let handle = match &launch.kind {
+            TerminalKind::Bash => self
+                .manager
+                .start_terminal(session_id, worktree, &launch.login_shell)
+                .await
+                .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?,
+            TerminalKind::Agent(kind) => {
+                let harness = cli_harness(kind).ok_or_else(|| {
+                    Status::invalid_argument(format!("unknown terminal kind {kind:?}"))
+                })?;
+                let binary = self.config.cli_harness_binary(
+                    harness.session_type,
+                    harness.default_binary,
+                    harness.binary_env,
+                );
+                // A tab is a conversation of its own: a harness told a session id (Claude Code)
+                // gets a fresh one, never the session's.
+                let conversation_id = uuid::Uuid::now_v7().to_string();
+                let argv = (harness.argv)(&CliLaunch {
+                    binary: &binary,
+                    session_id: &conversation_id,
+                    ..CliLaunch::default()
+                });
+                self.manager
+                    .start_agent_terminal(session_id, worktree, harness.session_type, argv)
+                    .await
+                    .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
+            }
+        };
         Ok(handle.terminal_id.clone())
     }
 

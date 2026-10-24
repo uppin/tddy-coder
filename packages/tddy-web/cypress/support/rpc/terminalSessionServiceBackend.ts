@@ -54,6 +54,8 @@ export interface TerminalSessionServiceControls {
   readonly startTerminalSessionIds: string[];
   /** The `terminal_id` handed back by each `StartTerminalSession`, in call order. */
   readonly startedTerminalIds: string[];
+  /** The `kind` each `StartTerminalSession` asked for (`""` for the login shell), in call order. */
+  readonly startedTerminalKinds: string[];
   /** Every `{ sessionId, terminalId }` passed to `StopTerminalSession`, in call order. */
   readonly stoppedTerminals: { sessionId: string; terminalId: string }[];
   /** Every `{ sessionId, terminalId, data }` passed to `SendTerminalInput`, in call order. */
@@ -85,6 +87,7 @@ export function aTerminalSessionServiceFake(
   const claimedControlSessionIds: string[] = [];
   const startTerminalSessionIds: string[] = [];
   const startedTerminalIds: string[] = [];
+  const startedTerminalKinds: string[] = [];
   const stoppedTerminals: { sessionId: string; terminalId: string }[] = [];
   const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
   const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
@@ -121,7 +124,12 @@ export function aTerminalSessionServiceFake(
       const terminalId = nextTerminalId(startTerminalSessionIds.length);
       startTerminalSessionIds.push(req.sessionId);
       startedTerminalIds.push(terminalId);
-      liveTerminals.push({ terminalId, kind: "bash", pid: 8000 + liveTerminals.length });
+      startedTerminalKinds.push(req.kind);
+      liveTerminals.push({
+        terminalId,
+        kind: req.kind === "" ? "bash" : req.kind,
+        pid: 8000 + liveTerminals.length,
+      });
       return create(StartTerminalSessionResponseSchema, { terminalId });
     },
     stopTerminalSession: async (req) => {
@@ -181,6 +189,7 @@ export function aTerminalSessionServiceFake(
     claimedControlSessionIds,
     startTerminalSessionIds,
     startedTerminalIds,
+    startedTerminalKinds,
     stoppedTerminals,
     sentTerminalInput,
     streamedTerminals,

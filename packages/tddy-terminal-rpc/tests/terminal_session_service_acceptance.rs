@@ -9,8 +9,8 @@
 mod support;
 
 use support::{
-    a_history_request, a_start_request, a_watch_request, an_input, an_output_request,
-    TerminalServiceHost, SCREEN_ID, SESSION_ID, SESSION_TOKEN,
+    a_history_request, a_start_request, a_start_request_for, a_watch_request, an_input,
+    an_output_request, TerminalServiceHost, OS_USER, SCREEN_ID, SESSION_ID, SESSION_TOKEN,
 };
 use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, ClaimTerminalControlResponse, ListTerminalSessionsRequest,
@@ -19,7 +19,9 @@ use tddy_terminal_rpc::proto::terminal_session::{
     StreamTerminalOutputRequest, TerminalControlEvent, TerminalHistoryChunk,
     TerminalSessionServiceServer,
 };
-use tddy_terminal_rpc::TerminalSessionServiceImpl;
+use tddy_terminal_rpc::{
+    login_shell_for, TerminalKind, TerminalLaunch, TerminalSessionServiceImpl,
+};
 
 /// The generated server the host's entry wraps — the thing that actually answers at a coordinate,
 /// and whose `NAME` comes from `terminal_session.proto` rather than from a caller.
@@ -199,6 +201,65 @@ async fn start_terminal_session_answers_at_the_registered_service() {
         StartTerminalSessionResponse {
             terminal_id: "bash-1".to_string(),
         }
+    );
+}
+
+#[tokio::test]
+async fn start_terminal_session_hands_the_roster_the_requested_agent_kind() {
+    // Given
+    let host = TerminalServiceHost::serving_main_terminal(b"");
+
+    // When the client asks for a terminal running Warp
+    let _: StartTerminalSessionResponse = host
+        .answer("StartTerminalSession", a_start_request_for("warp-cli"))
+        .await;
+
+    // Then the roster is asked for that harness, with the user's login shell alongside
+    assert_eq!(
+        host.roster.started_launches(),
+        vec![TerminalLaunch {
+            kind: TerminalKind::Agent("warp-cli".to_string()),
+            login_shell: login_shell_for(OS_USER),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_start_without_a_kind_hands_the_roster_the_login_shell() {
+    // Given
+    let host = TerminalServiceHost::serving_main_terminal(b"");
+
+    // When
+    let _: StartTerminalSessionResponse =
+        host.answer("StartTerminalSession", a_start_request()).await;
+
+    // Then
+    assert_eq!(
+        host.roster.started_launches(),
+        vec![TerminalLaunch {
+            kind: TerminalKind::Bash,
+            login_shell: login_shell_for(OS_USER),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_start_naming_bash_hands_the_roster_the_login_shell() {
+    // Given
+    let host = TerminalServiceHost::serving_main_terminal(b"");
+
+    // When
+    let _: StartTerminalSessionResponse = host
+        .answer("StartTerminalSession", a_start_request_for(" bash "))
+        .await;
+
+    // Then
+    assert_eq!(
+        host.roster.started_launches(),
+        vec![TerminalLaunch {
+            kind: TerminalKind::Bash,
+            login_shell: login_shell_for(OS_USER),
+        }]
     );
 }
 

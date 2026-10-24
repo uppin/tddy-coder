@@ -167,10 +167,15 @@ message StartTerminalSessionRequest {
   string session_id    = 2;
   // Control token; required when the session has an active terminal controller.
   string control_token = 3;
+  // What the terminal runs. Empty or "bash": the session user's login shell. Otherwise the session
+  // type of a registered CLI harness ("claude-cli", "cursor-cli", "opencode-cli", "muse-cli",
+  // "warp-cli"), started fresh and interactive in the session's worktree. A kind the host does not
+  // run is refused INVALID_ARGUMENT.
+  string kind          = 4;
 }
 
 message StartTerminalSessionResponse {
-  // Fresh identifier for the started login-shell terminal (never "main").
+  // Fresh identifier for the started terminal (never "main").
   string terminal_id = 1;
 }
 
@@ -194,7 +199,8 @@ message ListTerminalSessionsRequest {
 
 message TerminalSessionInfo {
   string terminal_id = 1;
-  // "claude-cli" for the reserved main tool, "bash" for started Bash (shell) tools.
+  // The reserved main tool's session type ("claude-cli", …), "bash" for a started shell, or the
+  // CLI harness session type a started agent terminal runs.
   string kind        = 2;
   uint32 pid         = 3;
 }

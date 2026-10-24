@@ -1,4 +1,5 @@
 import type { SessionType } from "./createSessionRequest";
+import { SESSION_TYPE_OPTIONS } from "./cliHarnessOptions";
 
 export interface CreateSessionTypeToggleProps {
   sessionType: SessionType;
@@ -9,16 +10,6 @@ export interface CreateSessionTypeToggleProps {
    */
   disabledReason?: (sessionType: SessionType) => string | null;
 }
-
-/** The session types the toggle offers, in order, with the label each button shows. */
-const SESSION_TYPE_OPTIONS: { id: SessionType; label: string }[] = [
-  { id: "tool", label: "Tool" },
-  { id: "claude-cli", label: "Claude CLI" },
-  { id: "cursor-cli", label: "Cursor CLI" },
-  { id: "opencode-cli", label: "OpenCode" },
-  { id: "muse-cli", label: "Muse Code" },
-  { id: "warp-cli", label: "Warp" },
-];
 
 /** The id of the element saying why `sessionType` is disabled; the button is described by it. */
 const reasonIdOf = (sessionType: SessionType) => `create-session-type-reason-${sessionType}`;

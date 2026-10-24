@@ -85,6 +85,7 @@ describe("SessionTerminalTabs — Agent + bash terminals per session", () => {
 
     // When the user opens a new terminal
     tabs.newTab().click();
+    tabs.newTabOption("bash").click();
 
     // Then StartTerminalSession was called for this session ...
     cy.wrap(backend).should((b: SessionServiceBackend) => {
@@ -108,8 +109,10 @@ describe("SessionTerminalTabs — Agent + bash terminals per session", () => {
 
     // When two terminals are opened
     tabs.newTab().click();
+    tabs.newTabOption("bash").click();
     tabs.tab("bash-1").should("exist");
     tabs.newTab().click();
+    tabs.newTabOption("bash").click();
 
     // Then both bash tabs exist, the second is selected, and both terminals stay mounted
     // (backgrounding a tab must not unmount its terminal).
@@ -152,6 +155,7 @@ describe("SessionTerminalTabs — Agent + bash terminals per session", () => {
 
     // When a new bash terminal is opened (becomes active) and the user types into it
     tabs.newTab().click();
+    tabs.newTabOption("bash").click();
     tabs.pane("bash-1").should("exist");
     tabs.paneTerminal("bash-1").click().type("ls\n");
 
