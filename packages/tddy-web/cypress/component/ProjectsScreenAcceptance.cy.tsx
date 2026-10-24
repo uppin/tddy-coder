@@ -135,6 +135,19 @@ it("renders a project present on two hosts as one card with a row per host", () 
     .should("deep.equal", [LOCAL_HOST, REMOTE_HOST]);
 });
 
+it("shows the project id on its card", () => {
+  // Given
+  const backend = aProjectsBackend([aProject({ projectId: "51777f55-9f23-47f1-a3e5-8997e2b036f2" })]);
+
+  // When
+  mountWithRpc(mountProjectsAppPage(cy.stub()), backend);
+
+  // Then
+  projectsScreenPage
+    .cardProjectId("51777f55-9f23-47f1-a3e5-8997e2b036f2")
+    .should("have.text", "51777f55-9f23-47f1-a3e5-8997e2b036f2");
+});
+
 it("creates a project from the screen and shows it after the list refreshes", () => {
   // Given
   const backend = aProjectsBackend([]);

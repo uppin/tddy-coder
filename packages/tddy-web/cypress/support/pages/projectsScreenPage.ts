@@ -8,6 +8,7 @@
 import {
   byTestId,
   projectCard,
+  projectCardId,
   projectHostRow,
   projectAddToHostToggle,
   projectAddToHostSelect,
@@ -39,6 +40,9 @@ export const projectsScreenPage = {
   /** A single project card for the given logical project id. */
   card: (projectId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(projectCard(projectId), { timeout: 5000, ...options }),
+
+  /** The project id shown on a project card. */
+  cardProjectId: (projectId: string) => byTestId(projectCardId(projectId), { timeout: 5000 }),
 
   /** One host row (per hosting daemon) inside a project card. */
   hostRow: (
