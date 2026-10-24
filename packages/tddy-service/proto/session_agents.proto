@@ -360,6 +360,9 @@ message SessionAgentEntry {
   string harness = 14;
   // Where the agent's conversations work, as attached.
   types.AgentPlacement placement = 15;
+  // As on `catalog.SubagentInfo`, snapshotted at attach.
+  string transport = 16;
+  string permission_policy = 17;
 }
 
 // Every roster read is a WHOLE snapshot. A consumer rebuilds its registry from it and never applies

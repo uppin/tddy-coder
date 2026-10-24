@@ -73,6 +73,8 @@ fn an_agent(agent_id: &str) -> AgentBuilder {
         kind: 0,
         harness: String::new(),
         placement: 0,
+        transport: String::new(),
+        permission_policy: String::new(),
     })
 }
 

@@ -94,6 +94,11 @@ message SubagentInfo {
   // For a CODING_AGENT row, the harness it runs (`claude-acp`, `codex-acp`, `opencode`, …), so a
   // picker can say what it is. Empty for MODEL rows.
   string harness = 9;
+  // For a CODING_AGENT row: "acp" or "headless" — how its turns are taken.
+  string transport = 10;
+  // For a CODING_AGENT row: "asks_caller", or "fixed: <what the CLI is allowed>" for a CLI that
+  // cannot ask mid-turn. Shown on the picker row so the policy is never implied.
+  string permission_policy = 11;
 }
 
 message ToolInfo {
