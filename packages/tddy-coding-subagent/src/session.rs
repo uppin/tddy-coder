@@ -19,7 +19,8 @@ use tddy_discovery::subagent::{
 use tokio::sync::broadcast;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::parked_permissions::{nothing_pending, ParkedPermissions};
+use crate::parked_permissions::{nothing_pending, nothing_pending_to_defer, ParkedPermissions};
+use crate::user_permission_answers::AnsweredBy;
 
 /// The prompt a conversation is answering, shared with its cancel handles. A turn holds the slot
 /// for as long as it runs, so a cancel waits for the turn to end before it returns.
@@ -35,7 +36,8 @@ const UPDATE_STREAM_CAPACITY: usize = 1024;
 /// agent's text, `end_turn` / `cancelled` / …, and one message descriptor per tool call the turn
 /// made. A permission request the agent raises pauses the turn: it ends with
 /// [`StopReason::PermissionRequested`] and the request, and the prompt stays in flight until a later
-/// turn answers the request and the agent finishes. Options that act on an OpenAI-loop transcript
+/// turn answers the request and the agent finishes. A request the caller hands to the user holds the
+/// turn instead, until either side answers it. Options that act on an OpenAI-loop transcript
 /// (`fromMessageId`, `correction`, `replacement`, `yieldConditions`, `maxTurns`) are refused with
 /// [`SubagentError::unsupported_by_coding_agent`].
 ///
@@ -181,9 +183,10 @@ impl CodingAgentSession {
     }
 
     /// What the daemon's `AnswerAgentPermission` answers this conversation's parked request through.
-    pub fn permission_answering(&self) -> std::sync::Arc<dyn crate::PermissionAnswering> {
-        // TODO(web-approvals): implement — the session's own ParkedPermissions
-        std::sync::Arc::new(crate::ParkedPermissions::default())
+    /// It is the session's own parked requests, so a user's answer and the main agent's race for the
+    /// same request, and the first one wins.
+    pub fn permission_answering(&self) -> Arc<dyn crate::PermissionAnswering> {
+        self.permissions.clone()
     }
 
     /// A handle that cancels this session's running turn without holding the session — what the
@@ -272,7 +275,8 @@ impl CodingAgentSession {
     /// Check `request` against the prompt already in flight, delivering its answer where it
     /// carries one. A new prompt is refused while the turn is open; so is an answer naming any
     /// other request, or no answer at all while a request is pending, and each refusal names the
-    /// pending request.
+    /// pending request. A deferral is accepted only for the pending request it names: the turn then
+    /// waits for that request's answer ([`settle`]).
     fn resume(&self, request: &TurnRequest) -> Result<(), SubagentError> {
         if request.prompt_text().is_some() {
             return Err(match self.permissions.pending() {
@@ -282,10 +286,29 @@ impl CodingAgentSession {
                 ),
             });
         }
-        match (request.permission_answer(), self.permissions.pending()) {
-            (Some(answer), _) => self.permissions.answer(answer).map_err(SubagentError::from),
-            (None, Some(pending)) => Err(refused_while_pending(&pending.request_id)),
-            (None, None) => Ok(()),
+        let pending = self.permissions.pending();
+        match (
+            request.permission_answer(),
+            request.permission_deferred_to_user(),
+            pending,
+        ) {
+            (Some(_), Some(_), _) => Err(SubagentError::from(
+                "a turn cannot both answer a permission request and hand it to the user",
+            )),
+            (Some(answer), None, _) => self
+                .permissions
+                .answer_recording(answer, AnsweredBy::MainAgent)
+                .map_err(SubagentError::from),
+            (None, Some(deferred), Some(pending)) if pending.request_id == deferred => Ok(()),
+            (None, Some(deferred), Some(pending)) => Err(SubagentError::from(format!(
+                "permission request '{}' is the one pending; the deferral names '{deferred}'",
+                pending.request_id
+            ))),
+            (None, Some(deferred), None) => {
+                Err(SubagentError::from(nothing_pending_to_defer(deferred)))
+            }
+            (None, None, Some(pending)) => Err(refused_while_pending(&pending.request_id)),
+            (None, None, None) => Ok(()),
         }
     }
 
@@ -313,18 +336,27 @@ impl CodingAgentSession {
 }
 
 /// Wait until the prompt ends, or until the agent asks for a permission request that no caller
-/// has answered yet — the point at which the turn yields it.
-async fn settle(flight: &mut InFlightPrompt, permissions: &ParkedPermissions) -> Settled {
+/// has answered yet — the point at which the turn yields it. The request named `deferred` is not
+/// yielded: while it is pending the turn waits for it to be answered, by the user or the caller,
+/// and then carries on as usual.
+async fn settle(
+    flight: &mut InFlightPrompt,
+    permissions: &ParkedPermissions,
+    deferred: Option<&str>,
+) -> Settled {
     if let Some(result) = flight.result.take() {
         return Settled::Ended(result);
     }
     loop {
         if let Some(pending) = permissions.pending() {
-            return Settled::Paused(pending);
+            if deferred != Some(pending.request_id.as_str()) {
+                return Settled::Paused(pending);
+            }
         }
         tokio::select! {
             ended = flight.ended.as_mut() => return Settled::Ended(ended),
             () = permissions.parked() => {}
+            () = permissions.resolved() => {}
         }
     }
 }
@@ -333,6 +365,9 @@ async fn settle(flight: &mut InFlightPrompt, permissions: &ParkedPermissions) ->
 fn new_prompt(request: &TurnRequest) -> Result<String, SubagentError> {
     if let Some(answer) = request.permission_answer() {
         return Err(SubagentError::from(nothing_pending(answer)));
+    }
+    if let Some(deferred) = request.permission_deferred_to_user() {
+        return Err(SubagentError::from(nothing_pending_to_defer(deferred)));
     }
     request.prompt_text().map(str::to_string).ok_or_else(|| {
         SubagentError::from("a coding agent has nothing to resume: it takes a new prompt each turn")
@@ -529,7 +564,13 @@ impl SubagentSession for CodingAgentSession {
                 self.begin_prompt(prompt)
             }
         };
-        match settle(&mut flight, &self.permissions).await {
+        match settle(
+            &mut flight,
+            &self.permissions,
+            request.permission_deferred_to_user(),
+        )
+        .await
+        {
             Settled::Paused(pending) => {
                 *slot = Some(flight);
                 let mut outcome = PromptOutcome::new(

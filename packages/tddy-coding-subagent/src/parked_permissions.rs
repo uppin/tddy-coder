@@ -1,6 +1,6 @@
 //! A coding subagent's permission requests, parked until the caller answers them.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
 use tddy_agent_backend::{PermissionDecision, PermissionHandler, PermissionRequest};
@@ -8,6 +8,8 @@ use tddy_discovery::subagent::{
     PermissionAnswer, PermissionChoice, PermissionRequestView, PermissionToolCall,
 };
 use tokio::sync::{oneshot, Notify};
+
+use crate::user_permission_answers::AnsweredBy;
 
 /// The [`PermissionHandler`] a coding-agent conversation installs: a request is parked — the
 /// agent's `session/request_permission` stays unanswered — and the tddy turn ends with it; the
@@ -20,6 +22,9 @@ pub struct ParkedPermissions {
     state: Mutex<State>,
     /// Woken when a request parks, so a turn waiting on the agent can yield it.
     parked: Notify,
+    /// Woken when a parked request is answered or cancelled, so a turn holding a deferred request
+    /// can carry on.
+    resolved: Notify,
 }
 
 #[derive(Debug, Default)]
@@ -28,6 +33,9 @@ struct State {
     queue: VecDeque<Parked>,
     /// How many requests have been parked, so each one is named on its own.
     issued: u64,
+    /// Who answered each request answered through [`ParkedPermissions::answer_recording`], by
+    /// request id. Only the first answer to a request is kept.
+    answerers: HashMap<String, AnsweredBy>,
 }
 
 #[derive(Debug)]
@@ -53,16 +61,49 @@ impl ParkedPermissions {
         self.parked.notified().await;
     }
 
+    /// Resolves once a parked request has been answered or cancelled. As with [`Self::parked`], a
+    /// waiter re-checks [`Self::pending`] rather than trusting the wake-up.
+    pub async fn resolved(&self) {
+        self.resolved.notified().await;
+    }
+
     /// Deliver `answer` to the pending request it names. A different `request_id`, a selected
     /// option the request did not offer, or no pending request at all is refused — naming the
     /// pending request where there is one — and leaves the pending request parked.
     pub fn answer(&self, answer: &PermissionAnswer) -> Result<(), String> {
+        self.deliver(answer, None)
+    }
+
+    /// [`Self::answer`], recording `by` as who answered. The first answer to a request wins: one
+    /// already answered is refused, naming who answered it, and is not delivered.
+    pub(crate) fn answer_recording(
+        &self,
+        answer: &PermissionAnswer,
+        by: AnsweredBy,
+    ) -> Result<(), String> {
+        self.deliver(answer, Some(by))
+    }
+
+    /// Who answered `request_id`, once it has been answered through [`Self::answer_recording`].
+    pub(crate) fn answerer_of(&self, request_id: &str) -> Option<AnsweredBy> {
+        self.state().answerers.get(request_id).cloned()
+    }
+
+    fn deliver(&self, answer: &PermissionAnswer, by: Option<AnsweredBy>) -> Result<(), String> {
         let mut state = self.state();
+        if let Some(first) = state.answerers.get(answer.request_id()) {
+            return Err(already_answered(answer.request_id(), first));
+        }
         let decision = decision_for(state.queue.front(), answer)?;
         let parked = state
             .queue
             .pop_front()
             .ok_or_else(|| nothing_pending(answer))?;
+        if let Some(by) = by {
+            state.answerers.insert(answer.request_id().to_string(), by);
+        }
+        drop(state);
+        self.resolved.notify_one();
         parked.decided.send(decision).map_err(|_| {
             format!(
                 "the coding agent stopped waiting for permission request '{}'",
@@ -84,6 +125,7 @@ impl ParkedPermissions {
                     parked.view.request_id
                 );
             }
+            self.resolved.notify_one();
         }
     }
 }
@@ -94,6 +136,18 @@ pub(crate) fn nothing_pending(answer: &PermissionAnswer) -> String {
         "no permission request is pending, so the answer to '{}' has nothing to answer",
         answer.request_id()
     )
+}
+
+/// Why a deferral of `request_id` is refused when no permission request is pending.
+pub(crate) fn nothing_pending_to_defer(request_id: &str) -> String {
+    format!(
+        "no permission request is pending, so the deferral of '{request_id}' has nothing to hand to the user"
+    )
+}
+
+/// Why `answer` is refused when its request was already answered.
+fn already_answered(request_id: &str, first: &AnsweredBy) -> String {
+    format!("permission request '{request_id}' was already answered by {first}")
 }
 
 /// The decision `answer` delivers to the request at the front of the queue, or why it cannot.

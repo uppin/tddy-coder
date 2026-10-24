@@ -34,13 +34,11 @@ pub trait PermissionAnswering: Send + Sync {
 }
 
 impl PermissionAnswering for ParkedPermissions {
-    fn answer_as(&self, _answer: &PermissionAnswer, _by: AnsweredBy) -> Result<(), String> {
-        // TODO(web-approvals): implement
-        Err("TODO(web-approvals): PermissionAnswering::answer_as is not implemented".to_string())
+    fn answer_as(&self, answer: &PermissionAnswer, by: AnsweredBy) -> Result<(), String> {
+        self.answer_recording(answer, by)
     }
 
-    fn answered_by(&self, _request_id: &str) -> Option<AnsweredBy> {
-        // TODO(web-approvals): implement
-        None
+    fn answered_by(&self, request_id: &str) -> Option<AnsweredBy> {
+        self.answerer_of(request_id)
     }
 }
