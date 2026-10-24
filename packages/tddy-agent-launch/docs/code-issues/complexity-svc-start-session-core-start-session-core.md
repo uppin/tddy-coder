@@ -4,7 +4,7 @@
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **842 lines** · **nesting depth 6** · 1 parameters · 40 branch/match lines · 54 early exits
-**CRAP:** **CRAP 80** · complexity 80 · rank 46/50 in this crate · **fully covered** (CRAP == complexity means coverage 1.0)
+**CRAP:** 2026-10-24, from `tddy-tools analyze`: complexity **49**. **CRAP 2,450**, rank 1/50, when only this crate's own tests run: none of them enters it. **CRAP 49** once the session-lifecycle project-home suites are added, because they enter it. Those two suites execute **25%** of its regions (100/393). The 2026-09-18 figure was CRAP 80, complexity 80, fully covered, measured in lifecycle where its tests then lived
 **Thresholds breached:** length 842 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — regressed 2026-10-04 (358 → 373, +15 from #571); narrowed 2026-09-24 by #524 (857 → 358); what is left is its early-return guards, which the engine refuses to extract (E4, plan `19`) — **unclaimed**, **low priority**: fully covered, so this is a readability cost, not a risk
@@ -25,6 +25,7 @@
 | 2026-10-08 | 386 | — | — | — | `#carve` 20/21 (launch start): +5 against `origin/master` (381 -> 386, fn line to closing brace). Re-pointed to `impl LaunchSessions`; rustfmt wraps the three roster calls (`self.agent_roster.agent_def_for_spawn(…)`, `seeded_roster_records(…)`) and the `DaemonSeedCloneClaimant { service: … }` literal over more lines. No control flow added. **Regressed, kept open**: still over 60 lines |
 | 2026-10-09 | 386 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 | 2026-10-22 | 393 | — | — | — | touched by #669 (`#provider-route` 8/9) and **unchanged by it**: 393 on `origin/feature/provider-route/opencode-acp` (`1b488545a`) and on HEAD, by brace matching (fn line to closing brace). The function is renamed `start_session_on_request` (`pub(crate)`); `start_session_core` is now a two-statement wrapper in `harness_profile_request.rs` that applies a harness profile first, so the profile step added no line here. Nesting, branches and exits not re-derived |
+| 2026-10-24 | 384 | 6 | — | — | **improved** (393 → 384, −9, by brace matching at `c1df8e142` and `4348f160a`) by `fix-main-agent-harness-se-e79c8de0`. That branch replaced the two inline `claude-cli` / `cursor-cli` empty-model `if`s with one call to `start_request_checks::refuse_a_cli_start_without_a_model`, and made `managed_recipe_for` `pub(crate)` so `refuse_a_claude_cli_start_up_front` can reuse it. That is one branch fewer here and no control flow added. `/analyze-code-issues` re-run: complexity 49. Coverage depends on which tests run: this crate's own 182 tests (CRAP 2,450, not entered) are the cross-crate gap. Lifecycle `ensure_project_home_session_acceptance` + `project_home_idle_stop_acceptance` enter it (CRAP 49, 25% of regions). Nesting is the brace-depth scan's 6, unchanged |
 
 ## What the tool found
 
@@ -72,3 +73,17 @@ live there, not in this function. Nesting unchanged. Not claimed by any PR.
 harness registry (`cli_harness(session_type)` → `LaunchSessions::start_cli_harness`), so `muse-cli` and
 any later harness start through it without another branch. Same line count (one comment line, three
 lines of `if`), same nesting. Not claimed by any PR.
+
+## Verified by hand
+
+2026-10-24 (`/analyze-code-issues` on `fix-main-agent-harness-se-e79c8de0`): I read the diff to
+this function. The two removed `if`s are replaced by one `refuse_a_cli_start_without_a_model(&req)?`
+with the same messages. That function is now shared with the project-home up-front check, which
+formats the message from the trimmed session type. The finding is still real: 384 lines, early-return
+guards the engine refuses (E4). **Analyzer blind spot, found on this run:** `tddy-tools analyze
+coverage` instruments only the crate under analysis. The body of an `async fn`, its `{closure#0}`,
+was codegen'd in the *calling* crate (`…set_up_main0Cs…_22tddy_session_lifecycle` in the llvm
+profile). So even a cross-crate run that instruments only `tddy_agent_launch` records the call (the
+outer fn's count) but **0 regions of the body**. The 25% above comes from a capture with every
+`tddy_*` crate instrumented.
+
