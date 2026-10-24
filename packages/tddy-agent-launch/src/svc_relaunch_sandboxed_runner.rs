@@ -188,7 +188,7 @@ impl LaunchSessions {
             runner_argv.push(prompt_path.to_string_lossy().to_string());
         }
 
-        let env = self.relaunch_jail_env(RelaunchJailEnv {
+        let mut env = self.relaunch_jail_env(RelaunchJailEnv {
             session_id,
             worktree_path,
             specialized_defs,
@@ -197,6 +197,8 @@ impl LaunchSessions {
             scratch_home: &scratch_home,
             tool_ipc_socket: &tool_ipc_socket,
         })?;
+        // Claude-only: `relaunch_jail_env` is shared with the other harnesses' sandboxed resume.
+        env.extend(self.config.claude_cli_renderer_env());
 
         let handle = self
             .spawn_relaunched_runner(RelaunchedRunnerSpawn {

@@ -330,8 +330,8 @@ use agent_cli::{
 pub use agent_cli::{
     resolve_claude_binary_path, resolve_claude_home_dir, resolve_cursor_binary_path,
     resolve_cursor_cli_daemon_url, resolve_cursor_cli_tddy_tools_path, resolve_cursor_home_dir,
-    ClaudeCliConfig, CursorCliConfig, CLAUDE_BINARY_ENV, CLAUDE_HOME_ENV, CURSOR_BINARY_ENV,
-    CURSOR_HOME_ENV,
+    ClaudeCliConfig, CursorCliConfig, CLAUDE_BINARY_ENV, CLAUDE_FULLSCREEN_ENV, CLAUDE_HOME_ENV,
+    CURSOR_BINARY_ENV, CURSOR_HOME_ENV,
 };
 
 use crate::config::access::AllowedTool;

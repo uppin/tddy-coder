@@ -233,6 +233,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         .await?;
 
     env_extra.extend(provider_route.map(|route| route.env).unwrap_or_default());
+    env_extra.extend(config.claude_cli_renderer_env());
 
     // The role is on disk before the agent exists, so the daemon never reads a home session as ordinary.
     claude_cli_spawn_steps::record_role_before_spawn(

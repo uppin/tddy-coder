@@ -6,6 +6,10 @@ fn default_claude_cli_binary_path() -> String {
     "claude".to_string()
 }
 
+fn default_claude_cli_fullscreen() -> bool {
+    true
+}
+
 fn default_cursor_cli_binary_path() -> String {
     "agent".to_string()
 }
@@ -13,6 +17,10 @@ fn default_cursor_cli_binary_path() -> String {
 /// Environment variable that overrides the resolved `claude` binary path (highest priority).
 /// The escape hatch for when host auto-resolution picks the wrong binary.
 pub const CLAUDE_BINARY_ENV: &str = "TDDY_CLAUDE_BINARY";
+
+/// Environment variable Claude Code reads to force its fullscreen renderer — the only renderer that
+/// enables the alternate screen and mouse tracking, so the only one the web terminal can scroll.
+pub const CLAUDE_FULLSCREEN_ENV: &str = "CLAUDE_CODE_NO_FLICKER";
 
 /// A wrapper-shim `bin` directory whose `claude` merely re-execs the real binary from `$PATH`
 /// (e.g. Superset's `~/.superset/bin`). Such a shim can't resolve inside the jail — its `PATH` is
@@ -144,6 +152,10 @@ pub struct ClaudeCliConfig {
     /// single daemon-wide home — see [`resolve_claude_home_dir`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_home_dir: Option<PathBuf>,
+    /// Force Claude's fullscreen renderer on every claude-cli launch (default `true`) — see
+    /// [`DaemonConfig::claude_cli_renderer_env`]. `false` leaves the renderer to Claude.
+    #[serde(default = "default_claude_cli_fullscreen")]
+    pub fullscreen: bool,
 }
 
 /// One further CLI harness's configuration, under `cli_harnesses.<session type>:`.
@@ -156,6 +168,23 @@ pub struct CliHarnessConfig {
 }
 
 impl DaemonConfig {
+    /// The environment every claude-cli launch adds so Claude runs the renderer `claude_cli.fullscreen`
+    /// asks for: [`CLAUDE_FULLSCREEN_ENV`] when on — also when the `claude_cli:` section is absent —
+    /// and nothing when off. Forcing it also overrides Claude's own fall back to the classic renderer
+    /// after a failed fullscreen launch.
+    #[must_use]
+    pub fn claude_cli_renderer_env(&self) -> Vec<(String, String)> {
+        let fullscreen = self
+            .claude_cli
+            .as_ref()
+            .map_or_else(default_claude_cli_fullscreen, |c| c.fullscreen);
+        if fullscreen {
+            vec![(CLAUDE_FULLSCREEN_ENV.to_string(), "1".to_string())]
+        } else {
+            Vec::new()
+        }
+    }
+
     /// The binary a CLI harness runs: `binary_env` when set and non-empty, else
     /// `cli_harnesses.<session_type>.binary_path`, else `default_binary`.
     #[must_use]

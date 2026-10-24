@@ -111,6 +111,7 @@ fn build_harness(
             tddy_tools_path: None,
             daemon_url: None,
             claude_home_dir: None,
+            fullscreen: true,
         }),
         ..Default::default()
     };
