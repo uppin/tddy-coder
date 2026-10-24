@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — proto change, several crates (task, daemon-sandbox task service, agent-launch, session-split, spawn, web), cancellation ordering across a forwarded stream and two clone backends, cleanup of partial state
-**Stack**: #start-progress 8/8. Base: `feature/start-progress/progress-ui`.
+**Stack**: #start-progress 8/8. PR: #741. Base: `feature/start-progress/progress-ui`.
 
 ## Initial Discovery
 
@@ -153,6 +153,16 @@ task-service test for peer forwarding with a scripted forwarder; Cypress compone
 | `cancelling_a_split_start_cancels_the_codebase_hosts_task` | `packages/tddy-session-split/tests/split_room_hosting_port.rs` | peer `CancelTask` |
 | `cancel_task_for_a_peer_daemon_is_forwarded_to_it` | `packages/tddy-daemon-sandbox/tests/task_service_peer_cancel.rs` (new) | forwarding |
 | `Cancel during a start cancels it and returns to the form saying so` | `packages/tddy-web/cypress/component/CreateSessionStartCancel.cy.tsx` (new) | UI |
+| `cancel_task_for_this_daemon_is_not_forwarded` | `packages/tddy-daemon-sandbox/tests/task_service_peer_cancel.rs` (new) | local requests stay local |
+
+⚠ **At the contract commit:** written and failing — the task-service forwarding test, the two session-level tests
+(`a_streamed_start_names_its_task_first`; `cancelling_a_start_that_is_cloning_…`, renamed
+`cancelling_a_start_that_is_cloning_ends_it_cancelled_and_leaves_no_repository`, whose slow clone is an SSH remote at
+TEST-NET-1 that nothing answers), and the Cypress spec. **Deferred to `/green`:**
+`cancelling_during_the_worktree_cut_leaves_no_session_directory_or_worktree` (needs a slow worktree cut) and
+`cancelling_a_split_start_cancels_the_codebase_hosts_task` (the split start takes no cancellation input yet — `/green`
+threads the start task's token into it). The web pane gains an optional `taskClient` prop; without one Cancel stays
+disabled during a start.
 
 ## Technical Debt & Production Readiness
 
@@ -181,10 +191,10 @@ task-service test for peer forwarding with a scripted forwarder; Cypress compone
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests (`./test -p tddy-agent-launch -p tddy-session-split -p tddy-daemon-kernel -p tddy-daemon-sandbox -p tddy-session-lifecycle`) + the changed Cypress spec; full-workspace result from CI

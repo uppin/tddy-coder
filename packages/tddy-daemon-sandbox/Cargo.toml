@@ -49,6 +49,8 @@ libc = "0.2"
 
 [dev-dependencies]
 prost = "0.13"
+# `task_service_peer_cancel.rs` scripts the peer daemon behind a `CommonRoom`.
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util"] }
 # The exec-tool server the jailed runner relays to, mounted directly by

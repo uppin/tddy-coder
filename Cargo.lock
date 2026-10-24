@@ -12796,6 +12796,7 @@ dependencies = [
  "serde_json",
  "tddy-actions",
  "tddy-core",
+ "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-rpc",
  "tddy-sandbox",

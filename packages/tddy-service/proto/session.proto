@@ -438,7 +438,16 @@ message StartSessionEvent {
     StartPhase phase = 3;
     StartKeepAlive keep_alive = 4;
     CloneProgress clone_progress = 5;
+    StartTaskStarted started = 6;
   }
+}
+
+// The first event of every streamed start: the background task the start runs as, on the daemon
+// doing the work. `TaskService.CancelTask` with this id (and `daemon_instance_id`) cancels the start —
+// its clone is killed, its partial state removed, and the stream ends CANCELLED.
+message StartTaskStarted {
+  string task_id = 1;
+  string daemon_instance_id = 2;
 }
 
 // Git's own progress for the clone a start runs (STEP_CLONE), parsed from `git clone --progress`.
