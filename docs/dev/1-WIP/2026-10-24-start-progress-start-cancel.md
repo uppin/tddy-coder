@@ -116,12 +116,12 @@ aborted, and `CancelTask` ignores its `daemon_instance_id`.
 
 ## Scope
 
-- [ ] `started` event first on every streamed start
-- [ ] Start registered as a task; token reaches clone, worktree, agent spawn
-- [ ] Cleanup on cancel; stream ends `CANCELLED`
-- [ ] Split: relay peer task id; cancel the peer's task
-- [ ] `CancelTask` forwarded to a peer daemon
-- [ ] Web: Cancel during a start, "Cancelling…", "Start cancelled"
+- [x] `started` event first on every streamed start
+- [~] Start registered as a task; token reaches the clone (worker, in-process and supervised handles) and is checked before every step after it, so the worktree is not cut and the agent not spawned for a cancelled start. **Deferred:** a worktree cut already running is not killed (see Decisions)
+- [~] Cleanup on cancel; stream ends `CANCELLED` — the clone's `.partial-*` directory and any repository are gone and no session directory exists when the clone is cancelled. **Deferred:** session-directory/worktree removal for a cancel *after* the clone (see Decisions)
+- [x] Split: relay peer task id; cancel the peer's task
+- [x] `CancelTask` forwarded to a peer daemon
+- [x] Web: Cancel during a start, "Cancelling…", "Start cancelled"
 - [ ] Docs: background-tasks (start task), session-drawer (Cancel), remote-managed-worktree (cancel)
 
 ## Technical Changes
@@ -170,6 +170,19 @@ disabled during a start.
 
 - **tddy Task, not `RpcRequest.abort`** (developer's choice): explicit, observable in the Tasks UI,
   and independent of transport cancellation, which does not exist end to end.
+- **The start is cancelled cooperatively, not dropped.** The token is observed where the work can stop
+  cleanly: the clone is stopped through its `CloneHandle` and the start then ends `CANCELLED` once the
+  clone has removed its own `.partial-*` directory (dropping the future would end the stream while that
+  blocking cleanup still ran), and every step after the clone is refused for a cancelled token. The
+  split start also races the forward against the token, cancels the codebase host's task, and tears its
+  workspace session down.
+- **Deferred (`cancelling_during_the_worktree_cut_…`)**: a worktree cut or agent spawn already in
+  flight is not interrupted, and a cancel landing after the clone does not yet remove the session
+  directory / worktree the later steps created — there is no clean seam in `start_session_on_request`
+  (the session id is created inside each session type's branch). TODO(start-cancel): carry the token
+  into the worktree step and register the created session directory for removal on cancel.
+- **`StartTask` is a `TaskBody` in `start_task.rs`**; the unary `StartSession` keeps a token that is
+  never signalled (`start_session_core`), so its path is unchanged.
 - **Complexity 5 accepted**: cancel is one capability across hops; splitting UI from daemon would leave
   a daemon cancel nothing calls, or a button nothing honours.
 
@@ -195,12 +208,12 @@ disabled during a start.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests (`./test -p tddy-agent-launch -p tddy-session-split -p tddy-daemon-kernel -p tddy-daemon-sandbox -p tddy-session-lifecycle`) + the changed Cypress spec; full-workspace result from CI
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Run scoped tests (`./test -p tddy-agent-launch -p tddy-session-split -p tddy-daemon-kernel -p tddy-daemon-sandbox -p tddy-session-lifecycle`) + the changed Cypress spec; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped clippy, `cargo fmt`)
+- [x] Linting and formatting (scoped clippy, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap

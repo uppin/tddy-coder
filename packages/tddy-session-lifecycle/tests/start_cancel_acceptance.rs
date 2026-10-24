@@ -145,6 +145,15 @@ async fn a_streamed_start_names_its_task_first() {
         matches!(&first.event, Some(StartEvent::Started(started)) if !started.task_id.is_empty()),
         "the first event names the task the start runs as: {first:?}"
     );
+
+    // Cleanup: the clone is stopped here, so the runtime does not wait out ssh's connect timeout.
+    if let Some(StartEvent::Started(started)) = first.event {
+        daemon
+            .service
+            .task_registry()
+            .cancel_task(&tddy_task::TaskId(started.task_id))
+            .await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -195,7 +204,7 @@ async fn cancelling_a_start_that_is_cloning_ends_it_cancelled_and_leaves_no_repo
     );
     assert!(!daemon.working_copy.exists(), "no repository left behind");
     assert!(
-        entries_under(&daemon.working_copy.parent().unwrap())
+        entries_under(daemon.working_copy.parent().unwrap())
             .iter()
             .all(|name| !name.contains("partial")),
         "no partial clone left behind"

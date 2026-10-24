@@ -11,6 +11,13 @@ use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_spawn::spawn_worker;
 
+/// What a running start reports into and is cancelled through.
+#[derive(Clone, Copy)]
+pub(crate) struct StartHandles<'a> {
+    pub(crate) progress: &'a AttachmentProgressSink,
+    pub(crate) cancel: &'a tddy_task::CancellationToken,
+}
+
 /// What provisioning a project's working copy on the blocking pool needs: the clone backend, and
 /// where the project comes from.
 pub(super) struct ProjectClone {
@@ -134,12 +141,12 @@ impl LaunchSessions {
         project_id: &str,
         session_token: &str,
         agent_clone: Option<&tddy_service::proto::session::AgentClonePlacement>,
-        progress: &AttachmentProgressSink,
-        cancel: &tddy_task::CancellationToken,
+        start: StartHandles<'_>,
     ) -> Result<project_storage::ProjectData, Status> {
         // Resolved lazily: only a peer-provisioned clone needs a base path. A locally-registered
         // project (the common case) never consults it, so a `None` here must not fail the start —
         // it only surfaces as an error if `ensure_project_available_locally` actually needs it.
+        let StartHandles { progress, cancel } = start;
         let repos_base_dir = repos_base_for_user(os_user, self.config.repos_base_path_or_default());
         let spawn_client = self.spawn_client.clone();
         let os_user_owned = os_user.to_string();

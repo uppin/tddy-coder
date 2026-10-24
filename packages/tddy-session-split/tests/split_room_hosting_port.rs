@@ -544,8 +544,11 @@ struct ACodebaseHost {
     /// Names its task, then keeps cutting: its stream never ends.
     never_finishes: bool,
     /// The open streams of a start that never finishes, held so their senders stay alive.
-    open_streams: Mutex<Vec<mpsc::Sender<Result<Vec<u8>, Status>>>>,
+    open_streams: Mutex<Vec<mpsc::Sender<Frame>>>,
 }
+
+/// One frame of a streamed answer.
+type Frame = Result<Vec<u8>, Status>;
 
 /// A codebase host that names its task and then goes on cutting the worktree until cancelled.
 fn a_codebase_host_that_never_finishes() -> ACodebaseHost {
