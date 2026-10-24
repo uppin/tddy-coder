@@ -45,6 +45,8 @@ pub struct CodingAgentSession {
     next_ordinal: u64,
     /// Each turn's question and answer, oldest first, for [`SubagentSession::tail`].
     history: Vec<String>,
+    /// Receives every update of every later turn as it streams; set by [`Self::record_updates_with`].
+    recorder: Option<AcpUpdateSink>,
 }
 
 /// One `session/prompt` the session has sent and has not yet seen end.
@@ -112,13 +114,15 @@ impl CodingAgentSession {
             model,
             next_ordinal: 1,
             history: Vec::new(),
+            recorder: None,
         })
     }
 
     /// Send every ACP update of every later turn to `sink`, as it streams — how a daemon-run
     /// conversation's transcript records the agent's tool calls while the turn is still running.
-    pub fn record_updates_with(&mut self, _sink: tddy_agent_backend::AcpUpdateSink) {
-        // TODO(conversation-bubble): implement
+    /// A turn already in flight keeps the recorder it began with.
+    pub fn record_updates_with(&mut self, sink: AcpUpdateSink) {
+        self.recorder = Some(sink);
     }
 
     /// A handle that cancels this session's running turn without holding the session — what the
@@ -175,7 +179,11 @@ impl CodingAgentSession {
     fn begin_prompt(&self, prompt: String) -> InFlightPrompt {
         let updates = Arc::new(Mutex::new(Vec::new()));
         let sink_updates = Arc::clone(&updates);
+        let recorder = self.recorder.clone();
         let sink: AcpUpdateSink = Arc::new(move |update| {
+            if let Some(recorder) = &recorder {
+                recorder(update.clone());
+            }
             sink_updates
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
