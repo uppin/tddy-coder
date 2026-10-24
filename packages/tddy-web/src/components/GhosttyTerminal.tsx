@@ -888,8 +888,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     }, [sessionActive, ready]);
 
     // Mouse/touch forwarding when hasMouseTracking (SGR sequences via onData)
+    // Reads `onDataRef` rather than depending on `onData`: callers pass an inline arrow, so an
+    // `onData` dependency tore down and re-attached every listener on each parent render.
+    const hasOnData = !!onData;
     useEffect(() => {
-      if (!ready || !containerRef.current || !termRef.current || !onData) return;
+      if (!ready || !containerRef.current || !termRef.current || !hasOnData) return;
       const container = containerRef.current;
       const term = termRef.current;
       logMouse("mouse listeners attached ready=%o", ready);
@@ -909,7 +912,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
       const sendSgr = (pb: number, col: number, row: number, release: boolean) => {
         const end = release ? "m" : "M";
-        onData(`\x1b[<${pb};${col};${row}${end}`);
+        onDataRef.current?.(`\x1b[<${pb};${col};${row}${end}`);
       };
 
       const onMouseDown = (e: MouseEvent) => {
@@ -984,7 +987,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         container.removeEventListener("touchstart", onTouchStartCapture, { capture: true });
         container.removeEventListener("touchend", onTouchEndCapture, { capture: true });
       };
-    }, [ready, onData]);
+    }, [ready, hasOnData]);
 
     // Prevent focus on pointer/touch/click when preventFocusOnTap (e.g. mobile, keyboard closed).
     // Touch events still propagate to SGR forwarding (bubble phase) — preventDefault does not stop propagation.

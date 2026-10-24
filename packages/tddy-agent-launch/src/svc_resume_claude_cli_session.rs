@@ -169,7 +169,8 @@ impl LaunchSessions {
     /// The environment a resumed claude-cli agent starts from: the checkout's commit identity
     /// (`None` for a split agent), the split wiring, and the provider account the session's start
     /// recorded — re-read from the owner's vault, so a rotated key is what the resume runs on and a
-    /// removed account refuses the resume rather than running it on the vendor.
+    /// removed account refuses the resume rather than running it on the vendor. It runs the renderer
+    /// `claude_cli.fullscreen` asks for, as a fresh start does.
     fn resumed_agent_env(
         &self,
         git_environment: Option<Vec<(String, String)>>,
@@ -187,6 +188,7 @@ impl LaunchSessions {
             .into_iter()
             .chain(split_env)
             .chain(route_env)
+            .chain(self.config.claude_cli_renderer_env())
             .collect())
     }
 }

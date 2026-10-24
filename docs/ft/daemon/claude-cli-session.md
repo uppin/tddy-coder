@@ -273,6 +273,28 @@ The `GhosttyTerminalSession` component wraps `GhosttyTerminal` and connects `onD
 
 `ConnectionScreen` mounts `GhosttyTerminalSession` on the session's host-served terminal feed when the attached session's `agent` is `claude-cli`.
 
+### Fullscreen renderer
+
+Every `claude-cli` launch — a fresh start and a **Resume**, on the host and in the sandbox — runs
+Claude's **fullscreen renderer**. It is the only renderer that switches to the alternate screen and
+enables mouse tracking (DECSET `1049`, `1000`/`1002`, `1006`). The web terminal routes the wheel to
+the TUI only once mouse tracking is on, and its live pane keeps no scrollback of its own, so an inline
+Claude cannot be scrolled from the browser at all.
+
+The daemon forces the renderer with **`CLAUDE_CODE_NO_FLICKER=1`** in the agent's environment. On the
+host the agent also inherits the daemon's environment; a sandboxed agent's environment is constructed,
+so the variable has to be added there too. Both paths add it from one helper,
+`DaemonConfig::claude_cli_renderer_env`.
+
+```yaml
+claude_cli:
+  fullscreen: false   # default true; also true when `claude_cli:` is absent
+```
+
+`false` leaves the renderer to Claude (its own setting, or `/tui`). Forcing it also overrides Claude's
+own switch back to the classic renderer after a fullscreen launch failed to start, so a machine where
+fullscreen crashes needs `fullscreen: false`.
+
 ## Session table display
 
 | Column | Claude CLI session value |

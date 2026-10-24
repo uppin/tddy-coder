@@ -330,8 +330,8 @@ use agent_cli::{
 pub use agent_cli::{
     resolve_claude_binary_path, resolve_claude_home_dir, resolve_cursor_binary_path,
     resolve_cursor_cli_daemon_url, resolve_cursor_cli_tddy_tools_path, resolve_cursor_home_dir,
-    ClaudeCliConfig, CursorCliConfig, CLAUDE_BINARY_ENV, CLAUDE_HOME_ENV, CURSOR_BINARY_ENV,
-    CURSOR_HOME_ENV,
+    ClaudeCliConfig, CursorCliConfig, CLAUDE_BINARY_ENV, CLAUDE_FULLSCREEN_ENV, CLAUDE_HOME_ENV,
+    CURSOR_BINARY_ENV, CURSOR_HOME_ENV,
 };
 
 use crate::config::access::AllowedTool;
@@ -997,6 +997,42 @@ claude_cli:
             choose_claude_binary(Some("/opt/claude"), "/usr/local/bin/claude"),
             ClaudeBinaryChoice::Explicit(p) if p == "/opt/claude"
         ));
+    }
+
+    /// What `claude_cli:` says about `fullscreen` once parsed, read back through the serialized
+    /// section so the assertion pins the YAML contract an operator writes.
+    fn parsed_fullscreen(claude_cli_section: &str) -> serde_yaml::Value {
+        let yaml = format!("users:\n  - github_user: u\n    os_user: u\n{claude_cli_section}");
+        let c: DaemonConfig = serde_yaml::from_str(&yaml).expect("parse");
+        let cli = c.claude_cli.as_ref().expect("claude_cli must be present");
+        serde_yaml::to_value(cli).expect("serialize claude_cli")["fullscreen"].clone()
+    }
+
+    /// The web terminal can only scroll Claude when Claude runs its fullscreen renderer, so a
+    /// `claude_cli:` section that does not mention `fullscreen` keeps it on.
+    #[test]
+    fn fullscreen_is_on_when_the_claude_cli_section_does_not_mention_it() {
+        // Given
+        let section = "claude_cli:\n  binary_path: /usr/local/bin/claude\n";
+
+        // When
+        let fullscreen = parsed_fullscreen(section);
+
+        // Then
+        assert_eq!(fullscreen, serde_yaml::Value::Bool(true));
+    }
+
+    /// An operator can turn the forced fullscreen renderer off.
+    #[test]
+    fn fullscreen_false_is_accepted_and_kept() {
+        // Given
+        let section = "claude_cli:\n  binary_path: /usr/local/bin/claude\n  fullscreen: false\n";
+
+        // When
+        let fullscreen = parsed_fullscreen(section);
+
+        // Then
+        assert_eq!(fullscreen, serde_yaml::Value::Bool(false));
     }
 
     /// A blank/whitespace env override is ignored (falls through to config/auto).

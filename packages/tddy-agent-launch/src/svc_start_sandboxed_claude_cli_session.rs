@@ -480,6 +480,8 @@ impl LaunchSessions {
         env.extend(self.lsp_tools_env(worktree_path));
         env.extend(self.restructure_tools_env());
         env.extend(semantic_index_env_pair);
+        // The jail's env is built here, not inherited, so the renderer choice has to be carried in.
+        env.extend(self.config.claude_cli_renderer_env());
         Ok(env)
     }
 }

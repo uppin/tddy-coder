@@ -109,6 +109,8 @@ is still alive. See `scripts/dev-process.sh`. Works on macOS's `/bin/bash` 3.2.
 | `tddy:term:session` | The one session terminal's feed, whatever carries it: recv length, ready/buffered state, hex preview |
 | `tddy:term:life` | Terminal lifecycle (init, open, initial `cols`/`rows`) |
 | `tddy:term:mouse` | Mouse / SGR forwarding |
+| `tddy:term:modes` | DEC private mode switches (`ESC[?…h/l`) in received output, and the mouse-tracking / alternate-screen state after the write — silent for chunks that switch nothing |
+| `tddy:term:chrome` | The session terminal's connection chrome on each render |
 
 **Precedence** (the daemon value is the baseline):
 

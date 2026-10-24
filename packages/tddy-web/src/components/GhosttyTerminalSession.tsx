@@ -20,7 +20,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { DEFAULT_TERMINAL_FONT_MAX, DEFAULT_TERMINAL_FONT_MIN } from "../lib/terminalZoom";
 import { tddyDebug } from "../lib/debugMask";
-import { tddyDevDebug } from "../lib/tddyDevLog";
 import {
   shouldShowVisibleLiveKitStatusStrip,
   type LiveKitChromeStatus,
@@ -46,10 +45,33 @@ const dTerm = tddyDebug("tddy:term:session");
 const dResize = tddyDebug("tddy:term:resize");
 const dHistory = tddyDebug("tddy:term:history");
 const dMouse = tddyDebug("tddy:term:mouse");
+const dModes = tddyDebug("tddy:term:modes");
+const dChrome = tddyDebug("tddy:term:chrome");
 
 /** Hex preview of the first `n` bytes for diagnosing garbled / misaligned output. */
 function hexPreview(data: Uint8Array, n = 24): string {
   return Array.from(data.slice(0, n), (b) => b.toString(16).padStart(2, "0")).join(" ");
+}
+
+/** DEC private mode set/reset sequences (`ESC [ ? Pm h|l`) in a chunk, e.g. `?1006h`, `?1049l` —
+ *  the switches that decide whether the wheel goes to the TUI. Latin-1 decode keeps byte offsets. */
+function decModeChanges(data: Uint8Array): string[] {
+  const text = new TextDecoder("latin1").decode(data);
+  return Array.from(text.matchAll(/\x1b\[\?([\d;]+)([hl])/g), (m) => `?${m[1]}${m[2]}`);
+}
+
+/** `tddy:term:modes`: after a chunk is written, log the DEC modes it switched and the resulting
+ *  mouse-tracking / alternate-screen state — silent for chunks that switch nothing. */
+function traceModes(term: GhosttyTerminalHandle, data: Uint8Array): void {
+  if (!dModes.enabled) return;
+  const modes = decModeChanges(data);
+  if (modes.length === 0) return;
+  dModes(
+    "%s → tracking=%o altScreen=%o",
+    modes.join(" "),
+    term.hasMouseTracking?.() ?? false,
+    term.isAlternateScreen?.() ?? false,
+  );
 }
 
 /**
@@ -391,6 +413,7 @@ export function GhosttyTerminalSession({
       }
       if (ready && termRef.current) {
         termRef.current.write(data);
+        traceModes(termRef.current, data);
       } else {
         // The reconnect byte-buffering fix: bytes that arrive before ghostty-web is ready are held
         // and flushed in order on `onReady`, instead of being written into a terminal that is not
@@ -621,7 +644,7 @@ export function GhosttyTerminalSession({
     </span>
   ) : null;
 
-  tddyDevDebug("[GhosttyTerminalSession] render chrome", {
+  dChrome("render chrome %o", {
     hasConnectionOverlay: !!connectionOverlay,
     statusBarCompact,
     keyboardAffordanceShown,
@@ -649,6 +672,7 @@ export function GhosttyTerminalSession({
           dTerm("ready — flushing %d buffered chunk(s)", buf.length);
           for (const chunk of buf) {
             term.write(chunk);
+            traceModes(term, chunk);
           }
           if (focusesOnReady) {
             term.focus();
