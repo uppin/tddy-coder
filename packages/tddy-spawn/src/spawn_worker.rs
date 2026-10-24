@@ -1,14 +1,12 @@
-//! Spawn worker — single-threaded child process that performs fork+exec.
+//! Spawn worker — child process that performs fork+exec for the daemon, serving each request on a
+//! thread of its own.
 //!
 //! Fork from a multi-threaded tokio process can deadlock (pthread/malloc locks).
-//! We fork this worker before tokio starts, so it has only one thread and can
-//! safely spawn tddy-* processes.
+//! We fork this worker before tokio starts, so the forking thread is the only one it inherits and
+//! nothing it needs from tokio can be held by a thread that did not survive the fork.
 
-use std::io::{BufRead, BufReader, Write};
 use std::os::unix::io::FromRawFd;
 use std::path::Path;
-use std::sync::Arc;
-use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +14,11 @@ use crate::spawner::{self, LiveKitCreds, SpawnOptions, SpawnResult};
 
 mod clone_request;
 pub use clone_request::CloneRequest;
+mod client;
+pub use client::{client_over, spawn_worker_over, SpawnClient};
+mod serve;
+mod wire;
+pub use wire::{RequestId, WorkerEnvelope, WorkerEvent, WorkerLine};
 
 fn default_spawn_mouse() -> bool {
     true
@@ -154,83 +157,6 @@ pub enum WorkerResponse {
     Error { message: String },
 }
 
-/// Client for sending spawn requests to the worker. Used by the async daemon.
-#[derive(Clone)]
-pub struct SpawnClient {
-    request_tx: Arc<std::sync::Mutex<std::fs::File>>,
-    response_rx: Arc<std::sync::Mutex<BufReader<std::fs::File>>>,
-}
-
-fn worker_request_label(req: &WorkerRequest) -> String {
-    match req {
-        WorkerRequest::Spawn(s) => format!(
-            "op=spawn session={} repo={}",
-            s.resume_session_id
-                .as_deref()
-                .or(s.new_session_id.as_deref())
-                .unwrap_or("new"),
-            s.repo_path
-        ),
-        WorkerRequest::Clone(c) => format!("op=clone dest={} os_user={}", c.destination, c.os_user),
-    }
-}
-
-impl SpawnClient {
-    fn send_and_recv(&self, req: WorkerRequest) -> anyhow::Result<WorkerResponse> {
-        let label = worker_request_label(&req);
-        let started = Instant::now();
-        log::info!("SpawnClient: sending {}", label);
-        let request_json = serde_json::to_string(&req)?;
-        let mut tx = self.request_tx.lock().unwrap();
-        writeln!(tx, "{}", request_json)?;
-        tx.flush()?;
-        drop(tx);
-
-        log::info!("SpawnClient: waiting for worker {}", label);
-        let mut rx = self.response_rx.lock().unwrap();
-        let mut line = String::new();
-        let n = rx.read_line(&mut line)?;
-        if n == 0 && line.is_empty() {
-            anyhow::bail!(
-                "spawn worker closed response pipe without a line (EOF) after {:?}",
-                started.elapsed()
-            );
-        }
-        let elapsed = started.elapsed();
-        log::info!(
-            "SpawnClient: received response line ({} bytes) elapsed_ms={} {}",
-            line.len(),
-            elapsed.as_millis(),
-            label
-        );
-        let response: WorkerResponse = serde_json::from_str(line.trim()).map_err(|e| {
-            let preview: String = line.chars().take(256).collect();
-            anyhow::anyhow!(
-                "invalid WorkerResponse JSON from spawn worker: {} (preview: {:?})",
-                e,
-                preview
-            )
-        })?;
-        Ok(response)
-    }
-
-    pub fn spawn(&self, req: SpawnRequest) -> anyhow::Result<SpawnResult> {
-        match self.send_and_recv(WorkerRequest::Spawn(Box::new(req)))? {
-            WorkerResponse::SpawnOk { result } => Ok(result),
-            WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
-            WorkerResponse::CloneOk => Err(anyhow::anyhow!("unexpected clone_ok for spawn")),
-        }
-    }
-
-    pub fn clone_repo(&self, req: CloneRequest) -> anyhow::Result<()> {
-        match self.send_and_recv(WorkerRequest::Clone(req))? {
-            WorkerResponse::CloneOk => Ok(()),
-            WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
-            WorkerResponse::SpawnOk { .. } => Err(anyhow::anyhow!("unexpected spawn_ok for clone")),
-        }
-    }
-}
-
 /// Fork the spawn worker before tokio starts. Returns (SpawnClient, worker_pid).
 /// On non-Unix, returns None and spawns will use spawn_as_user directly (may deadlock).
 #[cfg(unix)]
@@ -241,6 +167,7 @@ pub fn fork_spawn_worker() -> anyhow::Result<Option<(SpawnClient, libc::pid_t)>>
     if unsafe { libc::pipe(request_pipe.as_mut_ptr()) } != 0 {
         anyhow::bail!("pipe() failed");
     }
+    set_close_on_exec(request_pipe);
     let mut response_pipe: [RawFd; 2] = [0; 2];
     if unsafe { libc::pipe(response_pipe.as_mut_ptr()) } != 0 {
         unsafe {
@@ -249,6 +176,7 @@ pub fn fork_spawn_worker() -> anyhow::Result<Option<(SpawnClient, libc::pid_t)>>
         }
         anyhow::bail!("pipe() failed");
     }
+    set_close_on_exec(response_pipe);
 
     let pid = unsafe { libc::fork() };
     match pid {
@@ -267,7 +195,9 @@ pub fn fork_spawn_worker() -> anyhow::Result<Option<(SpawnClient, libc::pid_t)>>
                 libc::close(request_pipe[1]);
                 libc::close(response_pipe[0]);
             }
-            spawn_worker_main(request_pipe[0], response_pipe[1]);
+            let request_reader = unsafe { std::fs::File::from_raw_fd(request_pipe[0]) };
+            let response_writer = unsafe { std::fs::File::from_raw_fd(response_pipe[1]) };
+            serve::serve(request_reader, response_writer);
             std::process::exit(0);
         }
         _ => {
@@ -278,10 +208,7 @@ pub fn fork_spawn_worker() -> anyhow::Result<Option<(SpawnClient, libc::pid_t)>>
             }
             let request_tx = unsafe { std::fs::File::from_raw_fd(request_pipe[1]) };
             let response_rx = unsafe { std::fs::File::from_raw_fd(response_pipe[0]) };
-            let client = SpawnClient {
-                request_tx: Arc::new(std::sync::Mutex::new(request_tx)),
-                response_rx: Arc::new(std::sync::Mutex::new(BufReader::new(response_rx))),
-            };
+            let client = client_over(request_tx, response_rx, pid as u32);
             Ok(Some((client, pid)))
         }
     }
@@ -292,142 +219,83 @@ pub fn fork_spawn_worker() -> anyhow::Result<Option<(SpawnClient, i32)>> {
     Ok(None)
 }
 
-/// Worker main loop: read requests, spawn, write responses.
+/// Mark both ends of a pipe close-on-exec. A child the worker or the daemon execs then inherits
+/// neither end, so the response pipe reaches EOF the moment the worker dies, however many children
+/// it spawned and however long they run.
 #[cfg(unix)]
-fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
-    let request_reader = unsafe { std::fs::File::from_raw_fd(request_fd) };
-    let mut response_writer = unsafe { std::fs::File::from_raw_fd(response_fd) };
+fn set_close_on_exec(fds: [std::os::unix::io::RawFd; 2]) {
+    for fd in fds {
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+}
 
-    log::info!("spawn_worker: started, waiting for requests");
-    let reader = BufReader::new(request_reader);
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => break,
-        };
-        log::info!("spawn_worker: received request ({} bytes)", line.len());
-
-        let req: WorkerRequest = match serde_json::from_str(&line) {
-            Ok(r) => r,
-            Err(e) => {
-                let _ = writeln!(
-                    response_writer,
-                    "{}",
-                    serde_json::to_string(&WorkerResponse::Error {
-                        message: e.to_string()
-                    })
-                    .unwrap()
-                );
-                let _ = response_writer.flush();
-                continue;
+/// Run one spawn request on the worker's thread: `spawn_as_user` with the request's own parameters.
+fn run_spawn(req: &SpawnRequest) -> WorkerResponse {
+    let livekit = LiveKitCreds {
+        url: req.livekit_url.clone(),
+        api_key: req.livekit_api_key.clone(),
+        api_secret: req.livekit_api_secret.clone(),
+        common_room: req.common_room.clone(),
+        daemon_instance_id: req.daemon_instance_id.clone(),
+    };
+    let session = req
+        .resume_session_id
+        .as_deref()
+        .or(req.new_session_id.as_deref())
+        .unwrap_or("new");
+    log::info!(
+        "spawn_worker: calling spawn_as_user session_id={} repo={}",
+        session,
+        req.repo_path
+    );
+    let result = spawner::spawn_as_user(
+        &req.os_user,
+        &req.tool_path,
+        Path::new(&req.tddy_data_dir),
+        Path::new(&req.repo_path),
+        &livekit,
+        SpawnOptions {
+            resume_session_id: req.resume_session_id.as_deref(),
+            new_session_id: req.new_session_id.as_deref(),
+            project_id: req.project_id.as_deref(),
+            agent: req.agent.as_deref(),
+            agent_def_json: req.agent_def_json.as_deref(),
+            provider_route_json: req.provider_route_json.as_deref(),
+            mouse: req.mouse,
+            recipe: req.recipe.as_deref(),
+            stack_parent: req.stack_parent.as_deref(),
+            stack_node_id: req.stack_node_id.as_deref(),
+            stack_seed_base_session: req.stack_seed_base_session.as_deref(),
+            model: req.model.as_deref(),
+            // The reverse `spawn_conversation` channel is a per-session unix socket whose path
+            // crosses this fork boundary as a plain string (unlike stdio fds), so it works from the
+            // worker-spawned child just like the direct path.
+            host_session_socket: req.host_session_socket.as_deref(),
+            git_environment: &req.git_environment,
+        },
+        req.child_log_level.as_str(),
+        req.child_log_format.as_str(),
+        req.coder_log_config_yaml.as_deref(),
+        spawner::StartupWatch::from_millis(
+            req.startup_grace_period_ms,
+            req.startup_poll_interval_ms,
+        ),
+    );
+    log::info!(
+        "spawn_worker: spawn_as_user returned session_id={}",
+        session
+    );
+    match result {
+        Ok(result) => WorkerResponse::SpawnOk { result },
+        Err(e) => {
+            log::warn!(
+                "spawn_worker: spawn_as_user err session_id={} err={}",
+                session,
+                e
+            );
+            WorkerResponse::Error {
+                message: e.to_string(),
             }
-        };
-
-        let response = match req {
-            WorkerRequest::Spawn(req) => {
-                let livekit = LiveKitCreds {
-                    url: req.livekit_url.clone(),
-                    api_key: req.livekit_api_key.clone(),
-                    api_secret: req.livekit_api_secret.clone(),
-                    common_room: req.common_room.clone(),
-                    daemon_instance_id: req.daemon_instance_id.clone(),
-                };
-                log::info!(
-                    "spawn_worker: calling spawn_as_user session_id={} repo={}",
-                    req.resume_session_id
-                        .as_deref()
-                        .or(req.new_session_id.as_deref())
-                        .unwrap_or("new"),
-                    req.repo_path
-                );
-                let result = spawner::spawn_as_user(
-                    &req.os_user,
-                    &req.tool_path,
-                    Path::new(&req.tddy_data_dir),
-                    Path::new(&req.repo_path),
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: req.resume_session_id.as_deref(),
-                        new_session_id: req.new_session_id.as_deref(),
-                        project_id: req.project_id.as_deref(),
-                        agent: req.agent.as_deref(),
-                        agent_def_json: req.agent_def_json.as_deref(),
-                        provider_route_json: req.provider_route_json.as_deref(),
-                        mouse: req.mouse,
-                        recipe: req.recipe.as_deref(),
-                        stack_parent: req.stack_parent.as_deref(),
-                        stack_node_id: req.stack_node_id.as_deref(),
-                        stack_seed_base_session: req.stack_seed_base_session.as_deref(),
-                        model: req.model.as_deref(),
-                        // The reverse `spawn_conversation` channel is a per-session unix socket whose
-                        // path crosses this fork boundary as a plain string (unlike stdio fds), so it
-                        // works from the worker-spawned child just like the direct path.
-                        host_session_socket: req.host_session_socket.as_deref(),
-                        git_environment: &req.git_environment,
-                    },
-                    req.child_log_level.as_str(),
-                    req.child_log_format.as_str(),
-                    req.coder_log_config_yaml.as_deref(),
-                    spawner::StartupWatch::from_millis(
-                        req.startup_grace_period_ms,
-                        req.startup_poll_interval_ms,
-                    ),
-                );
-                log::info!(
-                    "spawn_worker: spawn_as_user returned session_id={}",
-                    req.resume_session_id
-                        .as_deref()
-                        .or(req.new_session_id.as_deref())
-                        .unwrap_or("new")
-                );
-                match &result {
-                    Ok(_) => {}
-                    Err(e) => log::warn!(
-                        "spawn_worker: spawn_as_user err session_id={} err={}",
-                        req.resume_session_id
-                            .as_deref()
-                            .or(req.new_session_id.as_deref())
-                            .unwrap_or("new"),
-                        e
-                    ),
-                }
-                match result {
-                    Ok(r) => WorkerResponse::SpawnOk { result: r },
-                    Err(e) => WorkerResponse::Error {
-                        message: e.to_string(),
-                    },
-                }
-            }
-            WorkerRequest::Clone(req) => {
-                log::info!(
-                    "spawn_worker: calling clone_as_user os_user={} dest={}",
-                    req.os_user,
-                    req.destination
-                );
-                let result = req.run();
-                match &result {
-                    Ok(()) => log::info!("spawn_worker: clone_as_user ok dest={}", req.destination),
-                    Err(e) => log::warn!(
-                        "spawn_worker: clone_as_user err dest={} err={}",
-                        req.destination,
-                        e
-                    ),
-                }
-                match result {
-                    Ok(()) => WorkerResponse::CloneOk,
-                    Err(e) => WorkerResponse::Error {
-                        message: e.to_string(),
-                    },
-                }
-            }
-        };
-
-        let response_json = serde_json::to_string(&response).unwrap();
-        if let Err(e) = writeln!(response_writer, "{}", response_json) {
-            log::error!("spawn_worker: failed to write response line: {}", e);
-        }
-        if let Err(e) = response_writer.flush() {
-            log::error!("spawn_worker: failed to flush response pipe: {}", e);
         }
     }
 }

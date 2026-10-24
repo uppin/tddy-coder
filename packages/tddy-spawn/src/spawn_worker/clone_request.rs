@@ -20,17 +20,19 @@ pub struct CloneRequest {
 
 impl CloneRequest {
     /// Run the clone as the requested OS user, with the request's environment on the `git` child.
-    pub(super) fn run(&self) -> anyhow::Result<()> {
+    /// `on_started` receives the child's pid once the child is running.
+    pub(super) fn run(&self, on_started: impl FnOnce(u32)) -> anyhow::Result<()> {
         let env: Vec<(&str, &str)> = self
             .env
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect();
-        spawner::clone_as_user_with_env(
+        spawner::clone_as_user_observed(
             &self.os_user,
             &self.git_url,
             Path::new(&self.destination),
             &env,
+            on_started,
         )
     }
 }
