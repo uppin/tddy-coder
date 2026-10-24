@@ -56,6 +56,16 @@ fn permission_relay_socket_path() -> Option<PathBuf> {
     }
 }
 
+/// The conversation a headless coding agent's permission prompts belong to: `TDDY_CONVERSATION_ID`,
+/// the variable the exec tools read too.
+fn permission_conversation_id() -> Option<String> {
+    crate::mcp_primitives::exec_conversation_from_env()
+}
+
+/// How long a conversation-tagged approval may wait for its conversation's answer before it is
+/// denied. The same bound the untagged relay uses.
+const CONVERSATION_APPROVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Parameters for the approval_prompt tool (Claude Code permission-prompt-tool format).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ApprovalPromptInput {
@@ -301,11 +311,14 @@ pub const UNKNOWN_TOOL_REJECTION: &str = "unknown MCP tool";
 pub struct PermissionServer {
     tool_router: ToolRouter<Self>,
     socket_path: Option<PathBuf>,
+    /// The conversation this server answers for, when a managed conversation launched it.
+    conversation_id: Option<String>,
 }
 
 impl PermissionServer {
     pub fn new() -> Self {
         let socket_path = permission_relay_socket_path();
+        let conversation_id = permission_conversation_id();
         let mut tool_router = Self::tool_router();
         let seed_defs = seed_subagents_or_report();
         // Session-tool transport (sandbox IPC or daemon HTTP) present => forward the
@@ -360,6 +373,7 @@ impl PermissionServer {
         Self {
             tool_router,
             socket_path,
+            conversation_id,
         }
     }
 
@@ -606,13 +620,24 @@ impl PermissionServer {
         }
     }
 
+    /// Decide a permission prompt exactly as the `approval_prompt` tool does. Plain delegation to
+    /// [`decide`](Self::decide), for callers outside this module.
+    pub fn decide_for_approval(&self, tool_name: &str, input: &Value) -> String {
+        self.decide(tool_name, input)
+    }
+
     /// Decide allow/deny. Bash(tddy-tools *) and mcp__tddy-tools__* are always allowed.
     /// Bash commands that only reference paths under TDDY_SESSION_DIR or TDDY_REPO_DIR are pre-allowed.
     /// For other tools: route through TDDY_SOCKET to TUI if available, else deny.
+    /// A server answering for a conversation (`TDDY_CONVERSATION_ID`) hands the prompt to that
+    /// conversation instead; see [`Self::decide_for_conversation`].
     ///
     /// Claude Code permission-prompt-tool expects allow responses to include `updatedInput` (the
     /// original or modified tool input). Deny responses use `behavior: "deny"` and optional `message`.
     fn decide(&self, tool_name: &str, input: &Value) -> String {
+        if let Some(conversation_id) = self.conversation_id.as_deref() {
+            return self.decide_for_conversation(conversation_id, tool_name, input);
+        }
         let allow_response = || serde_json::json!({ "behavior": "allow", "updatedInput": input });
         if tool_name == "Bash" {
             let command = input.get("command").and_then(|c| c.as_str()).unwrap_or("");
@@ -651,6 +676,106 @@ impl PermissionServer {
             "message": format!("Permission denied for {} (no TUI socket)", tool_name)
         })
         .to_string()
+    }
+
+    /// Decide a prompt raised by the conversation `conversation_id`. That conversation's own decision
+    /// point answers over `TDDY_SOCKET`, and no local pre-allow applies: a headless conversation
+    /// yields every prompt to its conversation. tddy-tools' own MCP tools are the one exception.
+    ///
+    /// Fails closed: only an explicit allow from the conversation is an allow. A refusal, a
+    /// conversation that cannot be reached or does not answer, and a missing `TDDY_SOCKET` are denials.
+    fn decide_for_conversation(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+        input: &Value,
+    ) -> String {
+        let allow_response = || serde_json::json!({ "behavior": "allow", "updatedInput": input });
+        if tool_name.starts_with("mcp__tddy-tools__") {
+            return allow_response().to_string();
+        }
+        let deny = |message: String| {
+            serde_json::json!({ "behavior": "deny", "message": message }).to_string()
+        };
+        let Some(socket_path) = self.socket_path.as_deref() else {
+            return deny(format!(
+                "TDDY_SOCKET is not set; the approval of {tool_name} cannot reach conversation {conversation_id}"
+            ));
+        };
+        match Self::relay_conversation_approval(socket_path, conversation_id, tool_name, input) {
+            Ok(true) => allow_response().to_string(),
+            Ok(false) => deny(format!("Permission denied for {tool_name}")),
+            Err(message) => deny(message),
+        }
+    }
+
+    /// One conversation-tagged `approve` round trip over `socket_path`, answered by the conversation
+    /// the request names. The round trip runs on a thread with a runtime of its own, so no runtime is
+    /// entered from inside the caller's, and it is bounded by [`CONVERSATION_APPROVAL_TIMEOUT`].
+    ///
+    /// `Ok(allow)` is the conversation's decision; `Err` carries the text a denial reports.
+    fn relay_conversation_approval(
+        socket_path: &std::path::Path,
+        conversation_id: &str,
+        tool_name: &str,
+        input: &Value,
+    ) -> Result<bool, String> {
+        let request = serde_json::json!({
+            "type": "approve",
+            "tool_name": tool_name,
+            "input": input,
+            "conversation_id": conversation_id,
+        });
+        let round_trip = std::thread::scope(|scope| {
+            scope
+                .spawn(move || -> Result<Value, String> {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| format!("could not start the approval runtime: {e}"))?;
+                    runtime.block_on(async {
+                        match tokio::time::timeout(
+                            CONVERSATION_APPROVAL_TIMEOUT,
+                            tddy_core::toolcall::dispatch_toolcall(socket_path, request),
+                        )
+                        .await
+                        {
+                            Ok(reply) => reply,
+                            Err(_elapsed) => Err(format!(
+                                "the approval from conversation {conversation_id} timed out"
+                            )),
+                        }
+                    })
+                })
+                .join()
+        });
+        match round_trip {
+            Ok(reply) => Self::conversation_decision(&reply?, conversation_id),
+            Err(_panicked) => Err(format!(
+                "the approval from conversation {conversation_id} failed unexpectedly"
+            )),
+        }
+    }
+
+    /// The decision in a conversation's reply to an `approve` request: `Ok(true)` is an allow,
+    /// `Ok(false)` a deny, and `Err` a refusal or a reply that is neither, carrying the text to report.
+    fn conversation_decision(reply: &Value, conversation_id: &str) -> Result<bool, String> {
+        match reply.get("status").and_then(Value::as_str) {
+            Some("ok") => match reply.get("decision").and_then(Value::as_str) {
+                Some("allow") => Ok(true),
+                Some("deny") => Ok(false),
+                _ => Err(format!(
+                    "conversation {conversation_id} replied to the approval without a decision: {reply}"
+                )),
+            },
+            Some("error") => Err(reply
+                .get("message")
+                .and_then(Value::as_str)
+                .map_or_else(|| reply.to_string(), str::to_string)),
+            _ => Err(format!(
+                "conversation {conversation_id} replied to the approval with an unrecognised reply: {reply}"
+            )),
+        }
     }
 
     #[cfg(unix)]
