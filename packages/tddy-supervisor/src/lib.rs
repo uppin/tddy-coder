@@ -54,12 +54,12 @@ pub mod supervisor;
 #[cfg(test)]
 mod test_util;
 
+pub use crate::config::spawn_policy::SpawnPolicy;
 pub use authz::{Authorizer, PeerIdentity};
 pub use cgroup_broker::CgroupBroker;
 pub use client::SupervisorClient;
 pub use config::{
-    CgroupPolicy, HostSocket, ManagedService, RestartPolicy, SocketConfig, SpawnPolicy,
-    SupervisorConfig,
+    CgroupPolicy, HostSocket, ManagedService, RestartPolicy, SocketConfig, SupervisorConfig,
 };
 pub use error::{ConfigError, SupervisorError};
 pub use request::{
@@ -91,8 +91,8 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
     let mut interrupt = signal(SignalKind::interrupt())?;
 
     // Every fork in the process goes through this one thread, and it must outlive every child it
-    // creates — see `spawn_broker::ForkBroker`.
-    let forks = Arc::new(spawn_broker::ForkBroker::start()?);
+    // creates — see `spawn_broker::fork_broker::ForkBroker`.
+    let forks = Arc::new(crate::spawn_broker::fork_broker::ForkBroker::start()?);
     let supervisor = Supervisor::new(&config, Arc::clone(&forks))?;
     let cgroups = CgroupBroker::new(
         cgroup_broker::resolve_cgroup_base(&config.cgroup)?,
@@ -112,7 +112,7 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
     // Bind before the first service starts. The socket appearing is what tells the rest of the
     // host that this supervisor is up, and binding first means a failure to bind cannot leave
     // orphaned services behind.
-    let listener = server::bind_privileged_listener(&config.socket)?;
+    let listener = crate::server::listener::bind_privileged_listener(&config.socket)?;
 
     let reaper = tokio::spawn({
         let supervisor = Arc::clone(&supervisor);
@@ -124,7 +124,10 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
     });
 
     supervisor.start_declared_services().await;
-    let server = tokio::spawn(server::serve(listener, Arc::clone(&surface)));
+    let server = tokio::spawn(crate::server::listener::serve(
+        listener,
+        Arc::clone(&surface),
+    ));
 
     tokio::select! {
         _ = terminate.recv() => log::info!(target: "tddy_supervisor", "SIGTERM received"),

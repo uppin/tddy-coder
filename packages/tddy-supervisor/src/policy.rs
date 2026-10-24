@@ -19,7 +19,9 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
-use crate::config::{is_loader_env_key, CgroupPolicy, SpawnPolicy, ROOT_USER};
+use crate::config::spawn_policy::is_loader_env_key;
+use crate::config::spawn_policy::SpawnPolicy;
+use crate::config::{CgroupPolicy, ROOT_USER};
 use crate::error::SupervisorError;
 use crate::request::{AppliedLimits, RequestedLimits};
 use crate::spawn_broker;
@@ -617,30 +619,56 @@ mod tests {
 
     #[test]
     fn a_tool_allowed_for_sessions_is_not_thereby_allowed_for_relaying() {
+        // Given
         let policy = a_spawn_policy().allowing_tool("/usr/bin/opencode").build();
 
+        // When
         let resolved = resolve_relay_tool_path(&policy, Path::new("/usr/bin/opencode"));
 
+        // Then
+        assert_eq!(resolved, Err(SupervisorError::Denied));
+    }
+
+    fn a_policy_relaying_opencode() -> SpawnPolicy {
+        let mut policy = a_spawn_policy().build();
+        policy.allowed_relay_tool_paths = vec![PathBuf::from("/usr/bin/opencode")];
+        policy
+    }
+
+    #[test]
+    fn resolves_a_relay_tool_path_listed_verbatim() {
+        // Given
+        let policy = a_policy_relaying_opencode();
+
+        // When
+        let resolved = resolve_relay_tool_path(&policy, Path::new("/usr/bin/opencode"));
+
+        // Then
+        assert_eq!(resolved, Ok(PathBuf::from("/usr/bin/opencode")));
+    }
+
+    #[test]
+    fn denies_a_relay_tool_path_that_reaches_a_listed_one_through_parent_components() {
+        // Given
+        let policy = a_policy_relaying_opencode();
+
+        // When
+        let resolved = resolve_relay_tool_path(&policy, Path::new("/usr/bin/../bin/opencode"));
+
+        // Then
         assert_eq!(resolved, Err(SupervisorError::Denied));
     }
 
     #[test]
-    fn a_relay_tool_path_is_matched_verbatim_and_must_be_plain() {
-        let mut policy = a_spawn_policy().build();
-        policy.allowed_relay_tool_paths = vec![PathBuf::from("/usr/bin/opencode")];
+    fn denies_a_relative_relay_tool_path() {
+        // Given
+        let policy = a_policy_relaying_opencode();
 
-        assert_eq!(
-            resolve_relay_tool_path(&policy, Path::new("/usr/bin/opencode")),
-            Ok(PathBuf::from("/usr/bin/opencode"))
-        );
-        assert_eq!(
-            resolve_relay_tool_path(&policy, Path::new("/usr/bin/../bin/opencode")),
-            Err(SupervisorError::Denied)
-        );
-        assert_eq!(
-            resolve_relay_tool_path(&policy, Path::new("opencode")),
-            Err(SupervisorError::Denied)
-        );
+        // When
+        let resolved = resolve_relay_tool_path(&policy, Path::new("opencode"));
+
+        // Then
+        assert_eq!(resolved, Err(SupervisorError::Denied));
     }
 
     #[test]

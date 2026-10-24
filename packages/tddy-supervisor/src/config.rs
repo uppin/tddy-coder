@@ -3,11 +3,15 @@
 //! This file is the entire policy surface. Nothing the daemon sends can widen it: target users,
 //! tool paths, mount roots and resource ceilings are all decided here, by root, at load time.
 
+pub(crate) mod spawn_policy;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::spawn_policy::is_loader_env_key;
+use crate::config::spawn_policy::SpawnPolicy;
 use crate::error::ConfigError;
 
 /// The one OS user the supervisor never spawns anything as, in any capacity.
@@ -17,35 +21,9 @@ pub(crate) const ROOT_USER: &str = "root";
 ///
 /// Separate facts from [`ROOT_USER`], and both have to be checked: a passwd entry can carry uid 0
 /// under any name it likes, so rejecting the *name* `root` says nothing about the ids an account
-/// actually resolves to. See [`crate::spawn_broker::refuse_root_credentials`].
+/// actually resolves to. See [`crate::spawn_broker::accounts::refuse_root_credentials`].
 pub(crate) const ROOT_UID: u32 = 0;
 pub(crate) const ROOT_GID: u32 = 0;
-
-/// Environment variables that decide what code a process loads, whatever binary it was told to
-/// exec. Prefixes, because the loader reads a family of each.
-const LOADER_ENV_PREFIXES: [&str; 2] = ["LD_", "MALLOC_"];
-
-/// The rest of the same family, which have no common prefix.
-const LOADER_ENV_KEYS: [&str; 5] = [
-    "GCONV_PATH",
-    "NLSPATH",
-    "LOCPATH",
-    "HOSTALIASES",
-    "RESOLV_HOST_CONF",
-];
-
-/// Whether `key` is one of the variables that chooses code rather than configuring behavior.
-///
-/// `LD_PRELOAD` on its own turns any allowlisted tool into a loader for a library the caller picked,
-/// which is the `allowed_tool_paths` allowlist bypassed without being touched. It works because the
-/// child execs *after* `setuid` to an ordinary account, so the binary is not setuid, `AT_SECURE` is
-/// unset, and the dynamic loader honors all of these.
-pub(crate) fn is_loader_env_key(key: &str) -> bool {
-    LOADER_ENV_PREFIXES
-        .iter()
-        .any(|prefix| key.starts_with(prefix))
-        || LOADER_ENV_KEYS.contains(&key)
-}
 
 /// Top-level supervisor configuration, loaded from `/etc/tddy/supervisor.yaml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,34 +151,6 @@ impl Default for RestartPolicy {
             stability_threshold_ms: 10_000,
         }
     }
-}
-
-/// What the daemon is allowed to ask the supervisor to spawn, and on whose behalf.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SpawnPolicy {
-    /// OS users a session may run as. `root` is rejected at load time.
-    #[serde(default)]
-    pub allowed_session_users: Vec<String>,
-    /// Absolute paths of tools a session may exec.
-    #[serde(default)]
-    pub allowed_tool_paths: Vec<PathBuf>,
-    /// Absolute paths of coding-agent harness binaries that may be run with their stdio relayed over
-    /// a caller-owned socket (`SpawnRelayed`). **Empty by default: relayed spawning is off.** It is a
-    /// list of its own, not `allowed_tool_paths`, so granting a session tool never grants a relay.
-    #[serde(default)]
-    pub allowed_relay_tool_paths: Vec<PathBuf>,
-    /// Roots under which a sandbox bind-mount source must fall.
-    #[serde(default)]
-    pub allowed_mount_roots: Vec<PathBuf>,
-    /// Environment variables a caller may set on a session it asks for.
-    ///
-    /// Empty by default, so a caller's `env` is refused rather than passed on. The caller is the
-    /// daemon; a variable it can put into the environment of a process running as *another* OS user
-    /// is a grant, and grants belong in this file. Loader variables ([`is_loader_env_key`]) are
-    /// rejected here at load time — listing one would hand over the tool allowlist with it.
-    #[serde(default)]
-    pub allowed_env_keys: Vec<String>,
 }
 
 /// Delegation settings and the ceilings every requested resource limit is clamped to.
@@ -622,8 +572,10 @@ mod tests {
 
     #[test]
     fn defaults_to_relaying_no_harness() {
+        // Given / When
         let config = SupervisorConfig::from_yaml(a_minimal_config()).expect("parse config");
 
+        // Then
         assert_eq!(
             config.spawn_policy.allowed_relay_tool_paths,
             Vec::<PathBuf>::new()
@@ -632,12 +584,17 @@ mod tests {
 
     #[test]
     fn refuses_a_relay_tool_path_that_is_not_absolute() {
+        // Given
         let yaml = format!(
             "{}\nspawn_policy:\n  allowed_relay_tool_paths: [\"bin/opencode\"]\n",
             a_minimal_config()
         );
 
-        assert!(SupervisorConfig::from_yaml(&yaml).is_err());
+        // When
+        let result = SupervisorConfig::from_yaml(&yaml);
+
+        // Then
+        assert_rejected_because(result, "allowed_relay_tool_paths entry");
     }
 
     #[test]

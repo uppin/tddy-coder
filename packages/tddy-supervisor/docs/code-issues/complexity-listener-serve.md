@@ -1,6 +1,7 @@
 # complexity: serve
 
-**Location:** `packages/tddy-supervisor/src/server.rs:511` — `serve`
+**Location:** `packages/tddy-supervisor/src/server/listener.rs:104` — `serve`
+**Moved:** 2026-10-24 — from `src/server.rs` by `#coagents` 2/8 (#721), which split the listener out of `server.rs` with an engine `move_item`; the body moved unchanged, so the metrics still hold
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **95 lines** (2026-09-24; 90 at detection) · **nesting depth 5** · 2 parameters · 4 branch/match lines · 2 early exits
@@ -15,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 90 | 5 | 4 | 2 | first detection |
 | 2026-09-24 | 95 | 5 | 4 | 2 | 90 on the merge-base with `origin/master` (`4e7157d2`) → 95 after #509 (`#keyring` 2/9): `StdioEndpoint::from_duplex` takes a fourth argument, `RequestTransport::UnixSocket`, and rustfmt wraps the call over six lines. No control flow added: nesting, branches and exits identical on base and HEAD. Decomposition deferred with the developer's consent (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`, which lists `server.rs` 703 → 708) |
+| 2026-10-24 | 95 | — | — | — | **unchanged**, moved to `server/listener.rs` (#721) |
 
 ## What the tool found
 

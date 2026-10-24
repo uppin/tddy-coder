@@ -8,7 +8,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::config::{CgroupPolicy, ManagedService, RestartPolicy, SpawnPolicy};
+use crate::config::spawn_policy::SpawnPolicy;
+use crate::config::{CgroupPolicy, ManagedService, RestartPolicy};
 use crate::request::RequestedLimits;
 
 pub const MIB: u64 = 1024 * 1024;

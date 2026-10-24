@@ -38,30 +38,30 @@
 //! ## Forking from a multi-threaded process
 //!
 //! `fork` copies only the calling thread, so a lock another thread held at fork time stays locked
-//! forever in the child. Two things keep that safe here: every fork happens on [`ForkBroker`]'s one
+//! forever in the child. Two things keep that safe here: every fork happens on [`ForkBroker`](fork_broker::ForkBroker)'s one
 //! dedicated thread, never on a runtime worker; and the `pre_exec` closure below allocates nothing
 //! and takes no lock — every string it needs is a [`CString`] built before the fork, and the pids
 //! it writes are formatted into buffers that already exist.
 
+pub(crate) mod accounts;
+mod child_environment;
+pub(crate) mod fork_broker;
+
 use std::collections::BTreeMap;
-use std::ffi::{CStr, CString, OsStr, OsString};
+use std::ffi::{CStr, CString};
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::fd::{OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
-use tokio::sync::{mpsc, oneshot};
-
-use crate::config::{ROOT_GID, ROOT_UID};
 pub use crate::handover::SocketHandover;
-use crate::handover::{hand_over_listeners, reserve_handover_slots};
+use crate::spawn_broker::accounts::TargetUser;
+use crate::spawn_broker::fork_broker::CompiledStep;
 
 extern "C" {
     /// POSIX's environment array, which `execvp` reads at exec time. Writing it is how the child
-    /// installs the environment the supervisor built for it — see [`ChildEnvironment`].
+    /// installs the environment the supervisor built for it — see [`ChildEnvironment`](child_environment::ChildEnvironment).
     static mut environ: *const *const libc::c_char;
 }
 
@@ -73,80 +73,6 @@ extern "C" {
 #[cfg(target_os = "linux")]
 const ORPHANED_EXIT_STATUS: libc::c_int = 125;
 
-/// A target OS user, fully resolved before the fork so the child never has to consult NSS.
-#[derive(Debug, Clone)]
-pub struct TargetUser {
-    pub uid: u32,
-    pub gid: u32,
-    /// `pw_name`. Kept as a C string because it becomes `USER`/`LOGNAME` in a child that cannot
-    /// allocate.
-    pub name: CString,
-    pub home: PathBuf,
-    /// The account's supplementary groups, resolved here so the child calls nothing but
-    /// `setgroups(2)`.
-    ///
-    /// This is what `initgroups(3)` would have computed, and computing it *before* the fork is not a
-    /// micro-optimisation. `initgroups` calls `getgrouplist`, which allocates and enters NSS: for
-    /// `files` it opens a `FILE*`, and for `sssd`/`ldap` it does socket I/O or a `dlopen`. None of that
-    /// is async-signal-safe, and the fork happens from one thread of a multi-threaded process, so a
-    /// malloc-arena or NSS lock held by any other thread at fork time is held forever in the child.
-    /// `packages/tddy-daemon/src/spawner.rs:909` records this crate's own encounter with it — spawns
-    /// "often stuck in initgroups" against LDAP. Worse here: [`ForkBroker`] has exactly one thread, so
-    /// one wedged child would stop every later session spawn *and* every managed-service restart,
-    /// including the daemon's, while the supervisor stayed up and kept answering `ListServices`.
-    pub groups: Vec<libc::gid_t>,
-}
-
-/// Look up an OS user in the host's passwd database.
-pub fn resolve_target_user(name: &str) -> anyhow::Result<TargetUser> {
-    let c_name = CString::new(name)
-        .map_err(|_| anyhow::anyhow!("user name `{name}` contains a nul byte"))?;
-
-    let mut entry = std::mem::MaybeUninit::<libc::passwd>::uninit();
-    // Generous, because a user in a large directory service can have a long entry; getpwnam_r
-    // reports ERANGE rather than truncating, so a too-small buffer would just be a lookup failure.
-    let mut buffer = vec![0u8; 16 * 1024];
-    let mut found = std::ptr::null_mut();
-    // SAFETY: every pointer is to a live local, and `buffer.len()` describes `buffer` exactly.
-    let code = unsafe {
-        libc::getpwnam_r(
-            c_name.as_ptr(),
-            entry.as_mut_ptr(),
-            buffer.as_mut_ptr().cast(),
-            buffer.len(),
-            &mut found,
-        )
-    };
-    if code != 0 || found.is_null() {
-        anyhow::bail!("no OS user `{name}` on this host");
-    }
-    // SAFETY: `found` is non-null, so getpwnam_r filled `entry` and pointed `found` at it.
-    let entry = unsafe { &*found };
-    if entry.pw_dir.is_null() || entry.pw_name.is_null() {
-        anyhow::bail!("OS user `{name}` has an incomplete passwd entry");
-    }
-    // Before anything else is read out of the entry: what the account is *called* is not what it
-    // resolves to, and the ids are the part that decides how much privilege the child gets.
-    refuse_root_credentials(name, entry.pw_uid, entry.pw_gid)?;
-    // SAFETY: both pointers were just checked non-null and point into `buffer`, which is alive.
-    let (pw_name, home) = unsafe {
-        (
-            CStr::from_ptr(entry.pw_name).to_owned(),
-            PathBuf::from(CStr::from_ptr(entry.pw_dir).to_string_lossy().into_owned()),
-        )
-    };
-
-    let groups = resolve_supplementary_groups(&pw_name, entry.pw_gid)?;
-
-    Ok(TargetUser {
-        uid: entry.pw_uid,
-        gid: entry.pw_gid,
-        name: pw_name,
-        home,
-        groups,
-    })
-}
-
 /// A group id as `getgrouplist(3)` takes it: `gid_t` in glibc's header, `c_int` in Darwin's. Both
 /// are 32 bits wide, so this is the two platforms spelling one argument differently rather than
 /// passing different things.
@@ -154,104 +80,6 @@ pub fn resolve_target_user(name: &str) -> anyhow::Result<TargetUser> {
 type GroupListId = libc::gid_t;
 #[cfg(not(target_os = "linux"))]
 type GroupListId = libc::c_int;
-
-/// The group list `initgroups(3)` would install for an account: its primary group plus every group
-/// that lists it as a member.
-///
-/// Called before the fork, from a process that may safely allocate and talk to NSS. See
-/// [`TargetUser::groups`] for why the child may not.
-fn resolve_supplementary_groups(name: &CStr, gid: u32) -> anyhow::Result<Vec<libc::gid_t>> {
-    // Most accounts are in a handful of groups; the retry below covers the ones that are not.
-    let mut groups: Vec<libc::gid_t> = vec![0; 32];
-    loop {
-        let mut count = groups.len() as libc::c_int;
-        // SAFETY: `name` is a live C string, and `count` describes `groups` exactly. On overflow
-        // `getgrouplist` returns -1 and writes the required length into `count` without writing past
-        // the buffer it was given. The cast is between the two spellings of a 32-bit group id — see
-        // [`GroupListId`] — so the buffer it writes into is the size it was told.
-        let found = unsafe {
-            libc::getgrouplist(
-                name.as_ptr(),
-                gid as GroupListId,
-                groups.as_mut_ptr().cast::<GroupListId>(),
-                &mut count,
-            )
-        };
-        if found >= 0 {
-            // Truncated to `count`, not to the return value: glibc returns the number of groups it
-            // found, Darwin's libc returns 0 for "they fit", and both write that number into
-            // `ngroups`. Reading the return value would hand the child an empty group list on one of
-            // the two — the quiet downgrade the bail below exists to refuse, arrived at by another
-            // route.
-            groups.truncate(count as usize);
-            return Ok(groups);
-        }
-        if count as usize <= groups.len() {
-            // -1 without asking for more room is a failure to enumerate, not a small buffer. Refusing
-            // is the only safe answer: a short group list is a silently *different* set of
-            // permissions for the session, which is exactly the kind of quiet downgrade this
-            // boundary exists to prevent.
-            anyhow::bail!(
-                "could not resolve the groups of OS user `{}`",
-                name.to_string_lossy()
-            );
-        }
-        groups.resize(count as usize, 0);
-    }
-}
-
-/// Refuse credentials that resolve to root, whatever the account they belong to is called.
-///
-/// `SupervisorConfig::load` rejects the *name* `root`, and that is a different check: an account
-/// aliased to uid 0 under another name (`toor`, or any second passwd entry sharing the id) passes
-/// validation, and by the time the child runs there is nothing left to catch it —
-/// [`privilege_to_drop`] compares effective ids, sees the supervisor already *is* uid 0, and reports
-/// nothing to drop, so the child execs as real root. `Authorizer::from_service_uids` would then admit
-/// uid 0 as well, contradicting the promise in `authz.rs` that root is not special-cased in.
-///
-/// gid 0 is refused for the same reason as uid 0: membership of the root group is read access to
-/// most of what the supervisor exists to keep away from a session.
-pub fn refuse_root_credentials(account: &str, uid: u32, gid: u32) -> anyhow::Result<()> {
-    if uid == ROOT_UID {
-        anyhow::bail!(
-            "account `{account}` resolves to uid {ROOT_UID}; the supervisor is the only privileged \
-             process on the host"
-        );
-    }
-    if gid == ROOT_GID {
-        anyhow::bail!(
-            "account `{account}` resolves to gid {ROOT_GID}; the supervisor is the only privileged \
-             process on the host"
-        );
-    }
-    Ok(())
-}
-
-/// Look up a group in the host's group database, for a service that declares one explicitly
-/// instead of taking its account's primary group.
-pub fn resolve_group_gid(name: &str) -> anyhow::Result<u32> {
-    let c_name = CString::new(name)
-        .map_err(|_| anyhow::anyhow!("group name `{name}` contains a nul byte"))?;
-
-    let mut entry = std::mem::MaybeUninit::<libc::group>::uninit();
-    let mut buffer = vec![0u8; 16 * 1024];
-    let mut found = std::ptr::null_mut();
-    // SAFETY: every pointer is to a live local, and `buffer.len()` describes `buffer` exactly.
-    let code = unsafe {
-        libc::getgrnam_r(
-            c_name.as_ptr(),
-            entry.as_mut_ptr(),
-            buffer.as_mut_ptr().cast(),
-            buffer.len(),
-            &mut found,
-        )
-    };
-    if code != 0 || found.is_null() {
-        anyhow::bail!("no OS group `{name}` on this host");
-    }
-    // SAFETY: `found` is non-null, so getgrnam_r filled `entry` and pointed `found` at it.
-    Ok(unsafe { (*found).gr_gid })
-}
 
 /// One fork/exec the supervisor performs on someone's behalf.
 #[derive(Debug, Clone)]
@@ -281,7 +109,8 @@ pub enum ChildOutput {
     /// journal.
     Discard,
     /// stdout to `/dev/null`, stderr to a pipe the supervisor reads: a clone's progress and its own
-    /// explanation of a failure. The read end is handed back by [`ForkBroker::spawn_capturing_stderr`].
+    /// explanation of a failure. The read end is handed back by
+    /// [`Supervisor::spawn_session_capturing_stderr`](crate::supervisor::Supervisor::spawn_session_capturing_stderr).
     CaptureStderr,
 }
 
@@ -392,7 +221,7 @@ pub enum PreExecStep {
 
 /// The ordered steps a child performs between `fork` and `exec`. Pure — builds no OS state.
 ///
-/// This is the only place the order is decided. [`PreExecSteps`] executes exactly this sequence,
+/// This is the only place the order is decided. [`PreExecSteps`](fork_broker::PreExecSteps) executes exactly this sequence,
 /// so what a test asserts here is what a child does.
 pub fn pre_exec_plan(plan: &SpawnPlan) -> Vec<PreExecStep> {
     let mut steps = vec![
@@ -469,358 +298,6 @@ fn privilege_to_drop(target: &TargetUser) -> Option<(u32, u32)> {
         return None;
     }
     Some((target.uid, target.gid))
-}
-
-/// Owns the one thread in the process that is allowed to `fork`.
-///
-/// Two reasons it is a thread of its own rather than `tokio::task::spawn_blocking`:
-///
-/// * A runtime worker may be holding an allocator lock on behalf of another task, and that lock
-///   would stay held forever in the forked child.
-/// * `PR_SET_PDEATHSIG` is keyed to the *thread* that forked, not to the process. Tokio retires
-///   idle blocking threads after a few seconds, which would tell every child its parent had died
-///   while the supervisor was still running. A thread that lives as long as the supervisor makes
-///   the signal mean what it says.
-pub struct ForkBroker {
-    jobs: mpsc::UnboundedSender<Job>,
-}
-
-/// A child the fork thread started: its pid, and the read end of its stderr when the plan asked for
-/// it to be captured.
-type Spawned = (u32, Option<std::process::ChildStderr>);
-
-type Job = (
-    SpawnPlan,
-    Option<SocketHandover>,
-    StdioMode,
-    oneshot::Sender<std::io::Result<SpawnedChild>>,
-);
-
-/// How the supervisor holds a child's stdio.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StdioMode {
-    /// As [`SpawnPlan::output`] says; stdin is always null.
-    Plan,
-    /// All three streams piped to the supervisor, for a relayed spawn.
-    Piped,
-}
-
-/// A forked child's pid, the read end of its stderr when the plan asked for it to be captured, and,
-/// for a relayed spawn, the supervisor's ends of its stdio.
-pub struct SpawnedChild {
-    pub pid: u32,
-    pub stderr: Option<std::process::ChildStderr>,
-    pub stdio: Option<ChildStdio>,
-}
-
-/// The supervisor's ends of a relayed child's stdin, stdout and stderr.
-pub struct ChildStdio {
-    pub stdin: std::process::ChildStdin,
-    pub stdout: std::process::ChildStdout,
-    pub stderr: std::process::ChildStderr,
-}
-
-impl ForkBroker {
-    /// Start the fork thread. It runs until the last [`ForkBroker`] is dropped, which happens when
-    /// the supervisor is on its way out.
-    pub fn start() -> std::io::Result<ForkBroker> {
-        // Taken before the thread exists and held for as long as it does — see the function's docs.
-        let handover_slots = reserve_handover_slots()?;
-        let (jobs, mut queue) = mpsc::unbounded_channel::<Job>();
-        std::thread::Builder::new()
-            .name("tddy-supervisor-fork".to_string())
-            .spawn(move || {
-                let _handover_slots = handover_slots;
-                while let Some((plan, handover, stdio, reply)) = queue.blocking_recv() {
-                    let _ = reply.send(spawn_now(plan, handover, stdio));
-                }
-            })?;
-        Ok(ForkBroker { jobs })
-    }
-
-    /// Fork, drop privilege, and exec the plan on the fork thread. Returns the child's pid.
-    ///
-    /// `handover` is the listening socket the child should find at [`crate::socket::SD_LISTEN_FDS_START`]. It is
-    /// not part of the [`SpawnPlan`] because it is a live descriptor the supervisor owns, not a
-    /// decision about the child.
-    pub async fn spawn(
-        &self,
-        plan: SpawnPlan,
-        handover: Option<SocketHandover>,
-    ) -> std::io::Result<u32> {
-        Ok(self.submit(plan, handover, StdioMode::Plan).await?.pid)
-    }
-
-    /// [`Self::spawn`] for a plan whose output is [`ChildOutput::CaptureStderr`]: the child's pid and
-    /// the read end of its stderr. The read ends at end-of-file once the child and everything it
-    /// started has closed it.
-    pub async fn spawn_capturing_stderr(
-        &self,
-        plan: SpawnPlan,
-    ) -> std::io::Result<(u32, std::process::ChildStderr)> {
-        let (pid, stderr) = self.spawn_with_output(plan, None).await?;
-        let stderr = stderr.ok_or_else(|| {
-            std::io::Error::other("the plan did not ask for its stderr to be captured")
-        })?;
-        Ok((pid, stderr))
-    }
-
-    pub(crate) async fn spawn_with_output(
-        &self,
-        plan: SpawnPlan,
-        handover: Option<SocketHandover>,
-    ) -> std::io::Result<Spawned> {
-        let spawned = self.submit(plan, handover, StdioMode::Plan).await?;
-        Ok((spawned.pid, spawned.stderr))
-    }
-
-    /// [`Self::spawn`] with the child's stdin, stdout and stderr piped to the supervisor — for a
-    /// relayed spawn, which hands them to [`crate::relay`]. Never takes a listener handover.
-    pub async fn spawn_piped(&self, plan: SpawnPlan) -> std::io::Result<(u32, ChildStdio)> {
-        let spawned = self.submit(plan, None, StdioMode::Piped).await?;
-        match spawned.stdio {
-            Some(stdio) => Ok((spawned.pid, stdio)),
-            None => Err(std::io::Error::other(
-                "a piped spawn came back without its pipes",
-            )),
-        }
-    }
-
-    async fn submit(
-        &self,
-        plan: SpawnPlan,
-        handover: Option<SocketHandover>,
-        stdio: StdioMode,
-    ) -> std::io::Result<SpawnedChild> {
-        let (reply, answer) = oneshot::channel();
-        self.jobs
-            .send((plan, handover, stdio, reply))
-            .map_err(|_| std::io::Error::other("the fork thread has stopped"))?;
-        answer
-            .await
-            .map_err(|_| std::io::Error::other("the fork thread dropped the request"))?
-    }
-}
-
-fn spawn_now(
-    plan: SpawnPlan,
-    handover: Option<SocketHandover>,
-    stdio: StdioMode,
-) -> std::io::Result<SpawnedChild> {
-    let mut command = Command::new(&plan.program);
-    command.args(&plan.args);
-    match stdio {
-        StdioMode::Plan => {
-            command.stdin(Stdio::null());
-            match plan.output {
-                ChildOutput::Inherit => {}
-                ChildOutput::Discard => {
-                    command.stdout(Stdio::null());
-                    command.stderr(Stdio::null());
-                }
-                ChildOutput::CaptureStderr => {
-                    command.stdout(Stdio::null());
-                    command.stderr(Stdio::piped());
-                }
-            }
-        }
-        StdioMode::Piped => {
-            command.stdin(Stdio::piped());
-            command.stdout(Stdio::piped());
-            command.stderr(Stdio::piped());
-        }
-    }
-    // Deliberately no `Command::env` anywhere above: `Command` installs its own environment *after*
-    // the `pre_exec` closure has run, which would discard the one variable only the child can know —
-    // its own pid, in `LISTEN_PID`. The whole environment is built and installed by
-    // [`ChildEnvironment`] instead.
-    let mut steps = PreExecSteps::prepare(&plan, handover.as_ref())?;
-    // SAFETY: the closure runs between `fork` and `exec`. It performs only async-signal-safe
-    // syscalls on values captured before the fork — see this module's header for why that matters.
-    unsafe {
-        command.pre_exec(move || steps.run());
-    }
-
-    let mut child = command.spawn()?;
-    let pid = child.id();
-    let spawned = match stdio {
-        StdioMode::Plan => SpawnedChild {
-            pid,
-            stderr: child.stderr.take(),
-            stdio: None,
-        },
-        StdioMode::Piped => {
-            let stdio = match (child.stdin.take(), child.stdout.take(), child.stderr.take()) {
-                (Some(stdin), Some(stdout), Some(stderr)) => Some(ChildStdio {
-                    stdin,
-                    stdout,
-                    stderr,
-                }),
-                _ => None,
-            };
-            SpawnedChild {
-                pid,
-                stderr: None,
-                stdio,
-            }
-        }
-    };
-    Ok(spawned)
-}
-
-/// The pre-computed instructions the child executes between `fork` and `exec`.
-///
-/// Every field is already in its final, allocation-free form, so `run` never needs the allocator.
-struct PreExecSteps {
-    /// The supervisor's pid, so the child can tell whether it was orphaned before it managed to ask
-    /// the kernel to signal it.
-    supervisor_pid: libc::pid_t,
-    /// The environment the child execs with, ready but for its own pid.
-    environment: ChildEnvironment,
-    /// The listeners to place at [`crate::socket::SD_LISTEN_FDS_START`] and after, in order — none for a child that
-    /// is handed nothing. Owned by the supervisor, not by the plan.
-    handover: Vec<RawFd>,
-    /// [`pre_exec_plan`]'s output, compiled. Executed in this order and no other.
-    steps: Vec<CompiledStep>,
-}
-
-impl PreExecSteps {
-    fn prepare(
-        plan: &SpawnPlan,
-        handover: Option<&SocketHandover>,
-    ) -> std::io::Result<PreExecSteps> {
-        let steps = pre_exec_plan(plan)
-            .into_iter()
-            .map(|step| CompiledStep::compile(step, plan))
-            .collect::<std::io::Result<Vec<CompiledStep>>>()?;
-
-        Ok(PreExecSteps {
-            // SAFETY: reads this process's own pid.
-            supervisor_pid: unsafe { libc::getpid() },
-            environment: ChildEnvironment::build(plan, handover)?,
-            handover: handover.map(SocketHandover::raw_fds).unwrap_or_default(),
-            steps,
-        })
-    }
-
-    fn run(&mut self) -> std::io::Result<()> {
-        // The environment and the handed-over listener are not plan steps: each carries a runtime
-        // value a `SpawnPlan` cannot hold — the child's own pid, a live descriptor number — and
-        // neither depends on the credentials or the namespaces the plan establishes, so where they
-        // sit relative to it is not a security property. Everything that *is* ordered is in the plan.
-        //
-        // SAFETY: writes only into memory this struct owns, plus one pointer store into `environ`.
-        unsafe { self.environment.install() };
-        if !self.handover.is_empty() {
-            // SAFETY: every descriptor is open in this child, inherited across the fork.
-            unsafe { hand_over_listeners(&self.handover) }?;
-        }
-
-        for step in &self.steps {
-            step.execute(self.supervisor_pid)?;
-        }
-        Ok(())
-    }
-}
-
-/// One [`PreExecStep`] in the form the child can execute: no owned paths left to convert, no
-/// lookups left to perform, nothing that would need the allocator.
-#[derive(Debug)]
-enum CompiledStep {
-    SetParentDeathSignal,
-    LeadOwnProcessGroup,
-    JoinCgroupScope {
-        procs: CString,
-    },
-    DropPrivilege {
-        uid: libc::uid_t,
-        gid: libc::gid_t,
-        /// The account's groups, already enumerated — see [`TargetUser::groups`].
-        groups: Vec<libc::gid_t>,
-    },
-    ChangeDirectory {
-        path: CString,
-    },
-    EnterUserNamespace {
-        /// `0 <uid> 1\n` for `/proc/self/uid_map` — see [`single_id_map`].
-        uid_map: Box<[u8]>,
-        /// `0 <gid> 1\n` for `/proc/self/gid_map`.
-        gid_map: Box<[u8]>,
-    },
-    EnterMountNamespace,
-    EnterNetworkNamespace,
-    MakeRootMountPrivate,
-    BindMount {
-        /// The source path, which the child resolves to a descriptor of its own before binding it —
-        /// see [`bind_mount`].
-        source: CString,
-        target: CString,
-        readonly: bool,
-    },
-    BringLoopbackUp,
-}
-
-impl CompiledStep {
-    /// Translate one planned step into its executable form, before the fork.
-    fn compile(step: PreExecStep, plan: &SpawnPlan) -> std::io::Result<CompiledStep> {
-        match step {
-            PreExecStep::SetParentDeathSignal => Ok(CompiledStep::SetParentDeathSignal),
-            PreExecStep::LeadOwnProcessGroup => Ok(CompiledStep::LeadOwnProcessGroup),
-            PreExecStep::JoinCgroupScope { procs } => Ok(CompiledStep::JoinCgroupScope {
-                procs: path_to_c_string(&procs)?,
-            }),
-            PreExecStep::DropPrivilege { uid, gid } => Ok(CompiledStep::DropPrivilege {
-                uid,
-                gid,
-                groups: plan.target.groups.clone(),
-            }),
-            PreExecStep::ChangeDirectory { path } => Ok(CompiledStep::ChangeDirectory {
-                path: path_to_c_string(&path)?,
-            }),
-            PreExecStep::EnterUserNamespace => Ok(CompiledStep::EnterUserNamespace {
-                uid_map: single_id_map(plan.target.uid),
-                gid_map: single_id_map(plan.target.gid),
-            }),
-            PreExecStep::EnterMountNamespace => Ok(CompiledStep::EnterMountNamespace),
-            PreExecStep::EnterNetworkNamespace => Ok(CompiledStep::EnterNetworkNamespace),
-            PreExecStep::MakeRootMountPrivate => Ok(CompiledStep::MakeRootMountPrivate),
-            PreExecStep::BindMount {
-                source,
-                target,
-                readonly,
-            } => compile_bind_mount(&source, &target, readonly),
-            PreExecStep::BringLoopbackUp => Ok(CompiledStep::BringLoopbackUp),
-        }
-    }
-
-    fn execute(&self, supervisor_pid: libc::pid_t) -> std::io::Result<()> {
-        // SAFETY: every call below runs after `fork` and touches only this process's own
-        // credentials, working directory, process group, descriptors, or the namespaces it has just
-        // created for itself. Each `CString` and buffer is owned by this step and outlives the call.
-        unsafe {
-            match self {
-                CompiledStep::SetParentDeathSignal => set_parent_death_signal(supervisor_pid),
-                CompiledStep::LeadOwnProcessGroup => lead_own_process_group(),
-                CompiledStep::JoinCgroupScope { procs } => join_cgroup_scope(procs),
-                CompiledStep::DropPrivilege { uid, gid, groups } => {
-                    drop_privilege(*uid, *gid, groups)
-                }
-                CompiledStep::ChangeDirectory { path } => change_directory(path),
-                CompiledStep::EnterUserNamespace { uid_map, gid_map } => {
-                    enter_user_namespace(uid_map, gid_map)
-                }
-                CompiledStep::EnterMountNamespace => enter_mount_namespace(),
-                CompiledStep::EnterNetworkNamespace => enter_network_namespace(),
-                CompiledStep::MakeRootMountPrivate => make_root_mount_private(),
-                CompiledStep::BindMount {
-                    source,
-                    target,
-                    readonly,
-                } => bind_mount(source, target, *readonly),
-                CompiledStep::BringLoopbackUp => bring_loopback_up(),
-            }
-        }
-    }
 }
 
 /// The answer every step below gives on a host whose kernel does not have the facility it needs.
@@ -1432,196 +909,12 @@ unsafe fn bring_loopback_up() -> std::io::Result<()> {
     Err(only_on_linux("a network namespace's loopback"))
 }
 
-/// `LISTEN_PID=`, the one variable whose value the child has to fill in for itself.
-const LISTEN_PID_PREFIX: &[u8] = b"LISTEN_PID=";
-
-/// Room for every digit of a `pid_t`.
-const LISTEN_PID_DIGITS: usize = 10;
-
 /// The variable a managed service is told the supervisor's privileged socket in.
 ///
-/// Set by [`ChildEnvironment::build`] for a declared managed service, after the service's own
+/// Set by `ChildEnvironment::build` for a declared managed service, after the service's own
 /// `env:` overlay, so `supervisor.yaml` can neither set nor forge it; never set for a session or a
 /// sandbox. Its presence is how `tddy-daemon` knows it was started by a supervisor.
 pub const SUPERVISOR_SOCKET_ENV: &str = "TDDY_SUPERVISOR_SOCKET";
-
-/// Environment variables describing a socket activation. Removed from every child's environment
-/// before anything is added back, because they only ever describe one process.
-const ACTIVATION_VARIABLES: [&str; 3] = ["LISTEN_FDS", "LISTEN_PID", "LISTEN_FDNAMES"];
-
-/// The exact environment a child execs with, assembled before the fork.
-///
-/// The supervisor owns the whole environment rather than letting `Command` compose it, for one
-/// reason: `LISTEN_PID` must name the child, whose pid does not exist until after the fork, and
-/// `Command` installs its environment only *after* the `pre_exec` closure has run — so anything the
-/// closure did to the environment would be discarded. Building the array here and storing its
-/// pointer in `environ` from the child is the same mechanism `Command` itself uses, minus the
-/// ordering problem.
-struct ChildEnvironment {
-    /// Owns the bytes the pointers below refer to. Never read after construction: keeping those
-    /// buffers alive until the `exec` reads them is the whole point of the field.
-    #[allow(dead_code)]
-    variables: Vec<CString>,
-    /// `LISTEN_PID=…` with its digits still to be written. Present only for a child being handed a
-    /// listener.
-    listen_pid: Option<Box<[u8]>>,
-    /// A null-terminated `envp`, exactly what `execvp` expects.
-    pointers: Vec<*const libc::c_char>,
-}
-
-// SAFETY: every pointer in `pointers` refers to a buffer owned by the same struct, and nothing else
-// holds a pointer into either. Moving the struct between threads moves all of it.
-unsafe impl Send for ChildEnvironment {}
-unsafe impl Sync for ChildEnvironment {}
-
-impl ChildEnvironment {
-    fn build(
-        plan: &SpawnPlan,
-        handover: Option<&SocketHandover>,
-    ) -> std::io::Result<ChildEnvironment> {
-        let hands_over_listener = handover.is_some();
-        let mut values: BTreeMap<OsString, OsString> = match &plan.environment {
-            EnvironmentBase::Inherited { .. } => std::env::vars_os().collect(),
-            EnvironmentBase::Minimal => minimal_environment(),
-        };
-        for (key, value) in &plan.env {
-            values.insert(OsString::from(key), OsString::from(value));
-        }
-        // The child's own account, not the supervisor's, and after the request's own variables so a
-        // caller cannot describe the child as somebody it is not. A child that kept root's `HOME`
-        // would write its state where the account it runs as cannot read it, and one that kept root's
-        // `USER` would tell every tool it runs that it is root.
-        values.insert(
-            OsString::from("HOME"),
-            plan.target.home.clone().into_os_string(),
-        );
-        let account = OsString::from(plan.target.name.to_string_lossy().into_owned());
-        values.insert(OsString::from("USER"), account.clone());
-        values.insert(OsString::from("LOGNAME"), account);
-        // Last, and after the request's own variables: an activation describes exactly one process,
-        // so only the supervisor gets to say whether this child has one. Inherited from its own
-        // activation, or asked for by a caller, these would have a child adopt whatever its
-        // descriptor 3 happened to be as a listener.
-        for variable in ACTIVATION_VARIABLES {
-            values.remove(OsStr::new(variable));
-        }
-        // The same rule for the supervisor's own socket: last, and dropped for every child before
-        // anything is added back, so neither a caller nor an inherited value can tell a child where
-        // the supervisor listens. Only a declared managed service is told.
-        values.remove(OsStr::new(SUPERVISOR_SOCKET_ENV));
-        if let EnvironmentBase::Inherited { supervisor_socket } = &plan.environment {
-            values.insert(
-                OsString::from(SUPERVISOR_SOCKET_ENV),
-                supervisor_socket.clone().into_os_string(),
-            );
-        }
-        if let Some(handover) = handover {
-            values.insert(
-                OsString::from("LISTEN_FDS"),
-                OsString::from(handover.count().to_string()),
-            );
-            values.insert(
-                OsString::from("LISTEN_FDNAMES"),
-                OsString::from(handover.fd_names()),
-            );
-        }
-
-        let mut variables = Vec::with_capacity(values.len());
-        for (key, value) in &values {
-            variables.push(environment_entry(key, value)?);
-        }
-        let listen_pid = hands_over_listener.then(listen_pid_entry);
-
-        let mut pointers: Vec<*const libc::c_char> =
-            variables.iter().map(|entry| entry.as_ptr()).collect();
-        if let Some(entry) = &listen_pid {
-            pointers.push(entry.as_ptr().cast());
-        }
-        pointers.push(std::ptr::null());
-
-        Ok(ChildEnvironment {
-            variables,
-            listen_pid,
-            pointers,
-        })
-    }
-
-    /// Stamp this environment with the child's own pid and install it.
-    ///
-    /// # Safety
-    ///
-    /// Runs after `fork`. Writes into memory this struct owns and stores one pointer into `environ`;
-    /// it allocates nothing, takes no lock, and the array outlives the `exec` that reads it.
-    unsafe fn install(&mut self) {
-        if let Some(entry) = &mut self.listen_pid {
-            write_listen_pid(entry);
-        }
-        environ = self.pointers.as_ptr();
-    }
-}
-
-/// The base environment of a session: a `PATH` it did not choose, plus the locale.
-///
-/// `HOME`, `USER` and `LOGNAME` are not here — [`ChildEnvironment::build`] derives them from the
-/// resolved account after everything else, so no caller can set them.
-fn minimal_environment() -> BTreeMap<OsString, OsString> {
-    let mut values = BTreeMap::new();
-    values.insert(OsString::from("PATH"), OsString::from(SESSION_PATH));
-    for variable in FORWARDED_VARIABLES {
-        if let Some(value) = std::env::var_os(variable) {
-            values.insert(OsString::from(variable), value);
-        }
-    }
-    values
-}
-
-fn environment_entry(key: &OsStr, value: &OsStr) -> std::io::Result<CString> {
-    let mut entry = Vec::with_capacity(key.as_bytes().len() + 1 + value.as_bytes().len());
-    entry.extend_from_slice(key.as_bytes());
-    entry.push(b'=');
-    entry.extend_from_slice(value.as_bytes());
-    CString::new(entry).map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "environment variable {} contains a nul byte",
-                key.to_string_lossy()
-            ),
-        )
-    })
-}
-
-/// `LISTEN_PID=` with room for the digits the child writes into it.
-fn listen_pid_entry() -> Box<[u8]> {
-    let mut entry = vec![0u8; LISTEN_PID_PREFIX.len() + LISTEN_PID_DIGITS + 1];
-    entry[..LISTEN_PID_PREFIX.len()].copy_from_slice(LISTEN_PID_PREFIX);
-    entry.into_boxed_slice()
-}
-
-/// Write this process's own pid into a `LISTEN_PID=` entry, in place.
-///
-/// Formatted by hand into the buffer the entry already owns: between `fork` and `exec` there is no
-/// allocator to reach for, so `format!` is not available. The daemon checks this value against its
-/// own pid before adopting the descriptor, which is the contract being satisfied.
-fn write_listen_pid(entry: &mut [u8]) {
-    // SAFETY: `getpid` only reads this process's own pid.
-    let mut remaining = unsafe { libc::getpid() } as u32;
-    let mut digits = [0u8; LISTEN_PID_DIGITS];
-    let mut written = 0;
-    loop {
-        digits[written] = b'0' + (remaining % 10) as u8;
-        remaining /= 10;
-        written += 1;
-        if remaining == 0 {
-            break;
-        }
-    }
-    let start = LISTEN_PID_PREFIX.len();
-    for (offset, digit) in digits[..written].iter().rev().enumerate() {
-        entry[start + offset] = *digit;
-    }
-    entry[start + written] = 0;
-}
 
 /// Write our own pid into an `cgroup.procs`, allocation-free.
 ///
@@ -1677,6 +970,12 @@ pub(crate) fn path_to_c_string(path: &Path) -> std::io::Result<CString> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spawn_broker::accounts::refuse_root_credentials;
+    use crate::spawn_broker::accounts::resolve_supplementary_groups;
+    use crate::spawn_broker::accounts::resolve_target_user;
+    use crate::spawn_broker::accounts::TargetUser;
+    use crate::spawn_broker::child_environment::ChildEnvironment;
+    use crate::spawn_broker::fork_broker::CompiledStep;
 
     const TDDY_UID: u32 = 998;
     const TDDY_GID: u32 = 998;
