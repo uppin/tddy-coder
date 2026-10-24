@@ -70,7 +70,8 @@ own planned red tests"* — list those by name in the restructure changeset's `#
 known-red. Anything red that is not on that list is still a stop, and a red test that **stops
 failing** during the restructure has been broken, not fixed.
 
-Check off the first two TODO items in the changeset (`Create/update PRD documentation` and `Create changeset`).
+Check off the first two TODO items in the changeset (`Create/update PRD documentation` and `Create changeset`),
+and mirror the change into the PR description when the branch has an open PR (`/update-context-docs` § 8).
 
 ### Step 6: Create Failing Acceptance Tests
 

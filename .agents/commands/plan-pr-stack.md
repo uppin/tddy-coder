@@ -417,6 +417,9 @@ gh pr create --draft \
   is greenable now, the PRs it can be greened alongside, and the PR it blocks. A reader who has to
   open five documents to learn whether they can start is a reader who starts anyway and finds out the
   hard way.
+- **The body carries this node's `## Progress` section** — the changeset's `## TODO` and `## Scope`
+  checklists as 4b left them, between the `changeset-checklist` markers (`/update-context-docs` § 8).
+  Every later tick on this node is mirrored there.
 - Verify this PR:
   ```bash
   gh pr view --json number,url,isDraft,baseRefName,changedFiles \
@@ -573,7 +576,8 @@ framework-specific reference for the test type. Fluent-tests style is mandatory 
   confirmation all are failing. **Wait for approval before 6f** — this gate is per node; it does not
   carry over from the previous one.
 - Check off `Create failing acceptance tests`, `Run acceptance tests (verify they fail)` and
-  `USER REVIEW — acceptance tests` in this node's changeset once approved.
+  `USER REVIEW — acceptance tests` in this node's changeset once approved, and mirror them into this
+  node's PR description (`/update-context-docs` § 8) — the PR exists since 4d.
 
 **6f. Failing unit/integration tests.**
 
@@ -594,7 +598,8 @@ framework-specific reference for the test type. Fluent-tests style is mandatory 
   ```
 - Verify: the build passes on the published surface, tests fail correctly, **and each failure is
   attributable to this node's own missing implementation** rather than a parent's. Check off
-  `TDD Red — write failing unit/integration tests` in the changeset.
+  `TDD Red — write failing unit/integration tests` in the changeset, and mirror it into the PR
+  description (`/update-context-docs` § 8).
 - If this step needed more exploration, append it to this node's `{slug}-initial-discovery.md` as a
   new `## Exploration N` section.
 

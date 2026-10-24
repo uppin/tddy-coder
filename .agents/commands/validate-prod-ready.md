@@ -99,7 +99,7 @@ cargo test
 If a changeset document exists in `docs/dev/1-WIP/`, update it:
 - Add production readiness findings to the **Validation Results** section (last run date, status
   ✅ Ready / ⚠️ Gaps / ❌ Blockers, counts, blockers, items added to technical debt)
-- Tick the **Scope** checkbox for "Technical Debt" if all items are addressed
+- Tick the **Scope** checkbox for "Technical Debt" if all items are addressed, and mirror the change into the PR description when the branch has an open PR (`/update-context-docs` § 8)
 - Add issues to the **Refactoring Needed** section under `### From /validate-prod-ready`
 
 If blockers are found, ask the user whether to fix them now or acknowledge as known issues.

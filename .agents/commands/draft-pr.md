@@ -50,7 +50,8 @@ You should:
    documentation sync, **not** a validation gate — do not run tests, clippy or a build to satisfy it;
    just make the docs match reality (including honestly noting anything WIP or not-yet-passing, marked
    with a visible indicator). Stage the updated docs so the draft PR ships with current context
-   documentation.
+   documentation. When the PR already exists, mirror the changed boxes into its description
+   (`/update-context-docs` § 8); when step 5 creates it, put the `## Progress` section in its body.
 3. Commit with a clear Markdown summary of what changed and why, following the repo's commit
    conventions.
 4. Push to a remote branch (create one if needed — see branch selection below).

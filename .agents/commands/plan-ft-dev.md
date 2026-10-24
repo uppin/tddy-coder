@@ -289,13 +289,13 @@ Related feature docs:
 Next steps:
 1. Review changeset with user
 2. Use /ft-dev to implement changes
-3. Update changeset milestones as progress is made
+3. Update changeset milestones as progress is made, mirroring them into the PR description once a PR exists
 4. Use /wrap-context-docs when complete to update dev docs
 ```
 
 ## Track During Implementation
 
-The changeset is a **living document**: check off milestones and acceptance tests as they complete, add technical debt discovered along the way, and document decisions and trade-offs made.
+The changeset is a **living document**: check off milestones and acceptance tests as they complete, add technical debt discovered along the way, and document decisions and trade-offs made. Once the branch has an open PR, every checklist change is mirrored into its description (`/update-context-docs` § 8).
 
 ## Changeset Lifecycle
 

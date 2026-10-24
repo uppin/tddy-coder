@@ -199,7 +199,7 @@ Include all required sections:
   integration tests, `packages/{package}/src/{module}.rs` for unit tests in a `#[cfg(test)]` module)
 - What each test validates and why it matters
 
-**MANDATORY**: Include a `## TODO` checklist in the changeset document. The calling skill/command specifies which items to check off — at minimum the first two (PRD + changeset) are checked by this phase.
+**MANDATORY**: Include a `## TODO` checklist in the changeset document. The calling skill/command specifies which items to check off — at minimum the first two (PRD + changeset) are checked by this phase. Once the branch has an open PR, every change to this checklist is mirrored into the PR description (`/update-context-docs` § 8).
 
 ```markdown
 ## TODO

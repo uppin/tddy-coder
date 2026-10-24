@@ -97,7 +97,7 @@ The workflow has three main phases:
 **Actions**:
 - Update amendment documents with progress
 - Update changeset docs with implementation details
-- Check off completed TODOs
+- Check off completed TODOs, and mirror the change into the PR description when the branch has an open PR (`/update-context-docs` § 8)
 
 **Frequency**: During development as major milestones are completed
 

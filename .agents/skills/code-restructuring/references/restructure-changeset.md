@@ -63,7 +63,7 @@ None — behaviour-preserving restructure. No PRD.
 - [ ] **Apply**: dry run clean, plan applied, per-seam checks green
 - [ ] **Baseline**: build and full suite back to the recorded numbers
 - [ ] **Code Quality**: `yarn lint:fix` and `yarn type-check` clean
-- [ ] **Documentation**: Final Checklist executed at wrap
+- [ ] **Documentation**: Final Checklist derived — every doc statement the restructure falsifies listed
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 

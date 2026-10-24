@@ -248,7 +248,7 @@ cargo test
 ### 7. Update & Wrap Documentation
 
 **Run Command**: `/wrap-context-docs`
-- Update changeset progress
+- Update changeset progress, and mirror it into the PR description (`/update-context-docs` § 8)
 - Wrap documentation if all complete
 - **Clears the `docs/dev/todo/` entries this change resolved.** Before handing off, reconcile the
   changeset's `## Prerequisites` with what the branch actually did: an entry recorded ⚠ DURING or
