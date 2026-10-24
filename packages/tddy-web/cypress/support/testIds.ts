@@ -1077,6 +1077,26 @@ export const sessionsProjectHomeSetupUnknown = (projectId: string) =>
 export const sessionsDrawerProjectHomeError = (projectId: string) =>
   `sessions-drawer-project-home-error-${projectId}`;
 
+/** `[data-testid="sessions-drawer-project-home-replace-<projectId>"]` — the pinned **main** entry's
+ *  **Replace main** action, offered once main is set up; it opens the setup form in replace mode. */
+export const sessionsDrawerProjectHomeReplace = (projectId: string) =>
+  `sessions-drawer-project-home-replace-${projectId}`;
+
+/** `[data-testid="sessions-project-home-setup-replacing-<projectId>"]` — the replace-mode notice in
+ *  the setup pane: the current main is stopped and stays listed as an ordinary session. */
+export const sessionsProjectHomeSetupReplacing = (projectId: string) =>
+  `sessions-project-home-setup-replacing-${projectId}`;
+
+/** `[data-testid="create-session-type-reason-<sessionType>"]` — why a session type the form shows is
+ *  disabled (the main variant: every type but Claude CLI). */
+export const createSessionTypeReason = (sessionType: string) =>
+  `create-session-type-reason-${sessionType}`;
+
+/** `[data-testid="project-main-session-link-<projectId>"]` — on a Projects card: **Set up main** when
+ *  the project has no main, **Open main** when it has one. */
+export const projectMainSessionLink = (projectId: string) =>
+  `project-main-session-link-${projectId}`;
+
 /** `[data-testid="sessions-drawer-stack-<parentSessionId>"]` — collapsible <details> group */
 export const sessionsDrawerStackGroup = (parentSessionId: string) =>
   `sessions-drawer-stack-${parentSessionId}`;

@@ -126,6 +126,7 @@ pub fn a_project_with_a_session_on_its_worktree() -> AProjectWithASession {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .expect("the project is registered");

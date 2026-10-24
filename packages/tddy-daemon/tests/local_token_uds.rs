@@ -360,6 +360,7 @@ fn a_project_under(data_dir: &Path) -> AProject {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .expect("register the project");

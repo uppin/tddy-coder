@@ -52,6 +52,10 @@ pub struct ProjectData {
     /// means no home agent is configured; a row written by an older daemon reads that way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_agent: Option<String>,
+    /// The session this project runs as its main (project-home session) on this host. Absent means
+    /// main is not set up; a row written by an older daemon reads that way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_session_id: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -357,6 +361,16 @@ pub fn set_project_home_agent(
     write_projects(projects_dir, &projects)
 }
 
+/// Records (`Some`) or clears (`None`) the session `project_id` runs as its main. Errors when
+/// `project_id` is unknown.
+pub fn set_project_home_session(
+    _projects_dir: &Path,
+    _project_id: &str,
+    _home_session_id: Option<&str>,
+) -> anyhow::Result<()> {
+    todo!("set_project_home_session: record the project's main session id")
+}
+
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).
 ///
 /// Multi-host: returns [`ProjectData::host_repo_paths`]\[host_key] when non-empty, else
@@ -411,6 +425,7 @@ mod per_host_path_unit_tests {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         };
         write_projects(&projects_dir, &[project]).unwrap();
         let px = main_repo_path_for_host(&projects_dir, "p1", "unit-host-x")
@@ -644,6 +659,7 @@ mod project_integration_base_acceptance_tests {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         };
         let r = add_project(&projects_dir, project);
         assert!(
@@ -675,6 +691,7 @@ mod project_integration_base_acceptance_tests {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         };
         add_project(&projects_dir, project).expect(
             "a safe <remote>/<path> must be accepted at the boundary regardless of the remote name",
@@ -714,6 +731,7 @@ mod set_project_default_branch_unit_tests {
                 accounts: Vec::new(),
                 local_gh: false,
                 home_agent: None,
+                home_session_id: None,
             },
         )
         .expect("seed project");

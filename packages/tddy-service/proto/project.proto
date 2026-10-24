@@ -130,6 +130,9 @@ message ProjectEntry {
   // Agent id (a `CatalogService.ListAgents` row) the project's project-home session runs. Empty =
   // no home agent configured.
   string home_agent = 10;
+  // The session this project runs as its **main** (project-home session) on this host, recorded by
+  // `EnsureProjectHomeSession`. Empty = main is not set up.
+  string home_session_id = 11;
 }
 
 message SetProjectDefaultBranchRequest {

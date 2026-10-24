@@ -29,6 +29,7 @@ fn a_project(project_id: &str) -> ProjectData {
         accounts: Vec::new(),
         local_gh: false,
         home_agent: None,
+        home_session_id: None,
     }
 }
 

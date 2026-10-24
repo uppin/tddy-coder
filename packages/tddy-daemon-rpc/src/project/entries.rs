@@ -75,5 +75,7 @@ pub(super) fn project_entry_from(
             .collect(),
         local_gh: p.local_gh,
         home_agent: p.home_agent.clone().unwrap_or_default(),
+        // TODO: map `p.home_session_id` (2026-10-24-project-home-from-new-session-form).
+        ..Default::default()
     }
 }

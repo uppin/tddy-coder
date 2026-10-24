@@ -1,11 +1,14 @@
 /**
- * Acceptance: each project group in the drawer starts with a pinned **main** entry for the
- * project-home session. Clicking it ensures that session (`EnsureProjectHomeSession`) and selects
- * it; the home session is not repeated among the group's rows; a project with no home agent starts
- * nothing and shows no hint (its click opens the setup pane); the **Other** group has no pinned entry; a project with a home agent and no
- * session yet still gets its group, so the pinned entry is how its first session starts.
+ * Acceptance: each project group in the drawer starts with a pinned **main** entry for the session
+ * the project records as its main (`ProjectEntry.home_session_id`). Clicking a set-up main ensures
+ * it (`EnsureProjectHomeSession`, no start spec) and selects it; main is not repeated among the
+ * group's rows, and is labelled with its model; another session carrying the project-home role (a
+ * replaced main) is an ordinary row; a project with no main starts nothing and shows no hint (its
+ * click opens the setup pane); a set-up main offers **Replace main**; the **Other** group has no
+ * pinned entry.
  *
- * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry (`#project-home` 4/7).
+ * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
+ * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
  */
 
 import React from "react";
@@ -27,12 +30,13 @@ import {
   sessionsDrawerProjectGroup,
   sessionsDrawerProjectGroupHeader,
   sessionsDrawerProjectHome,
+  sessionsDrawerProjectHomeReplace,
 } from "../support/testIds";
 
 const ALPHA = { projectId: "proj-alpha", name: "alpha" };
 const BETA = { projectId: "proj-beta", name: "beta" };
-const ALPHA_HOME: ProjectHomeInfo = { projectId: ALPHA.projectId, mainBranchRef: "origin/main", homeAgentLabel: "Claude" };
-const BETA_NO_AGENT: ProjectHomeInfo = { projectId: BETA.projectId, mainBranchRef: "origin/master", homeAgentLabel: null };
+const ALPHA_HOME: ProjectHomeInfo = { projectId: ALPHA.projectId, mainBranchRef: "origin/main", homeSessionId: "home-alpha" };
+const BETA_NO_MAIN: ProjectHomeInfo = { projectId: BETA.projectId, mainBranchRef: "origin/master", homeSessionId: null };
 
 function aSession(sessionId: string, projectId: string, overrides: Partial<SessionEntry> = {}): SessionEntry {
   return create(SessionEntrySchema, {
@@ -49,16 +53,30 @@ function aSession(sessionId: string, projectId: string, overrides: Partial<Sessi
 const ALPHA_HOME_SESSION = aSession("home-alpha", ALPHA.projectId, {
   sessionRole: "project-home",
   managedCodebase: true,
+  model: "opus",
 });
 
-function aDrawer(sessions: SessionEntry[], onEnsure: (projectId: string) => Promise<void> = cy.stub().resolves()) {
+/** A main that was replaced: it keeps its project-home role, but the project no longer records it. */
+const ALPHA_REPLACED_MAIN = aSession("old-alpha", ALPHA.projectId, {
+  sessionRole: "project-home",
+  managedCodebase: true,
+  isActive: false,
+  status: "inactive",
+});
+
+function aDrawer(
+  sessions: SessionEntry[],
+  onEnsure: (projectId: string) => Promise<void> = cy.stub().resolves(),
+  onReplaceProjectHome: (projectId: string) => void = cy.stub(),
+) {
   cy.mount(
     <TooltipProvider delayDuration={0}>
       <SessionDrawer
         sessions={sessions}
         projects={[ALPHA, BETA]}
-        projectHomes={[ALPHA_HOME, BETA_NO_AGENT]}
+        projectHomes={[ALPHA_HOME, BETA_NO_MAIN]}
         onEnsureProjectHome={onEnsure}
+        onReplaceProjectHome={onReplaceProjectHome}
         selectedSessionId={null}
         onSelectSession={cy.stub()}
         isOpen
@@ -108,20 +126,20 @@ beforeEach(() => {
   cy.clearLocalStorage();
 });
 
-it("each project group shows a pinned main entry first", () => {
+it("each project group shows a pinned main entry first, labelled with main's model", () => {
   // When
-  aDrawer([aSession("a1", ALPHA.projectId), aSession("b1", BETA.projectId)]);
+  aDrawer([ALPHA_HOME_SESSION, aSession("a1", ALPHA.projectId), aSession("b1", BETA.projectId)]);
 
   // Then
   rowOrderIn(ALPHA.projectId).its(0).should("equal", sessionsDrawerProjectHome(ALPHA.projectId));
   byTestId(sessionsDrawerProjectHome(ALPHA.projectId))
     .should("contain", "main")
     .and("contain", "origin/main")
-    .and("contain", "Claude");
+    .and("contain", "opus");
   rowOrderIn(BETA.projectId).its(0).should("equal", sessionsDrawerProjectHome(BETA.projectId));
 });
 
-it("clicking the pinned entry ensures the home session and selects it", () => {
+it("clicking a set-up main ensures it without a start spec and selects it", () => {
   // Given a daemon whose ensure answers with the started home session
   const backend = anInMemoryRpcBackend().onUnary(SessionService.method.ensureProjectHomeSession, () => ({
     session: ALPHA_HOME_SESSION,
@@ -141,11 +159,12 @@ it("clicking the pinned entry ensures the home session and selects it", () => {
     const calls = b.callsTo(SessionService.method.ensureProjectHomeSession);
     expect(calls).to.have.length(1);
     expect(calls[0]).to.include({ projectId: ALPHA.projectId });
+    expect(calls[0].start).to.equal(undefined);
   });
   cy.get("@onSelected").should("have.been.calledOnceWith", ALPHA_HOME_SESSION.sessionId);
 });
 
-it("the home session is not repeated in its group's rows", () => {
+it("main is not repeated in its group's rows", () => {
   // When
   aDrawer([ALPHA_HOME_SESSION, aSession("a1", ALPHA.projectId)]);
 
@@ -156,7 +175,7 @@ it("the home session is not repeated in its group's rows", () => {
   ]);
 });
 
-it("a project without a home agent starts nothing and shows no hint", () => {
+it("a project with no main starts nothing and shows no hint", () => {
   // Given
   const onEnsure = cy.stub().as("onEnsure").resolves();
   aDrawer([aSession("b1", BETA.projectId)], onEnsure);
@@ -180,8 +199,8 @@ it("the Other group has no pinned entry", () => {
   byTestId(sessionsDrawerItem("orphan")).should("exist");
 });
 
-it("a project with a home agent and no session yet still shows its pinned entry", () => {
-  // When only beta (no home agent) has a session
+it("a project whose main is not listed yet still shows its pinned entry", () => {
+  // When only beta (no main) has a session
   aDrawer([aSession("b1", BETA.projectId)]);
 
   // Then alpha's group exists for its pinned entry alone, ordered before beta's
@@ -194,10 +213,44 @@ it("a project with a home agent and no session yet still shows its pinned entry"
   });
 });
 
-it("a project with no home agent and no session gets no group", () => {
+it("a project with no main and no session gets no group", () => {
   // When only alpha has a session
   aDrawer([aSession("a1", ALPHA.projectId)]);
 
   // Then
   byTestId(sessionsDrawerProjectGroup(BETA.projectId)).should("not.exist");
+});
+
+it("a session with the project-home role that is not the recorded main is an ordinary row", () => {
+  // When
+  aDrawer([ALPHA_HOME_SESSION, ALPHA_REPLACED_MAIN]);
+
+  // Then
+  rowOrderIn(ALPHA.projectId).should("deep.equal", [
+    sessionsDrawerProjectHome(ALPHA.projectId),
+    sessionsDrawerItem(ALPHA_REPLACED_MAIN.sessionId),
+  ]);
+});
+
+it("a set-up main offers Replace main; a project with no main does not", () => {
+  // When
+  aDrawer([ALPHA_HOME_SESSION, aSession("b1", BETA.projectId)]);
+
+  // Then
+  byTestId(sessionsDrawerProjectHomeReplace(ALPHA.projectId)).should("exist");
+  byTestId(sessionsDrawerProjectHomeReplace(BETA.projectId)).should("not.exist");
+});
+
+it("Replace main asks to set that project's main up again, and starts nothing", () => {
+  // Given
+  const onEnsure = cy.stub().as("onEnsure").resolves();
+  const onReplace = cy.stub().as("onReplace");
+  aDrawer([ALPHA_HOME_SESSION], onEnsure, onReplace);
+
+  // When
+  byTestId(sessionsDrawerProjectHomeReplace(ALPHA.projectId)).click();
+
+  // Then
+  cy.get("@onReplace").should("have.been.calledOnceWith", ALPHA.projectId);
+  cy.get("@onEnsure").should("not.have.been.called");
 });

@@ -20,6 +20,7 @@ fn a_project(name: &str, repo_path: &str) -> ProjectData {
         accounts: Vec::new(),
         local_gh: false,
         home_agent: None,
+        home_session_id: None,
     }
 }
 

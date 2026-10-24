@@ -235,3 +235,13 @@ export function buildStartSessionRequest(
     sshConfigHost,
   };
 }
+
+/**
+ * The start spec the main variant of the form sends in `EnsureProjectHomeSession.start`: the
+ * claude-cli request without the fields the daemon owns for main — project, branch, placement and
+ * stack — so the spec says only what the operator chose.
+ */
+export function buildProjectHomeStartSpec(_form: CreateSessionFormValues): StartSessionRequestInit {
+  // TODO: implement (docs/dev/1-WIP/2026-10-24-project-home-from-new-session-form.md).
+  throw new Error("buildProjectHomeStartSpec is not implemented");
+}

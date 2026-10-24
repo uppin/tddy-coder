@@ -107,6 +107,7 @@ where
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .map_err(|e| Status::internal(format!("register provisioned project: {e}")))?;
@@ -188,6 +189,7 @@ where
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .map_err(|e| Status::internal(format!("register provisioned project: {e}")))?;
@@ -241,6 +243,7 @@ mod tests {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         }
     }
 

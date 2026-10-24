@@ -117,6 +117,7 @@ pub(super) async fn a_sandboxed_workspace_session(sandbox: bool) -> SeededWorksp
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         }],
     )
     .expect("register project");

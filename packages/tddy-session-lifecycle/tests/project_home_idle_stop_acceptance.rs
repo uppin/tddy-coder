@@ -26,8 +26,6 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 const VALID_TOKEN: &str = "valid-token";
 const PROJECT_ID: &str = "proj-home";
-const HOME_AGENT: &str = "home-claude";
-const CURSOR_AGENT: &str = "home-cursor";
 const TEN_MINUTES: u64 = 600;
 
 fn current_os_user() -> String {
@@ -142,19 +140,38 @@ struct World {
 }
 
 impl World {
+    /// Ensure main without a start spec: reach (or resume) the recorded session.
     async fn ensure(&self) -> Result<EnsureProjectHomeSessionResponse, tddy_rpc::Status> {
+        self.ensure_with(None).await
+    }
+
+    /// Set main up as a Claude CLI session, as the setup form does.
+    async fn set_up_main(&self) -> Result<EnsureProjectHomeSessionResponse, tddy_rpc::Status> {
+        self.ensure_with(Some(StartSessionRequest {
+            session_type: "claude-cli".to_string(),
+            model: "opus".to_string(),
+            ..Default::default()
+        }))
+        .await
+    }
+
+    async fn ensure_with(
+        &self,
+        start: Option<StartSessionRequest>,
+    ) -> Result<EnsureProjectHomeSessionResponse, tddy_rpc::Status> {
         self.service
             .ensure_project_home_session(Request::direct(EnsureProjectHomeSessionRequest {
                 session_token: VALID_TOKEN.to_string(),
                 project_id: PROJECT_ID.to_string(),
                 daemon_instance_id: String::new(),
+                start,
             }))
             .await
             .map(|r| r.into_inner())
     }
 }
 
-fn a_daemon_with_a_project(home_agent: Option<&str>, idle_stop_secs: u64) -> World {
+fn a_daemon_with_a_project(idle_stop_secs: u64) -> World {
     let repo = tempfile::tempdir().unwrap();
     git(repo.path(), &["init", "-q", "-b", "main"]);
     git(
@@ -170,27 +187,12 @@ fn a_daemon_with_a_project(home_agent: Option<&str>, idle_stop_secs: u64) -> Wor
     let data = tempfile::tempdir().unwrap();
     let projects = data.path().join("projects");
     std::fs::create_dir_all(&projects).unwrap();
-    let home_agent_line = home_agent
-        .map(|a| format!("    home_agent: {a}\n"))
-        .unwrap_or_default();
     std::fs::write(
         projects.join("projects.yaml"),
         format!(
-            "projects:\n  - project_id: {PROJECT_ID}\n    name: home\n    git_url: \"\"\n    main_repo_path: {}\n    main_branch_ref: origin/main\n{home_agent_line}",
+            "projects:\n  - project_id: {PROJECT_ID}\n    name: home\n    git_url: \"\"\n    main_repo_path: {}\n    main_branch_ref: origin/main\n",
             repo.path().display()
         ),
-    )
-    .unwrap();
-    let agents = data.path().join("agents");
-    std::fs::create_dir_all(&agents).unwrap();
-    std::fs::write(
-        agents.join("home-claude.yaml"),
-        format!("name: {HOME_AGENT}\nharness: claude-cli\nmodel: claude-opus-4-8\n"),
-    )
-    .unwrap();
-    std::fs::write(
-        agents.join("home-cursor.yaml"),
-        format!("name: {CURSOR_AGENT}\nharness: cursor-cli\nmodel: auto\n"),
     )
     .unwrap();
 
@@ -265,11 +267,11 @@ const ELEVEN_MINUTES: Duration = Duration::from_secs(11 * 60);
 #[tokio::test]
 async fn an_idle_project_home_session_is_stopped_after_the_configured_time() {
     // Given a home session waiting for input for eleven minutes, with a ten-minute limit
-    let world = a_daemon_with_a_project(Some(HOME_AGENT), TEN_MINUTES);
+    let world = a_daemon_with_a_project(TEN_MINUTES);
     let home = world
-        .ensure()
+        .set_up_main()
         .await
-        .expect("ensure")
+        .expect("set up main")
         .session
         .unwrap()
         .session_id;
@@ -287,11 +289,11 @@ async fn an_idle_project_home_session_is_stopped_after_the_configured_time() {
 #[tokio::test]
 async fn a_project_home_session_mid_turn_is_not_stopped() {
     // Given a home session whose turn has been running for eleven minutes
-    let world = a_daemon_with_a_project(Some(HOME_AGENT), TEN_MINUTES);
+    let world = a_daemon_with_a_project(TEN_MINUTES);
     let home = world
-        .ensure()
+        .set_up_main()
         .await
-        .expect("ensure")
+        .expect("set up main")
         .session
         .unwrap()
         .session_id;
@@ -309,11 +311,11 @@ async fn a_project_home_session_mid_turn_is_not_stopped() {
 #[tokio::test]
 async fn ensuring_an_auto_stopped_home_session_resumes_the_same_conversation() {
     // Given a home session the reaper stopped
-    let world = a_daemon_with_a_project(Some(HOME_AGENT), TEN_MINUTES);
+    let world = a_daemon_with_a_project(TEN_MINUTES);
     let home = world
-        .ensure()
+        .set_up_main()
         .await
-        .expect("ensure")
+        .expect("set up main")
         .session
         .unwrap()
         .session_id;
@@ -342,7 +344,7 @@ async fn ensuring_an_auto_stopped_home_session_resumes_the_same_conversation() {
 #[tokio::test]
 async fn an_ordinary_session_is_never_auto_stopped() {
     // Given an ordinary claude-cli session idle for eleven minutes
-    let world = a_daemon_with_a_project(Some(HOME_AGENT), TEN_MINUTES);
+    let world = a_daemon_with_a_project(TEN_MINUTES);
     let ordinary = world.an_ordinary_claude_session().await;
     world.reported(&ordinary, "WaitingForInput");
     let later = ELEVEN_MINUTES;
@@ -358,11 +360,11 @@ async fn an_ordinary_session_is_never_auto_stopped() {
 #[tokio::test]
 async fn idle_stop_secs_zero_disables_auto_stop() {
     // Given auto-stop switched off and a home session idle for a day
-    let world = a_daemon_with_a_project(Some(HOME_AGENT), 0);
+    let world = a_daemon_with_a_project(0);
     let home = world
-        .ensure()
+        .set_up_main()
         .await
-        .expect("ensure")
+        .expect("set up main")
         .session
         .unwrap()
         .session_id;

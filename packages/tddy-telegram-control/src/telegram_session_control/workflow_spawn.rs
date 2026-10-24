@@ -501,6 +501,7 @@ mod local_gh_tests {
             }],
             local_gh: true,
             home_agent: None,
+            home_session_id: None,
         }
     }
 

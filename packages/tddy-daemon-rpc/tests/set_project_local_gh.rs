@@ -116,6 +116,7 @@ fn a_daemon_with_a_project_row(
             accounts,
             local_gh,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .expect("seed project");

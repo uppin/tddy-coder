@@ -605,6 +605,7 @@ fn a_project_at(repo: &Path) -> ProjectData {
         accounts: Vec::new(),
         local_gh: false,
         home_agent: None,
+        home_session_id: None,
     }
 }
 

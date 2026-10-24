@@ -179,6 +179,7 @@ async fn add_project_to_host_is_idempotent_when_the_project_id_already_exists_on
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .expect("seed existing project");

@@ -135,6 +135,7 @@ fn a_project_with_a_secondary_worktree() -> Fixture {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .unwrap();

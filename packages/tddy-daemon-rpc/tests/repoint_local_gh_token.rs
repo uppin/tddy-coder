@@ -128,6 +128,7 @@ fn a_repoint_of_a_started_node_in_a_project(local_gh: bool) -> World {
             accounts: Vec::new(),
             local_gh,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .unwrap();

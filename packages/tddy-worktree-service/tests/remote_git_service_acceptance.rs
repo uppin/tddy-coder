@@ -54,6 +54,7 @@ fn a_project(name: &str, project_id: &str, main_repo_path: &std::path::Path) -> 
         accounts: Vec::new(),
         local_gh: false,
         home_agent: None,
+        home_session_id: None,
     }
 }
 

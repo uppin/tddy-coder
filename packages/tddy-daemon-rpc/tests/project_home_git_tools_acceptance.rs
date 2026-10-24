@@ -65,6 +65,7 @@ fn a_project(project_id: &str, repo: &Path) -> ProjectData {
         accounts: Vec::new(),
         local_gh: false,
         home_agent: None,
+        home_session_id: None,
     }
 }
 

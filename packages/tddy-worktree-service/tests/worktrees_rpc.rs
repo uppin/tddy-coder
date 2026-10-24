@@ -173,6 +173,7 @@ async fn list_worktrees_refresh_returns_git_worktree_rows() {
         accounts: Vec::new(),
         local_gh: false,
         home_agent: None,
+        home_session_id: None,
     };
 
     project_storage::add_project(&projects_dir, project).unwrap();
@@ -280,6 +281,7 @@ async fn clean_worktree_primary_is_failed_precondition() {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .unwrap();
@@ -353,6 +355,7 @@ async fn clean_worktree_clears_secondary_and_invalidates_cache() {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .unwrap();
@@ -465,6 +468,7 @@ async fn restore_session_worktree_recreates_worktree_from_changeset() {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         },
     )
     .unwrap();

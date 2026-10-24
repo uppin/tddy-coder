@@ -362,12 +362,18 @@ message EnsureProjectHomeSessionRequest {
   string project_id = 2;
   // Host whose home session this is. Empty or matching the local instance = local.
   string daemon_instance_id = 3;
+  // Absent: reach the project's recorded home session (NOT_FOUND when none is recorded, or the
+  // recorded one no longer exists — it is then cleared). Present: set main up (or replace it) from
+  // this New-session spec. Only `claude-cli` can be held read-only; sandbox placements and a
+  // caller-set `session_role` are refused. The daemon owns project, worktree, branch, managed mode
+  // and role.
+  StartSessionRequest start = 4;
 }
 
 message EnsureProjectHomeSessionResponse {
   SessionEntry session = 1;
-  // "started" (created now), "resumed" (was stopped; worktree fast-forwarded, same
-  // conversation) or "running" (returned unchanged).
+  // "started" (created now), "replaced" (created now, the previous main stopped), "resumed" (was
+  // stopped; worktree fast-forwarded, same conversation) or "running" (returned unchanged).
   string outcome = 2;
 }
 

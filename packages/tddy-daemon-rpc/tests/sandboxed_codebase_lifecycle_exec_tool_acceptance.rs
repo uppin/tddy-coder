@@ -140,6 +140,7 @@ fn register_project(sessions_base: &Path, repo_path: &Path) {
             accounts: Vec::new(),
             local_gh: false,
             home_agent: None,
+            home_session_id: None,
         }],
     )
     .expect("register project");

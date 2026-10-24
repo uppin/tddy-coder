@@ -3,6 +3,8 @@
  * entry, and which sessions a group still lists as rows.
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry (`#project-home` 4/7).
+ * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md — main is the session
+ * the project records (`homeSessionId`), not whichever session carries the role.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -29,22 +31,22 @@ const OTHER: ProjectSessionGroup = { projectId: null, label: "Other", sessions: 
 const keys = (groups: ProjectSessionGroup[]) => groups.map((g) => g.projectId);
 
 describe("withProjectHomeGroups", () => {
-  it("adds an empty group for a project with a home agent and no session, in name order, before Other", () => {
+  it("adds an empty group for a project whose main is not listed, in name order, before Other", () => {
     const groups = withProjectHomeGroups(
       [aGroup(ALPHA, "a1"), aGroup(GAMMA, "g1"), OTHER],
       [ALPHA, BETA, GAMMA],
-      [{ projectId: BETA.projectId, homeAgentLabel: "Claude" }],
+      [{ projectId: BETA.projectId, homeSessionId: "home-b" }],
     );
 
     expect(keys(groups)).toEqual([ALPHA.projectId, BETA.projectId, GAMMA.projectId, null]);
     expect(groups[1].sessions).toEqual([]);
   });
 
-  it("adds nothing for a project without a home agent", () => {
+  it("adds nothing for a project without a main", () => {
     const input = [aGroup(ALPHA, "a1")];
 
     const groups = withProjectHomeGroups(input, [ALPHA, BETA], [
-      { projectId: BETA.projectId, homeAgentLabel: null },
+      { projectId: BETA.projectId, homeSessionId: null },
     ]);
 
     expect(groups).toBe(input);
@@ -52,7 +54,7 @@ describe("withProjectHomeGroups", () => {
 
   it("does not duplicate a project that already has a group", () => {
     const groups = withProjectHomeGroups([aGroup(ALPHA, "a1")], [ALPHA], [
-      { projectId: ALPHA.projectId, homeAgentLabel: "Claude" },
+      { projectId: ALPHA.projectId, homeSessionId: "h" },
     ]);
 
     expect(keys(groups)).toEqual([ALPHA.projectId]);
@@ -60,9 +62,9 @@ describe("withProjectHomeGroups", () => {
 });
 
 describe("projectHomeSlot", () => {
-  const HOME = { projectId: ALPHA.projectId, mainBranchRef: "origin/main", homeAgentLabel: "Claude" };
+  const HOME = { projectId: ALPHA.projectId, mainBranchRef: "origin/main", homeSessionId: "h" };
 
-  it("lifts the project-home session out of the rows", () => {
+  it("lifts the recorded main out of the rows", () => {
     const home = aSession("h", ALPHA.projectId, PROJECT_HOME_ROLE);
     const group = { ...aGroup(ALPHA, "a1"), sessions: [home, aSession("a1", ALPHA.projectId)] };
 
@@ -71,6 +73,17 @@ describe("projectHomeSlot", () => {
     expect(slot.home).toEqual(HOME);
     expect(slot.homeSession?.sessionId).toBe("h");
     expect(slot.rows.map((s) => s.sessionId)).toEqual(["a1"]);
+  });
+
+  it("keeps a project-home session that is not the recorded main as a row", () => {
+    const replaced = aSession("old", ALPHA.projectId, PROJECT_HOME_ROLE);
+    const main = aSession("h", ALPHA.projectId, PROJECT_HOME_ROLE);
+    const group = { ...aGroup(ALPHA), sessions: [replaced, main] };
+
+    const slot = projectHomeSlot(group, [HOME]);
+
+    expect(slot.homeSession?.sessionId).toBe("h");
+    expect(slot.rows.map((s) => s.sessionId)).toEqual(["old"]);
   });
 
   it("leaves the Other group with every session as a row and no pinned entry", () => {
