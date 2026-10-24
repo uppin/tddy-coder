@@ -1,39 +1,54 @@
 # Session start and indexing progress
 
-What the web shows while a session starts and while its code index loads: the **start phase** under the
+What the web shows while a session starts and while its code index loads: the **start progress** list under the
 create form, and the **indexing indicator** in the session header. The feature is described in
 [Session Drawer § Start progress](../../../docs/ft/web/session-drawer.md#start-progress) and
 [Worktree Code Pane § Indexing indicator](../../../docs/ft/web/session-code-pane.md#indexing-indicator).
 
-## Start phase
+## Start progress
 
 `CreateSessionPane` starts every session with `startSessionStreamed` from `useSessionAttachments`,
 which consumes `SessionService.StreamStartSession` — with or without attachments — and ends with the
 one `result` event that creates the session. The unary `startSession` is not used by the form.
 
-`useSessionAttachments` exposes `startPhase: StartPhase_Step | null` beside the per-attachment
-`progress`. It follows the stream's `phase` events: a `BEGIN` sets the step, an `END` clears it when it
-names the step currently set, and the phase is cleared when the stream is over however it ended. A step
-that fails sends no `END` (the stream errors instead), so the clearing in `finally` is what removes its
-text. `null` also covers a start that is not being streamed.
+`useSessionAttachments` exposes `startProgress: StartProgressState` beside the per-attachment
+`progress`. `startProgress.ts` folds each non-attachment, non-result event into it
+(`startProgressAfter`):
 
-`CreateSessionStartPhase` renders the line under the form while Create is disabled
-(`data-testid="create-session-start-phase"`), and nothing between steps:
-
-| Step | Text |
+| Event | Effect |
 |---|---|
-| `WORKTREE` | Creating worktree… |
-| `SEMANTIC_INDEX` | Indexing (semantic)… |
-| `AGENT` | Starting agent… |
+| `phase` `BEGIN` | the step is appended in report order, `active` (a repeated `BEGIN` moves it to the end) |
+| `phase` `END` | the step becomes `done`; ending `CLONE` also drops the clone progress |
+| `cloneProgress` | replaces `clone` (stage, percent, bytes received, bytes per second) |
+| `keepAlive`, anything else | nothing |
 
-The wire contract is [`StartPhase`](../../tddy-service/docs/start-session-phases.md). Starts that report
-no phases (sandboxed, tool and split starts) show no line.
+The state resets when a start begins. A stream that errors (or ends without a result) marks the step in
+progress `failed` (`startProgressFailed`) and the list stays under the error; a start that creates the
+session clears it. Steps appear **as the host reports them** — whether a start clones or indexes is the
+host's decision — so there is no fixed list.
+
+`CreateSessionStartProgress` renders the list under the form while Create is disabled
+(`data-testid="create-session-start-progress"`), and nothing until the first step is reported. The
+heading (`…-heading`) reads "Creating session on <host label>": the codebase host on a split start, the
+session's host otherwise. Each row is `create-session-start-step-<name>` with `data-state` `active`,
+`done` or `failed`:
+
+| Step | Row |
+|---|---|
+| `CLONE` | Cloning repository |
+| `WORKTREE` | Worktree |
+| `SEMANTIC_INDEX` | Semantic index |
+| `AGENT` | Agent |
+
+While the clone is active its row carries `create-session-clone-progress`: git's stage and percent, a
+`role="progressbar"` bar, and `bytes · throughput/s` through `formatAttachmentBytes` (binary units).
+
+The wire contract is [`StartPhase`](../../tddy-service/docs/start-session-phases.md).
 
 ## Keep-alive events
 
-The stream can also carry `keepAlive` events while the host provisions the project. The loop in
-`startSessionStreamed` is an `if` / `else if` chain over `attachmentProgress`, `result` and `phase` with no
-`else`, so a `keepAlive` is ignored: it is not mistaken for the result and sets no phase.
+The stream can also carry `keepAlive` events while the host provisions the project. `startProgressAfter`
+ignores them: a `keepAlive` is not mistaken for the result and changes no step.
 
 ## Indexing indicator
 
@@ -111,9 +126,10 @@ While loading with more than one running phase the strip adds `+<N> more`
 
 | Spec | Pins |
 |---|---|
-| `cypress/component/SessionStartAndIndexingProgress.cy.tsx` (2) | the create pane shows the current start phase; the header shows indexing until ready |
+| `cypress/component/SessionStartAndIndexingProgress.cy.tsx` (2) | the create pane lists the start's steps; the header shows indexing until ready |
 | `cypress/component/SessionIndexingIndicatorResubscribe.cy.tsx` (4) | the header shows a load that starts after its first watch ended empty; drops what it said once its watch ends mid-load; watches again after 1, 2 and 4 s; a refused watch is not repeated and names why |
 | `cypress/component/CodeIndexStatusStrip.cy.tsx` | the strip's own states: the failure's reason; an index let go while the pane is open reads as starting; reconnecting with why; a worktree the host serves no language of has no code index, and why. Live progress, phases and `+N more` are pinned by `WorktreeCodePaneCodeSession.cy.tsx` ([code navigation](code-navigation.md#testing)) |
+| `cypress/component/CreateSessionStartProgress.cy.tsx` (5) | the step list in report order and ticked as each ends; the clone row's stage, percent, bytes and throughput updating in place; no clone row for a start that does not clone; the step a failed start stopped at, with the error; the host named in the heading |
 | `cypress/component/CreateSessionAttachmentProgress.cy.tsx` | per-attachment progress, and a start with nothing attached going through the stream |
 | `cypress/component/CreateSessionPane.cy.tsx` (29) | the form, started through the streamed start |
 | `cypress/component/ServerStreamFallback.cy.tsx` (7) | the testkit fallback below |

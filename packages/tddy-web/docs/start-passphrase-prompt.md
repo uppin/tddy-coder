@@ -18,7 +18,7 @@ mounted without the auth context in many specs, so a hook that read the context 
 
 ## When it listens, and to whom
 
-`CreateSessionPane` mounts `<StartPassphrasePrompt>` beside the start-phase line with `active={submitting}`.
+`CreateSessionPane` mounts `<StartPassphrasePrompt>` beside the start progress list with `active={submitting}`.
 The feed is read only while `active`, so a form nobody has submitted opens no stream, and an `active` that
 turns false closes the dialog and forgets the question.
 

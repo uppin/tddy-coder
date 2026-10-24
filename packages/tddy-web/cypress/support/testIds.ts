@@ -316,7 +316,7 @@ export const TEST_IDS = {
   // Sessions drawer — create session
   sessionsDrawerNewBtn: "sessions-drawer-new-btn",
   createSessionPane: "create-session-pane",
-  /** The step of the start the host is in (`StartPhase`), shown while a creation is streaming. */
+  /** The start's step list (`StartPhase`, `CloneProgress`), shown while a creation is streaming. */
   createSessionStartProgress: "create-session-start-progress",
   createSessionStartProgressHeading: "create-session-start-progress-heading",
   createSessionCloneProgress: "create-session-clone-progress",

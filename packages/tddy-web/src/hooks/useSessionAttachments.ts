@@ -231,7 +231,7 @@ export function useSessionAttachments({
   );
   const [pickRefusal, setPickRefusal] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, AttachmentProgress>>({});
-  // The step of the start the host reported beginning and has not yet ended.
+  // The steps the streamed start has reported, with the clone's progress.
   const [startProgress, setStartProgress] = useState<StartProgressState>(NO_START_PROGRESS);
   const [hostDocPickerOpen, setHostDocPickerOpen] = useState(false);
 
