@@ -20,6 +20,8 @@ export function bubbleClass(from: ChatMessage["from"]): string {
       return "self-center text-xs text-muted-foreground italic font-medium";
     case "tool":
       return "self-start rounded-md border border-border bg-muted/50 px-3 py-2 font-mono text-xs";
+    case "subagent":
+      return "self-start rounded-md border border-primary/40 bg-muted/50 px-3 py-2 text-xs font-medium";
     default:
       return "self-center text-xs text-muted-foreground italic";
   }

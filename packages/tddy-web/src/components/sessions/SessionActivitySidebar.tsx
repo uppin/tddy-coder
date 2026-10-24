@@ -33,6 +33,8 @@ export interface SessionActivitySidebarProps {
   mobile: boolean;
   onClose: () => void;
   onToolClick: (message: ChatMessage) => void;
+  /** A subagent conversation's bubble was clicked: the host opens that conversation. */
+  onSubagentClick: (message: ChatMessage) => void;
 }
 
 /**
@@ -46,6 +48,7 @@ export function SessionActivitySidebar({
   mobile,
   onClose,
   onToolClick,
+  onSubagentClick,
 }: SessionActivitySidebarProps) {
   const { atOldest, loadingOlder, loadOlder } = chat;
   return (
@@ -90,6 +93,7 @@ export function SessionActivitySidebar({
         readOnly
         chat={chat}
         onToolClick={onToolClick}
+        onSubagentClick={onSubagentClick}
         onLoadOlder={loadOlder}
         hasOlder={!atOldest}
         loadingOlder={loadingOlder}
