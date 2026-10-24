@@ -117,9 +117,11 @@ pub enum TerminalKind {
 impl TerminalKind {
     /// The kind a request names; surrounding whitespace is ignored.
     #[must_use]
-    pub fn from_request(_kind: &str) -> TerminalKind {
-        // TODO(agent-terminal-tabs): implement
-        todo!("TerminalKind::from_request")
+    pub fn from_request(kind: &str) -> TerminalKind {
+        match kind.trim() {
+            "" | "bash" => TerminalKind::Bash,
+            agent => TerminalKind::Agent(agent.to_string()),
+        }
     }
 }
 
@@ -408,8 +410,7 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         let session_id = keyed_session_id(&req.session_id);
 
         let launch = TerminalLaunch {
-            // TODO(agent-terminal-tabs): the kind `req.kind` names
-            kind: TerminalKind::Bash,
+            kind: TerminalKind::from_request(&req.kind),
             login_shell: crate::login_shell::login_shell_for(&os_user),
         };
         let terminal_id = self.ports.roster.start(&session_id, &launch).await?;

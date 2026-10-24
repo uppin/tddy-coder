@@ -48,13 +48,23 @@ impl CliSessionManager {
     /// a fresh `terminal_id` (never the reserved `MAIN_TERMINAL_ID`) and that kind.
     pub async fn start_agent_terminal(
         &self,
-        _session_id: &str,
-        _worktree_path: PathBuf,
-        _kind: &str,
-        _argv: Vec<String>,
+        session_id: &str,
+        worktree_path: PathBuf,
+        kind: &str,
+        argv: Vec<String>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
-        // TODO(agent-terminal-tabs): implement
-        todo!("start_agent_terminal")
+        let terminal_id = uuid::Uuid::now_v7().to_string();
+        self.spawn_tool(
+            session_id,
+            &terminal_id,
+            kind,
+            worktree_path,
+            "",
+            argv,
+            Vec::new(),
+            None,
+        )
+        .await
     }
 
     /// Look up a specific tool of a session by `terminal_id` (use `MAIN_TERMINAL_ID` for the

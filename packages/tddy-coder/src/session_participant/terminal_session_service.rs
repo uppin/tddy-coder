@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use tddy_rpc::{BidiStreamOutput, RpcMessage, RpcResult, RpcService, ServiceEntry, Status};
 use tddy_terminal_rpc::{
     build_terminal_session_entry, ControlChange, ControlClaim, TerminalControl, TerminalDescriptor,
-    TerminalLaunch, TerminalRoster, TerminalSessionPorts,
+    TerminalKind, TerminalLaunch, TerminalRoster, TerminalSessionPorts,
 };
 use tokio::sync::broadcast;
 
@@ -255,13 +255,18 @@ impl TerminalRoster for CoderTerminalRoster {
     /// session it does not.
     ///
     /// A started terminal here is always the login shell: this participant runs no harness
-    /// registry. TODO(agent-terminal-tabs): refuse a `TerminalKind::Agent` launch with
-    /// `INVALID_ARGUMENT`, naming that this session's terminals run bash only.
+    /// registry, so a launch naming a harness is refused with `INVALID_ARGUMENT` rather than
+    /// answered with a shell the caller did not ask for.
     async fn start(&self, session_id: &str, launch: &TerminalLaunch) -> Result<String, Status> {
         let served = self.svc.session_id.trim();
         if session_id != served {
             return Err(Status::failed_precondition(format!(
                 "this session participant runs session {served}, not {session_id}"
+            )));
+        }
+        if let TerminalKind::Agent(kind) = &launch.kind {
+            return Err(Status::invalid_argument(format!(
+                "this session's terminals run bash only, not {kind:?}"
             )));
         }
         self.svc

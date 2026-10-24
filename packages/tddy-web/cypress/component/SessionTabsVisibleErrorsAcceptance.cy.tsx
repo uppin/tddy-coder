@@ -517,6 +517,7 @@ describe("Terminal tab strip", () => {
 
     // When
     terminals.newTab().click();
+    terminals.newTabOption("bash").click();
 
     // Then
     errors.terminalError().should("contain.text", "too many terminals");
@@ -558,6 +559,7 @@ describe("Terminal tab strip", () => {
 
     // When
     terminals.newTab().click();
+    terminals.newTabOption("bash").click();
 
     // Then
     errors.terminalError().should("contain.text", "Not connected to the selected host");

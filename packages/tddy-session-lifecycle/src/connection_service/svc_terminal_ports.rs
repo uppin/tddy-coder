@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tddy_core::cli_harness::{cli_harness, CliLaunch};
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{
     ControlChange, ControlClaim, TerminalControl, TerminalDescriptor, TerminalKind, TerminalLaunch,
@@ -19,6 +20,7 @@ use tokio::sync::broadcast;
 
 use super::DaemonSessionHost;
 use crate::cli_session_manager::CliSessionManager;
+use crate::config::DaemonConfig;
 use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 
 impl DaemonSessionHost {
@@ -81,9 +83,10 @@ impl DaemonSessionHost {
             control: Arc::new(CliManagerTerminalControl::new(Arc::clone(
                 &self.claude_cli_manager,
             ))),
-            roster: Arc::new(CliManagerTerminalRoster::new(Arc::clone(
-                &self.claude_cli_manager,
-            ))),
+            roster: Arc::new(CliManagerTerminalRoster::new(
+                Arc::clone(&self.claude_cli_manager),
+                self.config.clone(),
+            )),
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
         }
     }
@@ -130,11 +133,12 @@ impl TerminalControl for CliManagerTerminalControl {
 /// The terminals of a session, spawned as tasks by [`CliSessionManager`].
 struct CliManagerTerminalRoster {
     manager: Arc<CliSessionManager>,
+    config: DaemonConfig,
 }
 
 impl CliManagerTerminalRoster {
-    fn new(manager: Arc<CliSessionManager>) -> Self {
-        CliManagerTerminalRoster { manager }
+    fn new(manager: Arc<CliSessionManager>, config: DaemonConfig) -> Self {
+        CliManagerTerminalRoster { manager, config }
     }
 }
 
@@ -155,9 +159,28 @@ impl TerminalRoster for CliManagerTerminalRoster {
                 .start_terminal(session_id, worktree, &launch.login_shell)
                 .await
                 .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?,
-            // TODO(agent-terminal-tabs): resolve the harness through the registry and the daemon
-            // config, build its fresh interactive argv, and start it with `start_agent_terminal`.
-            TerminalKind::Agent(kind) => todo!("agent terminal {kind:?}"),
+            TerminalKind::Agent(kind) => {
+                let harness = cli_harness(kind).ok_or_else(|| {
+                    Status::invalid_argument(format!("unknown terminal kind {kind:?}"))
+                })?;
+                let binary = self.config.cli_harness_binary(
+                    harness.session_type,
+                    harness.default_binary,
+                    harness.binary_env,
+                );
+                // A tab is a conversation of its own: a harness told a session id (Claude Code)
+                // gets a fresh one, never the session's.
+                let conversation_id = uuid::Uuid::now_v7().to_string();
+                let argv = (harness.argv)(&CliLaunch {
+                    binary: &binary,
+                    session_id: &conversation_id,
+                    ..CliLaunch::default()
+                });
+                self.manager
+                    .start_agent_terminal(session_id, worktree, harness.session_type, argv)
+                    .await
+                    .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?
+            }
         };
         Ok(handle.terminal_id.clone())
     }
