@@ -131,7 +131,36 @@ laptop: main agent ─MCP─ tddy-tools --mcp ─HTTP─ relay ─LiveKit─ cod
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- **`remote` requests are JSON, which the relay cannot decode (blocks `--agent` end to end).**
+  `connect_post` (`packages/tddy-tools/src/remote_cli.rs`) posts `application/json`.
+  `tddy-connectrpc` hands a unary body to the bridge without transcoding
+  (`packages/tddy-connectrpc/src/router.rs:96`), and generated handlers decode it as protobuf
+  (`packages/tddy-codegen/src/generator.rs:293`). A JSON body is therefore not a request. Test 9 pins
+  the JSON body (`specializedAgents`), so the fix is a developer decision: move `remote` to protobuf
+  (test 9's parse changes), or give the router JSON transcoding (a new dependency or a descriptor
+  transcoder). Every `tddy-tools remote` subcommand and the JSON arms of
+  `dispatch_request_via_daemon_http` and `ask_daemon_over_http`
+  (`packages/tddy-session-tool-client/src/conversation.rs:245`) share this. Not checked against a live
+  daemon.
+- **`ConversationWorktree` over HTTP is still unverified** (`docs/dev/todo/2026-10-01-conversation-worktree-over-http-is-unverified.md`).
+  No red test in this node sends it. Prerequisite text "Test 6 exercises it" is stale: test 6 is roster
+  admission. The first test that reaches the clone call over the relay is the two-daemon suite below,
+  and it inherits the JSON defect above.
+- **Daemon-side workspace seeding does not admit.** `workspace_roster_admits` has no production caller.
+  A workspace start seeds through `seed_and_start_workspace_session`
+  (`packages/tddy-agent-launch/src/workspace_branch_start.rs:36-39`) → `seeded_roster_records_placed`
+  (`packages/tddy-session-agents/src/agent_placement.rs:50`) → `seeded_roster_records`
+  (`packages/tddy-session-agents/src/svc_resolve_listed_worktree.rs:132`), which resolves any reference.
+  A model agent or another daemon's coding agent is seeded today. No red test pins it (test 9 is the CLI
+  body only), so it is left for the developer.
+- **Two-daemon suite not written** (`packages/tddy-daemon-rpc/tests/remote_codebase_subagent_acceptance.rs`).
+  Not attempted in this green pass. It needs a workspace project and repo fixture (defined only inside
+  `packages/tddy-session-lifecycle/tests/workspace_session_acceptance.rs`) and a coding-agent profile on
+  the codebase daemon, plus the `tddy-acp-stub` binary (now built). Its refusal cases depend on the
+  seeding gap above.
+- **Subagent tools over the relay are not exercised by a red test.** Advertisement keys on
+  `has_an_agent_to_address()` (`packages/tddy-tools/src/server.rs:404`). The roster-before-tool-list
+  test uses `TDDY_REMOTE_DAEMON_SOCKET` (UDS), not the HTTP relay.
 
 ## Decisions & Trade-offs
 
@@ -140,6 +169,14 @@ _(populated during development)_
   Wiring `tddy-coder --remote` remains its existing TODO.
 - **Coding agents only, local owner only.** A `model` agent gains nothing from the codebase host, and
   a third daemon would be multi-hop (roster non-goal).
+- **The roster stream's HTTP arm was a second refusal.** State A named only `link.rs`. The roster
+  stream also refused `DaemonHttp` in `packages/tddy-discovery/src/roster/stream.rs`, before any
+  client was asked, so that arm now joins the accepted transports. Its
+  `TODO(session-agent-roster)` asked for a `StreamSessionAgents` client over HTTP, which
+  `DaemonHttpRpcClient` now supplies, so the TODO was removed with it.
+- **`DaemonHttpRpcClient` error mapping.** A non-200 body that is not a Connect error is `Unknown`,
+  with the HTTP status and body. No code is guessed from the status. A stream that ends without its
+  end-of-stream envelope is `Unavailable`. An envelope with an unrecognised flags byte is `Internal`.
 
 ## Refactoring Needed
 
