@@ -52,6 +52,7 @@ services:
 spawn_policy:                      # absent = no privilege granted at all
   allowed_session_users: [alice, bob]
   allowed_tool_paths: [/usr/local/bin/tddy-coder, /usr/bin/git]
+  allowed_relay_tool_paths: []      # harness binaries a coding agent may run as, with relayed stdio; empty = off
   allowed_mount_roots: [/srv/tddy/repos]
   allowed_env_keys: [RUST_LOG]
 
@@ -62,6 +63,18 @@ cgroup:                            # absent = nothing is clamped
 
 Nothing is granted by default. An operator who writes no `spawn_policy` has a supervisor that supervises
 the daemon and refuses every spawn request — which is the correct reading of an absent policy.
+
+### Relayed spawns (coding agents)
+
+`SpawnRelayed` starts an allowlisted harness binary (`opencode`, `codex-acp`, `bunx`) as an allowed session
+user with its stdin/stdout relayed over a unix socket the **daemon** listens on — the one request that gives
+a child stdio, because the ACP driver talks to its agent over stdio and an unprivileged daemon cannot become
+another user itself. It passes every gate `SpawnSession` does (peer authorization, `allowed_session_users`,
+`allowed_env_keys`) **and** its own: `allowed_relay_tool_paths`, **empty by default**, so enabling session
+tools never enables it. The supervisor connects to the daemon's socket only if the path is absolute, is a
+socket (not a symlink to one) owned by the calling uid, and the listener's `SO_PEERCRED` uid is that uid; any
+failure is the opaque denial and nothing is forked. The child's exit status and a stop travel over
+`SessionStatus` / `StopSession`; a daemon that closes the connection stops the child.
 
 ### The prerequisites that bite
 

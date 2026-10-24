@@ -23,13 +23,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_coding_subagent::{
-    confinement_for, withdrawal_env, CodingAgentLaunch, CodingAgentLauncher, Confinement,
+    confinement_for, withdrawal_env, AgentTransport, CodingAgentLaunch, CodingAgentLauncher,
+    Confinement,
 };
 use tddy_core::provider_route::{Harness, HarnessRoute, RouteChoice, RouteSources};
 use tddy_core::{AcpAgentCommand, McpServerSpec};
 use tddy_discovery::subagent::SubagentError;
 
-use crate::coding_agent_as_user::{run_as_session_user, DropContext};
+use crate::coding_agent_as_user::{run_as_session_user, AsUserRefusal, DropContext};
+use crate::coding_agent_relay::{start_relayed, RelayEndpoint};
 
 /// Env var naming the `codex-acp` binary, as the workflow backend reads it.
 const CODEX_ACP_CLI_ENV: &str = "TDDY_CODEX_ACP_CLI";
@@ -53,6 +55,8 @@ pub struct DaemonCodingAgentLauncher {
     drop: DropContext,
     route: RouteResolver,
     tool_server: ToolServerResolver,
+    /// How an unprivileged daemon starts an agent as another user: through `tddy-supervisor`.
+    relay: Option<RelayEndpoint>,
 }
 
 impl DaemonCodingAgentLauncher {
@@ -62,16 +66,32 @@ impl DaemonCodingAgentLauncher {
         Self::with_identity(DropContext::current(), route, tool_server)
     }
 
+    /// With the supervisor to ask when this daemon cannot become the session's user itself.
+    #[must_use]
+    pub fn with_supervisor_relay(mut self, relay: RelayEndpoint) -> Self {
+        self.relay = Some(relay);
+        self
+    }
+
     /// The launcher a running daemon installs: routes from the session owner's vault, tool servers
-    /// from this daemon's own tokens and toolchain.
+    /// from this daemon's own tokens and toolchain. `spawn_backend` is the choice the daemon read
+    /// from its environment at startup: a supervised daemon relays through that supervisor.
     #[must_use]
     pub fn for_daemon(
         config: tddy_daemon_kernel::config::DaemonConfig,
         tddy_data_dir: PathBuf,
+        spawn_backend: &tddy_spawn::supervisor_client::SpawnBackendChoice,
         vaults: Option<Arc<tddy_daemon_auth::SessionVaults>>,
         user_resolver: tddy_daemon_kernel::SessionUserResolver,
         tokens: Option<tddy_daemon_auth::SessionTokens>,
     ) -> Self {
+        let relay_dir = tddy_data_dir.join("relay");
+        let supervisor_socket = match spawn_backend {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                Some(socket_path.clone())
+            }
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => None,
+        };
         let route = route_from_vault(move |token| {
             tddy_agent_launch::session_acting_identity::SessionAccountAccess::new(
                 vaults.clone(),
@@ -89,7 +109,14 @@ impl DaemonCodingAgentLauncher {
             )
             .map_err(|status| SubagentError::from(status.message().to_string()))
         });
-        Self::new(route, tool_server)
+        let launcher = Self::new(route, tool_server);
+        match supervisor_socket {
+            Some(socket_path) => launcher.with_supervisor_relay(RelayEndpoint {
+                spawner: Arc::new(crate::coding_agent_relay::SupervisorRelay { socket_path }),
+                socket_dir: relay_dir,
+            }),
+            None => launcher,
+        }
     }
 
     /// A launcher whose identity is `drop` (tests).
@@ -103,6 +130,7 @@ impl DaemonCodingAgentLauncher {
             drop,
             route,
             tool_server,
+            relay: None,
         }
     }
 
@@ -165,7 +193,11 @@ impl DaemonCodingAgentLauncher {
         Ok(())
     }
 
-    fn plan(&self, launch: &CodingAgentLaunch) -> Result<AcpAgentCommand, SubagentError> {
+    /// The command for `launch` as the harness runs it, before it is made to run as another user.
+    fn command_before_user_switch(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<AcpAgentCommand, SubagentError> {
         let (program, args) = Self::harness_command(launch)?;
         let mut command = AcpAgentCommand {
             program,
@@ -200,8 +232,13 @@ impl DaemonCodingAgentLauncher {
                 }
             }
         }
+        Ok(command)
+    }
+
+    fn plan(&self, launch: &CodingAgentLaunch) -> Result<AcpAgentCommand, SubagentError> {
+        let command = self.command_before_user_switch(launch)?;
         run_as_session_user(command, &launch.session_os_user, &self.drop)
-            .map_err(|reason| Self::refuse(launch, &reason))
+            .map_err(|reason| Self::refuse(launch, &reason.to_string()))
     }
 }
 
@@ -244,6 +281,24 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
         launch: &CodingAgentLaunch,
     ) -> Result<AcpAgentCommand, SubagentError> {
         self.plan(launch)
+    }
+
+    async fn launch_transport(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<AgentTransport, SubagentError> {
+        let command = self.command_before_user_switch(launch)?;
+        match run_as_session_user(command.clone(), &launch.session_os_user, &self.drop) {
+            Ok(command) => Ok(AgentTransport::Command(command)),
+            Err(AsUserRefusal::Unprivileged(reason)) => match &self.relay {
+                Some(relay) => start_relayed(relay, &launch.session_os_user, &command)
+                    .await
+                    .map(AgentTransport::Stream)
+                    .map_err(|e| Self::refuse(launch, &e.to_string())),
+                None => Err(Self::refuse(launch, &reason)),
+            },
+            Err(other) => Err(Self::refuse(launch, &other.to_string())),
+        }
     }
 
     async fn mcp_servers_for(
@@ -523,6 +578,101 @@ mod tests {
             .expect("servers");
 
         assert!(servers.is_empty());
+    }
+
+    struct RecordingSupervisor {
+        asked: std::sync::Mutex<Vec<tddy_supervisor::SpawnRelayedRequest>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::coding_agent_relay::RelaySpawner for RecordingSupervisor {
+        async fn spawn_relayed(
+            &self,
+            request: tddy_supervisor::SpawnRelayedRequest,
+        ) -> Result<tddy_supervisor::SpawnedProcess, tddy_supervisor::SupervisorError> {
+            self.asked.lock().expect("asked").push(request.clone());
+            let _stream = std::os::unix::net::UnixStream::connect(&request.relay_socket)
+                .expect("the supervisor connects");
+            Ok(tddy_supervisor::SpawnedProcess { pid: 7 })
+        }
+    }
+
+    fn an_unprivileged_daemon_with_a_supervisor() -> (
+        DaemonCodingAgentLauncher,
+        Arc<RecordingSupervisor>,
+        tempfile::TempDir,
+    ) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let supervisor = Arc::new(RecordingSupervisor {
+            asked: std::sync::Mutex::new(Vec::new()),
+        });
+        let launcher = DaemonCodingAgentLauncher::with_identity(
+            DropContext {
+                uid: 4242,
+                gid: 4242,
+                privileged: false,
+                setpriv: None,
+            },
+            Arc::new(|_| Ok(None)),
+            Arc::new(|_| Err(SubagentError::from("unused"))),
+        )
+        .with_supervisor_relay(RelayEndpoint {
+            spawner: supervisor.clone(),
+            socket_dir: dir.path().join("r"),
+        });
+        (launcher, supervisor, dir)
+    }
+
+    #[tokio::test]
+    async fn an_unprivileged_daemon_asks_the_supervisor_to_run_another_users_agent() {
+        let (launcher, supervisor, _dir) = an_unprivileged_daemon_with_a_supervisor();
+        let mut launch = a_launch("opencode");
+        launch.session_os_user = "root".to_string();
+
+        let transport = launcher.launch_transport(&launch).await.expect("transport");
+
+        assert!(matches!(transport, AgentTransport::Stream(_)));
+        let asked = supervisor.asked.lock().expect("asked");
+        assert_eq!(asked.len(), 1);
+        assert_eq!(asked[0].os_user, "root");
+        assert_eq!(asked[0].args, ["acp"]);
+        assert_eq!(asked[0].working_dir, Some(PathBuf::from("/work/tree")));
+    }
+
+    #[tokio::test]
+    async fn the_daemons_own_user_needs_no_supervisor() {
+        let (launcher, supervisor, _dir) = an_unprivileged_daemon_with_a_supervisor();
+        let mut launch = a_launch("opencode");
+        launch.session_os_user = this_user();
+        let launcher = DaemonCodingAgentLauncher {
+            drop: the_daemons_own_identity(),
+            ..launcher
+        };
+
+        let transport = launcher.launch_transport(&launch).await.expect("transport");
+
+        assert!(matches!(transport, AgentTransport::Command(_)));
+        assert!(supervisor.asked.lock().expect("asked").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_supervised_launch_still_applies_the_route_it_sends_as_environment() {
+        let (launcher, supervisor, _dir) = an_unprivileged_daemon_with_a_supervisor();
+        let launcher = DaemonCodingAgentLauncher {
+            route: Arc::new(|_| Ok(Some(a_route()))),
+            ..launcher
+        };
+        let mut launch = a_launch("claude-acp");
+        launch.session_os_user = "root".to_string();
+        launch.def.provider_account = Some("meta".to_string());
+
+        launcher.launch_transport(&launch).await.expect("transport");
+
+        let asked = supervisor.asked.lock().expect("asked");
+        assert_eq!(
+            asked[0].env.get("API_KEY").map(String::as_str),
+            Some("sekret")
+        );
     }
 
     #[tokio::test]

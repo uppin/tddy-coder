@@ -471,6 +471,17 @@ impl Supervisor {
         }
     }
 
+    /// [`Self::spawn_session`] with the child's stdio piped to the supervisor, for a relayed spawn.
+    pub async fn spawn_session_piped(
+        &self,
+        plan: SpawnPlan,
+    ) -> std::io::Result<(u32, crate::spawn_broker::ChildStdio)> {
+        let _in_flight = self.spawn_gate.lock().await;
+        let (pid, stdio) = self.forks.spawn_piped(plan).await?;
+        self.sessions().record_spawned(pid);
+        Ok((pid, stdio))
+    }
+
     /// What became of a session this supervisor spawned.
     ///
     /// A pid it never spawned is [`SupervisorError::Denied`], not reported on: answering would make

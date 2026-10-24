@@ -114,9 +114,14 @@ Dependents compile against `AgentKind`, `CodingAgentSession`, `CodingAgentLaunch
 - **tddy-session-agents**: `open_local_agent_session` branch on kind; attach admission; catalog rows
 - **tddy-session-lifecycle**: `CodingAgentLauncher` adapter (spawn as the session's OS user, route, MCP config)
 - **tddy-daemon-rpc**: `ListSubagents` rows
+- **tddy-supervisor**: `SpawnRelayed` (stdio relayed over a daemon-owned socket), its own allowlist `allowed_relay_tool_paths` — see *Privileged-surface change*
+- **tddy-agent-backend**: `AcpDriver::spawn_over` (serve an agent over a stream; additive), `codex_acp_route_args` exported
+- **tddy-session-split**: `coding_agent_wiring` (the managed agent's `tddy-tools --mcp` server and credential)
 - **tddy-web**: kind badge in two pickers and the Agents tab
 
 ## Related Feature Documentation
+
+- [tddy-supervisor.md](../../ft/supervisor/tddy-supervisor.md) § Relayed spawns
 
 - [PRD-2026-10-24-coagents-acp-subagent.md](../../ft/daemon/1-WIP/PRD-2026-10-24-coagents-acp-subagent.md)
 - [session-agent-roster.md](../../ft/daemon/session-agent-roster.md), [harness-profiles.md](../../ft/daemon/harness-profiles.md), [managed-codebase-subagents.md](../../ft/coder/managed-codebase-subagents.md)
@@ -236,17 +241,27 @@ Cypress (`mountWithRpc` / per-daemon in-memory backends):
 launcher are real and covered by the acceptance tests and the launcher's unit tests. One launcher
 gap remains, as a typed refusal naming its reason (never a weaker launch):
 
-- 🔴 **TODO(acp-subagent) — run as another OS user on a supervised host.**
-  `coding_agent_as_user` reuses the PTY path's machinery (`resolve_pty_os_user`,
-  `wrap_argv_for_privilege_drop` → `setpriv`, `pty_user_env_overrides`; GitHub token variables are
-  stripped with `env -u`): a **privileged** daemon (unsupervised, forked spawn worker) runs the agent
-  as the session user with piped stdio; the daemon's own user needs no drop. An **unprivileged**
-  daemon — every `tddy-supervisor` install, i.e. `./install --systemd` — is refused naming that:
-  the supervisor's `SpawnSession` gives a child no stdio and takes no file descriptor (its design:
-  "a path crosses a process boundary, a file descriptor does not"), `tool_path` must be
-  allowlisted, and the driver spawns its own child. Closing it needs a new supervisor request that
-  relays a child's stdio over a path-rendezvoused socket plus an operator policy entry — a change to
-  the privileged surface that was not made here.
+- **Another OS user on a supervised host — done, with a gap in what could be proven.** A new
+  `tddy-supervisor` request, `SpawnRelayed` (see Decisions), starts an allowlisted harness as the
+  session's user with stdin/stdout relayed over a unix socket the daemon listens on. The daemon side
+  (`coding_agent_relay`, used by `DaemonCodingAgentLauncher::launch_transport`) binds a 0700-directory
+  socket, asks the supervisor, accepts its connection and returns the stream, which
+  `AcpDriver::spawn_over` serves (`CodingAgentSession::start_over`). A privileged unsupervised daemon
+  still uses `setpriv` (`coding_agent_as_user`); the daemon's own user needs neither.
+  **Not provable here without root / on this host:** that the child really runs as a *different* uid
+  (the tests run the target user as the current user, so no privilege is dropped — the drop is the
+  pre-exec plan's own, separately tested contract); and the supervisor spawning + relaying end to end
+  on this macOS host (`spawn_broker` refuses `PR_SET_PDEATHSIG` off Linux, so the live-child test
+  `an_allowlisted_harness_has_its_stdio_relayed_and_its_exit_reported` is `#[cfg(target_os = "linux")]`
+  and was **written but not run** — CI runs it). Proven here: the policy and peer gates refuse before
+  any fork (4 acceptance tests against the real supervisor binary), the socket-ownership and
+  peer-credential checks, byte relay both ways and caller-hangup (unit tests over a real `cat`), the
+  driver over a stream against the stub, and the daemon asking the supervisor with the right fields
+  (a fake supervisor that connects like the real one), plus the typed refusal.
+  Operator setup: `spawn_policy.allowed_relay_tool_paths` must list each harness binary (absolute),
+  `allowed_session_users` the user, and `allowed_env_keys` every variable a launch sets (a route's
+  variables, `OPENCODE_CONFIG_CONTENT`) — a missing one is the supervisor's opaque denial, which the
+  daemon turns into an error naming those three settings.
 - **Provider account** — done. `route_from_vault` resolves the profile's account in the session
   owner's vault with `resolve_session_route` (the call tool sessions use) and the launcher applies
   it per harness: env + secret env for all; `-c` overrides (`codex_acp_route_args`, now exported from
@@ -295,8 +310,32 @@ See *Managed launches* above; `codex-acp` offers sandbox modes only, no tool wit
   needs piped stdio to the child; whether the daemon's spawn worker / supervisor can hand back piped
   stdio for a non-PTY child is unverified. If it cannot, green records it and stops rather than
   running the agent as the daemon's own user.
+- **A supervised host gets the user switch from a new, separately allowlisted supervisor request.**
+  See *Privileged-surface change* — the alternative (extending `SpawnSession` with stdio) would have
+  widened the grant of every session tool.
 - **Process per conversation.** One ACP child per conversation keeps cancel and kill trivially scoped;
   a pooled agent with several ACP sessions is a later optimisation.
+
+## Privileged-surface change (recorded explicitly)
+
+n2 adds one request to the root-owned `tddy-supervisor` surface: **`SpawnRelayed`**
+(`packages/tddy-supervisor`: `proto/supervisor.proto`, `src/relay.rs`, `policy::resolve_relay_tool_path`,
+`SpawnPolicy.allowed_relay_tool_paths`). What it can and cannot do:
+
+- It spawns an allowlisted binary as an allowed session user, never root, with the session-spawn
+  environment gate. **Its own allowlist, `allowed_relay_tool_paths`, is empty by default** and is not
+  `allowed_tool_paths`: a host that allowlisted session tools has not enabled it, and no other caller
+  gains a capability.
+- It is reachable only by a peer that already passes the authorizer (a declared service's uid).
+- The one new action of a root process is connecting to a socket path the caller names. That is a
+  confused-deputy edge, closed twice: before connecting, the path must be absolute and plain, `lstat`
+  a socket (a symlink is refused, not followed) owned by the caller's uid; after connecting, the
+  listener's `SO_PEERCRED` uid must equal the caller's. Either failure is the opaque `Denied`, and the
+  socket is connected **before** the fork, so a refusal forks nothing.
+- The relay moves bytes between that socket and the child's piped stdio; stderr is logged at debug,
+  not relayed. A caller that closes the connection stops the session (`StopSession` semantics);
+  status and exit come from the existing `SessionStatus`.
+- `ForkBroker` gained `spawn_piped` beside `spawn`; existing spawns are unchanged.
 
 ## Refactoring Needed
 

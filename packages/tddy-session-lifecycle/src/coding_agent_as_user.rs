@@ -27,6 +27,26 @@ const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
     "GITHUB_ENTERPRISE_TOKEN",
 ];
 
+/// Why a command could not be made to run as the session's user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AsUserRefusal {
+    /// This daemon holds no privilege to become another user — the case a supervised host's
+    /// `SpawnRelayed` exists for.
+    Unprivileged(String),
+    /// Anything else: an unknown user, no `setpriv`.
+    Other(String),
+}
+
+impl std::fmt::Display for AsUserRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AsUserRefusal::Unprivileged(reason) | AsUserRefusal::Other(reason) => {
+                f.write_str(reason)
+            }
+        }
+    }
+}
+
 /// What this daemon process is allowed to do about another user.
 #[derive(Debug, Clone)]
 pub struct DropContext {
@@ -73,8 +93,8 @@ pub fn run_as_session_user(
     command: AcpAgentCommand,
     os_user: &str,
     drop: &DropContext,
-) -> Result<AcpAgentCommand, String> {
-    let target = resolve_pty_os_user(os_user)?;
+) -> Result<AcpAgentCommand, AsUserRefusal> {
+    let target = resolve_pty_os_user(os_user).map_err(AsUserRefusal::Other)?;
     wrap_for_user(command, os_user, &target, drop)
 }
 
@@ -83,23 +103,22 @@ fn wrap_for_user(
     os_user: &str,
     target: &ResolvedPtyUser,
     drop: &DropContext,
-) -> Result<AcpAgentCommand, String> {
+) -> Result<AcpAgentCommand, AsUserRefusal> {
     if !pty_requires_privilege_drop(target.uid, target.gid, drop.uid, drop.gid) {
         return Ok(command);
     }
     if !drop.privileged {
-        return Err(format!(
+        return Err(AsUserRefusal::Unprivileged(format!(
             "the session runs as '{os_user}' but this daemon is not privileged, and a piped-stdio \
-             child cannot be started as another user without privilege (on a supervised host \
-             that privilege is tddy-supervisor's, whose SpawnSession gives a child no stdio); it \
-             will not run the agent as the daemon's own user"
-        ));
+             child cannot be started as another user without privilege; it will not run the agent \
+             as the daemon's own user"
+        )));
     }
     let setpriv = drop.setpriv.as_ref().ok_or_else(|| {
-        format!(
+        AsUserRefusal::Other(format!(
             "starting the agent as '{os_user}' needs `setpriv` (util-linux) on this daemon's PATH, \
              and none was found"
-        )
+        ))
     })?;
     let mut inner = vec!["env".to_string()];
     for variable in GITHUB_TOKEN_VARIABLES {
@@ -189,7 +208,8 @@ mod tests {
         .expect_err("refused");
 
         assert!(
-            refusal.contains("'dev'") && refusal.contains("not privileged"),
+            matches!(refusal, AsUserRefusal::Unprivileged(_))
+                && refusal.to_string().contains("'dev'"),
             "{refusal}"
         );
     }
@@ -199,6 +219,6 @@ mod tests {
         let refusal = wrap_for_user(a_command(), "dev", &a_user(1000), &a_daemon(0, true, false))
             .expect_err("refused");
 
-        assert!(refusal.contains("setpriv"), "{refusal}");
+        assert!(refusal.to_string().contains("setpriv"), "{refusal}");
     }
 }

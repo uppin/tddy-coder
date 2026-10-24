@@ -216,6 +216,7 @@ impl BuildContext {
             tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher::for_daemon(
                 config.clone(),
                 tddy_data_dir.clone(),
+                &options.spawn_backend,
                 self.identity.credential_vaults.clone(),
                 user_resolver,
                 Some(session_tokens.clone()),

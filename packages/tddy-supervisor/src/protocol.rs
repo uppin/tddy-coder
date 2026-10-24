@@ -17,7 +17,7 @@ use crate::error::SupervisorError;
 use crate::proto::supervisor as wire;
 use crate::request::{
     AppliedLimits, CreateScopeRequest, RequestedLimits, SandboxMount, ScopeHandle, SessionState,
-    SessionStatus, SpawnSandboxRequest, SpawnSessionRequest, SpawnedProcess,
+    SessionStatus, SpawnRelayedRequest, SpawnSandboxRequest, SpawnSessionRequest, SpawnedProcess,
 };
 use crate::service::{ServiceState, ServiceStatus};
 
@@ -192,6 +192,34 @@ fn mount_from_wire(mount: wire::SandboxMount) -> SandboxMount {
         source: PathBuf::from(mount.source),
         target: PathBuf::from(mount.target),
         readonly: mount.readonly,
+    }
+}
+
+pub fn spawn_relayed_to_wire(
+    request: SpawnRelayedRequest,
+) -> Result<wire::SpawnRelayedRequest, SupervisorError> {
+    Ok(wire::SpawnRelayedRequest {
+        os_user: request.os_user,
+        tool_path: path_to_wire(&request.tool_path)?,
+        args: request.args,
+        env: request.env.into_iter().collect(),
+        working_dir: request
+            .working_dir
+            .as_deref()
+            .map(path_to_wire)
+            .transpose()?,
+        relay_socket: path_to_wire(&request.relay_socket)?,
+    })
+}
+
+pub fn spawn_relayed_from_wire(request: wire::SpawnRelayedRequest) -> SpawnRelayedRequest {
+    SpawnRelayedRequest {
+        os_user: request.os_user,
+        tool_path: PathBuf::from(request.tool_path),
+        args: request.args,
+        env: request.env.into_iter().collect::<BTreeMap<_, _>>(),
+        working_dir: request.working_dir.map(PathBuf::from),
+        relay_socket: PathBuf::from(request.relay_socket),
     }
 }
 

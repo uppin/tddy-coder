@@ -30,8 +30,8 @@ use crate::policy;
 use crate::proto::supervisor::{self as wire, SupervisorService, SupervisorServiceServer};
 use crate::protocol;
 use crate::request::{
-    CreateScopeRequest, ScopeHandle, SessionStatus, SpawnSandboxRequest, SpawnSessionRequest,
-    SpawnedProcess,
+    CreateScopeRequest, ScopeHandle, SessionStatus, SpawnRelayedRequest, SpawnSandboxRequest,
+    SpawnSessionRequest, SpawnedProcess,
 };
 use crate::socket::{resolve_socket_source, SocketSource};
 use crate::spawn_broker::{
@@ -83,6 +83,45 @@ impl PrivilegedSurface {
         // `SpawnSession` spawns a plain process. Jailing is `SpawnSandbox`'s job.
         let plan = resolved.plan(request.args, None);
         self.spawn(plan, "session", &os_user).await
+    }
+
+    /// Spawn a coding-agent harness as an allowlisted user with its stdio relayed to the caller.
+    ///
+    /// The same user, environment and working-directory gates as [`Self::spawn_session`], plus the
+    /// relay's own allowlist. The caller's socket is connected to **before** the fork, so a socket
+    /// that is not the caller's costs nothing and spawns nothing.
+    async fn spawn_relayed(
+        &self,
+        request: SpawnRelayedRequest,
+        caller_uid: u32,
+    ) -> Result<SpawnedProcess, SupervisorError> {
+        let policy = &self.config.spawn_policy;
+        // The relay allowlist first: with it empty (the default) nothing below runs at all.
+        let program = policy::resolve_relay_tool_path(policy, &request.tool_path)?;
+        let resolved = self.resolve_spawn(
+            &request.os_user,
+            &program,
+            request.working_dir.as_deref(),
+            None,
+            &request.env,
+        )?;
+        let stream =
+            crate::relay::connect_to_callers_socket(&request.relay_socket, caller_uid).await?;
+        let os_user = resolved.os_user.clone();
+        let plan = resolved.plan(request.args, None);
+        let (pid, stdio) = self
+            .supervisor
+            .spawn_session_piped(plan)
+            .await
+            .map_err(|error| SupervisorError::OperationFailed {
+                message: format!("spawn relayed session: {error}"),
+            })?;
+        log::info!(
+            target: "tddy_supervisor::server",
+            "spawned relayed session pid {pid} as `{os_user}`"
+        );
+        crate::relay::relay(Arc::clone(&self.supervisor), pid, stream, stdio);
+        Ok(SpawnedProcess { pid })
     }
 
     /// Resolve a sandbox request against policy and hand the jail plan to the supervisor.
@@ -410,6 +449,22 @@ impl SupervisorService for SupervisorServiceImpl {
         let spawned = self
             .surface
             .spawn_session(protocol::spawn_session_from_wire(request.into_inner()))
+            .await
+            .map_err(protocol::status_from_error)?;
+        Ok(Response::new(protocol::spawned_process_to_wire(spawned)))
+    }
+
+    async fn spawn_relayed(
+        &self,
+        request: Request<wire::SpawnRelayedRequest>,
+    ) -> Result<Response<wire::SpawnedProcess>, Status> {
+        self.authorize_peer()?;
+        let spawned = self
+            .surface
+            .spawn_relayed(
+                protocol::spawn_relayed_from_wire(request.into_inner()),
+                self.peer.uid,
+            )
             .await
             .map_err(protocol::status_from_error)?;
         Ok(Response::new(protocol::spawned_process_to_wire(spawned)))

@@ -40,6 +40,7 @@ mod host_socket_config;
 pub mod policy;
 pub mod protocol;
 pub mod reaper;
+pub mod relay;
 pub mod request;
 pub mod restart;
 pub mod server;
@@ -63,7 +64,7 @@ pub use config::{
 pub use error::{ConfigError, SupervisorError};
 pub use request::{
     AppliedLimits, CreateScopeRequest, RequestedLimits, SandboxMount, ScopeHandle, SessionState,
-    SessionStatus, SpawnSandboxRequest, SpawnSessionRequest, SpawnedProcess,
+    SessionStatus, SpawnRelayedRequest, SpawnSandboxRequest, SpawnSessionRequest, SpawnedProcess,
 };
 pub use restart::{BackoffState, RestartDecision};
 pub use service::{ServiceState, ServiceStatus};

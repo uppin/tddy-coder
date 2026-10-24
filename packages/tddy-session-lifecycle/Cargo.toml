@@ -67,6 +67,8 @@ tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 # `supervisor_client`. `tddy-supervisor` left with them — the daemon reaches the supervisor only
 # through this crate now.
 tddy-spawn = { path = "../tddy-spawn" }
+# `SpawnRelayedRequest`: a coding agent started as the session's user on a supervised host.
+tddy-supervisor = { path = "../tddy-supervisor" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2", features = ["serde"] }
