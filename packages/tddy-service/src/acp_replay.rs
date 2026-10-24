@@ -27,6 +27,7 @@ use crate::proto::acp::{
     acp_agent_message, session_update, AcpAgentMessage, SessionNotification, SessionUpdate,
     ToolCall, ToolCallId, ToolCallStatus, ToolKind,
 };
+use crate::subagent_conversation_replay::{fold_subagent_calls, subagent_entry_of};
 
 /// Session-dir filename of the persisted ACP transcript (sibling of `agent-activity.jsonl`).
 pub const ACP_TRANSCRIPT_FILENAME: &str = "acp-transcript.jsonl";
@@ -103,9 +104,8 @@ pub fn read_session_transcript(session_dir: &Path) -> io::Result<Vec<AcpAgentMes
             .iter()
             .map(frame_for_agent_activity)
             .collect();
-    Ok(latest_state_per_tool_call(merge_by_timestamp(
-        persisted_frames,
-        activity_frames,
+    Ok(latest_state_per_tool_call(fold_subagent_calls(
+        merge_by_timestamp(persisted_frames, activity_frames),
     )))
 }
 
@@ -290,7 +290,7 @@ pub fn page_before(
 }
 
 /// Wrap a `SessionUpdate` in a `SessionNotification` frame stamped at `at_unix_ms`.
-fn session_update_frame(update: SessionUpdate, at_unix_ms: i64) -> AcpAgentMessage {
+pub fn session_update_frame(update: SessionUpdate, at_unix_ms: i64) -> AcpAgentMessage {
     AcpAgentMessage {
         id: 0,
         msg: Some(acp_agent_message::Msg::SessionUpdate(SessionNotification {
@@ -359,15 +359,26 @@ pub fn frame_for_agent_activity(
 ) -> AcpAgentMessage {
     use tddy_core::agent_activity::{STATUS_COMPLETED, STATUS_ERROR};
 
-    let title = match tddy_core::stream::claude::tool_use_detail(&record.tool_name, &record.input) {
-        Some(detail) => format!("{} {detail}", record.tool_name),
-        None => record.tool_name.clone(),
-    };
-    let status = match record.status.as_str() {
-        STATUS_COMPLETED => ToolCallStatus::Completed,
-        STATUS_ERROR => ToolCallStatus::Failed,
-        // `running` (and any not-yet-terminal state) maps to in-progress.
-        _ => ToolCallStatus::InProgress,
+    // A main-agent call on a subagent conversation is that conversation's one entry, not a call of its
+    // own: its id, title and status come from the conversation (see `subagent_conversation_replay`).
+    let (tool_call_id, title, status) = match subagent_entry_of(record) {
+        Some(entry) => (entry.tool_call_id, entry.title, entry.status),
+        None => {
+            let title = match tddy_core::stream::claude::tool_use_detail(
+                &record.tool_name,
+                &record.input,
+            ) {
+                Some(detail) => format!("{} {detail}", record.tool_name),
+                None => record.tool_name.clone(),
+            };
+            let status = match record.status.as_str() {
+                STATUS_COMPLETED => ToolCallStatus::Completed,
+                STATUS_ERROR => ToolCallStatus::Failed,
+                // `running` (and any not-yet-terminal state) maps to in-progress.
+                _ => ToolCallStatus::InProgress,
+            };
+            (record.call_id.clone(), title, status)
+        }
     };
     let at_unix_ms = if record.completed_unix_ms > 0 {
         record.completed_unix_ms
@@ -384,7 +395,7 @@ pub fn frame_for_agent_activity(
     let update = SessionUpdate {
         update: Some(session_update::Update::ToolCall(ToolCall {
             tool_call_id: Some(ToolCallId {
-                value: record.call_id.clone(),
+                value: tool_call_id,
             }),
             title,
             kind: tool_kind_for(&record.tool_name) as i32,
@@ -432,23 +443,35 @@ pub fn tool_call_detail(
     session_dir: &Path,
     tool_call_id: &str,
 ) -> io::Result<Option<ToolCallDetail>> {
-    let frames = read_session_transcript(session_dir)?;
-    for frame in &frames {
+    Ok(tool_call_detail_in(
+        &read_session_transcript(session_dir)?,
+        tool_call_id,
+    ))
+}
+
+/// The bodies of the `tool_call` frame in an already-resolved transcript whose id is `tool_call_id`,
+/// or `None` when no frame carries that id. [`tool_call_detail`] is this over the session's transcript.
+pub fn tool_call_detail_in(
+    frames: &[AcpAgentMessage],
+    tool_call_id: &str,
+) -> Option<ToolCallDetail> {
+    frames.iter().find_map(|frame| {
         if tool_call_id_of(frame) != Some(tool_call_id) {
-            continue;
+            return None;
         }
-        if let Some(acp_agent_message::Msg::SessionUpdate(n)) = &frame.msg {
-            if let Some(session_update::Update::ToolCall(tc)) =
-                n.update.as_ref().and_then(|u| u.update.as_ref())
-            {
-                return Ok(Some(ToolCallDetail {
-                    raw_input: tc.raw_input.clone(),
-                    raw_output: tc.raw_output.clone(),
-                }));
+        match &frame.msg {
+            Some(acp_agent_message::Msg::SessionUpdate(n)) => {
+                match n.update.as_ref().and_then(|u| u.update.as_ref()) {
+                    Some(session_update::Update::ToolCall(tc)) => Some(ToolCallDetail {
+                        raw_input: tc.raw_input.clone(),
+                        raw_output: tc.raw_output.clone(),
+                    }),
+                    _ => None,
+                }
             }
+            _ => None,
         }
-    }
-    Ok(None)
+    })
 }
 
 #[cfg(test)]
