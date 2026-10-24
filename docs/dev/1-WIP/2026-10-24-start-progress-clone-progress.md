@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — proto contract change, several crates (service, spawn, projects, session-files, agent-launch, daemon-rpc, web generated code), a spawned-process streaming seam, and a filesystem ownership change (temp-dir clone + rename)
-**Stack**: #start-progress 5/8. Base: `feature/start-progress/split-stream`.
+**Stack**: #start-progress 5/8. PR: #738. Base: `feature/start-progress/split-stream`.
 
 ## Initial Discovery
 
@@ -35,7 +35,7 @@ Clone progress and an unbounded, clean clone, for the forked-worker and in-proce
   throttled (≤ 4/s plus every stage change), rename on success, remove on failure, a `CloneHandle` that
   kills the clone's process group; `clone_as_user_with_env` becomes a thin call into it.
 - The worker carries progress as `WorkerEvent::CloneProgress` over node 2's events.
-- `tddy-projects`: the cloner type gains a progress callback.
+- `tddy-projects`: unchanged — the cloner closure built in `spawn_project_clone` captures the progress sink, so `Fn(&str, &Path) -> Result<(), String>` stays (decided at the contract commit).
 - `tddy-session-files`: `AttachmentProgressSink::clone_progress(..)`.
 - `tddy-agent-launch`: `provision_project_for_start` brackets a real clone with `STEP_CLONE` and feeds
   progress into the sink; the clone deadline (`tokio::time::timeout(spawn_worker_request_timeout, …)`)
@@ -91,7 +91,6 @@ pub fn clone_with_progress(os_user: &str, git_url: &str, destination: &Path, env
     on_started: impl FnOnce(CloneHandle), on_progress: impl FnMut(GitProgress)) -> anyhow::Result<()>;
 
 // tddy-spawn/src/spawn_worker/wire.rs — WorkerEvent::CloneProgress(GitProgress)
-// tddy-projects/src/project_provision.rs — C: Fn(&str, &Path, &mut dyn FnMut(GitProgress)) -> Result<(), String>
 // tddy-session-files — AttachmentProgressSink::clone_progress(&self, CloneProgress)
 ```
 
@@ -109,7 +108,6 @@ streams over node 2's events; both must be green. Nothing from nodes 3 or 4 is e
 
 - **tddy-service**: `proto/session.proto` (+ generated code)
 - **tddy-spawn**: [README.md](../../../packages/tddy-spawn/README.md), [clone-ssh-environment.md](../../../packages/tddy-spawn/docs/clone-ssh-environment.md) — streamed clone
-- **tddy-projects**: cloner signature
 - **tddy-session-files**: sink method
 - **tddy-agent-launch**: [README.md](../../../packages/tddy-agent-launch/README.md) — clone step, no deadline
 - **tddy-daemon-rpc**: CreateProject / AddProjectToHost deadline removal
@@ -138,7 +136,7 @@ start's `test -e` skips.
 - [ ] `git_progress::parse` + `ProgressThrottle`
 - [ ] `clone_with_progress`: `--progress`, temp dir + rename, remove on failure, `CloneHandle::stop`
 - [ ] Worker relays `WorkerEvent::CloneProgress`
-- [ ] Cloner signature with progress; sink `clone_progress`
+- [ ] Sink `clone_progress`; the cloner closure captures it
 - [ ] Session start: `STEP_CLONE` + progress; deadline removed
 - [ ] CreateProject / AddProjectToHost: deadline removed
 - [ ] TODO: stream CreateProject / AddProjectToHost
@@ -180,6 +178,14 @@ with a project whose main repo is absent so the start clones from a local origin
 | `a_start_clone_outlives_the_spawn_worker_request_timeout` | same | no deadline |
 | `create_project_clones_past_the_spawn_worker_request_timeout` | `packages/tddy-daemon-rpc/tests/create_project_acceptance.rs` | no deadline |
 
+⚠ **Deferred to `/green`, not written at the contract commit:** `a_start_clone_outlives_the_spawn_worker_request_timeout`
+and `create_project_clones_past_the_spawn_worker_request_timeout`. Both need a clone slower than a 1 s
+`spawn_worker_request_timeout_secs`, and neither path lets a test put a slow fake `git` on the child's `PATH`
+(the session clone's env comes from `ClonePlanner`, CreateProject's is empty; mutating process `PATH` is
+forbidden in tests). `/green` adds the seam with the deadline removal. `a_start_whose_project_is_present_reports_no_clone_step`
+is the existing `starting_a_session_streams_worktree_then_agent_phases_before_the_result`, whose exact
+sequence already excludes a clone step.
+
 ## Technical Debt & Production Readiness
 
 ## Decisions & Trade-offs
@@ -209,10 +215,10 @@ with a project whose main repo is absent so the start clones from a local origin
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests (`./test -p tddy-spawn -p tddy-projects -p tddy-session-files -p tddy-agent-launch -p tddy-session-lifecycle -p tddy-daemon-rpc`); full-workspace result from CI
