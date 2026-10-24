@@ -63,20 +63,21 @@ pub fn read_conversation_transcript(
 }
 
 /// Fold the subagent-conversation entries of a transcript into one entry per conversation, in the
-/// place of the first frame that named it, carrying the status and stamp of the last. Every other
-/// frame is kept as it was, in order.
+/// place of the first frame that named it, carrying the status and stamp of the last and the title the
+/// conversation's calls name between them. Every other frame is kept as it was, in order.
 pub fn fold_subagent_calls(frames: Vec<AcpAgentMessage>) -> Vec<AcpAgentMessage> {
     let latest: HashMap<String, AcpAgentMessage> = frames
         .iter()
         .filter_map(|frame| subagent_entry_id(frame).map(|id| (id.to_string(), frame.clone())))
         .collect();
+    let titles = conversation_titles(&frames);
     let mut emitted: HashSet<String> = HashSet::new();
     let mut folded = Vec::with_capacity(frames.len());
     for frame in frames {
         match subagent_entry_id(&frame).map(str::to_string) {
             Some(id) => {
                 if emitted.insert(id.clone()) {
-                    folded.push(with_state_of(frame, &latest[&id]));
+                    folded.push(with_state_of(frame, &latest[&id], &titles[&id]));
                 }
             }
             None => folded.push(frame),
@@ -90,9 +91,63 @@ fn subagent_entry_id(frame: &AcpAgentMessage) -> Option<&str> {
     tool_call_id_of(frame).filter(|id| id.starts_with(SUBAGENT_TOOL_CALL_PREFIX))
 }
 
-/// `first`, carrying the status, output and stamp `last` left it in: the entry a conversation's first
-/// call opened, in the state its last call put it.
-fn with_state_of(mut first: AcpAgentMessage, last: &AcpAgentMessage) -> AcpAgentMessage {
+/// The title of every conversation entry in `frames`, from the arguments of all the calls that name it.
+/// The agent is named by the first call that names one, and the prompt is carried by a later call, so
+/// the title needs the whole conversation rather than the first frame alone.
+fn conversation_titles(frames: &[AcpAgentMessage]) -> HashMap<String, String> {
+    let mut arguments: HashMap<&str, Vec<serde_json::Value>> = HashMap::new();
+    for frame in frames {
+        if let Some(entry_id) = subagent_entry_id(frame) {
+            arguments
+                .entry(entry_id)
+                .or_default()
+                .extend(raw_input_of(frame));
+        }
+    }
+    frames
+        .iter()
+        .filter_map(subagent_entry_id)
+        .map(|entry_id| {
+            let calls = arguments
+                .get(entry_id)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let title = conversation_title(conversation_of(entry_id), calls);
+            (entry_id.to_string(), title)
+        })
+        .collect()
+}
+
+/// The conversation an entry id names: the id less [`SUBAGENT_TOOL_CALL_PREFIX`].
+fn conversation_of(entry_id: &str) -> &str {
+    entry_id
+        .strip_prefix(SUBAGENT_TOOL_CALL_PREFIX)
+        .unwrap_or(entry_id)
+}
+
+/// The arguments a tool-call frame carries, as JSON, when it carries any.
+fn raw_input_of(frame: &AcpAgentMessage) -> Option<serde_json::Value> {
+    let Some(acp_agent_message::Msg::SessionUpdate(note)) = &frame.msg else {
+        return None;
+    };
+    let Some(session_update::Update::ToolCall(call)) = note
+        .update
+        .as_ref()
+        .and_then(|update| update.update.as_ref())
+    else {
+        return None;
+    };
+    serde_json::from_str(call.raw_input.as_deref()?).ok()
+}
+
+/// `first`, carrying `title` and the status, output and stamp `last` left it in: the entry a
+/// conversation's first call opened, named for the whole conversation and in the state its last call
+/// put it.
+fn with_state_of(
+    mut first: AcpAgentMessage,
+    last: &AcpAgentMessage,
+    title: &str,
+) -> AcpAgentMessage {
     if let Some(acp_agent_message::Msg::SessionUpdate(note)) = first.msg.as_mut() {
         if let Some(acp_agent_message::Msg::SessionUpdate(last_note)) = &last.msg {
             note.timestamp_unix_ms = last_note.timestamp_unix_ms;
@@ -108,6 +163,7 @@ fn with_state_of(mut first: AcpAgentMessage, last: &AcpAgentMessage) -> AcpAgent
                     .as_ref()
                     .and_then(|update| update.update.as_ref()),
             ) {
+                call.title = title.to_string();
                 call.status = last_call.status;
                 call.raw_output = last_call.raw_output.clone();
             }
@@ -120,7 +176,8 @@ fn with_state_of(mut first: AcpAgentMessage, last: &AcpAgentMessage) -> AcpAgent
 pub struct SubagentEntry {
     /// `SUBAGENT_TOOL_CALL_PREFIX` + the conversation id.
     pub tool_call_id: String,
-    /// `"<agent> · <first prompt>"`, from whichever of the two the call names.
+    /// `"<agent>: <first prompt>"`, from the parts this call names. The fold replaces it with the title
+    /// of the whole conversation, since one call may name only the agent or only the prompt.
     pub title: String,
     pub status: ToolCallStatus,
 }
@@ -134,7 +191,7 @@ pub fn subagent_entry_of(record: &AgentActivityRecord) -> Option<SubagentEntry> 
     let conversation_id = conversation_named_by(record)?;
     Some(SubagentEntry {
         tool_call_id: format!("{SUBAGENT_TOOL_CALL_PREFIX}{conversation_id}"),
-        title: entry_title(&conversation_id, &record.input),
+        title: conversation_title(&conversation_id, std::slice::from_ref(&record.input)),
         status: entry_status(record),
     })
 }
@@ -152,21 +209,30 @@ fn conversation_named_by(record: &AgentActivityRecord) -> Option<String> {
         .map(str::to_string)
 }
 
-/// `"<agent> · <first prompt>"` from the parts the call names, or the conversation id when it names
-/// neither.
-fn entry_title(conversation_id: &str, input: &serde_json::Value) -> String {
-    let agent = input
-        .get("agent")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|agent| !agent.is_empty());
-    let prompt = prompt_summary(input.get("prompt"));
-    let parts: Vec<&str> = [agent, prompt.as_deref()].into_iter().flatten().collect();
+/// `"<agent>: <first prompt>"` from the parts the calls name, or the conversation id when they name
+/// neither. The agent is the id a `subagent_new_session` call named it by, because an activity record
+/// carries no label: the label lives on the roster row. The prompt is the first call's that carries one.
+fn conversation_title(conversation_id: &str, inputs: &[serde_json::Value]) -> String {
+    let agent = inputs.iter().find_map(named_agent);
+    let prompt = inputs
+        .iter()
+        .find_map(|input| prompt_summary(input.get("prompt")));
+    let parts: Vec<String> = [agent, prompt].into_iter().flatten().collect();
     if parts.is_empty() {
         conversation_id.to_string()
     } else {
-        parts.join(" · ")
+        parts.join(": ")
     }
+}
+
+/// The agent a call names, trimmed, unless it names none or a blank one.
+fn named_agent(input: &serde_json::Value) -> Option<String> {
+    input
+        .get("agent")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty())
+        .map(str::to_string)
 }
 
 /// The first non-blank line of a prompt, cut to [`PROMPT_SUMMARY_CHARS`]. A prompt is a bare string or
