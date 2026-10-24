@@ -20,11 +20,22 @@ use std::sync::Arc;
 
 use std::path::PathBuf;
 
+/// Work to finish for a terminal once its process has exited and its output is complete, before the
+/// terminal is deregistered: it receives the terminal's capture, and the terminal stays registered
+/// (so a resume cannot start) until the returned future completes.
+pub type ExitHook = Box<
+    dyn FnOnce(
+            Arc<std::sync::Mutex<tddy_task::TerminalCapture>>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send,
+>;
+
 impl CliSessionManager {
     /// Spawn `argv` in a PTY as an identified tool and register it under `(session_id, terminal_id)`.
     ///
     /// Shared by [`start`](Self::start) (the `claude` tool) and
-    /// [`start_terminal`](Self::start_terminal) (Bash tools).
+    /// [`start_terminal`](Self::start_terminal) (Bash tools). `on_exit` runs to completion when the
+    /// process has exited, before the terminal is deregistered.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn spawn_tool(
         &self,
@@ -36,6 +47,7 @@ impl CliSessionManager {
         argv: Vec<String>,
         env: Vec<(String, String)>,
         os_user: Option<&str>,
+        on_exit: Option<ExitHook>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
         let spec = PtySpawnSpec {
@@ -75,6 +87,7 @@ impl CliSessionManager {
             session_id.to_string(),
             terminal_id.to_string(),
             handle.task_id.clone(),
+            on_exit,
         );
 
         log::info!(
@@ -142,6 +155,7 @@ impl CliSessionManager {
         session_id: String,
         terminal_id: String,
         task_id: TaskId,
+        on_exit: Option<ExitHook>,
     ) {
         let terminals = Arc::clone(&self.terminals);
         let managed_workflows = Arc::clone(&self.managed_workflows);
@@ -159,6 +173,13 @@ impl CliSessionManager {
                 }
                 if status_rx.changed().await.is_err() {
                     break;
+                }
+            }
+            // The process has exited and its output is complete. The hook finishes before the
+            // terminal leaves the index, so whoever sees it gone sees the hook's work.
+            if let Some(on_exit) = on_exit {
+                if let Some(channel) = task.channel("0") {
+                    on_exit(channel.capture_arc()).await;
                 }
             }
             let mut reg = terminals.write().await;

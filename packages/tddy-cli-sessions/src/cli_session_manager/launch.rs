@@ -6,6 +6,8 @@ use std::path::Path;
 
 use tddy_core::cli_harness::{CliHarness, CliLaunch};
 
+use super::pty_spawn::ExitHook;
+
 use super::MAIN_TERMINAL_ID;
 
 use std::sync::Arc;
@@ -18,6 +20,8 @@ impl CliSessionManager {
     ///
     /// `extra_args` follow the harness's own argv (a provider route's `--model`), and `env` is
     /// applied to the child on top of the daemon's (a route's configuration variable and key).
+    /// `on_exit` runs to completion once the process has exited, before its terminal is deregistered.
+    #[allow(clippy::too_many_arguments)]
     pub async fn launch_cli_harness(
         &self,
         harness: &CliHarness,
@@ -26,6 +30,7 @@ impl CliSessionManager {
         launch: &CliLaunch<'_>,
         extra_args: Vec<String>,
         env: Vec<(String, String)>,
+        on_exit: Option<ExitHook>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let mut argv = (harness.argv)(launch);
         argv.extend(extra_args);
@@ -38,6 +43,7 @@ impl CliSessionManager {
             argv,
             env,
             None,
+            on_exit,
         )
         .await
     }
@@ -66,6 +72,7 @@ impl CliSessionManager {
             model,
             argv,
             env,
+            None,
             None,
         )
         .await
@@ -206,6 +213,7 @@ impl CliSessionManager {
             argv,
             env,
             os_user,
+            None,
         )
         .await
     }

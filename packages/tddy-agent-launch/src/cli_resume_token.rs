@@ -2,56 +2,65 @@
 //! later resume continues that conversation.
 //!
 //! Warp prints `warp --resume <TOKEN>` only as it exits, so the token exists only in the terminal's
-//! output once the process has ended. The watcher waits for the terminal to finish, reads its
-//! capture and records the token the harness parser finds. It writes nothing when the run printed
+//! output once the process has ended. The recorder is an [`ExitHook`] the session manager runs once
+//! the process has exited and its output is complete, **before** the terminal is deregistered: whoever
+//! sees the terminal gone, and resumes, reads the new token. It writes nothing when the run printed
 //! none, and it changes no field but `harness_resume_token`.
 //!
-//! It is spawned after the session's metadata is written, never before: the start or the resume
-//! writes the whole metadata, and that write would overwrite a token a watcher had recorded first.
+//! The hook is handed over at spawn, so a fast exit cannot slip past it, but it is held until the
+//! caller [arms](ResumeTokenArm::arm) it: the start or the resume writes the whole metadata, and that
+//! write would overwrite a token recorded first. A caller that never arms it (it failed before the
+//! metadata was written) records nothing.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
+use tddy_cli_sessions::cli_session_manager::ExitHook;
 use tddy_core::cli_harness_warp::resume_token_from_output;
 use tddy_core::{read_session_metadata, write_session_metadata};
+use tokio::sync::oneshot;
 
-/// Records the resume token `handle`'s terminal prints as it exits into `session_dir`'s metadata.
-/// Runs in the background; a run that prints no token leaves the recorded one as it is.
-// FIXME(warp-cli-session): two orderings are not enforced. (a) The terminal is deregistered from
-// `CliSessionManager` on the same status change that releases this watcher, so a resume that lands
-// in the gap reads the previous token. (b) The PTY reader is not joined before the exit status is
-// reported (`tddy-pty` runtime), so the capture can trail `pty_done` and miss the final output. Both
-// need a change to the PTY and session-manager runtime, outside this node.
-pub(crate) fn watch_for_resume_token(handle: &PtyHandle, session_dir: PathBuf) {
-    let capture = Arc::clone(&handle.capture);
-    let mut pty_done = handle.pty_done.clone();
-    tokio::spawn(async move {
-        // The sender is dropped only once the terminal has finished, so an error here means the
-        // terminal was torn down without finishing: there is no complete output to read.
-        if pty_done.wait_for(|done| *done).await.is_err() {
-            return;
-        }
-        let output = match capture.lock() {
-            Ok(capture) => capture.buffered_bytes().to_vec(),
-            Err(_) => {
-                log::warn!(
-                    "resume token not read: the terminal capture of {} is poisoned",
-                    session_dir.display()
-                );
+/// Releases the recorder built by [`resume_token_recorder`] once the session's metadata is on disk.
+pub(crate) struct ResumeTokenArm(oneshot::Sender<()>);
+
+impl ResumeTokenArm {
+    /// The metadata is written: the recorder may now add the token to it.
+    pub(crate) fn arm(self) {
+        let _ = self.0.send(());
+    }
+}
+
+/// The hook recording the resume token `session_dir`'s terminal prints as it exits, and the arm that
+/// releases it. A run that prints no token leaves the recorded one as it is.
+pub(crate) fn resume_token_recorder(session_dir: PathBuf) -> (ExitHook, ResumeTokenArm) {
+    let (arm_tx, arm_rx) = oneshot::channel();
+    let hook: ExitHook = Box::new(move |capture| {
+        Box::pin(async move {
+            // A dropped arm: the start or resume failed before writing the metadata.
+            if arm_rx.await.is_err() {
                 return;
             }
-        };
-        let Some(token) = resume_token_from_output(&output) else {
-            return;
-        };
-        if let Err(e) = record_resume_token(&session_dir, &token) {
-            log::warn!(
-                "failed to record the resume token in {}: {e}",
-                session_dir.display()
-            );
-        }
+            let output = match capture.lock() {
+                Ok(capture) => capture.buffered_bytes().to_vec(),
+                Err(_) => {
+                    log::warn!(
+                        "resume token not read: the terminal capture of {} is poisoned",
+                        session_dir.display()
+                    );
+                    return;
+                }
+            };
+            let Some(token) = resume_token_from_output(&output) else {
+                return;
+            };
+            if let Err(e) = record_resume_token(&session_dir, &token) {
+                log::warn!(
+                    "failed to record the resume token in {}: {e}",
+                    session_dir.display()
+                );
+            }
+        })
     });
+    (hook, ResumeTokenArm(arm_tx))
 }
 
 /// Writes `token` as the session's resume token, every other field of its metadata as it was read.
