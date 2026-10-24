@@ -14,6 +14,7 @@
 |---|---|---|---|
 | 2026-09-19 | 0 | 5 | first detection |
 | 2026-09-26 | 0 | 5 | #526 (`#carve` 15/21) moved `pty_runtime` whole to `tddy-terminal-rpc`, the five tests with it (`:175`, `:193`, `:215`, `:225`, `:236`). Still in a consumer crate, still reached through `pty_runtime`'s re-export; `privilege_drop.rs` still has no `#[cfg(test)]` |
+| 2026-10-24 | 0 | 5 | touched by #734 (`#start-progress` 1/8), **unchanged**: `privilege_drop.rs` gained `TargetAccount`, `resolve_target_account`, `EffectiveIdentity`, `plan_privilege_change(_from)`; their tests are in this crate (`tests/privilege_change_acceptance.rs`). The five original tests were not moved; `privilege_drop.rs` still has no `#[cfg(test)]` |
 
 ## What the tool found
 

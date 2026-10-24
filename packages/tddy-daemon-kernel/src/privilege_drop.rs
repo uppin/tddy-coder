@@ -138,6 +138,8 @@ pub fn resolve_target_account(os_user: &str) -> Result<TargetAccount, String> {
     let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
     let mut buf = vec![0u8; 16384];
     let mut result = std::ptr::null_mut();
+    // SAFETY: `name` is a live C string, `passwd` and `buf` outlive the call, and `buf.len()` is
+    // the size of `buf`; `getpwnam_r` writes only into them and `result`.
     let ret = unsafe {
         libc::getpwnam_r(
             name.as_ptr(),
@@ -156,6 +158,7 @@ pub fn resolve_target_account(os_user: &str) -> Result<TargetAccount, String> {
     if entry.pw_dir.is_null() {
         return Err(format!("user '{os_user}' has no home directory"));
     }
+    // SAFETY: `pw_dir` was checked non-null above and is a NUL-terminated string inside `buf`.
     let home = unsafe { std::ffi::CStr::from_ptr(entry.pw_dir) }
         .to_string_lossy()
         .into_owned();
@@ -244,6 +247,8 @@ fn login_name_of(uid: u32) -> Option<String> {
     let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
     let mut buf = vec![0u8; 16384];
     let mut result = std::ptr::null_mut();
+    // SAFETY: `passwd` and `buf` outlive the call and `buf.len()` is the size of `buf`;
+    // `getpwuid_r` writes only into them and `result`.
     let ret = unsafe {
         libc::getpwuid_r(
             uid,
@@ -262,6 +267,7 @@ fn login_name_of(uid: u32) -> Option<String> {
         return None;
     }
     Some(
+        // SAFETY: `pw_name` was checked non-null above and is a NUL-terminated string inside `buf`.
         unsafe { std::ffi::CStr::from_ptr(entry.pw_name) }
             .to_string_lossy()
             .into_owned(),

@@ -6,7 +6,7 @@
 //! child held mid-`pre_exec` cannot be produced without a test-only hook in production code, so the
 //! heartbeat is pinned on the watcher itself, fed by a pipe this test writes.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-spawn-diag.md
+//! Feature docs: docs/ft/daemon/project-concept.md (Cloning at session start)
 #![cfg(unix)]
 
 mod support;

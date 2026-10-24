@@ -15,3 +15,11 @@
 - Needs a **deployment decision**, not a code fix in isolation: either the supervisor brokers the
   spawn, or the daemon keeps a capability that lets it change user, or the feature is documented as
   single-user on supervised installs. Not verifiable locally, and not one node's call.
+
+## Update 2026-10-24 — #734 (`#start-progress` 1/8)
+
+Still open. The privilege drop now lives in `tddy_daemon_kernel::pre_exec_stages` and makes no
+`initgroups` call, and a non-root daemon no longer forks into an `EPERM`: `plan_privilege_change`
+refuses **before forking** with `CannotBecomeUser`, naming both users and the supervisor. The probe
+still fails on the supervised deployment shape; the deployment answer is `#start-progress` 3/8's
+supervisor handoff.

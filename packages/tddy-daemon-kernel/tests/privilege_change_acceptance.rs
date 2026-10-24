@@ -4,7 +4,7 @@
 //! The decision is a pure function of the target account and the current effective identity
 //! (`plan_privilege_change_from`), so every case runs on a non-root developer machine or CI runner.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-spawn-diag.md
+//! Feature docs: docs/ft/daemon/project-concept.md (Cloning at session start)
 #![cfg(unix)]
 
 use tddy_daemon_kernel::privilege_drop::{

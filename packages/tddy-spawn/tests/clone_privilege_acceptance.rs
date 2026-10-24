@@ -8,7 +8,7 @@
 //! child deadlocks in `pre_exec` and the clone never returns, which must fail this test rather than
 //! hang the suite.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-spawn-diag.md
+//! Feature docs: docs/ft/daemon/project-concept.md (Cloning at session start)
 #![cfg(unix)]
 
 use std::time::{Duration, Instant};

@@ -5,7 +5,7 @@
 //! The spawn paths are read as source: both calls are a defect wherever they appear in these
 //! files, since every privilege drop now goes through `tddy_daemon_kernel::pre_exec_stages`.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-spawn-diag.md
+//! Feature docs: docs/ft/daemon/project-concept.md (Cloning at session start)
 
 const SPAWN_PATHS: [(&str, &str); 2] = [
     (
