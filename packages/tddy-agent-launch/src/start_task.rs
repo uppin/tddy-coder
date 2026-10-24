@@ -3,11 +3,19 @@
 //! The task names itself to the caller first (`StartSessionEvent.started`), runs the start with its
 //! cancellation token, and ends the stream with the start's result — or, when the task was
 //! cancelled, with `CANCELLED`.
+//!
+//! A cancel that lands while a step past the clone is already running (a worktree being cut, an
+//! agent being spawned) does not interrupt that step: the start finishes it, and the session it
+//! created is then deleted — its agent stopped, its worktree and its directory removed — exactly as
+//! a Delete would, before the stream ends `CANCELLED`.
 
 use async_trait::async_trait;
-use tddy_rpc::Status;
+use tddy_rpc::{Request, Status};
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
-use tddy_service::proto::session::{StartSessionEvent, StartSessionRequest, StartTaskStarted};
+use tddy_service::proto::session::{
+    DeleteSessionRequest, StartSessionEvent, StartSessionRequest, StartSessionResponse,
+    StartTaskStarted,
+};
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_task::{TaskBody, TaskContext, TaskStatus};
 use tokio::sync::mpsc::UnboundedSender;
@@ -16,6 +24,7 @@ use crate::launch_ports::LaunchSessions;
 use crate::start_keepalive::{
     with_activity_keepalive, STARTING_ACTIVITY, START_KEEPALIVE_INTERVAL,
 };
+use crate::svc_start_session_core::START_CANCELLED;
 
 /// The `kind` a start task is registered under.
 pub(crate) const START_TASK_KIND: &str = "start_session";
@@ -46,14 +55,22 @@ impl TaskBody for StartTask {
                 daemon_instance_id,
             })),
         }));
-        let ended = run_start(&service, req, &tx, &ctx.cancel_token()).await;
-        let status = match &ended {
-            Ok(()) => TaskStatus::Completed { exit_code: Some(0) },
-            Err(status) if status.code == tddy_rpc::Code::Cancelled => TaskStatus::Cancelled,
-            Err(status) => TaskStatus::Failed {
-                message: status.message.clone(),
-            },
+        let cancel = ctx.cancel_token();
+        let session_token = req.session_token.clone();
+        let started = run_start(&service, req, &tx, &cancel).await;
+        let ended = match started {
+            Ok(response) if cancel.is_cancelled() => {
+                Err(undo_a_cancelled_start(&service, &response, session_token).await)
+            }
+            Ok(response) => {
+                let _ = tx.send(Ok(StartSessionEvent {
+                    event: Some(StartSessionEventKind::Result(response)),
+                }));
+                Ok(())
+            }
+            Err(status) => Err(status),
         };
+        let status = task_status_of(&ended);
         // The terminal event goes out last: every progress event ahead of it was forwarded first.
         if let Err(status) = ended {
             let _ = tx.send(Err(status));
@@ -62,14 +79,57 @@ impl TaskBody for StartTask {
     }
 }
 
-/// Run the start, reporting into `tx`; on success its result event is sent here, on failure the
-/// status is returned for the caller to end the stream with.
+/// What the registry records for a start that ended this way.
+fn task_status_of(ended: &Result<(), Status>) -> TaskStatus {
+    match ended {
+        Ok(()) => TaskStatus::Completed { exit_code: Some(0) },
+        Err(status) if status.code == tddy_rpc::Code::Cancelled => TaskStatus::Cancelled,
+        Err(status) => TaskStatus::Failed {
+            message: status.message.clone(),
+        },
+    }
+}
+
+/// The start finished a step the cancel could not interrupt: delete the session it created, so a
+/// cancelled start leaves no session directory, worktree or agent behind. Returns the status the
+/// stream ends with — `CANCELLED`, unless the session could not be removed.
+async fn undo_a_cancelled_start(
+    service: &LaunchSessions,
+    created: &StartSessionResponse,
+    session_token: String,
+) -> Status {
+    if created.session_id.is_empty() {
+        return Status::cancelled(START_CANCELLED);
+    }
+    let deleted = service
+        .delete_session_at_session_coordinate(Request::direct(DeleteSessionRequest {
+            session_id: created.session_id.clone(),
+            session_token,
+        }))
+        .await;
+    match deleted {
+        Ok(_) => Status::cancelled(START_CANCELLED),
+        Err(status) => {
+            log::warn!(
+                "StreamStartSession: the cancelled start's session {} could not be removed: {status}",
+                created.session_id
+            );
+            Status::internal(format!(
+                "start cancelled, but its session {} could not be removed: {}",
+                created.session_id, status.message
+            ))
+        }
+    }
+}
+
+/// Run the start, forwarding its progress into `tx`, and return what it answered — the caller
+/// decides whether that is sent as the result or undone.
 async fn run_start(
     service: &LaunchSessions,
     req: StartSessionRequest,
     tx: &StartEvents,
     cancel: &tddy_task::CancellationToken,
-) -> Result<(), Status> {
+) -> Result<StartSessionResponse, Status> {
     let (conn_progress_tx, mut conn_progress_rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<StartSessionEvent, Status>>();
     let session_tx = tx.clone();
@@ -100,9 +160,5 @@ async fn run_start(
             "StreamStartSession: the start's progress forwarding task ended abnormally: {err}"
         );
     }
-    let response = started?.into_inner();
-    let _ = tx.send(Ok(StartSessionEvent {
-        event: Some(StartSessionEventKind::Result(response)),
-    }));
-    Ok(())
+    Ok(started?.into_inner())
 }

@@ -6,6 +6,7 @@ import type { CatalogService } from "../../gen/catalog_pb";
 import type { PrStackService } from "../../gen/pr_stack_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
+import type { TaskService } from "../../gen/tasks_pb";
 import type { SessionAttachmentHint } from "../../rpc/connections/session";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { sessionPaneIsWorkflowView } from "./attachClaim";
@@ -18,6 +19,7 @@ type CatalogClient = Client<typeof CatalogService>;
 type PrStackClient = Client<typeof PrStackService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
+type TaskClient = Client<typeof TaskService>;
 
 /** Extra context a custom workflow view may need beyond the selected session itself. */
 export interface WorkflowViewContext {
@@ -35,6 +37,11 @@ export interface WorkflowViewContext {
    * worktrees from its Start-session dialog's host-document picker.
    */
   worktreeClient?: WorktreeClient;
+  /**
+   * The task service on the same host as `client`. Only the PR-Stack view uses it, so its
+   * Start-session dialog can cancel a start in progress.
+   */
+  taskClient?: TaskClient;
   sessionToken?: string;
   /**
    * How the attached session is reached. Custom views that need a LiveKit room (e.g. the PR-Stack
@@ -108,6 +115,7 @@ export function resolveWorkflowView(
         prStackClient={context.prStackClient}
         sessionFilesClient={context.sessionFilesClient}
         worktreeClient={context.worktreeClient}
+        taskClient={context.taskClient}
         sessionToken={context.sessionToken}
         sessions={context.sessions}
         attachmentHint={context.attachmentHint}

@@ -124,6 +124,7 @@ export function SessionMainPane({
         prStackClient,
         sessionFilesClient,
         worktreeClient,
+        taskClient,
         sessionToken,
         attachmentHint,
         sessions: [...sessions],

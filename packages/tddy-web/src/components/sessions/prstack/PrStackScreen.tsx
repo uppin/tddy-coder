@@ -6,6 +6,7 @@ import type { CatalogService } from "../../../gen/catalog_pb";
 import type { PrStackService } from "../../../gen/pr_stack_pb";
 import type { SessionFilesService } from "../../../gen/session_files_pb";
 import type { WorktreeService } from "../../../gen/worktree_pb";
+import type { TaskService } from "../../../gen/tasks_pb";
 import type { SessionAttachmentHint } from "../../../rpc/connections/session";
 import { Button } from "../../ui/button";
 import { detectIsMobile, useIsMobile } from "../../../hooks/useIsMobile";
@@ -36,6 +37,7 @@ type CatalogClient = Client<typeof CatalogService>;
 type PrStackClient = Client<typeof PrStackService>;
 type SessionFilesClient = Client<typeof SessionFilesService>;
 type WorktreeClient = Client<typeof WorktreeService>;
+type TaskClient = Client<typeof TaskService>;
 
 /**
  * The default for a caller that parses no participant metadata.
@@ -100,6 +102,8 @@ export interface PrStackScreenProps {
    * reachable yet, and the dialog is not offered at all without both.
    */
   worktreeClient?: WorktreeClient;
+  /** The task service on the same host as `client`: the Start-session dialog cancels a start through it. */
+  taskClient?: TaskClient;
   sessionToken?: string;
   /**
    * The full session list (all hosts). Used to resolve each planned node's in-progress child
@@ -172,6 +176,7 @@ export function PrStackScreen({
   catalogClient,
   sessionFilesClient,
   worktreeClient,
+  taskClient,
   sessionToken = "",
   sessions = [],
   attachmentHint = null,
@@ -687,6 +692,7 @@ export function PrStackScreen({
           catalogClient={catalogClient}
           sessionFilesClient={sessionFilesClient}
           worktreeClient={worktreeClient}
+          taskClient={taskClient}
           sessionToken={sessionToken}
           initialValues={startSessionInitialValues}
           onClose={() => setStartSessionNode(null)}

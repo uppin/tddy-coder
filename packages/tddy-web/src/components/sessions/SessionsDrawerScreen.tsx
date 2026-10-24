@@ -182,6 +182,7 @@ export function SessionsDrawerScreen({
     activeCatalogClient,
     activeExecToolClient,
     activePrStackClient,
+    activeTaskClient,
     activeHost,
   } = useSessionsDrawerOwningHost(selectedSession, selectedInstanceId);
 
@@ -421,7 +422,11 @@ export function SessionsDrawerScreen({
               isCreating={mode === "creating"}
               client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
               projectClient={projectClient ?? undefined}
-              taskClient={mode === "creating" ? (taskClient ?? undefined) : undefined}
+              taskClient={
+                mode === "creating"
+                  ? (taskClient ?? undefined)
+                  : (activeTaskClient ?? taskClient ?? undefined)
+              }
               worktreeClient={
                 mode === "creating"
                   ? (worktreeClient ?? undefined)
