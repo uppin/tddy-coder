@@ -36,13 +36,13 @@ use tddy_service::proto::session_agents_svc::{
 use tddy_worktree_service::stream::MpscResultStream;
 
 use tddy_discovery::subagent::{
-    AnsweredBy, MessageDescriptor, MessageId, MessageRole, PermissionAnswer, PromptOutcome,
-    SubagentSession, TurnRequest,
+    AnsweredBy, MessageDescriptor, MessageId, MessageRole, PermissionAnswer, PermissionAnswering,
+    PromptOutcome, SubagentSession, TurnRequest,
 };
 use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
 use crate::agent_conversations::{AgentConversation, PromptRouting};
-use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder};
+use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder, SessionClaim};
 use crate::ports::SessionAgentPorts;
 use crate::session_agent_status::ManagedAgentState;
 
@@ -226,6 +226,20 @@ impl SessionAgentServiceImpl {
         // What the conversation's transcript records as the prompt; `None` for a resume.
         let prompt = requested.prompt_text().map(str::to_string);
 
+        // A permission answer is claimed before the badge is stamped: when it is refused as delivered it
+        // starts no turn, so the conversation's badge keeps showing the turn it is still running.
+        let claimed = match (&routing, requested.permission_answer()) {
+            (
+                PromptRouting::Local {
+                    session,
+                    answering: Some(answering),
+                    ..
+                },
+                Some(answer),
+            ) => Some(claim_for_answer(session, &**answering, answer)?),
+            _ => None,
+        };
+
         // Stamped before either branch runs, so the badge changes when the turn starts rather than
         // when it is first observed to have started.
         self.note_agent_activity(
@@ -236,12 +250,19 @@ impl SessionAgentServiceImpl {
             turn.activity_summary(),
         );
 
-        let (session, closed, recorder) = match routing {
+        let (claim, closed, recorder) = match routing {
             PromptRouting::Local {
                 session,
                 closed,
                 recorder,
-            } => (session, closed, recorder),
+                ..
+            } => {
+                let claim = match claimed {
+                    Some(guard) => SessionClaim::Claimed(guard),
+                    None => SessionClaim::Wait(session),
+                };
+                (claim, closed, recorder)
+            }
             PromptRouting::Remote(daemon_instance_id) => {
                 self.ports
                     .sessions
@@ -281,8 +302,7 @@ impl SessionAgentServiceImpl {
             // Recorded before the answer goes out, so a transcript read after the answer arrives already holds
             // the turn. A turn that cannot be written fails rather than answering: the caller would take an answer
             // the conversation's record does not hold, and a replay would show a conversation that never had this turn.
-            match take_recorded_turn(&session, &recorder, &closed, requested, prompt.as_deref())
-                .await
+            match take_recorded_turn(claim, &recorder, &closed, requested, prompt.as_deref()).await
             {
                 Ok(outcome) => {
                     // Framed rather than sent whole: over LiveKit anything past MAX_CHUNK_FRAME_BYTES is
@@ -1231,6 +1251,34 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         Ok(Response::new(AnswerAgentPermissionResponse {
             answered_by: login,
         }))
+    }
+}
+
+/// Claim `session` for a turn that delivers a main-agent permission answer, without waiting for it.
+///
+/// A turn already holding the session may be the one waiting on this very request: a request handed to
+/// the user keeps its turn open until it is answered. Waiting for the session would queue the answer
+/// behind the turn it has to release, so the answer is delivered through the conversation's answering
+/// handle instead, and the call is refused as delivered. The turn carries on and returns its outcome to
+/// the call that deferred the request. A refusal of the answer itself (no such pending request, or one
+/// already answered) is returned as it is.
+///
+/// Where nothing holds the session the claim is taken, and the answer runs as any turn's does.
+fn claim_for_answer(
+    session: &Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>,
+    answering: &dyn PermissionAnswering,
+    answer: &PermissionAnswer,
+) -> Result<tokio::sync::OwnedMutexGuard<Box<dyn SubagentSession>>, Status> {
+    match Arc::clone(session).try_lock_owned() {
+        Ok(guard) => Ok(guard),
+        Err(_) => {
+            answering
+                .answer_as(answer, AnsweredBy::MainAgent)
+                .map_err(Status::failed_precondition)?;
+            Err(Status::failed_precondition(
+                crate::permission_wire::answer_delivered_while_held(answer.request_id()),
+            ))
+        }
     }
 }
 

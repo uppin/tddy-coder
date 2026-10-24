@@ -29,7 +29,7 @@ use tddy_service::subagent_conversation_replay::{
     append_conversation_frame, conversation_transcript_dir,
 };
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
-use tokio::sync::{broadcast, mpsc, oneshot, Notify};
+use tokio::sync::{broadcast, mpsc, oneshot, Notify, OwnedMutexGuard};
 
 use crate::conversation_transcript::{
     now_unix_ms, turn_end_frames, user_prompt_frame, whole_turn_frames, TurnEnd,
@@ -228,28 +228,38 @@ impl TurnError {
     }
 }
 
+/// The session a turn runs on: waited for like any turn's, or already claimed by the caller without
+/// waiting.
+pub(crate) enum SessionClaim {
+    /// Taken by the turn, behind any turn already running on the conversation.
+    Wait(Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>),
+    /// Taken by the caller, which found nothing holding the session. See `take_a_turn`: a turn that
+    /// delivers a permission answer claims the session only when nothing holds it, so it never waits
+    /// behind a turn that is waiting for that answer.
+    Claimed(OwnedMutexGuard<Box<dyn SubagentSession>>),
+}
+
 /// Take one turn of a local conversation and record it as it runs.
 ///
 /// The session is held from the turn's start to the end of its recording, so two turns on one conversation
 /// are recorded one after the other: a queued turn's prompt is not written into the middle of the turn before
 /// it. A conversation closed before or during the turn reports it closed, and the turn's end records the stop.
 pub(crate) async fn take_recorded_turn(
-    session: &tokio::sync::Mutex<Box<dyn SubagentSession>>,
+    claim: SessionClaim,
     recorder: &ConversationRecorder,
     closed: &Notify,
     requested: TurnRequest,
     prompt: Option<&str>,
 ) -> Result<PromptOutcome, TurnError> {
-    // FIXME(web-approvals): a turn that defers a permission request to the user holds this lock until
-    // the user answers it, so a main-agent answer taken here waits behind it and is refused only once
-    // the user has answered (already answered by …). The answer should reach the parked request
-    // without this lock, through the conversation's answering handle.
-    let mut session = tokio::select! {
-        // Biased so a conversation already closed is reported as closed rather than racing one more turn out
-        // of a model.
-        biased;
-        _ = closed.notified() => return Err(TurnError::Closed { recording: None }),
-        guard = session.lock() => guard,
+    let mut session = match claim {
+        SessionClaim::Claimed(guard) => guard,
+        SessionClaim::Wait(lock) => tokio::select! {
+            // Biased so a conversation already closed is reported as closed rather than racing one more turn out
+            // of a model.
+            biased;
+            _ = closed.notified() => return Err(TurnError::Closed { recording: None }),
+            guard = lock.lock_owned() => guard,
+        },
     };
     recorder.begin_turn(prompt).map_err(TurnError::Recording)?;
     let taken = tokio::select! {

@@ -91,6 +91,10 @@ pub enum PromptRouting {
         session: Arc<Mutex<Box<dyn SubagentSession>>>,
         closed: Arc<Notify>,
         recorder: Arc<ConversationRecorder>,
+        /// The handle the conversation's parked permission requests are answered through, `None` when
+        /// the session parks none. Carried here so a permission answer can reach a request while a turn
+        /// holds the session, without taking the map's lock again.
+        answering: Option<Arc<dyn PermissionAnswering>>,
     },
     Remote(String),
 }
@@ -137,6 +141,7 @@ impl OpenAgentConversations {
                 session,
                 closed,
                 recorder,
+                answering,
                 agent_id,
                 ..
             } => Some((
@@ -144,6 +149,7 @@ impl OpenAgentConversations {
                     session: Arc::clone(session),
                     closed: Arc::clone(closed),
                     recorder: Arc::clone(recorder),
+                    answering: answering.clone(),
                 },
                 agent_id.clone(),
             )),
