@@ -27,13 +27,18 @@ OpenCode; the interactive OpenCode TUI is the **`opencode-cli`** terminal sessio
 
 ## Behavior
 
-- **Worker:** a dedicated thread with a `tokio::LocalSet`, started on the backend's first command, so
-  a provider route set after construction reaches the agent. `initialize` once, then `new_session`
+- **Driver:** the shared ACP client driver every ACP backend runs on (`claude-acp`, `codex-acp`,
+  `opencode`), started on the backend's first command, so a provider route set after construction
+  reaches the agent. Dropping the backend ends the agent process. `initialize` once, then `new_session`
   (or `load_session` on a resume), then `prompt` with the merged system and user prompt.
 - **Progress:** agent message chunks accumulate into the turn's output; message chunks, tool calls,
   terminal tool states and plan entries reach the `ProgressSink` — the same mapping every ACP backend
   uses.
-- **Permissions:** every request is approved once (`allow-once`); the run is headless.
+- **Model:** off a provider route, the requested model is set on the session (`session/set_model`);
+  a model the agent does not advertise fails the run naming the models it does. On a route the
+  route's configuration selects the model.
+- **Permissions:** every request is answered with the first option the agent offers to allow once; a
+  request with none is cancelled. The run is headless.
 
 ## Running on a provider account
 
