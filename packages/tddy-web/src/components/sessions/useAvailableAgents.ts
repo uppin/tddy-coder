@@ -14,6 +14,7 @@
 
 import { createClient, type Client } from "@connectrpc/connect";
 import { CatalogService, type SubagentInfo } from "../../gen/catalog_pb";
+import { AgentKind } from "../../gen/types_pb";
 import { useHostFanOut, type HostReadFailure, type HostReader } from "../../rpc/useHostFanOut";
 
 type CatalogClient = Client<typeof CatalogService>;
@@ -28,6 +29,10 @@ export interface AvailableAgent {
   readonly daemonInstanceId: string;
   /** Exec tools the main agent loses while this agent is attached. */
   readonly replaces: readonly string[];
+  /** What runs the agent's turns: a model definition, or a coding agent the daemon launches. */
+  readonly kind: AgentKind;
+  /** The harness of a coding agent; empty for a model. */
+  readonly harness: string;
 }
 
 export interface AvailableAgents {
@@ -44,6 +49,9 @@ function availableAgentOf(info: SubagentInfo): AvailableAgent {
     model: info.model,
     daemonInstanceId: info.daemonInstanceId,
     replaces: info.replaces,
+    // TODO(acp-subagent): implement — the row's own kind and harness
+    kind: AgentKind.MODEL,
+    harness: "",
   };
 }
 

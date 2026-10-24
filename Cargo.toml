@@ -47,6 +47,7 @@ members = [
     "packages/tddy-e2e",
     "packages/tddy-livekit",
     "packages/tddy-codegen",
+    "packages/tddy-coding-subagent",
     "packages/tddy-livekit-testkit",
     "packages/tddy-connectrpc",
     "packages/tddy-git",

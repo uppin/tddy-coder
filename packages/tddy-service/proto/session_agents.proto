@@ -344,6 +344,10 @@ message SessionAgentEntry {
   // status is what the agent is doing *now*, and this is the last thing it was seen doing — which is
   // the only useful thing to show for an agent that is idle.
   types.SessionAgentActivity last_activity = 12;
+  // Snapshotted at attach, from the catalog row: what runs this agent's turns.
+  types.AgentKind kind = 13;
+  // The harness of a CODING_AGENT entry; empty for MODEL entries.
+  string harness = 14;
 }
 
 // Every roster read is a WHOLE snapshot. A consumer rebuilds its registry from it and never applies

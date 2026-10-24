@@ -5,7 +5,7 @@
 **Type**: Feature
 **Complexity**: 5 — proto + wire-record change, a new crate, a spawned-as-user process seam, four crates and the web, managed confinement per harness is partly unsettled (see Decisions)
 **Branch**: `feature/coagents/acp-subagent`, base `feature/coagents/acp-driver` (#720) — `#coagents` 2/8
-**PR**: _assigned at wave 1_
+**PR**: [#721](https://github.com/uppin/tddy-coder/pull/721)
 
 ## Initial Discovery
 
@@ -183,42 +183,52 @@ observable without root); Cypress component tests for the badge (`mountWithRpc` 
 
 ## Acceptance Tests
 
-`packages/tddy-coding-subagent/tests/coding_agent_session_acceptance.rs` (`#[serial]`, stub binary):
+Run with `cargo build -p tddy-acp-stub` first (the session and daemon suites spawn it), then
+`cargo test -p tddy-coding-subagent` and `cargo test -p tddy-daemon-rpc --test coding_subagent_acceptance`;
+web: `bun run cypress:component --spec cypress/component/CreateSessionAgentPicker.cy.tsx,cypress/component/SessionAgentRosterStatus.cy.tsx`.
+
+`packages/tddy-coding-subagent/tests/coding_agent_session_acceptance.rs` (`#[serial]`, real stub through n1's `AcpDriver`) — fail at `CodingAgentSession::start`'s `TODO(acp-subagent)` (and need #720 green):
 
 1. `a_prompt_turn_returns_the_coding_agents_text_as_end_turn`
-2. `each_tool_call_of_the_turn_is_one_message_descriptor`
-3. `a_loop_only_option_is_refused_naming_it` — `yieldConditions`, `fromMessageId`, `correction`, `replacement`, `maxTurns` each → `UnsupportedByCodingAgent { option }`
-4. `a_permission_request_is_denied_and_recorded_in_the_turns_messages`
-5. `cancelling_a_running_turn_returns_cancelled`
+2. `each_tool_call_of_the_turn_is_one_message_descriptor` — `Read`, `Edit` descriptors in order
+3. `a_loop_only_option_is_refused_naming_it` — `maxTurns`, `yieldConditions`, `fromMessageId`, `correction`, `replacement`
+4. `a_permission_request_is_denied_and_recorded_in_the_turns_messages` — stub records `selected:reject-once`; an `is_error` descriptor previews the title
+5. `cancelling_a_running_turn_returns_cancelled` — through a `CancelHandle` taken before the turn
 6. `dropping_the_session_stops_the_agent_process`
 
-`packages/tddy-daemon-rpc/tests/list_subagents_acceptance.rs` (extend):
+`packages/tddy-coding-subagent/tests/catalog_acceptance.rs`:
 
-7. `an_acp_harness_profile_is_listed_as_a_coding_agent_with_its_harness`
-8. `an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model`
-9. `a_headless_harness_profile_is_not_listed_yet`
+7. `an_acp_harness_profile_is_a_coding_agent` (fails: empty catalog)
+8. `a_headless_or_pty_harness_profile_is_not_offered_yet` — **passes at contract**: a negative pinned by the empty TODO body; it stays meaningful once 7 is green
+9. `an_acp_allowed_agent_is_a_coding_agent_on_its_default_model` (fails)
+10. `profiles_come_before_allowed_agents` (fails)
+11. `claude_and_opencode_can_withdraw_their_native_tools_and_codex_cannot` (fails on `claude-acp`)
 
-`packages/tddy-daemon-rpc/tests/session_agent_roster_acceptance.rs` (extend):
+`packages/tddy-daemon-rpc/tests/coding_subagent_acceptance.rs` (new, one file for listing, attaching and conversations; a `RecordingLauncher` injected through `test_service_with_coding_agent_launcher` records each `CodingAgentLaunch` and starts the stub) — fail because no coding-agent row is listed yet:
 
-10. `attaching_a_coding_agent_streams_a_coding_agent_entry`
-11. `a_managed_session_refuses_a_harness_that_cannot_withdraw_its_native_tools`
-12. `a_coding_agent_owned_by_another_daemon_is_refused_at_attach`
+12. `an_acp_harness_profile_is_listed_as_a_coding_agent_with_its_harness`
+13. `an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model`
+14. `a_headless_harness_profile_is_not_listed_yet` — **passes at contract** (negative)
+15. `attaching_a_coding_agent_streams_a_coding_agent_entry`
+16. `a_managed_session_refuses_a_harness_that_cannot_withdraw_its_native_tools` — `FAILED_PRECONDITION` naming `codex-acp`
+17. `opening_a_coding_agent_conversation_launches_it_as_the_session_user_on_the_session_worktree` — `session_os_user == "testdev"`, `worktree == repo_path`
+18. `a_managed_session_launches_the_coding_agent_with_only_tddy_tools_exec_tools` — `managed`, MCP servers `["tddy-tools"]`, recorded on `session/new`
+19. `a_coding_agent_turn_answers_through_prompt_agent_conversation` — `"fixed it"`, `end_turn`
+20. `ending_a_coding_agent_conversation_stops_its_process`
 
-`packages/tddy-daemon-rpc/tests/session_agent_conversation_acceptance.rs` (extend):
+Cypress (`mountWithRpc` / per-daemon in-memory backends):
 
-13. `opening_a_coding_agent_conversation_launches_it_as_the_session_user_on_the_session_worktree`
-14. `a_managed_session_launches_the_coding_agent_with_only_tddy_tools_exec_tools`
-15. `a_long_coding_agent_turn_is_awaitable` — prompt over the grace → pending → await → outcome
-16. `ending_a_coding_agent_conversation_stops_its_process`
+21. `CreateSessionAgentPicker.cy.tsx` — `a coding agent row shows its coding-agent badge and harness` (fails: no badge); `a model row shows no coding-agent badge` (negative, passes)
+22. `SessionAgentRosterStatus.cy.tsx` — `a roster row for a coding agent shows its badge` (fails: no badge)
 
-`packages/tddy-changeset/src/session_agent.rs` (unit):
+**Changed from the plan:**
+- *A coding agent owned by another daemon is refused at attach* is **moved to n8** `remote-codebase`: a remote attach resolves through the peer's `ListSubagents` before the row's kind is known, so on a one-daemon harness it cannot be distinguished from "no peer".
+- *A long coding-agent turn is awaitable* (grace → `responseId` → `subagent_await`) is an MCP-layer behaviour of `tddy-tools` that the daemon RPC does not have; it is covered generically by `tddy-tools-cli/tests/subagent_async_response_acceptance.rs` and gains nothing coding-agent specific. Replaced by test 19.
+- *A record written before kinds loads as a model entry* is guaranteed by the serde default in the published surface (`#[serde(default)] kind: AgentKindRecord`); a test would pass at contract, so none was added.
+- `SubagentError` is a string newtype, not an enum: the refusal is the constructor `SubagentError::unsupported_by_coding_agent(option)`, not a variant.
+- The launcher port is `CodingAgentLauncher::command_for(&CodingAgentLaunch) -> AcpAgentCommand`; `CodingAgentSession::start(command, open, model)` spawns it, so the session is testable without the daemon. The daemon seam is `DaemonSessionHost::with_coding_agent_launcher`, carried into `AgentRoster.coding_agent_launcher`.
 
-17. `a_record_written_before_kinds_loads_as_a_model_entry`
-
-`packages/tddy-web/cypress/component/CreateSessionAgentPicker.cy.tsx`, `SessionAgentTreeAcceptance.cy.tsx` (extend):
-
-18. `a coding agent row shows its coding-agent badge and harness`
-19. `a roster row for a coding agent shows its badge`
+**Baseline (2026-10-24, `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`):** `cargo check --all-targets` clean for `tddy-discovery tddy-coding-subagent tddy-changeset tddy-session-agents tddy-daemon-rpc tddy-session-lifecycle tddy-tools tddy-daemon tddy-session-split`; `cargo clippy --all-targets -- -D warnings` clean for the touched crates; the existing specs in the two Cypress files pass.
 
 ## Technical Debt & Production Readiness
 
@@ -237,6 +247,10 @@ _(populated during development)_
   silent unconfined launch). Revisit at 6e.
 - **Deny, not allow, until n3.** An auto-approving subagent on the main agent's worktree is the
   behaviour this stack exists to avoid.
+- **Running as the session's OS user is the launcher's job, and its mechanism is open.** The driver
+  needs piped stdio to the child; whether the daemon's spawn worker / supervisor can hand back piped
+  stdio for a non-PTY child is unverified. If it cannot, green records it and stops rather than
+  running the agent as the daemon's own user.
 - **Process per conversation.** One ACP child per conversation keeps cancel and kill trivially scoped;
   a pooled agent with several ACP sessions is a later optimisation.
 
@@ -260,10 +274,10 @@ _(populated during development)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
