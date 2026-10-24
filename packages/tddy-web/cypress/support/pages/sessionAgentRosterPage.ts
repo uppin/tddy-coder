@@ -22,6 +22,7 @@ import {
   agentRosterRowCloneState,
   agentRosterRowDetachBtn,
   agentRosterRowHost,
+  agentRosterRowKind,
   agentRosterRowLastActivity,
   agentRosterRowReplaces,
   agentRosterRowStatus,
@@ -45,6 +46,8 @@ export const sessionAgentRosterPage = {
   // --- attached agents ------------------------------------------------------
   row: (agentId: string) => byTestId(agentRosterRow(agentId)),
   rowHost: (agentId: string) => byTestId(agentRosterRowHost(agentId)),
+  /** "coding agent · <harness>" on a coding agent's row; absent on a model row. */
+  rowKind: (agentId: string) => byTestId(agentRosterRowKind(agentId)),
   rowReplaces: (agentId: string) => byTestId(agentRosterRowReplaces(agentId)),
   rowCloneState: (agentId: string) => byTestId(agentRosterRowCloneState(agentId)),
   /** What the agent is doing. Always present — `unknown` is a value, not an absence. */

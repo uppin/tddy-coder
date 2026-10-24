@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package catalog;
 
+import "types.proto";
+
 // What this daemon can offer: the tools it allows, the coding backends it allows, each backend's
 // models, and every subagent a name resolves against here.
 //
@@ -87,6 +89,11 @@ message SubagentInfo {
   repeated string replaces = 6;
   // Exec-catalog tools the agent's own loop may call.
   repeated string tools = 7;
+  // MODEL for a def or registry assistant; CODING_AGENT for a harness the daemon launches.
+  types.AgentKind kind = 8;
+  // For a CODING_AGENT row, the harness it runs (`claude-acp`, `codex-acp`, `opencode`, …), so a
+  // picker can say what it is. Empty for MODEL rows.
+  string harness = 9;
 }
 
 message ToolInfo {

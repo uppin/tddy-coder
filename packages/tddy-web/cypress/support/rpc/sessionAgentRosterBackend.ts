@@ -18,7 +18,11 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { CatalogService, ListSubagentsResponseSchema } from "../../../src/gen/catalog_pb";
 import { SessionAgentService } from "../../../src/gen/session_agents_pb";
 import { AgentCloneState, SessionAgentRosterSchema, type SessionAgentEntry } from "../../../src/gen/session_agents_pb";
-import { SessionAgentStatus, type SessionAgentActivity } from "../../../src/gen/types_pb";
+import {
+  AgentKind,
+  SessionAgentStatus,
+  type SessionAgentActivity,
+} from "../../../src/gen/types_pb";
 
 /** A roster entry with sensible defaults; tests override only what the scenario is about. */
 export function anAttachedAgent(
@@ -342,6 +346,17 @@ export function aDaemonOfferingAgents(
   return anInMemoryRpcBackend().onUnary(CatalogService.method.listSubagents, () => ({
     subagents: agents,
   }));
+}
+
+/** A coding agent a host offers: launched by the daemon, spoken to over ACP. */
+export function anAvailableCodingAgent(name: string, daemonInstanceId: string, harness: string) {
+  return {
+    ...anAvailableAgent(name, daemonInstanceId),
+    model: "gpt-5.2",
+    tools: [],
+    kind: AgentKind.CODING_AGENT,
+    harness,
+  };
 }
 
 /** A daemon that cannot answer the picker's fan-out. */

@@ -89,3 +89,14 @@ message BranchSession {
   // e.g. "active" | "idle".
   string status = 4;
 }
+
+// What runs a roster agent's turns.
+//
+// MODEL is an OpenAI-loop definition — a `<tddyhome>/agents/*.yaml` def or a registry assistant:
+// a model behind an endpoint, driven by tddy's own read/grep loop. CODING_AGENT is a coding agent
+// (Claude Code, Codex, OpenCode, …) that the daemon launches and speaks to over ACP or a headless
+// CLI. An entry written before this field existed reads as MODEL, which is what it was.
+enum AgentKind {
+  AGENT_KIND_MODEL = 0;
+  AGENT_KIND_CODING_AGENT = 1;
+}
