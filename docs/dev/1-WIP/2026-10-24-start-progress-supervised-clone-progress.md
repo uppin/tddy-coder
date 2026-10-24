@@ -99,9 +99,9 @@ Supervised clones are `SpawnSession{git clone}` + 25 ms `SessionStatus` polling 
 
 ## Scope
 
-- [ ] `CloneRepository` streaming RPC in the proto, server and client
-- [ ] Supervisor runs git as the target user under spawn policy, stderr piped, temp + rename
-- [ ] `clone_repo_via_supervisor_with_progress`; polling clone removed
+- [x] `CloneRepository` streaming RPC in the proto, server and client
+- [x] Supervisor runs git as the target user under spawn policy, stderr piped, temp + rename
+- [x] `clone_repo_via_supervisor_with_progress`; polling clone removed
 - [ ] Docs: supervisor README / `tddy-supervisor.md` RPC list
 
 ## Technical Changes
@@ -140,7 +140,23 @@ from `tddy-spawn`'s tests). `futures-util` added to `tddy-supervisor` with the d
 
 ## Technical Debt & Production Readiness
 
+- ⚠ `the_daemon_reports_supervised_clone_progress_through_the_clone_callbacks` stays deferred: it needs a
+  running supervisor binary from `tddy-spawn`'s tests, and no clean seam exists without a test-only branch.
+- `CloneExited.signal` is always unset: the supervisor's session table records an exit code, not the signal.
+  `code: None` means "ended by a signal".
+- The supervisor renames/removes the partial directory as root inside a user-writable parent; the name is random
+  (unguessable) and `remove_dir_all` does not follow symlinks, but this is root acting on user-owned paths.
+
 ## Decisions & Trade-offs
+
+- **git is found on the supervisor's own `PATH`** (the operator's, never the caller's) and must still be in
+  `allowed_tool_paths`: the request carries no tool path, and authorization is unchanged. The daemon no longer
+  resolves git, so `clone_request*`, `program_in_path`, `resolve_git_program` and the 25 ms `wait_for_exit`
+  polling were removed (with their tests in `tddy-session-lifecycle`).
+- **The stop test's seam** is the supervisor's `PATH`: the test puts a fake `git` first on it and allowlists it.
+- `CloneHandle` gained a supervisor variant (`CloneHandle::through_supervisor`); its `stop()` runs
+  `StopSession` on a helper thread with its own runtime.
+- A client that stops listening (drops the receiver) closes the connection; the supervisor then stops the clone.
 
 - **A dedicated RPC**, not `inherit_output` on `SpawnSession`: sessions keep their no-output policy, and
   the clone's lifetime is one stream.
@@ -169,12 +185,12 @@ from `tddy-spawn`'s tests). `futures-util` added to `tddy-supervisor` with the d
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
-- [ ] Run scoped tests (`./test -p tddy-supervisor -p tddy-spawn`); full-workspace result from CI
+- [x] Run scoped tests (`./test -p tddy-supervisor -p tddy-spawn`); full-workspace result from CI (Linux-only supervisor tests run on CI; locally they were run once on macOS with the PDEATHSIG refusal patched out temporarily)
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped clippy, `cargo fmt`)
+- [x] Linting and formatting (scoped clippy, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
