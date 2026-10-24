@@ -47,3 +47,18 @@ fn a_pty_only_harness_has_no_subagent_transport() {
         assert_eq!(transport_of(harness), None, "{harness}");
     }
 }
+
+#[test]
+fn warp_oz_is_headless_and_runs_under_its_agent_profiles_policy() {
+    assert_eq!(transport_of("oz"), Some(Transport::Headless));
+    assert!(
+        matches!(permission_policy_of("oz"), Some(PermissionPolicy::Fixed(ref text)) if text.contains("profile")),
+        "{:?}",
+        permission_policy_of("oz")
+    );
+    assert_eq!(
+        transport_of("warp-cli"),
+        None,
+        "the interactive Warp TUI is not a subagent"
+    );
+}

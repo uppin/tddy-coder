@@ -24,6 +24,10 @@ pub enum HeadlessHarness {
     Cursor,
     /// `codex exec --json`
     Codex,
+    /// Warp's headless runner: `oz agent run -p <prompt> --output-format ndjson -C <dir>`, a later turn
+    /// adding `--conversation <id>` from the run's `conversation_started` event. Distinct from the
+    /// interactive `warp-cli` session type, which runs the `warp` TUI.
+    Oz,
 }
 
 impl HeadlessHarness {
@@ -33,6 +37,7 @@ impl HeadlessHarness {
             Self::Claude => "claude",
             Self::Cursor => "cursor",
             Self::Codex => "codex",
+            Self::Oz => "oz",
         }
     }
 
@@ -41,6 +46,7 @@ impl HeadlessHarness {
             "claude" => Some(Self::Claude),
             "cursor" => Some(Self::Cursor),
             "codex" => Some(Self::Codex),
+            "oz" => Some(Self::Oz),
             _ => None,
         }
     }
@@ -60,6 +66,9 @@ pub struct HeadlessCommand {
     pub permission_prompt_tool: Option<String>,
     /// Native tools withdrawn from the CLI, where it can withdraw them.
     pub disallowed_tools: Vec<String>,
+    /// oz only: the agent profile the run executes under (`--profile`) — what decides its
+    /// permissions, since a headless `oz` run never asks.
+    pub profile: Option<String>,
 }
 
 /// One headless conversation: its CLI, and the CLI's own session id once the first turn named it.

@@ -290,3 +290,131 @@ fn harness_ids_round_trip() {
     }
     assert_eq!(HeadlessHarness::from_id("claude-acp"), None);
 }
+
+// ---------------------------------------------------------------------------
+// Warp's headless runner, `oz agent run` — replaying streams captured from a real `oz`
+// (v0.2026.10.21, 2026-10-24) under tests/fixtures/oz/
+// ---------------------------------------------------------------------------
+
+fn an_oz_capture(name: &str) -> Vec<serde_json::Value> {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/oz")
+        .join(name);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a captured ndjson line"))
+        .collect()
+}
+
+#[tokio::test]
+async fn an_oz_turn_returns_its_text_and_the_next_turn_continues_its_conversation() {
+    // Given
+    let cli = a_fake_cli(&an_oz_capture("text_turn.ndjson"), 0);
+    let driver = HeadlessDriver::new(HeadlessHarness::Oz, cli.command());
+
+    // When
+    let first = a_turn(&driver, "Reply with ok").await;
+    a_turn(&driver, "And again").await;
+
+    // Then
+    assert_eq!(first.stop_reason, AcpStopReason::EndTurn);
+    assert_eq!(first.text, "ok\n");
+    assert_eq!(driver.session_id().as_deref(), Some("conv-0001"));
+    let calls = cli.invocations();
+    assert!(
+        calls[0].starts_with("agent run") && calls[0].contains("--output-format ndjson"),
+        "{}",
+        calls[0]
+    );
+    assert!(
+        calls[0].contains("-p Reply with ok") || calls[0].contains("--prompt Reply with ok"),
+        "{}",
+        calls[0]
+    );
+    assert!(
+        !calls[0].contains("--conversation"),
+        "a first turn opens a conversation: {}",
+        calls[0]
+    );
+    assert!(
+        calls[1].contains("--conversation conv-0001"),
+        "{}",
+        calls[1]
+    );
+}
+
+#[tokio::test]
+async fn an_oz_turns_commands_and_edits_become_tool_calls_with_their_results() {
+    // Given
+    let cli = a_fake_cli(&an_oz_capture("tool_turn.ndjson"), 0);
+    let driver = HeadlessDriver::new(HeadlessHarness::Oz, cli.command());
+    let (sink, updates) = collecting();
+
+    // When
+    let turn = tokio::time::timeout(
+        TURN_DEADLINE,
+        driver.prompt_turn("Do it".to_string(), Some(sink)),
+    )
+    .await
+    .expect("in time")
+    .expect("the turn succeeds");
+
+    // Then
+    assert!(turn.text.starts_with("Ran `ls -la`"), "{}", turn.text);
+    let updates = updates.lock().expect("updates");
+    let titles: Vec<&str> = updates
+        .iter()
+        .filter_map(|update| match update {
+            AcpUpdate::ToolCall { title, .. } => Some(title.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(titles, ["ls -la", "Create the requested text file."]);
+    let completed = updates
+        .iter()
+        .filter(|update| {
+            matches!(
+                update,
+                AcpUpdate::ToolCallUpdate {
+                    status: Some(tddy_agent_backend::AcpToolStatus::Completed),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(
+        completed, 2,
+        "each tool_result completes its call: {updates:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_worktree_model_mcp_and_profile_reach_ozs_argv() {
+    // Given
+    let cli = a_fake_cli(&an_oz_capture("text_turn.ndjson"), 0);
+    let mcp = cli.path().join("mcp.json");
+    std::fs::write(&mcp, "{}").expect("mcp config");
+    let driver = HeadlessDriver::new(
+        HeadlessHarness::Oz,
+        HeadlessCommand {
+            model: Some("claude-sonnet".to_string()),
+            mcp_config: Some(mcp.clone()),
+            profile: Some("tddy-subagent".to_string()),
+            ..cli.command()
+        },
+    );
+
+    // When
+    a_turn(&driver, "Go").await;
+
+    // Then
+    let call = &cli.invocations()[0];
+    assert!(
+        call.contains(&format!("-C {}", cli.path().display())),
+        "{call}"
+    );
+    assert!(call.contains("--model claude-sonnet"), "{call}");
+    assert!(call.contains(&format!("--mcp {}", mcp.display())), "{call}");
+    assert!(call.contains("--profile tddy-subagent"), "{call}");
+}

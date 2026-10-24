@@ -14,8 +14,10 @@
 
 The ACP path covers every coding agent with an ACP adapter. The rest are driven headless: `claude -p
 --output-format stream-json`, `cursor agent -p --output-format stream-json`, and `codex exec --json`.
-This PRD puts a **headless transport behind the same conversation interface**, so those harnesses are
-listed, attached and talked to exactly like ACP ones — same tools, same outcome shape, same activity
+Warp joins them through its headless runner, `oz agent run --output-format ndjson` (master's `warp-cli`
+session type runs the interactive `warp` TUI, which has no headless mode). This PRD puts a **headless
+transport behind the same conversation interface**, so those harnesses are listed, attached and talked
+to exactly like ACP ones — same tools, same outcome shape, same activity
 bubble, same placement — with ACP preferred whenever a harness has both.
 
 ## Background
@@ -32,12 +34,15 @@ codex reports nothing until it exits. Claude can route its permission prompts to
 - **One interface, two transports.** A conversation turn on a headless harness is one CLI invocation
   resuming the conversation's own session id; its streamed events become the same tool-call and text
   updates an ACP turn produces.
-- **Which harnesses.** `claude`, `cursor`, `codex` harness profiles and `allowed_agents` ids are listed
+- **Which harnesses.** `claude`, `cursor`, `codex` and `oz` (Warp, labelled "Warp (oz)") harness profiles and `allowed_agents` ids are listed
   by `ListSubagents` as `coding_agent` rows. Where one agent is offered both ways (`claude` and
   `claude-acp`), both rows are listed, and each says its transport.
 - **Permissions.**
   - `claude -p`: permission prompts are routed to `tddy-tools`, and yield to the main agent exactly
     as an ACP permission request does (`permission_requested` → `subagent_resume { permission }`).
+  - `oz` (Warp): a headless run never asks — it acts under its agent profile (`--profile`), which by
+    default auto-approves commands and edits (observed). The row names that policy; a managed session
+    refuses it until a profile that withdraws its native tools is proven.
   - `cursor` and `codex`: they cannot ask mid-turn. They are offered with a fixed policy named on the
     row — `cursor` read-only unless the operator's profile opts into `--force`, `codex` in its
     `workspace-write` sandbox — and the policy is shown in the picker.
@@ -68,7 +73,8 @@ codex reports nothing until it exits. Claude can route its permission prompts to
 
 ## Acceptance Criteria
 
-- [ ] `claude`, `cursor`, `codex` are listed as coding agents with their transport and permission policy.
+- [ ] `claude`, `cursor`, `codex`, `oz` are listed as coding agents with their transport and permission policy.
+- [ ] A Warp (`oz`) turn streams its commands and edits as tool calls, and the next turn continues its conversation (`--conversation <id>`).
 - [ ] A turn on each returns the CLI's final text, and a second turn resumes the same CLI session.
 - [ ] Claude's permission prompt yields to the main agent and its answer is honoured.
 - [ ] Cancel ends a running headless turn as `cancelled`.

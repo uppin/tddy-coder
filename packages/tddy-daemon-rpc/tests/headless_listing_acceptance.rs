@@ -68,3 +68,23 @@ async fn a_harness_offered_both_ways_is_listed_once_per_transport() {
     );
     assert!(transports.contains(&("claude-a", "acp")), "{transports:?}");
 }
+
+#[tokio::test]
+async fn a_warp_oz_profile_is_listed_as_a_headless_coding_agent() {
+    // When
+    let rows = rows_offered_for(&[("warp", "oz")]).await;
+
+    // Then
+    let warp = rows
+        .iter()
+        .find(|row| row.name == "warp")
+        .expect("warp row");
+    assert_eq!(warp.kind, AgentKind::CodingAgent as i32);
+    assert_eq!(warp.harness, "oz");
+    assert_eq!(warp.transport, "headless");
+    assert!(
+        warp.permission_policy.starts_with("fixed:"),
+        "{}",
+        warp.permission_policy
+    );
+}

@@ -3,7 +3,7 @@
 //! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-headless-driver.md
 
 /// The headless harnesses, run one CLI invocation per turn.
-pub const HEADLESS_HARNESSES: &[&str] = &["claude", "cursor", "codex"];
+pub const HEADLESS_HARNESSES: &[&str] = &["claude", "cursor", "codex", "oz"];
 
 /// The transport a harness's turns take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

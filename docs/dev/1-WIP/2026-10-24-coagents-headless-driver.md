@@ -26,7 +26,7 @@ helpers they expose (argv builders, stream parsers made reusable).
 
 ## Responsibility
 
-- `tddy_agent_backend::headless_driver::{HeadlessDriver, HeadlessHarness { Claude, Cursor, Codex }, HeadlessTurn}` — one turn = one CLI invocation with the conversation's session id (fresh → `--session-id`/none; then `--resume` / `exec resume`), stream → `AcpUpdate`s (n1's shape), cancel → kill the child, drop → kill.
+- `tddy_agent_backend::headless_driver::{HeadlessDriver, HeadlessHarness { Claude, Cursor, Codex, Oz }, HeadlessTurn}` — one turn = one CLI invocation with the conversation's session id (fresh → `--session-id`/none; then `--resume` / `exec resume`), stream → `AcpUpdate`s (n1's shape), cancel → kill the child, drop → kill.
 - A `ConversationDriver` trait over `AcpDriver` and `HeadlessDriver` that `CodingAgentSession` holds (n2's session generalised; the trait lives with the drivers).
 - Claude permission routing: `--permission-prompt-tool mcp__tddy-tools__approval_prompt` pointed at a per-conversation `tddy-tools` endpoint that parks the request into n3's `ParkedPermissions`.
 - Catalog: `claude`, `cursor`, `codex` rows with `transport` (`acp` | `headless`) and `permission_policy` (`asks_caller` | `fixed:<text>`) on `SubagentInfo` / `SessionAgentEntry`.
@@ -131,6 +131,34 @@ overrides (`TDDY_CURSOR_AGENT`, a `claude` path override, `codex` path). Real CL
 **Changed from the plan:** the claude permission-prompt **yield** end to end (plan test 4) needs n3's `ParkedPermissions` behaviour and a per-conversation `tddy-tools` approval endpoint the daemon serves; the contract pins the CLI side (7) and green wires the endpoint, adding the round-trip test to `tddy-coding-subagent` once #722 is green. Plan test 10 (a managed session refusing an unconfinable headless harness) is covered by #721's admission test once `confinement_for` lists the CLIs. **Green must update #721's `a_headless_or_pty_harness_profile_is_not_offered_yet` and `a_headless_harness_profile_is_not_listed_yet`** — their premise ("not yet") is exactly what this node ends; they become "a PTY-only harness is not offered". `CodingAgentDef` is not widened: transport and policy are derived from the harness id (`transports.rs`), so #721's type is untouched. New proto: `SubagentInfo.transport = 10`, `.permission_policy = 11`; `SessionAgentEntry.transport = 16`, `.permission_policy = 17`. The web row text is green's (the badge already names the harness).
 
 **Baseline (2026-10-24, isolated `CARGO_TARGET_DIR`):** `cargo check --all-targets` clean across agent-backend, coding-subagent, discovery, session-agents, daemon-rpc, tools, session-split, session-lifecycle, daemon; scoped clippy clean.
+
+### Added 2026-10-24 — Warp via `oz agent run` (developer's decision)
+
+Master gained Warp (#717/#718) as the interactive `warp-cli` session type; the `warp` TUI has no
+headless or ACP mode. Warp's headless runner is the standalone `oz` CLI (`brew tap warpdotdev/warp &&
+brew install --cask oz`). **Observed on a real `oz` (v0.2026.10.21, 2026-10-24)**, captures in
+`packages/tddy-agent-backend/tests/fixtures/oz/` (ids, paths and user name replaced):
+
+| Fact | Observed |
+|---|---|
+| argv | `oz agent run -p <PROMPT> --output-format ndjson -C <DIR> [--conversation <ID>] [--model <ID>] [--mcp <json\|path>]... [--profile <ID>]` |
+| events | `{"type":"system","event_type":"run_started",run_id,run_url}`, `{"type":"system","event_type":"conversation_started",conversation_id}`, `{"type":"tool_call","tool":"run_command",command}` / `{"type":"tool_call","tool":"edit_files",title,file_paths}`, `{"type":"tool_result","tool":…,status?,exit_code?,output? \| diff}`, `{"type":"agent",text}`; exit 0 at turn end |
+| resume | `--conversation <id>` continues a **local** conversation (same id echoed, context kept) |
+| permissions | the default profile auto-approves commands and edits headlessly — no prompt, no wait |
+| tool ids | `tool_call` carries none; a `tool_result` pairs with the preceding `tool_call` of the same `tool` |
+
+Owned additions: `HeadlessHarness::Oz` (id `oz`, label "Warp (oz)"), `HeadlessCommand.profile`, `oz`
+in `HEADLESS_HARNESSES` / `transport_of` (Headless) / `permission_policy_of` (Fixed, naming the agent
+profile), `confinement_for("oz") = CannotWithdraw` until a confining profile is proven. Distinct from
+master's `warp-cli`, which stays a PTY session type and is never a subagent.
+
+Tests added (fail at the TODOs):
+
+- `headless_driver_acceptance.rs` — `an_oz_turn_returns_its_text_and_the_next_turn_continues_its_conversation`, `an_oz_turns_commands_and_edits_become_tool_calls_with_their_results`, `the_worktree_model_mcp_and_profile_reach_ozs_argv`; `harness_ids_round_trip` covers `Oz`
+- `transports_acceptance.rs` — `warp_oz_is_headless_and_runs_under_its_agent_profiles_policy` (and `warp-cli` has no subagent transport)
+- `headless_listing_acceptance.rs` — `a_warp_oz_profile_is_listed_as_a_headless_coding_agent`
+
+**Complexity** unchanged at 4: one more harness on the same seam.
 
 ## Technical Debt & Production Readiness
 
