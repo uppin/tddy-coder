@@ -304,4 +304,16 @@ impl SessionAgentService for PeerRoutedSessionAgents {
         }
         self.local.report_agent_conversation_state(request).await
     }
+
+    async fn answer_agent_permission(
+        &self,
+        request: Request<tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest>,
+    ) -> Result<
+        Response<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse>,
+        Status,
+    > {
+        self.record_activity();
+        // TODO(web-approvals): implement — route to the peer named by `daemon_instance_id`
+        self.local.answer_agent_permission(request).await
+    }
 }

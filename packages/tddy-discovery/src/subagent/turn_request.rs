@@ -48,6 +48,9 @@ pub struct TurnRequest {
     /// The answer to the conversation's pending permission request — a coding agent's turn
     /// continues with it. Refused by a model-loop session, which never asks.
     permission_answer: Option<super::permission::PermissionAnswer>,
+    /// The pending permission request the caller handed to the user: the turn waits for the user's
+    /// answer (or the caller's own, whichever comes first) instead of answering it.
+    permission_deferred_to_user: Option<String>,
 }
 
 impl TurnRequest {
@@ -81,6 +84,18 @@ impl TurnRequest {
     pub fn with_permission_answer(mut self, answer: super::permission::PermissionAnswer) -> Self {
         self.permission_answer = Some(answer);
         self
+    }
+
+    /// Hand the pending permission request `request_id` to the user: the turn continues once the
+    /// user answers it from the web, or the caller answers it after all.
+    pub fn deferring_permission_to_user(mut self, request_id: impl Into<String>) -> Self {
+        self.permission_deferred_to_user = Some(request_id.into());
+        self
+    }
+
+    /// The request this turn hands to the user, if any.
+    pub fn permission_deferred_to_user(&self) -> Option<&str> {
+        self.permission_deferred_to_user.as_deref()
     }
 
     /// The permission answer this turn carries, if any.

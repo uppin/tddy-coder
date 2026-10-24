@@ -5,7 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — proto change (new RPC, peer-forwarded), a first-answer-wins race between the web and the main agent, Rust + web
 **Branch**: `feature/coagents/web-approvals`, base `feature/coagents/headless-driver` (#726) — `#coagents` 8/8
-**PR**: _assigned at wave 1_
+**PR**: [#727](https://github.com/uppin/tddy-coder/pull/727)
 
 ## Initial Discovery
 
@@ -99,24 +99,30 @@ Cypress component for the entry (`mountWithRpc` + in-memory `SessionAgentService
 
 ## Acceptance Tests
 
-`packages/tddy-coding-subagent/tests/permission_defer_acceptance.rs` (new):
+`packages/tddy-coding-subagent/tests/permission_defer_acceptance.rs` (stub agent paused on a request; needs #721 and #722 green):
 
-1. `deferring_returns_a_pending_response_awaiting_the_user`
-2. `a_user_answer_continues_the_turn_and_await_returns_it`
-3. `the_first_answer_wins_and_the_second_is_refused_naming_who_answered`
+1. `a_deferred_request_waits_for_the_users_answer_and_the_turn_then_continues` — `TurnRequest::deferring_permission_to_user` holds the turn; `PermissionAnswering::answer_as(.., User("alice"))` continues it; the agent records `selected:allow-once`
+2. `the_first_answer_wins_and_the_second_is_refused_naming_who_answered`
 
-`packages/tddy-daemon-rpc/tests/session_agent_conversation_acceptance.rs` (extend):
+`packages/tddy-tools/tests/permission_deferral_arg_acceptance.rs` — `subagent_resume`'s `deferPermissionToUser`:
 
-4. `answer_agent_permission_is_refused_for_a_non_owner`
-5. `answer_agent_permission_is_refused_for_a_conversation_of_another_session`
-6. `answer_agent_permission_reaches_a_conversation_served_by_a_peer`
+3. `a_request_id_is_deferred_to_the_user` · 4. `no_deferral_is_none` · 5. `deferring_and_answering_at_once_is_refused_naming_both`
 
-`packages/tddy-web/cypress/component/SubagentPermissionAnswerAcceptance.cy.tsx` (new):
+`packages/tddy-daemon-rpc/tests/answer_agent_permission_acceptance.rs`:
 
-7. `a deferred request shows one button per option`
-8. `a request not deferred to the user shows no buttons`
-9. `choosing an option sends it and the entry records the choice`
-10. `the bubble reads waiting for you while a request is deferred`
+6. `answer_agent_permission_is_refused_for_an_unauthenticated_caller` — `UNAUTHENTICATED`
+7. `answer_agent_permission_is_refused_for_a_conversation_the_session_does_not_hold` — `NOT_FOUND` naming it
+
+`packages/tddy-web/cypress/component/SubagentPermissionAnswerAcceptance.cy.tsx` (over `aConversationReplayBackend` + a recorded `AnswerAgentPermission`) — fail first at #723's missing bubble, then on this node's entry:
+
+8. `a deferred request shows one button per option` — `permission-option-<optionId>`
+9. `a request not deferred to the user shows no buttons`
+10. `choosing an option sends it and the entry records the choice` — `{conversationId, requestId, optionId}`; `permission-answered` names `alice`
+11. `the bubble reads waiting for you while a request is deferred`
+
+**Changed from the plan:** this node owns no symbol of #722's: the deferral is `TurnRequest::deferring_permission_to_user` (a new builder, not a `PermissionAnswer` variant), the second resolver is the new `PermissionAnswering` trait implemented for `ParkedPermissions` (plus `AnsweredBy`), and the MCP argument is a separate `deferPermissionToUser` property rather than a field inside #722's `permission`. The transcript carries a pending request as a `tool_call` with id `permission:<requestId>` whose detail names the options and `deferredToUser` — the conversation view reads it through the existing detail lookup. The peer-forward of `AnswerAgentPermission` is published as a local delegation (`TODO(web-approvals)`); its cross-daemon test needs two daemons and is green's. Non-owner refusal is pinned as "unauthenticated" because the test daemon authenticates one user; green adds the second-user case if the host's owner check differs from token resolution.
+
+**Baseline (2026-10-24, isolated `CARGO_TARGET_DIR`):** `cargo check --all-targets` clean across service, session-agents, session-lifecycle, daemon-rpc, daemon, tools, coder, session-split, discovery, coding-subagent; scoped clippy clean.
 
 ## Technical Debt & Production Readiness
 
@@ -149,10 +155,10 @@ _(populated during development)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

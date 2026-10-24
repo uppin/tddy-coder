@@ -75,6 +75,11 @@ service SessionAgentService {
   // This is that agent's own report, and the only possible source for it
   // (docs/ft/daemon/session-agent-roster.md § What an agent is doing).
   rpc ReportAgentConversationState(ReportAgentConversationStateRequest) returns (ReportAgentConversationStateResponse);
+  // Answer a coding subagent's permission request the main agent deferred to the user
+  // (`subagent_resume { permission: { requestId, deferToUser: true } }`). The session's owner only;
+  // the conversation must belong to the named session. The first answer wins: one arriving after
+  // the main agent's, or after another user's, is refused naming who answered.
+  rpc AnswerAgentPermission(AnswerAgentPermissionRequest) returns (AnswerAgentPermissionResponse);
 }
 
 enum AgentCloneState {
@@ -394,4 +399,21 @@ message StreamSessionAgentsRequest {
 enum AgentPlacement {
   AGENT_PLACEMENT_SHARED = 0;
   AGENT_PLACEMENT_CLONE = 1;
+}
+
+message AnswerAgentPermissionRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+  string daemon_instance_id = 3;
+  string conversation_id = 4;
+  string request_id = 5;
+  // One of the request's option ids; empty with `cancelled` set.
+  string option_id = 6;
+  bool cancelled = 7;
+}
+
+message AnswerAgentPermissionResponse {
+  // Who the answer was recorded as: the answering user's login.
+  string answered_by = 1;
 }

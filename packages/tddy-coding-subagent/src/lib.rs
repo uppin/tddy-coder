@@ -10,6 +10,7 @@ pub mod parked_permissions;
 pub mod permissions;
 pub mod session;
 pub mod transports;
+pub mod user_permission_answers;
 
 pub use approval_routes::ApprovalRoutes;
 pub use catalog::{
@@ -31,3 +32,4 @@ pub use transports::{
     permission_policy_of, transport_and_policy_wire, transport_of, PermissionPolicy, Transport,
     HEADLESS_HARNESSES,
 };
+pub use user_permission_answers::{AnsweredBy, PermissionAnswering};
