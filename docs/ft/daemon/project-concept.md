@@ -79,6 +79,14 @@ A session start on a host that does not hold the project's checkout clones it fi
 `git_url` or from a peer's, into `{home}/{repos_base}/{name}/`. A clone over SSH asks the operator for a key
 passphrase when the key is protected; see [cloning over SSH](clone-ssh-passphrase.md).
 
+The clone, like every child the daemon starts as another OS user, either becomes that user or fails at
+once. A daemon that is not root, asked to clone as somebody else, refuses before starting anything, with a
+message naming the user it runs as, the user requested, and that a host run by `tddy-supervisor` brokers
+such spawns. While a child is being started the daemon log records each step it passes — forked, groups,
+gid, uid, exec — with its pid, and a step that does not finish is logged again every five seconds as
+`still at <step> after <n>s`. A session-start clone that fails or exceeds its deadline is logged on the host
+doing the clone.
+
 ## API (ConnectionService)
 
 - `ListProjects` / `CreateProject` — manage projects.

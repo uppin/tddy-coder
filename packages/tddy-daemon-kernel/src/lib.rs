@@ -72,6 +72,7 @@ pub mod os_user_resolution;
 pub mod peer_calls;
 pub mod peer_forwarding;
 pub mod pending_login_ttl;
+pub mod pre_exec_stages;
 pub mod privilege_drop;
 pub mod session_notification;
 pub mod spawn_as_user;

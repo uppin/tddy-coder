@@ -64,3 +64,9 @@ nodes 4–8 are still rebasing on this branch would conflict every one of them.
 owner; doing it earlier would leave the duplication half-resolved across two PRs. Node 3 keeps the
 pair honest in the interval by **relocating rather than deleting** the guard test
 `tool_catalog_sync.rs` (M4), which asserts the two catalogs still match.
+
+## Update 2026-10-24 — #734 (`#start-progress` 1/8)
+
+Still open. `spawner.rs` only lost code here (its passwd lookups and three `pre_exec` closures moved to
+`tddy_daemon_kernel::privilege_drop` / `pre_exec_stages`); it was not split, because later
+`#start-progress` nodes also modify it.

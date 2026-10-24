@@ -186,11 +186,20 @@ impl LaunchSessions {
         });
 
         match tokio::time::timeout(timeout, handle).await {
-            Ok(Ok(res)) => res,
+            Ok(Ok(res)) => res.inspect_err(|status| {
+                log::warn!(
+                    "ensure_project_available_for_start: clone of project {project_id} failed: {status}"
+                )
+            }),
             Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => Err(Status::deadline_exceeded(
-                "ensure_project_available_for_start: clone timed out",
-            )),
+            Err(_elapsed) => {
+                log::warn!(
+                    "ensure_project_available_for_start: clone of project {project_id} exceeded its {timeout:?} deadline"
+                );
+                Err(Status::deadline_exceeded(
+                    "ensure_project_available_for_start: clone timed out",
+                ))
+            }
         }
     }
 }

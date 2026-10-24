@@ -15,6 +15,7 @@
 |---|---|---|---|
 | 2026-09-19 | 0 | 3 | first detection |
 | 2026-09-26 | 0 | 3 | #526 (`#carve` 15/21) moved `pty_runtime` to `tddy-terminal-rpc`: the call sites are `tddy-terminal-rpc/src/pty_runtime.rs:128`, `tddy-host-service/src/ssh_agent.rs:452` and `tddy-worktree-service/src/remote_git_service.rs:222`. The four tested symbols' tests moved with it, unchanged |
+| 2026-10-24 | 0 | 3 | touched-file only, #734 (`#start-progress` 1/8): `resolve_pty_os_user` is **unchanged** and still untested in this crate. The new `resolve_target_account` beside it does its own passwd lookup (plus `getgrouplist`) and is tested here, but does not call `resolve_pty_os_user`, so its tests do not enter it |
 
 ## What the tool found
 

@@ -1,12 +1,12 @@
 # complexity: ensure_project_available_for_start
 
-**Location:** `packages/tddy-agent-launch/src/svc_ensure_project_available_for_start.rs:124` — `ensure_project_available_for_start`
+**Location:** `packages/tddy-agent-launch/src/svc_ensure_project_available_for_start.rs:97` — `ensure_project_available_for_start`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **157 lines** · **nesting depth 8** · 1 parameters · 9 branch/match lines · 2 early exits
 **Thresholds breached:** length 157 > 60; nesting 8 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — narrowed 2026-09-24 by #524 (158 → 99); still over the 60-line budget — **unclaimed**
+**Status:** Open — regressed 2026-10-24 by #734 (`#start-progress` 1/8, 99 → 108); still over the 60-line budget — **unclaimed**. Growth deferred with the developer's consent, #start-progress 1/8
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 **Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_ensure_project_available_for_start.rs:123`; this record was `complexity-svc-resolve-listed-worktree-ensure-project-available-for-start.md`
 
@@ -23,6 +23,7 @@
 | 2026-10-08 | 99 | — | — | — | `#carve` 20/21: **moved** by the engine (`move_item`) to `svc_ensure_project_available_for_start.rs:123` and converted to `impl LaunchSessions`; 99 lines at `origin/master` and at HEAD (fn line to closing brace), unchanged. Nesting not re-derived. Over the 60-line budget: **kept open**; **Location** line below updated |
 | 2026-10-09 | 99 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 | 2026-10-24 | 99 | — | — | — | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): length by brace matching is identical at both. `/analyze-code-issues` re-run: complexity 8. This crate's own tests never enter it (CRAP 72). The session-lifecycle `ensure_project_home_session_acceptance` + `project_home_idle_stop_acceptance` (27 tests), with every workspace crate instrumented enter it (CRAP 8) |
+| 2026-10-24 | 108 | — | — | — | **Regressed** by #734 (`#start-progress` 1/8): the timeout `match` logs its failure arm (`inspect_err` + `log::warn!`) and its deadline arm (a block with `log::warn!`), +9 lines by brace matching (99 at `origin/master`, 108 at HEAD, fn at `:97`). No new branch: the same three arms. Deferred with the developer's consent, #start-progress 1/8 — later `#start-progress` nodes (4, 5) remove this deadline and stream the clone |
 
 ## What the tool found
 

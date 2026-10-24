@@ -12,11 +12,16 @@
 //! `spawner.rs` re-exports every name, so no caller in `tddy-daemon` changed and there is exactly
 //! one definition of "drop privileges and exec".
 //!
-//! Everything that actually drops privileges is `#[cfg(unix)]`: `setgid`/`initgroups`/`setuid` have
+//! Everything that actually drops privileges is `#[cfg(unix)]`: `setgroups`/`setgid`/`setuid` have
 //! no meaning elsewhere, and a non-unix build must fail to find the function rather than silently
 //! get one that did not drop anything.
 
 use std::path::{Path, PathBuf};
+
+#[cfg(unix)]
+use crate::pre_exec_stages::StagedCommand;
+#[cfg(unix)]
+use crate::privilege_drop::{plan_privilege_change, resolve_target_account};
 use std::process::Stdio;
 
 /// The variables `gh` honours ahead of its own login.
@@ -137,7 +142,7 @@ pub struct CaptureAsUser {
 #[cfg(unix)]
 struct AsUserCommand {
     resolved_program: PathBuf,
-    command: std::process::Command,
+    staged: StagedCommand,
 }
 
 /// Build `program args...` to run as `os_user` — program resolution, the passwd lookup, `HOME`,
@@ -152,8 +157,6 @@ fn as_user_command(
     program: &Path,
     args: &[String],
 ) -> anyhow::Result<AsUserCommand> {
-    use std::os::unix::process::CommandExt;
-
     // Anchor a relative `program` to the daemon's own toolchain root (its own process cwd —
     // nothing in this crate ever calls set_current_dir, so this reliably reflects wherever
     // ./web-dev / cargo run -p tddy-daemon was launched from), not to the target OS user's home
@@ -163,34 +166,9 @@ fn as_user_command(
         .map_err(|e| anyhow::anyhow!("resolve daemon's own toolchain root (current_dir): {}", e))?;
     let resolved_program = resolve_tool_path(&program.to_string_lossy(), &daemon_toolchain_root);
 
-    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
-    let mut buf = vec![0u8; 16384];
-    let mut result = std::ptr::null_mut();
-    let ret = unsafe {
-        libc::getpwnam_r(
-            std::ffi::CString::new(os_user)
-                .map_err(|e| anyhow::anyhow!("invalid username: {}", e))?
-                .as_ptr(),
-            passwd.as_mut_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_char,
-            buf.len(),
-            &mut result,
-        )
-    };
-    if ret != 0 || result.is_null() {
-        anyhow::bail!("user '{}' not found", os_user);
-    }
-    let passwd = unsafe { &*result };
-    let uid = passwd.pw_uid;
-    let gid = passwd.pw_gid;
-    if passwd.pw_dir.is_null() || passwd.pw_name.is_null() {
-        anyhow::bail!("user '{}' has no home/pw_name", os_user);
-    }
-    let pw_name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name).to_owned() };
-    let home_dir = unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
-        .to_string_lossy()
-        .into_owned();
-    let same_user = uid == unsafe { libc::getuid() } && gid == unsafe { libc::getgid() };
+    let target = resolve_target_account(os_user).map_err(anyhow::Error::msg)?;
+    let home_dir = target.home.clone();
+    let change = plan_privilege_change(target)?;
 
     let mut cmd = std::process::Command::new(&resolved_program);
     cmd.args(args)
@@ -208,28 +186,10 @@ fn as_user_command(
         cmd.env_remove(token_variable);
     }
 
-    if !same_user {
-        let home_dir_pre = home_dir.clone();
-        unsafe {
-            cmd.pre_exec(move || {
-                std::env::set_var("HOME", &home_dir_pre);
-                if libc::setgid(gid) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::initgroups(pw_name.as_ptr(), gid as _) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::setuid(uid) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
-
+    let label = format!("{} as {os_user}", resolved_program.display());
     Ok(AsUserCommand {
         resolved_program,
-        command: cmd,
+        staged: StagedCommand::new(cmd, &label, change),
     })
 }
 
@@ -251,11 +211,14 @@ pub fn run_output_as_user(
 ) -> anyhow::Result<CaptureAsUser> {
     let AsUserCommand {
         resolved_program,
-        mut command,
+        staged,
     } = as_user_command(os_user, program, args)?;
+    let result = staged
+        .spawn()
+        .and_then(|started| started.child.wait_with_output());
     Ok(CaptureAsUser {
         resolved_program,
-        result: command.output(),
+        result,
     })
 }
 
@@ -289,9 +252,10 @@ pub fn start_output_as_user(
 ) -> anyhow::Result<SpawnedAsUser> {
     let AsUserCommand {
         resolved_program,
-        mut command,
+        staged,
     } = as_user_command(os_user, program, args)?;
-    let mut child = command.spawn()?;
+    // The stage watcher ends by itself once the child execs, so the child alone is handed back.
+    let mut child = staged.spawn()?.child;
     match (child.stdout.take(), child.stderr.take()) {
         (Some(stdout), Some(stderr)) => Ok(SpawnedAsUser {
             resolved_program,

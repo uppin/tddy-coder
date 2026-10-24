@@ -342,6 +342,55 @@ when the GitHub user has no OS user in `config`. It is a free function so a fami
 crate authenticates a caller exactly as the session host does, without holding the host.
 `tddy-session-lifecycle` re-exports the module at its old path.
 
+## `privilege_drop` and `pre_exec_stages` — starting a child as another OS user
+
+Every daemon spawn as another OS user — `tddy-spawn`'s `clone_as_user_with_env` and `spawn_as_user`,
+and this crate's `spawn_as_user::as_user_command` (behind `run_capture_as_user`, `run_output_as_user`,
+`start_output_as_user`) — goes through one path:
+
+1. **`resolve_target_account(os_user) -> TargetAccount`**, in the parent: the passwd entry (`name`, `uid`,
+   `gid`, `home`) and the supplementary group list from `getgrouplist(3)` — the NSS walk `initgroups(3)`
+   would otherwise do after the fork. A failure to enumerate the groups is an error, never a short list.
+2. **`plan_privilege_change(target) -> Result<PrivilegeChange, CannotBecomeUser>`**, still before any
+   fork, comparing **effective** ids (`EffectiveIdentity::current()`; `plan_privilege_change_from` takes
+   the identity explicitly for tests). Same uid **and** gid → `PrivilegeChange::None`. Root →
+   `Drop(target)`. Anything else is refused, including a matching uid with another gid, which could not
+   `setgid` either. `CannotBecomeUser`'s message names both users and says a supervised host brokers
+   such spawns through `tddy-supervisor`.
+3. **`StagedCommand::new(command, label, change).spawn() -> StagedChild`** installs the `pre_exec` and
+   spawns. The child makes only async-signal-safe calls: it writes a 5-byte record (stage byte + its
+   pid, little-endian) to a close-on-exec pipe **before** each step — `Forked`, then for a `Drop`
+   `Groups` / `Gid` / `Uid` around bare `setgroups` / `setgid` / `setuid` — and `Exec` last, immediately
+   before `execve`. No environment writes (`HOME` is set on the `Command`, before the fork), no NSS, no
+   allocation.
+4. A watcher thread runs **`watch_stages(reader, label, heartbeat) -> StageOutcome`**: it logs
+   `spawn <label> pid=<n> reached <stage>` per record and, while a step is outstanding,
+   `spawn <label> pid=<n> still at <stage> after <n>s` every `STAGE_HEARTBEAT` (5 s). A successful exec
+   closes the pipe; EOF after `Exec` is `Execed`, earlier is `StoppedAt(stage)`, none is
+   `NothingReported`. The thread ends by itself at EOF; callers that do not need the outcome drop the
+   handle.
+
+Things a reader of the code would otherwise rediscover:
+
+- **Every spawn forks, same-user children included.** `pre_exec` forces std's fork path (no
+  `posix_spawn`); the closure is async-signal-safe, so that is safe in the multi-threaded daemon, and it
+  is what makes a same-user child report `forked` → `exec` too.
+- **A record names the step being entered, not the one finished**, so a child stuck inside `setgroups`
+  shows `still at groups`.
+- **An `execve` that fails after the `Exec` record** is reported by the watcher as `Execed` while
+  `spawn()` returns the exec error — the `Command`'s own error is authoritative; the stage log says only
+  that the child got as far as calling exec.
+- **A non-root daemon now gets `CannotBecomeUser` before forking** instead of an `EPERM` from the child.
+  `tddy-host-service`'s key and tooling probes surface it as their error string; `tddy-daemon-rpc`'s model
+  probe as `FailedPrecondition("model probe failed: …")`.
+- On macOS the pipe is made close-on-exec with `fcntl` after `pipe(2)` (there is no `pipe2`), as std's
+  own pipes are there.
+
+Tests: `tests/privilege_change_acceptance.rs` (plan and refusal, account resolution) and
+`tests/pre_exec_stages_acceptance.rs` (stage order of a real same-user child, the heartbeat on a
+test-owned pipe, record encoding). `tddy-spawn/tests/pre_exec_safety.rs` scans the spawn paths for
+`set_var` / `initgroups`.
+
 ## See also
 
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)
