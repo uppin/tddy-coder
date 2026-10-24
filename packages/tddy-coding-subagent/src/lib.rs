@@ -5,6 +5,7 @@
 pub mod catalog;
 pub mod confinement;
 pub mod launcher;
+pub mod parked_permissions;
 pub mod permissions;
 pub mod session;
 
@@ -19,5 +20,6 @@ pub use confinement::{
 pub use launcher::{
     AgentTransport, CodingAgentLaunch, CodingAgentLauncher, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
 };
+pub use parked_permissions::ParkedPermissions;
 pub use permissions::DenyAndRecord;
 pub use session::{CancelHandle, CodingAgentSession};

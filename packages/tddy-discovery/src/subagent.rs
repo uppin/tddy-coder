@@ -22,6 +22,7 @@ use crate::openai::{
 };
 
 mod grep_context;
+mod permission;
 mod repeated_calls;
 mod replacement;
 mod result_summary;
@@ -37,6 +38,9 @@ mod yield_condition;
 use transcript::Transcript;
 
 pub use grep_context::{ContextLine, GrepContext, GREP_CONTEXT_LINE_CEILING};
+pub use permission::{
+    PermissionAnswer, PermissionChoice, PermissionRequestView, PermissionToolCall,
+};
 pub use repeated_calls::{RepeatedCall, RepeatedCalls, IDENTICAL_CALL_LIMIT};
 pub use replacement::{validate_replacement, Replacement, REPLACEMENT_RESULT_LIMIT};
 pub use result_summary::{summarize, ResultSummary, SUMMARY_FIRST_LINE_CHARS};
@@ -105,6 +109,11 @@ pub enum StopReason {
     /// including the yielded call is the answer. The outcome names the fired condition and the
     /// yielded tool message's id, which is the id a resume-with-replacement consumes.
     YieldedToCaller,
+    /// A coding agent asked permission for a tool call, and the turn yielded the request to the
+    /// caller. The agent's own turn is still running, paused on the question: the caller answers
+    /// with a resume carrying a [`PermissionAnswer`], which continues that turn. The outcome's
+    /// [`PromptOutcome::permission_request`] names the request.
+    PermissionRequested,
 }
 
 /// Result of one [`SubagentSession::take_turn`] call — the loop's yield point.
@@ -139,6 +148,9 @@ pub struct PromptOutcome {
     /// What the turn's sync merged from the caller before it ran — `None` when nothing was merged
     /// (no worktree, an unchanged caller, or `syncWorktree: false`).
     pub worktree_sync: Option<WorktreeSync>,
+    /// The request the turn yielded on, when it stopped on [`StopReason::PermissionRequested`];
+    /// `None` for every other stop reason.
+    pub permission_request: Option<PermissionRequestView>,
 }
 
 impl PromptOutcome {
@@ -155,6 +167,7 @@ impl PromptOutcome {
             yielded_message_id: None,
             worktree_reset: None,
             worktree_sync: None,
+            permission_request: None,
         }
     }
 }

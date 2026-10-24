@@ -470,6 +470,7 @@ async fn resume_with_a_replacement_round_trips_the_rpc_wire() {
                 "result": "{\"replaced\": true, \"matchedOccurrences\": 1, \"bytes_written\": 128}"
             })
             .to_string(),
+            permission_answer_json: String::new(),
         }))
         .await
         .expect("resuming an open conversation must succeed")
