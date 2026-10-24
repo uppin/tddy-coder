@@ -49,14 +49,13 @@ impl Turns {
         Ok(())
     }
 
-    /// End the turn on `session_id`, returning the agent's text for it. Only the prompt that began
-    /// the turn ends it, so the turn is always present here.
-    pub(super) fn end(&self, session_id: &str) -> String {
+    /// End the turn on `session_id`, returning the agent's text for it; `None` when no turn was
+    /// running there.
+    pub(super) fn end(&self, session_id: &str) -> Option<String> {
         self.0
             .borrow_mut()
             .remove(session_id)
             .map(|turn| turn.output)
-            .unwrap_or_default()
     }
 
     /// Deliver one update to the turn running on its session, if there is one.

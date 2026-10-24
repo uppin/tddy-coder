@@ -16,15 +16,17 @@ mod mapping;
 mod session;
 mod worker;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, oneshot};
 
 use crate::error::BackendError;
+use crate::provider_route::HarnessRoute;
 
-use super::{BackendModels, ProgressSink};
+use super::routed::route_child_env;
+use super::{BackendModels, InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
 
 /// How to start the agent child: program, arguments, extra environment, working directory.
 #[derive(Debug, Clone, Default)]
@@ -201,6 +203,86 @@ impl AcpAgentHooks for NoHooks {}
 
 /// How many requests may wait for the worker before a caller waits to send one.
 const COMMAND_QUEUE_DEPTH: usize = 16;
+
+/// The driver a backend runs its agent on. A backend starts it on first use and replaces it when
+/// its provider route changes; dropping the replaced driver ends its child.
+pub(super) type DriverSlot = Mutex<Option<Arc<AcpDriver>>>;
+
+/// The driver in `slot`, started by `start` when the slot is empty.
+pub(super) fn started(
+    slot: &DriverSlot,
+    start: impl FnOnce() -> Result<AcpDriver, BackendError>,
+) -> Result<Arc<AcpDriver>, BackendError> {
+    let mut guard = slot.lock().map_err(|_| {
+        BackendError::InvocationFailed("the ACP driver slot is poisoned".to_string())
+    })?;
+    if let Some(driver) = guard.as_ref() {
+        return Ok(Arc::clone(driver));
+    }
+    let driver = Arc::new(start()?);
+    *guard = Some(Arc::clone(&driver));
+    Ok(driver)
+}
+
+/// A provider route's environment as a child is spawned with it: its plain pairs, then its secret
+/// pairs.
+pub(super) fn route_env(route: &HarnessRoute) -> Vec<(String, String)> {
+    route_child_env(route)
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect()
+}
+
+/// The working directory a session opens in: the request's, else this process's.
+pub(super) fn session_cwd(working_dir: Option<&Path>) -> Result<PathBuf, BackendError> {
+    match working_dir {
+        Some(dir) => Ok(dir.to_path_buf()),
+        None => std::env::current_dir().map_err(|e| {
+            BackendError::InvocationFailed(format!("no working directory for the session: {e}"))
+        }),
+    }
+}
+
+/// The session an invocation opens: resumed by the id its request names, or fresh. The request's
+/// model is applied unless a provider route is in force; on a route the route's model stands, as it
+/// always has.
+pub(super) fn open_for_request(
+    request: &InvokeRequest,
+    on_route: bool,
+) -> Result<OpenSession, BackendError> {
+    Ok(OpenSession {
+        cwd: session_cwd(request.working_dir.as_deref())?,
+        resume: match &request.session {
+            Some(SessionMode::Resume(id)) => Some(id.clone()),
+            _ => None,
+        },
+        model: if on_route {
+            None
+        } else {
+            request.model.clone()
+        },
+        mcp_servers: Vec::new(),
+    })
+}
+
+/// Run one prompt turn on `session` and report it as the backend's response.
+pub(super) async fn answer(
+    driver: &AcpDriver,
+    session: AcpSession,
+    prompt: String,
+    progress: Option<ProgressSink>,
+) -> Result<InvokeResponse, BackendError> {
+    let turn = driver
+        .prompt(&session.session_id, prompt, None, progress)
+        .await?;
+    Ok(InvokeResponse {
+        output: turn.text,
+        exit_code: 0,
+        session_id: Some(session.session_id),
+        questions: Vec::new(),
+        raw_stream: None,
+        stderr: None,
+    })
+}
 
 /// One ACP agent child and its connection. Dropping it terminates the child.
 ///

@@ -138,6 +138,11 @@ impl AgentConnection {
         let text = self.turns.end(&session_id);
         let response = answer
             .map_err(|e| BackendError::InvocationFailed(format!("ACP prompt failed: {e}")))?;
+        let text = text.ok_or_else(|| {
+            BackendError::InvocationFailed(format!(
+                "no prompt was running on session {session_id} when its answer arrived"
+            ))
+        })?;
         Ok(AcpTurnEnd {
             stop_reason: mapping::stop_reason(response.stop_reason)?,
             text,

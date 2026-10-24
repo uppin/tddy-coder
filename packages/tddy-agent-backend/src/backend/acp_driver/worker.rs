@@ -49,8 +49,9 @@ pub(super) enum Command {
     },
 }
 
-/// What the worker starts from: the child to spawn, the ports its requests use, and where it reports
-/// whether the child started, and the child's pid.
+/// What the worker starts from: the child to spawn, the handlers its requests use, the channel its
+/// requests arrive on, and the places it reports back to its creator (whether the child started, and
+/// the child's pid).
 pub(super) struct Setup {
     pub(super) command: AcpAgentCommand,
     pub(super) permissions: Arc<dyn PermissionHandler>,
@@ -125,12 +126,14 @@ async fn serve(setup: Setup) {
     let _ = supervisor.await;
 }
 
-/// Start a future the connection spawns for one incoming message. Its first poll happens here, at
-/// once, with a waker that does nothing. A notification handler finishes on that poll, so the update
-/// it carries is recorded in the order the agent sent it, before the prompt response that follows
-/// it is delivered. A future still pending after it is handed to the local set, which polls it
-/// again with a real waker; a future must accept a poll that finds nothing new, so the first
-/// poll's waker is not needed.
+/// Start a future the connection spawns for one incoming message.
+///
+/// The library delivers an agent's `session/update` on a task of its own, while a prompt's response
+/// wakes the prompt directly, so the turn could end before its last update was recorded. Polling the
+/// future once here, at once, closes that gap: a notification handler completes on that poll, so the
+/// update is recorded in the order the agent sent it, before the response that follows it. A future
+/// still pending after the poll is handed to the local set, which polls it again with a real waker.
+/// A future must tolerate a poll that finds nothing new, so the placeholder waker loses nothing.
 fn run_or_spawn(fut: impl Future<Output = ()> + 'static) {
     let mut fut = Box::pin(fut);
     let mut cx = Context::from_waker(Waker::noop());

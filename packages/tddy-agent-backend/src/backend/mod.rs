@@ -2,7 +2,6 @@
 
 mod acp;
 pub mod acp_driver;
-mod acp_updates;
 mod claude;
 mod codex;
 pub mod codex_acp;

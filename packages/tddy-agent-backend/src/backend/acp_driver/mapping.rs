@@ -71,26 +71,20 @@ pub(super) fn report_progress(update: &AcpUpdate, sink: &ProgressSink) {
             raw_output,
             ..
         } => {
-            // ACP reports a tool's result as a status change to Completed or Failed on the same id;
-            // any other status is not a result yet.
-            let is_error = match status {
-                Some(AcpToolStatus::Failed) => true,
-                Some(AcpToolStatus::Completed) => false,
-                _ => return,
-            };
-            sink.emit(&ProgressEvent::ToolResult {
-                call_id: id.clone(),
-                result_json: raw_output.as_ref().and_then(json_text).unwrap_or_default(),
-                is_error,
-            });
-        }
-        AcpUpdate::Plan(entries) => {
-            for entry in entries {
-                sink.emit(&ProgressEvent::TaskStarted {
-                    description: entry.clone(),
-                });
+            if let Some(is_error) = tool_outcome(*status) {
+                sink.emit(&tool_result(id, raw_output.as_ref(), is_error));
             }
         }
+        AcpUpdate::Plan(entries) => report_plan(entries, sink),
+    }
+}
+
+/// Each plan entry is a task the agent has started.
+fn report_plan(entries: &[String], sink: &ProgressSink) {
+    for entry in entries {
+        sink.emit(&ProgressEvent::TaskStarted {
+            description: entry.clone(),
+        });
     }
 }
 
@@ -169,6 +163,32 @@ pub(super) fn offered_models(
     }
 }
 
+/// A tool call's terminal state, as the progress event the TUI shows for its result.
+fn tool_result(
+    call_id: &str,
+    raw_output: Option<&serde_json::Value>,
+    is_error: bool,
+) -> ProgressEvent {
+    ProgressEvent::ToolResult {
+        call_id: call_id.to_string(),
+        result_json: raw_output.and_then(json_text).unwrap_or_default(),
+        is_error,
+    }
+}
+
+/// Whether a tool call's status is its result, and if so whether the result is an error. ACP reports
+/// a tool's result as a status change to Completed or Failed on the same id; any other status is not
+/// a result yet.
+fn tool_outcome(status: Option<AcpToolStatus>) -> Option<bool> {
+    match status {
+        Some(AcpToolStatus::Failed) => Some(true),
+        Some(AcpToolStatus::Completed) => Some(false),
+        _ => None,
+    }
+}
+
+/// The driver's status for a tool call. A status this driver does not know is reported as absent,
+/// which is how an update without a status reads.
 fn tool_status(status: acp::ToolCallStatus) -> Option<AcpToolStatus> {
     match status {
         acp::ToolCallStatus::Pending => Some(AcpToolStatus::Pending),
@@ -196,6 +216,8 @@ fn tool_kind_name(kind: acp::ToolKind) -> &'static str {
     }
 }
 
+/// The protocol's spelling of an option kind. A kind newer than this driver is `unknown`; no
+/// handler in this crate selects an option of an unknown kind.
 fn permission_kind_name(kind: acp::PermissionOptionKind) -> &'static str {
     match kind {
         acp::PermissionOptionKind::AllowOnce => "allow_once",
