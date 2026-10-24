@@ -66,6 +66,7 @@ impl AgentConnection {
             resume,
             model,
             mcp_servers,
+            meta,
         } = open;
         let mcp_servers: Vec<acp::McpServer> =
             mcp_servers.into_iter().map(mapping::mcp_server).collect();
@@ -75,7 +76,8 @@ impl AgentConnection {
                     .with_one_retry("load_session", || {
                         self.conn.load_session(
                             acp::LoadSessionRequest::new(session_id.clone(), cwd.clone())
-                                .mcp_servers(mcp_servers.clone()),
+                                .mcp_servers(mcp_servers.clone())
+                                .meta(meta.clone()),
                         )
                     })
                     .await?;
@@ -86,7 +88,8 @@ impl AgentConnection {
                     .with_one_retry("new_session", || {
                         self.conn.new_session(
                             acp::NewSessionRequest::new(cwd.clone())
-                                .mcp_servers(mcp_servers.clone()),
+                                .mcp_servers(mcp_servers.clone())
+                                .meta(meta.clone()),
                         )
                     })
                     .await?;
