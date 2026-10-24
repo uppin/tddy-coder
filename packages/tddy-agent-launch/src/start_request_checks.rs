@@ -91,19 +91,6 @@ pub(crate) fn refuse_a_cli_start_without_a_model(req: &StartSessionRequest) -> R
 
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
-/// How long a forwarded `StartSession` waits for the peer's answer.
-///
-/// The peer may clone the project first, and a clone over SSH can stop to ask its operator for a key
-/// passphrase (up to the prompt's lifetime), so the ordinary peer-forward deadline is too short. A
-/// split start already waits the peer's whole clone budget for the same peer-side work; this is that
-/// one budget.
-#[must_use]
-pub fn start_forward_deadline(
-    config: &tddy_daemon_kernel::config::DaemonConfig,
-) -> std::time::Duration {
-    tddy_session_agents::agent_roster::split_forward_deadline(config)
-}
-
 impl LaunchSessions {
     pub(super) fn eligible_daemon_ids(&self) -> (String, Vec<String>) {
         let local_id = local_instance_id_for_config(&self.config);
@@ -132,13 +119,17 @@ impl LaunchSessions {
                     "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
                 )
             })?;
-        let inner = tddy_daemon_kernel::peer_calls::forward_start_session_within(
+        // Relayed into a discarding sink: the unary caller has no stream to report into, and the
+        // forward is bounded by the peer's keep-alives and the relay's idle timeout, not a deadline.
+        let discarded = AttachmentProgressSink::discarding();
+        let inner = tddy_daemon_kernel::peer_calls::forward_start_session_relaying(
             slot,
             &peer_instance_id,
             req,
-            start_forward_deadline(&self.config),
+            &|event| discarded.relay(event),
         )
-        .await?;
+        .await
+        .map_err(tddy_daemon_kernel::peer_calls::ForwardedStartFailure::into_status)?;
         log::info!(
             "StartSession: forward succeeded session_id={} livekit_server_identity={}",
             inner.session_id,

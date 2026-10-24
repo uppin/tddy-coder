@@ -18,14 +18,30 @@ pub const START_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 /// What a keep-alive says the host is waiting on while a project is provisioned.
 pub const PROVISIONING_ACTIVITY: &str = "provisioning";
 
-/// Await `work`, reporting a keep-alive to `sink` every `interval` until it completes.
+/// What a keep-alive says the host is waiting on for the rest of a start: a worktree cut, an index,
+/// an agent launch — anything after provisioning that can be quiet for longer than the relay allows.
+pub const STARTING_ACTIVITY: &str = "starting";
+
+/// Await `work`, reporting a [`PROVISIONING_ACTIVITY`] keep-alive to `sink` every `interval` until
+/// it completes. See [`with_activity_keepalive`].
+pub async fn with_keepalive<F: Future>(
+    sink: &AttachmentProgressSink,
+    interval: Duration,
+    work: F,
+) -> F::Output {
+    with_activity_keepalive(sink, interval, PROVISIONING_ACTIVITY, work).await
+}
+
+/// Await `work`, reporting a keep-alive naming `activity` to `sink` every `interval` until it
+/// completes.
 ///
 /// The first keep-alive is one `interval` in, so work that finishes sooner emits none. Nothing is
 /// emitted once `work` has returned: the ticking lives inside this call. A sink that reports
 /// nowhere (the unary start) makes this a plain `work.await`.
-pub async fn with_keepalive<F: Future>(
+pub async fn with_activity_keepalive<F: Future>(
     sink: &AttachmentProgressSink,
     interval: Duration,
+    activity: &str,
     work: F,
 ) -> F::Output {
     tokio::pin!(work);
@@ -35,7 +51,7 @@ pub async fn with_keepalive<F: Future>(
             // Work first, so a tick that is ready alongside completion is not reported.
             biased;
             output = &mut work => return output,
-            _ = ticks.tick() => sink.keep_alive(PROVISIONING_ACTIVITY),
+            _ = ticks.tick() => sink.keep_alive(activity),
         }
     }
 }

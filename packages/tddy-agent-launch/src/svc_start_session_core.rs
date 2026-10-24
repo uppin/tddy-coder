@@ -246,7 +246,6 @@ impl LaunchSessions {
                 progress,
             })
             .await?;
-            let timeout = self.config.spawn_worker_request_timeout();
             // The room serves this very service: a participant of a session room reaches the same
             // `ExecuteTool` / `ReadHostDocument` surface a caller reaches over the common room or
             // HTTP, on the same daemon, rooted at the checkout it just made.
@@ -269,7 +268,6 @@ impl LaunchSessions {
                         paired_agent,
                         &sessions_base,
                         &session_id,
-                        timeout,
                     )
                     .await?;
                 progress.end_phase(StartStep::Worktree);
@@ -329,7 +327,6 @@ impl LaunchSessions {
                     os_user,
                     sessions_base,
                     session_id,
-                    timeout,
                     placement,
                 )
                 .await?;

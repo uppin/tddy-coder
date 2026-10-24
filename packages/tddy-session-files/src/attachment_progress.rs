@@ -96,8 +96,10 @@ impl AttachmentProgressSink {
     /// Passes on an event another daemon reported for its half of this start (a split start's
     /// codebase host), unchanged. A closed receiver is ignored, as for [`Self::report`].
     pub fn relay(&self, event: StartSessionEvent) {
-        // TODO(split-stream): implement
-        let _ = event;
+        let Some(tx) = self.tx.as_ref() else {
+            return;
+        };
+        let _ = tx.send(Ok(event));
     }
 
     /// A closed receiver is ignored, as for [`Self::report`].

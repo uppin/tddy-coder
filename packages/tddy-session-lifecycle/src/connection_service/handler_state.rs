@@ -8,7 +8,6 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tddy_model_registry::ModelRegistryStore;
 use tddy_spawn::spawn_worker::SpawnClient;
@@ -113,12 +112,6 @@ impl DaemonSessionHost {
             Arc::clone(&self.jail_relaunch),
             Arc::clone(&self.hosted_agent_clones),
         )
-    }
-
-    /// How long to wait for the codebase daemon's answer to a split session's forwarded start (see
-    /// [`super::agent_roster::split_forward_deadline`]), under this host's config.
-    pub fn split_forward_deadline(&self) -> Duration {
-        crate::connection_service::agent_roster::split_forward_deadline(&self.config)
     }
 
     /// The fields the demo-VM RPCs read, shared with this host (the VM table and idle tracker are

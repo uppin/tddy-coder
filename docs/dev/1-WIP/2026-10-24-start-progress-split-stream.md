@@ -125,13 +125,13 @@ deadline. Keep-alives only cover provisioning, so a long worktree cut on a strea
 
 ## Scope
 
-- [ ] `forward_start_session_relaying` + `StartEventSink`; `forward_start_session_within` deleted
-- [ ] Split start and agent-clone provision relay the peer's events into the caller's sink
-- [ ] `STEP_AGENT` around the split agent spawn
-- [ ] `SplitStartFailure::{PeerAnswered, PeerSilent}` from the stream outcome
-- [ ] Whole-life keep-alive for streamed starts
-- [ ] Unary start forward rides the relaying forward
-- [ ] `split_forward_deadline`, `start_forward_deadline`, worktree `request_timeout` on the session path removed
+- [x] `forward_start_session_relaying` + `StartEventSink`; `forward_start_session_within` deleted
+- [x] Split start and agent-clone provision relay the peer's events into the caller's sink
+- [x] `STEP_AGENT` around the split agent spawn
+- [x] `SplitStartFailure::{PeerAnswered, PeerSilent}` from the stream outcome
+- [x] Whole-life keep-alive for streamed starts
+- [x] Unary start forward rides the relaying forward
+- [x] `split_forward_deadline`, `start_forward_deadline`, worktree `request_timeout` on the session path removed
 - [ ] Docs: `remote-managed-worktree.md` § Failure is atomic, `clone-ssh-passphrase.md` AC, kernel docs
 
 ## Technical Changes
@@ -172,10 +172,22 @@ gains one case run by CI (needs the testkit container).
 `packages/tddy-agent-launch/tests/start_forward_deadline.rs` is deleted with the deadline it pins.
 
 ⚠ **Written at the contract commit:** the two kernel relay tests (plus `a_peer_that_goes_silent_is_reported_as_silent`)
-and the two split tests. **Deferred to `/green`, not yet written:** `a_split_start_outlives_the_old_budget_while_the_codebase_host_keeps_it_alive`
-(it replaces the two `remote_managed_worktree_acceptance.rs` deadline tests, which green rewrites together with
-removing the deadline), `a_streamed_start_sends_keep_alives_through_a_slow_worktree_step` (needs a seam for a slow
-step that `/green` introduces with the whole-life keep-alive), and the LiveKit cross-host case (CI-only).
+and the two split tests.
+
+**Written at green:** `a_split_start_outlives_the_old_budget_while_the_codebase_host_keeps_it_alive` replaces the two
+`remote_managed_worktree_acceptance.rs` deadline tests. The lifecycle harness holds no common room, so the test
+drives the forward a split start makes (`forward_start_session_relaying`) over a scripted codebase host on the paused
+clock: a 400 s worktree cut (past the 330 s budget the forward used to die at), a keep-alive every 5 s, then the result.
+
+**Deferred, not written:** `a_streamed_start_sends_keep_alives_through_a_slow_worktree_step`. Reason: the only
+slow step a streamed start has is the worktree cut, which `start_session_core` makes by calling the free function
+`workspace_session::start_workspace_session` against a real git repository. There is no injected port to slow it
+without a test-only branch in production code. The keep-alive timing is pinned by the existing `with_keepalive` tests
+in `tests/start_keepalive.rs` (same loop, now `with_activity_keepalive`), and the relayed keep-alives by the split
+relay test. Needs a decision from the developer: add a worktree-cut port so the slow step can be scripted, or accept
+the timing tests as the coverage.
+
+**Still CI-only:** `a_split_start_streams_the_codebase_hosts_progress_across_livekit` (cross-host LiveKit suite).
 
 ## Technical Debt & Production Readiness
 
@@ -186,6 +198,21 @@ step that `/green` introduces with the whole-life keep-alive), and the LiveKit c
 - **Unary forwards ride the stream** rather than keeping a deadline or hanging forever.
 - **`PeerSilent` keeps the orphan warning**: after silence the peer may still create the session; node 8's
   cancel is what closes that.
+- **Silence is decided by the relay, not by a status code** (green): `stream_relay::RelayFailure` is `Peer` for a
+  status the peer sent (and for a frame that would not decode) and `Silent` only for the idle expiry. A peer's own
+  `DEADLINE_EXCEEDED` therefore stays `PeerAnswered`. `forward_server_stream_classified` gives the start path that
+  split; the other stream callers keep `Status` through the same loop.
+- **The open is bounded by the idle window too** (green): a start forward waits `PEER_FORWARD_STREAM_IDLE_TIMEOUT`
+  for the stream to open, not `peer_forward_timeout_secs`. An open that never answers is `PeerSilent`. A refusal the
+  transport returns before the stream opens (no connected transport, say) is `PeerAnswered`, the same as a refusal
+  the peer sends: only silence keeps the orphan warning.
+- **Background clone provisioning relays into a discarding sink** (green): `claim_agent_clone` runs on a spawned task
+  with no operator stream, so its sink reports nowhere; the roster entry carries the outcome.
+- **The unary start forward rides the relay into a discarding sink** (green): the forward has no deadline left, so
+  the only bound on a unary start forward is the peer's keep-alives and the idle timeout.
+- **A double keep-alive during provisioning** (green, accepted): `provision_project_for_start` keeps the stream alive
+  with its `provisioning` label inside the whole-life `starting` keep-alive, so two keep-alives tick per interval
+  there. The relay tolerates it; collapsing them would lose the more specific label.
 
 ## Refactoring Needed
 ### From /validate-changes
@@ -209,7 +236,7 @@ step that `/green` introduces with the whole-life keep-alive), and the LiveKit c
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests (`./test -p tddy-daemon-kernel -p tddy-session-split -p tddy-session-agents -p tddy-agent-launch -p tddy-session-lifecycle`); full-workspace result (incl. the LiveKit cross-host case) from CI
 - [ ] Validate changes (/validate-changes)

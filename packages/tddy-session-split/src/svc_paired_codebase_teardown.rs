@@ -50,8 +50,8 @@ impl SplitSessions {
                 // teardown is issued blind, because a forward that never answered leaves this side
                 // unable to tell what the peer got as far as building.
                 //
-                // "Not there" is a statement about *now*, not about the whole start. After a forward
-                // deadline the peer may still be cutting the worktree, so it can answer this honestly
+                // "Not there" is a statement about *now*, not about the whole start. After the codebase
+                // host went silent it may still be cutting the worktree, so it can answer this honestly
                 // and create the session moments later — the one case that still orphans a checkout,
                 // and the reason that case is a warning an operator can grep for rather than an info
                 // line saying nothing was created.
@@ -59,8 +59,8 @@ impl SplitSessions {
                     SplitStartFailure::PeerAnswered => log::info!(
                         "StartSession: daemon {codebase_instance_id} did not have workspace session {codebase_session_id} at teardown time, after a failed split start"
                     ),
-                    SplitStartFailure::ForwardDeadline => log::warn!(
-                        "StartSession: daemon {codebase_instance_id} did not have workspace session {codebase_session_id} at teardown time, but the forwarded start had already timed out: if that daemon was still building the worktree it may create the session after this teardown, leaving an orphaned checkout there"
+                    SplitStartFailure::PeerSilent => log::warn!(
+                        "StartSession: daemon {codebase_instance_id} did not have workspace session {codebase_session_id} at teardown time, but it had gone silent during the forwarded start: if that daemon was still building the worktree it may create the session after this teardown, leaving an orphaned checkout there"
                     ),
                 },
                 Err(e) => log::error!(

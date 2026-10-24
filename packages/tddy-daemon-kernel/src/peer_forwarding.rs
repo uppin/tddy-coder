@@ -17,6 +17,8 @@ use std::time::Duration;
 
 use tddy_daemon_extensions::PeerForwarder;
 
+use crate::stream_relay::RelayFailure;
+
 /// Whether an RPC should run locally or be forwarded to a discovered peer.
 ///
 /// Previously named `StartSessionPeerRoute`; renamed to `PeerRoute` to reflect that this
@@ -208,14 +210,86 @@ impl CommonRoom {
         T: Send + 'static,
         D: Fn(Vec<u8>) -> Result<T, tddy_rpc::Status> + Send + 'static,
     {
-        let open_deadline = self.forward_timeout;
-        let frames = tokio::time::timeout(
+        self.open_relayed_stream(
+            peer_id,
+            service,
+            method,
+            body,
+            self.forward_timeout,
+            decode_frame,
+            RelayFailure::into_status,
+        )
+        .await
+        .map_err(RelayFailure::into_status)
+    }
+
+    /// [`CommonRoom::forward_server_stream_to_peer`] for a caller that must tell the peer's own answer
+    /// from its silence.
+    ///
+    /// Opening the stream and every frame after it are bounded by [`PEER_FORWARD_STREAM_IDLE_TIMEOUT`]
+    /// alone: a forwarded start is paced by its peer's keep-alives, not by a deadline on the whole
+    /// call. Each failure says which of the two it was (see [`RelayFailure`]).
+    pub(crate) async fn forward_server_stream_classified<T, D>(
+        &self,
+        peer_id: &str,
+        service: &str,
+        method: &str,
+        body: Vec<u8>,
+        decode_frame: D,
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<T, RelayFailure>>, RelayFailure>
+    where
+        T: Send + 'static,
+        D: Fn(Vec<u8>) -> Result<T, tddy_rpc::Status> + Send + 'static,
+    {
+        self.open_relayed_stream(
+            peer_id,
+            service,
+            method,
+            body,
+            PEER_FORWARD_STREAM_IDLE_TIMEOUT,
+            decode_frame,
+            std::convert::identity,
+        )
+        .await
+    }
+
+    /// Open a server stream within `open_deadline` and relay its frames, passing each terminal failure
+    /// through `classify`. An open that never answers is silence; a transport refusal is the peer's.
+    #[allow(clippy::too_many_arguments)]
+    async fn open_relayed_stream<T, E, D, C>(
+        &self,
+        peer_id: &str,
+        service: &str,
+        method: &str,
+        body: Vec<u8>,
+        open_deadline: Duration,
+        decode_frame: D,
+        classify: C,
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<T, E>>, RelayFailure>
+    where
+        T: Send + 'static,
+        E: Send + 'static,
+        D: Fn(Vec<u8>) -> Result<T, tddy_rpc::Status> + Send + 'static,
+        C: Fn(RelayFailure) -> E + Send + 'static,
+    {
+        let frames = match tokio::time::timeout(
             open_deadline,
             self.forwarder
                 .call_server_stream(peer_id, service, method, body),
         )
         .await
-        .map_err(|_| peer_forward_deadline_status(service, method, peer_id, open_deadline))??;
+        {
+            Err(_) => {
+                return Err(RelayFailure::Silent(peer_forward_deadline_status(
+                    service,
+                    method,
+                    peer_id,
+                    open_deadline,
+                )))
+            }
+            Ok(Err(status)) => return Err(RelayFailure::Peer(status)),
+            Ok(Ok(frames)) => frames,
+        };
 
         // Deliberately unbounded: the transport sits behind the port and may be filled by a
         // **shared** response loop, so a relay that stopped draining the receiver it hands back
@@ -244,7 +318,7 @@ impl CommonRoom {
                     )
                 },
             }
-            .run(frames, tx)
+            .run(frames, tx, classify)
             .await;
         });
         Ok(rx)

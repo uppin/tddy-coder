@@ -29,6 +29,9 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-model-registry = { path = "../tddy-model-registry" }
 # `ServiceEntry` and `Status`: this crate answers RPCs, so `Status` is its error type at the edge.
 tddy-rpc = { path = "../tddy-rpc" }
+# `AttachmentProgressSink`: the agent-clone provision relays the peer's start events into the sink it
+# is handed (a discarding one for the background claim).
+tddy-session-files = { path = "../tddy-session-files" }
 # The `connection` protos the roster, the clone reports and the activity records are carried in,
 # plus `acp_replay` and the ACP protos `session_agent_inference` reads a turn's state out of.
 tddy-service = { path = "../tddy-service" }

@@ -24,7 +24,6 @@ impl LaunchSessions {
         paired_agent: Option<workspace_session::PairedAgentSession>,
         sessions_base: &Path,
         session_id: &str,
-        timeout: std::time::Duration,
     ) -> Result<
         (
             Response<StartSessionResponse>,
@@ -51,7 +50,6 @@ impl LaunchSessions {
             paired_agent.as_ref(),
             req.sandbox,
             &self.tddy_data_dir,
-            timeout,
         )
         .await?;
         // Written before this call answers, because the answer is what releases the agent
@@ -101,7 +99,6 @@ impl LaunchSessions {
         os_user: &str,
         sessions_base: std::path::PathBuf,
         session_id: String,
-        timeout: std::time::Duration,
         placement: tddy_service::proto::session::AgentClonePlacement,
     ) -> Result<Response<StartSessionResponse>, Status> {
         let started = workspace_session::start_agent_clone_session(
@@ -110,7 +107,6 @@ impl LaunchSessions {
             sessions_base.clone(),
             req.project_id.trim(),
             &self.tddy_data_dir,
-            timeout,
         )
         .await?;
         self.agent_roster

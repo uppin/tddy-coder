@@ -60,7 +60,6 @@ pub async fn start_workspace_session(
     paired_agent: Option<&PairedAgentSession>,
     sandbox: bool,
     tddy_data_dir: &Path,
-    request_timeout: std::time::Duration,
 ) -> Result<Response<StartSessionResponse>, Status> {
     let project_id = project_id.trim();
     if project_id.is_empty() {
@@ -109,19 +108,15 @@ pub async fn start_workspace_session(
     let base_ref = Some(branch.selected_integration_base_ref.trim())
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    let worktree_path = tokio::time::timeout(
-        request_timeout,
-        tokio::task::spawn_blocking(move || {
-            tddy_core::setup_worktree_for_session_with_optional_chain_base(
-                &repo_root_clone,
-                &session_dir_clone,
-                base_ref.as_deref(),
-            )
-            .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
-        }),
-    )
+    let worktree_path = tokio::task::spawn_blocking(move || {
+        tddy_core::setup_worktree_for_session_with_optional_chain_base(
+            &repo_root_clone,
+            &session_dir_clone,
+            base_ref.as_deref(),
+        )
+        .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
+    })
     .await
-    .map_err(|_| Status::deadline_exceeded("start_workspace_session: create worktree timed out"))?
     .map_err(|join_err| Status::internal(join_err.to_string()))?
     .map_err(|e: anyhow::Error| Status::internal(e.to_string()))?;
 
@@ -186,7 +181,6 @@ pub async fn start_agent_clone_session(
     sessions_base: PathBuf,
     project_id: &str,
     tddy_data_dir: &Path,
-    request_timeout: std::time::Duration,
 ) -> Result<Response<StartSessionResponse>, Status> {
     let project_id = project_id.trim();
     if project_id.is_empty() {
@@ -208,34 +202,30 @@ pub async fn start_agent_clone_session(
 
     let repo_root_for_git = repo_root.clone();
     let worktree_for_git = worktree_path.clone();
-    tokio::time::timeout(
-        request_timeout,
-        tokio::task::spawn_blocking(move || {
-            // Detached: see the type's note. `HEAD` is the project's own tip, which is only a
-            // starting point — the mirror's first restore moves it to the session's.
-            let output = std::process::Command::new("git")
-                .args([
-                    "worktree",
-                    "add",
-                    "--detach",
-                    &worktree_for_git.to_string_lossy(),
-                    "HEAD",
-                ])
-                .current_dir(&repo_root_for_git)
-                .output()
-                .map_err(|e| format!("could not run git worktree add: {e}"))?;
-            match output.status.success() {
-                true => Ok(()),
-                false => Err(format!(
-                    "git worktree add failed in {}: {}",
-                    repo_root_for_git.display(),
-                    String::from_utf8_lossy(&output.stderr).trim_end()
-                )),
-            }
-        }),
-    )
+    tokio::task::spawn_blocking(move || {
+        // Detached: see the type's note. `HEAD` is the project's own tip, which is only a
+        // starting point — the mirror's first restore moves it to the session's.
+        let output = std::process::Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "--detach",
+                &worktree_for_git.to_string_lossy(),
+                "HEAD",
+            ])
+            .current_dir(&repo_root_for_git)
+            .output()
+            .map_err(|e| format!("could not run git worktree add: {e}"))?;
+        match output.status.success() {
+            true => Ok(()),
+            false => Err(format!(
+                "git worktree add failed in {}: {}",
+                repo_root_for_git.display(),
+                String::from_utf8_lossy(&output.stderr).trim_end()
+            )),
+        }
+    })
     .await
-    .map_err(|_| Status::deadline_exceeded("start_agent_clone_session: create worktree timed out"))?
     .map_err(|join_err| Status::internal(join_err.to_string()))?
     .map_err(Status::internal)?;
 
