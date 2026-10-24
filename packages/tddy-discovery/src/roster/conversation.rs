@@ -245,6 +245,7 @@ impl AgentConversationLink {
                 yield_conditions_json: Self::encode_yield_conditions(request),
                 replacement_json: Self::encode_replacement(request),
                 permission_answer_json: Self::encode_permission_answer(request)?,
+                defer_permission_to_user: request.permission_deferred_to_user().map(str::to_string),
             }));
         };
         if let Some(rewind_point) = request.rewind_point() {

@@ -319,6 +319,11 @@ message ResumeAgentConversationRequest {
   // {answer: "selected"|"cancelled", requestId, optionId?} object; the coding agent's paused turn
   // continues with it. Empty when the resume answers no request.
   string permission_answer_json = 10;
+  // The request id of the conversation's pending permission request to hand to the user instead of
+  // answering it here: the turn holds until the user answers it from the conversation view, or this
+  // caller answers it. Empty or absent = none. Refused with `permission_answer_json` set, since a
+  // request is either answered by the caller or handed to the user.
+  optional string defer_permission_to_user = 11;
 }
 
 message SessionAgentEntry {

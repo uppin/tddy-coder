@@ -13,14 +13,14 @@ use tddy_agent_backend::{
 };
 use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{
-    preview_of, ContentBlock, MessageDescriptor, MessageId, MessageRole, PermissionRequestView,
-    PromptOutcome, StopReason, SubagentError, SubagentSession, ToolCallDescriptor, TurnRequest,
+    preview_of, AnsweredBy, ContentBlock, MessageDescriptor, MessageId, MessageRole,
+    PermissionAnswering, PermissionRequestView, PromptOutcome, StopReason, SubagentError,
+    SubagentSession, ToolCallDescriptor, TurnRequest,
 };
 use tokio::sync::broadcast;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::parked_permissions::{nothing_pending, nothing_pending_to_defer, ParkedPermissions};
-use crate::user_permission_answers::AnsweredBy;
 
 /// The prompt a conversation is answering, shared with its cancel handles. A turn holds the slot
 /// for as long as it runs, so a cancel waits for the turn to end before it returns.
@@ -185,7 +185,7 @@ impl CodingAgentSession {
     /// What the daemon's `AnswerAgentPermission` answers this conversation's parked request through.
     /// It is the session's own parked requests, so a user's answer and the main agent's race for the
     /// same request, and the first one wins.
-    pub fn permission_answering(&self) -> Arc<dyn crate::PermissionAnswering> {
+    pub fn permission_answering(&self) -> Arc<dyn PermissionAnswering> {
         self.permissions.clone()
     }
 
@@ -272,11 +272,39 @@ impl CodingAgentSession {
         }
     }
 
-    /// Check `request` against the prompt already in flight, delivering its answer where it
-    /// carries one. A new prompt is refused while the turn is open; so is an answer naming any
-    /// other request, or no answer at all while a request is pending, and each refusal names the
-    /// pending request. A deferral is accepted only for the pending request it names: the turn then
-    /// waits for that request's answer ([`settle`]).
+    /// Deliver the answer `request` carries, as the main agent's, before the in-flight slot is taken:
+    /// the answer reaches the request it names whether or not a turn holds the slot, so it is not
+    /// queued behind the turn that is waiting for it. Returns the id of the request answered, when
+    /// one was. A turn carrying a prompt answers nothing here; [`Self::resume`] refuses it.
+    fn deliver_main_agent_answer<'r>(
+        &self,
+        request: &'r TurnRequest,
+    ) -> Result<Option<&'r str>, SubagentError> {
+        if request.prompt_text().is_some() {
+            return Ok(None);
+        }
+        match (
+            request.permission_answer(),
+            request.permission_deferred_to_user(),
+        ) {
+            (Some(_), Some(_)) => Err(SubagentError::from(
+                "a turn cannot both answer a permission request and hand it to the user",
+            )),
+            (Some(answer), None) => {
+                self.permissions
+                    .answer_recording(answer, AnsweredBy::MainAgent)
+                    .map_err(SubagentError::from)?;
+                Ok(Some(answer.request_id()))
+            }
+            (None, _) => Ok(None),
+        }
+    }
+
+    /// Check `request` against the prompt already in flight. A new prompt is refused while the turn
+    /// is open, and so is a turn that asks nothing while a request is pending; each refusal names
+    /// the pending request. A deferral is accepted only for the pending request it names: the turn
+    /// then waits for that request's answer ([`settle`]), and the request is recorded as deferred to
+    /// the user, so the user may answer it.
     fn resume(&self, request: &TurnRequest) -> Result<(), SubagentError> {
         if request.prompt_text().is_some() {
             return Err(match self.permissions.pending() {
@@ -286,29 +314,21 @@ impl CodingAgentSession {
                 ),
             });
         }
-        let pending = self.permissions.pending();
         match (
-            request.permission_answer(),
             request.permission_deferred_to_user(),
-            pending,
+            self.permissions.pending(),
         ) {
-            (Some(_), Some(_), _) => Err(SubagentError::from(
-                "a turn cannot both answer a permission request and hand it to the user",
-            )),
-            (Some(answer), None, _) => self
-                .permissions
-                .answer_recording(answer, AnsweredBy::MainAgent)
-                .map_err(SubagentError::from),
-            (None, Some(deferred), Some(pending)) if pending.request_id == deferred => Ok(()),
-            (None, Some(deferred), Some(pending)) => Err(SubagentError::from(format!(
+            (Some(deferred), Some(pending)) if pending.request_id == deferred => {
+                self.permissions.defer_to_user(deferred);
+                Ok(())
+            }
+            (Some(deferred), Some(pending)) => Err(SubagentError::from(format!(
                 "permission request '{}' is the one pending; the deferral names '{deferred}'",
                 pending.request_id
             ))),
-            (None, Some(deferred), None) => {
-                Err(SubagentError::from(nothing_pending_to_defer(deferred)))
-            }
-            (None, None, Some(pending)) => Err(refused_while_pending(&pending.request_id)),
-            (None, None, None) => Ok(()),
+            (Some(deferred), None) => Err(SubagentError::from(nothing_pending_to_defer(deferred))),
+            (None, Some(pending)) => Err(refused_while_pending(&pending.request_id)),
+            (None, None) => Ok(()),
         }
     }
 
@@ -377,6 +397,17 @@ fn new_prompt(request: &TurnRequest) -> Result<String, SubagentError> {
 fn refused_while_pending(request_id: &str) -> SubagentError {
     SubagentError::from(format!(
         "permission request '{request_id}' is pending: answer it before the coding agent takes another turn"
+    ))
+}
+
+/// Why an answer that was delivered is not continued by this call: the turn holding the request
+/// is still running, and it carries on with the answer and returns its outcome to the call that
+/// deferred the request, which collects it with `subagent_await`.
+fn answer_delivered_while_held(request_id: &str) -> SubagentError {
+    SubagentError::from(format!(
+        "permission request '{request_id}' was answered and the answer was delivered to the coding agent; \
+         the turn that deferred it carries on and returns its outcome to the call that deferred it, \
+         which collects it with subagent_await"
     ))
 }
 
@@ -549,20 +580,37 @@ async fn drive_cancelled_turn_to_its_end(
 impl SubagentSession for CodingAgentSession {
     async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
         refuse_loop_only(&request)?;
+        let answered = self.deliver_main_agent_answer(&request)?;
         let in_flight = Arc::clone(&self.in_flight);
-        let mut slot = in_flight.lock().await;
+        let mut slot = match answered {
+            // Not waited on. A turn holding the slot is the one waiting for this answer, so waiting
+            // behind it would never return; the answer is already with the coding agent.
+            Some(request_id) => in_flight
+                .try_lock()
+                .map_err(|_| answer_delivered_while_held(request_id))?,
+            None => in_flight.lock().await,
+        };
         let mut flight = match slot.take() {
             Some(flight) => {
-                if let Err(refusal) = self.resume(&request) {
-                    *slot = Some(flight);
-                    return Err(refusal);
+                if answered.is_none() {
+                    if let Err(refusal) = self.resume(&request) {
+                        *slot = Some(flight);
+                        return Err(refusal);
+                    }
                 }
                 flight
             }
-            None => {
-                let prompt = new_prompt(&request)?;
-                self.begin_prompt(prompt)
-            }
+            None => match answered {
+                Some(request_id) => {
+                    return Err(SubagentError::from(format!(
+                        "permission request '{request_id}' was answered, but no prompt is in flight to continue"
+                    )))
+                }
+                None => {
+                    let prompt = new_prompt(&request)?;
+                    self.begin_prompt(prompt)
+                }
+            },
         };
         match settle(
             &mut flight,
@@ -618,5 +666,9 @@ impl SubagentSession for CodingAgentSession {
 
     fn updates(&self) -> Option<broadcast::Receiver<AcpUpdate>> {
         Some(self.update_stream.subscribe())
+    }
+
+    fn permission_answerer(&self) -> Option<Arc<dyn PermissionAnswering>> {
+        Some(self.permission_answering())
     }
 }

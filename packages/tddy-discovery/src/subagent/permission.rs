@@ -63,3 +63,35 @@ impl PermissionAnswer {
         }
     }
 }
+
+/// Who answered a parked permission request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnsweredBy {
+    /// The main agent, through `subagent_resume`.
+    MainAgent,
+    /// A user, by login, through `AnswerAgentPermission`.
+    User(String),
+}
+
+impl std::fmt::Display for AnsweredBy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MainAgent => write!(f, "the main agent"),
+            Self::User(login) => write!(f, "{login}"),
+        }
+    }
+}
+
+/// Answering a parked permission request from either side, once: the first answer wins, and a later
+/// one is refused naming who answered first.
+pub trait PermissionAnswering: Send + Sync {
+    /// Deliver `answer` to the request it names, recording `by` as who answered it. Refused, and not
+    /// delivered, when that request was already answered.
+    fn answer_as(&self, answer: &PermissionAnswer, by: AnsweredBy) -> Result<(), String>;
+
+    /// Who answered `request_id`, once it has been answered.
+    fn answered_by(&self, request_id: &str) -> Option<AnsweredBy>;
+
+    /// Whether `request_id` was handed to the user, so that a user may answer it.
+    fn deferred_to_user(&self, request_id: &str) -> bool;
+}

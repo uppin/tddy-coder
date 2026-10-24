@@ -1,15 +1,13 @@
 //! A coding subagent's permission requests, parked until the caller answers them.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
 use tddy_agent_backend::{PermissionDecision, PermissionHandler, PermissionRequest};
 use tddy_discovery::subagent::{
-    PermissionAnswer, PermissionChoice, PermissionRequestView, PermissionToolCall,
+    AnsweredBy, PermissionAnswer, PermissionChoice, PermissionRequestView, PermissionToolCall,
 };
 use tokio::sync::{oneshot, Notify};
-
-use crate::user_permission_answers::AnsweredBy;
 
 /// The [`PermissionHandler`] a coding-agent conversation installs: a request is parked — the
 /// agent's `session/request_permission` stays unanswered — and the tddy turn ends with it; the
@@ -36,6 +34,9 @@ struct State {
     /// Who answered each request answered through [`ParkedPermissions::answer_recording`], by
     /// request id. Only the first answer to a request is kept.
     answerers: HashMap<String, AnsweredBy>,
+    /// The requests a turn handed to the user, by request id: the user may answer these, and only
+    /// these, through [`PermissionAnswering`](tddy_discovery::subagent::PermissionAnswering).
+    deferred: HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -67,29 +68,16 @@ impl ParkedPermissions {
         self.resolved.notified().await;
     }
 
-    /// Deliver `answer` to the pending request it names. A different `request_id`, a selected
-    /// option the request did not offer, or no pending request at all is refused — naming the
-    /// pending request where there is one — and leaves the pending request parked.
-    pub fn answer(&self, answer: &PermissionAnswer) -> Result<(), String> {
-        self.deliver(answer, None)
-    }
-
-    /// [`Self::answer`], recording `by` as who answered. The first answer to a request wins: one
-    /// already answered is refused, naming who answered it, and is not delivered.
+    /// Deliver `answer` to the pending request it names, recording `by` as who answered. A different
+    /// `request_id`, a selected option the request did not offer, or no pending request at all is
+    /// refused — naming the pending request where there is one — and leaves the pending request
+    /// parked. The first answer to a request wins: one already answered is refused, naming who
+    /// answered it, and is not delivered.
     pub(crate) fn answer_recording(
         &self,
         answer: &PermissionAnswer,
         by: AnsweredBy,
     ) -> Result<(), String> {
-        self.deliver(answer, Some(by))
-    }
-
-    /// Who answered `request_id`, once it has been answered through [`Self::answer_recording`].
-    pub(crate) fn answerer_of(&self, request_id: &str) -> Option<AnsweredBy> {
-        self.state().answerers.get(request_id).cloned()
-    }
-
-    fn deliver(&self, answer: &PermissionAnswer, by: Option<AnsweredBy>) -> Result<(), String> {
         let mut state = self.state();
         if let Some(first) = state.answerers.get(answer.request_id()) {
             return Err(already_answered(answer.request_id(), first));
@@ -99,9 +87,7 @@ impl ParkedPermissions {
             .queue
             .pop_front()
             .ok_or_else(|| nothing_pending(answer))?;
-        if let Some(by) = by {
-            state.answerers.insert(answer.request_id().to_string(), by);
-        }
+        state.answerers.insert(answer.request_id().to_string(), by);
         drop(state);
         self.resolved.notify_one();
         parked.decided.send(decision).map_err(|_| {
@@ -110,6 +96,21 @@ impl ParkedPermissions {
                 answer.request_id()
             )
         })
+    }
+
+    /// Who answered `request_id`, once it has been answered through [`Self::answer_recording`].
+    pub(crate) fn answerer_of(&self, request_id: &str) -> Option<AnsweredBy> {
+        self.state().answerers.get(request_id).cloned()
+    }
+
+    /// Record that the turn holding `request_id` handed it to the user, so the user may answer it.
+    pub(crate) fn defer_to_user(&self, request_id: &str) {
+        self.state().deferred.insert(request_id.to_string());
+    }
+
+    /// Whether `request_id` was handed to the user by the turn holding it.
+    pub(crate) fn is_deferred_to_user(&self, request_id: &str) -> bool {
+        self.state().deferred.contains(request_id)
     }
 
     /// Answer every parked request as cancelled, oldest first. ACP asks a client whose prompt is
