@@ -327,6 +327,7 @@ async fn start_terminal_session_returns_fresh_terminal_id() {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
+            kind: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed");
@@ -355,6 +356,7 @@ async fn list_terminal_sessions_returns_main_and_started() {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
+            kind: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -399,6 +401,7 @@ async fn stop_terminal_session_removes_from_list() {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
+            kind: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -476,6 +479,7 @@ async fn terminal_session_rpcs_require_valid_token() {
             session_token: "bad-token".to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
+            kind: String::new(),
         }))
         .await
         .expect_err("StartTerminalSession with bad token must fail");
@@ -519,6 +523,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
+            kind: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")
@@ -579,6 +584,7 @@ async fn send_terminal_input_targets_identified_terminal() {
             session_token: VALID_TOKEN.to_string(),
             session_id: SESSION_ID.to_string(),
             control_token: String::new(),
+            kind: String::new(),
         }))
         .await
         .expect("StartTerminalSession must succeed")

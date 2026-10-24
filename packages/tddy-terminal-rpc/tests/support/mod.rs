@@ -329,7 +329,7 @@ impl tddy_terminal_rpc::TerminalControl for InMemoryControl {
 /// numbered entry, `stop` removes one, `list` reports what is left.
 pub struct InMemoryRoster {
     terminals: Mutex<Vec<tddy_terminal_rpc::TerminalDescriptor>>,
-    started_shells: Mutex<Vec<String>>,
+    started_launches: Mutex<Vec<tddy_terminal_rpc::TerminalLaunch>>,
     started: AtomicUsize,
 }
 
@@ -342,24 +342,25 @@ impl InMemoryRoster {
                 kind: "claude-cli".to_string(),
                 pid: 4242,
             }]),
-            started_shells: Mutex::new(Vec::new()),
+            started_launches: Mutex::new(Vec::new()),
             started: AtomicUsize::new(0),
         }
     }
 
-    /// The shell path each `StartTerminalSession` asked for, in order.
-    pub fn started_shells(&self) -> Vec<String> {
-        self.started_shells.lock().unwrap().clone()
+    /// The launch each `StartTerminalSession` handed the roster, in order.
+    pub fn started_launches(&self) -> Vec<tddy_terminal_rpc::TerminalLaunch> {
+        self.started_launches.lock().unwrap().clone()
     }
 }
 
 #[async_trait]
 impl tddy_terminal_rpc::TerminalRoster for InMemoryRoster {
-    async fn start(&self, _session_id: &str, shell_path: &str) -> Result<String, tddy_rpc::Status> {
-        self.started_shells
-            .lock()
-            .unwrap()
-            .push(shell_path.to_string());
+    async fn start(
+        &self,
+        _session_id: &str,
+        launch: &tddy_terminal_rpc::TerminalLaunch,
+    ) -> Result<String, tddy_rpc::Status> {
+        self.started_launches.lock().unwrap().push(launch.clone());
         let nth = self.started.fetch_add(1, Ordering::SeqCst) + 1;
         let terminal_id = format!("bash-{nth}");
         self.terminals
@@ -754,6 +755,17 @@ pub fn a_start_request() -> tddy_terminal_rpc::proto::terminal_session::StartTer
         session_token: SESSION_TOKEN.to_string(),
         session_id: SESSION_ID.to_string(),
         control_token: String::new(),
+        kind: String::new(),
+    }
+}
+
+/// A `StartTerminalSessionRequest` for this session naming `kind` as what the terminal runs.
+pub fn a_start_request_for(
+    kind: &str,
+) -> tddy_terminal_rpc::proto::terminal_session::StartTerminalSessionRequest {
+    tddy_terminal_rpc::proto::terminal_session::StartTerminalSessionRequest {
+        kind: kind.to_string(),
+        ..a_start_request()
     }
 }
 

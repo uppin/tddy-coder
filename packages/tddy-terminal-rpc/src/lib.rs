@@ -59,7 +59,8 @@ pub use login_shell::login_shell_for;
 pub use proto::terminal_session::{GetTerminalHistoryRequest, TerminalHistoryChunk};
 pub use service::{
     build_terminal_session_entry, ControlChange, ControlClaim, TerminalControl, TerminalDescriptor,
-    TerminalRoster, TerminalSessionPorts, TerminalSessionServiceImpl, TERMINAL_SESSION_SERVICE,
+    TerminalKind, TerminalLaunch, TerminalRoster, TerminalSessionPorts, TerminalSessionServiceImpl,
+    TERMINAL_SESSION_SERVICE,
 };
 
 /// Serialized `FileDescriptorSet` for gRPC reflection (merged at the daemon host with
