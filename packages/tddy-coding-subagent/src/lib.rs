@@ -5,11 +5,13 @@
 pub mod catalog;
 pub mod confinement;
 pub mod launcher;
+pub mod parked_permissions;
 pub mod permissions;
 pub mod session;
 
 pub use catalog::{coding_agent_defs, CodingAgentDef, ACP_HARNESSES};
 pub use confinement::{confinement_for, Confinement};
 pub use launcher::{CodingAgentLaunch, CodingAgentLauncher};
+pub use parked_permissions::ParkedPermissions;
 pub use permissions::DenyAndRecord;
 pub use session::{CancelHandle, CodingAgentSession};

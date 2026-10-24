@@ -5,7 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — proto change (chunk + resume fields, stop-reason tables on both ends), concurrency (a parked ACP permission future resolved from a later call), three crates
 **Branch**: `feature/coagents/permission-yield`, base `feature/coagents/acp-subagent` (#721) — `#coagents` 3/8
-**PR**: _assigned at wave 1_
+**PR**: [#722](https://github.com/uppin/tddy-coder/pull/722)
 
 ## Initial Discovery
 
@@ -119,24 +119,39 @@ wire tests in `tddy-daemon-rpc` for the remote shape; `tddy-tools-cli` MCP test 
 
 ## Acceptance Tests
 
-`packages/tddy-coding-subagent/tests/permission_yield_acceptance.rs`:
+Build the stub first (`cargo build -p tddy-acp-stub`).
 
-1. `a_permission_request_ends_the_call_with_the_request_and_its_options`
-2. `resuming_with_an_option_continues_the_same_turn_and_the_agent_receives_it`
+`packages/tddy-coding-subagent/tests/permission_yield_acceptance.rs` (`#[serial]`, stub agent asking through `session/request_permission`, outcomes read from its record) — fail at `CodingAgentSession::start` until #720/#721 are green, then on this node's missing `ParkedPermissions`:
+
+1. `a_permission_request_ends_the_call_with_the_request_and_its_options` — `PermissionRequested`, title, `[(allow-once, allow_once), (reject-once, reject_once)]`, a non-empty `requestId`
+2. `resuming_with_an_option_continues_the_same_turn_and_the_agent_receives_it` — agent records `selected:allow-once`; the continuation ends `EndTurn` with the turn's text; one `new_session`
 3. `a_cancelled_answer_reaches_the_agent_as_cancelled`
-4. `a_second_request_in_the_same_turn_yields_again`
+4. `a_second_request_in_the_same_turn_yields_again` — a fresh `requestId`; both answers reach the agent in order
 5. `a_prompt_while_a_request_is_pending_is_refused_naming_it`
-6. `a_resume_naming_another_request_is_refused_naming_the_pending_one`
-7. `cancelling_while_a_request_is_pending_returns_cancelled`
+6. `a_resume_naming_another_request_is_refused_naming_the_pending_one` — and a resume answering nothing, likewise; the agent got no answer
+7. `cancelling_while_a_request_is_pending_returns_cancelled` — the agent records `cancelled` and one `cancel`
 
-`packages/tddy-daemon-rpc/tests/session_agent_conversation_acceptance.rs` (extend):
+`packages/tddy-tools/tests/session_agent_conversation_client_acceptance.rs` (extended; its fake daemon learns `ResumeAgentConversation`) — the in-jail client half of the wire:
 
-8. `a_permission_request_and_its_answer_cross_the_conversation_rpcs`
+8. `a_final_frame_naming_a_permission_request_yields_it_to_the_caller` — fails: `permission_request` not parsed
+9. `a_resume_carries_the_callers_permission_answer` — fails: `permission_answer_json` empty; expected `{"answer":"selected","requestId":"perm-1","optionId":"allow-once"}`
 
-`packages/tddy-tools-cli/tests/subagent_resume_mcp_acceptance.rs` (extend):
+`packages/tddy-session-agents/tests/permission_request_frames.rs` — the daemon half:
 
-9. `subagent_resume_accepts_a_permission_answer_and_returns_the_continuation`
-10. `a_continuation_past_the_grace_returns_a_response_id`
+10. `a_permission_request_rides_the_final_frame` — fails: `permission_request_json` empty
+
+`packages/tddy-discovery/tests/permission_outcome_json_acceptance.rs` — the MCP outcome:
+
+11. `a_paused_turn_names_its_stop_reason_and_its_permission_request` — fails: no `permissionRequest`
+12. `an_ordinary_turn_carries_no_permission_request` — **passes at contract** (negative)
+
+`packages/tddy-tools/tests/permission_answer_arg_acceptance.rs` — `subagent_resume`'s `permission` argument:
+
+13. `an_option_is_a_selected_answer` · 14. `cancelled_is_a_cancelled_answer` · 15. `no_permission_is_no_answer` · 16. `both_an_option_and_cancelled_is_refused_naming_both` · 17. `an_answer_without_a_request_id_is_refused_naming_it` — all fail at `parse_permission_answer`'s TODO
+
+**Changed from the plan:** the daemon-RPC round trip (old test 8) is split into its two halves — the client (8, 9) and the daemon frames (10) — because the whole round trip needs #721's recording-launcher harness, a file that node owns; the full path is exercised end to end once both are green. The MCP-level tests (old 9, 10) are 11 and 13–17: the outcome JSON and the argument parse are the MCP surface, and the grace / `responseId` path is generic and already covered. Wire spellings published (implemented, not TODO): `PermissionRequested` in both stop-reason tables.
+
+**Baseline (2026-10-24):** `cargo check --all-targets` clean for `tddy-discovery tddy-coding-subagent tddy-session-agents tddy-tools tddy-daemon-rpc tddy-session-lifecycle tddy-tools-cli tddy-daemon tddy-session-split tddy-acp`; scoped clippy `-D warnings` clean; the 16 existing tests in the extended client suite pass.
 
 ## Technical Debt & Production Readiness
 
@@ -168,10 +183,10 @@ _(populated during development)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
