@@ -40,6 +40,7 @@ use tddy_discovery::subagent::{
 use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
 use crate::agent_conversations::{AgentConversation, PromptRouting};
+use crate::conversation_transcript::{now_unix_ms, record_turn};
 use crate::ports::SessionAgentPorts;
 use crate::session_agent_status::ManagedAgentState;
 
@@ -185,6 +186,8 @@ impl SessionAgentServiceImpl {
         // conditions array that never parses — is refused while the conversation still shows what
         // it was doing, not a Prompting badge over a turn that never started.
         let requested = turn.turn_request().map_err(Status::invalid_argument)?;
+        // What the conversation's transcript records as the prompt; `None` for a resume.
+        let prompt = requested.prompt_text().map(str::to_string);
 
         // Stamped before either branch runs, so the badge changes when the turn starts rather than
         // when it is first observed to have started.
@@ -250,6 +253,18 @@ impl SessionAgentServiceImpl {
                 // Framed rather than sent whole: over LiveKit anything past MAX_CHUNK_FRAME_BYTES is
                 // chunk-framed, and one lost chunk frame wedges the call with no error at all.
                 Ok(outcome) => {
+                    // Recorded before the answer goes out, so a transcript read after the answer
+                    // arrives already holds the turn. A turn that cannot be written is logged rather
+                    // than failed: the agent did the work, and its answer is still the caller's.
+                    if let Err(e) = record_turn(
+                        &session_dir,
+                        &conversation_id,
+                        prompt.as_deref(),
+                        &outcome,
+                        now_unix_ms(),
+                    ) {
+                        log::warn!("conversation '{conversation_id}' turn was not recorded: {e}");
+                    }
                     let frames = agent_turn_frames(&outcome);
                     // Reported after the frames are on the wire, not before: a badge that drops to
                     // idle while the answer is still arriving is one a reader acts on too early.
