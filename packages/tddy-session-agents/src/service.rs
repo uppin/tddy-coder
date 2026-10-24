@@ -254,8 +254,9 @@ impl SessionAgentServiceImpl {
                 // chunk-framed, and one lost chunk frame wedges the call with no error at all.
                 Ok(outcome) => {
                     // Recorded before the answer goes out, so a transcript read after the answer
-                    // arrives already holds the turn. A turn that cannot be written is logged rather
-                    // than failed: the agent did the work, and its answer is still the caller's.
+                    // arrives already holds the turn. A turn that cannot be written fails rather than
+                    // answering: the caller would take an answer the conversation's record does not
+                    // hold, and a replay would show a conversation that never had this turn.
                     if let Err(e) = record_turn(
                         &session_dir,
                         &conversation_id,
@@ -263,7 +264,11 @@ impl SessionAgentServiceImpl {
                         &outcome,
                         now_unix_ms(),
                     ) {
-                        log::warn!("conversation '{conversation_id}' turn was not recorded: {e}");
+                        turn_ended(format!("turn failed: {e}"));
+                        let _ = tx.send(Err(Status::internal(format!(
+                            "conversation '{conversation_id}' turn could not be recorded: {e}"
+                        ))));
+                        return;
                     }
                     let frames = agent_turn_frames(&outcome);
                     // Reported after the frames are on the wire, not before: a badge that drops to
