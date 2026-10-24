@@ -148,10 +148,15 @@ not run, and `has_its_own_worktree` stays pinned by `worktree_route_acceptance`.
 - `attaching_the_same_placement_again_returns_the_roster_at_the_same_revision`
 - `the_roster_store_refuses_a_second_placement_for_an_attached_agent`
 
-`packages/tddy-session-agents/src/clone_placement/sync_notice_tests.rs` (unit, recording fake session):
+`packages/tddy-session-agents/src/clone_placement/sync_notice_tests.rs` (unit, recording and scripted fake sessions):
 
 - `a_turn_after_a_caller_change_is_sent_a_notice_naming_the_changed_file`
 - `a_turn_with_no_caller_change_is_sent_its_prompt_as_it_was_written`
+- `a_merge_on_a_turn_with_no_prompt_sends_the_agent_no_prompt`
+- `a_notice_held_past_a_turn_with_no_prompt_rides_on_the_next_prompt_once`
+- `a_notice_survives_a_prompt_turn_that_fails`
+- `a_turn_that_skips_the_caller_sync_is_sent_no_notice_and_leaves_the_caller_change_out`
+- `a_turn_that_skips_the_caller_sync_is_not_refused_by_a_conflicting_caller_change`
 
 `packages/tddy-daemon-rpc/tests/clone_placement_exec_call_acceptance.rs` (managed claude-acp session):
 
@@ -173,19 +178,16 @@ stub writes `notes/from-agent.txt` on its turn):
 
 - `an_exec_call_names_the_conversation_the_launch_named_and_none_otherwise`
 
-**Changed from the plan:** no `commit_turn_changes` — `Worktree::commit_changes` already commits everything a turn changed. The per-turn sync, per-turn commit and the `pull`/`diff`/`end` round trips for daemon-run conversations are pinned at their decision seam (4–7) and the launch (2); an end-to-end MCP test of a daemon-run pull needs a daemon behind `tddy-tools`, which no current harness provides — green adds one to `tddy-daemon-rpc` if the routing needs more than the decision. A model agent's per-call commits in a clone run through the existing `run_in_conversation`, already covered by `conversation_worktree_exec_tool_acceptance`. Seeding at start carries the placement as `StartSessionRequest.clone_placed_agents = 44` (the subset of `specialized_agents`), since `specialized_agents` is a list of ids. New proto: `types.AgentPlacement`, `AttachSessionAgentRequest.placement = 5`, `SessionAgentEntry.placement = 15`.
+**Changed from the plan:** no `commit_turn_changes` — `Worktree::commit_changes` already commits everything a turn changed. The per-turn sync, per-turn commit and the `pull`/`diff`/`end` round trips for daemon-run conversations are pinned at their decision seam (4–7) and the launch (2); the daemon-side routing harness now exists: `packages/tddy-daemon-rpc/tests/clone_placement_routing_acceptance.rs` drives the `ConversationWorktree` Diff, PullRange and Remove ops on a real git session worktree. The tools' MCP process end to end against a real daemon is still not run. A model agent's per-call commits in a clone run through the existing `run_in_conversation`, already covered by `conversation_worktree_exec_tool_acceptance`. Seeding at start carries the placement as `StartSessionRequest.clone_placed_agents = 44` (the subset of `specialized_agents`), since `specialized_agents` is a list of ids. New proto: `types.AgentPlacement`, `AttachSessionAgentRequest.placement = 5`, `SessionAgentEntry.placement = 15`.
 
 **Baseline (2026-10-24):** `cargo check --all-targets` clean across the changeset, service, session-agents, tools, daemon-rpc, session-lifecycle, session-split, daemon, discovery, tools-cli; scoped clippy clean; the existing picker specs pass.
 
 ## Technical Debt & Production Readiness
 
-- **A merge on a turn with no new prompt is not announced.** A permission answer continues a turn and
-  carries no prompt for the sync notice to ride on. `TODO(clone-placement)` in `clone_placement.rs`
-  (`take_turn`): the notice would have to wait for the next prompt.
-- **A coding agent's turn ignores `syncWorktree: false`.** `take_in_callers_files` syncs unconditionally,
-  where the in-jail loop honours `TurnRequest::syncs_worktree()`. The conflict refusal names
-  `syncWorktree: false` as a way forward, which does not work for a coding agent. Not changed in this
-  node; needs a decision (honour the flag, or stop naming it in the refusal).
+- **A merge on a turn with no new prompt is held, not sent.** A permission answer continues a turn and
+  carries no prompt for the sync notice to ride on, so the notice waits and rides on the next
+  prompt-bearing turn (`take_turn` in `clone_placement.rs`). The permission-answer turn itself still
+  runs without it, because the ACP session has no channel for it: a stated limit, not a silent drop.
 - **Not this node:** 16 `tddy-session-lifecycle` integration tests fail with "sandbox RPC bridge not
   installed" (`sandboxed_session_*`, `sandboxed_claude_cli_*`, `sandboxed_cursor_cli_*`, the sandbox
   delete/resume tests). The same set is in the baseline run recorded earlier in this worktree; none of
@@ -219,6 +221,14 @@ stub writes `notes/from-agent.txt` on its turn):
 - **The notice test uses a recording fake, not the stub.** The stub records lifecycle events, not
   prompts. The fake sits behind the real `CodingAgentConversationTurns` and a real conversation
   worktree, so the prompt observed is the one the agent would receive.
+- **A merge on a prompt-less turn is held for the next prompt.** A permission answer has no prompt for
+  the notice to ride on, and the notice must not be lost, so it waits, in order, for the next
+  prompt-bearing turn. A prompt-bearing turn that fails keeps its notice too: a failed turn does not
+  say whether the agent read its prompt. The prompt-less turn itself is still sent no prompt text.
+- **A coding agent's turn honours `syncWorktree: false`.** The conflict refusal names
+  `syncWorktree: false` as a way forward, and that promise is only true if the turn skips the sync; the
+  in-jail loop already skips it the same way. A skipped sync merges nothing, notices nothing and is
+  refused by no conflict.
 
 ## Refactoring Needed
 
@@ -249,8 +259,8 @@ stub writes `notes/from-agent.txt` on its turn):
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-session-agents -p tddy-subagent-worktree -p tddy-daemon-rpc -p tddy-tools-cli -p tddy-changeset`; the Cypress spec) — verify 100% pass. Open: `tddy-session-lifecycle` has 16 pre-existing sandbox-bridge failures (Technical Debt), and the Cypress spec was not run (no web change)
 - [ ] Carry to n8 `remote-codebase`: `open_owned` (peer-owned) and remote placement
-- [ ] Permission-answer turns announce no merge (`TODO(clone-placement)` in `clone_placement.rs`)
-- [ ] Decide whether a coding agent's turn honours `syncWorktree: false` (Technical Debt)
+- [x] Permission-answer turns announce no merge (`TODO(clone-placement)` in `clone_placement.rs`) — resolved here: a merge on a prompt-less turn is held and rides on the next prompt-bearing turn; the permission-answer turn itself still carries none (stated limit, Technical Debt)
+- [x] Decide whether a coding agent's turn honours `syncWorktree: false` (Technical Debt) — resolved here: it does, and the skip is pinned by two tests (Decisions & Trade-offs)
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

@@ -101,21 +101,38 @@ impl WorktreeSyncPort for ConversationWorktreeSync {
 /// in before each turn, and what the turn changed is committed on the conversation branch after it.
 ///
 /// A coding agent keeps its own history and its own tools, so it has no turn loop to hand the sync
-/// notice to. A turn refused by a sync conflict never reaches the agent.
+/// notice to. The notice of a merge is held and rides on the next prompt the agent is sent: a turn
+/// with no prompt (answering a permission request) sends none and leaves the notice held, and a
+/// prompt-bearing turn that fails keeps its notice for the next one. A turn that skips the sync
+/// (`syncWorktree: false`) merges nothing, so it holds no notice and is refused by no conflict. A
+/// turn refused by a sync conflict never reaches the agent.
 pub(crate) struct CodingAgentConversationTurns {
     session: Box<dyn SubagentSession>,
     worktree: ConversationWorktree,
+    /// The notices of merges not yet sent to the agent, oldest first.
+    pending_notices: Vec<String>,
 }
 
 impl CodingAgentConversationTurns {
     pub(crate) fn new(session: Box<dyn SubagentSession>, worktree: ConversationWorktree) -> Self {
-        Self { session, worktree }
+        Self {
+            session,
+            worktree,
+            pending_notices: Vec::new(),
+        }
+    }
+
+    /// The held notices as one preface, in the order they were held, leaving none held. `None` when
+    /// none is held.
+    fn take_held_notices(&mut self) -> Option<String> {
+        let held = std::mem::take(&mut self.pending_notices);
+        (!held.is_empty()).then(|| held.join("\n\n"))
     }
 }
 
 /// Merge the caller's files into `worktree` before a coding agent's turn, refusing the turn when they
-/// conflict with work the conversation has not pulled. Answers the merge when there was one, so the
-/// turn can tell the agent what changed.
+/// conflict with work the conversation has not pulled. Answers the merge when there was one, so its
+/// notice can be held for the agent's next prompt.
 ///
 /// A free function over the worktree alone: a turn future must not hold a borrow of the session,
 /// which is not `Sync`.
@@ -132,15 +149,33 @@ async fn take_in_callers_files(
 #[async_trait]
 impl SubagentSession for CodingAgentConversationTurns {
     async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
-        // The sync notice rides on the prompt the agent is sent: the same words a model loop gives its
-        // model. A turn with no new prompt (answering a permission request) has nothing to ride on.
-        // TODO(clone-placement): a merge on a turn that carries no prompt is not announced to the
-        // agent; the notice would need to wait for the next prompt the turn sends.
-        let request = match take_in_callers_files(&self.worktree).await? {
-            Some(sync) => request.with_prompt_preface(&sync_notice(&sync)),
+        // A turn that skips the sync (`syncWorktree: false`) runs on the worktree as it stands.
+        let merged = if request.syncs_worktree() {
+            take_in_callers_files(&self.worktree).await?
+        } else {
+            None
+        };
+        if let Some(sync) = merged {
+            self.pending_notices.push(sync_notice(&sync));
+        }
+        // The held notices ride on the prompt the agent is sent: the same words a model loop gives
+        // its model. A turn with no new prompt (answering a permission request) has nothing to ride
+        // on, so its notices stay held for the next prompt-bearing turn.
+        let preface = if request.prompt_text().is_some() {
+            self.take_held_notices()
+        } else {
+            None
+        };
+        let request = match &preface {
+            Some(notices) => request.with_prompt_preface(notices),
             None => request,
         };
         let outcome = self.session.take_turn(request).await;
+        if let (Err(_), Some(notices)) = (&outcome, preface) {
+            // A failed turn does not say whether the agent read its prompt, so the notices it
+            // carried wait for the next prompt rather than being dropped.
+            self.pending_notices.insert(0, notices);
+        }
         // The turn ran whether or not it answered: what it changed is on disk and is committed
         // even when the turn itself failed.
         let committed = self
