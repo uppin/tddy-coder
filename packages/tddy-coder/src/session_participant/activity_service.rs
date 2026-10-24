@@ -626,6 +626,7 @@ mod tests {
             daemon_instance_id: String::new(),
             mode: StreamMode::SnapshotThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         };
         RpcMessage::new(
             req.encode_to_vec(),
@@ -759,6 +760,7 @@ mod tests {
             daemon_instance_id: String::new(),
             mode: StreamMode::CountThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         };
         let message = RpcMessage::new(
             req.encode_to_vec(),
@@ -809,6 +811,7 @@ mod tests {
             daemon_instance_id: String::new(),
             mode: StreamMode::CountThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         };
         let message = RpcMessage::new(
             req.encode_to_vec(),
@@ -905,6 +908,7 @@ mod tests {
             daemon_instance_id: String::new(),
             mode: StreamMode::CountThenLive as i32,
             page_size: 0,
+            conversation_id: String::new(),
         };
         let message = RpcMessage::new(
             req.encode_to_vec(),
@@ -947,6 +951,7 @@ mod tests {
             session_id: session_id.to_string(),
             daemon_instance_id: String::new(),
             tool_call_id: tool_call_id.to_string(),
+            conversation_id: String::new(),
         };
         RpcMessage::new(
             req.encode_to_vec(),
