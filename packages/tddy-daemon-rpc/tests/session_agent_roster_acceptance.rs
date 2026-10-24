@@ -59,6 +59,7 @@ impl RosteredSession {
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
                 agent_id: agent_id.to_string(),
+                placement: 0,
             }))
             .await
             .map(|r| r.into_inner())
@@ -708,6 +709,7 @@ async fn refuses_an_unauthenticated_roster_call_before_contacting_any_peer() {
             session_id: session.session_id.clone(),
             daemon_instance_id: String::new(),
             agent_id: explorer.clone(),
+            placement: 0,
         }))
         .await
         .map(|r| r.into_inner());
@@ -764,6 +766,7 @@ async fn refuses_a_session_id_that_climbs_out_of_the_sessions_directory() {
             session_id: "../victim".to_string(),
             daemon_instance_id: String::new(),
             agent_id: explorer.clone(),
+            placement: 0,
         }))
         .await
         .map(|r| r.into_inner());

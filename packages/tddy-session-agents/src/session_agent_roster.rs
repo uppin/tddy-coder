@@ -391,6 +391,8 @@ fn roster_entry(
         last_activity: activity.as_ref().and_then(AgentActivity::to_proto),
         kind: crate::coding_agent::agent_kind_to_wire(record.kind) as i32,
         harness: record.harness.clone().unwrap_or_default(),
+        // TODO(clone-placement): implement — the record's `placement` on the roster row
+        placement: 0,
     }
 }
 
@@ -435,6 +437,7 @@ mod tests {
             codebase_session_id: None,
             kind: Default::default(),
             harness: None,
+            placement: Default::default(),
         }
     }
 

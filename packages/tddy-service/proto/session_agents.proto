@@ -157,6 +157,8 @@ message AttachSessionAgentRequest {
   // INVALID_ARGUMENT; there is no "assume the local daemon" reading, because that reading silently
   // picks the wrong host once two daemons offer the same name.
   string agent_id = 4;
+  // Where the agent's conversations work; SHARED (the default) is the session's own worktree.
+  types.AgentPlacement placement = 5;
 }
 
 message CancelAgentConversationRequest {
@@ -356,6 +358,8 @@ message SessionAgentEntry {
   types.AgentKind kind = 13;
   // The harness of a CODING_AGENT entry; empty for MODEL entries.
   string harness = 14;
+  // Where the agent's conversations work, as attached.
+  types.AgentPlacement placement = 15;
 }
 
 // Every roster read is a WHOLE snapshot. A consumer rebuilds its registry from it and never applies

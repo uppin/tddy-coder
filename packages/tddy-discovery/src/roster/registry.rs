@@ -66,6 +66,7 @@ fn seed_entry(
         // A seed is always a def: coding agents are never seeded into the jail.
         kind: tddy_service::proto::types::AgentKind::Model as i32,
         harness: String::new(),
+        placement: 0,
     }
 }
 

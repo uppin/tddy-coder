@@ -58,6 +58,7 @@ fn an_agent_this_daemon_runs() -> SessionAgentRecord {
         codebase_session_id: None,
         kind: Default::default(),
         harness: None,
+        placement: Default::default(),
     }
 }
 

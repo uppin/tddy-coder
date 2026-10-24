@@ -5,7 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — proto change (attach + entry placement), git worktree seam on the daemon, three crates plus the web
 **Branch**: `feature/coagents/clone-placement`, base `feature/coagents/conversation-bubble` (#723) — `#coagents` 5/8
-**PR**: _assigned at wave 1_
+**PR**: [#724](https://github.com/uppin/tddy-coder/pull/724)
 
 ## Initial Discovery
 
@@ -38,7 +38,7 @@ A coding agent's own background processes are outside every lock. Same exposure,
 - `AgentPlacement { SHARED = 0, CLONE = 1 }`; `AttachSessionAgentRequest.placement` (5); `SessionAgentEntry.placement`; `SessionAgentRecord.placement` (serde default `Shared`).
 - Daemon open path: for `Clone`, `ConversationWorktrees::ensure` at open; `local_agent_codebase_access` sends the conversation id so `run_in_conversation` applies; a coding agent's cwd / MCP exec target is the conversation worktree.
 - `turn_start` sync before every daemon-run turn (reusing `tddy-subagent-worktree`'s sync).
-- `commit_turn_changes` — one commit per coding-agent turn on the conversation branch.
+- One commit per coding-agent turn on the conversation branch, through the existing `Worktree::commit_changes` (no new worktree-crate API).
 - `tddy-tools`: `subagent_diff` / `_pull` / `_end` route daemon-run `Clone` conversations to the daemon's `ConversationWorktree` ops; descriptions updated for `Shared`.
 - Web: placement select per agent in `CreateSessionAgentPickerSection` and `AgentPicker`; placement on `RosterAgentRow`; `specialized_agents` entries carry the placement (`StartSessionRequest` seeding).
 
@@ -62,10 +62,10 @@ the web select — bodies `TODO(clone-placement)` — and the failing tests belo
 
 **Wave:** 3 of 4
 **Greenable independently:** no — needs n2's daemon-run coding-agent behaviour
-**Concurrent with:** n3, n5, n8
-**Blocks:** none
+**Concurrent with:** n3, n5
+**Blocks:** n8 `remote-codebase` (its clone-through-the-relay test needs this node's placement behaviour)
 
-    n1 → n2      n2 → n3, n5, n7, n8      n3 → n4, n6      n5 → n6
+    n1 → n2      n2 → n3, n5, n7, n8      n3 → n4, n6      n5 → n6      n7 → n8
 
 ## Affected Packages
 
@@ -116,24 +116,29 @@ for diff/pull/end; Cypress component for the select.
 
 ## Acceptance Tests
 
-`packages/tddy-daemon-rpc/tests/clone_placement_acceptance.rs` (new):
+Build the stub first (`cargo build -p tddy-acp-stub`).
 
-1. `attaching_with_clone_records_the_placement`
-2. `a_clone_coding_agent_turn_leaves_the_session_worktree_untouched`
-3. `a_clone_turn_starts_on_the_callers_current_files`
-4. `a_clone_coding_agent_turn_is_one_commit_on_the_conversation_branch`
-5. `a_clone_daemon_run_model_agent_commits_per_mutating_call`
+`packages/tddy-daemon-rpc/tests/clone_placement_acceptance.rs` (real git session worktree, a recording launcher):
 
-`packages/tddy-tools-cli/tests/subagent_pull_mcp_acceptance.rs` (extend):
+1. `attaching_with_clone_records_the_placement` — fails: the entry's `placement` stays SHARED
+2. `a_clone_coding_agent_conversation_launches_on_a_worktree_and_branch_of_its_own` — branch `tddy/subagent/<session>/<conv>`, holds the caller's files; needs #721 green (coding-agent rows) and this node
+3. `a_shared_coding_agent_conversation_launches_on_the_session_worktree` — the default; needs #721 green, then passes unchanged (pins the default)
 
-6. `subagent_pull_applies_a_daemon_run_clone_conversations_work`
-7. `subagent_diff_reads_a_daemon_run_clone_conversation`
-8. `subagent_end_takes_the_rest_and_removes_the_worktree`
-9. `a_shared_conversation_still_answers_pulled_null`
+`packages/tddy-tools/tests/worktree_route_acceptance.rs` — `worktree_route::has_its_own_worktree`, the decision `subagent_diff` / `_pull` / `_end` take:
 
-`packages/tddy-web/cypress/component/CreateSessionAgentPicker.cy.tsx` (extend):
+4. `an_in_process_conversation_under_managed_access_has_its_own_worktree` (fails)
+5. `an_in_process_conversation_reading_the_host_directly_has_none` (negative, passes)
+6. `a_daemon_run_conversation_of_a_clone_placed_agent_has_its_own_worktree` (fails)
+7. `a_daemon_run_conversation_of_a_shared_agent_has_none` (negative, passes)
 
-10. `an agent can be attached with clone placement`
+`packages/tddy-web/cypress/component/CreateSessionAgentPicker.cy.tsx` (extended):
+
+8. `an agent can be attached with clone placement` — `StartSession.clonePlacedAgents == [id]` (fails: no placement control)
+9. `an agent picked without choosing a placement works on the session's worktree` (negative, passes)
+
+**Changed from the plan:** no `commit_turn_changes` — `Worktree::commit_changes` already commits everything a turn changed. The per-turn sync, per-turn commit and the `pull`/`diff`/`end` round trips for daemon-run conversations are pinned at their decision seam (4–7) and the launch (2); an end-to-end MCP test of a daemon-run pull needs a daemon behind `tddy-tools`, which no current harness provides — green adds one to `tddy-daemon-rpc` if the routing needs more than the decision. A model agent's per-call commits in a clone run through the existing `run_in_conversation`, already covered by `conversation_worktree_exec_tool_acceptance`. Seeding at start carries the placement as `StartSessionRequest.clone_placed_agents = 44` (the subset of `specialized_agents`), since `specialized_agents` is a list of ids. New proto: `types.AgentPlacement`, `AttachSessionAgentRequest.placement = 5`, `SessionAgentEntry.placement = 15`.
+
+**Baseline (2026-10-24):** `cargo check --all-targets` clean across the changeset, service, session-agents, tools, daemon-rpc, session-lifecycle, session-split, daemon, discovery, tools-cli; scoped clippy clean; the existing picker specs pass.
 
 ## Technical Debt & Production Readiness
 
@@ -166,10 +171,10 @@ _(populated during development)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
