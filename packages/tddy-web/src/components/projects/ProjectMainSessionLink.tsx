@@ -4,7 +4,6 @@ import { sessionsDrawerPathForSession, sessionsProjectHomeSetupPath } from "../.
  * A Projects card's link to the project's **main** session: **Set up main** opens the sessions
  * drawer's setup pane for the project when it has none, **Open main** opens main itself.
  *
- * Spec: docs/ft/web/projects-screen-multi-host.md (§ Home agent).
  * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
  */
 export function ProjectMainSessionLink({

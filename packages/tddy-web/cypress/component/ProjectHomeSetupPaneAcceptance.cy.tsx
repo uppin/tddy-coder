@@ -17,7 +17,7 @@ import type { ProjectEntry } from "../../src/gen/project_pb";
 import { SessionEntrySchema, SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { whyMainCannotRun } from "../../src/components/sessions/projectHomeSessionTypes";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { projectHomeSetupPage as setup } from "../support/pages/projectHomeSetupPage";
@@ -25,12 +25,13 @@ import { projectHomeSetupPage as setup } from "../support/pages/projectHomeSetup
 const BETA = "proj-beta";
 const MAIN_SESSION_ID = "home-beta-0000-0000-0000-000000000000";
 
-/** A project the daemon lists with no main set up. */
+/** A project the selected daemon lists with no main set up. */
 const BETA_WITHOUT_MAIN: Partial<ProjectEntry> = {
   projectId: BETA,
   name: "beta",
   mainBranchRef: "origin/master",
   homeSessionId: "",
+  daemonInstanceId: DEFAULT_TEST_DAEMON.instanceId,
 };
 
 /**
@@ -86,8 +87,7 @@ it("the main form hides the host, project, branch, stack, attachments and placem
   setup.clickMain(BETA);
 
   // Then
-  setup.form(BETA).should("exist");
-  setup.renderedHiddenControls(BETA).should("deep.equal", []);
+  setup.assertMainVariantHidesPlacementAndBranchControls(BETA);
 });
 
 it("only Claude CLI can be chosen for main; every other type says why", () => {

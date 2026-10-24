@@ -1,3 +1,4 @@
+import type { ProjectEntry } from "../gen/project_pb";
 import type { SessionEntry } from "../gen/session_pb";
 import type { KnownProject, ProjectSessionGroup } from "./sessionProjectGroups";
 
@@ -10,6 +11,27 @@ export interface ProjectHomeInfo {
    * has not been set up. Configured iff non-null.
    */
   homeSessionId: string | null;
+}
+
+/**
+ * Each project's main as recorded on `instanceId` — the host the pinned entry ensures main on.
+ * `home_session_id` is per host and `ListProjects` returns one row per host a project is registered
+ * on, so only that host's rows count: another host's row would show its main (or its lack of one)
+ * for an entry that acts on this one. A project with no row on that host has no main there to
+ * reach, and gets no home. No host selected means nowhere to ensure main, so no homes at all.
+ */
+export function projectHomesOnHost(
+  projects: ReadonlyArray<ProjectEntry>,
+  instanceId: string | null,
+): ProjectHomeInfo[] {
+  if (instanceId === null) return [];
+  return projects
+    .filter((p) => p.daemonInstanceId === instanceId)
+    .map((p) => ({
+      projectId: p.projectId,
+      mainBranchRef: p.mainBranchRef,
+      homeSessionId: p.homeSessionId === "" ? null : p.homeSessionId,
+    }));
 }
 
 /** `SessionEntry.sessionRole` of a project's project-home session. */

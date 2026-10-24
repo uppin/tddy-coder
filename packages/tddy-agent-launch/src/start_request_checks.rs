@@ -55,6 +55,18 @@ pub(crate) fn record_requested_github_source(
         .map_err(|e| Status::internal(format!("failed to record the session's GitHub source: {e}")))
 }
 
+/// claude-cli and cursor-cli always need a model: a start naming either type without one is
+/// refused before anything is created.
+pub(crate) fn refuse_a_cli_start_without_a_model(req: &StartSessionRequest) -> Result<(), Status> {
+    let session_type = req.session_type.trim();
+    if matches!(session_type, "claude-cli" | "cursor-cli") && req.model.trim().is_empty() {
+        return Err(Status::invalid_argument(format!(
+            "model is required for {session_type} sessions"
+        )));
+    }
+    Ok(())
+}
+
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 /// How long a forwarded `StartSession` waits for the peer's answer.

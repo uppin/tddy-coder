@@ -4,10 +4,11 @@
  *
  * The entry renders `aria-disabled` and returns early from its click, and its only explanation is a
  * small grey hint under it. An operator who clicks "main" sees no response at all — no request, no
- * navigation, no error — and reads the drawer as broken. Expected: the click asks to set a home agent
- * up for that project (the Sessions screen opens its setup pane — see
+ * navigation, no error — and reads the drawer as broken. Expected: the click asks to set main up
+ * for that project (the Sessions screen opens its setup pane — see
  * `ProjectHomeSetupPaneAcceptance`). A project whose main is set up still starts it as before. Each
- * Projects card links to the same setup (**Set up main**), or to main itself (**Open main**).
+ * Projects card links to the same setup (**Set up main**), or to main itself (**Open main**), as
+ * recorded on the card's primary (first-listed) host.
  *
  * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
  */
@@ -16,10 +17,16 @@ import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "../../src/gen/session_pb";
 import { SessionDrawer, type ProjectHomeInfo } from "../../src/components/sessions/SessionDrawer";
-import { ProjectService } from "../../src/gen/project_pb";
+import { ProjectService, type ProjectEntry } from "../../src/gen/project_pb";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { mountWithRpc } from "../support/rpc/inMemory";
-import { aProject, aProjectsBackend, projectsAppPage } from "../support/rpc/projectsAppPageFixtures";
+import {
+  PROJECTS_LOCAL_HOST,
+  PROJECTS_REMOTE_HOST,
+  aProject,
+  aProjectsBackend,
+  projectsAppPage,
+} from "../support/rpc/projectsAppPageFixtures";
 import { projectHomeSetupPage as setup } from "../support/pages/projectHomeSetupPage";
 import { byTestId, sessionsDrawerProjectHome } from "../support/testIds";
 
@@ -63,6 +70,14 @@ function aDrawer(handlers: {
   );
 }
 
+/** The Projects page over `ListProjects` answering `projects`. */
+function theProjectsPageListing(projects: ProjectEntry[]) {
+  const backend = aProjectsBackend((b) =>
+    b.onUnary(ProjectService.method.listProjects, () => ({ projects })),
+  );
+  mountWithRpc(projectsAppPage(), backend);
+}
+
 /** The Projects page listing ALPHA, whose main is set up, and BETA, which has none. */
 function theProjectsPage() {
   const projects = [
@@ -77,10 +92,7 @@ function theProjectsPage() {
       homeSessionId,
     }),
   );
-  const backend = aProjectsBackend((b) =>
-    b.onUnary(ProjectService.method.listProjects, () => ({ projects })),
-  );
-  mountWithRpc(projectsAppPage(), backend);
+  theProjectsPageListing(projects);
 }
 
 beforeEach(() => {
@@ -147,4 +159,18 @@ it("a project with a main links to Open main from its Projects card", () => {
     .projectCardLink(ALPHA.projectId)
     .should("have.text", "Open main")
     .and("have.attr", "href", `#/sessions/${ALPHA_MAIN_SESSION}`);
+});
+
+it("a project on two hosts links to its primary host's main from its Projects card", () => {
+  // When ALPHA is listed first on a host with no main for it, then on a host whose main is set up
+  theProjectsPageListing([
+    aProject({ ...ALPHA, daemonInstanceId: PROJECTS_LOCAL_HOST, homeSessionId: "" }),
+    aProject({ ...ALPHA, daemonInstanceId: PROJECTS_REMOTE_HOST, homeSessionId: ALPHA_MAIN_SESSION }),
+  ]);
+
+  // Then the card's link is the first-listed (primary) host's
+  setup
+    .projectCardLink(ALPHA.projectId)
+    .should("have.text", "Set up main")
+    .and("have.attr", "href", `#/sessions/project-home/${ALPHA.projectId}`);
 });

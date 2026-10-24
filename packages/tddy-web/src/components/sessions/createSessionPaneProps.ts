@@ -128,8 +128,6 @@ export interface CreateSessionProjectHome {
   projectId: string;
   /** The host main runs on — the one `EnsureProjectHomeSession` is addressed to. */
   daemonInstanceId: string;
-  /** The project already has a main, which starting stops and replaces. */
-  replacing: boolean;
   /**
    * Sets main up from the form's start spec (`buildProjectHomeStartSpec`). Rejects with the
    * daemon's reason, which the form shows.

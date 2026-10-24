@@ -9,8 +9,14 @@
 
 import { describe, expect, it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
+import { ProjectEntrySchema } from "../gen/project_pb";
 import { SessionEntrySchema } from "../gen/session_pb";
-import { projectHomeSlot, withProjectHomeGroups, PROJECT_HOME_ROLE } from "./projectHomeGroups";
+import {
+  projectHomeSlot,
+  projectHomesOnHost,
+  withProjectHomeGroups,
+  PROJECT_HOME_ROLE,
+} from "./projectHomeGroups";
 import type { ProjectSessionGroup } from "./sessionProjectGroups";
 
 const ALPHA = { projectId: "p-alpha", name: "alpha" };
@@ -90,5 +96,43 @@ describe("projectHomeSlot", () => {
     const slot = projectHomeSlot(OTHER, [HOME]);
 
     expect(slot).toEqual({ home: undefined, homeSession: null, rows: OTHER.sessions });
+  });
+});
+
+describe("projectHomesOnHost", () => {
+  const aProjectRow = (projectId: string, daemonInstanceId: string, homeSessionId: string) =>
+    create(ProjectEntrySchema, { projectId, daemonInstanceId, homeSessionId, mainBranchRef: "origin/main" });
+
+  it("reads each project's main from the row of the host main is ensured on", () => {
+    // Given
+    const rows = [aProjectRow(ALPHA.projectId, "host-a", ""), aProjectRow(ALPHA.projectId, "host-b", "home-b")];
+
+    // When
+    const homes = projectHomesOnHost(rows, "host-b");
+
+    // Then
+    expect(homes).toEqual([{ projectId: ALPHA.projectId, mainBranchRef: "origin/main", homeSessionId: "home-b" }]);
+  });
+
+  it("gives a project with no row on that host no home", () => {
+    // Given
+    const rows = [aProjectRow(BETA.projectId, "host-a", "home-a")];
+
+    // When
+    const homes = projectHomesOnHost(rows, "host-b");
+
+    // Then
+    expect(homes).toEqual([]);
+  });
+
+  it("gives no homes while no host is selected", () => {
+    // Given
+    const rows = [aProjectRow(ALPHA.projectId, "host-a", "home-a")];
+
+    // When
+    const homes = projectHomesOnHost(rows, null);
+
+    // Then
+    expect(homes).toEqual([]);
   });
 });

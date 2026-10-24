@@ -113,7 +113,9 @@ export function SessionsDrawerScreen({
     claims;
 
   const { projects, error: projectsError, reload: reloadProjects } = useSessionsDrawerProjects(projectClient, sessionToken);
-  const projectHomes = useSessionsDrawerProjectHomes(projects);
+  // Main is per host: the pinned entries and the setup pane read the selected host's rows, the host
+  // the ensure below targets.
+  const { homes: projectHomes, projectOnHost } = useSessionsDrawerProjectHomes(projects, selectedInstanceId);
   const projectHomeSetup = useProjectHomeSetup();
   const setup = projectHomeSetup.setup;
 
@@ -394,7 +396,7 @@ export function SessionsDrawerScreen({
           {setup !== null ? (
             <ProjectHomeSetupPane
               {...setup}
-              project={projects.find((p) => p.projectId === setup.projectId) ?? null}
+              project={projectOnHost(setup.projectId)}
               daemonInstanceId={selectedInstanceId ?? ""}
               sessionToken={sessionToken}
               onStart={(spec) => startProjectHome(setup.projectId, selectedInstanceId ?? "", spec)}

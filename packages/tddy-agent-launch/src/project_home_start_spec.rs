@@ -22,7 +22,8 @@ const READ_ONLY_SESSION_TYPE: &str = "claude-cli";
 
 /// Refuses a spec asking for what main cannot be given: a standing role (granted by the daemon,
 /// never requested — see `LaunchSessions::start_session_core`) or a placement other than the home
-/// worktree on this host.
+/// worktree on this host (a sandbox, another codebase host, an SSH exec target, an agent clone or
+/// a split agent).
 pub(crate) fn refuse_what_main_cannot_honour(spec: &StartSessionRequest) -> Result<(), Status> {
     if !spec.session_role.trim().is_empty() {
         return Err(Status::permission_denied(format!(
@@ -40,6 +41,8 @@ pub(crate) fn refuse_what_main_cannot_honour(spec: &StartSessionRequest) -> Resu
             !spec.codebase_daemon_instance_id.trim().is_empty(),
             "codebase_daemon_instance_id",
         ),
+        // An SSH exec target runs the agent on a host that does not hold the home worktree.
+        (!spec.ssh_config_host.trim().is_empty(), "ssh_config_host"),
         (spec.agent_clone.is_some(), "agent_clone"),
         (spec.split_agent.is_some(), "split_agent"),
     ];

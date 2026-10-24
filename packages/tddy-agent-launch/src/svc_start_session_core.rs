@@ -18,6 +18,7 @@ use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
 use crate::placement::classify_placement;
 use crate::placement::PlacementRequest;
+use crate::start_request_checks::refuse_a_cli_start_without_a_model;
 
 use tddy_rpc::Response;
 use tddy_rpc::Status;
@@ -138,16 +139,7 @@ impl LaunchSessions {
         // auto-provision below: claude-cli always requires a model, so reject an empty one up front
         // — a bad request should fail fast with INVALID_ARGUMENT, not a project NotFound. The
         // per-session-type handlers re-check as defense-in-depth (and for the resume/child paths).
-        if req.session_type.trim() == "claude-cli" && req.model.trim().is_empty() {
-            return Err(Status::invalid_argument(
-                "model is required for claude-cli sessions",
-            ));
-        }
-        if req.session_type.trim() == "cursor-cli" && req.model.trim().is_empty() {
-            return Err(Status::invalid_argument(
-                "model is required for cursor-cli sessions",
-            ));
-        }
+        refuse_a_cli_start_without_a_model(&req)?;
 
         // Neither placement below puts a repository where the agent runs, so both skip the project
         // auto-provision and the whole worktree-bearing dispatch that follows: a split resolves the
@@ -481,7 +473,7 @@ fn classify_start_placement(
     Ok(placement)
 }
 
-fn managed_recipe_for(
+pub(crate) fn managed_recipe_for(
     req: &StartSessionRequest,
 ) -> Result<Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>, Status> {
     let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =

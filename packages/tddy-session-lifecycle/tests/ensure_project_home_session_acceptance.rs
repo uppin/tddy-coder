@@ -15,8 +15,9 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_projects::project_storage;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
-    EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, ListSessionsRequest,
-    SessionEntry, SessionService as SessionServiceTrait, StartSessionRequest,
+    AgentClonePlacement, EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse,
+    ListSessionsRequest, SessionEntry, SessionService as SessionServiceTrait, SplitAgentPlacement,
+    StartSessionRequest,
 };
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
@@ -209,6 +210,22 @@ impl World {
             .into_iter()
             .find(|s| s.session_id == session_id)
             .expect("the session is listed")
+    }
+
+    /// Whether the daemon still serves `session_id`'s agent terminal.
+    async fn is_served(&self, session_id: &str) -> bool {
+        self.manager.get(session_id).await.is_some()
+    }
+
+    /// Write a harness profile named `name` running `harness` into the daemon's agents directory.
+    fn with_harness_profile(&self, name: &str, harness: &str) {
+        let agents = self.data.path().join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(
+            agents.join(format!("{name}.yaml")),
+            format!("name: {name}\nharness: {harness}\nmodel: auto\n"),
+        )
+        .unwrap();
     }
 
     async fn argv_of(&self, session_id: &str) -> String {
@@ -608,7 +625,7 @@ async fn a_project_home_session_is_listed_with_its_role() {
 }
 
 #[tokio::test]
-async fn an_ensured_project_home_agent_is_pre_approved_the_project_home_tool_set() {
+async fn an_ensured_main_is_pre_approved_the_project_home_tool_set() {
     // Given a main the ensure has started
     let world = a_daemon_with_a_project();
     let main = world
@@ -622,7 +639,7 @@ async fn an_ensured_project_home_agent_is_pre_approved_the_project_home_tool_set
         .manager
         .get(&main.session_id)
         .await
-        .expect("the home agent is running");
+        .expect("main is running");
 
     // Then the command line the stub `claude` echoes pre-approves the role's tool set, a
     // cross-session tool among it (the wait panics with what the agent did print)
@@ -659,4 +676,154 @@ async fn a_start_session_naming_a_role_is_refused_and_starts_nothing() {
         refusal.message()
     );
     assert_eq!(world.session_dirs(), 0);
+}
+
+#[tokio::test]
+async fn setting_up_main_over_ssh_is_refused_and_starts_nothing() {
+    // Given
+    let world = a_daemon_with_a_project();
+    let spec = StartSessionRequest {
+        ssh_config_host: "build-box".to_string(),
+        ..a_claude_cli_spec()
+    };
+
+    // When
+    let refusal = world
+        .set_up_main(spec)
+        .await
+        .expect_err("an SSH exec target is refused");
+
+    // Then
+    assert_eq!(refusal.code(), Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("ssh_config_host"),
+        "names the refused field: {}",
+        refusal.message()
+    );
+    assert_eq!(world.session_dirs(), 0);
+    assert_eq!(world.recorded_main(), None);
+}
+
+#[tokio::test]
+async fn setting_up_main_with_a_profile_that_runs_cursor_cli_is_refused() {
+    // Given a harness profile that runs Cursor CLI, named as a claude-cli spec's agent on the
+    // harness's own vendor
+    let world = a_daemon_with_a_project();
+    world.with_harness_profile("cursor-on-vendor", "cursor-cli");
+    let spec = StartSessionRequest {
+        agent: "cursor-on-vendor".to_string(),
+        provider_built_in: true,
+        ..a_claude_cli_spec()
+    };
+
+    // When
+    let refusal = world
+        .set_up_main(spec)
+        .await
+        .expect_err("the profile's cursor-cli is refused");
+
+    // Then
+    assert_eq!(refusal.code(), Code::FailedPrecondition);
+    assert!(
+        refusal.message().contains("cursor-cli"),
+        "names the type the profile resolves to: {}",
+        refusal.message()
+    );
+    assert_eq!(world.session_dirs(), 0);
+    assert_eq!(world.recorded_main(), None);
+}
+
+#[tokio::test]
+async fn setting_up_main_as_an_agent_clone_is_refused() {
+    // Given
+    let world = a_daemon_with_a_project();
+    let spec = StartSessionRequest {
+        agent_clone: Some(AgentClonePlacement::default()),
+        ..a_claude_cli_spec()
+    };
+
+    // When
+    let refusal = world
+        .set_up_main(spec)
+        .await
+        .expect_err("an agent clone is refused");
+
+    // Then
+    assert_eq!(refusal.code(), Code::InvalidArgument);
+    assert_eq!(world.session_dirs(), 0);
+}
+
+#[tokio::test]
+async fn setting_up_main_as_a_split_agent_is_refused() {
+    // Given
+    let world = a_daemon_with_a_project();
+    let spec = StartSessionRequest {
+        split_agent: Some(SplitAgentPlacement::default()),
+        ..a_claude_cli_spec()
+    };
+
+    // When
+    let refusal = world
+        .set_up_main(spec)
+        .await
+        .expect_err("a split agent is refused");
+
+    // Then
+    assert_eq!(refusal.code(), Code::InvalidArgument);
+    assert_eq!(world.session_dirs(), 0);
+}
+
+#[tokio::test]
+async fn a_refused_replace_leaves_the_running_main_running_and_recorded() {
+    // Given a running main
+    let world = a_daemon_with_a_project();
+    let old = world
+        .set_up_main(a_claude_cli_spec())
+        .await
+        .expect("set up")
+        .session
+        .unwrap();
+
+    // When main is set up again from a spec the start refuses (claude-cli needs a model)
+    let refusal = world
+        .set_up_main(StartSessionRequest {
+            model: String::new(),
+            ..a_claude_cli_spec()
+        })
+        .await
+        .expect_err("a start without a model is refused");
+
+    // Then
+    assert_eq!(refusal.code(), Code::InvalidArgument);
+    assert!(
+        world.is_served(&old.session_id).await,
+        "the old main still runs"
+    );
+    assert_eq!(world.recorded_main(), Some(old.session_id));
+    assert_eq!(world.session_dirs(), 1);
+}
+
+#[tokio::test]
+async fn two_concurrent_set_ups_record_one_main_and_the_other_is_replaced() {
+    // Given
+    let world = a_daemon_with_a_project();
+
+    // When main is set up twice at once
+    let (first, second) = tokio::join!(
+        world.set_up_main(a_claude_cli_spec()),
+        world.set_up_main(a_claude_cli_spec())
+    );
+
+    // Then the later one replaces the earlier, which is stopped
+    let first = first.expect("the first set-up succeeds");
+    let second = second.expect("the second set-up succeeds");
+    assert_eq!(first.outcome, "started");
+    assert_eq!(second.outcome, "replaced");
+    let earlier = first.session.unwrap().session_id;
+    let later = second.session.unwrap().session_id;
+    assert_eq!(world.recorded_main(), Some(later));
+    assert!(
+        !world.is_served(&earlier).await,
+        "the replaced main is no longer served"
+    );
 }

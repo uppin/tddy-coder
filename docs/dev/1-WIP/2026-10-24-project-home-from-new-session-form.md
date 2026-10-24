@@ -291,6 +291,7 @@ Fixture sets main up with a claude-cli spec instead of a `home_agent:` row; test
 - **Sandbox refused for main** (planner, approved with PRD): the sandboxed claude-cli path drops `session_role`. TODO to file at green: carry the role on the sandboxed path, then allow it.
 - **No adoption of a pre-existing role-tagged main** (planner, approved with PRD): users set main up once again.
 - **Green additions** (implementer, kept): the type check runs on the spec *after* a harness profile named by `agent` is applied (so a cursor-cli profile cannot pass as claude-cli) — `start_session_core` now applies the profile and `start_session_with_role` takes a resolved request; `agent_clone` / `split_agent` are refused too; stack fields are cleared with the branch fields; replacing fast-forwards the home worktree before stopping the old main; a stale id is cleared and the outcome is `started`; a recorded id whose record is unreadable is `INTERNAL`, not cleared. `ProjectRpcHandler` lost `model_registry`, its field budget is 7 → 6.
+- **Review fixes** (implementer, from /validate-changes): ensure takes its lock *before* reading `home_session_id`, so two set-ups record one main and the second reports `replaced`; a replace runs every start check that can fail without side effects (`refuse_a_claude_cli_start_up_front`) before it stops the old main — spawn failures and the async agent-allowlist lookup still come after the stop, and the old id stays recorded so a plain ensure resumes it; `ssh_config_host` is refused like the other placements; a main whose id cannot be recorded is stopped and the error returned. Web: the drawer slots main from the **selected host's** project row only.
 - **Daemon overwrites location fields** of the spec (project, repo path, branch, managed, role) rather than refusing them — they are the daemon's by definition of main; placement and role are refused because silently dropping them would change what the operator asked for.
 
 ## Refactoring Needed
@@ -306,6 +307,15 @@ Fixture sets main up with a claude-cli spec instead of a `home_agent:` row; test
 ## Validation Results
 
 ### /validate-changes
+
+Review over the green commit found no critical issue; 5 warnings + 8 info, all fixed (see *Decisions → Review fixes*). Scoped reruns on the combined tree, 2026-10-24:
+
+- `cargo test -p tddy-session-lifecycle --test ensure_project_home_session_acceptance --test project_home_idle_stop_acceptance -p tddy-projects --test project_home_session_storage -p tddy-daemon-rpc --test project_home_session_entry --test rpc_handlers_shape --test list_projects_local_only -p tddy-service --test unbundle_service_split` — 22 / 5 / 5 / 2 / 10 / 2 / 28 passed, 0 failed.
+- `cargo test -p tddy-agent-launch --lib` — 152 passed; clippy `-D warnings` + fmt clean on `tddy-agent-launch`, `tddy-session-lifecycle`.
+- `bun test` (sessions, utils, routing, projects) — 691 passed, 0 failed. `generated-code.sh check` — up to date.
+- Cypress component, 11 specs (ProjectHome*, SessionsDrawer{ProjectHome,ProjectGroups,,CrossHost}, CreateSession{Pane,Acceptance,ManagedCodebase}, ProjectsScreen) — 123 passed, 0 failed.
+
+Open: a Projects card's "Set up main" link reflects the card's primary host, the setup pane acts on the drawer's selected host — needs a host on the setup route (left for the developer).
 
 ### /validate-tests
 
@@ -324,11 +334,11 @@ Fixture sets main up with a claude-cli spec instead of a `home_agent:` row; test
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
 - [ ] Refactor test issues

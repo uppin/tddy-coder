@@ -82,13 +82,16 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
         mainBranchRef: p.mainBranchRef,
         accounts: p.accounts.map((a) => ({ provider: a.provider, accountId: a.accountId })),
         localGh: p.localGh,
-        homeSessionId: p.homeSessionId,
         hosts: [],
       };
       byId.set(p.projectId, group);
       groups.push(group);
     }
-    group.hosts.push({ daemonInstanceId: p.daemonInstanceId, mainRepoPath: p.mainRepoPath });
+    group.hosts.push({
+      daemonInstanceId: p.daemonInstanceId,
+      mainRepoPath: p.mainRepoPath,
+      homeSessionId: p.homeSessionId,
+    });
   }
   return groups;
 }

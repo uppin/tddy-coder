@@ -76,13 +76,20 @@ export const projectHomeSetupPage = {
 
   typeReason: (sessionType: SessionType) => byTestId(createSessionTypeReason(sessionType)),
 
-  /** The test ids of the hidden controls that are nevertheless rendered (expected: none). */
-  renderedHiddenControls: (projectId: string): Cypress.Chainable<string[]> =>
+  /**
+   * Asserts the main variant renders none of the controls it hides. Waits for the form to have
+   * rendered — its model select visible — before asserting each one absent, so an absence is
+   * not read off a form still mounting.
+   */
+  assertMainVariantHidesPlacementAndBranchControls(projectId: string) {
     projectHomeSetupPage
-      .pane(projectId)
-      .then(($pane) =>
-        HIDDEN_IN_MAIN.filter((id) => $pane.find(`[data-testid="${id}"]`).length > 0),
-      ),
+      .form(projectId)
+      .find(`[data-testid="${TEST_IDS.createSessionModelSelect}"]`, { timeout: 5000 })
+      .should("be.visible");
+    for (const id of HIDDEN_IN_MAIN) {
+      projectHomeSetupPage.pane(projectId).find(`[data-testid="${id}"]`).should("not.exist");
+    }
+  },
 
   chooseModel(model: string) {
     byTestId(TEST_IDS.createSessionModelSelect, { timeout: 5000 }).select(model);

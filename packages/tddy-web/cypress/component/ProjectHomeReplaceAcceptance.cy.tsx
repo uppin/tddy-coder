@@ -14,7 +14,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import type { ProjectEntry } from "../../src/gen/project_pb";
 import { SessionEntrySchema, SessionService } from "../../src/gen/session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionServiceBackend } from "../support/rpc/daemonSessionHostBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { projectHomeSetupPage as setup } from "../support/pages/projectHomeSetupPage";
@@ -23,16 +23,30 @@ const ALPHA = "proj-alpha";
 const MAIN_SESSION_ID = "home-alpha-0000-0000-0000-000000000000";
 const NEW_MAIN_SESSION_ID = "home-alpha-1111-1111-1111-111111111111";
 
-/** A project whose main is set up and listed. */
+/** A project whose main is set up and listed, on the selected host. */
 const ALPHA_WITH_MAIN: Partial<ProjectEntry> = {
   projectId: ALPHA,
   name: "alpha",
   mainBranchRef: "origin/main",
   homeSessionId: MAIN_SESSION_ID,
+  daemonInstanceId: DEFAULT_TEST_DAEMON.instanceId,
 };
 
-/** The Sessions screen over a daemon whose `EnsureProjectHomeSession` runs `ensure`. */
-function theSessionsScreen(ensure: () => unknown) {
+/** The same project registered on another host, which has no main set up for it. */
+const ALPHA_ON_ANOTHER_HOST_WITHOUT_MAIN: Partial<ProjectEntry> = {
+  ...ALPHA_WITH_MAIN,
+  homeSessionId: "",
+  daemonInstanceId: "another-host",
+};
+
+/**
+ * The Sessions screen over a daemon listing `projects` whose `EnsureProjectHomeSession` runs
+ * `ensure`.
+ */
+function theSessionsScreen(
+  ensure: () => unknown,
+  projects: Partial<ProjectEntry>[] = [ALPHA_WITH_MAIN],
+) {
   const backend = aSessionServiceBackend({
     sessions: [
       {
@@ -43,7 +57,7 @@ function theSessionsScreen(ensure: () => unknown) {
         model: "opus",
       },
     ],
-    projectsOverride: [ALPHA_WITH_MAIN],
+    projectsOverride: projects,
   }).onUnary(SessionService.method.ensureProjectHomeSession, ensure);
   mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
   return backend;
@@ -117,4 +131,13 @@ it("a main the daemon no longer has opens the setup form", () => {
   });
   cy.location("hash").should("match", new RegExp(`^#/sessions/project-home/${ALPHA}(\\?|$)`));
   setup.pane(ALPHA).should("contain", "Set up main for alpha");
+});
+
+it("main reflects the selected host's project row", () => {
+  // When the project is listed first on a host with no main for it, then on the selected host
+  theSessionsScreen(replacesMain, [ALPHA_ON_ANOTHER_HOST_WITHOUT_MAIN, ALPHA_WITH_MAIN]);
+
+  // Then the pinned entry stands for the selected host's main
+  setup.mainEntry(ALPHA).should("exist");
+  setup.replaceAction(ALPHA).should("exist");
 });

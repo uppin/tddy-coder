@@ -25,9 +25,11 @@ export interface ProjectGroup {
   mainBranchRef: string;
   accounts: { provider: string; accountId: string }[];
   localGh: boolean;
-  /** The session the project records as its main; empty when main is not set up. */
-  homeSessionId: string;
-  hosts: { daemonInstanceId: string; mainRepoPath: string }[];
+  /**
+   * Each host the project is registered on, first-seen first (the first is the card's primary
+   * host). `homeSessionId` is that host's recorded main — main is per host — empty when not set up.
+   */
+  hosts: { daemonInstanceId: string; mainRepoPath: string; homeSessionId: string }[];
 }
 
 /**
@@ -172,7 +174,10 @@ export function ProjectCard({
         </select>
       </div>
 
-      <ProjectMainSessionLink projectId={group.projectId} homeSessionId={group.homeSessionId} />
+      <ProjectMainSessionLink
+        projectId={group.projectId}
+        homeSessionId={group.hosts[0]?.homeSessionId ?? ""}
+      />
 
       <LocalGhToggle projectId={group.projectId} checked={group.localGh} onChange={setLocalGh} />
 

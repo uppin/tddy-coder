@@ -1,6 +1,8 @@
 import React from "react";
 import type { ProjectEntry } from "../../gen/project_pb";
 import type { StartSessionRequestInit } from "../../hooks/useSessionAttachments";
+import { useHostLabel } from "../../rpc/selectedDaemon";
+import { hostNotConnectedText } from "../../rpc/rpcFailure";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
@@ -11,7 +13,8 @@ import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
  * project and host fixed, only the session types that can run main selectable. **Start main
  * session** hands the form's start spec to `onStart` (`EnsureProjectHomeSession`); the started
  * session is selected, which replaces this pane, and a refusal is shown in the form. A project id
- * the registry does not list says so instead of offering a form for nothing.
+ * the registry does not list says so instead of offering a form for nothing, and so does a host no
+ * wire reaches any more (the registry keeps its last good list, so the project can still be named).
  *
  * Feature doc: docs/ft/web/session-drawer.md § Pinned main entry.
  * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-project-home-from-new-session-form.md
@@ -32,6 +35,7 @@ export function ProjectHomeSetupPane(props: {
   const { projectId, project, replacing, daemonInstanceId, sessionToken, onStart, onClose } = props;
   const { client, projectClient, catalogClient, accountsClient, sessionFilesClient, worktreeClient } =
     useSessionsDrawerClients();
+  const hostLabel = useHostLabel();
   const verb = replacing ? "Replace" : "Set up";
 
   return (
@@ -68,7 +72,7 @@ export function ProjectHomeSetupPane(props: {
                 Starting stops the current main. It stays in the list as an ordinary session.
               </p>
             )}
-            {client && projectClient && catalogClient && sessionFilesClient && worktreeClient && (
+            {client && projectClient && catalogClient && sessionFilesClient && worktreeClient ? (
               <CreateSessionPane
                 // A fresh form per project: the variant fixes its project when it mounts.
                 key={projectId}
@@ -82,8 +86,20 @@ export function ProjectHomeSetupPane(props: {
                 onCancel={onClose}
                 // Never called: the main variant starts through `projectHome.onStart`.
                 onCreated={() => undefined}
-                projectHome={{ projectId, daemonInstanceId, replacing, onStart }}
+                projectHome={{ projectId, daemonInstanceId, onStart }}
               />
+            ) : (
+              <>
+                <p
+                  data-testid={`sessions-project-home-setup-unreachable-${projectId}`}
+                  className="mb-3 text-sm text-muted-foreground"
+                >
+                  {hostNotConnectedText(hostLabel(daemonInstanceId))}
+                </p>
+                <Button type="button" variant="secondary" onClick={onClose}>
+                  Cancel
+                </Button>
+              </>
             )}
           </>
         )}
