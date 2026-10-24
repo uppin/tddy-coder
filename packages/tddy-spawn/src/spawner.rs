@@ -632,82 +632,7 @@ pub fn clone_as_user_with_env(
     destination: &Path,
     extra_env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
-    clone_as_user_observed(os_user, git_url, destination, extra_env, |_| {})
-}
-
-/// [`clone_as_user_with_env`], calling `on_started` with the `git clone` child's pid as soon as the
-/// child is running, before the clone finishes. A spawn worker reports that pid to its caller.
-#[cfg(unix)]
-pub fn clone_as_user_observed(
-    os_user: &str,
-    git_url: &str,
-    destination: &Path,
-    extra_env: &[(&str, &str)],
-    on_started: impl FnOnce(u32),
-) -> anyhow::Result<()> {
-    let dest_str = destination
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("destination path is not valid UTF-8"))?;
-
-    // Match shell `if test -e "$1"; then exit 0; fi` without starting a child — the tree is already
-    // present, so there is nothing to refuse or drop privileges for.
-    if destination.exists() {
-        log::info!(
-            "clone_as_user: destination already exists, skipping fork (dest={})",
-            destination.display()
-        );
-        return Ok(());
-    }
-
-    log::info!(
-        "clone_as_user: will run git clone as os_user={} dest={}",
-        os_user,
-        destination.display()
-    );
-
-    let target = resolve_target_account(os_user)?;
-    let home_dir = target.home.clone();
-    // Refused here, before any fork, when this process cannot become `os_user`.
-    let change = plan_privilege_change(target)?;
-
-    // Run as target user: skip clone if destination exists; else `git clone`.
-    let mut cmd = std::process::Command::new("sh");
-    cmd.arg("-c")
-        .arg(r#"if test -e "$1"; then exit 0; fi; exec git clone "$2" "$1""#)
-        .arg("sh")
-        .arg(dest_str)
-        .arg(git_url)
-        .env("HOME", &home_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // Transport-shim env vars (e.g. GIT_SSH_COMMAND + TDDY_* for a facilitator clone) travel in the
-    // child's own environment, which the privilege drop does not touch.
-    for (key, value) in extra_env {
-        cmd.env(key, value);
-    }
-
-    log::debug!(
-        "clone_as_user: invoking sh/git same_user={} dest={}",
-        matches!(change, PrivilegeChange::None),
-        destination.display()
-    );
-
-    let staged = StagedCommand::new(cmd, &format!("clone {}", destination.display()), change)
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("git clone: {}", e))?;
-    on_started(staged.child.id());
-    let output = staged
-        .child
-        .wait_with_output()
-        .map_err(|e| anyhow::anyhow!("git clone: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git clone failed: {}", stderr.trim());
-    }
-
-    Ok(())
+    crate::clone_run::clone_with_progress(os_user, git_url, destination, extra_env, |_| {}, |_| {})
 }
 
 #[cfg(not(unix))]
@@ -721,17 +646,6 @@ pub fn clone_as_user_with_env(
     _git_url: &str,
     _destination: &Path,
     _extra_env: &[(&str, &str)],
-) -> anyhow::Result<()> {
-    anyhow::bail!("clone_as_user is only supported on Unix")
-}
-
-#[cfg(not(unix))]
-pub fn clone_as_user_observed(
-    _os_user: &str,
-    _git_url: &str,
-    _destination: &Path,
-    _extra_env: &[(&str, &str)],
-    _on_started: impl FnOnce(u32),
 ) -> anyhow::Result<()> {
     anyhow::bail!("clone_as_user is only supported on Unix")
 }

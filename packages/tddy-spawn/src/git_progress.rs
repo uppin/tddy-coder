@@ -33,9 +33,69 @@ pub struct GitProgress {
 /// Parse one progress line; `None` for a line that carries no `NN% (done/total)` progress, such as
 /// `Cloning into '…'...`.
 pub fn parse(line: &str) -> Option<GitProgress> {
-    // TODO(clone-progress): implement — strip "remote: ", "<stage>: NN% (a/b)", optional ", X.YY UNIT | Z.WW UNIT/s"
-    let _ = line;
-    None
+    let line = line.trim();
+    let text = line
+        .strip_prefix("remote:")
+        .map_or(line, |rest| rest.trim_start());
+    let (stage, rest) = text.split_once(':')?;
+    let stage = stage.trim();
+    if stage.is_empty() {
+        return None;
+    }
+    let (percent, rest) = rest.split_once('%')?;
+    let percent = percent.trim().parse::<u32>().ok()?;
+    let rest = rest.trim_start().strip_prefix('(')?;
+    let (counts, tail) = rest.split_once(')')?;
+    let (done, total) = counts.split_once('/')?;
+    let (bytes_received, bytes_per_second) = transfer_figures(tail);
+    Some(GitProgress {
+        stage: stage.to_string(),
+        percent,
+        objects_done: done.trim().parse().ok()?,
+        objects_total: total.trim().parse().ok()?,
+        bytes_received,
+        bytes_per_second,
+        line: line.to_string(),
+    })
+}
+
+/// The `, 38.50 MiB | 4.25 MiB/s` part of a line: bytes so far and bytes per second, each 0 when
+/// the line does not carry it. A `, done.` segment is neither.
+fn transfer_figures(tail: &str) -> (u64, u64) {
+    let mut bytes = 0;
+    let mut rate = 0;
+    for segment in tail.split(',').map(str::trim) {
+        match segment.split_once('|') {
+            Some((size, speed)) => {
+                bytes = byte_count(size).unwrap_or(0);
+                rate = byte_count(speed.trim().trim_end_matches("/s")).unwrap_or(0);
+            }
+            None => {
+                if let Some(size) = byte_count(segment) {
+                    bytes = size;
+                }
+            }
+        }
+    }
+    (bytes, rate)
+}
+
+/// `38.50 MiB` as bytes, with git's binary units.
+fn byte_count(text: &str) -> Option<u64> {
+    let mut words = text.split_whitespace();
+    let figure: f64 = words.next()?.parse().ok()?;
+    let unit: f64 = match words.next()? {
+        "bytes" | "B" => 1.0,
+        "KiB" => 1024.0,
+        "MiB" => 1024.0 * 1024.0,
+        "GiB" => 1024.0 * 1024.0 * 1024.0,
+        "TiB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    if words.next().is_some() {
+        return None;
+    }
+    Some((figure * unit).round() as u64)
 }
 
 /// The shortest gap between two forwarded updates of the same stage.
@@ -55,8 +115,17 @@ impl ProgressThrottle {
 
     /// Whether `progress`, seen at `now`, should be forwarded. Records it when it is.
     pub fn admit(&mut self, progress: &GitProgress, now: Instant) -> bool {
-        // TODO(clone-progress): implement
-        let _ = (progress, now, &self.last);
-        false
+        let worth_sending = match &self.last {
+            None => true,
+            Some((stage, at)) => {
+                *stage != progress.stage
+                    || progress.percent >= 100
+                    || now.saturating_duration_since(*at) >= PROGRESS_INTERVAL
+            }
+        };
+        if worth_sending {
+            self.last = Some((progress.stage.clone(), now));
+        }
+        worth_sending
     }
 }

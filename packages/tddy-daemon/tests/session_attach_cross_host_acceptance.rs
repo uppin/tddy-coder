@@ -715,6 +715,8 @@ async fn stream_start_session_forwards_to_the_peer_that_runs_the_session() {
             StartEvent::Phase(_) => {}
             // Keep-alives are pinned by tddy-agent-launch's `start_keepalive.rs`.
             StartEvent::KeepAlive(_) => {}
+            // Clone progress is pinned by tddy-session-lifecycle's `start_phase_acceptance.rs`.
+            StartEvent::CloneProgress(_) => {}
         }
     }
 
@@ -859,6 +861,8 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
             StartEvent::Phase(_) => {}
             // Keep-alives are pinned by tddy-agent-launch's `start_keepalive.rs`.
             StartEvent::KeepAlive(_) => {}
+            // Clone progress is pinned by tddy-session-lifecycle's `start_phase_acceptance.rs`.
+            StartEvent::CloneProgress(_) => {}
         }
     }
 

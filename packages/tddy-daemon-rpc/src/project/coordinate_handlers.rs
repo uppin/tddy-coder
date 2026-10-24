@@ -19,12 +19,58 @@ use tddy_service::proto::project::{
     ListProjectsResponse, ProjectEntry, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse,
 };
-use tddy_session_lifecycle::connection_service::{
-    await_supervised_with_timeout, spawn_blocking_with_timeout, wire_same,
-};
+use tddy_session_lifecycle::connection_service::{spawn_blocking_with_timeout, wire_same};
 use tddy_spawn::{spawn_worker, spawner};
 
 impl ProjectRpcHandler {
+    /// Clone `git_url` into `destination` as `os_user` on the daemon's spawn backend.
+    ///
+    /// There is deliberately no deadline: a clone is as slow as its repository and network, and the
+    /// clone itself is killable and leaves no partial destination. The RPC is unary, so it reports
+    /// no progress (see `docs/dev/todo/2026-10-24-stream-create-project-and-add-to-host-clone-progress.md`).
+    async fn clone_without_deadline(
+        &self,
+        op_label: &'static str,
+        os_user: &str,
+        git_url: &str,
+        destination: &std::path::Path,
+    ) -> Result<(), Status> {
+        let os_user = os_user.to_string();
+        let git_url = git_url.to_string();
+        let destination = destination.to_path_buf();
+        let cloned = match self.clone_backend.choice.clone() {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                tddy_spawn::supervisor_spawn::clone_repo_via_supervisor(
+                    &socket_path,
+                    &os_user,
+                    &git_url,
+                    &destination,
+                )
+                .await
+                .map_err(|e| format!("{e:#}"))
+            }
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                let spawn_client = self.clone_backend.worker.clone();
+                tokio::task::spawn_blocking(move || match spawn_client {
+                    Some(client) => client.clone_repo(spawn_worker::CloneRequest {
+                        os_user,
+                        git_url,
+                        destination: destination.display().to_string(),
+                        env: Default::default(),
+                    }),
+                    None => spawner::clone_as_user(&os_user, &git_url, &destination),
+                })
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|cloned| cloned.map_err(|e| e.to_string()))
+            }
+        };
+        cloned.map_err(|message| {
+            log::error!("{op_label}: clone failed: {message}");
+            Status::internal(message)
+        })
+    }
+
     pub(crate) async fn list_projects_at_project_coordinate(
         &self,
         request: Request<ListProjectsRequest>,
@@ -114,42 +160,8 @@ impl ProjectRpcHandler {
                 .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
             base.join(name)
         };
-        let spawn_client = self.clone_backend.worker.clone();
-        let os_user_owned = os_user.to_string();
-        let git_url_owned = git_url.to_string();
-        let dest_path = destination.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-
-        match self.clone_backend.choice.clone() {
-            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
-                await_supervised_with_timeout(
-                    timeout,
-                    "create_project: clone via tddy-supervisor",
-                    tddy_spawn::supervisor_spawn::clone_repo_via_supervisor(
-                        &socket_path,
-                        &os_user_owned,
-                        &git_url_owned,
-                        &dest_path,
-                    ),
-                )
-                .await?
-            }
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                spawn_blocking_with_timeout(timeout, "create_project: clone_repo", move || {
-                    if let Some(ref client) = spawn_client {
-                        client.clone_repo(spawn_worker::CloneRequest {
-                            os_user: os_user_owned,
-                            git_url: git_url_owned,
-                            destination: dest_path.display().to_string(),
-                            env: Default::default(),
-                        })
-                    } else {
-                        spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
-                    }
-                })
-                .await?
-            }
-        }
+        self.clone_without_deadline("create_project", os_user, git_url, &destination)
+            .await?;
 
         let main_repo_path = destination
             .canonicalize()
@@ -268,42 +280,8 @@ impl ProjectRpcHandler {
                 .ok_or_else(|| Status::internal("could not resolve repos base path"))?;
             base.join(name)
         };
-        let spawn_client = self.clone_backend.worker.clone();
-        let os_user_owned = os_user.to_string();
-        let git_url_owned = git_url.to_string();
-        let dest_path = destination.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-
-        match self.clone_backend.choice.clone() {
-            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
-                await_supervised_with_timeout(
-                    timeout,
-                    "add_project_to_host: clone via tddy-supervisor",
-                    tddy_spawn::supervisor_spawn::clone_repo_via_supervisor(
-                        &socket_path,
-                        &os_user_owned,
-                        &git_url_owned,
-                        &dest_path,
-                    ),
-                )
-                .await?
-            }
-            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                spawn_blocking_with_timeout(timeout, "add_project_to_host: clone_repo", move || {
-                    if let Some(ref client) = spawn_client {
-                        client.clone_repo(spawn_worker::CloneRequest {
-                            os_user: os_user_owned,
-                            git_url: git_url_owned,
-                            destination: dest_path.display().to_string(),
-                            env: Default::default(),
-                        })
-                    } else {
-                        spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
-                    }
-                })
-                .await?
-            }
-        }
+        self.clone_without_deadline("add_project_to_host", os_user, git_url, &destination)
+            .await?;
 
         let main_repo_path = destination
             .canonicalize()

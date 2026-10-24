@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 use super::wire::{RequestId, WorkerEnvelope, WorkerLine};
 use super::{run_spawn, CloneRequest, WorkerEvent, WorkerRequest, WorkerResponse};
+use crate::git_progress::GitProgress;
 
 /// Serve requests until the request pipe closes, then return once every request still running has
 /// written its result.
@@ -50,26 +51,26 @@ fn serve_line(line: &str, out: &Mutex<File>) {
     let id = envelope.id;
     let response = match envelope.request {
         WorkerRequest::Spawn(req) => run_spawn(&req),
-        WorkerRequest::Clone(req) => run_clone(&req, |pid| {
-            write_line(
-                out,
-                &WorkerLine::Event {
-                    id,
-                    event: WorkerEvent::Started { pid },
-                },
-            );
-        }),
+        WorkerRequest::Clone(req) => run_clone(
+            &req,
+            |pid| write_event(out, id, WorkerEvent::Started { pid }),
+            |progress| write_event(out, id, WorkerEvent::CloneProgress(progress)),
+        ),
     };
     write_line(out, &WorkerLine::Result { id, response });
 }
 
-fn run_clone(req: &CloneRequest, on_started: impl FnOnce(u32)) -> WorkerResponse {
+fn run_clone(
+    req: &CloneRequest,
+    on_started: impl FnOnce(u32),
+    on_progress: impl FnMut(GitProgress),
+) -> WorkerResponse {
     log::info!(
         "spawn_worker: calling clone_as_user os_user={} dest={}",
         req.os_user,
         req.destination
     );
-    let result = req.run(on_started);
+    let result = req.run(on_started, on_progress);
     match &result {
         Ok(()) => log::info!("spawn_worker: clone_as_user ok dest={}", req.destination),
         Err(e) => log::warn!(
@@ -84,6 +85,11 @@ fn run_clone(req: &CloneRequest, on_started: impl FnOnce(u32)) -> WorkerResponse
             message: e.to_string(),
         },
     }
+}
+
+/// Report an event of request `id`, ahead of its result.
+fn write_event(out: &Mutex<File>, id: RequestId, event: WorkerEvent) {
+    write_line(out, &WorkerLine::Event { id, event });
 }
 
 /// The request id a line carries, when it is JSON with one.

@@ -42,6 +42,7 @@ pub fn attachment_size_bytes(session_dir: &Path, basename: &str) -> u64 {
 /// `StreamStartSession` supplies the stream's sender; unary `StartSession` supplies
 /// [`AttachmentProgressSink::discarding`], so the two entry points run the identical code path and
 /// the unary one simply has nowhere to report to.
+#[derive(Clone)]
 pub struct AttachmentProgressSink {
     pub tx: Option<tokio::sync::mpsc::UnboundedSender<Result<StartSessionEvent, Status>>>,
 }

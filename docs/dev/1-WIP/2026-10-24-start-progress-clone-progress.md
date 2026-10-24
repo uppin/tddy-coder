@@ -132,15 +132,15 @@ start's `test -e` skips.
 
 ## Scope
 
-- [ ] Proto: `STEP_CLONE`, `CloneProgress`, `clone_progress` event; generated Rust + TS
-- [ ] `git_progress::parse` + `ProgressThrottle`
-- [ ] `clone_with_progress`: `--progress`, temp dir + rename, remove on failure, `CloneHandle::stop`
-- [ ] Worker relays `WorkerEvent::CloneProgress`
-- [ ] Sink `clone_progress`; the cloner closure captures it
-- [ ] Session start: `STEP_CLONE` + progress; deadline removed
-- [ ] CreateProject / AddProjectToHost: deadline removed
-- [ ] TODO: stream CreateProject / AddProjectToHost
-- [ ] Docs: project-concept (clone step), tddy-spawn clone docs
+- [x] Proto: `STEP_CLONE`, `CloneProgress`, `clone_progress` event; generated Rust + TS
+- [x] `git_progress::parse` + `ProgressThrottle`
+- [x] `clone_with_progress`: `--progress`, temp dir + rename, remove on failure, `CloneHandle::stop`
+- [x] Worker relays `WorkerEvent::CloneProgress`
+- [x] Sink `clone_progress`; the cloner closure captures it
+- [x] Session start: `STEP_CLONE` + progress; deadline removed
+- [x] CreateProject / AddProjectToHost: deadline removed
+- [x] TODO: stream CreateProject / AddProjectToHost
+- [x] Docs: project-concept (clone step), tddy-spawn clone docs
 
 ## Technical Changes
 
@@ -188,6 +188,16 @@ sequence already excludes a clone step.
 
 ## Technical Debt & Production Readiness
 
+- ⚠ **Still deferred:** `a_start_clone_outlives_the_spawn_worker_request_timeout` and
+  `create_project_clones_past_the_spawn_worker_request_timeout`. Green found no clean seam: a slow
+  clone needs a fake `git` on the child's `PATH`, and neither path carries a test-controlled env
+  without a test-only production branch. The deadline removal itself is covered by the code (no
+  `timeout` remains on either path).
+- Streaming CreateProject / AddProjectToHost: [TODO](../todo/2026-10-24-stream-create-project-and-add-to-host-clone-progress.md).
+- Scoped run: `tddy-spawn` and `tddy-session-files` green; `tddy-daemon-rpc` green; `tddy-agent-launch` and
+  `tddy-session-lifecycle` red only in environment-bound suites unrelated to the clone (macOS sandbox
+  jail, LiveKit session-sync, stub-harness spawn, gh identity pairs).
+
 ## Decisions & Trade-offs
 
 - **Complexity 5 accepted.** The proto event, the parser and the emitter are one capability; splitting
@@ -219,12 +229,12 @@ sequence already excludes a clone step.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
-- [ ] Run scoped tests (`./test -p tddy-spawn -p tddy-projects -p tddy-session-files -p tddy-agent-launch -p tddy-session-lifecycle -p tddy-daemon-rpc`); full-workspace result from CI
+- [x] Run scoped tests (`./test -p tddy-spawn -p tddy-projects -p tddy-session-files -p tddy-agent-launch -p tddy-session-lifecycle -p tddy-daemon-rpc`); full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
 - [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Linting and formatting (scoped clippy, `cargo fmt`)
+- [x] Linting and formatting (scoped clippy, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
