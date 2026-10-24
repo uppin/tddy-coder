@@ -471,7 +471,7 @@ What actually gates a concurrent `/green` is narrower:
 > a real integration rather than an injected double.
 
 That distinction is decided when the tests are written, not when the stack is planned, which is why
-this heading is filled in during wave 2 and revisited if the tests change. A node whose acceptance
+this heading is filled in during pass 2 and revisited if the tests change. A node whose acceptance
 tests mount its *own* component and inject doubles for everything else is greenable immediately, even
 sitting sixth in the line. A node whose test asserts "the key is now held by the agent" needs the
 node that talks to the agent to be green first.

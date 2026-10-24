@@ -1,16 +1,16 @@
 ---
-description: /plan-pr-stack with an implementation pipeline bolted onto wave 2 - as soon as a node's contract commit is pushed and its green-wave needs are met, give it an ephemeral worktree and run /green, then /validate-changes + /pr-wrap, then a /fix-pr loop, each in its own subagent sized to the node, and remove the worktree when the PR is green. A final **sweep node** is planned at the tail once the pipelines drain: it solves every code issue the stack added and every TODO it can, and the TODOs still open are put to the user. Planning (interview, wave 1, the 6e acceptance-test review) stays interactive. Pointed at a stack that is already partly done, it **resumes**: it reads each node's implementation status from git, GitHub and CI and starts every node at the stage it has not finished. Every subagent is started with an explicit model **and** effort taken from the changeset's complexity score, and the orchestrator tells the user which and why before each one starts
+description: /plan-pr-stack with an implementation pipeline bolted onto pass 2 - as soon as a node's contract commit is pushed and its green-wave needs are met, give it an ephemeral worktree and run /green, then /validate-changes + /pr-wrap, then a /fix-pr loop, each in its own subagent sized to the node, and remove the worktree when the PR is green. A final **sweep node** is planned at the tail once the pipelines drain: it solves every code issue the stack added and every TODO it can, and the TODOs still open are put to the user. Planning (interview, pass 1, the 6e acceptance-test review) stays interactive. Pointed at a stack that is already partly done, it **resumes**: it reads each node's implementation status from git, GitHub and CI and starts every node at the stage it has not finished. Every subagent is started with an explicit model **and** effort taken from the changeset's complexity score, and the orchestrator tells the user which and why before each one starts
 ---
-## YOLO PR Stack — `/plan-pr-stack`, and every ready node implemented while wave 2 keeps going
+## YOLO PR Stack — `/plan-pr-stack`, and every ready node implemented while pass 2 keeps going
 
-`/yolo-pr-stack` is `/plan-pr-stack` with one extra mode in **wave 2**. Run
-`.agents/commands/plan-pr-stack.md` end to end — interview, decomposition approval, wave 1, wave 2's
+`/yolo-pr-stack` is `/plan-pr-stack` with one extra mode in **pass 2**. Run
+`.agents/commands/plan-pr-stack.md` end to end — interview, decomposition approval, pass 1, pass 2's
 per-node 6e acceptance-test review, the completion gate — and add the **pipeline** below at the two
-points named in *Hooks into wave 2*. Nothing in `/plan-pr-stack` is skipped, shortened or relaxed. The
-pipeline only starts work that wave 2 would otherwise leave for the hand-off in its Step 10.
+points named in *Hooks into pass 2*. Nothing in `/plan-pr-stack` is skipped, shortened or relaxed. The
+pipeline only starts work that pass 2 would otherwise leave for the hand-off in its Step 10.
 
 ```
-wave 2 lands PRₖ (contract commit pushed) → moves on to PRₖ₊₁
+pass 2 lands PRₖ (contract commit pushed) → moves on to PRₖ₊₁
         └─ PRₖ ready? ──► ephemeral worktree ──► [G] /green ──► [W] /validate-changes + /pr-wrap ──► [F] /fix-pr loop ──► worktree removed
                                                    [G] and [W]+[F] = background subagents; [F] continues [W]'s agent, model sized to the node
 ```
@@ -20,7 +20,7 @@ pipelines drain → cascade → collect the stack's open TODOs + code issues →
                                                                               └─ TODOs still open ──► user: continue the stack | defer
 ```
 
-The orchestrator is the session running wave 2. It owns the worktrees, picks each subagent's model,
+The orchestrator is the session running pass 2. It owns the worktrees, picks each subagent's model,
 starts the next stage when the previous one reports, and keeps the interactive parts interactive.
 Subagents cannot ask the user anything; each one runs under **pre-approved consent** (below) and
 stops with a 🔴 report where that consent runs out.
@@ -54,8 +54,8 @@ Read-only, from the orchestrator, one node at a time. **First row that matches w
 | Tests green and pushed, PR still draft or its changeset still in `1-WIP/` | `W` | `[W]` |
 | Contract commit pushed, commits after it, tests **still red** | `G:resume` | `[G]`, told what exists |
 | Contract commit pushed, nothing after it | `G` | `[G]` |
-| Plan commit pushed, no contract commit | `plan:wave2` | wave 2 for this node (6a–6g, **6e stays interactive**) |
-| No branch or PR yet | `plan:wave1` | `/plan-pr-stack` from the step that creates it |
+| Plan commit pushed, no contract commit | `plan:pass2` | pass 2 for this node (6a–6g, **6e stays interactive**) |
+| No branch or PR yet | `plan:pass1` | `/plan-pr-stack` from the step that creates it |
 | Contract commit carries no failing test (see *Which nodes qualify*) | `manual` | left for the Step 10 hand-off, as in Dispatch |
 
 **"Tests green" comes from CI first, but drafts are not built.** A terminal-green test check on the
@@ -84,7 +84,7 @@ the complexity score, and the stage it starts at. Then run Dispatch as normal, w
   failing, and builds on them. `W` re-runs its own validations rather than trusting that green was
   proven. An `[F]` with no `[W]` agent to continue is a **fresh** agent, sized by `[W]`'s row, that
   first reads the diff and the changeset.
-- **Nodes with `plan:` statuses are planned first**, interactively, because wave 2 is bottom-up and
+- **Nodes with `plan:` statuses are planned first**, interactively, because pass 2 is bottom-up and
   their acceptance tests need the user. The implementation pipelines of nodes already past their
   contract commit start alongside, as in the ordinary command — planning never waits on them and
   they never wait on it.
@@ -156,7 +156,7 @@ Planning is the user's call and this command does not change that: the interview
 approval, and **6e — the per-node acceptance-test review**. A node's contract commit is pushed only
 after its 6e approval, so a pipeline never starts on tests the user has not seen.
 
-## Hooks into wave 2
+## Hooks into pass 2
 
 **Hook 1 — after 6g, once the planning worktree has left PRₖ.** The branch is pinned only while it
 is checked out here, so the order is: finish 6g for PRₖ → `git checkout` PRₖ₊₁ (its 6a), or, for the
@@ -168,7 +168,7 @@ the workaround (`--force`, detaching) is the pinning problem `/plan-pr-stack` 6a
 commit is already pushed. Run the dispatch again. It also re-runs after every pipeline finishes, to
 refill the concurrency cap.
 
-**A green pushed by a pipeline moves the stack under wave 2.** 6b already rebases each node onto its
+**A green pushed by a pipeline moves the stack under pass 2.** 6b already rebases each node onto its
 parent's tip before its contract commit, so a node planned after its parent went green simply picks
 the green up. That is expected, not a leak — 6b's *exactly ONE commit* check counts commits above the
 parent's **current** tip, whatever that tip now holds.
@@ -363,7 +363,7 @@ may be to resume there. Say where it is.
 (the cascade `/pr-stack-rebase from #1 to #n`) needs **every stack branch free**, and a running
 pipeline pins its own. So:
 
-1. Restore `$ORIGINAL_BRANCH` (Step 7) and run Step 7b's wave-order check. Report wave 2 as finished
+1. Restore `$ORIGINAL_BRANCH` (Step 7) and run Step 7b's wave-order check. Report pass 2 as finished
    **and the pipelines as running**. A Step 7b reorder while pipelines run is a stop: it rebuilds
    branches they have checked out. Wait for them to drain first, then reorder.
 2. **Wait for the pipelines to drain** — every ledger row `done`, `stopped`, `blocked` or `manual`.
@@ -392,7 +392,7 @@ Planning, implementing and wrapping a stack leaves debris: `packages/*/docs/code
 all of it down. **No code issue the stack added or reopened may exit the stack.** A TODO may, but only
 by the user's decision.
 
-The node's scope cannot be known in wave 1, so it is **reserved** at the decomposition approval and
+The node's scope cannot be known in pass 1, so it is **reserved** at the decomposition approval and
 **planned after the pipelines drain** (completion gate step 6, after the cascade).
 
 ### Collect
@@ -467,7 +467,7 @@ For every node's pipeline, on that node's branch only: commit and push the green
 `gh pr ready`; fix checks and review comments, post `/fix-pr`'s evidence-backed replies, and push;
 remove the ephemeral worktree with `git worktree remove --force` once step 3's tracked-changes and
 unpushed checks pass — the force is for the untracked build artifacts only. Everything `green-yolo.md`
-lists as **not pre-approvable** still stops that pipeline, and a stop never blocks wave 2 — only the
+lists as **not pre-approvable** still stops that pipeline, and a stop never blocks pass 2 — only the
 nodes that need the stopped one.
 
 Also pre-approved: appending the sweep node with `/add-to-pr-stack` and running its pipeline. Not
@@ -534,7 +534,7 @@ with the user's answer per row. A node that is not ✅ is stated plainly — no 
   Cypress run; whole-stack health is CI's.
 - **Concurrency cap 3** by default, stated at the decomposition approval.
 - **A stop is local.** It halts that node and blocks only the nodes that need it. It keeps its
-  worktree. Wave 2 and every unrelated pipeline carry on.
+  worktree. Pass 2 and every unrelated pipeline carry on.
 - **Remove a worktree only when its PR is green and nothing is unpushed.** Never delete a branch.
 - **No cascade, no `gh stack sync` / `rebase` from a pipeline worktree**, and no merge from anywhere
   in this command.
@@ -545,7 +545,7 @@ with the user's answer per row. A node that is not ✅ is stated plainly — no 
 
 ## Related
 
-**Commands**: `/plan-pr-stack` (the whole of planning and both waves; scores each changeset's
+**Commands**: `/plan-pr-stack` (the whole of planning and both passes; scores each changeset's
 `Complexity`), `/green`, `/validate-changes`, `/pr-wrap`, `/fix-pr`, `/green-yolo` (the single-branch
 version whose consent table this reuses), `/pr-stack-rebase`, `/add-to-pr-stack`, `/repoint`,
 `/merge-pr-stack`

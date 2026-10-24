@@ -1,11 +1,11 @@
 ---
-description: Plan a stack of dependent PRs by hand, in two waves - interview and decompose, open every draft PR with its PRD, changeset and discovery (commit 1), then revisit each node bottom-up for its draft-PR contract - owned API surface and failing tests (commit 2) - and finish with a cascade /pr-stack-rebase
+description: Plan a stack of dependent PRs by hand, in two passes - interview and decompose, open every draft PR with its PRD, changeset and discovery (commit 1), then revisit each node bottom-up for its draft-PR contract - owned API surface and failing tests (commit 2) - and finish with a cascade /pr-stack-rebase
 ---
-## Plan PR Stack — From Requirements to a Stack of Draft PRs, in Two Waves
+## Plan PR Stack — From Requirements to a Stack of Draft PRs, in Two Passes
 
 Alternative to `/plan-red` when the work is large enough to split across **multiple PRs planned
 ahead**. Interview the user, decompose the work into a **linear sequence** of self-contained PRs,
-then build the stack in **two waves**, both in the **current worktree**, one branch at a time.
+then build the stack in **two passes**, both in the **current worktree**, one branch at a time.
 
 Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first — it defines the stack model,
 **registering the stack with `gh stack`**, the **PR boundary contract**, the `## Draft PR contract`,
@@ -19,30 +19,30 @@ rules. This command assumes those definitions and never contradicts them.
 > the `pr-stack` skill. This command is how *this*
 > repository's contributors plan a stack by hand. Neither describes the other.
 
-### The two waves
+### The two passes
 
-- **Wave 1 — plan every node (commit 1 of each).** For each node in dependency order: cut its branch
+- **Pass 1 — plan every node (commit 1 of each).** For each node in dependency order: cut its branch
   off its parent, write its own PRD + changeset + initial discovery, commit those **docs only**,
-  push, and open the **draft PR immediately** against its parent's branch. When wave 1 ends, every
+  push, and open the **draft PR immediately** against its parent's branch. When pass 1 ends, every
   node of the stack is a draft PR on GitHub with a one-commit planning branch.
-- **Wave 2 — publish each node's draft-PR contract, bottom-up (commit 2 of each).** Revisit n₁ → nₙ.
+- **Pass 2 — publish each node's draft-PR contract, bottom-up (commit 2 of each).** Revisit n₁ → nₙ.
   For each: check it out, `/pr-stack-rebase` it onto its now-moved base, then land what its
   `## Draft PR contract` promised — **the API surface this node owns plus its failing tests** — as
   the node's **second commit**. Push. The next node's rebase picks that surface up, which is what
   lets it compile against a real signature.
-- **Completion gate.** When wave 2 ends, restore the starting branch and run a **cascade
+- **Completion gate.** When pass 2 ends, restore the starting branch and run a **cascade
   `/pr-stack-rebase` over the whole stack** (`from #1 to #n`). Every layer is expected to come back
   *already current, leak-free*; anything else is brought current before the stack is handed off.
 
-> **Wave 2 is not a stubs phase, and no node's deliverable is stubs.** The boundary contract is
-> absolute here: *a node that ships only surface is not a valid PR*. What wave 2 publishes is the
+> **Pass 2 is not a stubs phase, and no node's deliverable is stubs.** The boundary contract is
+> absolute here: *a node that ships only surface is not a valid PR*. What pass 2 publishes is the
 > **first push of a PR that will go on to implement the thing** — the interface plus its failing
 > tests, early, so dependents can branch off a real ref. `/green` finishes each node in the same PR.
-> **A node must never merge in its wave-2 state.** If you catch yourself planning a node whose whole
+> **A node must never merge in its pass-2 state.** If you catch yourself planning a node whose whole
 > job is to declare surface for a later node to implement, that is a layer split — go back to Step 1
 > and cut by capability instead.
 
-Another agent may pick up `/green` on any node **only after the completion gate** — wave 2 rewrites
+Another agent may pick up `/green` on any node **only after the completion gate** — pass 2 rewrites
 parents and rebases children, and a branch pinned in another worktree cannot be checked out here.
 After the gate, **this worktree is back on the branch it started on** — if that was `master`, it must
 be on `master` again (a named branch checkout, not detached `origin/master`, not a stack branch).
@@ -184,7 +184,7 @@ the whole body of work.
 - **A code issue this stack will fix is claimed by the node that fixes it.** After the stack's PRs
   exist, add `**Claimed by:** #NNN — `#<slug> K/N`` and `**Lands after:**` to each such record, so a
   concurrently-planned change finds the owner rather than re-planning the same refactor. Do this at
-  the **wave-1 checkpoint** (Step 5), which is the first moment every PR number exists.
+  the **pass-1 checkpoint** (Step 5), which is the first moment every PR number exists.
 - **A code issue claimed by a *different*, already-running stack is a 🚧 Claimed verdict**, and it
   forks the same way it does for a single PR: stop and ask the developer whether this stack proceeds
   on today's shape, waits for the named PR, or cuts a node's scope to avoid the collision. A stack is
@@ -227,9 +227,9 @@ This whole-work file is **temporary**. It is **not** a changeset companion, and 
 not delete it as if it were. **Do not `git add` it onto a stack branch.** When each node's changeset
 is created in Step 4b, **copy** the whole-work dump into **that node's**
 `{slug}-initial-discovery.md` as Exploration 1 (full dump, not a pointer), and append any
-node-specific follow-up as later Exploration sections — in wave 1 while writing the changeset, and
-again in wave 2 (Step 6) if the contract needs more exploration. After every node has its own
-companion, **delete** the whole-work source at the wave-1 checkpoint (Step 5) — **ask the user
+node-specific follow-up as later Exploration sections — in pass 1 while writing the changeset, and
+again in pass 2 (Step 6) if the contract needs more exploration. After every node has its own
+companion, **delete** the whole-work source at the pass-1 checkpoint (Step 5) — **ask the user
 first**, per CLAUDE.md. If planning stops before all 4b companions exist, **keep** it.
 
 ### Step 3: Settle the plan — no stack document is committed
@@ -254,20 +254,20 @@ What this step produces is agreement, not a file. Settle and write down for your
   `phase-two` are not. See **PR titles** in the `pr-stack` skill;
 - the **owned API surface** per node (this becomes each changeset's `## Responsibility` and
   `## Boundaries`);
-- the **draft-PR contract** per node — what surface plus failing tests wave 2 publishes first;
+- the **draft-PR contract** per node — what surface plus failing tests pass 2 publishes first;
 - the **reading order** `K` used in titles (`display_order`), and separately the **real edges**
   (`parents`), which are what determine merge order.
 
 Branch names are `feature/<stack-slug>/<node>` — every node sharing one namespace. Do not invent
 `pr-2-<slug>`; that shape belongs to a different repo.
 
-## Wave 1 — plan every node and open its draft PR (commit 1 of each)
+## Pass 1 — plan every node and open its draft PR (commit 1 of each)
 
 ### Step 4: For each node in dependency order (n₁ → nₙ) — branch, docs, push, open the PR
 
 Process nodes in an order where every parent comes before its children (topological). Stay in **this
 worktree**. After each node is on GitHub, move to the next branch — do not keep a checkout of a
-branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tests. Those come in wave 2.
+branch that is already pushed. **Pass 1 writes docs only** — no `src/`, no tests. Those come in pass 2.
 
 **4a. Create the node's branch in this worktree and check it out.**
 
@@ -286,7 +286,7 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
   consumes something from *two* earlier PRs simply sits after both of them — both are ancestors, and
   `## Dependencies` records what it takes from each.
 - **Do not create a worktree per node here.** Two reasons, both from the `pr-stack` skill: a worktree
-  **pins its branch**, and git refuses to update a branch checked out elsewhere — wave 2 must be able
+  **pins its branch**, and git refuses to update a branch checked out elsewhere — pass 2 must be able
   to check every branch out **here**; and a worktree in this repo costs several GB once `target/` and
   `node_modules` exist. The branch is on the remote as soon as 4d finishes, and recreating a worktree
   later is cheap. Per-node worktrees belong to whoever runs `/green` — see Step 10.
@@ -341,12 +341,12 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
 
   Describing inherited state in *State A* is not a substitute — State A says what exists, this says
   what the implementer must **not** build.
-- **`## Draft PR contract`** states what wave 2 will publish for this node: the owned API surface plus
+- **`## Draft PR contract`** states what pass 2 will publish for this node: the owned API surface plus
   the failing tests that specify it. Write it as *the first push of this PR*, never as this PR's
   deliverable.
 - **`## Green wave`** answers three questions a would-be implementer asks before touching anything:
   can this node be greened now, which nodes can be greened *alongside* it, and which node is waiting
-  on it. Write the first pass here from the planned decomposition, and **revisit it in wave 2** once
+  on it. Write the first draft here from the planned decomposition, and **revisit it in pass 2** once
   the tests exist — the tests are what actually decide it:
 
   ```markdown
@@ -381,7 +381,7 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
 
 - Stage **only** this node's PRD, changeset and discovery companion — never the whole-work discovery
   file, never anything under `src/`. Never use `--no-verify`.
-- This commit is the node's plan. Wave 2 adds its contract as a **separate, second** commit; do not
+- This commit is the node's plan. Pass 2 adds its contract as a **separate, second** commit; do not
   amend this one later.
 
 **4d. Push and open the draft PR immediately — do not wait for the rest of the stack.**
@@ -408,7 +408,7 @@ gh pr create --draft \
 
   > **The one-commit trap.** This repo squashes with `COMMIT_OR_PR_TITLE`, and for a PR with
   > **exactly one commit** GitHub uses the *commit* subject, not the PR title. Between 4d and the
-  > wave-2 commit every node is a one-commit PR — so keep commit 1's subject identical to the PR
+  > pass-2 commit every node is a one-commit PR — so keep commit 1's subject identical to the PR
   > title, or pass the title explicitly at merge time.
 - Pass the body from a file so newlines and backticks survive. The body may say the PR is at its
   planning stage; the **title** may not.
@@ -423,15 +423,15 @@ gh pr create --draft \
     --jq '"#\(.number) draft=\(.isDraft) base=\(.baseRefName) files=\(.changedFiles)"'
   ```
   It must be `draft=true`, based on its parent (a root node on `$TRUNK`), and show **only its own
-  files** — in wave 1 that is its PRD, changeset and discovery companion, nothing else. A file count
+  files** — in pass 1 that is its PRD, changeset and discovery companion, nothing else. A file count
   that includes a parent's docs means the base is wrong.
 - **Note this node's number and URL** for Step 6g — it is written into this node's own changeset in
-  wave 2, not committed now (a docs-only third commit would break the two-commit shape).
-- **Do not keep a worktree for this branch.** Wave 2 returns to it **exactly once**, in order.
+  pass 2, not committed now (a docs-only third commit would break the two-commit shape).
+- **Do not keep a worktree for this branch.** Pass 2 returns to it **exactly once**, in order.
 
-### Step 5: Wave 1 checkpoint — the whole stack is visible for the first time
+### Step 5: Pass 1 checkpoint — the whole stack is visible for the first time
 
-Every node is now a one-commit draft PR. Before wave 2 touches any branch:
+Every node is now a one-commit draft PR. Before pass 2 touches any branch:
 
 1. **Confirm a clean tree and that the top branch is pushed:**
    ```bash
@@ -490,22 +490,22 @@ Every node is now a one-commit draft PR. Before wave 2 touches any branch:
    `{slug}-initial-discovery.md`. **Ask the user before deleting** (CLAUDE.md). It was never staged,
    so this drops an untracked file; wrap of the root node must never be the thing that removes it. If
    any node still lacks a companion, **keep** the file and stop here.
-6. **Report wave 1 to the user** — the final title list with PR numbers and URLs, each node's
+6. **Report pass 1 to the user** — the final title list with PR numbers and URLs, each node's
    branch/base, and the order. State plainly that **no node is ready for `/green` yet**: the drafts are
-   plans, and wave 2 is about to rewrite every branch above the roots. Then continue into wave 2
+   plans, and pass 2 is about to rewrite every branch above the roots. Then continue into pass 2
    without waiting — the per-node acceptance-test review in Step 6e is where the user gates each node.
 
-## Wave 2 — publish each node's draft-PR contract, bottom-up (commit 2 of each)
+## Pass 2 — publish each node's draft-PR contract, bottom-up (commit 2 of each)
 
 ### Step 6: For each node in dependency order (n₁ → nₙ) — rebase, surface, failing tests, commit 2, push
 
 This is the `/plan-red` red step (its Steps 6–7), run once per node, **in dependency order**. The
 order is not optional: a child's tests compile against its parent's published surface, which only
-exists on the parent after **its** wave-2 commit. Each node first rebases onto its parent's new tip,
+exists on the parent after **its** pass-2 commit. Each node first rebases onto its parent's new tip,
 then does its own work on top. Every commit here leaves the nodes above it behind; the loop clears
 each of them when it reaches it, and Step 8 proves nothing was missed.
 
-**6a. Check the branch out here.** The branch exists locally from wave 1. Nothing may pin it
+**6a. Check the branch out here.** The branch exists locally from pass 1. Nothing may pin it
 elsewhere:
 
 ```bash
@@ -521,7 +521,7 @@ too early. Do not `git worktree add` a second copy and do not rebase from the ot
 do, and read the result:
 
 - A **root node** rebases onto `origin/$TRUNK`. Usually *already current, leak-free, no rewrite*; if
-  the trunk moved since wave 1 it is rebased and force-pushed with lease, which is fine.
+  the trunk moved since pass 1 it is rebased and force-pushed with lease, which is fine.
 - A **child** rebases onto its parent's branch, which just received its second commit, so it is
   **expected to be behind**. The rebase replays this node's single planning commit on top of the
   parent's two commits and force-pushes with lease. Afterwards:
@@ -664,7 +664,7 @@ it sitting on the top branch, which would pin it.
 ### Step 7b: Validate the wave order — MANDATORY
 
 Before the cascade, recompute every node's wave from the **final** real edges. These are the
-`## Green wave` sections as wave 2 left them, not the wave-1 guess. Then read the waves off the line,
+`## Green wave` sections as pass 2 left them, not the pass-1 guess. Then read the waves off the line,
 bottom to top:
 
 ```
@@ -699,7 +699,7 @@ Say explicitly that `#1..#n` are **stack positions**, not PR numbers. Cascade mo
 worktree for each layer (nothing pins the branches), rebases bottom-up using each layer's **recorded
 pre-rebase tip** with `--onto`, and **restores `$ORIGINAL_BRANCH`** when it finishes or stops.
 
-**Expected result: every layer reports *already current, leak-free, no rewrite*.** Wave 2 rebased each
+**Expected result: every layer reports *already current, leak-free, no rewrite*.** Pass 2 rebased each
 layer immediately before its second commit, so the cascade is the proof, not the fix. Read its report
 per layer:
 
@@ -722,7 +722,7 @@ git branch --show-current   # must equal ORIGINAL_BRANCH — the cascade restore
 Present a complete summary:
 
 - **The final title of every PR**, as one list, showing the shared slug and ascending `K/N`. This is
-  what Step 5's revision pass produced; re-read them now — if wave 2 shifted scope between nodes, fix
+  what Step 5's revision pass produced; re-read them now — if pass 2 shifted scope between nodes, fix
   the affected title with `gh pr edit` and report the corrected list.
 - **The sequence** — each node's predecessor, its branch, and its PR base, plus the `gh stack link`
   output confirming the stack is registered. Note explicitly that GitHub enforces no merge order and
@@ -837,7 +837,7 @@ actionable the moment some node builds the seam.
   dependents first). Topology permits any intra-wave order; that is why this one must be chosen and
   justified, not left to the order the nodes were named in.
 - **The line never returns to an earlier wave.** Read bottom to top, wave numbers never decrease.
-  This holds at planning (Step 1), whenever wave 2 finds a new edge (Step 6), and at the completion
+  This holds at planning (Step 1), whenever pass 2 finds a new edge (Step 6), and at the completion
   gate (Step 7b). A node pushed into a later wave moves up the line. "Its predecessors are still
   below it" is not enough to leave it where it is.
 - **Refuse a detached start.** `ORIGINAL_BRANCH` must be a named branch.
@@ -849,20 +849,20 @@ actionable the moment some node builds the seam.
 - **The boundary contract governs the decomposition.** Every node is a vertical slice — schema, code,
   tests, in one PR. Splitting by layer is forbidden; a node that ships only surface is not a valid
   node. Split by capability instead. Only the two named exceptions apply, and do not invent a third.
-- **Wave 2 is a draft-PR contract, not a stubs phase.** What it publishes is the first push of a PR
+- **Pass 2 is a draft-PR contract, not a stubs phase.** What it publishes is the first push of a PR
   that goes on to implement the same thing. **A node must never merge in that state.**
-- **Two waves, two commits per node.** Wave 1 commits docs only and opens the draft; wave 2 adds
+- **Two passes, two commits per node.** Pass 1 commits docs only and opens the draft; pass 2 adds
   exactly one commit (surface + failing tests + changeset check-offs). Never amend commit 1; a
   correction after commit 2 is pushed is a third commit.
-- **Wave 1 writes no `src/`.** The whole chain must exist on GitHub before any branch is rewritten.
-- **Wave 2 runs bottom-up and rebases before it writes.** Each node's 6b `/pr-stack-rebase` (single
+- **Pass 1 writes no `src/`.** The whole chain must exist on GitHub before any branch is rewritten.
+- **Pass 2 runs bottom-up and rebases before it writes.** Each node's 6b `/pr-stack-rebase` (single
   mode) comes before its build, surface and tests. Verify `origin/<base>..HEAD` is one commit after
   the rebase and two after the contract commit.
 - **Nobody pins a stack branch until Step 8 has run.** If a branch is pinned, stop and ask; do not
   work around it with a second worktree.
 - **Branch names are `feature/<stack-slug>/<node>`**, one namespace for the whole stack.
 - **Plan in this worktree.** Do not create per-node worktrees during planning; they belong to `/green`.
-- **Restore `$ORIGINAL_BRANCH` when wave 2 is done**, including when that is `master`, and **then run
+- **Restore `$ORIGINAL_BRANCH` when pass 2 is done**, including when that is `master`, and **then run
   the cascade `/pr-stack-rebase from #1 to #n`** as the completion gate. Confirm
   `git branch --show-current` afterwards. Do not delete this worktree. **Never delete a stack branch**
   — it closes the dependent PR, irrecoverably.
@@ -902,12 +902,12 @@ actionable the moment some node builds the seam.
   → whole-work discovery
   → cross-check docs/dev/todo/ → size each fix: in-node, prerequisite PR, or its own node
   → settle order, slug, owned surfaces, per-node draft-PR contracts
-  → WAVE 1 (per node, in this worktree, in dependency order)
+  → PASS 1 (per node, in this worktree, in dependency order)
         git checkout -b feature/<slug>/<node>   (off its parent; root off origin/$TRUNK)
         PRD + changeset (4 headings) + discovery → commit 1 (docs only)
         git push -u origin HEAD → gh pr create --draft --base <parent> → title → draft PR live
   → checkpoint: verify every base, revise every title, delete whole-work discovery (ask), report
-  → WAVE 2 (per node, in this worktree, in dependency order)
+  → PASS 2 (per node, in this worktree, in dependency order)
         git checkout feature/<slug>/<node> → /pr-stack-rebase (single; picks up the parent's surface)
         build + baseline → owned API surface → failing acceptance tests (USER REVIEW)
         → failing unit/integration tests → commit 2 → git push origin HEAD
@@ -924,10 +924,10 @@ actionable the moment some node builds the seam.
 
 ## Related
 
-**Commands**: `/yolo-pr-stack` (this command, with each ready node implemented while wave 2 runs), `/plan-red` (its Steps 6–7 are what wave 2 runs per node), `/add-to-pr-stack` (a node on
+**Commands**: `/yolo-pr-stack` (this command, with each ready node implemented while pass 2 runs), `/plan-red` (its Steps 6–7 are what pass 2 runs per node), `/add-to-pr-stack` (a node on
 top of an **existing** stack tail), `/split-pr-to-stack` (carve an **existing** PR into stacked slices;
 this command plans from requirements), `/follow-up-branch`, `/green`, `/validate-changes`,
-`/pr-stack-rebase` (single mode in wave 2, cascade mode as the completion gate), `/merge-pr-stack`,
+`/pr-stack-rebase` (single mode in pass 2, cascade mode as the completion gate), `/merge-pr-stack`,
 `/merge`, `/repoint`, `/pr-wrap`, `/wrap-context-docs`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
 **References**: `.agents/skills/planning/references/planning-phase.md`,
