@@ -28,6 +28,8 @@ pub struct StubAgent {
     recorder: Recorder,
     /// Woken by `session/cancel`, for a turn held open with `hold_until_cancel`.
     cancelled: std::rc::Rc<tokio::sync::Notify>,
+    /// The working directory each session was opened in: where its `write_file` actions write.
+    session_cwds: std::cell::RefCell<std::collections::HashMap<String, std::path::PathBuf>>,
 }
 
 impl StubAgent {
@@ -42,7 +44,39 @@ impl StubAgent {
             scenario: std::cell::RefCell::new(scenario),
             recorder: Recorder::from_env(),
             cancelled: std::rc::Rc::new(tokio::sync::Notify::new()),
+            session_cwds: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
+    }
+
+    /// Run the `write_file` actions of one turn in the working directory of `session_id`.
+    fn write_files(
+        &self,
+        session_id: &acp::SessionId,
+        files: &[crate::scenario::WriteFileTemplate],
+    ) -> Result<(), acp::Error> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        let cwds = self.session_cwds.borrow();
+        let cwd = cwds.get(&*session_id.0).ok_or_else(|| {
+            eprintln!(
+                "tddy-acp-stub: write_file for unopened session {}",
+                session_id.0
+            );
+            acp::Error::internal_error()
+        })?;
+        for file in files {
+            let path = cwd.join(&file.path);
+            let written = path
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&path, &file.content));
+            if let Err(error) = written {
+                eprintln!("tddy-acp-stub: write_file {}: {error}", path.display());
+                return Err(acp::Error::internal_error());
+            }
+        }
+        Ok(())
     }
 
     async fn send_notification(
@@ -99,6 +133,9 @@ impl acp::Agent for StubAgent {
     ) -> Result<acp::NewSessionResponse, acp::Error> {
         let session_id = self.next_session_id.get();
         self.next_session_id.set(session_id + 1);
+        self.session_cwds
+            .borrow_mut()
+            .insert(session_id.to_string(), args.cwd.clone());
         self.recorder.record(serde_json::json!({
             "event": "new_session",
             "session_id": session_id.to_string(),
@@ -116,6 +153,9 @@ impl acp::Agent for StubAgent {
         &self,
         args: acp::LoadSessionRequest,
     ) -> Result<acp::LoadSessionResponse, acp::Error> {
+        self.session_cwds
+            .borrow_mut()
+            .insert(args.session_id.0.to_string(), args.cwd.clone());
         self.recorder.record(serde_json::json!({
             "event": "load_session",
             "session_id": args.session_id.0.to_string(),
@@ -149,6 +189,8 @@ impl acp::Agent for StubAgent {
         if template.error {
             return Err(acp::Error::internal_error());
         }
+
+        self.write_files(&args.session_id, &template.write_files)?;
 
         for chunk in &template.chunks {
             self.send_notification(

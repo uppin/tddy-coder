@@ -111,7 +111,7 @@ impl LaunchSessions {
         // a sandboxed claude or cursor start does: an unreachable subagent fails the start here.
         let mut started_agents = self
             .agent_roster
-            .seeded_roster_records(&req.specialized_agents)
+            .seeded_roster_records_placed(&req.specialized_agents, &req.clone_placed_agents)
             .await?;
         let specialized_defs = self
             .agent_roster

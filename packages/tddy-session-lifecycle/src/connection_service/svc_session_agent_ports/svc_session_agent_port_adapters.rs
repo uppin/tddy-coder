@@ -177,6 +177,7 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
     async fn open_local(
         &self,
         session_id: &str,
+        conversation_id: &str,
         session_dir: &Path,
         record: &SessionAgentRecord,
         session_token: &str,
@@ -185,6 +186,7 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
         self.roster
             .open_local_agent_session(
                 session_id,
+                conversation_id,
                 session_dir,
                 record,
                 session_token,

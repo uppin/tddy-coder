@@ -8,6 +8,7 @@
 use crate::mcp_primitives::{schema_object, subagent_access_is_managed};
 use crate::session_tool_client::{conversation_worktree, ConversationWorktreeOp};
 use crate::subagent_pull::{bound, pull_range};
+use crate::worktree_route::ConversationHost;
 use tddy_discovery::subagent_runtime::{subagent_error_json, subagent_sessions};
 
 /// The tool as advertised.
@@ -24,7 +25,8 @@ pub(crate) fn subagent_end_tool_definition() -> rmcp::model::Tool {
          twice. Then the conversation's \
          worktree and branch are deleted and the conversation is closed. Returns {ended: true, \
          pulled: {commits, skipped, files: {created, updated, removed}, lines: {added, \
-         removed}, conflicts}} — `pulled` is null when the conversation never changed a file. Refused while a turn is \
+         removed}, conflicts}} — `pulled` is null when the conversation never changed a file, and for a `shared` agent, which edits the session's own \
+         worktree and has nothing of its own to take. Refused while a turn is \
          running: await it or cancel. Use subagent_cancel instead to discard the work.",
         schema_object(serde_json::json!({
             "type": "object",
@@ -48,8 +50,8 @@ pub(crate) async fn subagent_end_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
     };
-    // A conversation whose loop runs on the daemon never has a conversation worktree, and with no
-    // daemon to ask (local access) none can exist either: `pull_range` finds nothing to pull.
+    // A conversation with no worktree of its own — a shared agent's, or one with no daemon to ask
+    // (local access) — has nothing to take: `pull_range` answers null without asking.
     let pulled = match pull_range(session_id, bound(&args, "from"), bound(&args, "to")).await {
         Ok(pulled) => pulled,
         Err(reason) => return subagent_error_json(reason),
@@ -59,15 +61,35 @@ pub(crate) async fn subagent_end_tool(args: serde_json::Value) -> String {
     serde_json::json!({ "ended": true, "pulled": pulled }).to_string()
 }
 
-/// Whether `session_id` names an open conversation with no turn outstanding, and if so whether its
-/// loop runs in this process.
-pub(crate) async fn the_state_of(session_id: &str) -> Result<bool, String> {
+/// Where `session_id`'s turns run: in this process, or on the daemon — and for the daemon, whether
+/// its agent is `clone`-placed. An unknown conversation is refused.
+pub(crate) async fn host_of(session_id: &str) -> Result<ConversationHost, String> {
     let sessions = subagent_sessions().lock().await;
-    let Some(conversation) = sessions.open.get(session_id) else {
-        return Err(format!("unknown subagent session: {session_id}"));
-    };
-    match sessions.pending.queue_size(session_id) {
-        0 => Ok(conversation.remote.is_none()),
+    let conversation = sessions
+        .open
+        .get(session_id)
+        .ok_or_else(|| format!("unknown subagent session: {session_id}"))?;
+    Ok(match conversation.remote {
+        None => ConversationHost::InProcess {
+            managed_access: subagent_access_is_managed(),
+        },
+        Some(_) => ConversationHost::Daemon {
+            clone: conversation.clone_placed,
+        },
+    })
+}
+
+/// [`host_of`] for a conversation with no turn outstanding: what `subagent_pull` and `subagent_end`
+/// take is what the turns have committed, so they wait for the turns to end.
+pub(crate) async fn the_host_of(session_id: &str) -> Result<ConversationHost, String> {
+    let host = host_of(session_id).await?;
+    let outstanding = subagent_sessions()
+        .lock()
+        .await
+        .pending
+        .queue_size(session_id);
+    match outstanding {
+        0 => Ok(host),
         outstanding => Err(format!(
             "subagent session {session_id} has {outstanding} turn(s) still running; await them \
              or use subagent_cancel to discard the conversation"

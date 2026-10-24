@@ -52,6 +52,14 @@ impl CodingAgentLauncher for RecordingLauncher {
             cwd: Some(launch.worktree.clone()),
         })
     }
+
+    /// These sessions are not managed, so the agent is handed no MCP exec tools.
+    async fn mcp_servers_for(
+        &self,
+        _launch: &CodingAgentLaunch,
+    ) -> Result<Vec<tddy_core::McpServerSpec>, SubagentError> {
+        Ok(Vec::new())
+    }
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {

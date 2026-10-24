@@ -77,6 +77,10 @@ pub struct SubagentConversation {
     /// Ending it here has to close it there too: the owning daemon otherwise keeps the loop, and
     /// its own registration of it, for the life of its process.
     pub remote: Option<crate::roster::RemoteConversationHandle>,
+    /// Whether the agent is `clone`-placed: a conversation the daemon runs then works on a worktree
+    /// of its own, which `subagent_diff`, `subagent_pull` and `subagent_end` read and take. Read off
+    /// the roster entry by the caller that opened the conversation; `false` until it says otherwise.
+    pub clone_placed: bool,
 }
 
 impl SubagentConversation {
@@ -98,6 +102,7 @@ impl SubagentConversation {
             context_tokens: session.context_tokens(),
             session: std::sync::Arc::new(tokio::sync::Mutex::new(session)),
             remote,
+            clone_placed: false,
         }
     }
 

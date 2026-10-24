@@ -12,6 +12,7 @@ import { CreateSessionTypeToggle } from "./CreateSessionTypeToggle";
 import { CreateSessionModelField } from "./CreateSessionModelField";
 import { BUILT_IN_PROVIDER, CreateSessionProviderField } from "./CreateSessionProviderField";
 import { CreateSessionAgentPickerSection } from "./CreateSessionAgentPickerSection";
+import type { AgentPlacementChoice } from "./agentPlacementChoice";
 import { CreateSessionToolFields } from "./CreateSessionToolFields";
 import { CreateSessionCursorCliFields } from "./CreateSessionCursorCliFields";
 import { CreateSessionClaudeCliFields } from "./CreateSessionClaudeCliFields";
@@ -116,6 +117,10 @@ export function CreateSessionPane({
   // than bare names because the picker lists every host's agents and two hosts routinely offer a def
   // of the same name — a bare name cannot say which of them was picked.
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
+  // The subset of the picked agents whose conversations each work on a clone of their own; every
+  // other picked agent works on the session's worktree. Kept beside the picks rather than inside them
+  // so the picks stay what the list of ids means on its own.
+  const [clonePlacedAgentIds, setClonePlacedAgentIds] = useState<string[]>([]);
   const [semanticIndex, setSemanticIndex] = useState(false);
 
   // One option per logical project: aggregated `ListProjects` returns a row per (project, host), and
@@ -192,6 +197,13 @@ export function CreateSessionPane({
     setSelectedAgentIds((prev) =>
       prev.includes(agentId) ? prev.filter((id) => id !== agentId) : [...prev, agentId],
     );
+  };
+
+  const setAgentPlacement = (agentId: string, placement: AgentPlacementChoice) => {
+    setClonePlacedAgentIds((prev) => {
+      const others = prev.filter((id) => id !== agentId);
+      return placement === "clone" ? [...others, agentId] : others;
+    });
   };
 
   const { remoteBranches, error: remoteBranchesError } = useProjectBranches({
@@ -275,6 +287,7 @@ export function CreateSessionPane({
     sandboxedCodebase,
     isSplitCodebase,
     selectedAgentIds,
+    clonePlacedAgentIds,
     semanticIndex,
     codebaseDaemonInstanceId,
     sshConfigHost,
@@ -302,6 +315,8 @@ export function CreateSessionPane({
       availableAgents={availableAgents}
       selectedAgentIds={selectedAgentIds}
       toggleAgent={toggleAgent}
+      clonePlacedAgentIds={clonePlacedAgentIds}
+      setAgentPlacement={setAgentPlacement}
     />
   );
 

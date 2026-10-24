@@ -591,6 +591,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
         let mut record = self.ports.catalog.record_for(&req.agent_id).await?;
+        record.placement = crate::agent_placement::placement_from_wire(req.placement)?;
 
         // An agent owned by a peer reads a checkout on that peer, so the entry has to name one
         // before it is written. Claiming it is also what opens the session's room — and both happen
@@ -869,6 +870,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                             .sessions
                             .open_local(
                                 &req.session_id,
+                                &conversation_id,
                                 &session_dir,
                                 &record,
                                 &req.session_token,

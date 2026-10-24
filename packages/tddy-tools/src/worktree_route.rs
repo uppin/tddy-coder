@@ -17,7 +17,20 @@ pub enum ConversationHost {
 }
 
 /// Whether the conversation's work lives on a branch of its own.
-pub fn has_its_own_worktree(_host: ConversationHost) -> bool {
-    // TODO(clone-placement): implement
-    false
+///
+/// An in-process loop has one exactly when its tools reach the codebase through the daemon's managed
+/// access, which is where the conversation worktree is cut. A daemon-run loop has one exactly when
+/// its agent is `clone`-placed.
+pub fn has_its_own_worktree(host: ConversationHost) -> bool {
+    match host {
+        ConversationHost::InProcess { managed_access } => managed_access,
+        ConversationHost::Daemon { clone } => clone,
+    }
+}
+
+/// Whether a roster entry's wire `placement` is `clone`. Only the value `clone` answers yes: an
+/// unknown number is not read as a clone, because a shared agent is the one that never has a
+/// worktree of its own to take.
+pub fn is_clone_placement(placement: i32) -> bool {
+    placement == tddy_service::proto::types::AgentPlacement::Clone as i32
 }

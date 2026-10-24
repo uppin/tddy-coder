@@ -50,6 +50,7 @@ pub fn coding_agent_record(
         codebase_session_id: None,
         kind: AgentKindRecord::CodingAgent,
         harness: Some(def.harness.clone()),
+        placement: Default::default(),
     })
 }
 
@@ -125,7 +126,7 @@ fn refuse_system_prompt(
 }
 
 /// The worktree a coding agent of `session_id` works on: the session's own checkout.
-fn session_worktree(
+pub(crate) fn session_worktree(
     session_id: &str,
     agent_id: &str,
     metadata: &tddy_core::SessionMetadata,
@@ -227,11 +228,13 @@ impl AgentRoster {
     }
 
     /// A conversation with a coding agent, started through the daemon's launcher as the session's
-    /// OS user on the session's worktree. Without a launcher this refuses naming that — a coding
-    /// agent is never started some other way.
+    /// OS user. It works on the session's worktree when the agent is `shared`, and on the
+    /// conversation's own worktree — created here, before the agent starts — when it is `clone`.
+    /// Without a launcher this refuses naming that — a coding agent is never started some other way.
     pub(crate) async fn open_coding_agent_session(
         &self,
         session_id: &str,
+        conversation_id: &str,
         session_dir: &Path,
         record: &SessionAgentRecord,
         session_token: &str,
@@ -245,8 +248,29 @@ impl AgentRoster {
                 record.agent_id
             ))
         })?;
-        let launch = self.coding_agent_launch(session_id, session_dir, record, session_token)?;
+        let mut launch =
+            self.coding_agent_launch(session_id, session_dir, record, session_token)?;
+        let clone = match record.placement {
+            tddy_core::AgentPlacementRecord::Shared => None,
+            tddy_core::AgentPlacementRecord::Clone => {
+                let worktree = crate::clone_placement::open_conversation_worktree(
+                    &launch.worktree,
+                    session_id,
+                    conversation_id,
+                )
+                .await?;
+                launch.worktree = worktree.root().to_path_buf();
+                Some(worktree)
+            }
+        };
         let session = start_coding_agent_session(launcher.as_ref(), &launch).await?;
-        Ok(Box::new(session))
+        let turns: Box<dyn tddy_discovery::subagent::SubagentSession> = match clone {
+            None => Box::new(session),
+            Some(worktree) => Box::new(crate::clone_placement::CodingAgentConversationTurns::new(
+                Box::new(session),
+                worktree,
+            )),
+        };
+        Ok(turns)
     }
 }

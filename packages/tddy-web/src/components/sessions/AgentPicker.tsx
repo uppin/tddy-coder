@@ -5,6 +5,7 @@ import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "../ui/button";
 import { AgentKindBadge } from "./AgentKindBadge";
+import type { AgentPlacementChoice } from "./agentPlacementChoice";
 import { useAvailableAgents, type AvailableAgent } from "./useAvailableAgents";
 
 /**
@@ -34,10 +35,14 @@ export interface AgentPickerProps {
    */
   readonly errorTestId: string;
   /**
-   * Attach the confirmed agent. Resolves to the message naming the failure, or `null` when the
-   * attach went through — on which the picker closes itself through {@link onClose}.
+   * Attach the confirmed agent, where its conversations work as `placement` says. Resolves to the
+   * message naming the failure, or `null` when the attach went through — on which the picker closes
+   * itself through {@link onClose}.
    */
-  readonly onAttach: (agent: AvailableAgent) => Promise<string | null>;
+  readonly onAttach: (
+    agent: AvailableAgent,
+    placement: AgentPlacementChoice,
+  ) => Promise<string | null>;
   /** Dismiss the picker, attaching nothing. */
   readonly onClose: () => void;
 }
@@ -52,6 +57,9 @@ export function AgentPicker({ testIdPrefix, errorTestId, onAttach, onClose }: Ag
   const available = useAvailableAgents(client, servingInstanceId ?? "");
 
   const [pickedAgent, setPickedAgent] = useState<AvailableAgent | null>(null);
+  // Where the picked agent's conversations will work. Shared unless the operator says otherwise, and
+  // reset with each pick so one agent's choice never carries onto the next.
+  const [placement, setPlacement] = useState<AgentPlacementChoice>("shared");
   const [attachError, setAttachError] = useState<string | null>(null);
   // True while an attach is on the wire. It closes the confirm control, because `onAttach` decides
   // whether the agent already has a conversation open from the state it can see *when it resolves*:
@@ -68,7 +76,7 @@ export function AgentPicker({ testIdPrefix, errorTestId, onAttach, onClose }: Ag
     setAttaching(true);
     let failure: string | null;
     try {
-      failure = await onAttach(agent);
+      failure = await onAttach(agent, placement);
     } finally {
       setAttaching(false);
     }
@@ -108,6 +116,7 @@ export function AgentPicker({ testIdPrefix, errorTestId, onAttach, onClose }: Ag
                 aria-pressed={pickedAgent?.agentId === agent.agentId}
                 onClick={() => {
                   setPickedAgent(agent);
+                  setPlacement("shared");
                   setAttachError(null);
                 }}
                 className={`flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1 text-left ${
@@ -151,6 +160,18 @@ export function AgentPicker({ testIdPrefix, errorTestId, onAttach, onClose }: Ag
               {attachError}
             </p>
           )}
+          <label className="flex items-center gap-2 text-muted-foreground">
+            <span>Placement</span>
+            <select
+              data-testid={`${testIdPrefix}-placement`}
+              className="rounded-md border border-input bg-background px-1 text-xs"
+              value={placement}
+              onChange={(event) => setPlacement(event.target.value as AgentPlacementChoice)}
+            >
+              <option value="shared">shared — the session's worktree</option>
+              <option value="clone">clone — a worktree of each conversation's own</option>
+            </select>
+          </label>
           <div className="flex gap-2">
             <Button
               data-testid={`${testIdPrefix}-confirm-btn`}

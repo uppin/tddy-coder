@@ -22,6 +22,11 @@ pub struct ResponseTemplate {
     #[serde(default)]
     pub chunks: Vec<String>,
 
+    /// `write_file` actions, run before anything is streamed: the files an agent edits while it
+    /// works, written into the session's working directory as the agent would write them.
+    #[serde(default)]
+    pub write_files: Vec<WriteFileTemplate>,
+
     /// Tool calls to simulate (name and input).
     #[serde(default)]
     pub tool_calls: Vec<ToolCallTemplate>,
@@ -57,10 +62,19 @@ fn default_stop_reason() -> String {
     "end_turn".to_string()
 }
 
+/// A `write_file` action: write `content` to `path`, relative to the session's working directory,
+/// creating its parent directories.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WriteFileTemplate {
+    pub path: String,
+    pub content: String,
+}
+
 impl Default for ResponseTemplate {
     fn default() -> Self {
         Self {
             chunks: vec!["Echo response.".to_string()],
+            write_files: Vec::new(),
             tool_calls: Vec::new(),
             permission_requests: Vec::new(),
             stop_reason: default_stop_reason(),

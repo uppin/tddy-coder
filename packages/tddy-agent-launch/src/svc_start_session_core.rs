@@ -400,7 +400,7 @@ impl LaunchSessions {
             // than persisting a roster entry that resolves to nothing on the next resume.
             let started_agents = self
                 .agent_roster
-                .seeded_roster_records(&req.specialized_agents)
+                .seeded_roster_records_placed(&req.specialized_agents, &req.clone_placed_agents)
                 .await?;
             let clones = DaemonSeedCloneClaimant {
                 service: self.agent_roster.clone(),

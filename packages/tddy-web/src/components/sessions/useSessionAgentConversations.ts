@@ -2,6 +2,7 @@ import React from "react";
 import { ConnectError } from "@connectrpc/connect";
 import type { SessionEntry } from "../../gen/session_pb";
 import type { AvailableAgent } from "./useAvailableAgents";
+import { agentPlacementWire, type AgentPlacementChoice } from "./agentPlacementChoice";
 import {
   conversationForAgent,
   withAgentConversation,
@@ -51,7 +52,10 @@ export function useSessionAgentConversations({
    * this app is routinely served from. The `OpenAgentConversation` call itself belongs to the tab's
    * body, which owns the conversation for as long as the tab is open.
    */
-  const attachAgent = async (agent: AvailableAgent): Promise<string | null> => {
+  const attachAgent = async (
+    agent: AvailableAgent,
+    placement: AgentPlacementChoice,
+  ): Promise<string | null> => {
     // The picker is only rendered with both in hand; a refusal names what is missing rather than
     // reporting an attach that was never sent as a success.
     if (!sessionAgentClient || !selectedSession) {
@@ -64,6 +68,7 @@ export function useSessionAgentConversations({
         sessionId,
         daemonInstanceId,
         agentId: agent.agentId,
+        placement: agentPlacementWire(placement),
       });
     } catch (err) {
       return ConnectError.from(err).rawMessage;

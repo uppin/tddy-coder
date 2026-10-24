@@ -1804,12 +1804,17 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
                     // No provider: the loop runs on the facilitating daemon, against an
                     // endpoint this process cannot see. Naming one here would report a queue
                     // the turn is not standing in.
-                    SubagentConversation::opened(
-                        opened.agent_id,
-                        None,
-                        opened.session,
-                        opened.remote,
-                    ),
+                    {
+                        let mut conversation = SubagentConversation::opened(
+                            opened.agent_id,
+                            None,
+                            opened.session,
+                            opened.remote,
+                        );
+                        conversation.clone_placed =
+                            crate::worktree_route::is_clone_placement(entry.placement);
+                        conversation
+                    },
                 );
                 serde_json::json!({ "sessionId": session_id }).to_string()
             }
