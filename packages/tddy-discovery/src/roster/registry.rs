@@ -67,6 +67,8 @@ fn seed_entry(
         kind: tddy_service::proto::types::AgentKind::Model as i32,
         harness: String::new(),
         placement: 0,
+        transport: String::new(),
+        permission_policy: String::new(),
     }
 }
 

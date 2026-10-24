@@ -3875,6 +3875,8 @@ mod tests {
                     kind: 0,
                     harness: String::new(),
                     placement: 0,
+                    transport: String::new(),
+                    permission_policy: String::new(),
                 }],
             },
         );

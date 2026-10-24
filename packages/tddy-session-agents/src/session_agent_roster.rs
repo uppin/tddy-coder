@@ -398,6 +398,9 @@ fn roster_entry(
         kind: crate::coding_agent::agent_kind_to_wire(record.kind) as i32,
         harness: record.harness.clone().unwrap_or_default(),
         placement: crate::agent_placement::placement_to_wire(record.placement) as i32,
+        // TODO(acp-subagent): implement — the record's `transport` and `permission_policy`
+        transport: String::new(),
+        permission_policy: String::new(),
     }
 }
 

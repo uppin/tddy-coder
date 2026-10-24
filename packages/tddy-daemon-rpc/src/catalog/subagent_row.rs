@@ -27,6 +27,8 @@ pub(super) fn subagent_info(
         tools: def_tool_names(def),
         kind: tddy_service::proto::types::AgentKind::Model as i32,
         harness: String::new(),
+        transport: String::new(),
+        permission_policy: String::new(),
     })
 }
 
