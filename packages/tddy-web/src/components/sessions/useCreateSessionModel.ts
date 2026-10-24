@@ -48,12 +48,18 @@ export function useCreateSessionModel({
   const vendorModels = useAgentModels(catalogClient, sessionToken, modelAgentKey, daemonInstanceId);
 
   // The provider field is offered for the harness the session runs: a CLI session type names its
-  // harness, and a tool session runs the agent it picked. The daemon says which accounts that
-  // harness can run on and why not; the form keeps no matrix of its own.
+  // harness, and a tool session runs the agent it picked. Warp runs only on its own vendor, so it
+  // names no harness and no provider is looked up or offered for it. The daemon says which accounts
+  // that harness can run on and why not; the form keeps no matrix of its own.
   // TODO(tool-route): the catalog does not say which agents are specialized definitions, which are
   // not harnesses; for one of those the form still asks the daemon, which answers "unknown harness"
   // and so hides the field (docs/dev/todo/2026-10-22-tool-session-provider-picker-needs-harness-metadata.md).
-  const providerHarness = sessionType === "tool" ? selectedAgentId || null : sessionType;
+  const providerHarness =
+    sessionType === "tool"
+      ? selectedAgentId || null
+      : sessionType === "warp-cli"
+        ? null
+        : sessionType;
   const providerRoutes = useProviderRoutes(accountsClient, sessionToken, providerHarness);
   // A provider choice belongs to the harness it was made for: switching session type or agent
   // clears it.

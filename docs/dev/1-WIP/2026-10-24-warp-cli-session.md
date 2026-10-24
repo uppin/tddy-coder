@@ -248,11 +248,11 @@ handful of string lists. Warp breaks two of the assumptions earlier harnesses co
 
 ## Implementation Milestones
 
-- [ ] Descriptor, argv, parser, route arm, context row: `warp_cli_acceptance.rs` green
-- [ ] Metadata field plus literal sites; workspace `cargo check --all-targets` green (scoped crates listed in the commit)
-- [ ] Watcher plus token-carrying resume: `warp_cli_session.rs` green
-- [ ] Worktree removal: `worktree_removal_eligibility.rs` green
-- [ ] Web: `CreateSessionWarpAcceptance.cy.tsx` green
+- [x] Descriptor, argv, parser, route arm, context row: `warp_cli_acceptance.rs` green
+- [x] Metadata field plus literal sites; workspace `cargo check --all-targets` green (scoped crates listed in the commit)
+- [x] Watcher plus token-carrying resume: `warp_cli_session.rs` green. The ordering constraint below stays open
+- [x] Worktree removal: `worktree_removal_eligibility.rs` green
+- [x] Web: `CreateSessionWarpAcceptance.cy.tsx` green
 
 ## Testing Plan
 
@@ -351,7 +351,7 @@ Red state, verified 2026-10-24: both fail. Create is disabled with no model, and
 
 ## Technical Debt & Production Readiness
 
-- [ ] **Ordering constraint for green**: the watcher must write `harness_resume_token` **before** the terminal is deregistered from `CliSessionManager`. `an_exit_that_prints_no_token_keeps_the_recorded_one` waits for deregistration and then asserts; it is deterministic only under that ordering. Alternatively, give the watcher an observable completion signal, and wait on that in the test instead.
+- [ ] **Ordering constraint for green** (OPEN, 2026-10-24): the watcher must write `harness_resume_token` **before** the terminal is deregistered from `CliSessionManager`. Not met. The watcher and the deregistration task (`tddy-cli-sessions` `spawn_terminal_cleanup`) react to the same terminal status, so a resume landing in that gap reads the previous token. Also, `tddy-pty` does not join the PTY reader before reporting exit, so the capture can trail `pty_done`. Both need changes outside this node's packages. The FIXME at `packages/tddy-agent-launch/src/cli_resume_token.rs` records them. Needs a human decision: a hook in the session manager, or accept the gap.
 
 ## Decisions & Trade-offs
 

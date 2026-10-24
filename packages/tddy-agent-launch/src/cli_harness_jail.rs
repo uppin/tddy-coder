@@ -22,6 +22,18 @@ pub(crate) fn sandboxed_agent_kind(session_type: &str) -> Option<&'static str> {
     }
 }
 
+/// The runner's `--agent-kind` for `harness`, or the refusal of a sandboxed start of a harness the
+/// runner does not host. Checked before a provider route is resolved, so the refusal names the
+/// runner rather than a provider account the harness could never use.
+pub(crate) fn require_sandbox_hosts(harness: &CliHarness) -> Result<&'static str, Status> {
+    sandboxed_agent_kind(harness.session_type).ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "the sandbox runner does not host {}",
+            harness.session_type
+        ))
+    })
+}
+
 /// The model a sandboxed CLI harness is started or resumed with, on the runner's `--model`.
 ///
 /// The runner refuses a blank model for OpenCode and Muse, and it has no channel for a route's
@@ -123,12 +135,7 @@ pub(crate) fn resolve_cli_jail_binaries(
     config: &DaemonConfig,
     harness: &CliHarness,
 ) -> Result<CliJailBinaries, Status> {
-    let agent_kind = sandboxed_agent_kind(harness.session_type).ok_or_else(|| {
-        Status::failed_precondition(format!(
-            "the sandbox runner does not host {}",
-            harness.session_type
-        ))
-    })?;
+    let agent_kind = require_sandbox_hosts(harness)?;
     Ok(CliJailBinaries {
         tddy_tools_path: canonical_exec_path(
             &tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
