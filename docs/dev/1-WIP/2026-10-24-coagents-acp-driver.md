@@ -5,7 +5,7 @@
 **Type**: Technical Improvement
 **Complexity**: 4 — one crate plus the stub and integration tests, a spawned-process seam, concurrency (cancel while a turn runs), an inherited restructure (two complexity records)
 **Branch**: `feature/coagents/acp-driver`, base `master` — `#coagents` 1/8
-**PR**: _assigned at wave 1_
+**PR**: [#720](https://github.com/uppin/tddy-coder/pull/720)
 
 ## Initial Discovery
 
@@ -95,7 +95,8 @@ Real dependency edges, as opposed to the branch line:
 
 - **tddy-agent-backend**: [README.md](../../packages/tddy-agent-backend/README.md) — new `backend/acp_driver.rs`; `acp.rs`, `codex_acp.rs`, `opencode_acp.rs` reduced to hooks; `acp_updates.rs` folded into the driver's mapping
 - **tddy-acp-stub**: request recorder, `hold_until_cancel`, advertised `models`
-- **tddy-integration-tests**: `tests/acp_driver_acceptance.rs`; existing `acp_backend_acceptance.rs`, `codex_acp_backend.rs`, `opencode_acp_backend.rs` must stay green
+- **tddy-agent-backend** tests: `tests/acp_driver_acceptance.rs`, `tests/claude_acp_on_driver_acceptance.rs` (in this crate, not `tddy-integration-tests`, whose dev-dependencies build all of `tddy-coder`)
+- **tddy-integration-tests**: existing `acp_backend_acceptance.rs`, `codex_acp_backend.rs`, `opencode_acp_backend.rs` must stay green
 
 ## Related Feature Documentation
 
@@ -180,26 +181,30 @@ makes client-side behaviour observable without a mock.
 
 ## Acceptance Tests
 
-`packages/tddy-integration-tests/tests/acp_driver_acceptance.rs` (`#[serial]`, stub binary):
+Run with `cargo build -p tddy-acp-stub && cargo test -p tddy-agent-backend --test acp_driver_acceptance --test claude_acp_on_driver_acceptance`.
 
-1. `a_prompt_returns_the_agents_text_and_stop_reason` — `open_session` + `prompt` against a two-chunk scenario → `AcpTurnEnd { stop_reason: EndTurn, text }`.
-2. `a_requested_model_is_set_on_the_session` — scenario advertises `[a, b]`, open with `model: b` → recorder has `set_session_model b`.
-3. `a_model_the_agent_does_not_offer_is_refused_naming_the_offered_ones` — open with `model: z` → error text contains `a` and `b`; no prompt sent.
-4. `cancel_ends_a_running_turn_as_cancelled` — `hold_until_cancel` scenario, `cancel` while `prompt` runs → `stop_reason: Cancelled`, recorder has `cancel`.
-5. `dropping_the_driver_terminates_the_agent_process` — stub pid from the recorder is gone after drop.
-6. `mcp_servers_reach_session_new` — open with one stdio MCP server → recorder's `new_session` lists it.
-7. `a_permission_request_is_answered_by_the_installed_handler` — scenario permission request, handler rejecting → the stub's recorded outcome is the rejection.
-8. `a_session_id_resumes_by_session_load` — open, prompt, new driver, open with `resume: id` → recorder has `load_session id`.
-9. `updates_stream_as_tool_calls_and_text` — a tool-call scenario → sink receives `ToolUse` then `ToolResult` and text in order.
+`packages/tddy-agent-backend/tests/acp_driver_acceptance.rs` (`#[serial]`, real `tddy-acp-stub` child; scenario and record paths passed through `AcpAgentCommand.env`) — all fail today at `open_session`'s `TODO(acp-driver)` error:
 
-`packages/tddy-integration-tests/tests/acp_backend_acceptance.rs` (extend):
+1. `a_prompt_returns_the_agents_text_and_stop_reason` — two chunks → `AcpTurnEnd { EndTurn, "Hello, caller." }`.
+2. `a_requested_model_is_set_on_the_session` — advertises `[model-a, model-b]`, open with `model-b` → one recorded `set_session_model model-b` on that session; `current_model` is `model-b`.
+3. `a_model_the_agent_does_not_offer_is_refused_naming_the_offered_ones` — `model-z` → error naming `model-z`, `model-a`, `model-b`; nothing set.
+4. `cancel_ends_a_running_turn_as_cancelled` — `hold_until_cancel` turn, `cancel` → `Cancelled`, one recorded `cancel`.
+5. `dropping_the_driver_terminates_the_agent_process` — the stub's recorded pid is gone within 5 s of the drop.
+6. `mcp_servers_reach_session_new` — recorded `new_session.mcp_servers == ["tddy-tools"]`.
+7. `a_permission_request_is_answered_by_the_installed_handler` — a handler choosing `reject-once` is asked once with the title and both options; the stub records `selected:reject-once`.
+8. `a_session_id_resumes_by_session_load` — a session id from one driver, `resume` on a new driver → one recorded `load_session` with that id, no `new_session`.
+9. `updates_stream_as_tool_calls_and_text` — the sink receives `Text("Reading.")` then `ToolCall { id: "tool-Read", title: "Read", kind: "other", raw_input }`.
 
-10. `claude_acp_honours_the_requested_model` — `InvokeRequest.model` → recorder `set_session_model`.
-11. `claude_acp_resume_survives_a_new_backend` — `SessionMode::Resume(id)` on a fresh backend → `load_session`.
+`packages/tddy-agent-backend/tests/claude_acp_on_driver_acceptance.rs` (`#[serial]`, process-wide stub env) — fail today on the missing behaviour, not on setup:
 
-`packages/tddy-integration-tests/tests/codex_acp_backend.rs` (extend):
+10. `claude_acp_honours_the_requested_model` — `InvokeRequest.model = opus` → recorded `set_session_model opus` (today: none).
+11. `claude_acp_resume_survives_a_new_backend` — `SessionMode::Resume(id)` on a fresh backend → recorded `load_session id`, no `new_session` (today: a new session).
 
-12. `codex_acp_retries_once_through_login_on_an_auth_error` — kept passing on the driver (existing behaviour, re-pinned through the hook).
+Dropped from the plan: the Codex `codex login` retry end-to-end test. It needs a fake `codex login` binary and an auth-failing stub mode; the retry decision itself stays pinned by the existing `codex_acp/oauth.rs` classification, and green must keep `codex_acp_backend.rs` green. Recorded here rather than silently.
+
+**Stub infrastructure (implemented in the contract commit):** `TDDY_ACP_STUB_RECORD` JSONL recorder (`started` with pid, `new_session` with cwd + MCP server names, `load_session`, `set_session_model`, `cancel`, `permission_outcome`); scenario `models`; response `hold_until_cancel`; `load_session` advertises the models too.
+
+**Baseline (2026-10-24, `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`):** `cargo clippy -p tddy-agent-backend -p tddy-acp-stub -- -D warnings` clean; `cargo test -p tddy-agent-backend --no-fail-fast` — every pre-existing suite passes, only the 11 tests above fail; `cargo fmt --all --check` clean.
 
 ## Technical Debt & Production Readiness
 
@@ -234,10 +239,10 @@ _(populated during development)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

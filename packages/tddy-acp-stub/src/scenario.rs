@@ -8,6 +8,11 @@ pub struct Scenario {
     /// List of response templates. Each prompt consumes the next response.
     #[serde(default)]
     pub responses: Vec<ResponseTemplate>,
+
+    /// Model ids advertised on `session/new`; the first is the current one. Empty advertises the
+    /// single default stub model.
+    #[serde(default)]
+    pub models: Vec<String>,
 }
 
 /// Template for a single prompt response.
@@ -33,6 +38,11 @@ pub struct ResponseTemplate {
     /// If true, return an error instead of success.
     #[serde(default)]
     pub error: bool,
+
+    /// If true, stream the chunks, then hold the turn open until `session/cancel` arrives and end
+    /// it as cancelled.
+    #[serde(default)]
+    pub hold_until_cancel: bool,
 }
 
 /// Template for a permission request (agent asks client for permission).
@@ -55,6 +65,7 @@ impl Default for ResponseTemplate {
             permission_requests: Vec::new(),
             stop_reason: default_stop_reason(),
             error: false,
+            hold_until_cancel: false,
         }
     }
 }
