@@ -134,7 +134,7 @@ Recommendation: split later — out of scope for this change, worth its own PR
 If a changeset document exists in `docs/dev/1-WIP/`, update it:
 - Add the code quality score and priority fixes to the **Validation Results** section (last run
   date, overall score, critical/major/minor counts, priority fixes with `file:line`)
-- Tick the **Scope** checkbox for "Code Quality" if the score is B or better
+- Tick the **Scope** checkbox for "Code Quality" if the score is B or better, and mirror the change into the PR description when the branch has an open PR (`/update-context-docs` § 8)
 - Add issues to the **Refactoring Needed** section under `### From /analyze-clean-code`
 
 If "must refactor" items are found, ask the user whether to proceed with refactoring or just report.

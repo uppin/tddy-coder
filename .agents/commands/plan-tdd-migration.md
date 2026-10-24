@@ -129,7 +129,7 @@ For each migration milestone:
 2. **Refactor the code** (rename, move, restructure) via `/green` (`tdd-implementer` subagent), incrementally
 3. **Run tests** - all must still pass; if a test fails, the implementation change broke behavior — fix the implementation, not the test
 4. **Optionally** use `/red` to add tests for genuinely new implementation details or newly exposed internal APIs
-5. **Update the changeset** (`/update-context-docs`) — check off milestones, record technical decisions and any technical debt discovered
+5. **Update the changeset** (`/update-context-docs`) — check off milestones, record technical decisions and any technical debt discovered, and mirror the change into the PR description when the branch has an open PR (`/update-context-docs` § 8)
 6. **Repeat** for next milestone
 
 Then run the full test suite (`./test`) and confirm 100% pass, with the behavior preservation tests among them.
@@ -153,12 +153,15 @@ Same mandatory validation steps as `/plan-tdd-one-shot` Phase 3. Never skip one 
 - [ ] Run `cargo clippy -- -D warnings` and fix all warnings
 - [ ] Run `cargo fmt` to ensure consistent formatting
 - [ ] Run full test suite one final time
-- [ ] Update documentation (see `/update-context-docs`), then wrap it:
-  - Apply the changeset to affected package READMEs and dev docs so they reflect State B
-  - Archive or delete the WIP changeset per `/wrap-context-docs`
-  - Create one new entry file in the package `changesets/` — `YYYY-MM-DD-<slug>.md` (see [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md))
+- [ ] Update documentation (see `/update-context-docs`)
 - [ ] **CHECKPOINT: Ask the user to review completed migration**
-- [ ] Create the PR with `/pr` — summarize what was migrated, link to the archived changeset, **highlight that features remain unchanged**, and list the validation results
+
+The list ends before the wrap. Wrapping the changeset (`/wrap-context-docs` — State B into package
+READMEs and dev docs, one new `changesets/YYYY-MM-DD-<slug>.md` entry per
+[changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md)) and opening, readying
+or merging the PR are the operator's to sequence, never items here (`/wrap-context-docs` §
+*Checklists end at the wrap*). When a PR is opened for a migration, its body summarizes what was
+migrated, **highlights that features remain unchanged**, and lists the validation results.
 
 Record each validation's outcome in the changeset "Validation Results" section and the issues found under "Refactoring Needed".
 

@@ -93,6 +93,10 @@ Inherited parent documents (not in the list above) never decide this — they ar
     **no post-wrap item**: no "Whole-workspace health — CI", no merge or deploy step, no manual check
     left for the operator. Those are the operator's to sequence, and go in your report to them, not
     the body. See `/wrap-context-docs` § *Checklists end at the wrap*.
+  - When the branch has its own changeset, the body carries its `## Progress` section — the
+    changeset's `## TODO` and `## Scope` checklists between the `changeset-checklist` markers
+    (`/update-context-docs` § 8). A wrapped changeset is captured **before** the wrap deletes it.
+    Every later tick is mirrored there.
   - If updating an existing PR, skip `gh pr create` (the push already updated it); just present the existing PR URL.
 - **In a stack**: once the PR exists, **re-register the stack** so it joins — `gh stack link --base master <prs…>`, bottom to top, additive. A PR nobody registered is correctly based but invisible as part of the stack.
 - Present the PR URL to the user. If the push output returned a URL to finish PR creation, you may open it in the browser (`open <URL>` on macOS).

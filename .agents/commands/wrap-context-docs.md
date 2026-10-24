@@ -91,6 +91,13 @@ manual way to see the change working may be described in prose ("To try it: …"
 about the change, not a step owed by it. Post-wrap next steps go in the agent's final report to the
 operator, not into the changeset or the PR body.
 
+**Sync the PR description one last time before deleting the changeset.** When the branch has an open
+PR, mirror the changeset's final `## TODO` and `## Scope` into the body's `## Progress` section
+(`/update-context-docs` § 8): every box `[x]` or annotated as deferred. Then replace the section's
+changeset link with the docs it was wrapped into — the path is about to stop existing. The section
+stays in the body as the record of what the change covered; the wrap adds no box of its own, and
+nothing after it is ever added there.
+
 ## Decision Logic
 
 Prerequisites for wrapping — **all** must be true:

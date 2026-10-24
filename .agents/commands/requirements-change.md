@@ -79,7 +79,8 @@ When a feature doc change has technical work behind it, link to the changeset:
 ```
 
 When updating a changeset, tick off completed Scope items, update milestone status, mark acceptance
-tests as passing, and add new milestones if the scope expanded.
+tests as passing, and add new milestones if the scope expanded. When the branch has an open PR, mirror
+the changed checklist into its description (`/update-context-docs` § 8).
 
 Commit with a message that says what changed and why, e.g.
 `git commit -m "docs: update signature toolbar with color options"`.

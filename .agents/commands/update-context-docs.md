@@ -50,7 +50,8 @@ Changesets are **living documents** — update them continuously during developm
 | Package dev docs | Only during wrap (see `/wrap-context-docs`) | After changeset complete |
 | Feature docs | Only during wrap or if no PRD exists | After PRD complete |
 
-Which workflow stage flips which changeset Scope item:
+Which workflow stage flips which changeset Scope item — each command that flips one also mirrors it
+into the open PR's description (§ 8):
 
 | Scope Item | Command | When | Status Change |
 |-----------|---------|------|---------------|
@@ -62,7 +63,7 @@ Which workflow stage flips which changeset Scope item:
 | Integration | `/test-acceptance` | Cross-package integration tests pass | `[ ]` → `[x]` |
 | Technical Debt | `/validate-prod-ready` | Production readiness verified | `[ ]` → `[x]` |
 | Code Quality | `/analyze-clean-code` | Clean code analysis passes | `[ ]` → `[~]` |
-| Code Quality | `/validate-tests` | All validations pass, review complete (`/pr-wrap`) | `[~]` → `[x]` |
+| Code Quality | `/validate-tests` | All validations pass | `[~]` → `[x]` |
 
 ### 4. Implementation Milestones
 
@@ -134,6 +135,37 @@ by wrap time the changeset is being deleted, and nothing else remembers.
 an entry the change resolved but planning never scanned needs the user's agreement first (CLAUDE.md:
 ask before deleting).
 
+### 8. Mirror the changeset checklist into the PR description
+
+The PR body is where a reviewer watches progress, so it carries a copy of the changeset's checklist.
+**Every time a box in the changeset changes** — ticked, unticked, `[~]`, added, removed, or annotated
+as deferred — by this command or by any other command that writes those boxes, sync the copy **if the
+branch has an open PR** (draft or ready):
+
+```bash
+PR=$(gh pr list --head "$(git branch --show-current)" --state open --json number --jq '.[0].number')
+```
+
+No PR → nothing to sync; say so in the report. Otherwise:
+
+- **What is mirrored**: this PR's **own** changeset's `## TODO` list, then its `## Scope` list,
+  verbatim, under one `## Progress` heading that links the changeset path. A restructure changeset's
+  `## Final Checklist` is **not** mirrored — it is the wrap's own task list, not progress. On a stack
+  branch a parent's changeset is never mirrored here; it belongs to the parent's PR.
+- **Where**: between `<!-- changeset-checklist:start -->` and `<!-- changeset-checklist:end -->` in the
+  body. Replace that region only and leave the rest of the body as it is; when the markers are absent,
+  append the section at the end, above the attribution line.
+- **How**: read the body with `gh pr view "$PR" --json body --jq .body`, rewrite the region in a file,
+  and write it back with `gh api -X PATCH "repos/{owner}/{repo}/pulls/$PR" -F body=@<file>`.
+  `gh pr edit` can fail silently on this repo (a Projects-classic GraphQL error), so do not use it for
+  the body. Read the body back once to confirm the region changed.
+- **When**: in the same step that writes the changeset. It needs no push — the body may lead the
+  pushed branch until the next push.
+
+The checklist **ends before the wrap** (`/wrap-context-docs` § *Checklists end at the wrap*), so the
+mirror never carries a wrap, CI, readying, merge or deploy item either. Those are the operator's, and
+how the PR proceeds after the wrap is theirs to decide.
+
 ## Detection Heuristics
 
 To find relevant documentation for the current work:
@@ -190,12 +222,14 @@ cargo test -p client-lib undo_redo
 3. Compare against actual implementation (check code, run tests)
 4. Show the proposed changes as a diff and confirm before writing
 5. Update checkboxes, milestones, and evidence
-6. Report what was updated to the user
+6. Mirror the checklist into the PR description when the branch has an open PR (§ 8)
+7. Report what was updated to the user, including whether the PR body was synced
 
 ## Verification Checklist
 
 - [ ] **CRITICAL**: checked for PRD documents FIRST; if one exists, only the PRD was modified
 - [ ] **CRITICAL**: changeset Scope checkboxes reflect the current workflow stage (`[ ]`, `[~]`, `[x]`)
+- [ ] The open PR's `## Progress` section matches the changeset's `## TODO` and `## Scope` (or there is no PR)
 - [ ] PRD "Affected Features" section is up to date (if applicable)
 - [ ] Acceptance criteria match actual test results
 - [ ] Dev doc milestones reflect actual file existence

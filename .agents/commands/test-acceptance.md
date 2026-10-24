@@ -74,6 +74,9 @@ Also update its "Validation Results" section:
 
 If a feature/dev doc exists, update its acceptance criteria status too.
 
+When this flips a `## TODO` or `## Scope` box and the branch has an open PR, mirror the change into the
+PR description (`/update-context-docs` § 8).
+
 ### 7. Output Format
 
 Present findings as:

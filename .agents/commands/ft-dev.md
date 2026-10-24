@@ -84,6 +84,7 @@ After completing a milestone, update the changeset:
 - [ ] Check off passing acceptance tests
 - [ ] Document technical decisions made
 - [ ] Track technical debt discovered
+- [ ] Mirror the changed boxes into the PR description, if the branch has an open PR (`/update-context-docs` § 8)
 
 Then run the full test suite (`cargo test`) and `cargo clippy -- -D warnings`.
 

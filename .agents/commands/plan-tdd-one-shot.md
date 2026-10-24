@@ -93,8 +93,11 @@ Every single one of these steps is MANDATORY. Do not skip any.
 - [ ] **TODO-21**: Run `cargo clippy -- -D warnings` and fix all warnings
 - [ ] **TODO-22**: Run `cargo fmt` to ensure consistent formatting
 - [ ] **TODO-23**: Run full test suite one final time
-- [ ] **TODO-24**: Update and wrap documentation (`/update-context-docs`, then `/wrap-context-docs` if all acceptance criteria are met)
+- [ ] **TODO-24**: Update documentation (`/update-context-docs`)
 - [ ] **TODO-25**: **CHECKPOINT: Ask the user to review completed work**
+
+The list ends before the wrap. `/wrap-context-docs`, readying, CI, merge and deploy are the operator's
+to sequence, never TODO items (`/wrap-context-docs` § *Checklists end at the wrap*).
 
 #### Validation steps cannot be skipped
 
@@ -186,7 +189,7 @@ individually trackable steps. Both must be present.
 
 **During technical planning**: clarify ambiguities, explore multiple approaches, weigh trade-offs explicitly, document the rationale, and produce a changeset with milestones, testing plan and technical decisions.
 
-**During execution**: follow the plan in order, check off completed items, pause at every checkpoint, adapt the plan when new information emerges, track deviations and their reasons, and never compromise code quality to pass tests.
+**During execution**: follow the plan in order, check off completed items and mirror them into the open PR's description (`/update-context-docs` § 8), pause at every checkpoint, adapt the plan when new information emerges, track deviations and their reasons, and never compromise code quality to pass tests.
 
 **Documentation**: keep docs current as implementation progresses, track progress with checkboxes, capture technical choices and rationale, and link feature docs to dev docs to PRs.
 
