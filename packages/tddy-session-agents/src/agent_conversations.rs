@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::conversation_recorder::ConversationRecorder;
-use tddy_discovery::subagent::SubagentSession;
+use tddy_discovery::subagent::{PermissionAnswering, SubagentSession};
 use tokio::sync::{Mutex, Notify};
 
 /// One open conversation with a roster agent.
@@ -32,6 +32,10 @@ pub enum AgentConversation {
         /// Records the conversation's turns as they run: the transcript a replay reads, and the frames a
         /// replay tails. Opened with the session, before its first turn.
         recorder: Arc<ConversationRecorder>,
+        /// The handle its parked permission requests are answered through, captured when the
+        /// conversation opens. Held beside the session rather than read through it, because a turn
+        /// that is waiting on a request holds the session's lock; `None` when the session parks none.
+        answering: Option<Arc<dyn PermissionAnswering>>,
     },
     /// The turn loop runs on `daemon_instance_id`; this daemon forwards to it.
     Remote {
@@ -163,6 +167,25 @@ impl OpenAgentConversations {
             .await
             .get(conversation_id)
             .is_some_and(|conversation| conversation.session_id() == session_id)
+    }
+
+    /// The handle `conversation_id`'s parked permission requests are answered through, when it is a
+    /// conversation open on `session_id` whose turns run here and whose session parks requests.
+    /// `None` for a conversation another daemon runs the loop of. Takes only the map's lock, never a
+    /// session's, so an answer reaches a turn that is waiting on it.
+    pub async fn answering_for(
+        &self,
+        session_id: &str,
+        conversation_id: &str,
+    ) -> Option<Arc<dyn PermissionAnswering>> {
+        match self.open.lock().await.get(conversation_id)? {
+            AgentConversation::Local {
+                session_id: open_session,
+                answering,
+                ..
+            } if open_session == session_id => answering.clone(),
+            AgentConversation::Local { .. } | AgentConversation::Remote { .. } => None,
+        }
     }
 
     /// Forget `conversation_id`, handing back what was open under it.

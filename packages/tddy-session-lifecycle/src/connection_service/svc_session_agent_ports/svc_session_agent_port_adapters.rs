@@ -210,6 +210,10 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
     fn conversation_closed(&self, conversation_id: &str) {
         self.roster.conversation_closed(conversation_id);
     }
+
+    fn github_user(&self, session_token: &str) -> Result<String, Status> {
+        self.roster.session_github_user(session_token)
+    }
 }
 
 /// How a conversation with an agent another daemon owns reaches that daemon: over this daemon's

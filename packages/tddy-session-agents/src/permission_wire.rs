@@ -31,3 +31,22 @@ pub fn with_permission_answer(
     })?;
     Ok(requested.with_permission_answer(answer))
 }
+
+/// Hand the pending permission request `defer_permission_to_user` names to the user, where the
+/// resume names one. Empty is no request. A resume that both hands a request to the user and
+/// answers one is refused: a request is either answered by the caller or handed to the user.
+pub fn with_permission_deferral(
+    requested: TurnRequest,
+    defer_permission_to_user: Option<&str>,
+    answer_json: &str,
+) -> Result<TurnRequest, String> {
+    match defer_permission_to_user.filter(|request_id| !request_id.is_empty()) {
+        None => Ok(requested),
+        Some(_) if !answer_json.is_empty() => Err(
+            "ResumeAgentConversation defer_permission_to_user and permission_answer_json cannot both be set: \
+             a permission request is either answered by the caller or handed to the user"
+                .to_string(),
+        ),
+        Some(request_id) => Ok(requested.deferring_permission_to_user(request_id)),
+    }
+}

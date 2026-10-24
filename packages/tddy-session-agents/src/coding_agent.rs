@@ -244,7 +244,7 @@ impl AgentRoster {
     }
 
     /// The GitHub user `session_token` authenticates.
-    pub(crate) fn session_github_user(&self, session_token: &str) -> Result<String, Status> {
+    pub fn session_github_user(&self, session_token: &str) -> Result<String, Status> {
         (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))
     }

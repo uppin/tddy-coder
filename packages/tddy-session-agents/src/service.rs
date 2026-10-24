@@ -36,7 +36,8 @@ use tddy_service::proto::session_agents_svc::{
 use tddy_worktree_service::stream::MpscResultStream;
 
 use tddy_discovery::subagent::{
-    MessageDescriptor, MessageId, MessageRole, PromptOutcome, SubagentSession, TurnRequest,
+    AnsweredBy, MessageDescriptor, MessageId, MessageRole, PermissionAnswer, PromptOutcome,
+    SubagentSession, TurnRequest,
 };
 use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
@@ -87,12 +88,16 @@ impl SessionAgentServiceImpl {
                 "conversation '{conversation_id}' could not open its transcript: {e}"
             ))
         })?;
+        // Read before the session is boxed behind its lock: a turn waiting on a permission request holds
+        // that lock, and the answer to the request still has to reach it.
+        let answering = session.permission_answerer();
         Ok(AgentConversation::Local {
             session_id: session_id.to_string(),
             agent_id: agent_id.to_string(),
             session: Arc::new(tokio::sync::Mutex::new(session)),
             closed: Arc::new(tokio::sync::Notify::new()),
             recorder: Arc::new(recorder),
+            answering,
         })
     }
 
@@ -397,6 +402,11 @@ impl TurnOnAConversation {
                         with_yield_conditions(requested, &req.yield_conditions_json)?,
                         &req.replacement_json,
                     )?,
+                    &req.permission_answer_json,
+                )?;
+                let requested = crate::permission_wire::with_permission_deferral(
+                    requested,
+                    req.defer_permission_to_user.as_deref(),
                     &req.permission_answer_json,
                 )?;
                 Ok(within(requested, req.max_turns))
@@ -1166,37 +1176,81 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
 
     /// Answer a coding subagent's permission request the main agent deferred to the user.
     ///
-    /// Authenticated first, as the neighbouring handlers are, and the conversation must be open on
-    /// the session the request names: a conversation id is host-wide, so an id another session opened
-    /// is refused as not held rather than answered.
+    /// Authenticated first, as the neighbouring handlers are. The conversation must be open on the
+    /// session the request names: a conversation id is host-wide, so an id another session opened is
+    /// refused as not held rather than answered. It must be one whose session parks permission
+    /// requests, and the request must have been handed to the user by the turn holding it: a request
+    /// the main agent keeps is the main agent's to answer, and is refused here.
     ///
-    /// The success path is not wired yet. The answer has to reach the session's parked requests, but
-    /// a deferred turn keeps the session behind its lock and the conversation table holds it only as
-    /// a `Box<dyn SubagentSession>`, with no route to the parked requests (see
-    /// `CodingAgentSession::cancel_handle`). That route is the permission-yield wiring of #722.
+    /// The answer is recorded under the caller's GitHub login, and the first answer to a request wins:
+    /// a second is refused naming who answered first. The answer reaches the parked request through the
+    /// handle captured when the conversation opened, not through the conversation's lock, so it is
+    /// delivered while the deferred turn is still waiting on it.
     async fn answer_agent_permission(
         &self,
         request: Request<AnswerAgentPermissionRequest>,
     ) -> Result<Response<AnswerAgentPermissionResponse>, Status> {
         let req = request.into_inner();
         self.session_dir(&req.session_token, &req.session_id)?;
-        if !self
+        let Some(answering) = self
             .ports
             .conversations
-            .is_open_on(&req.session_id, &req.conversation_id)
+            .answering_for(&req.session_id, &req.conversation_id)
             .await
-        {
-            return Err(Status::not_found(format!(
-                "conversation '{}' is not open on session '{}'",
-                req.conversation_id, req.session_id
+        else {
+            return Err(
+                if self
+                    .ports
+                    .conversations
+                    .is_open_on(&req.session_id, &req.conversation_id)
+                    .await
+                {
+                    Status::failed_precondition(format!(
+                        "conversation '{}' has no permission requests to answer on session '{}'",
+                        req.conversation_id, req.session_id
+                    ))
+                } else {
+                    Status::not_found(format!(
+                        "conversation '{}' is not open on session '{}'",
+                        req.conversation_id, req.session_id
+                    ))
+                },
+            );
+        };
+        if !answering.deferred_to_user(&req.request_id) {
+            return Err(Status::failed_precondition(format!(
+                "permission request '{}' of conversation '{}' was not handed to the user, so the user may not answer it",
+                req.request_id, req.conversation_id
             )));
         }
-        // TODO(web-approvals): blocked on the permission-yield handle wiring — decision pending
-        Err(Status::unimplemented(format!(
-            "answering a permission request of conversation '{}' is not yet wired: the conversation \
-             table cannot reach the session's parked permission requests (the permission-yield handle, #722)",
-            req.conversation_id
-        )))
+        let answer = answer_of(&req)?;
+        let login = self.ports.sessions.github_user(&req.session_token)?;
+        answering
+            .answer_as(&answer, AnsweredBy::User(login.clone()))
+            .map_err(Status::failed_precondition)?;
+        Ok(Response::new(AnswerAgentPermissionResponse {
+            answered_by: login,
+        }))
+    }
+}
+
+/// The answer an `AnswerAgentPermission` carries: one of the request's options, or cancelled. Exactly
+/// one of the two; anything else is refused, as the tools layer refuses it.
+fn answer_of(req: &AnswerAgentPermissionRequest) -> Result<PermissionAnswer, Status> {
+    match (req.option_id.is_empty(), req.cancelled) {
+        (false, false) => Ok(PermissionAnswer::Selected {
+            request_id: req.request_id.clone(),
+            option_id: req.option_id.clone(),
+        }),
+        (true, true) => Ok(PermissionAnswer::Cancelled {
+            request_id: req.request_id.clone(),
+        }),
+        (false, true) => Err(Status::invalid_argument(
+            "an answer names an optionId or cancelled, not both",
+        )),
+        (true, false) => Err(Status::invalid_argument(
+            "an answer names one of the request's optionId, or cancelled: true",
+        )),
     }
 }
 
