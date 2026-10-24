@@ -38,6 +38,7 @@ impl CliSessionManager {
             argv,
             Vec::new(),
             None,
+            None,
         )
         .await
     }

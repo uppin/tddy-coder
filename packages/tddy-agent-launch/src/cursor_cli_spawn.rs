@@ -403,6 +403,7 @@ fn write_cursor_cli_session_metadata(launch: CursorCliSessionRecord<'_>) -> Resu
         pid: Some(pid),
         model: Some(model.to_string()),
         cursor_chat_id: Some(cursor_chat_id),
+        harness_resume_token: None,
         hook_token: Some(hook_token),
         managed_codebase,
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),

@@ -56,6 +56,11 @@ struct TerminalEntry {
 /// `session_id → (terminal_id → TerminalEntry)`.
 type TerminalIndex = Arc<RwLock<HashMap<String, HashMap<String, TerminalEntry>>>>;
 
+/// The exit hooks not yet finished: `(session_id, terminal_id) → (task, settled)`, where `settled`
+/// turns `true` once the hook of that task's run has finished.
+type ExitSettlements =
+    Arc<RwLock<HashMap<(String, String), (TaskId, tokio::sync::watch::Receiver<bool>)>>>;
+
 /// Per-session control leases: `session_id → ControlLeaseInfo`.
 type ControlRegistry = Arc<RwLock<HashMap<String, ControlLeaseInfo>>>;
 
@@ -103,6 +108,9 @@ pub struct CliSessionManager {
     /// not exposed at all — which is why the entry, and not the presence
     /// of a PTY, is what decides whether anything is bridged.
     exposed_terminals: ExposedTerminalRegistry,
+    /// The exit hooks of terminals spawned with one, until each has finished — what
+    /// [`Self::exit_hook_settled`] waits on.
+    exit_settlements: ExitSettlements,
 }
 
 /// Backward-compatible alias for [`CliSessionManager`].
@@ -131,6 +139,7 @@ impl CliSessionManager {
             control_tx,
             managed_workflows: Arc::new(RwLock::new(HashMap::new())),
             exposed_terminals: Arc::new(RwLock::new(HashMap::new())),
+            exit_settlements: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -151,10 +160,12 @@ mod terminals;
 mod relaunch;
 
 mod launch;
+pub use launch::HarnessLaunchExtras;
 
 mod argv;
 
 mod pty_spawn;
+pub use pty_spawn::ExitHook;
 
 // ---------------------------------------------------------------------------
 // Resize escape parsing

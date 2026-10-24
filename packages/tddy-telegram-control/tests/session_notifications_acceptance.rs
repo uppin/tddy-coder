@@ -82,6 +82,7 @@ fn write_claude_cli_session(session_dir: &std::path::Path, initial_activity_stat
         session_type: Some("claude-cli".to_string()),
         model: Some("claude-opus-5".to_string()),
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: Some(initial_activity_status.to_string()),
         hook_token: Some(TEST_HOOK_TOKEN.to_string()),
         sandbox: None,

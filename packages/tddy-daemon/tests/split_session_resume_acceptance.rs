@@ -319,6 +319,7 @@ fn a_stopped_split_session() -> SessionMetadata {
         session_type: Some("claude-cli".to_string()),
         model: Some(MODEL.to_string()),
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: None,
         sandbox: None,

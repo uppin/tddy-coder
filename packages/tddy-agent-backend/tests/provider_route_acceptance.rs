@@ -150,6 +150,7 @@ fn every_harness_id_names_its_harness_and_back() {
         "opencode",
         "opencode-cli",
         "muse-cli",
+        "warp-cli",
         "cursor",
         "cursor-cli",
     ] {
@@ -227,8 +228,8 @@ fn a_route_can_be_logged_without_its_key() {
 }
 
 #[test]
-fn every_harness_but_cursor_answers_routable() {
-    // Then Claude Code, Codex, OpenCode and Muse Code are routable, and Cursor never is
+fn every_harness_but_cursor_and_warp_answers_routable() {
+    // Then Claude Code, Codex, OpenCode and Muse Code are routable; Cursor and Warp never are
     for harness in [
         Harness::Claude,
         Harness::ClaudeAcp,
@@ -241,7 +242,7 @@ fn every_harness_but_cursor_answers_routable() {
     ] {
         assert_eq!(harness_routable(harness), Ok(()));
     }
-    for harness in [Harness::Cursor, Harness::CursorCli] {
+    for harness in [Harness::Cursor, Harness::CursorCli, Harness::WarpCli] {
         assert_eq!(
             harness_routable(harness),
             Err(RouteRefusal::HarnessCannotBeRouted { harness })

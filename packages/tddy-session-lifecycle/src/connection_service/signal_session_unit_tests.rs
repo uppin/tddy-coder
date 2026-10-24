@@ -56,6 +56,7 @@ fn write_unit_session(session_dir: &std::path::Path, pid: u32) {
         session_type: None,
         model: None,
         cursor_chat_id: None,
+        harness_resume_token: None,
         activity_status: None,
         hook_token: None,
         sandbox: None,
