@@ -1,7 +1,11 @@
 import type { Client } from "@connectrpc/connect";
 import type { SessionAgentService } from "../../gen/session_agents_pb";
 import { Button } from "../ui/button";
-import { useAnswerAgentPermission } from "./useAnswerAgentPermission";
+import {
+  OWNING_DAEMON_UNKNOWN_TEXT,
+  owningDaemonKnown,
+  useAnswerAgentPermission,
+} from "./useAnswerAgentPermission";
 
 /** A coding subagent's pending permission request, as the conversation transcript records it. */
 export interface PendingPermission {
@@ -12,12 +16,17 @@ export interface PendingPermission {
   deferredToUser: boolean;
   /** Who answered it, once answered. */
   answeredBy?: string;
+  /** The option the answer chose; absent when the answer was a cancellation. */
+  answeredOptionId?: string;
 }
 
 export interface PermissionRequestEntryProps {
   sessionId: string;
   conversationId: string;
   sessionToken: string;
+  /** The daemon that owns the session (`SessionEntry.daemonInstanceId`). Empty when not known, and
+   *  then the entry offers no answer and says so. */
+  daemonInstanceId: string;
   permission: PendingPermission;
   client: Client<typeof SessionAgentService>;
 }
@@ -32,6 +41,7 @@ export function PermissionRequestEntry({
   sessionId,
   conversationId,
   sessionToken,
+  daemonInstanceId,
   permission,
   client,
 }: PermissionRequestEntryProps) {
@@ -39,14 +49,21 @@ export function PermissionRequestEntry({
     client,
     sessionToken,
     sessionId,
+    daemonInstanceId,
     conversationId,
   });
 
   // Once the daemon has accepted an answer — from this entry, or one the transcript already records —
   // the choice is final and no option is offered again.
   const answeredBy = recorded?.answeredBy ?? permission.answeredBy ?? null;
-  const offerOptions = permission.deferredToUser && answeredBy === null;
-  const chosen = recorded && permission.options.find((o) => o.optionId === recorded.optionId);
+  const answeredOptionId = recorded?.optionId ?? permission.answeredOptionId;
+  const awaitingAnswer = permission.deferredToUser && answeredBy === null;
+  const offerOptions = awaitingAnswer && owningDaemonKnown(daemonInstanceId);
+  const cannotAnswer = awaitingAnswer && !owningDaemonKnown(daemonInstanceId);
+  const chosen =
+    answeredOptionId === undefined
+      ? undefined
+      : permission.options.find((o) => o.optionId === answeredOptionId);
 
   return (
     <section
@@ -56,6 +73,11 @@ export function PermissionRequestEntry({
       <p data-testid="permission-request-title" className="font-mono font-semibold">
         {permission.title}
       </p>
+      {cannotAnswer && (
+        <p data-testid="permission-cannot-answer" role="status" className="text-muted-foreground">
+          {OWNING_DAEMON_UNKNOWN_TEXT}
+        </p>
+      )}
       {offerOptions && (
         <div className="flex flex-wrap gap-2">
           {permission.options.map((option) => (

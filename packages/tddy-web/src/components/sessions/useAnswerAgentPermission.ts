@@ -13,10 +13,22 @@ import type { SessionAgentService } from "../../gen/session_agents_pb";
  * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
  */
 
+/** What an entry says when the daemon that owns its session is not known, so it cannot be answered. */
+export const OWNING_DAEMON_UNKNOWN_TEXT =
+  "The daemon that owns this session is not known, so this request cannot be answered from here.";
+
+/** Whether a session's owning daemon id is known. An empty id is "not known", never "this daemon":
+ *  the answer is addressed to the daemon that holds the conversation, so none is sent without one. */
+export function owningDaemonKnown(daemonInstanceId: string): boolean {
+  return daemonInstanceId.trim() !== "";
+}
+
 export interface AnswerAgentPermissionParams {
   readonly client: Client<typeof SessionAgentService>;
   readonly sessionToken: string;
   readonly sessionId: string;
+  /** The daemon that owns the session (`SessionEntry.daemonInstanceId`). Empty when not known. */
+  readonly daemonInstanceId: string;
   /** The conversation the request was parked in. */
   readonly conversationId: string;
 }
@@ -42,6 +54,7 @@ export function useAnswerAgentPermission({
   client,
   sessionToken,
   sessionId,
+  daemonInstanceId,
   conversationId,
 }: AnswerAgentPermissionParams): AnswerAgentPermissionState {
   const [pending, setPending] = useState(false);
@@ -50,16 +63,19 @@ export function useAnswerAgentPermission({
 
   const answer = useCallback(
     async (requestId: string, optionId: string) => {
+      // Without the owning daemon the call would be addressed to "" — the daemon this browser is on —
+      // which is not necessarily the one that holds the conversation. Nothing is sent in its place.
+      if (!owningDaemonKnown(daemonInstanceId)) {
+        setError(OWNING_DAEMON_UNKNOWN_TEXT);
+        return;
+      }
       setPending(true);
       setError(null);
       try {
         const response = await client.answerAgentPermission({
           sessionToken,
           sessionId,
-          // An empty daemon instance id means "serve here", the routing the transcript calls use.
-          // TODO(web-approvals): a session hosted by another daemon needs that daemon's id here
-          // (`rosterHalfOf` routes roster calls by it). The entry's props carry none yet.
-          daemonInstanceId: "",
+          daemonInstanceId,
           conversationId,
           requestId,
           optionId,
@@ -72,7 +88,7 @@ export function useAnswerAgentPermission({
         setPending(false);
       }
     },
-    [client, sessionToken, sessionId, conversationId],
+    [client, sessionToken, sessionId, daemonInstanceId, conversationId],
   );
 
   return { answer, pending, error, recorded };

@@ -17,6 +17,9 @@ export interface SubagentConversationDialogProps {
   /** The bubble's text — the agent and what it was asked — shown as the dialog's title. */
   title: string;
   sessionToken: string;
+  /** The daemon that owns the session (`SessionEntry.daemonInstanceId`); empty when not known. A
+   *  permission request's answer is addressed to it. */
+  daemonInstanceId: string;
   client: Client<typeof ActivityService>;
   onClose: () => void;
 }
@@ -40,6 +43,7 @@ export function SubagentConversationDialog({
   conversationId,
   title,
   sessionToken,
+  daemonInstanceId,
   client,
   onClose,
 }: SubagentConversationDialogProps) {
@@ -133,6 +137,7 @@ export function SubagentConversationDialog({
                 message={message}
                 sessionId={sessionId}
                 sessionToken={sessionToken}
+                daemonInstanceId={daemonInstanceId}
                 conversationId={conversationId}
                 activityClient={client}
                 agentClient={agentClient}

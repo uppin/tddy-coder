@@ -11,6 +11,9 @@ import { SubagentConversationDialog } from "./SubagentConversationDialog";
 interface SessionActivitiesPaneProps {
   sessionId: string;
   sessionToken: string;
+  /** The daemon that owns the session (`SessionEntry.daemonInstanceId`); empty when not known. A
+   *  permission request opened from this pane is answered to it. */
+  daemonInstanceId: string;
   /** Explicit client override — session-scoped routing where available. Falls back to the shared
    *  HTTP client from the transport context. A dormant session has no LiveKit room of its own, so
    *  in practice this is the owning daemon's client and the replay comes off disk. */
@@ -33,6 +36,7 @@ interface SessionActivitiesPaneProps {
 export function SessionActivitiesPane({
   sessionId,
   sessionToken,
+  daemonInstanceId,
   client,
 }: SessionActivitiesPaneProps) {
   // `useHttpClient` is called unconditionally (hook rules); the explicit prop wins when present.
@@ -122,6 +126,7 @@ export function SessionActivitiesPane({
           conversationId={conversation.conversationId}
           title={conversation.title}
           sessionToken={sessionToken}
+          daemonInstanceId={daemonInstanceId}
           client={resolvedClient}
           onClose={() => setConversation(null)}
         />

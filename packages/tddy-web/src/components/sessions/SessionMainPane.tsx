@@ -199,6 +199,7 @@ export function SessionMainPane({
       <SessionActivitiesPane
         sessionId={selectedSession.sessionId}
         sessionToken={sessionToken}
+        daemonInstanceId={selectedSession.daemonInstanceId}
         client={buildSessionActivityClient?.() ?? activityClient}
       />
     ) : null);

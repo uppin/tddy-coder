@@ -178,6 +178,7 @@ export function SessionWithActivitySidebar(props: {
           conversationId={conversation.conversationId}
           title={conversation.title}
           sessionToken={sessionToken}
+          daemonInstanceId={session.daemonInstanceId}
           client={client}
           onClose={() => setConversation(null)}
         />

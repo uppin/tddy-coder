@@ -11,6 +11,8 @@ export interface TranscriptPermissionRequestProps {
   message: ChatMessage;
   sessionId: string;
   sessionToken: string;
+  /** The daemon that owns the session (`SessionEntry.daemonInstanceId`); empty when not known. */
+  daemonInstanceId: string;
   /** The subagent conversation the request was parked in. */
   conversationId: string;
   /** Reads the request's input from the conversation's transcript, as any tool call's bodies are read. */
@@ -34,6 +36,7 @@ export function TranscriptPermissionRequest({
   message,
   sessionId,
   sessionToken,
+  daemonInstanceId,
   conversationId,
   activityClient,
   agentClient,
@@ -83,6 +86,7 @@ export function TranscriptPermissionRequest({
       sessionId={sessionId}
       conversationId={conversationId}
       sessionToken={sessionToken}
+      daemonInstanceId={daemonInstanceId}
       permission={permission}
       client={agentClient}
     />
