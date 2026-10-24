@@ -268,7 +268,7 @@ it("starts a session with nothing attached over the streaming RPC and names the 
   createSessionPage.submit();
 
   // Then the step the host is in is named, and releasing the host creates the session
-  createSessionPage.startPhase().should("contain.text", "Creating worktree…");
+  createSessionPage.startStep("worktree").should("have.attr", "data-state", "active");
   cy.then(() => gate.release());
   cy.get("@onCreated").should("have.been.calledWith", "streamed-1");
 });

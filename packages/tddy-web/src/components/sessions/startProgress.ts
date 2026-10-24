@@ -1,4 +1,9 @@
-import type { CloneProgress, StartPhase_Step, StartSessionEvent } from "../../gen/session_pb";
+import {
+  StartPhase_Boundary,
+  type CloneProgress,
+  StartPhase_Step,
+  type StartSessionEvent,
+} from "../../gen/session_pb";
 
 /** One step of a start as the create pane lists it. */
 export interface StartProgressStep {
@@ -23,13 +28,37 @@ export function startProgressAfter(
   state: StartProgressState,
   event: StartSessionEvent,
 ): StartProgressState {
-  // TODO(progress-ui): implement — phase BEGIN appends active, END marks done, clone_progress replaces clone
-  void event;
-  return state;
+  switch (event.event.case) {
+    case "phase": {
+      const { step, boundary } = event.event.value;
+      if (boundary === StartPhase_Boundary.BEGIN) {
+        const steps = state.steps.filter((entry) => entry.step !== step);
+        return { ...state, steps: [...steps, { step, state: "active" }] };
+      }
+      if (boundary === StartPhase_Boundary.END) {
+        return {
+          // The clone's progress belongs to the clone step: it is over when that step is.
+          clone: step === StartPhase_Step.CLONE ? null : state.clone,
+          steps: state.steps.map((entry) =>
+            entry.step === step ? { ...entry, state: "done" } : entry,
+          ),
+        };
+      }
+      return state;
+    }
+    case "cloneProgress":
+      return { ...state, clone: event.event.value };
+    default:
+      return state;
+  }
 }
 
 /** The state after the stream failed: the step in progress is marked failed. */
 export function startProgressFailed(state: StartProgressState): StartProgressState {
-  // TODO(progress-ui): implement
-  return state;
+  return {
+    ...state,
+    steps: state.steps.map((entry) =>
+      entry.state === "active" ? { ...entry, state: "failed" } : entry,
+    ),
+  };
 }

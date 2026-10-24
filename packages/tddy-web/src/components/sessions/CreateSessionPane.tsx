@@ -19,7 +19,7 @@ import { CreateSessionBranchFields } from "./CreateSessionBranchFields";
 import { CreateSessionHostAndProjectFields } from "./CreateSessionHostAndProjectFields";
 import { CreateSessionAttachmentsSection } from "./CreateSessionAttachmentsSection";
 import { CreateSessionActions } from "./CreateSessionActions";
-import { CreateSessionStartPhase } from "./CreateSessionStartPhase";
+import { CreateSessionStartProgress } from "./CreateSessionStartProgress";
 import { CreateSessionStackParentSelect } from "./CreateSessionStackParentSelect";
 import { useProjectBranches } from "./useProjectBranches";
 import { useCreateSessionCatalogs } from "./useCreateSessionCatalogs";
@@ -238,8 +238,12 @@ export function CreateSessionPane({
     resetProgress: resetAttachmentProgress,
     stageAttachments,
     startSessionStreamed,
-    startPhase,
+    startProgress,
   } = sessionAttachments;
+
+  const startingHostId = isSplitCodebase ? codebaseDaemonInstanceId : agentHostInstanceId;
+  const startingHostLabel =
+    daemons.find((daemon) => daemon.instanceId === startingHostId)?.label ?? startingHostId;
 
   const form: CreateSessionFormValues = {
     sessionToken,
@@ -457,14 +461,14 @@ export function CreateSessionPane({
         </>
       )}
 
-      {/* The step of the start the host is in, while it is streaming one. */}
-      <CreateSessionStartPhase step={startPhase} />
+      {/* The steps of the start, under the host doing the work (the codebase host on a split start). */}
+      <CreateSessionStartProgress hostLabel={startingHostLabel} progress={startProgress} />
 
       {/* A start that must clone can block on the host's ssh key passphrase, and the host doing the
           cloning is the one that asks: the codebase host on a split session (the workspace start is
           forwarded there), the session's own host otherwise. */}
       <StartPassphrasePrompt
-        instanceId={isSplitCodebase ? codebaseDaemonInstanceId : agentHostInstanceId}
+        instanceId={startingHostId}
         active={submitting}
         sessionToken={sessionToken}
       />

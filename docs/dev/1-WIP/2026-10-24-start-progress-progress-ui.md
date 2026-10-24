@@ -92,11 +92,11 @@ for 30 s.
 
 ## Scope
 
-- [ ] Start progress state in the hook (steps, clone, stopped-at)
-- [ ] `CreateSessionStartProgress` component; `CreateSessionStartPhase` removed
-- [ ] Clone row: stage, percent bar, bytes and throughput
-- [ ] Byte / throughput formatting — reuses `formatAttachmentBytes` (`src/lib/attachmentBytes.ts`, binary units) instead of a new helper
-- [ ] Page object + stale spec comment
+- [x] Start progress state in the hook (steps, clone, stopped-at)
+- [x] `CreateSessionStartProgress` component; `CreateSessionStartPhase` removed
+- [x] Clone row: stage, percent bar, bytes and throughput
+- [x] Byte / throughput formatting — reuses `formatAttachmentBytes` (`src/lib/attachmentBytes.ts`, binary units) instead of a new helper
+- [x] Page object + stale spec comment
 - [ ] Docs: `session-drawer.md` § Start progress
 
 ## Technical Changes
@@ -159,9 +159,9 @@ assertions. Single-spec runs only.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
-- [ ] Run the changed specs only (`cypress run --component --spec …`); full Cypress from CI
+- [x] Run the changed specs only (`cypress run --component --spec …`); full Cypress from CI
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)

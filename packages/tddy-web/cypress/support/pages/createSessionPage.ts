@@ -394,10 +394,6 @@ export const createSessionPage = {
   /** The clone step's progress line: stage, percent, bytes and throughput. */
   cloneProgress: () => byTestId(TEST_IDS.createSessionCloneProgress),
 
-  /** The line naming the step of the start the host is in, while a creation is streaming. */
-  startPhase: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.createSessionStartPhase, options),
-
   // ---------------------------------------------------------------------------
   // Attachments (docs/ft/coder/session-attachments.md)
   // ---------------------------------------------------------------------------
