@@ -885,7 +885,7 @@ async fn telegram_intent_then_project_pick_continues_flow() {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         }],
     )
     .expect("write projects");
@@ -953,7 +953,7 @@ async fn telegram_branch_pick_shows_more_when_more_than_ten_remote_branches() {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         }],
     )
     .expect("write projects");
@@ -1020,7 +1020,7 @@ async fn telegram_branch_pick_no_more_when_at_most_ten_remote_branches() {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         }],
     )
     .expect("write projects");
@@ -1278,7 +1278,7 @@ async fn telegram_branch_callback_work_on_selected_sets_selected_branch_to_work_
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         }],
     )
     .expect("write projects");
@@ -1371,7 +1371,7 @@ async fn telegram_branch_callback_new_branch_from_base_sets_selected_integration
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         }],
     )
     .expect("write projects");

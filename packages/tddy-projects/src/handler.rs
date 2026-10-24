@@ -1,4 +1,4 @@
-//! Port the seven `project.ProjectService` RPCs are implemented against.
+//! Port the six `project.ProjectService` RPCs are implemented against.
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
@@ -6,11 +6,10 @@ use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, SetProjectAccountsRequest, SetProjectAccountsResponse,
-    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, SetProjectHomeAgentRequest,
-    SetProjectHomeAgentResponse,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
 };
 
-/// What the seven project RPCs need from the host process.
+/// What the six project RPCs need from the host process.
 #[async_trait]
 pub trait ProjectHandler: Send + Sync {
     async fn list_projects(
@@ -44,11 +43,4 @@ pub trait ProjectHandler: Send + Sync {
         &self,
         request: Request<SetProjectAccountsRequest>,
     ) -> Result<Response<SetProjectAccountsResponse>, Status>;
-
-    /// Set or clear the agent the project's project-home session runs. Logical-project scope,
-    /// routed like the default branch; an id the agent catalog does not list is refused.
-    async fn set_project_home_agent(
-        &self,
-        request: Request<SetProjectHomeAgentRequest>,
-    ) -> Result<Response<SetProjectHomeAgentResponse>, Status>;
 }

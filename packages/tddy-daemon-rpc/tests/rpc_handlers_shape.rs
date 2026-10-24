@@ -202,7 +202,7 @@ fn no_handler_holds_the_session_host() {
 fn each_handler_holds_no_more_fields_than_its_budget() {
     // Given each handler's measured transitive field set
     let budgets = [
-        ("project.rs", "ProjectRpcHandler", 7),
+        ("project.rs", "ProjectRpcHandler", 6),
         ("catalog.rs", "CatalogRpcHandler", 5),
         ("exec_tool.rs", "ExecToolRpcHandler", 9),
         ("pr_stack.rs", "PrStackRpcHandler", 7),

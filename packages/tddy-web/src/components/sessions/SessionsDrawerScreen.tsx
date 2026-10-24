@@ -113,14 +113,11 @@ export function SessionsDrawerScreen({
     claims;
 
   const { projects, error: projectsError, reload: reloadProjects } = useSessionsDrawerProjects(projectClient, sessionToken);
-  const { homes: projectHomes, agents } = useSessionsDrawerProjectHomes(catalogClient, projects);
-  const projectHomeSetup = useProjectHomeSetup({
-    projectClient,
-    sessionToken,
-    selectedInstanceId: selectedInstanceId ?? "",
-    onStored: reloadProjects,
-  });
-  const setupProjectId = projectHomeSetup.setupProjectId;
+  // Main is per host: the pinned entries and the setup pane read the selected host's rows, the host
+  // the ensure below targets.
+  const { homes: projectHomes, projectOnHost } = useSessionsDrawerProjectHomes(projects, selectedInstanceId);
+  const projectHomeSetup = useProjectHomeSetup();
+  const setup = projectHomeSetup.setup;
 
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
@@ -252,13 +249,6 @@ export function SessionsDrawerScreen({
     navigate(sessionsDrawerPathForSession(sessionId));
   };
 
-  // The pinned main entry: ensure the project's home session on the selected host, then select it.
-  const { ensure: ensureProjectHome } = useEnsureProjectHome(
-    client,
-    sessionToken,
-    handleSelectSession,
-  );
-
   const {
     selectedForDelete,
     selectionMode,
@@ -333,6 +323,25 @@ export function SessionsDrawerScreen({
     requestSessionsRefresh();
   };
 
+  const openProjectHomeSetup = (projectId: string, replacing = false) => {
+    if (isMobile) setSessionListOpen(false);
+    projectHomeSetup.open(projectId, { replacing });
+  };
+  // The pinned main entry ensures main on the selected host and selects it, or sends a project with
+  // no main to set one up; a main the setup pane starts is attached like a created session.
+  const homeHandlers = {
+    onStarted: (sessionId: string) => {
+      reloadProjects();
+      handleSessionCreated(sessionId);
+    },
+    onNoMain: (projectId: string) => {
+      reloadProjects();
+      openProjectHomeSetup(projectId);
+    },
+  };
+  const { ensure: ensureProjectHome, start: startProjectHome } =
+    useEnsureProjectHome(client, sessionToken, handleSelectSession, homeHandlers);
+
   return (
     <UploadProgressProvider>
     <TooltipProvider delayDuration={0}>
@@ -378,21 +387,19 @@ export function SessionsDrawerScreen({
             onEnsureProjectHome={(projectId) =>
               ensureProjectHome(projectId, selectedInstanceId ?? "")
             }
-            onSetUpProjectHome={(projectId) => {
-              if (isMobile) setSessionListOpen(false);
-              projectHomeSetup.open(projectId);
-            }}
+            onSetUpProjectHome={openProjectHomeSetup}
+            onReplaceProjectHome={(projectId) => openProjectHomeSetup(projectId, true)}
           />
           {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
           {/* A bad deep link surfaces "not found" in the detail pane only — the session list
               stays visible so the operator can pick a valid session. */}
-          {setupProjectId !== null ? (
+          {setup !== null ? (
             <ProjectHomeSetupPane
-              projectId={setupProjectId}
-              project={projects.find((p) => p.projectId === setupProjectId) ?? null}
-              agents={agents}
-              onSetHomeAgent={(agentId) => projectHomeSetup.setHomeAgent(setupProjectId, agentId)}
-              onStart={() => ensureProjectHome(setupProjectId, selectedInstanceId ?? "")}
+              {...setup}
+              project={projectOnHost(setup.projectId)}
+              daemonInstanceId={selectedInstanceId ?? ""}
+              sessionToken={sessionToken}
+              onStart={(spec) => startProjectHome(setup.projectId, selectedInstanceId ?? "", spec)}
               onClose={projectHomeSetup.close}
             />
           ) : unknownSession ? (

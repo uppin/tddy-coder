@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-24 | 528 | first detection. The size predates #509 (528 at merge-base `4e7157d2`). #509 changed 10 lines (5+/5−), all of them the `os_user_for_github` binding (`let os_user = self…` → `&self…`). It did not grow the file |
 | 2026-10-04 | 650 | **grown by #512** (`#keyring` 5/9): +122 for `set_project_accounts_at_project_coordinate`, the sibling of `set_project_default_branch_at_project_coordinate`. No dependent #513–#516 touches the file; the split was deferred by the developer, not blocked |
+| 2026-10-24 | 586 | touched by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`) and **unchanged by it**: two `home_agent: None` → `home_session_id: None` field renames (`:170`, `:328`), 586 production lines at both. `/analyze-code-issues` re-run on `tddy-daemon-rpc` (287 tests across 85 files, join 66.8%): `create_project_at_project_coordinate` (CRAP 240) and `list_project_branches_at_project_coordinate` (CRAP 110) in this file are never entered. They are the two top CRAP findings in the crate, with records of their own |
 
 ## What would close it — candidate seams (not proven)
 

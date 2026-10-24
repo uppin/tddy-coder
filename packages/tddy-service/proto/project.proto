@@ -29,10 +29,6 @@ service ProjectService {
   // most one account per provider; a second is refused rather than silently winning. See
   // `#keyring` 5/9.
   rpc SetProjectAccounts(SetProjectAccountsRequest) returns (SetProjectAccountsResponse);
-  // Set the agent a project's project-home session runs (logical-project scope, routed exactly as
-  // SetProjectDefaultBranch is). An empty `home_agent` clears it; an id `CatalogService.ListAgents`
-  // does not list is refused and nothing is written. See `#project-home` 1/7.
-  rpc SetProjectHomeAgent(SetProjectHomeAgentRequest) returns (SetProjectHomeAgentResponse);
 }
 
 // One provider's account, as assigned to a project.
@@ -127,9 +123,12 @@ message ProjectEntry {
   // login` on each host, as the session's OS user) instead of from a vault account. A project with
   // this set has no github entry in `accounts`. See docs/ft/daemon/github-identity.md.
   bool local_gh = 9;
-  // Agent id (a `CatalogService.ListAgents` row) the project's project-home session runs. Empty =
-  // no home agent configured.
-  string home_agent = 10;
+  // Retired: the agent name a project's project-home session ran (`home_agent`).
+  reserved 10;
+  reserved "home_agent";
+  // The session this project runs as its **main** (project-home session) on this host, recorded by
+  // `EnsureProjectHomeSession`. Empty = main is not set up.
+  string home_session_id = 11;
 }
 
 message SetProjectDefaultBranchRequest {
@@ -157,18 +156,5 @@ message SetProjectAccountsRequest {
 }
 
 message SetProjectAccountsResponse {
-  ProjectEntry project = 1;
-}
-
-message SetProjectHomeAgentRequest {
-  string session_token = 1;
-  string project_id = 2;
-  // Agent id to store; empty clears the setting.
-  string home_agent = 3;
-  // Host to apply this to. Empty or matching the local instance = local; otherwise forwarded.
-  string daemon_instance_id = 4;
-}
-
-message SetProjectHomeAgentResponse {
   ProjectEntry project = 1;
 }

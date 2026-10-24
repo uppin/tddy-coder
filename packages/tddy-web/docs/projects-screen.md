@@ -74,31 +74,21 @@ page-object helpers `localGhToggle`, `turnLocalGhOn`, `hostGhState`. Acceptance:
 `cypress/component/ProjectLocalGh.cy.tsx`. The card is the first production caller of
 `GetHostTooling`.
 
-## Home agent
+## Main session link
 
-`components/projects/ProjectHomeAgent.tsx` is the card's **Home agent** `<select>`: `Not set` plus one
-option per `agents` entry. `ProjectsAppPage` loads the agents with `CatalogService.ListAgents` on the
-selected daemon (`useListedAgents`; a failed load leaves the list empty, as the account list does)
-and wires `onSetHomeAgent` to `SetProjectHomeAgent` on `group.hosts[0]`, then reloads the projects.
-Unlike the other setters, that callback **rejects** with the daemon's error, which the picker shows
-inline (`ConnectError.rawMessage`) while keeping the stored value selected. A stored id missing from
-`agents` gets its own *(not listed by this daemon)* option. Both `agents` and `onSetHomeAgent` are
-optional `ProjectsScreen` props; without `onSetHomeAgent` the picker is not rendered.
+`components/projects/ProjectMainSessionLink.tsx` is the card's link to the project's **main**
+session. `ProjectsScreen` keeps each host's `ProjectEntry.homeSessionId` on its
+`ProjectGroup.hosts` entry (main is per host), and `ProjectCard` passes the first host's — the card's
+primary host — to the link: empty renders **Set up main** (`#` + `sessionsProjectHomeSetupPath(id)`,
+the sessions drawer's setup pane), otherwise **Open main** (`#` + `sessionsDrawerPathForSession(id)`).
+The setup pane itself acts on the drawer's selected host, not on the card's primary host; it is
+`ProjectHomeSetupPane` in `components/sessions/`, which renders the New-session form's main variant.
 
-**Focus from the address.** `ProjectsAppPage` reads `PARAM_PROJECT` (`#/projects?project=<id>`) and
-passes it as `ProjectsScreen.focusedProjectId`; the matching card gets `focusHomeAgent`, which sets
-`ProjectHomeAgent.focused`. The picker focuses its `<select>` and calls
-`scrollIntoView({ block: "center" })` in an effect keyed on `focused` and on whether the picker is
-rendered, so it fires once the project is listed and a later poll does not steal focus back. The
-address is a deep link only; the sessions drawer sets a project's home agent in its own
-`ProjectHomeSetupPane` (`components/sessions/`), which renders the same `ProjectHomeAgent` with
-`focused` and stores through `SetProjectHomeAgent` on the selected host (`useProjectHomeSetup`).
-
-Test IDs: `project-home-agent-select-<projectId>`, `project-home-agent-error-<projectId>`; page-object
-helpers `homeAgentValue`, `homeAgentOptionLabels`, `setHomeAgent`, `homeAgentError`. Acceptance:
-`cypress/component/ProjectsScreenHomeAgentAcceptance.cy.tsx`,
-`cypress/component/ProjectHomeSetupLinkAcceptance.cy.tsx` (drawer click → setup, focus from
-`PARAM_PROJECT`), `cypress/component/ProjectHomeSetupPaneAcceptance.cy.tsx` (the drawer's setup pane).
+Test ID: `project-main-session-link-<projectId>`; page-object helper
+`projectHomeSetupPage.projectCardLink`. Acceptance:
+`cypress/component/ProjectHomeSetupLinkAcceptance.cy.tsx` (Set up main / Open main from the card),
+`cypress/component/ProjectHomeSetupPaneAcceptance.cy.tsx` and
+`cypress/component/ProjectHomeReplaceAcceptance.cy.tsx` (the drawer's setup pane).
 
 ## Role derivation
 

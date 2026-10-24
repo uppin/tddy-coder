@@ -14,6 +14,7 @@
 |---|---|---|---|
 | 2026-10-22 | 277 | 3 | as #670's green phase wrote it: the sandboxed Cursor start's sequence (roster warm-up, worktree, seeded clones, jail dirs, runner argv, env, spawn, bridge, metadata) for `opencode-cli` / `muse-cli` |
 | 2026-10-22 | 250 | 3 | same PR, at wrap: the engine extracted `bridge_and_register_cli_harness_jail` (−27) and moved the pure helpers to `cli_harness_jail.rs` (the file went from 560 to 390 production lines) |
+| 2026-10-24 | 250 | — | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): length by brace matching is identical at both. `/analyze-code-issues` re-run: complexity 22, **CRAP 506**, never entered, either by this crate's own tests or by the session-lifecycle `ensure_project_home_session_acceptance` + `project_home_idle_stop_acceptance` (27 tests), with every workspace crate instrumented |
 
 ## What the tool found
 

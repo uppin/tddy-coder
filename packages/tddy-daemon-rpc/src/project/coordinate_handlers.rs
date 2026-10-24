@@ -167,7 +167,7 @@ impl ProjectRpcHandler {
             host_repo_paths: std::collections::HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
         let default_remote = entries::resolve_default_remote_or_empty(
@@ -325,7 +325,7 @@ impl ProjectRpcHandler {
             host_repo_paths: std::collections::HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         };
         let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;

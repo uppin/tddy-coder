@@ -1,39 +1,32 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Client } from "@connectrpc/connect";
-import { CatalogService, type AgentInfo } from "../../gen/catalog_pb";
+import { useMemo } from "react";
 import type { ProjectEntry } from "../../gen/project_pb";
-import type { ProjectHomeInfo } from "../../utils/projectHomeGroups";
+import { projectHomesOnHost, type ProjectHomeInfo } from "../../utils/projectHomeGroups";
+
+/** What the drawer's pinned **main** entries stand for, and the registry row setup reads. */
+export interface SessionsDrawerProjectHomes {
+  homes: ProjectHomeInfo[];
+  /** The project's `ListProjects` row on the host main is ensured on; `null` when it has none. */
+  projectOnHost: (projectId: string) => ProjectEntry | null;
+}
 
 /**
- * What each project's pinned **main** entry shows (`#project-home` 4/7): its main branch ref and
- * its home agent's label, read from `ListProjects` rows and the daemon's agent list. A home agent
- * the list does not name shows under its id; one that is not set is `null`. The agent list itself
- * comes back too — it is what the setup pane offers a project with no home agent.
+ * What each project's pinned **main** entry stands for (`#project-home` 4/7): its main branch ref
+ * and the session the project records as its main, read from the `ListProjects` rows of
+ * `instanceId` — the host the entry ensures main on and the setup pane starts it on (see
+ * `projectHomesOnHost`). An empty `homeSessionId` — main not set up — is `null`.
+ *
+ * PRD: docs/ft/web/session-drawer.md
  */
 export function useSessionsDrawerProjectHomes(
-  catalogClient: Client<typeof CatalogService> | null,
   projects: ReadonlyArray<ProjectEntry>,
-): { homes: ProjectHomeInfo[]; agents: AgentInfo[] } {
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
-  useEffect(() => {
-    if (!catalogClient) {
-      setAgents([]);
-      return;
-    }
-    catalogClient
-      .listAgents({})
-      .then((res) => setAgents(res.agents))
-      .catch(() => setAgents([]));
-  }, [catalogClient]);
-
-  const homes = useMemo(() => {
-    const labelById = new Map(agents.map((a) => [a.id, a.label]));
-    return projects.map((p) => ({
-      projectId: p.projectId,
-      mainBranchRef: p.mainBranchRef,
-      homeAgentLabel: p.homeAgent ? (labelById.get(p.homeAgent) ?? p.homeAgent) : null,
-    }));
-  }, [projects, agents]);
-
-  return { homes, agents };
+  instanceId: string | null,
+): SessionsDrawerProjectHomes {
+  return useMemo(
+    () => ({
+      homes: projectHomesOnHost(projects, instanceId),
+      projectOnHost: (projectId: string) =>
+        projects.find((p) => p.projectId === projectId && p.daemonInstanceId === instanceId) ?? null,
+    }),
+    [projects, instanceId],
+  );
 }

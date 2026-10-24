@@ -18,6 +18,7 @@
 | 2026-09-23 | 101 | 5 | 2 | 9 | moved to `tddy-daemon-rpc`; length from re-wrapped field paths, not new logic |
 | 2026-09-23 | 101 | 5 | 2 | 9 | re-measured at the #520 wrap: unchanged since the move; still at `exec_tool/ports.rs:261`, nesting and early exits identical to the lifecycle original |
 | 2026-09-24 | 101 | 5 | 2 | 9 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count, nesting and exits. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD |
+| 2026-10-24 | 101 | — | — | — | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): 101 at both, fn line to closing brace (`exec_tool/ports.rs:254`). `/analyze-code-issues` re-run on `tddy-daemon-rpc` (287 tests across 85 files, join 66.8%): entered, CRAP < 6 |
 
 ## What the tool found
 

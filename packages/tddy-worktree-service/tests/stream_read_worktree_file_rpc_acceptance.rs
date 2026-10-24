@@ -93,7 +93,7 @@ fn a_served_worktree_capped_at(cap: u64) -> ServedWorktree {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         },
     )
     .expect("register project");

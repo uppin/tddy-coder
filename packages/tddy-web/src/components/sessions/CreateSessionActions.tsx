@@ -7,6 +7,8 @@ export interface CreateSessionActionsProps {
   isSubmitEnabled: boolean;
   onCancel: () => void;
   handleSubmit: () => void;
+  /** The submit button's text; defaults to **Create session**. */
+  submitLabel?: string;
 }
 
 /**
@@ -19,6 +21,7 @@ export function CreateSessionActions({
   isSubmitEnabled,
   onCancel,
   handleSubmit,
+  submitLabel = "Create session",
 }: CreateSessionActionsProps) {
   return (
     <>
@@ -45,7 +48,7 @@ export function CreateSessionActions({
           disabled={!isSubmitEnabled}
           onClick={handleSubmit}
         >
-          Create session
+          {submitLabel}
         </Button>
       </div>
     </>

@@ -48,10 +48,11 @@ pub struct ProjectData {
     /// entry in `accounts`. Absent reads as `false`, and `false` is never written.
     #[serde(default, skip_serializing_if = "is_false")]
     pub local_gh: bool,
-    /// Agent id (a `CatalogService.ListAgents` row) the project's project-home session runs. Absent
-    /// means no home agent is configured; a row written by an older daemon reads that way.
+    /// The session this project runs as its main (project-home session) on this host. Absent means
+    /// main is not set up; a row written by an older daemon reads that way. The `home_agent` key
+    /// such a row may carry is ignored on read and not written back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub home_agent: Option<String>,
+    pub home_session_id: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -334,26 +335,24 @@ pub fn set_project_accounts(
     write_projects(projects_dir, &projects)
 }
 
-/// Sets (`Some`) or clears (`None`) the agent `project_id`'s project-home session runs.
-///
-/// Stores the id as given: whether the catalog lists it is the caller's check, made before this
-/// write so a refused id never mutates `projects.yaml`. Errors when `project_id` is unknown.
-pub fn set_project_home_agent(
+/// Records (`Some`) or clears (`None`) the session `project_id` runs as its main. Errors when
+/// `project_id` is unknown.
+pub fn set_project_home_session(
     projects_dir: &Path,
     project_id: &str,
-    home_agent: Option<&str>,
+    home_session_id: Option<&str>,
 ) -> anyhow::Result<()> {
     log::info!(
-        "set_project_home_agent: project_id={} home_agent={}",
+        "set_project_home_session: project_id={} home_session_id={}",
         project_id,
-        home_agent.unwrap_or_default()
+        home_session_id.unwrap_or_default()
     );
     let mut projects = read_projects(projects_dir)?;
     let project = projects
         .iter_mut()
         .find(|p| p.project_id == project_id)
         .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
-    project.home_agent = home_agent.map(str::to_string);
+    project.home_session_id = home_session_id.map(str::to_string);
     write_projects(projects_dir, &projects)
 }
 
@@ -410,7 +409,7 @@ mod per_host_path_unit_tests {
             host_repo_paths,
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         };
         write_projects(&projects_dir, &[project]).unwrap();
         let px = main_repo_path_for_host(&projects_dir, "p1", "unit-host-x")
@@ -643,7 +642,7 @@ mod project_integration_base_acceptance_tests {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         };
         let r = add_project(&projects_dir, project);
         assert!(
@@ -674,7 +673,7 @@ mod project_integration_base_acceptance_tests {
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
             local_gh: false,
-            home_agent: None,
+            home_session_id: None,
         };
         add_project(&projects_dir, project).expect(
             "a safe <remote>/<path> must be accepted at the boundary regardless of the remote name",
@@ -713,7 +712,7 @@ mod set_project_default_branch_unit_tests {
                 host_repo_paths: HashMap::new(),
                 accounts: Vec::new(),
                 local_gh: false,
-                home_agent: None,
+                home_session_id: None,
             },
         )
         .expect("seed project");

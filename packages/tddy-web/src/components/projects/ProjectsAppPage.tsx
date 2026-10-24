@@ -3,12 +3,9 @@ import type { Client } from "@connectrpc/connect";
 import { type ProjectEntry } from "../../gen/project_pb";
 import { ProjectService } from "../../gen/project_pb";
 import { AccountsService } from "../../gen/accounts_pb";
-import { CatalogService, type AgentInfo } from "../../gen/catalog_pb";
 import { HostService } from "../../gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
-import { PARAM_PROJECT } from "../../routing/appLocation";
-import { useAppLocation } from "../../routing/useAppLocation";
 import { useDaemonClient, useDaemons, useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import {
   hostNotConnected,
@@ -110,16 +107,6 @@ function useProjectsRpc({
     [connected, sessionToken, loadProjects],
   );
 
-  // Unlike the setters above, this one lets a refusal reach the caller: the Home agent picker shows
-  // the daemon's reason on its row.
-  const setProjectHomeAgent = useCallback(
-    async (input: { projectId: string; homeAgent: string; daemonInstanceId: string }) => {
-      await connected().setProjectHomeAgent({ sessionToken, ...input });
-      loadProjects();
-    },
-    [connected, sessionToken, loadProjects],
-  );
-
   const loadProjectBranches = useCallback(
     async (input: { projectId: string; daemonInstanceId: string }): Promise<{ branches: string[]; defaultRemote: string }> => {
       const res = await connected().listProjectBranches({ sessionToken, ...input });
@@ -149,33 +136,7 @@ function useProjectsRpc({
     setDefaultBranch,
     loadProjectBranches,
     setProjectAccounts,
-    setProjectHomeAgent,
   };
-}
-
-/**
- * The agents the catalog lists, from `CatalogService.ListAgents` — what a project's home agent is
- * chosen from. A failed load leaves the list empty, as the account list does.
- */
-function useListedAgents(): AgentInfo[] {
-  const client = useDaemonClient(CatalogService);
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
-
-  useEffect(() => {
-    if (!client) return;
-    let current = true;
-    client
-      .listAgents({})
-      .then((res) => {
-        if (current) setAgents(res.agents);
-      })
-      .catch(() => {});
-    return () => {
-      current = false;
-    };
-  }, [client]);
-
-  return agents;
 }
 
 /**
@@ -256,14 +217,10 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
     [connectHost],
   );
   const { selectedInstanceId } = useSelectedDaemon();
-  // The project the address names — where the sessions drawer sends an operator to set a home agent.
-  const { location } = useAppLocation();
-  const focusedProjectId = location.params[PARAM_PROJECT] ?? null;
   // A host's display name — what a "not connected" error names. Stable across directory updates,
   // so the project poll is not restarted on every participant event.
   const hostLabel = useHostLabel();
   const { accounts, error: accountsLoadError } = useAssignableAccounts(sessionToken ?? "");
-  const agents = useListedAgents();
   const hostClient = useDaemonClient(HostService);
   // Each host is asked about its own `gh`: the serving daemon relays to `daemonInstanceId`.
   const loadHostGithubCli = useCallback(
@@ -283,7 +240,6 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
     setDefaultBranch,
     loadProjectBranches,
     setProjectAccounts,
-    setProjectHomeAgent,
   } = useProjectsRpc({
     client,
     clientForHost,
@@ -306,9 +262,6 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         accounts={accounts}
         onSetProjectAccounts={setProjectAccounts}
         loadHostGithubCli={loadHostGithubCli}
-        agents={agents}
-        onSetHomeAgent={setProjectHomeAgent}
-        focusedProjectId={focusedProjectId}
       />
     </AppShell>
   );

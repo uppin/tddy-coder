@@ -8,7 +8,7 @@ import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
 export interface SessionsDrawerProjects {
   projects: ProjectEntry[];
   error: string | null;
-  /** Read the registry again — after a change this screen made, such as a home agent being set. */
+  /** Read the registry again — after a change this screen made, such as main being set up. */
   reload: () => void;
 }
 

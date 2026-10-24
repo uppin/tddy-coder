@@ -1,10 +1,25 @@
-//! `EnsureProjectHomeSession`: start, resume, or return a project's project-home session
-//! (`#project-home` 4/7).
+//! `EnsureProjectHomeSession`: set up, replace, resume, or return a project's main — its
+//! project-home session (`#project-home` 4/7).
 //!
-//! The decision, by what exists for the project on this host:
-//! - no home agent set, or one whose harness cannot enforce managed-codebase mode → refused;
-//! - no project-home session → create the home worktree and start a managed session on it with the
-//!   home agent and the `project-home` role ([`EnsureOutcome::Started`]);
+//! The project records its main as `home_session_id`. Ensures are serialized, and each reads the
+//! project's record only once it holds its turn, so two set-ups cannot both find no main. With a
+//! `start` spec:
+//! - the spec is checked first ([`crate::project_home_start_spec`]): a type that cannot be held
+//!   read-only, a placement other than the home worktree on this host, or a requested role is
+//!   refused, and nothing starts or stops;
+//! - the start itself is then checked the way the start path checks it (model, recipe, provider
+//!   route — [`LaunchSessions::refuse_a_claude_cli_start_up_front`]), so a refused replace leaves
+//!   the running main running and recorded;
+//! - a recorded main this daemon still serves is stopped (its record and role stay, so it stays
+//!   read-only), and the home worktree is fast-forwarded;
+//! - main starts from the spec on the home worktree with the `project-home` role, and its id is
+//!   recorded ([`EnsureOutcome::Replaced`] when a main existed, else [`EnsureOutcome::Started`]).
+//!   A start that fails past those checks (the agent fails to spawn) leaves the old main stopped
+//!   but still recorded, so an ensure without a spec resumes it. A started main whose id cannot be
+//!   recorded is stopped again and the error returned, so no unrecorded main is left running.
+//!
+//! Without one, for the recorded main:
+//! - none recorded, or one whose session no longer exists (the record is then cleared) → not found;
 //! - a stopped one → fast-forward the home worktree, then resume it, same conversation
 //!   ([`EnsureOutcome::Resumed`]);
 //! - a running one → return it unchanged ([`EnsureOutcome::Running`]).
@@ -18,9 +33,7 @@ use std::path::{Path, PathBuf};
 
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::session_metadata::PROJECT_HOME_ROLE;
-use tddy_discovery::harness_profile::{load_harness_profiles, HarnessProfile};
-use tddy_projects::project_storage::ProjectData;
+use tddy_projects::project_storage::{self, ProjectData};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, ListSessionsRequest,
@@ -30,21 +43,23 @@ use tddy_session_activity::session_reader;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::home_worktree::{ensure_home_worktree, fast_forward_home_worktree};
 
-use crate::harness_profile_request::request_on_profile;
 use crate::launch_ports::LaunchSessions;
+use crate::project_home_start_spec::{
+    on_home_worktree, refuse_a_type_main_cannot_run, refuse_what_main_cannot_honour,
+};
 use crate::session_coordinate_handlers::SESSION_SERVICE;
 
-/// The one harness that can enforce managed-codebase mode, which is what makes the home session's
-/// read-only guarantee real (`docs/dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md`).
-const ENFORCING_HARNESS: &str = "claude-cli";
+/// The RPC this module answers: its peer-routing method name and its log prefix.
+const ENSURE_RPC: &str = "EnsureProjectHomeSession";
 
-/// Serializes ensures, so two clicks cannot both find no home session and start two.
+/// Serializes ensures, so two clicks cannot both find no main and start two.
 static ENSURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Whose sessions an ensure looks through, and for which project.
 struct HomeScope {
     os_user: String,
     sessions_base: PathBuf,
+    projects_dir: PathBuf,
     project: ProjectData,
 }
 
@@ -52,6 +67,7 @@ struct HomeScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnsureOutcome {
     Started,
+    Replaced,
     Resumed,
     Running,
 }
@@ -61,6 +77,7 @@ impl EnsureOutcome {
     pub fn as_wire(self) -> &'static str {
         match self {
             Self::Started => "started",
+            Self::Replaced => "replaced",
             Self::Resumed => "resumed",
             Self::Running => "running",
         }
@@ -77,23 +94,19 @@ impl LaunchSessions {
         // daemon's to answer, the way `GetWorktreeSnapshot` is routed.
         if let Some(answered) = self
             .peer_routing
-            .rpc_served_by_peer(
-                SESSION_SERVICE,
-                "EnsureProjectHomeSession",
-                &req.daemon_instance_id,
-                &req,
-            )
+            .rpc_served_by_peer(SESSION_SERVICE, ENSURE_RPC, &req.daemon_instance_id, &req)
             .await?
         {
             return Ok(Response::new(answered));
         }
-        let scope = self.caller_home_scope(&req)?;
-        let profile = self.home_agent_profile(&scope.project)?;
-
+        // Held before the project is read: what an ensure decides from `home_session_id` must not
+        // go stale while a concurrent ensure starts or replaces main.
         let _one_ensure_at_a_time = ENSURE_LOCK.lock().await;
-        let (session_id, outcome) = self
-            .ensure_on_this_host(&req.session_token, &scope, &profile)
-            .await?;
+        let scope = self.caller_home_scope(&req)?;
+        let (session_id, outcome) = match req.start {
+            Some(spec) => self.set_up_main(&req.session_token, &scope, spec).await?,
+            None => self.reach_recorded_main(&req.session_token, &scope).await?,
+        };
         let session = self.listed_session(&req.session_token, &session_id).await?;
         Ok(Response::new(EnsureProjectHomeSessionResponse {
             session: Some(session),
@@ -117,7 +130,7 @@ impl LaunchSessions {
             Some(&self.tddy_data_dir),
         )
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let (_, project) = tddy_session_split::service_util::find_registered_project(
+        let (projects_dir, project) = tddy_session_split::service_util::find_registered_project(
             &self.tddy_data_dir,
             &os_user,
             req.project_id.trim(),
@@ -125,72 +138,160 @@ impl LaunchSessions {
         Ok(HomeScope {
             os_user,
             sessions_base,
+            projects_dir,
             project,
         })
     }
 
-    /// The started / resumed / running decision for the project's home session on this daemon.
-    async fn ensure_on_this_host(
+    /// The running / resumed decision for the main the project records; not found when it records
+    /// none.
+    async fn reach_recorded_main(
         &self,
         session_token: &str,
         scope: &HomeScope,
-        profile: &HarnessProfile,
     ) -> Result<(String, EnsureOutcome), Status> {
-        let HomeScope {
-            os_user,
-            sessions_base,
-            project,
-        } = scope;
-        let existing = find_home_session(sessions_base, &project.project_id)?;
-        // Running: its recorded pid is alive, or this daemon still serves its terminal. A live pid
-        // with no served terminal also reads as running
-        // (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
-        let running = match &existing {
-            Some(home) => home.is_active || self.is_served(&home.session_id).await,
-            None => false,
+        let Some(main) = self.recorded_main(scope)? else {
+            return Err(Status::not_found(format!(
+                "project {} has no main session: set one up",
+                scope.project.project_id
+            )));
         };
-        match existing {
-            Some(home) if running => Ok((home.session_id, EnsureOutcome::Running)),
-            Some(stopped) => {
-                self.resume_stopped_home(session_token, project, sessions_base, &stopped)
-                    .await?;
-                Ok((stopped.session_id, EnsureOutcome::Resumed))
-            }
-            None => {
-                let started = self
-                    .start_home(session_token, os_user, project, profile)
-                    .await?;
-                Ok((started, EnsureOutcome::Started))
-            }
+        if self.is_running(&main).await {
+            return Ok((main.session_id, EnsureOutcome::Running));
         }
+        self.resume_stopped_home(session_token, scope, &main)
+            .await?;
+        Ok((main.session_id, EnsureOutcome::Resumed))
     }
 
-    /// The harness profile the project's home agent names, refused unless its harness can enforce
-    /// managed-codebase mode.
-    fn home_agent_profile(&self, project: &ProjectData) -> Result<HarnessProfile, Status> {
-        let agent = project.home_agent.as_deref().map(str::trim).unwrap_or("");
-        if agent.is_empty() {
-            return Err(Status::failed_precondition(format!(
-                "project {} has no home agent: set one on the Projects screen",
+    /// Start main from `spec` on the home worktree and record it, stopping a recorded main this
+    /// daemon serves first. The spec and the start it makes are checked before anything is stopped
+    /// or started.
+    async fn set_up_main(
+        &self,
+        session_token: &str,
+        scope: &HomeScope,
+        spec: StartSessionRequest,
+    ) -> Result<(String, EnsureOutcome), Status> {
+        let project = &scope.project;
+        refuse_what_main_cannot_honour(&spec)?;
+        let spec = self.apply_harness_profile(StartSessionRequest {
+            session_token: session_token.to_string(),
+            ..spec
+        })?;
+        refuse_a_type_main_cannot_run(&spec)?;
+        let home = home_worktree_for(project)?;
+        let start = on_home_worktree(spec, &project.project_id, &home);
+        self.refuse_a_claude_cli_start_up_front(&start)?;
+
+        let previous = self.recorded_main(scope)?;
+        if let Some(previous) = &previous {
+            self.stop_previous_main(project, &home, previous).await?;
+        }
+        let started = self.start_and_record_main(scope, start).await?;
+        let outcome = match previous {
+            Some(_) => EnsureOutcome::Replaced,
+            None => EnsureOutcome::Started,
+        };
+        Ok((started, outcome))
+    }
+
+    /// Make way for a new main: fast-forward the home worktree and stop `previous` if this daemon
+    /// serves it. Its record and role stay, so it stays read-only.
+    async fn stop_previous_main(
+        &self,
+        project: &ProjectData,
+        home: &Path,
+        previous: &session_reader::SessionEntry,
+    ) -> Result<(), Status> {
+        // The worktree outlives the main it was made for; the new one starts at today's ref.
+        fast_forward_home(home, project)?;
+        // TODO: a previous main whose pid is alive but whose terminal this daemon no longer
+        // serves (a daemon restart) is left running
+        // (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
+        if self.is_served(&previous.session_id).await {
+            self.claude_cli_manager
+                .stop_session(&previous.session_id)
+                .await;
+            log::info!(
+                "{ENSURE_RPC}: stopped main {} of project {} to replace it",
+                previous.session_id,
                 project.project_id
-            )));
+            );
         }
-        let profile = load_harness_profiles(&self.tddy_data_dir.join("agents"))
+        Ok(())
+    }
+
+    /// Start `start` and record it as the project's main. A main whose id cannot be recorded is
+    /// stopped again, so no project-home session runs that the project does not name.
+    async fn start_and_record_main(
+        &self,
+        scope: &HomeScope,
+        start: StartSessionRequest,
+    ) -> Result<String, Status> {
+        let project_id = &scope.project.project_id;
+        let started = self
+            .start_session_with_role(start, &AttachmentProgressSink::discarding())
+            .await?
+            .into_inner()
+            .session_id;
+        if let Err(status) = record_main(&scope.projects_dir, project_id, Some(&started)) {
+            log::error!(
+                "{ENSURE_RPC}: stopping main {started} of project {project_id}: {}",
+                status.message
+            );
+            self.claude_cli_manager.stop_session(&started).await;
+            return Err(status);
+        }
+        log::info!(
+            "{ENSURE_RPC}: started main {started} for project {project_id} as {}",
+            scope.os_user
+        );
+        Ok(started)
+    }
+
+    /// The session the project records as its main, if it still exists. A recorded session whose
+    /// directory is gone (deleted) is cleared from the project, so the next ensure asks for setup.
+    fn recorded_main(
+        &self,
+        scope: &HomeScope,
+    ) -> Result<Option<session_reader::SessionEntry>, Status> {
+        let project = &scope.project;
+        let Some(session_id) = project
+            .home_session_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        else {
+            return Ok(None);
+        };
+        if !unified_session_dir_path(&scope.sessions_base, session_id).is_dir() {
+            log::info!(
+                "{ENSURE_RPC}: main {session_id} of project {} no longer exists; clearing it",
+                project.project_id
+            );
+            record_main(&scope.projects_dir, &project.project_id, None)?;
+            return Ok(None);
+        }
+        let sessions = session_reader::list_sessions_in_dir(&scope.sessions_base)
+            .map_err(|e| Status::internal(format!("listing sessions: {e}")))?;
+        sessions
             .into_iter()
-            .find(|profile| profile.name == agent)
+            .find(|s| s.session_id == session_id)
+            .map(Some)
             .ok_or_else(|| {
-                Status::failed_precondition(format!(
-                    "home agent {agent:?} is not a harness profile, so it names no harness to run"
+                Status::internal(format!(
+                    "main {session_id} of project {} has no readable session record",
+                    project.project_id
                 ))
-            })?;
-        if profile.harness != ENFORCING_HARNESS {
-            return Err(Status::failed_precondition(format!(
-                "home agent {agent:?} runs {}, which cannot enforce managed-codebase mode, so the \
-                 home session could not be kept read-only; only {ENFORCING_HARNESS} can",
-                profile.harness
-            )));
-        }
-        Ok(profile)
+            })
+    }
+
+    /// Running: its recorded pid is alive, or this daemon still serves its terminal. A live pid
+    /// with no served terminal also reads as running
+    /// (docs/dev/todo/2026-10-23-project-home-running-heuristic.md).
+    async fn is_running(&self, main: &session_reader::SessionEntry) -> bool {
+        main.is_active || self.is_served(&main.session_id).await
     }
 
     /// Whether this daemon still serves `session_id`'s terminal; the handle is dropped when the
@@ -199,60 +300,21 @@ impl LaunchSessions {
         self.claude_cli_manager.get(session_id).await.is_some()
     }
 
-    async fn start_home(
-        &self,
-        session_token: &str,
-        os_user: &str,
-        project: &ProjectData,
-        profile: &HarnessProfile,
-    ) -> Result<String, Status> {
-        let home = home_worktree_for(project)?;
-        let start = StartSessionRequest {
-            session_token: session_token.to_string(),
-            project_id: project.project_id.clone(),
-            session_type: ENFORCING_HARNESS.to_string(),
-            model: profile.model.clone(),
-            managed_codebase: true,
-            // Recorded in the initial record before the agent is spawned, and the role the agent is
-            // pre-approved the project-home tool set for (`#project-home` 5/7 extends this ensure).
-            session_role: PROJECT_HOME_ROLE.to_string(),
-            repo_path: home.to_string_lossy().into_owned(),
-            ..Default::default()
-        };
-        let start = if profile.provider_account.trim().is_empty() {
-            start
-        } else {
-            let access = self.host.session_account_access(session_token);
-            request_on_profile(start, profile, &access)?
-        };
-        let started = self
-            .start_session_with_role(start, &AttachmentProgressSink::discarding())
-            .await?
-            .into_inner();
-        log::info!(
-            "EnsureProjectHomeSession: started session {} for project {} as {os_user}",
-            started.session_id,
-            project.project_id
-        );
-        Ok(started.session_id)
-    }
-
+    /// Fast-forward a stopped main's home worktree to the project's main branch ref, then resume
+    /// it in the same conversation.
     async fn resume_stopped_home(
         &self,
         session_token: &str,
-        project: &ProjectData,
-        sessions_base: &Path,
+        scope: &HomeScope,
         stopped: &session_reader::SessionEntry,
     ) -> Result<(), Status> {
-        let session_dir = unified_session_dir_path(sessions_base, &stopped.session_id);
+        let session_dir = unified_session_dir_path(&scope.sessions_base, &stopped.session_id);
         let metadata = read_session_metadata(&session_dir)
             .map_err(|e| Status::internal(format!("home session metadata: {e}")))?;
         let home = metadata.repo_path.map(PathBuf::from).ok_or_else(|| {
             Status::failed_precondition("the home session has no worktree to resume in")
         })?;
-        let main_ref = main_branch_ref_of(project)?;
-        fast_forward_home_worktree(&home, &main_ref)
-            .map_err(|e| Status::failed_precondition(format!("home worktree: {e}")))?;
+        fast_forward_home(&home, &scope.project)?;
         self.resume_session_at_session_coordinate(Request::direct(ResumeSessionRequest {
             session_token: session_token.to_string(),
             session_id: stopped.session_id.clone(),
@@ -294,6 +356,16 @@ fn main_branch_ref_of(project: &ProjectData) -> Result<String, Status> {
         })
 }
 
+/// Fast-forward `home` to `project`'s main branch ref.
+fn fast_forward_home(home: &Path, project: &ProjectData) -> Result<(), Status> {
+    fast_forward_home_worktree(home, &main_branch_ref_of(project)?).map_err(home_worktree_failure)
+}
+
+/// A home worktree that could not be made or moved: the project is not in a state main can run in.
+fn home_worktree_failure(error: impl std::fmt::Display) -> Status {
+    Status::failed_precondition(format!("home worktree: {error}"))
+}
+
 /// The project's home worktree, created at its main branch ref when absent.
 fn home_worktree_for(project: &ProjectData) -> Result<PathBuf, Status> {
     let main_repo = tddy_session_split::service_util::project_repo_root(project)?;
@@ -304,17 +376,15 @@ fn home_worktree_for(project: &ProjectData) -> Result<PathBuf, Status> {
         &project.project_id,
         &main_branch_ref_of(project)?,
     )
-    .map_err(|e| Status::failed_precondition(format!("home worktree: {e}")))
+    .map_err(home_worktree_failure)
 }
 
-/// The project's project-home session on this host, if one was ever started.
-fn find_home_session(
-    sessions_base: &Path,
+/// Record (`Some`) or clear (`None`) `project_id`'s main in the projects store.
+fn record_main(
+    projects_dir: &Path,
     project_id: &str,
-) -> Result<Option<session_reader::SessionEntry>, Status> {
-    let sessions = session_reader::list_sessions_in_dir(sessions_base)
-        .map_err(|e| Status::internal(format!("listing sessions: {e}")))?;
-    Ok(sessions
-        .into_iter()
-        .find(|s| s.project_id == project_id && s.session_role == PROJECT_HOME_ROLE))
+    session_id: Option<&str>,
+) -> Result<(), Status> {
+    project_storage::set_project_home_session(projects_dir, project_id, session_id)
+        .map_err(|e| Status::internal(format!("recording project {project_id}'s main: {e}")))
 }

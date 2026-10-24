@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file project.proto.
  */
 export const file_project: GenFile = /*@__PURE__*/
-  fileDesc("Cg1wcm9qZWN0LnByb3RvEgdwcm9qZWN0IjkKEUFjY291bnRBc3NpZ25tZW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkitAEKF0FkZFByb2plY3RUb0hvc3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEg8KB2dpdF91cmwYBCABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAUgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgGIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYByABKAkiQgoYQWRkUHJvamVjdFRvSG9zdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiPwoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJjChpMaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIkcKG0xpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRIQCghicmFuY2hlcxgBIAMoCRIWCg5kZWZhdWx0X3JlbW90ZRgCIAEoCSJAChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKbG9jYWxfb25seRgCIAEoCCI/ChRMaXN0UHJvamVjdHNSZXNwb25zZRInCghwcm9qZWN0cxgBIAMoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5IvoBCgxQcm9qZWN0RW50cnkSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSFgoObWFpbl9yZXBvX3BhdGgYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD21haW5fYnJhbmNoX3JlZhgGIAEoCRIWCg5kZWZhdWx0X3JlbW90ZRgHIAEoCRIsCghhY2NvdW50cxgIIAMoCzIaLnByb2plY3QuQWNjb3VudEFzc2lnbm1lbnQSEAoIbG9jYWxfZ2gYCSABKAgSEgoKaG9tZV9hZ2VudBgKIAEoCSKAAQoeU2V0UHJvamVjdERlZmF1bHRCcmFuY2hSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIXCg9tYWluX2JyYW5jaF9yZWYYAyABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJIkkKH1NldFByb2plY3REZWZhdWx0QnJhbmNoUmVzcG9uc2USJgoHcHJvamVjdBgBIAEoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5IqIBChlTZXRQcm9qZWN0QWNjb3VudHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIsCghhY2NvdW50cxgDIAMoCzIaLnByb2plY3QuQWNjb3VudEFzc2lnbm1lbnQSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAQgASgJEhAKCGxvY2FsX2doGAUgASgIIkQKGlNldFByb2plY3RBY2NvdW50c1Jlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJ3ChpTZXRQcm9qZWN0SG9tZUFnZW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSEgoKaG9tZV9hZ2VudBgDIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBCABKAkiRQobU2V0UHJvamVjdEhvbWVBZ2VudFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeTKXBQoOUHJvamVjdFNlcnZpY2USSwoMTGlzdFByb2plY3RzEhwucHJvamVjdC5MaXN0UHJvamVjdHNSZXF1ZXN0Gh0ucHJvamVjdC5MaXN0UHJvamVjdHNSZXNwb25zZRJOCg1DcmVhdGVQcm9qZWN0Eh0ucHJvamVjdC5DcmVhdGVQcm9qZWN0UmVxdWVzdBoeLnByb2plY3QuQ3JlYXRlUHJvamVjdFJlc3BvbnNlElcKEEFkZFByb2plY3RUb0hvc3QSIC5wcm9qZWN0LkFkZFByb2plY3RUb0hvc3RSZXF1ZXN0GiEucHJvamVjdC5BZGRQcm9qZWN0VG9Ib3N0UmVzcG9uc2USYAoTTGlzdFByb2plY3RCcmFuY2hlcxIjLnByb2plY3QuTGlzdFByb2plY3RCcmFuY2hlc1JlcXVlc3QaJC5wcm9qZWN0Lkxpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRJsChdTZXRQcm9qZWN0RGVmYXVsdEJyYW5jaBInLnByb2plY3QuU2V0UHJvamVjdERlZmF1bHRCcmFuY2hSZXF1ZXN0GigucHJvamVjdC5TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlc3BvbnNlEl0KElNldFByb2plY3RBY2NvdW50cxIiLnByb2plY3QuU2V0UHJvamVjdEFjY291bnRzUmVxdWVzdBojLnByb2plY3QuU2V0UHJvamVjdEFjY291bnRzUmVzcG9uc2USYAoTU2V0UHJvamVjdEhvbWVBZ2VudBIjLnByb2plY3QuU2V0UHJvamVjdEhvbWVBZ2VudFJlcXVlc3QaJC5wcm9qZWN0LlNldFByb2plY3RIb21lQWdlbnRSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("Cg1wcm9qZWN0LnByb3RvEgdwcm9qZWN0IjkKEUFjY291bnRBc3NpZ25tZW50EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkitAEKF0FkZFByb2plY3RUb0hvc3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEg8KB2dpdF91cmwYBCABKAkSFwoPbWFpbl9icmFuY2hfcmVmGAUgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgGIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYByABKAkiQgoYQWRkUHJvamVjdFRvSG9zdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJoChRDcmVhdGVQcm9qZWN0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkSDwoHZ2l0X3VybBgDIAEoCRIaChJ1c2VyX3JlbGF0aXZlX3BhdGgYBCABKAkiPwoVQ3JlYXRlUHJvamVjdFJlc3BvbnNlEiYKB3Byb2plY3QYASABKAsyFS5wcm9qZWN0LlByb2plY3RFbnRyeSJjChpMaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIkcKG0xpc3RQcm9qZWN0QnJhbmNoZXNSZXNwb25zZRIQCghicmFuY2hlcxgBIAMoCRIWCg5kZWZhdWx0X3JlbW90ZRgCIAEoCSJAChNMaXN0UHJvamVjdHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKbG9jYWxfb25seRgCIAEoCCI/ChRMaXN0UHJvamVjdHNSZXNwb25zZRInCghwcm9qZWN0cxgBIAMoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5IpECCgxQcm9qZWN0RW50cnkSEgoKcHJvamVjdF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2dpdF91cmwYAyABKAkSFgoObWFpbl9yZXBvX3BhdGgYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD21haW5fYnJhbmNoX3JlZhgGIAEoCRIWCg5kZWZhdWx0X3JlbW90ZRgHIAEoCRIsCghhY2NvdW50cxgIIAMoCzIaLnByb2plY3QuQWNjb3VudEFzc2lnbm1lbnQSEAoIbG9jYWxfZ2gYCSABKAgSFwoPaG9tZV9zZXNzaW9uX2lkGAsgASgJSgQIChALUgpob21lX2FnZW50IoABCh5TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhcKD21haW5fYnJhbmNoX3JlZhgDIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBCABKAkiSQofU2V0UHJvamVjdERlZmF1bHRCcmFuY2hSZXNwb25zZRImCgdwcm9qZWN0GAEgASgLMhUucHJvamVjdC5Qcm9qZWN0RW50cnkiogEKGVNldFByb2plY3RBY2NvdW50c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEiwKCGFjY291bnRzGAMgAygLMhoucHJvamVjdC5BY2NvdW50QXNzaWdubWVudBIaChJkYWVtb25faW5zdGFuY2VfaWQYBCABKAkSEAoIbG9jYWxfZ2gYBSABKAgiRAoaU2V0UHJvamVjdEFjY291bnRzUmVzcG9uc2USJgoHcHJvamVjdBgBIAEoCzIVLnByb2plY3QuUHJvamVjdEVudHJ5MrUECg5Qcm9qZWN0U2VydmljZRJLCgxMaXN0UHJvamVjdHMSHC5wcm9qZWN0Lkxpc3RQcm9qZWN0c1JlcXVlc3QaHS5wcm9qZWN0Lkxpc3RQcm9qZWN0c1Jlc3BvbnNlEk4KDUNyZWF0ZVByb2plY3QSHS5wcm9qZWN0LkNyZWF0ZVByb2plY3RSZXF1ZXN0Gh4ucHJvamVjdC5DcmVhdGVQcm9qZWN0UmVzcG9uc2USVwoQQWRkUHJvamVjdFRvSG9zdBIgLnByb2plY3QuQWRkUHJvamVjdFRvSG9zdFJlcXVlc3QaIS5wcm9qZWN0LkFkZFByb2plY3RUb0hvc3RSZXNwb25zZRJgChNMaXN0UHJvamVjdEJyYW5jaGVzEiMucHJvamVjdC5MaXN0UHJvamVjdEJyYW5jaGVzUmVxdWVzdBokLnByb2plY3QuTGlzdFByb2plY3RCcmFuY2hlc1Jlc3BvbnNlEmwKF1NldFByb2plY3REZWZhdWx0QnJhbmNoEicucHJvamVjdC5TZXRQcm9qZWN0RGVmYXVsdEJyYW5jaFJlcXVlc3QaKC5wcm9qZWN0LlNldFByb2plY3REZWZhdWx0QnJhbmNoUmVzcG9uc2USXQoSU2V0UHJvamVjdEFjY291bnRzEiIucHJvamVjdC5TZXRQcm9qZWN0QWNjb3VudHNSZXF1ZXN0GiMucHJvamVjdC5TZXRQcm9qZWN0QWNjb3VudHNSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * One provider's account, as assigned to a project.
@@ -333,12 +333,12 @@ export type ProjectEntry = Message<"project.ProjectEntry"> & {
   localGh: boolean;
 
   /**
-   * Agent id (a `CatalogService.ListAgents` row) the project's project-home session runs. Empty =
-   * no home agent configured.
+   * The session this project runs as its **main** (project-home session) on this host, recorded by
+   * `EnsureProjectHomeSession`. Empty = main is not set up.
    *
-   * @generated from field: string home_agent = 10;
+   * @generated from field: string home_session_id = 11;
    */
-  homeAgent: string;
+  homeSessionId: string;
 };
 
 /**
@@ -460,59 +460,6 @@ export const SetProjectAccountsResponseSchema: GenMessage<SetProjectAccountsResp
   messageDesc(file_project, 13);
 
 /**
- * @generated from message project.SetProjectHomeAgentRequest
- */
-export type SetProjectHomeAgentRequest = Message<"project.SetProjectHomeAgentRequest"> & {
-  /**
-   * @generated from field: string session_token = 1;
-   */
-  sessionToken: string;
-
-  /**
-   * @generated from field: string project_id = 2;
-   */
-  projectId: string;
-
-  /**
-   * Agent id to store; empty clears the setting.
-   *
-   * @generated from field: string home_agent = 3;
-   */
-  homeAgent: string;
-
-  /**
-   * Host to apply this to. Empty or matching the local instance = local; otherwise forwarded.
-   *
-   * @generated from field: string daemon_instance_id = 4;
-   */
-  daemonInstanceId: string;
-};
-
-/**
- * Describes the message project.SetProjectHomeAgentRequest.
- * Use `create(SetProjectHomeAgentRequestSchema)` to create a new message.
- */
-export const SetProjectHomeAgentRequestSchema: GenMessage<SetProjectHomeAgentRequest> = /*@__PURE__*/
-  messageDesc(file_project, 14);
-
-/**
- * @generated from message project.SetProjectHomeAgentResponse
- */
-export type SetProjectHomeAgentResponse = Message<"project.SetProjectHomeAgentResponse"> & {
-  /**
-   * @generated from field: project.ProjectEntry project = 1;
-   */
-  project?: ProjectEntry;
-};
-
-/**
- * Describes the message project.SetProjectHomeAgentResponse.
- * Use `create(SetProjectHomeAgentResponseSchema)` to create a new message.
- */
-export const SetProjectHomeAgentResponseSchema: GenMessage<SetProjectHomeAgentResponse> = /*@__PURE__*/
-  messageDesc(file_project, 15);
-
-/**
  * @generated from service project.ProjectService
  */
 export const ProjectService: GenService<{
@@ -577,18 +524,6 @@ export const ProjectService: GenService<{
     methodKind: "unary";
     input: typeof SetProjectAccountsRequestSchema;
     output: typeof SetProjectAccountsResponseSchema;
-  },
-  /**
-   * Set the agent a project's project-home session runs (logical-project scope, routed exactly as
-   * SetProjectDefaultBranch is). An empty `home_agent` clears it; an id `CatalogService.ListAgents`
-   * does not list is refused and nothing is written. See `#project-home` 1/7.
-   *
-   * @generated from rpc project.ProjectService.SetProjectHomeAgent
-   */
-  setProjectHomeAgent: {
-    methodKind: "unary";
-    input: typeof SetProjectHomeAgentRequestSchema;
-    output: typeof SetProjectHomeAgentResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_project, 0);

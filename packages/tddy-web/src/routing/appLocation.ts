@@ -19,7 +19,7 @@ export const PARAM_FULL = "full";
 export const PARAM_CODE = "code";
 /** `#/tasks/:taskId` — the selected output-channel tab. */
 export const PARAM_CHANNEL = "channel";
-/** `#/worktrees` — the project filter; `#/projects` — the project whose home agent to set up. */
+/** `#/worktrees` — the project filter. */
 export const PARAM_PROJECT = "project";
 /** `#/rpc-playground` — the addressed LiveKit participant. */
 export const PARAM_PARTICIPANT = "participant";

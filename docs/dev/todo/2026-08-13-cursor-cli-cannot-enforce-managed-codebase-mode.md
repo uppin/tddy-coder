@@ -20,3 +20,10 @@ cursor-cli would additionally require, all of which the non-sandboxed cursor pat
   `Vec::new()` (`cli_session_manager.rs:346-364`), so any start-time env is silently lost.
 
 Worth revisiting if cursor-agent gains a tool-allowlist or MCP-only mode.
+
+**2026-10-24 (2026-10-24-project-home-from-new-session-form):** this is also why only `claude-cli`
+can run a project's **main**. `EnsureProjectHomeSession` refuses a `cursor-cli` start spec with
+`FAILED_PRECONDITION`, and the main set-up form (the New-session form's main variant) shows **Cursor
+CLI** disabled for this reason ("Cursor CLI has no tool allowlist…", `whyMainCannotRun` in
+`packages/tddy-web/src/components/sessions/projectHomeSessionTypes.ts`). Closing this entry would
+let main allow Cursor CLI too.

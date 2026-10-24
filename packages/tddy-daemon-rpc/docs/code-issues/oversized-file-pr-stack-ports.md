@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-24 | 775 | first detection. The size predates #509 (775 at merge-base `4e7157d2`). #509 changed 12 lines (6+/6−), all of them the `os_user_for_github` binding (`let os_user = self…` → `&self…`, for the account-identity return type). It did not grow the file |
 | 2026-10-08 | 808 | 775 on `origin/master` → 808 after `#keyring` 9/9 (#516); split deferred with the developer's consent — see the backlog entry "`#keyring` 9/9 left files over the 500-production-line budget" (2026-10-08): +33, `repoint_planned_pr` resolving the project's account (`token_for_repoint`, `project_github_token`). File has no `#[cfg(test)]` module |
+| 2026-10-24 | 819 | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): 819 production lines at both (counted to the first `#[cfg(test)]`; there is none) |
 
 ## What would close it — candidate seams (not proven)
 

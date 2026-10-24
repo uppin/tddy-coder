@@ -21,3 +21,13 @@
   owns the session (a pid with no served terminal treated as stopped, so ensure resumes it), with
   an acceptance case in `packages/tddy-session-lifecycle/tests/ensure_project_home_session_acceptance.rs`
   that records a live foreign pid in the home session's metadata and expects `resumed`.
+
+**2026-10-24 (2026-10-24-project-home-from-new-session-form):** the same blind spot reaches
+**Replace main**. Main is found by the project's recorded `home_session_id`, and a replace stops the
+recorded main only when this daemon serves its terminal (`stop_previous_main`,
+`packages/tddy-agent-launch/src/svc_ensure_project_home.rs`, which carries the code `TODO`). A main
+whose process outlived a daemon restart is not served, so a replace leaves it running beside the new
+main; it keeps its role, so it stays read-only. The fix above (liveness from the owning daemon) should
+also let a replace stop that process, with a case in
+`packages/tddy-session-lifecycle/tests/ensure_project_home_session_acceptance.rs` expecting the old
+main stopped.

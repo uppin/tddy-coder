@@ -18,8 +18,6 @@ import {
   projectAccountRow,
   projectAccountSelect,
   projectLocalGhToggle,
-  projectHomeAgentSelect,
-  projectHomeAgentError,
   projectHostGh,
   projectCardError,
   TEST_IDS,
@@ -195,37 +193,6 @@ export const projectsScreenPage = {
   /** What a Local gh project's host row says about that host's `gh`. */
   hostGhState: (projectId: string, daemonInstanceId: string): Cypress.Chainable<string> =>
     byTestId(projectHostGh(projectId, daemonInstanceId), { timeout: 5000 }).invoke("text"),
-
-  // ---------------------------------------------------------------------------
-  // Home agent
-  // ---------------------------------------------------------------------------
-
-  /** The home-agent dropdown on a project card. */
-  homeAgentSelect: (projectId: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(projectHomeAgentSelect(projectId), { timeout: 5000, ...options }),
-
-  /** The agent id currently selected as the project's home agent (`""` = not set). */
-  homeAgentValue: (projectId: string): Cypress.Chainable<string> =>
-    projectsScreenPage
-      .homeAgentSelect(projectId)
-      .find("option:selected")
-      .then(($opt) => (($opt[0] as HTMLOptionElement)?.value ?? "")),
-
-  /** The option labels the home-agent dropdown offers, in option order. */
-  homeAgentOptionLabels: (projectId: string): Cypress.Chainable<string[]> =>
-    projectsScreenPage
-      .homeAgentSelect(projectId)
-      .find("option")
-      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).text)),
-
-  /** Choose a project's home agent by agent id (the dropdown submits on change). */
-  setHomeAgent(projectId: string, agentId: string) {
-    byTestId(projectHomeAgentSelect(projectId)).select(agentId);
-  },
-
-  /** Why the last home-agent change on a project was refused. */
-  homeAgentError: (projectId: string): Cypress.Chainable<string> =>
-    byTestId(projectHomeAgentError(projectId), { timeout: 5000 }).invoke("text"),
 
   // ---------------------------------------------------------------------------
   // Create project

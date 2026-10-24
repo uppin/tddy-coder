@@ -65,19 +65,6 @@ export interface ProjectsScreenProps {
    * `githubHostname`). Asked for each host of a Local gh project.
    */
   loadHostGithubCli: LoadHostGithubCli;
-  /** Agents the catalog lists — the choices for each project's home agent (`#project-home` 1/7). */
-  agents?: { id: string; label: string }[];
-  /**
-   * Store (or, with `""`, clear) a project's home agent. Resolves once stored; rejects with the
-   * daemon's reason when refused.
-   */
-  onSetHomeAgent?: (input: {
-    projectId: string;
-    homeAgent: string;
-    daemonInstanceId: string;
-  }) => Promise<void>;
-  /** The project whose home-agent picker takes focus and is scrolled into view, once it is listed. */
-  focusedProjectId?: string | null;
 }
 
 
@@ -95,13 +82,16 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
         mainBranchRef: p.mainBranchRef,
         accounts: p.accounts.map((a) => ({ provider: a.provider, accountId: a.accountId })),
         localGh: p.localGh,
-        homeAgent: p.homeAgent,
         hosts: [],
       };
       byId.set(p.projectId, group);
       groups.push(group);
     }
-    group.hosts.push({ daemonInstanceId: p.daemonInstanceId, mainRepoPath: p.mainRepoPath });
+    group.hosts.push({
+      daemonInstanceId: p.daemonInstanceId,
+      mainRepoPath: p.mainRepoPath,
+      homeSessionId: p.homeSessionId,
+    });
   }
   return groups;
 }
@@ -119,9 +109,6 @@ export function ProjectsScreen({
   accounts,
   onSetProjectAccounts,
   loadHostGithubCli,
-  agents = [],
-  onSetHomeAgent,
-  focusedProjectId = null,
 }: ProjectsScreenProps) {
   const groups = useMemo(() => groupByProject(projects), [projects]);
 
@@ -214,9 +201,6 @@ export function ProjectsScreen({
             accounts={accounts}
             onSetProjectAccounts={onSetProjectAccounts}
             loadHostGithubCli={loadHostGithubCli}
-            agents={agents}
-            onSetHomeAgent={onSetHomeAgent}
-            focusHomeAgent={group.projectId === focusedProjectId}
           />
         ))}
       </div>

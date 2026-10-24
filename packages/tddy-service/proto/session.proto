@@ -36,10 +36,13 @@ service SessionService {
   rpc StreamStartSession(StartSessionRequest) returns (stream StartSessionEvent);
   rpc ConnectSession(ConnectSessionRequest) returns (ConnectSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
-  // Start, resume, or return the project's project-home session: one managed, read-only session
-  // per project on a dedicated home worktree at the project's main branch ref, running the
-  // project's home agent. Refused (failed_precondition) when the project has no home agent or its
-  // harness cannot enforce managed-codebase mode. See `#project-home` 4/7.
+  // Set up, replace, resume, or return the project's main (project-home session): one managed,
+  // read-only claude-cli session per project on a dedicated home worktree at the project's main
+  // branch ref, recorded on the project as `ProjectEntry.home_session_id`. With a `start` spec it
+  // starts main from that spec (stopping a recorded main first — "replaced"); a type that cannot be
+  // held read-only is refused (failed_precondition), a sandbox placement is refused
+  // (invalid_argument), and so is a requested role (permission_denied). Without one it reaches the
+  // recorded main, not_found when none is recorded or the recorded one no longer exists.
   rpc EnsureProjectHomeSession(EnsureProjectHomeSessionRequest) returns (EnsureProjectHomeSessionResponse);
   rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
@@ -362,12 +365,18 @@ message EnsureProjectHomeSessionRequest {
   string project_id = 2;
   // Host whose home session this is. Empty or matching the local instance = local.
   string daemon_instance_id = 3;
+  // Absent: reach the project's recorded home session (NOT_FOUND when none is recorded, or the
+  // recorded one no longer exists — it is then cleared). Present: set main up (or replace it) from
+  // this New-session spec. Only `claude-cli` can be held read-only; sandbox placements and a
+  // caller-set `session_role` are refused. The daemon owns project, worktree, branch, managed mode
+  // and role.
+  StartSessionRequest start = 4;
 }
 
 message EnsureProjectHomeSessionResponse {
   SessionEntry session = 1;
-  // "started" (created now), "resumed" (was stopped; worktree fast-forwarded, same
-  // conversation) or "running" (returned unchanged).
+  // "started" (created now), "replaced" (created now, the previous main stopped), "resumed" (was
+  // stopped; worktree fast-forwarded, same conversation) or "running" (returned unchanged).
   string outcome = 2;
 }
 

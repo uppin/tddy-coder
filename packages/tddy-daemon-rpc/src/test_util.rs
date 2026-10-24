@@ -33,8 +33,7 @@ use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, ProjectService, SetProjectAccountsRequest, SetProjectAccountsResponse,
-    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, SetProjectHomeAgentRequest,
-    SetProjectHomeAgentResponse,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_worktree_service::stream::MpscResultStream;
@@ -178,16 +177,6 @@ impl ProjectService for TestDaemon {
         self.handlers
             .project_service()
             .set_project_accounts(request)
-            .await
-    }
-
-    async fn set_project_home_agent(
-        &self,
-        request: Request<SetProjectHomeAgentRequest>,
-    ) -> Result<Response<SetProjectHomeAgentResponse>, Status> {
-        self.handlers
-            .project_service()
-            .set_project_home_agent(request)
             .await
     }
 }

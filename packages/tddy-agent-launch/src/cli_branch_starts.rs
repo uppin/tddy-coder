@@ -17,13 +17,37 @@ use std::sync::Arc;
 use crate::svc_start_session_core::CliStart;
 
 use crate::launch_ports::LaunchSessions;
-use crate::session_provider_route::{sandboxed_start_route, session_route_sources_with_default};
+use crate::session_provider_route::{
+    sandboxed_start_route, session_route_sources_with_default, start_route,
+};
+use crate::start_request_checks::refuse_a_cli_start_without_a_model;
+use crate::svc_start_session_core::managed_recipe_for;
 use tddy_core::cli_harness::CliHarness;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::{Harness, HarnessRoute};
 use tddy_service::proto::session::StartSessionRequest;
+use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
 impl LaunchSessions {
+    /// The refusals the start path would answer an unsandboxed, co-located claude-cli `req` with
+    /// before it creates anything — a missing model, a caller-chosen id, an unknown recipe, and a
+    /// provider route the owner's vault cannot serve — checked by the same functions, starting and
+    /// creating nothing. For a caller that must stop something before the start may begin
+    /// (replacing a project's main), so a refusal leaves it unstopped. A spawn that fails after
+    /// these pass is not caught here.
+    pub(crate) fn refuse_a_claude_cli_start_up_front(
+        &self,
+        req: &StartSessionRequest,
+    ) -> Result<(), Status> {
+        refuse_a_cli_start_without_a_model(req)?;
+        resolve_caller_chosen_session_id(&req.requested_session_id, req.session_type.trim())?;
+        managed_recipe_for(req)?;
+        let access = self.host.session_account_access(&req.session_token);
+        let sources = session_route_sources_with_default(req, "claude-cli", &access)?;
+        start_route(&access, Harness::ClaudeCli, &sources, req.model.trim())?;
+        Ok(())
+    }
+
     pub(super) async fn start_sandboxed_claude_cli_from_request(
         &self,
         req: &StartSessionRequest,

@@ -8,7 +8,7 @@ this crate supplies the `H`.
 
 | Handler | Coordinate | Trait it implements (defined in) | RPCs |
 |---|---|---|---|
-| `ProjectRpcHandler` | `project.ProjectService` (family D) | `ProjectHandler` (`tddy-projects`) | `ListProjects`, `CreateProject`, `AddProjectToHost`, `ListProjectBranches`, `SetProjectDefaultBranch`, `SetProjectAccounts`, `SetProjectHomeAgent` |
+| `ProjectRpcHandler` | `project.ProjectService` (family D) | `ProjectHandler` (`tddy-projects`) | `ListProjects`, `CreateProject`, `AddProjectToHost`, `ListProjectBranches`, `SetProjectDefaultBranch`, `SetProjectAccounts` |
 | `CatalogRpcHandler` | `catalog.CatalogService` (family A) | `CatalogHandler` (`tddy-discovery`) | `ListTools`, `ListAgents`, `ListAgentModels`, `ListSubagents` |
 | `ExecToolRpcHandler` | `exec_tools.ExecToolService` (family L) | `ExecToolHandler` (`tddy-tool-engine`) | `ExecuteTool`, `StreamExecuteTool`, `ListExecTools`, `ListSessionToolCalls` |
 | `PrStackRpcHandler` | `pr_stack.PrStackService` (family P) | `PrStackHandler` (`tddy-pr-stack`) | `AddPlannedPr`, `GetPrStatus`, `QueryBranch`, `ResolveStackBase`, `LinkStackNode`, `RepointPlannedPr`, `ReorderPlannedPr`, `PullBaseIntoBranch` |
@@ -176,7 +176,7 @@ workspace jails, hosted clones, peer roster and token store the host does. **No 
 
 | Handler | Fields | Budget |
 |---|---|---:|
-| `ProjectRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `eligible_daemon_source`, `spawn_client`, `common_room_livekit_room`, `model_registry` (the home-agent catalog check) | 7 |
+| `ProjectRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `eligible_daemon_source`, `spawn_client`, `common_room_livekit_room` | 6 |
 | `CatalogRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `model_registry`, `rpc_activity` | 5 |
 | `ExecToolRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `peer_routing`, `rpc_activity`, `local_exec_tools` | 9 |
 | `PrStackRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `credential_vaults`, `rpc_activity`, `peer_routing` | 7 |
@@ -213,8 +213,8 @@ returns the storage refusal of a GitHub assignment together with it as `InvalidA
 
 | Module | Holds |
 |---|---|
-| `project` | the struct; `ports.rs` (`ProjectHandler`), `coordinate_handlers.rs` (the RPC bodies), `coordinate_route.rs` (`coordinate_route`: local or forwarded to the named peer — the one routing rule every per-host setter uses), `home_agent_handler.rs` (`SetProjectHomeAgent`: route, catalog check, write), `entries.rs` (project row → `ProjectEntry`, `merge_listed_projects_with_peers`, default-remote resolution), `clone_destination.rs` (where a clone under the caller's home lands) |
-| `catalog` | the struct; `ports.rs` (`CatalogHandler`), `agent_models.rs` (the `tddy-tools list-models` probe, its parse and the short-lived cache in front of it), `subagent_row.rs` (resolved agent def → `ListSubagents` row), `agent_rows.rs` (`listed_agents`: the `ListAgents` rows — allowlist, model-registry assistants, harness profiles — shared with the home-agent check) |
+| `project` | the struct; `ports.rs` (`ProjectHandler`), `coordinate_handlers.rs` (the RPC bodies), `coordinate_route.rs` (`coordinate_route`: local or forwarded to the named peer — the one routing rule every per-host setter uses), `entries.rs` (project row → `ProjectEntry`, including the recorded main as `home_session_id`, `merge_listed_projects_with_peers`, default-remote resolution), `clone_destination.rs` (where a clone under the caller's home lands) |
+| `catalog` | the struct; `ports.rs` (`CatalogHandler`), `agent_models.rs` (the `tddy-tools list-models` probe, its parse and the short-lived cache in front of it), `subagent_row.rs` (resolved agent def → `ListSubagents` row), `agent_rows.rs` (`listed_agents`, `pub(super)`: the `ListAgents` rows — allowlist, model-registry assistants, harness profiles) |
 | `exec_tool` | the struct; `ports.rs` (`ExecToolHandler`), `path_guard.rs` (the traversal check every path-bearing tool's arguments pass before any I/O), `role_guard.rs` (`reject_refused_local_exec_tool`: that traversal check plus the project-home read-only rule — a session whose metadata says `session_role: project-home` may run only `tddy_tool_engine::read_only::is_project_home_allowed_tool` tools, `PERMISSION_DENIED` otherwise, and unreadable metadata is refused — applied to every call run from this daemon's own sessions base), `project_home.rs` (`run_locally`, the one place the handlers reach the local runner: the four project-home tools are answered here instead — `PERMISSION_DENIED` unless the caller's own record carries the `project-home` role — over `DaemonProjectHome`, the `ProjectHomePort` that lists and starts through the host's own `list_sessions_at_session_coordinate` / `start_session_at_session_coordinate` as the caller's token, tags a started session's changeset with the home session as orchestrator, and records the call; and `offered_catalog`, the `ListExecTools` answer — the set a named session is offered by its recorded role, or the daemon-wide catalog with no session), `result_frames.rs` (`StreamExecuteTool` framing, `EXEC_TOOL_FRAME_BYTES`) |
 | `pr_stack` | the struct; `ports.rs` (`PrStackHandler`), `guards.rs` (`require_pr_stack_orchestrator`, `validate_repoint_target` — the refusals a mutation runs before it touches an orchestrator's plan), `pr_status.rs` (the PR leg of a branch resolution, read with the calling operator's GitHub credential), `branch_legs.rs` (the base-sync and worktree legs `QueryBranch` / `PullBaseIntoBranch` report) |
 | `families` | `RpcHandlers` and its `DaemonRpcFamilies` implementation |
