@@ -155,6 +155,7 @@ mod launch;
 mod argv;
 
 mod pty_spawn;
+pub use pty_spawn::ExitHook;
 
 // ---------------------------------------------------------------------------
 // Resize escape parsing

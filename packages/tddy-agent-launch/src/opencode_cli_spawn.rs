@@ -28,7 +28,7 @@ use tddy_service::proto::session::{
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
-use crate::cli_resume_token::watch_for_resume_token;
+use crate::cli_resume_token::resume_token_recorder;
 use crate::cli_route_launch::{
     launch_model_for, resume_cli_route, start_cli_route, CliRouteLaunch,
 };
@@ -37,6 +37,7 @@ use crate::cli_session_worktree::{
 };
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::stack_parent::SpawnStackParent;
+use tddy_cli_sessions::cli_session_manager::ExitHook;
 
 /// Everything one CLI harness start reads.
 pub(crate) struct CliHarnessStart<'a> {
@@ -205,6 +206,7 @@ pub(crate) async fn start_cli_harness_session(
     progress.begin_phase(StartStep::Agent);
     let binary = harness_binary(config, harness);
     let launch_model = launch_model_for(harness, route.is_some(), model);
+    let (token_recorder, token_arm) = resume_token_recorder(session_dir.clone());
     let launched = launch(
         cli_manager,
         harness,
@@ -218,6 +220,7 @@ pub(crate) async fn start_cli_harness_session(
         },
         route.unwrap_or_default(),
         env,
+        token_recorder,
     )
     .await?;
     progress.end_phase(StartStep::Agent);
@@ -237,8 +240,8 @@ pub(crate) async fn start_cli_harness_session(
     };
     write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
-    // Watched only once the metadata is on disk: the watcher records its token into it.
-    watch_for_resume_token(&launched, session_dir.clone());
+    // Armed only once the metadata is on disk: the recorder adds its token to it.
+    token_arm.arm();
     // The roster naming them is on disk now, so the clones belong to the session rather than to the
     // start that claimed them.
     seeded_clones.keep();
@@ -332,6 +335,7 @@ async fn resume_cli_harness_session(
 
     let route = resume_cli_route(account_access, harness, session_dir)?;
     let binary = harness_binary(config, harness);
+    let (token_recorder, token_arm) = resume_token_recorder(session_dir.to_path_buf());
     let launched = launch(
         cli_manager,
         harness,
@@ -345,6 +349,7 @@ async fn resume_cli_harness_session(
         },
         route,
         git_environment,
+        token_recorder,
     )
     .await?;
 
@@ -354,8 +359,8 @@ async fn resume_cli_harness_session(
     updated.updated_at = chrono::Utc::now().to_rfc3339();
     write_session_metadata(session_dir, &updated)
         .map_err(|e| Status::internal(format!("failed to update session metadata: {e}")))?;
-    // Watched only once the metadata is on disk, for the same reason as the start.
-    watch_for_resume_token(&launched, session_dir.to_path_buf());
+    // Armed only once the metadata is on disk, for the same reason as the start.
+    token_arm.arm();
 
     Ok(Response::new(ResumeSessionResponse {
         session_id: session_id.to_string(),
@@ -366,6 +371,7 @@ async fn resume_cli_harness_session(
 }
 
 /// Spawn `harness` with `launch`, followed by the route's arguments and with its environment added.
+#[allow(clippy::too_many_arguments)]
 async fn launch(
     cli_manager: &Arc<CliSessionManager>,
     harness: &CliHarness,
@@ -374,6 +380,7 @@ async fn launch(
     launch: &CliLaunch<'_>,
     route: CliRouteLaunch,
     mut env: Vec<(String, String)>,
+    on_exit: ExitHook,
 ) -> Result<Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>, Status> {
     env.extend(route.env);
     cli_manager
@@ -384,6 +391,7 @@ async fn launch(
             launch,
             route.args,
             env,
+            Some(on_exit),
         )
         .await
         .map_err(|e| Status::internal(format!("failed to spawn {}: {e}", harness.session_type)))

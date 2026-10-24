@@ -263,6 +263,20 @@ async fn a_warp_session_records_the_resume_token_warp_prints_on_exit() {
 }
 
 #[tokio::test]
+async fn a_warp_session_that_is_seen_to_have_exited_already_records_its_resume_token() {
+    // Given: a stub that prints its banner and exits at once
+    let daemon = a_warp_daemon(OnExit::PrintsANewTokenEachRun);
+    let session_id = daemon.start(a_warp_start_request()).await.unwrap();
+
+    // When: the session is first seen to have exited (its terminal gone)
+    daemon.warp_has_exited(&session_id).await;
+
+    // Then: the token is on disk already, with no further waiting, so a resume now continues it
+    let meta = read_session_metadata(&daemon.session_dir(&session_id)).unwrap();
+    assert_eq!(meta.harness_resume_token.as_deref(), Some("tok-1"));
+}
+
+#[tokio::test]
 async fn a_later_exit_replaces_the_recorded_resume_token() {
     // Given: a stopped session whose earlier run recorded a token
     let daemon = a_warp_daemon(OnExit::PrintsANewTokenEachRun);

@@ -121,8 +121,10 @@ Real dependency edges: none (`n1`, `n2` independent; the line `n1 → n2` is fla
 ## Affected Packages
 
 - **tddy-agent-backend**: [README.md](../../../packages/tddy-agent-backend/README.md) · [docs/architecture.md](../../../packages/tddy-agent-backend/docs/architecture.md): the fifth descriptor, `Harness::WarpCli`, the resume-token parser
-- **tddy-agent-launch**: [README.md](../../../packages/tddy-agent-launch/README.md) · [docs/module-layout.md](../../../packages/tddy-agent-launch/docs/module-layout.md): the resume-token watcher; token-carrying generic resume; the provider-account refusal
+- **tddy-agent-launch**: [README.md](../../../packages/tddy-agent-launch/README.md) · [docs/module-layout.md](../../../packages/tddy-agent-launch/docs/module-layout.md): the resume-token recorder (an exit hook); token-carrying generic resume; the provider-account refusal
 - **tddy-changeset**: [README.md](../../../packages/tddy-changeset/README.md): `SessionMetadata.harness_resume_token`
+- **tddy-cli-sessions** (widened 2026-10-24): `spawn_tool` / `launch_cli_harness` take an `ExitHook` run before the terminal is deregistered
+- **tddy-pty** (widened 2026-10-24): the exit monitor joins the PTY reader before reporting exit
 - **tddy-session-activity**: [README.md](../../../packages/tddy-session-activity/README.md): worktree removal includes `warp-cli`
 - **tddy-session-lifecycle** (tests only): `tests/warp_cli_session.rs`
 - **tddy-web**: [README.md](../../../packages/tddy-web/README.md) · [docs/create-session-provider.md](../../../packages/tddy-web/docs/create-session-provider.md): Warp in the session-type toggle, no model field
@@ -351,7 +353,7 @@ Red state, verified 2026-10-24: both fail. Create is disabled with no model, and
 
 ## Technical Debt & Production Readiness
 
-- [ ] **Ordering constraint for green** (OPEN, 2026-10-24): the watcher must write `harness_resume_token` **before** the terminal is deregistered from `CliSessionManager`. Not met. The watcher and the deregistration task (`tddy-cli-sessions` `spawn_terminal_cleanup`) react to the same terminal status, so a resume landing in that gap reads the previous token. Also, `tddy-pty` does not join the PTY reader before reporting exit, so the capture can trail `pty_done`. Both need changes outside this node's packages. The FIXME at `packages/tddy-agent-launch/src/cli_resume_token.rs` records them. Needs a human decision: a hook in the session manager, or accept the gap.
+- [x] **Ordering constraint for green** (done, 2026-10-24): the resume token is recorded before the terminal is deregistered. `CliSessionManager::spawn_tool` takes an `ExitHook` that the terminal-cleanup task runs to completion once the process has exited, before it removes the terminal from the index; the recorder (`cli_resume_token.rs`) is that hook, armed by the caller once the session metadata is written (so the start's whole-metadata write cannot clobber it). `tddy-pty` joins its reader thread before reporting exit, so the capture holds the final output. Test: `a_warp_session_that_is_seen_to_have_exited_already_records_its_resume_token`; `tddy-pty` guard: `the_capture_holds_the_last_output_when_the_exit_is_reported` (a regression guard: the reader normally wins the race, so it does not fail deterministically without the join). Caveat: a grandchild that inherits the PTY slave and outlives the child delays the exit report until it closes it.
 
 ## Decisions & Trade-offs
 
@@ -364,6 +366,7 @@ Red state, verified 2026-10-24: both fail. Create is disabled with no model, and
   `Default`. A sidecar file would avoid that, but would split persistence across two places.
 - **The watcher runs for every generic-path harness.** No per-descriptor flag: a harness that never
   prints the line records nothing. This keeps the descriptor shape unchanged.
+- **Scope widened to `tddy-cli-sessions` and `tddy-pty`** (developer approved widening, 2026-10-24), to enforce the exit ordering above rather than accept the gap.
 - **Native Warp login only** (developer, 2026-10-24). The `warp` provider preset is deferred, because
   connecting an account probes an HTTP model endpoint (`provider_model_probe.rs:54`) and a Warp key
   has none.

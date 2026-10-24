@@ -239,7 +239,7 @@ fn open_pty_and_pump(
     // Reader: start BEFORE child spawn so fast-exiting stubs cannot miss PTY output.
     let master_for_reader = Arc::clone(&master);
     let output_ch_reader = Arc::clone(&output_ch);
-    std::thread::spawn(move || {
+    let reader_thread = std::thread::spawn(move || {
         let reader = {
             let m = master_for_reader.lock().unwrap();
             m.try_clone_reader()
@@ -354,8 +354,14 @@ fn open_pty_and_pump(
                 message: format!("child wait error: {e}"),
             },
         };
-        // Unblock the writer thread first so it drops its master fd, then report terminal status.
+        // Unblock the writer thread first so it drops its master fd.
         let _ = child_exited_tx.send(());
+        // The reader ends once the child has closed the slave side. Waiting for it means the
+        // capture holds everything the child wrote before it exited, by the time the terminal
+        // status is reported.
+        if reader_thread.join().is_err() {
+            log::warn!(target: "tddy_pty::runtime", "PTY reader thread panicked");
+        }
         let _ = exit_tx.send(status);
     });
 
@@ -493,6 +499,38 @@ mod tests {
             master_released_within(&master, std::time::Duration::from_secs(3)).await,
             "PTY master was not released after the child exited — the writer thread is still \
              blocked on stdin and pinning the master fd"
+        );
+    }
+
+    /// The exit is reported only once the reader has drained the child's output, so the capture
+    /// holds the last bytes the child wrote before it exited.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_capture_holds_the_last_output_when_the_exit_is_reported() {
+        // Given a child that writes its final line and exits at once
+        let registry = TaskRegistry::new();
+        let pty_registry = PtyRegistry::new();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let task = PtyRuntime::spawn(
+            &registry,
+            &pty_registry,
+            a_pty_spec_running(&["/bin/sh", "-c", "printf 'final-line-before-exit'"]),
+            ready_tx,
+        )
+        .await;
+        let _ready = ready_rx.await.expect("ready signal").expect("PTY spawned");
+
+        // When the exit is reported
+        assert!(
+            reaches_terminal_within(&task, std::time::Duration::from_secs(5)).await,
+            "PTY task never reached terminal status"
+        );
+
+        // Then the capture already holds that line
+        let capture = task.channel("0").expect("channel 0").capture_arc();
+        let output = String::from_utf8_lossy(capture.lock().unwrap().buffered_bytes()).into_owned();
+        assert!(
+            output.contains("final-line-before-exit"),
+            "capture at exit was {output:?}"
         );
     }
 }
