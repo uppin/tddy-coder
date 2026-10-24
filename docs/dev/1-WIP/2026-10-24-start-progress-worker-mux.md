@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — one crate but concurrency and ordering semantics over a pipe protocol, a forked-process seam with no existing tests
-**Stack**: #start-progress 2/8. Base: `feature/start-progress/spawn-diag`.
+**Stack**: #start-progress 2/8. PR: #735. Base: `feature/start-progress/spawn-diag`.
 
 ## Initial Discovery
 
@@ -137,7 +137,10 @@ EOF drains the map with `"spawn worker pid=<n> exited; request <id> abandoned"`.
 Integration tests in `packages/tddy-spawn/tests/` over `spawn_worker_over` + `client_over` (real
 threads, real pipes, no fork), with fake programs written to a tempdir and `PATH` carried in the
 request env (the seam discovery found). One test forks the real worker via `fork_spawn_worker` to
-prove the production wiring.
+prove the production wiring — **dropped at the contract commit**: forking the multi-threaded test
+harness and running the worker loop in the child risks the very allocator/lock deadlock the worker
+exists to avoid. The production fork path's only change is the loop it runs, which
+`spawn_worker_over` exercises.
 
 ## Acceptance Tests
 
@@ -147,7 +150,7 @@ prove the production wiring.
 | `concurrent_requests_each_receive_their_own_result` | same | id routing under interleaving |
 | `a_clone_reports_its_child_pid_before_its_result` | same | `WorkerEvent::Started` via `clone_repo_observed` |
 | `every_pending_request_fails_naming_the_worker_when_it_exits` | same | EOF fan-out |
-| `the_forked_worker_serves_two_requests_at_once` | same | production `fork_spawn_worker` path |
+| `every_worker_line_names_the_request_it_answers` | same | wire format |
 
 ## Technical Debt & Production Readiness
 
@@ -178,10 +181,10 @@ prove the production wiring.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests (`./test -p tddy-spawn`); full-workspace result from CI

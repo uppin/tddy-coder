@@ -16,6 +16,10 @@ use crate::spawner::{self, LiveKitCreds, SpawnOptions, SpawnResult};
 
 mod clone_request;
 pub use clone_request::CloneRequest;
+mod client;
+pub use client::{client_over, spawn_worker_over};
+mod wire;
+pub use wire::{RequestId, WorkerEnvelope, WorkerEvent, WorkerLine};
 
 fn default_spawn_mouse() -> bool {
     true
