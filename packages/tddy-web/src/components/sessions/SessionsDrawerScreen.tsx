@@ -69,6 +69,7 @@ export function SessionsDrawerScreen({
     accountsClient,
     execToolClient,
     prStackClient,
+    taskClient,
   } = useSessionsDrawerClients();
 
   // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
@@ -420,6 +421,7 @@ export function SessionsDrawerScreen({
               isCreating={mode === "creating"}
               client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
               projectClient={projectClient ?? undefined}
+              taskClient={mode === "creating" ? (taskClient ?? undefined) : undefined}
               worktreeClient={
                 mode === "creating"
                   ? (worktreeClient ?? undefined)

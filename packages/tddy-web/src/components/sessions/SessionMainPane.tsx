@@ -32,6 +32,7 @@ export function SessionMainPane({
   isCreating = false,
   client,
   projectClient,
+  taskClient,
   worktreeClient,
   codeNavigationClient,
   terminalClient,
@@ -253,6 +254,7 @@ export function SessionMainPane({
           accountsClient={accountsClient}
           sessionFilesClient={sessionFilesClient}
           worktreeClient={worktreeClient}
+          taskClient={taskClient}
           sessionToken={sessionToken}
           onCancel={onCancelCreate ?? (() => undefined)}
           onCreated={onSessionCreated ?? (() => undefined)}

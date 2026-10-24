@@ -50,6 +50,7 @@ export function CreateSessionPane({
   accountsClient,
   sessionFilesClient,
   worktreeClient,
+  taskClient,
   sessionToken,
   onCancel,
   onCreated,
@@ -285,6 +286,8 @@ export function CreateSessionPane({
     stageAttachments,
     startSessionStreamed,
     onCreated,
+    taskClient,
+    sessionToken,
   });
   const { branchConflict, setBranchConflict, resolveBranchConflict } = created;
   const { submitting, error, isSubmitEnabled, handleSubmit } =
@@ -478,6 +481,7 @@ export function CreateSessionPane({
         submitting={submitting}
         isSubmitEnabled={isSubmitEnabled}
         onCancel={onCancel}
+        startCancel={projectHome ? undefined : created.startCancel}
         handleSubmit={handleSubmit}
         submitLabel={projectHome ? "Start main session" : undefined}
       />

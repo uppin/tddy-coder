@@ -21,6 +21,7 @@ import type {
   SessionAttachmentSchema,
   StartSessionRequestSchema,
   StartSessionResponse,
+  StartTaskStarted,
 } from "../gen/session_pb";
 import {
   NO_START_PROGRESS,
@@ -120,7 +121,10 @@ export interface SessionAttachments {
    * arrives and resolving to the terminal result. `null` means the form unmounted mid-stream, so
    * there is nobody left to hand a session to.
    */
-  startSessionStreamed: (request: StartSessionRequestInit) => Promise<StartSessionResponse | null>;
+  startSessionStreamed: (
+    request: StartSessionRequestInit,
+    onStarted?: (task: StartTaskStarted) => void,
+  ) => Promise<StartSessionResponse | null>;
 }
 
 /** How each basename rule reads next to the row that broke it. */
@@ -385,6 +389,7 @@ export function useSessionAttachments({
    */
   const startSessionStreamed = async (
     request: StartSessionRequestInit,
+    onStarted?: (task: StartTaskStarted) => void,
   ): Promise<StartSessionResponse | null> => {
     let result: StartSessionResponse | null = null;
     setStartProgress(NO_START_PROGRESS);
@@ -402,6 +407,10 @@ export function useSessionAttachments({
           }));
         } else if (event.event.case === "result") {
           result = event.event.value;
+        } else if (event.event.case === "started") {
+          // The task the start runs as — what Cancel addresses. The latest one stands: a split
+          // start relays the codebase host's own task after this host's.
+          onStarted?.(event.event.value);
         } else {
           setStartProgress((current) => startProgressAfter(current, event));
         }
