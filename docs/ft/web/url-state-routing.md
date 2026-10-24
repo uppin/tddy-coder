@@ -42,6 +42,7 @@ rules.
 | `#/` | Canonicalised to `#/sessions` (replace — no history entry) |
 | `#/sessions` | Sessions drawer, nothing selected |
 | `#/sessions/new` | Sessions drawer with the create-session pane open |
+| `#/sessions/project-home/:projectId` | Sessions drawer with that project's home-agent setup pane open |
 | `#/sessions/:sessionId` | That session selected (and auto-attached when active) |
 | `#/tasks` | Tasks drawer, nothing selected |
 | `#/tasks/:taskId` | That task selected |
@@ -101,7 +102,7 @@ A history entry records **something the operator did**.
 | Open create-session pane | push |
 | Inspector tab click, inspector toggle, Code toggle, channel tab | push |
 | Host change; worktrees project change; playground service/method select | push |
-| Drawer **main** entry with no home agent → `#/projects?project=<id>` | push |
+| Drawer **main** entry with no home agent → `#/sessions/project-home/<id>` | push |
 | Inspector **auto**-open (idle/error) and **auto**-close (on connect) | replace |
 | `#/` → `#/sessions` canonicalisation | replace |
 | Writing back a resolved default (`host`, `project`, `participant`) | replace |

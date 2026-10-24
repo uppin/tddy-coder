@@ -4,9 +4,10 @@
  *
  * The entry renders `aria-disabled` and returns early from its click, and its only explanation is a
  * small grey hint under it. An operator who clicks "main" sees no response at all — no request, no
- * navigation, no error — and reads the drawer as broken. Expected: the click takes the operator to
- * the Projects screen with that project's home-agent picker focused, so the missing setting is one
- * choice away. A project that has a home agent still starts its main session as before.
+ * navigation, no error — and reads the drawer as broken. Expected: the click asks to set a home agent
+ * up for that project (the Sessions screen opens its setup pane — see
+ * `ProjectHomeSetupPaneAcceptance`). A project that has a home agent still starts its main session as
+ * before. The Projects screen still focuses a project's picker when its address names the project.
  */
 
 import React from "react";

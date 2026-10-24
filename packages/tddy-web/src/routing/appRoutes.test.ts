@@ -22,6 +22,9 @@ import {
   sessionsDrawerPathForSession,
   parseSessionsDrawerSessionId,
   SESSIONS_NEW_ROUTE,
+  SESSIONS_PROJECT_HOME_SETUP_ROUTE,
+  parseSessionsProjectHomeSetupProjectId,
+  sessionsProjectHomeSetupPath,
   isSessionsNewPath,
   TASKS_ROUTE,
   isTasksPath,
@@ -315,6 +318,38 @@ describe("sessions create routes", () => {
     expect(result).toBe(true);
   });
 
+});
+
+describe("sessions project-home setup route", () => {
+  it("routes /sessions/project-home/:projectId to the sessions drawer screen", () => {
+    // When
+    const result = isSessionsDrawerPath(sessionsProjectHomeSetupPath("proj-beta"));
+    // Then
+    expect(result).toBe(true);
+  });
+
+  it("round-trips a project id that needs encoding", () => {
+    // Given
+    const path = sessionsProjectHomeSetupPath("team/proj beta");
+    // When
+    const result = parseSessionsProjectHomeSetupProjectId(path);
+    // Then
+    expect(result).toBe("team/proj beta");
+  });
+
+  it("is not read as a session id", () => {
+    // When
+    const result = parseSessionsDrawerSessionId(sessionsProjectHomeSetupPath("proj-beta"));
+    // Then
+    expect(result).toBeNull();
+  });
+
+  it("names no project without a project segment", () => {
+    // When
+    const result = parseSessionsProjectHomeSetupProjectId(SESSIONS_PROJECT_HOME_SETUP_ROUTE);
+    // Then
+    expect(result).toBeNull();
+  });
 });
 
 describe("tasks routes", () => {

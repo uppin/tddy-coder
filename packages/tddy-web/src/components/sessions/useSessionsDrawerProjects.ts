@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ProjectService, type ProjectEntry } from "../../gen/project_pb";
 import { useHostLabel, useSelectedDaemon } from "../../rpc/selectedDaemon";
@@ -8,6 +8,8 @@ import { hostNotConnectedText, rpcFailureText } from "../../rpc/rpcFailure";
 export interface SessionsDrawerProjects {
   projects: ProjectEntry[];
   error: string | null;
+  /** Read the registry again — after a change this screen made, such as a home agent being set. */
+  reload: () => void;
 }
 
 /**
@@ -26,6 +28,8 @@ export function useSessionsDrawerProjects(
   const selectedHost = hostLabel(selectedInstanceId ?? "");
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [generation, setGeneration] = useState(0);
+  const reload = useCallback(() => setGeneration((g) => g + 1), []);
   useEffect(() => {
     if (!projectClient) {
       setError(hostNotConnectedText(selectedHost));
@@ -45,6 +49,6 @@ export function useSessionsDrawerProjects(
     return () => {
       cancelled = true;
     };
-  }, [projectClient, sessionToken, selectedHost]);
-  return { projects, error };
+  }, [projectClient, sessionToken, selectedHost, generation]);
+  return { projects, error, reload };
 }
