@@ -5,7 +5,7 @@
 **Type**: Feature
 **Complexity**: 4 — two crates, three spawned-process seams, permission routing through an MCP tool into n3's yield, per-CLI confinement facts partly unconfirmed
 **Branch**: `feature/coagents/headless-driver`, base `feature/coagents/remote-codebase` (#725) — `#coagents` 7/8
-**PR**: _assigned at wave 1_
+**PR**: [#726](https://github.com/uppin/tddy-coder/pull/726)
 
 ## Initial Discovery
 
@@ -105,24 +105,32 @@ overrides (`TDDY_CURSOR_AGENT`, a `claude` path override, `codex` path). Real CL
 
 ## Acceptance Tests
 
-`packages/tddy-coding-subagent/tests/headless_subagent_acceptance.rs` (new):
+`packages/tddy-agent-backend/tests/headless_driver_acceptance.rs` — `HeadlessDriver` over **fake CLIs**: shell scripts that append their argv to a record file and print the real event shapes (claude/cursor stream-json from `stream/claude.rs`'s fixtures, codex JSONL from `stream/codex.rs`'s):
 
-1. `a_claude_turn_returns_its_final_text_and_the_next_turn_resumes_its_session`
-2. `a_cursor_turn_returns_its_final_text_and_the_next_turn_resumes_its_chat`
-3. `a_codex_turn_returns_its_final_text_and_the_next_turn_resumes_its_thread`
-4. `a_claude_permission_prompt_yields_to_the_caller_and_the_answer_is_honoured`
-5. `cancelling_a_headless_turn_kills_the_cli_and_returns_cancelled`
-6. `headless_tool_calls_become_transcript_updates`
-7. `a_codex_turns_tool_calls_arrive_at_turn_end`
+1. `a_claude_turn_returns_its_final_text_and_the_next_turn_resumes_its_session` — `-p … stream-json`, then `--resume cl-1`
+2. `a_cursor_turn_returns_its_final_text_and_the_next_turn_resumes_its_chat` — `--resume cu-1`
+3. `a_codex_turn_returns_its_final_text_and_the_next_turn_resumes_its_thread` — `exec … --json`, then `resume th-1`
+4. `cancelling_a_headless_turn_kills_the_cli_and_returns_cancelled` — a CLI that sleeps 30 s, cancelled within 5 s
+5. `headless_tool_calls_become_transcript_updates` — claude `tool_use` → `AcpUpdate::ToolCall { id: "tu-1", title: "Read…" }`
+6. `a_codex_turns_tool_calls_arrive_at_turn_end` — `command_execution` item → a `ToolCall` titled with the command
+7. `the_model_and_the_permission_prompt_tool_reach_claudes_argv` — `--model`, `--permission-prompt-tool mcp__tddy-tools__approval_prompt`, `--disallowedTools`
+8. `harness_ids_round_trip` — **passes at contract** (the published id table)
 
-`packages/tddy-daemon-rpc/tests/list_subagents_acceptance.rs` (extend):
+`packages/tddy-coding-subagent/tests/transports_acceptance.rs` — `transport_of` / `permission_policy_of`:
 
-8. `headless_harnesses_are_listed_with_their_transport_and_permission_policy`
-9. `a_harness_offered_both_ways_is_listed_once_per_transport`
+9. `acp_harnesses_take_the_acp_transport_and_ask_the_caller`
+10. `claude_headless_asks_the_caller_through_its_permission_prompt_tool`
+11. `cursor_and_codex_run_under_a_fixed_policy_the_row_names`
+12. `a_pty_only_harness_has_no_subagent_transport` — negative, passes
 
-`packages/tddy-daemon-rpc/tests/session_agent_roster_acceptance.rs` (extend):
+`packages/tddy-daemon-rpc/tests/headless_listing_acceptance.rs`:
 
-10. `a_managed_session_refuses_a_headless_harness_that_cannot_be_confined`
+13. `headless_harnesses_are_listed_with_their_transport_and_permission_policy` — `transport: "headless"`, `permission_policy: "asks_caller"` / `"fixed: …"`
+14. `a_harness_offered_both_ways_is_listed_once_per_transport`
+
+**Changed from the plan:** the claude permission-prompt **yield** end to end (plan test 4) needs n3's `ParkedPermissions` behaviour and a per-conversation `tddy-tools` approval endpoint the daemon serves; the contract pins the CLI side (7) and green wires the endpoint, adding the round-trip test to `tddy-coding-subagent` once #722 is green. Plan test 10 (a managed session refusing an unconfinable headless harness) is covered by #721's admission test once `confinement_for` lists the CLIs. **Green must update #721's `a_headless_or_pty_harness_profile_is_not_offered_yet` and `a_headless_harness_profile_is_not_listed_yet`** — their premise ("not yet") is exactly what this node ends; they become "a PTY-only harness is not offered". `CodingAgentDef` is not widened: transport and policy are derived from the harness id (`transports.rs`), so #721's type is untouched. New proto: `SubagentInfo.transport = 10`, `.permission_policy = 11`; `SessionAgentEntry.transport = 16`, `.permission_policy = 17`. The web row text is green's (the badge already names the harness).
+
+**Baseline (2026-10-24, isolated `CARGO_TARGET_DIR`):** `cargo check --all-targets` clean across agent-backend, coding-subagent, discovery, session-agents, daemon-rpc, tools, session-split, session-lifecycle, daemon; scoped clippy clean.
 
 ## Technical Debt & Production Readiness
 
@@ -155,10 +163,10 @@ _(populated during development)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

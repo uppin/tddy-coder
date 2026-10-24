@@ -49,6 +49,8 @@ fn an_entry(agent_id: &str) -> SessionAgentEntry {
         kind: 0,
         harness: String::new(),
         placement: 0,
+        transport: String::new(),
+        permission_policy: String::new(),
     }
 }
 

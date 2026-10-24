@@ -27,6 +27,9 @@ pub use backend::acp_driver::{
     PermissionDecision, PermissionHandler, PermissionOptionView, PermissionRequest,
     SessionErrorVerdict,
 };
+pub use backend::headless_driver::{
+    AcpConversation, ConversationDriver, HeadlessCommand, HeadlessDriver, HeadlessHarness,
+};
 pub use backend::{
     backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
     default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
