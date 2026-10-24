@@ -671,6 +671,7 @@ export const TEST_IDS = {
   sessionsTerminalTabAgent: "sessions-terminal-tab-agent",
   /** The "+" button that opens a new bash terminal. */
   sessionsTerminalTabNew: "sessions-terminal-tab-new",
+  sessionsTerminalTabNewMenu: "sessions-terminal-tab-new-menu",
   /** The trailing ⛶ control that puts the active pane into browser full screen. */
   sessionsTerminalFullscreen: "sessions-terminal-fullscreen",
   /** The floating "exit full screen" control drawn over a pane stack that holds fullscreen. */
@@ -1167,6 +1168,11 @@ export const restructurePlanRow = (opId: string) => `restructure-plan-row-${opId
  */
 export const restructurePlanCell = (opId: string, column: string) =>
   `restructure-plan-row-${opId}-${column}`;
+
+/** `[data-testid="sessions-terminal-tab-new-<kind>"]` — one item of the "+" menu: `bash`, or the
+ *  session type of the CLI harness the new terminal runs (`warp-cli`, …). */
+export const sessionsTerminalTabNewOption = (kind: string) =>
+  `sessions-terminal-tab-new-${kind}`;
 
 /** `[data-testid="sessions-terminal-tab-<terminalId>"]` — a single bash terminal tab. */
 export const sessionsTerminalTab = (terminalId: string) =>

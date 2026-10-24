@@ -42,6 +42,20 @@ impl CliSessionManager {
         .await
     }
 
+    /// Start an **agent terminal** attached to `session_id`: the CLI harness `kind` names (its
+    /// session type, `"warp-cli"`, …) running `argv` in `worktree_path`. Returns the new handle with
+    /// a fresh `terminal_id` (never the reserved `MAIN_TERMINAL_ID`) and that kind.
+    pub async fn start_agent_terminal(
+        &self,
+        _session_id: &str,
+        _worktree_path: PathBuf,
+        _kind: &str,
+        _argv: Vec<String>,
+    ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
+        // TODO(agent-terminal-tabs): implement
+        todo!("start_agent_terminal")
+    }
+
     /// Look up a specific tool of a session by `terminal_id` (use `MAIN_TERMINAL_ID` for the
     /// `claude` terminal).
     pub async fn get_terminal(

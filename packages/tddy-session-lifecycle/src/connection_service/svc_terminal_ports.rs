@@ -12,8 +12,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{
-    ControlChange, ControlClaim, TerminalControl, TerminalDescriptor, TerminalRoster,
-    TerminalSessionPorts,
+    ControlChange, ControlClaim, TerminalControl, TerminalDescriptor, TerminalKind, TerminalLaunch,
+    TerminalRoster, TerminalSessionPorts,
 };
 use tokio::sync::broadcast;
 
@@ -140,20 +140,25 @@ impl CliManagerTerminalRoster {
 
 #[async_trait]
 impl TerminalRoster for CliManagerTerminalRoster {
-    /// A started shell runs in the same worktree the session's agent does, which is why the main
-    /// terminal has to exist first: it is where that path is recorded.
-    async fn start(&self, session_id: &str, shell_path: &str) -> Result<String, Status> {
+    /// A started terminal runs in the same worktree the session's agent does, which is why the
+    /// main terminal has to exist first: it is where that path is recorded.
+    async fn start(&self, session_id: &str, launch: &TerminalLaunch) -> Result<String, Status> {
         let main = self
             .manager
             .get(session_id)
             .await
             .ok_or_else(|| Status::failed_precondition("session has no running terminal"))?;
         let worktree = main.worktree_path.clone();
-        let handle = self
-            .manager
-            .start_terminal(session_id, worktree, shell_path)
-            .await
-            .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?;
+        let handle = match &launch.kind {
+            TerminalKind::Bash => self
+                .manager
+                .start_terminal(session_id, worktree, &launch.login_shell)
+                .await
+                .map_err(|e| Status::internal(format!("failed to start terminal: {e}")))?,
+            // TODO(agent-terminal-tabs): resolve the harness through the registry and the daemon
+            // config, build its fresh interactive argv, and start it with `start_agent_terminal`.
+            TerminalKind::Agent(kind) => todo!("agent terminal {kind:?}"),
+        };
         Ok(handle.terminal_id.clone())
     }
 

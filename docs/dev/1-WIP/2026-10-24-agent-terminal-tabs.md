@@ -7,7 +7,7 @@
 signature change (`TerminalRoster::start`) with three implementations, across five packages
 (terminal-rpc, session-lifecycle, cli-sessions, coder, web); real-PTY integration tests
 **Stack**: `#warp-agent` 2/2 — branch `feature/warp-agent/agent-terminal-tabs`, base `feature/warp-agent/warp-cli-session` (#717)
-**PR**: _(set in wave 2)_
+**PR**: [#718](https://github.com/uppin/tddy-coder/pull/718)
 
 ## Initial Discovery
 
@@ -92,8 +92,11 @@ The second commit (wave 2) publishes:
   implementation migrated. The bash path keeps working (real), and the agent path is
   `todo!("TODO(agent-terminal-tabs)")`, so the workspace builds and today's bash tests stay green.
 - `CliSessionManager::start_agent_terminal` with a `todo!()` body.
-- Web: `open(kind)` and `{ terminalId, kind }` types, with the menu markup absent. These are pinned
-  by failing Cypress specs.
+- Web: the regenerated `terminal_session_pb.ts` (with `kind`), the menu test ids
+  (`sessionsTerminalTabNewMenu`, `sessionsTerminalTabNewOption(kind)`), the page-object helpers
+  (`newTabMenu`, `newTabOption`), and the fake backend recording `startedTerminalKinds` and listing
+  the requested kind. `{ terminalId, kind }` state, `open(kind)`, the menu and the shared option list
+  are implementation, pinned by the failing Cypress spec.
 - Every acceptance test below, failing for this node's missing implementation.
 
 ## Green wave
@@ -250,11 +253,17 @@ on the wire, labels, reattach labels, tool session, refusal, Escape.
 ## Acceptance Tests
 
 ### tddy-terminal-rpc — `packages/tddy-terminal-rpc/tests/terminal_session_service_acceptance.rs`
+
+Red state, verified 2026-10-24: the agent-kind test fails; the two bash-path tests pass (the bash path is kept).
+
 - [ ] **Integration**: `start_terminal_session_hands_the_roster_the_requested_agent_kind`
 - [ ] **Integration**: `a_start_without_a_kind_hands_the_roster_the_login_shell`
 - [ ] **Integration**: `a_start_naming_bash_hands_the_roster_the_login_shell`
 
 ### tddy-session-lifecycle — `packages/tddy-session-lifecycle/tests/agent_terminal_tabs_acceptance.rs`
+
+Red state, verified 2026-10-24: 7 of 7 fail. The RPC handler still hands the roster `Bash`, so a shell starts instead of the harness and an unknown kind is not refused. The existing `terminal_session_acceptance.rs` passes 12/12.
+
 - [ ] **Integration**: `an_agent_terminal_runs_that_harness_in_the_sessions_worktree` — Muse stub; argv `["muse"]`, cwd = the main terminal's worktree
 - [ ] **Integration**: `an_agent_terminal_is_listed_with_its_harness_as_its_kind`
 - [ ] **Integration**: `an_agent_terminal_gets_a_fresh_id_distinct_from_main_and_from_other_tabs`
@@ -267,6 +276,9 @@ on the wire, labels, reattach labels, tool session, refusal, Escape.
 - [ ] **Unit**: `start_terminal_session_refuses_an_agent_kind`
 
 ### tddy-web — `packages/tddy-web/cypress/component/SessionTerminalTabsAgentKindsAcceptance.cy.tsx`
+
+Red state, verified 2026-10-24: 7 of 7 fail (no `sessions-terminal-tab-new-menu`). The existing `SessionTerminalTabsAcceptance.cy.tsx` passes 5/5.
+
 - [ ] **Component**: "opens a menu of Bash and every CLI harness from '+'"
 - [ ] **Component**: "starts a Muse Code terminal from the menu and focuses its tab"
 - [ ] **Component**: "labels tabs by kind with a per-kind ordinal"
@@ -278,7 +290,8 @@ on the wire, labels, reattach labels, tool session, refusal, Escape.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- [ ] **Existing tab specs need the menu**: `SessionTerminalTabsAcceptance.cy.tsx`, `SessionTabsVisibleErrorsAcceptance.cy.tsx` and `SessionTerminalFullscreenAcceptance.cy.tsx` click a bare `+` (`tabs.newTab()`) and expect a bash tab. Once `+` opens a menu, they must go through `newTabOption("bash")`. Migrate them in green; they are left unmigrated in the contract so they keep proving the bash path until then.
+- [ ] The daemon roster needs the `DaemonConfig` to resolve a harness binary: `CliManagerTerminalRoster::new` gains it (wired in `terminal_session_ports`).
 
 ## Decisions & Trade-offs
 
@@ -323,10 +336,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
