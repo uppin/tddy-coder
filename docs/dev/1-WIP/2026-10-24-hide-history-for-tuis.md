@@ -65,7 +65,7 @@ switches modes. Closing it means adding `1049`/`1047`/`47` to `TerminalCapture`'
 
 ## Acceptance criteria
 
-- [ ] Entering the alternate screen hides **Load earlier output**; leaving it shows it again.
-- [ ] Mouse tracking on the normal screen hides **Load earlier output**.
-- [ ] After a fill, entering the alternate screen hides **View history**.
-- [ ] Entering the alternate screen while viewing history keeps **Back to live**.
+- [x] Entering the alternate screen hides **Load earlier output**; leaving it shows it again.
+- [x] Mouse tracking on the normal screen hides **Load earlier output**.
+- [x] After a fill, entering the alternate screen hides **View history**.
+- [x] Entering the alternate screen while viewing history keeps **Back to live**.

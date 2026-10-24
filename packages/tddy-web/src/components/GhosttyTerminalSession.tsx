@@ -53,19 +53,28 @@ function hexPreview(data: Uint8Array, n = 24): string {
   return Array.from(data.slice(0, n), (b) => b.toString(16).padStart(2, "0")).join(" ");
 }
 
-/** DEC private mode set/reset sequences (`ESC [ ? Pm h|l`) in a chunk, e.g. `?1006h`, `?1049l` —
- *  the switches that decide whether the wheel goes to the TUI. Latin-1 decode keeps byte offsets. */
+/** DEC private mode set/reset sequences (`ESC [ ? Pm h|l`) in a chunk, e.g. `?1006h`, `?1049l`, and
+ *  a hard reset (`ESC c`, reported as `RIS`) — the switches that decide whether the wheel goes to the
+ *  TUI and whether the TUI owns navigation. Latin-1 decode keeps byte offsets. */
 function decModeChanges(data: Uint8Array): string[] {
+  if (!data.includes(0x1b)) return [];
   const text = new TextDecoder("latin1").decode(data);
-  return Array.from(text.matchAll(/\x1b\[\?([\d;]+)([hl])/g), (m) => `?${m[1]}${m[2]}`);
+  return Array.from(text.matchAll(/\x1b\[\?([\d;]+)([hl])|\x1bc/g), (m) =>
+    m[1] === undefined ? "RIS" : `?${m[1]}${m[2]}`,
+  );
+}
+
+/** Whether the live terminal's program scrolls its own output: it is on the alternate screen, or it
+ *  tracks the mouse. Mouse tracking counts on its own because a reattach learns it from the daemon's
+ *  replayed mode prologue, which does not carry the alternate screen. */
+function tuiOwnsNavigation(term: GhosttyTerminalHandle): boolean {
+  return (term.isAlternateScreen?.() ?? false) || (term.hasMouseTracking?.() ?? false);
 }
 
 /** `tddy:term:modes`: after a chunk is written, log the DEC modes it switched and the resulting
- *  mouse-tracking / alternate-screen state — silent for chunks that switch nothing. */
-function traceModes(term: GhosttyTerminalHandle, data: Uint8Array): void {
+ *  mouse-tracking / alternate-screen state. */
+function traceModes(term: GhosttyTerminalHandle, modes: string[]): void {
   if (!dModes.enabled) return;
-  const modes = decModeChanges(data);
-  if (modes.length === 0) return;
   dModes(
     "%s → tracking=%o altScreen=%o",
     modes.join(" "),
@@ -299,6 +308,15 @@ export function GhosttyTerminalSession({
   const [view, setView] = useState<"live" | "page">("live");
   const [loading, setLoading] = useState(false);
   const [filled, setFilled] = useState(false);
+  // Whether the live terminal's program owns navigation (see `tuiOwnsNavigation`) — re-read after
+  // every chunk that switches a mode, since ghostty-web holds the state and does not report changes.
+  const [liveTuiOwnsNavigation, setLiveTuiOwnsNavigation] = useState(false);
+  const noteLiveModeSwitches = (term: GhosttyTerminalHandle, data: Uint8Array) => {
+    const modes = decModeChanges(data);
+    if (modes.length === 0) return;
+    traceModes(term, modes);
+    setLiveTuiOwnsNavigation(tuiOwnsNavigation(term));
+  };
 
   // Whether this terminal can page back at all — the feed's answer, not the transport's. This is
   // the whole of what gives a LiveKit-carried session scrollback: the same question, asked of the
@@ -413,7 +431,7 @@ export function GhosttyTerminalSession({
       }
       if (ready && termRef.current) {
         termRef.current.write(data);
-        traceModes(termRef.current, data);
+        noteLiveModeSwitches(termRef.current, data);
       } else {
         // The reconnect byte-buffering fix: bytes that arrive before ghostty-web is ready are held
         // and flushed in order on `onReady`, instead of being written into a terminal that is not
@@ -611,9 +629,12 @@ export function GhosttyTerminalSession({
   // "View history" affordance instead (instant swap, no fetch). The anchor only ever *withdraws*
   // the offer — a wire that states `atOldest` has nothing older — because a wire that states no
   // anchor at all is not a wire without history; it is one whose history the connection fetches
-  // from somewhere else.
-  const loadEarlierVisible = canScrollBack && !anchor?.atOldest && !filled && !loading;
-  const viewHistoryVisible = canScrollBack && filled && view === "live";
+  // from somewhere else. Neither is offered while a full-screen TUI owns navigation: it scrolls its
+  // own output, and its alternate-screen repaints never become scrollback, so the history replay
+  // would hold frames rather than a transcript. "Back to live" is never withheld.
+  const historyOffered = canScrollBack && !liveTuiOwnsNavigation;
+  const loadEarlierVisible = historyOffered && !anchor?.atOldest && !filled && !loading;
+  const viewHistoryVisible = historyOffered && filled && view === "live";
   const backToLiveVisible = view === "page";
 
   // The status the chrome reports. A caller that states none is not making a claim about the
@@ -672,7 +693,7 @@ export function GhosttyTerminalSession({
           dTerm("ready — flushing %d buffered chunk(s)", buf.length);
           for (const chunk of buf) {
             term.write(chunk);
-            traceModes(term, chunk);
+            noteLiveModeSwitches(term, chunk);
           }
           if (focusesOnReady) {
             term.focus();
