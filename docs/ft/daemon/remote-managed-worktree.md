@@ -438,13 +438,24 @@ half-built split session is left behind.
    the id and sends it as `requested_session_id`, so a failed forward can still issue the delete.
    If B answers with a *different* id (an older peer that ignores the field), A tears down the id B
    reported and refuses the start: a peer that cannot honour the request cannot give the guarantee.
-2. **The forward outlives B's own budget.** With only the caller-chosen id, A would tear down at
-   30 s and B would carry on building the worktree afterwards. The split forward therefore uses
-   `spawn_worker_request_timeout + peer_forward_timeout_secs`.
+2. **The forward outlives B's own work.** With only the caller-chosen id, a deadline on A would
+   tear down while B carried on building the worktree. The split forward therefore has **no overall
+   deadline**: A forwards a *streamed* start (`forward_start_session_relaying`) and relays B's events —
+   its worktree step, keep-alives and attachment progress — into the operator's start stream as they
+   arrive. B sends a keep-alive every 5 s for the whole life of the start, so the only bound is the
+   relay's per-frame idle timeout (`PEER_FORWARD_STREAM_IDLE_TIMEOUT`, 30 s): a live B is never cut off,
+   a silent one is.
 
-The cost of (2) is worth stating: a codebase daemon whose RPC participant has vanished now surfaces
-after roughly 330 s (with the default setting) rather than 30 s. That is the price of never orphaning a checkout on a host the
-operator may not be watching.
+The outcome is classified from the stream, not from a status code:
+
+| Outcome | Classified as | Teardown | Orphan warning |
+|---|---|---|---|
+| B answered with any status (including its own `DEADLINE_EXCEEDED`, e.g. a clone timeout), or the transport refused before the stream opened | `PeerAnswered` — reported as B's answer | delete the requested id | no |
+| B was silent for the idle window (stream never opened, or no frame for 30 s) | `PeerSilent` | delete the requested id | yes — B may still create the session after silence |
+
+A split start reports its steps: the worktree step relayed from B, and the agent step (`STEP_AGENT`)
+from A around the local agent spawn. A codebase daemon whose RPC participant has vanished surfaces after
+the 30 s idle window, not after a fixed budget.
 
 ### Agent working directory
 

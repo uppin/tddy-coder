@@ -274,9 +274,18 @@ every forward is a `FailedPrecondition` naming the call and the peer.
 - A relayed stream ends at the first terminal frame: a peer's error frame is relayed once, and a frame
   that cannot be decoded ends the relay with that error. A consumer that drops its receiver releases the
   transport's stream no later than the idle timeout.
-- The remote managed worktree's split-start forward, and the plain `StartSession` forward, use
-  `spawn_worker_request_timeout + peer_forward_timeout` (`split_forward_deadline`, 330 s by default) so a
-  peer that clones first, and may stop to ask for a passphrase, is waited for; a longer setting lengthens it too.
+- Every start forwarded to a peer — the remote managed worktree's split start, the agent-clone provision
+  and the plain `StartSession` forward — is a **relayed stream with no overall deadline**:
+  `peer_calls::forward_start_session_relaying(room, peer, req, relay)` opens `StreamStartSession`, hands
+  every non-terminal `StartSessionEvent` to `relay` as it arrives, and returns the peer's result. The open
+  waits `PEER_FORWARD_STREAM_IDLE_TIMEOUT`, not `peer_forward_timeout_secs`, and each frame restarts the
+  idle window; the peer's keep-alives (every 5 s for a start's whole life) keep a live start open.
+- A start forward's failure is `ForwardedStartFailure::{PeerAnswered(Status), PeerSilent(Status)}`,
+  decided by the relay rather than by a status code: `stream_relay::RelayFailure::Peer` for any status the
+  peer sent (its own `DEADLINE_EXCEEDED` included) and for an undecodable frame, `Silent` only for the idle
+  expiry (`CommonRoom::forward_server_stream_classified`). A refusal the transport returns before the
+  stream opens is `PeerAnswered`; only silence is `PeerSilent`. The other stream callers keep a plain
+  `Status` through the same loop.
 
 ## `peer_calls` — typed RPCs forwarded to a peer
 
@@ -286,7 +295,7 @@ to the peer's service and method, and decodes the answer. The unary ones go thro
 
 | Family | Functions | Service |
 |---|---|---|
-| session | `forward_start_session`, `forward_start_session_within` (explicit deadline), `forward_stream_start_session`, `forward_delete_session` | `session.SessionService` |
+| session | `forward_start_session_relaying` (relayed start, `ForwardedStartFailure`), `forward_stream_start_session`, `forward_delete_session` | `session.SessionService` |
 | exec tool | `forward_stream_execute_tool` | `exec_tools.ExecToolService` |
 | project | `forward_add_project_to_host`, `forward_set_project_default_branch`, `forward_set_project_accounts` | `project.ProjectService` |
 | session files | `forward_upload_staged_attachment_chunk`, `forward_list_staged_attachments`, `forward_delete_staged_attachment`, `forward_read_host_document`, `forward_stream_read_host_document` | `tddy_service::SESSION_FILES_SERVICE` |

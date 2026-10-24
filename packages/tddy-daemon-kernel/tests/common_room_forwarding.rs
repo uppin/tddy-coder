@@ -429,7 +429,7 @@ async fn a_consumer_that_drops_the_relay_releases_the_forwarders_stream() {
 }
 
 // ---------------------------------------------------------------------------
-// A forwarded start, relayed (docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-split-stream.md)
+// A forwarded start, relayed (docs/ft/daemon/remote-managed-worktree.md § Failure is atomic)
 // ---------------------------------------------------------------------------
 
 mod forwarded_start {

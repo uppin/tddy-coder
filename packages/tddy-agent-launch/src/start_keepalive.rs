@@ -1,4 +1,5 @@
-//! Keeping a streamed start's stream alive while it waits on slow provisioning.
+//! Keeping a streamed start's stream alive for its whole life — provisioning, the worktree cut, the
+//! agent launch.
 //!
 //! A forwarded `StreamStartSession` is ended by the relay after
 //! `PEER_FORWARD_STREAM_IDLE_TIMEOUT` (30 s) without a frame. Provisioning a project can be quiet
