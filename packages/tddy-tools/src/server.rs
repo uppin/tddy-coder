@@ -2067,6 +2067,21 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
     };
+    // A deferral is refused rather than dropped: running the turn without it would answer nothing
+    // and leave the request pending with the main agent, which the caller did not ask for. The
+    // daemon's resume request has no field to carry it yet, so the refusal stands until one lands.
+    match crate::permission_deferral_arg::parse_permission_deferral(&args) {
+        Ok(None) => {}
+        // TODO(web-approvals): blocked — ResumeAgentConversationRequest has no deferral field; decision pending
+        Ok(Some(_)) => {
+            return subagent_error_json(format!(
+                "{} is not yet carried to the daemon: a permission request cannot be handed to the user from subagent_resume yet; answer it with {} instead",
+                crate::permission_deferral_arg::DEFER_ARG,
+                crate::permission_answer_arg::PERMISSION_ARG
+            ))
+        }
+        Err(e) => return subagent_error_json(e),
+    }
     let request = match crate::permission_answer_arg::parse_permission_answer(&args) {
         Ok(Some(answer)) => request.with_permission_answer(answer),
         Ok(None) => request,
