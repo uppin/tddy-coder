@@ -126,7 +126,8 @@ workstream B:
 gh pr comment <N> --body '#forcebuild'   # sticky: later pushes to the draft build too
 ```
 
-Do **not** `gh pr ready` to get a build — readying triggers the PR's wrap, which is `/pr-wrap`'s step.
+Do **not** `gh pr ready` to get a build — a PR is marked ready only after its docs are wrapped, and
+`/pr-wrap` owns that sequence: wrap the docs (step 7), **then** mark ready (step 8).
 
 | Check | What it runs |
 |---|---|

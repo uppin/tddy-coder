@@ -75,8 +75,9 @@ gh stack link --base master <pr> <pr> <pr> ...
 `gh stack` itself — which is every stack this repo's commands build. Two flags matter:
 
 - **`--base master`** — it defaults to `main`, which is not this repo's trunk.
-- **never `--open`** on a stack of drafts: it marks every PR ready for review, and in this repo
-  readying a PR is what triggers its documents to be wrapped.
+- **never `--open`** on a stack of drafts: it marks every PR ready for review with its documents
+  unwrapped. In this repo readying a PR **is** a two-step sequence — wrap its documents, then mark it
+  ready — and `/pr-wrap` runs it one node at a time.
 
 **When a node's documents are wrapped.** Once its planned scope is developed and every gap or
 deferral is approved by the user — never gated on CI. The CI build and full test run are post-wrap
@@ -245,7 +246,8 @@ What GitHub still does **not** do, even for a registered stack:
 can start without waiting for it to merge.
 
 Cut the branch off the predecessor's branch, commit, push, and open the PR with
-`gh pr create --base <predecessor-branch>`. `/pr` does the base detection for you. Then **re-register
+`gh pr create --draft --base <predecessor-branch>` (drafts until its docs are wrapped). `/pr` does the
+base detection — and the wrap-before-ready check — for you. Then **re-register
 the stack** so the new PR joins it:
 
 ```bash
@@ -904,7 +906,8 @@ Commands MUST resolve a branch's base in this order:
 
 Each PR carries its **own** PRD + changeset in `docs/dev/1-WIP/`. Because a stacked branch inherits
 its parents' commits, a child's tree contains its parents' working documents — but the reverse is not
-true. PRs are **wrapped when they are set ready for review**, and each node is wrapped and readied on
+true. A PR's documents are **wrapped first, then the PR is marked ready for review** — never the mark
+alone — and each node is wrapped and readied on
 its own gate, in whatever order the nodes finish: a parent's state is not a precondition.
 
 So that no link dangles whichever node wraps first, **a working document never links another node's
@@ -1084,8 +1087,8 @@ number — **neither side is right**. Compute the value from the source of truth
 pick the next genuinely free number), then ask whether an assertion that merely restates its own
 computed input is worth keeping at all.
 
-Documents are **not** wrapped here — each PR's changeset and PRD were already wrapped when that PR
-was set ready for review. By the time a PR merges its documents have left `1-WIP`.
+Documents are **not** wrapped here — each PR's changeset and PRD were wrapped just before that PR
+was marked ready for review. By the time a PR merges its documents have left `1-WIP`.
 
 Between steps, re-read the live PR state. If it disagrees with a PR's document, **live status is
 right** and the document needs updating.
@@ -1362,6 +1365,9 @@ git push -q origin <head-branch>
 gh pr create --base master --head <head-branch> --title "<same title>" \
   --body "Recreated after #<N> auto-closed when its stacked base branch was deleted."
 ```
+
+Add `--draft` when the closed PR was a draft: its docs are not wrapped yet, and a PR is opened ready
+only after its docs are wrapped.
 
 Then **re-register the stack** with the recreated PR in place of the closed one:
 

@@ -381,7 +381,8 @@ based on B while B shrinks to B1, and the child's PR diff swallows B2:
    ```
 
    (`<B>` here is B1's branch name — unchanged from the original B.) Follow
-   `.agents/commands/pr.md` for the body shape; open it as a draft if the slice is not finished.
+   `.agents/commands/pr.md` for the body shape. Add `--draft` unless this slice's docs are already
+   wrapped — a PR is opened or marked ready only after its docs are wrapped.
 2. **Retarget every direct child of B** from B → **B2**. **Do not** retarget D, E, … — their base
    stays their current parent. Force-push the rebased descendants **top-down from B2**
    (`C`, then `D`, …) with `--force-with-lease`, back-to-back with each retarget so a child is never
@@ -396,7 +397,8 @@ based on B while B shrinks to B1, and the child's PR diff swallows B2:
 
 If B had **zero children**, skip step 2. If B had **no PR**, there is nothing to retarget and no
 force-push of B1 — push both branches with `git push -u` and open both PRs with
-`gh pr create --base …` (B1 based on A, B2 based on B1).
+`gh pr create --draft --base …` (B1 based on A, B2 based on B1); each is readied later by its own
+`/pr-wrap`, which wraps its docs first.
 
 Never plain `--force`; always `--force-with-lease`.
 
@@ -421,7 +423,8 @@ gh stack link --base master <pr-A> <pr-B1> <pr-B2> <pr-C> ...
 ```
 
 Pass `--base master` explicitly (it defaults to `main`) and **never `--open`** on a stack that
-contains drafts — it marks them ready for review, which triggers each one's wrap.
+contains drafts — it marks them ready for review with their docs unwrapped. A PR is readied only
+by wrapping its docs first, then marking it — each node through its own `/pr-wrap`.
 
 ## Step 7: Update the documents
 
@@ -527,7 +530,8 @@ A (`<A>`) → B1 (`<B>`, PR #<n1>) → B2 (`<B2>`, PR #<n2>) → C (`<C>`, PR #<
 ### Next
 - CI: `scripts/ci-status.sh <PR#> --failures` (add `--watch` to block until the run finishes). The
   slices are drafts, which CI skips: comment `gh pr comment <PR#> --body '#forcebuild'` on each one
-  that needs a build now — never `gh pr ready`, which triggers its wrap
+  that needs a build now — never `gh pr ready`: readying is *wrap the docs, then mark ready*, and
+  that is `/pr-wrap`'s
 - `/green` per PR in its own worktree (create worktrees only for PRs being implemented)
 - A force-pushed PR may have lost its approval — re-request review before arming `#automerge`
 - Further slices: `/split-pr-to-stack` again on B1 or B2 (this command is two layers only)
