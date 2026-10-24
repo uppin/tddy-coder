@@ -105,6 +105,9 @@ pub struct AgentRoster {
     pub roster_keepalive_interval: Duration,
     pub session_admissions: Arc<dyn RoomAdmission>,
     pub model_registry: Option<Arc<ModelRegistryStore>>,
+    /// What starts a coding agent for a conversation. `None` on a daemon with no launcher wired —
+    /// a coding-agent conversation is then refused naming that, never started some other way.
+    pub coding_agent_launcher: Option<Arc<dyn tddy_coding_subagent::CodingAgentLauncher>>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn AgentHostCallbacks>,
 }

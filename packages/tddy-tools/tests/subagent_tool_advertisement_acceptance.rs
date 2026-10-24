@@ -69,6 +69,8 @@ fn an_entry(agent_id: &str) -> SessionAgentEntry {
         clone_error: String::new(),
         status: 0, // SESSION_AGENT_STATUS_UNSPECIFIED
         last_activity: None,
+        kind: 0,
+        harness: String::new(),
     }
 }
 

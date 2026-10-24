@@ -18,6 +18,7 @@ import {
 import type { SubagentSessionNode } from "./agentTree";
 import { rosterHalfOf, type RosterHalf } from "./sessionRosterHalf";
 import { useSessionAgentRoster } from "./useSessionAgentRoster";
+import { AgentKindBadge } from "./AgentKindBadge";
 
 /**
  * The Agents tab as a **tree**: the session's own main agent at the root, and beneath it the two
@@ -266,6 +267,7 @@ function RosterAgentRow({ entry, roster, half, depth, now, onDetach }: RosterAge
         </span>
         <span className="flex flex-wrap items-center gap-1 text-muted-foreground">
           <span data-testid={`${testId}-host`}>{entry.daemonInstanceId}</span>
+          <AgentKindBadge kind={entry.kind} harness={entry.harness} testId={`${testId}-kind`} />
           <span
             data-testid={`${testId}-clone-state`}
             data-clone-state={cloneStateName(entry.cloneState)}

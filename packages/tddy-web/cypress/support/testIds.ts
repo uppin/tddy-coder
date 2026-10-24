@@ -1798,6 +1798,9 @@ export const agentRosterRow = (agentId: string) => `agent-roster-row-${safeTestI
 /** The owning-daemon label on an attached agent's row. */
 export const agentRosterRowHost = (agentId: string) => `${agentRosterRow(agentId)}-host`;
 
+/** The coding-agent badge on a roster row; absent on a model row. */
+export const agentRosterRowKind = (agentId: string) => `${agentRosterRow(agentId)}-kind`;
+
 /** The tools an attached agent withdraws from the main agent. */
 export const agentRosterRowReplaces = (agentId: string) => `${agentRosterRow(agentId)}-replaces`;
 

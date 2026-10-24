@@ -28,6 +28,7 @@ import {
   aDaemonOfferingAgents,
   aDaemonThatCannotBeReached,
   anAvailableAgent,
+  anAvailableCodingAgent,
 } from "../support/rpc/sessionAgentRosterBackend";
 import {
   TEST_IDS,
@@ -276,5 +277,39 @@ describe("CreateSession specialized-agent picker across hosts", () => {
     cy.wrap(null).should(() => {
       expect(startedSessionAgentLists(hostA)).to.deep.equal([[EXPLORER_ON_A]]);
     });
+  });
+});
+
+describe("CreateSession agent picker — coding agents", () => {
+  const CODEX_ON_B = "codex-fast@server-2";
+
+  beforeEach(() => {
+    cy.viewport(1280, 900);
+  });
+
+  it("a coding agent row shows its coding-agent badge and harness", () => {
+    // Given
+    mountPicker(aDaemonOfferingAgents([anAvailableCodingAgent("codex-fast", HOST_B.instanceId, "codex-acp")]));
+
+    // When
+    openTheAgentPicker();
+
+    // Then
+    byTestId(`${createSessionAgentOption(CODEX_ON_B)}-kind`).should(
+      "have.text",
+      "coding agent · codex-acp",
+    );
+  });
+
+  it("a model row shows no coding-agent badge", () => {
+    // Given
+    mountPicker(aDaemonOfferingAgents([anAvailableAgent("linter", HOST_B.instanceId)]));
+
+    // When
+    openTheAgentPicker();
+
+    // Then
+    theAgentIsOfferedUnpicked(LINTER_ON_B);
+    byTestId(`${createSessionAgentOption(LINTER_ON_B)}-kind`).should("not.exist");
   });
 });

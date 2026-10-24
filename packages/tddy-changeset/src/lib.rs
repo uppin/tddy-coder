@@ -39,7 +39,7 @@ pub use elapsed_format::format_elapsed_compact;
 pub use session_activity::{
     activity_status_from_hook, parse_hook_event, HookEvent, SessionActivityStatus,
 };
-pub use session_agent::{AgentId, AgentIdError, SessionAgentRecord};
+pub use session_agent::{AgentId, AgentIdError, AgentKindRecord, SessionAgentRecord};
 pub use session_github_source::{
     read_session_github_source, write_session_github_source, SessionGithubSource,
     SESSION_GITHUB_SOURCE_FILENAME,
