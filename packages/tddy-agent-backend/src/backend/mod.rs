@@ -11,6 +11,7 @@ mod mock;
 pub mod model_catalog;
 mod opencode_acp;
 mod routed;
+pub use routed::codex_acp_route_args;
 mod stub;
 mod tool_executor;
 

@@ -171,7 +171,7 @@ See *Responsibility*, per package as listed in *Affected Packages*.
 - [x] `CodingAgentDef` resolution and `ListSubagents` rows
 - [x] attach admission incl. managed confinement refusal
 - [x] `CodingAgentSession` turn / descriptors / refusals / deny-and-record / cancel / drop
-- [ ] `CodingAgentLauncher` daemon adapter — same-user, unmanaged, vendor-login launches only (see 🔴 TODOs under Technical Debt)
+- [x] `CodingAgentLauncher` daemon adapter — user (privileged daemon), route, managed withdrawal + MCP; supervised-host user switch is a 🔴 TODO
 - [x] web badge
 
 ## Testing Plan
@@ -232,42 +232,51 @@ Cypress (`mountWithRpc` / per-daemon in-memory backends):
 
 ## Technical Debt & Production Readiness
 
-**Green (2026-10-24)** — session, catalog, admission, open/turn/end and the web badge are real and
-covered by the acceptance tests. Three launcher gaps remain; each is a typed refusal naming its
-reason (never a weaker launch), and each is open work:
+**Green (2026-10-24)** — session, catalog, admission, open/turn/end, the web badge and the daemon
+launcher are real and covered by the acceptance tests and the launcher's unit tests. One launcher
+gap remains, as a typed refusal naming its reason (never a weaker launch):
 
-- 🔴 **TODO(acp-subagent) — run as the session's OS user.** `DaemonCodingAgentLauncher`
-  (`tddy-session-lifecycle/src/coding_agent_launcher.rs`) starts the harness only when the daemon
-  already runs as `session_os_user` (the desktop deployment). No existing spawn path
-  (`spawn_as_user`, the spawn worker) hands the ACP driver piped stdio for a non-PTY child run as
-  another user, so under a root/supervisor daemon every launch is refused with a message naming both
-  users. Needs a spawn-as-user path with piped stdio.
-- 🔴 **TODO(acp-subagent) — provider account route.** A harness profile naming `provider_account`
-  is refused at launch: resolving the route reads the session owner's vault
-  (`tddy-agent-launch::SessionAccountAccess`), which the launcher does not hold.
-- 🔴 **TODO(acp-subagent) — managed confinement is admitted but not yet launched.** Attach
-  admission, the table and the open path are real (a managed session refuses `codex-acp` at attach
-  and passes `claude-acp` / `opencode`, with `mcp_servers = [tddy-tools --mcp]` on the launch), but
-  the production launcher refuses any `managed` launch: it neither applies the withdrawal below nor
-  gives `tddy-tools --mcp` its transport (`TDDY_REMOTE_*` agent token + daemon socket). Until then a
-  managed session can attach a confinable harness but cannot open a conversation with it.
+- 🔴 **TODO(acp-subagent) — run as another OS user on a supervised host.**
+  `coding_agent_as_user` reuses the PTY path's machinery (`resolve_pty_os_user`,
+  `wrap_argv_for_privilege_drop` → `setpriv`, `pty_user_env_overrides`; GitHub token variables are
+  stripped with `env -u`): a **privileged** daemon (unsupervised, forked spawn worker) runs the agent
+  as the session user with piped stdio; the daemon's own user needs no drop. An **unprivileged**
+  daemon — every `tddy-supervisor` install, i.e. `./install --systemd` — is refused naming that:
+  the supervisor's `SpawnSession` gives a child no stdio and takes no file descriptor (its design:
+  "a path crosses a process boundary, a file descriptor does not"), `tool_path` must be
+  allowlisted, and the driver spawns its own child. Closing it needs a new supervisor request that
+  relays a child's stdio over a path-rendezvoused socket plus an operator policy entry — a change to
+  the privileged surface that was not made here.
+- **Provider account** — done. `route_from_vault` resolves the profile's account in the session
+  owner's vault with `resolve_session_route` (the call tool sessions use) and the launcher applies
+  it per harness: env + secret env for all; `-c` overrides (`codex_acp_route_args`, now exported from
+  `tddy-agent-backend` — an additive export) for `codex-acp`; the route's config file as inline
+  `OPENCODE_CONFIG_CONTENT` for `opencode`. An unresolvable route refuses; it never falls back to the
+  vendor. Verified by unit tests with a fake resolver; the vault read itself is the tool sessions'
+  tested path.
+- **Managed launches** — done. `claude-acp`: `OpenSession.meta` =
+  `{claudeCode:{options:{disallowedTools:[Read,Write,Edit,MultiEdit,NotebookEdit,Bash,BashOutput,KillShell,Glob,Grep,LS]}}}`
+  (verified: reaches `session/new` on the stub, per #720's test; **documented, not verified** against
+  a live `claude-agent-acp`). `opencode`: `OPENCODE_CONFIG_CONTENT` = `{"tools":{bash,read,write,edit,patch,glob,grep,list:false}}`
+  merged over the route's config (**documented, not verified** against a live OpenCode).
+  `tddy-tools --mcp` is handed over with `TDDY_REMOTE_*` from `colocated_jail_tool_env` and a token
+  minted for the agent (`tddy-session-split::coding_agent_wiring`); a daemon that signs no tokens
+  refuses. `CodingAgentLauncher::mcp_servers_for` (default: the launch's own) is how the launcher
+  completes the servers.
 - `subagent_cancel` while a turn runs ends the conversation (the table's `closed` signal drops the
   turn and the session, which kills the process). `CodingAgentSession::cancel_handle` is real
   (`session/cancel`, turn ends `cancelled`) but the conversation table holds `Box<dyn SubagentSession>`
   and cannot reach it; wiring it is n3's table work.
 - A provider-account-less coding agent's model is `default_model_for_agent(id)` — a model id the
   harness may not advertise; `session/set_model` then fails loudly naming the offered models.
+- `tddy-daemon-rpc --test in_jail_conversation_acceptance` fails on this macOS host (the jailed
+  `tddy-sandbox-runner` exits 126 before its ready marker); its four sibling sandbox targets pass.
+  This branch touches no jail, runner, supervisor or spawn file — environment, not a regression.
 
 ### Confinement mechanism per harness (what `confinement_for` relies on)
 
-- `claude-acp` — `claude-agent-acp` accepts `disallowedTools` in `session/new` `_meta.claudeCode.options`.
-  **Not applied yet**: `OpenSession` (n1) carries no `_meta`, and n2 does not change the driver.
-- `opencode` — its config's tool permissions (`OPENCODE_CONFIG_CONTENT`) disable the built-in
-  bash/read/edit/write/glob/grep tools. **Not applied yet** (launcher gap above).
-- `codex-acp` — sandbox modes only, no tool withdrawal; `CannotWithdraw`, refused in managed sessions.
-
-Neither mechanism was verified against a real adapter (none is available here); the table is the
-documented claim, the launcher is where it will be proven.
+See *Managed launches* above; `codex-acp` offers sandbox modes only, no tool withdrawal:
+`CannotWithdraw`, refused in managed sessions at attach and again at launch.
 
 ## Decisions & Trade-offs
 
