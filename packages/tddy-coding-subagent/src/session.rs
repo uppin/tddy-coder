@@ -43,6 +43,28 @@ impl CodingAgentSession {
         let permissions = Arc::new(DenyAndRecord::default());
         let driver = AcpDriver::spawn(command, permissions.clone(), Arc::new(NoHooks))
             .map_err(|e| SubagentError::from(format!("could not start the coding agent: {e}")))?;
+        Self::opened(driver, permissions, open, model).await
+    }
+
+    /// [`Self::start`] for an agent already running behind `stream` (started by the supervisor as
+    /// the session's OS user): no process of this session's own; closing the stream ends the agent.
+    pub async fn start_over(
+        stream: std::os::unix::net::UnixStream,
+        open: OpenSession,
+        model: String,
+    ) -> Result<Self, SubagentError> {
+        let permissions = Arc::new(DenyAndRecord::default());
+        let driver = AcpDriver::spawn_over(stream, permissions.clone(), Arc::new(NoHooks))
+            .map_err(|e| SubagentError::from(format!("could not reach the coding agent: {e}")))?;
+        Self::opened(driver, permissions, open, model).await
+    }
+
+    async fn opened(
+        driver: AcpDriver,
+        permissions: Arc<DenyAndRecord>,
+        open: OpenSession,
+        model: String,
+    ) -> Result<Self, SubagentError> {
         let opened = driver
             .open_session(open)
             .await

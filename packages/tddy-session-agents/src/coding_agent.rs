@@ -9,8 +9,8 @@
 use std::path::Path;
 
 use tddy_coding_subagent::{
-    coding_agent_defs_in, confinement_for, CodingAgentDef, CodingAgentLaunch, CodingAgentSession,
-    Confinement,
+    coding_agent_defs_in, confinement_for, AgentTransport, CodingAgentDef, CodingAgentLaunch,
+    CodingAgentSession, Confinement,
 };
 use tddy_core::{AgentKindRecord, SessionAgentRecord};
 use tddy_core::{McpServerSpec, OpenSession};
@@ -212,8 +212,8 @@ impl AgentRoster {
             mcp_servers,
             session_token: session_token.to_string(),
         };
-        let command = launcher
-            .command_for(&launch)
+        let transport = launcher
+            .launch_transport(&launch)
             .await
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
         let mcp_servers = launcher
@@ -233,9 +233,15 @@ impl AgentRoster {
             mcp_servers,
             meta,
         };
-        let session = CodingAgentSession::start(command, open, def.model)
-            .await
-            .map_err(|e| Status::failed_precondition(e.to_string()))?;
+        let session = match transport {
+            AgentTransport::Command(command) => {
+                CodingAgentSession::start(command, open, def.model).await
+            }
+            AgentTransport::Stream(stream) => {
+                CodingAgentSession::start_over(stream, open, def.model).await
+            }
+        }
+        .map_err(|e| Status::failed_precondition(e.to_string()))?;
         Ok(Box::new(session))
     }
 }

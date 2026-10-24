@@ -471,8 +471,31 @@ pub struct ForkBroker {
 type Job = (
     SpawnPlan,
     Option<SocketHandover>,
-    oneshot::Sender<std::io::Result<u32>>,
+    StdioMode,
+    oneshot::Sender<std::io::Result<SpawnedChild>>,
 );
+
+/// How the supervisor holds a child's stdio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StdioMode {
+    /// As [`SpawnPlan::inherit_output`] says; stdin is always null.
+    Plan,
+    /// All three streams piped to the supervisor, for a relayed spawn.
+    Piped,
+}
+
+/// A forked child's pid and, for a relayed spawn, the supervisor's ends of its stdio.
+pub struct SpawnedChild {
+    pub pid: u32,
+    pub stdio: Option<ChildStdio>,
+}
+
+/// The supervisor's ends of a relayed child's stdin, stdout and stderr.
+pub struct ChildStdio {
+    pub stdin: std::process::ChildStdin,
+    pub stdout: std::process::ChildStdout,
+    pub stderr: std::process::ChildStderr,
+}
 
 impl ForkBroker {
     /// Start the fork thread. It runs until the last [`ForkBroker`] is dropped, which happens when
@@ -485,8 +508,8 @@ impl ForkBroker {
             .name("tddy-supervisor-fork".to_string())
             .spawn(move || {
                 let _handover_slots = handover_slots;
-                while let Some((plan, handover, reply)) = queue.blocking_recv() {
-                    let _ = reply.send(spawn_now(plan, handover));
+                while let Some((plan, handover, stdio, reply)) = queue.blocking_recv() {
+                    let _ = reply.send(spawn_now(plan, handover, stdio));
                 }
             })?;
         Ok(ForkBroker { jobs })
@@ -502,9 +525,30 @@ impl ForkBroker {
         plan: SpawnPlan,
         handover: Option<SocketHandover>,
     ) -> std::io::Result<u32> {
+        Ok(self.submit(plan, handover, StdioMode::Plan).await?.pid)
+    }
+
+    /// [`Self::spawn`] with the child's stdin, stdout and stderr piped to the supervisor — for a
+    /// relayed spawn, which hands them to [`crate::relay`]. Never takes a listener handover.
+    pub async fn spawn_piped(&self, plan: SpawnPlan) -> std::io::Result<(u32, ChildStdio)> {
+        let spawned = self.submit(plan, None, StdioMode::Piped).await?;
+        match spawned.stdio {
+            Some(stdio) => Ok((spawned.pid, stdio)),
+            None => Err(std::io::Error::other(
+                "a piped spawn came back without its pipes",
+            )),
+        }
+    }
+
+    async fn submit(
+        &self,
+        plan: SpawnPlan,
+        handover: Option<SocketHandover>,
+        stdio: StdioMode,
+    ) -> std::io::Result<SpawnedChild> {
         let (reply, answer) = oneshot::channel();
         self.jobs
-            .send((plan, handover, reply))
+            .send((plan, handover, stdio, reply))
             .map_err(|_| std::io::Error::other("the fork thread has stopped"))?;
         answer
             .await
@@ -512,13 +556,26 @@ impl ForkBroker {
     }
 }
 
-fn spawn_now(plan: SpawnPlan, handover: Option<SocketHandover>) -> std::io::Result<u32> {
+fn spawn_now(
+    plan: SpawnPlan,
+    handover: Option<SocketHandover>,
+    stdio: StdioMode,
+) -> std::io::Result<SpawnedChild> {
     let mut command = Command::new(&plan.program);
     command.args(&plan.args);
-    command.stdin(Stdio::null());
-    if !plan.inherit_output {
-        command.stdout(Stdio::null());
-        command.stderr(Stdio::null());
+    match stdio {
+        StdioMode::Plan => {
+            command.stdin(Stdio::null());
+            if !plan.inherit_output {
+                command.stdout(Stdio::null());
+                command.stderr(Stdio::null());
+            }
+        }
+        StdioMode::Piped => {
+            command.stdin(Stdio::piped());
+            command.stdout(Stdio::piped());
+            command.stderr(Stdio::piped());
+        }
     }
     // Deliberately no `Command::env` anywhere above: `Command` installs its own environment *after*
     // the `pre_exec` closure has run, which would discard the one variable only the child can know —
@@ -531,8 +588,22 @@ fn spawn_now(plan: SpawnPlan, handover: Option<SocketHandover>) -> std::io::Resu
         command.pre_exec(move || steps.run());
     }
 
-    let child = command.spawn()?;
-    Ok(child.id())
+    let mut child = command.spawn()?;
+    let pid = child.id();
+    let stdio = match (
+        stdio,
+        child.stdin.take(),
+        child.stdout.take(),
+        child.stderr.take(),
+    ) {
+        (StdioMode::Piped, Some(stdin), Some(stdout), Some(stderr)) => Some(ChildStdio {
+            stdin,
+            stdout,
+            stderr,
+        }),
+        _ => None,
+    };
+    Ok(SpawnedChild { pid, stdio })
 }
 
 /// The pre-computed instructions the child executes between `fork` and `exec`.

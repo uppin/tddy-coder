@@ -7,6 +7,16 @@ use tddy_discovery::subagent::SubagentError;
 
 use crate::catalog::CodingAgentDef;
 
+/// How the ACP driver reaches the agent a launcher started.
+#[derive(Debug)]
+pub enum AgentTransport {
+    /// A command the driver spawns itself, as the daemon's own user (or already wrapped to switch).
+    Command(AcpAgentCommand),
+    /// A connected stream to an agent started elsewhere — by `tddy-supervisor` as the session's OS
+    /// user, its stdio relayed over this stream. Closing it ends the agent.
+    Stream(std::os::unix::net::UnixStream),
+}
+
 /// Everything a launch needs to know about the conversation it serves.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CodingAgentLaunch {
@@ -50,6 +60,16 @@ pub trait CodingAgentLauncher: Send + Sync {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<AcpAgentCommand, SubagentError>;
+
+    /// How the driver reaches the agent. By default the [`AcpAgentCommand`] of [`Self::command_for`];
+    /// a launcher that starts the agent somewhere the driver cannot spawn (another user's, through
+    /// a supervisor) overrides it to hand back a stream.
+    async fn launch_transport(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<AgentTransport, SubagentError> {
+        self.command_for(launch).await.map(AgentTransport::Command)
+    }
 
     /// The MCP servers the ACP session is opened with. By default the launch's own; a launcher that
     /// has to complete them (resolve the binary, mint the agent's tool credential) overrides it.

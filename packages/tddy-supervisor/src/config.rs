@@ -185,6 +185,11 @@ pub struct SpawnPolicy {
     /// Absolute paths of tools a session may exec.
     #[serde(default)]
     pub allowed_tool_paths: Vec<PathBuf>,
+    /// Absolute paths of coding-agent harness binaries that may be run with their stdio relayed over
+    /// a caller-owned socket (`SpawnRelayed`). **Empty by default: relayed spawning is off.** It is a
+    /// list of its own, not `allowed_tool_paths`, so granting a session tool never grants a relay.
+    #[serde(default)]
+    pub allowed_relay_tool_paths: Vec<PathBuf>,
     /// Roots under which a sandbox bind-mount source must fall.
     #[serde(default)]
     pub allowed_mount_roots: Vec<PathBuf>,
@@ -386,6 +391,9 @@ impl SupervisorConfig {
         }
         for tool in &self.spawn_policy.allowed_tool_paths {
             require_absolute("allowed_tool_paths entry", tool)?;
+        }
+        for tool in &self.spawn_policy.allowed_relay_tool_paths {
+            require_absolute("allowed_relay_tool_paths entry", tool)?;
         }
         for root in &self.spawn_policy.allowed_mount_roots {
             require_absolute("allowed_mount_roots entry", root)?;
@@ -610,6 +618,26 @@ mod tests {
             config.spawn_policy.allowed_mount_roots,
             Vec::<PathBuf>::new()
         );
+    }
+
+    #[test]
+    fn defaults_to_relaying_no_harness() {
+        let config = SupervisorConfig::from_yaml(a_minimal_config()).expect("parse config");
+
+        assert_eq!(
+            config.spawn_policy.allowed_relay_tool_paths,
+            Vec::<PathBuf>::new()
+        );
+    }
+
+    #[test]
+    fn refuses_a_relay_tool_path_that_is_not_absolute() {
+        let yaml = format!(
+            "{}\nspawn_policy:\n  allowed_relay_tool_paths: [\"bin/opencode\"]\n",
+            a_minimal_config()
+        );
+
+        assert!(SupervisorConfig::from_yaml(&yaml).is_err());
     }
 
     #[test]

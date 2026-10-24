@@ -24,6 +24,14 @@ service SupervisorService {
   // a sandbox request that names host paths, so it is the part a compromised caller reaches for.
   rpc SpawnSandbox(SpawnSandboxRequest) returns (SpawnedProcess);
 
+  // Spawn an allowlisted coding-agent harness as another OS user with its stdin, stdout and stderr
+  // relayed over a unix socket the caller owns. The caller binds a listening socket at
+  // `relay_socket` first; the supervisor connects to it, verifies the listener is the caller, and
+  // relays bytes until the child exits. Gated by its own allowlist (allowed_relay_tool_paths, empty
+  // by default) beside the session-user and environment gates SpawnSession passes. The child's exit
+  // status and its stop travel over SessionStatus / StopSession, keyed by the returned pid.
+  rpc SpawnRelayed(SpawnRelayedRequest) returns (SpawnedProcess);
+
   // What became of a session. The supervisor reaps its own children, so it is the only process that
   // can answer this — a caller cannot `waitpid` a process it did not fork. A pid the supervisor
   // never spawned is refused rather than reported on, so this cannot become a liveness oracle for
@@ -81,6 +89,19 @@ message SpawnSessionRequest {
   optional string working_dir = 5;
   // Name of an existing scope the child joins before it drops privilege and execs.
   optional string scope = 6;
+}
+
+message SpawnRelayedRequest {
+  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  string os_user = 1;
+  // Must appear verbatim in the policy's allowed_relay_tool_paths — not allowed_tool_paths.
+  string tool_path = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;
+  optional string working_dir = 5;
+  // Absolute path of a unix socket the caller is listening on, owned by the caller's uid. A path
+  // crosses a process boundary, a file descriptor does not.
+  string relay_socket = 6;
 }
 
 message SpawnedProcess {

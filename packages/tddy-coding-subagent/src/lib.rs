@@ -10,6 +10,6 @@ pub mod session;
 
 pub use catalog::{coding_agent_defs, coding_agent_defs_in, CodingAgentDef, ACP_HARNESSES};
 pub use confinement::{confinement_for, withdrawal_env, withdrawal_session_meta, Confinement};
-pub use launcher::{CodingAgentLaunch, CodingAgentLauncher};
+pub use launcher::{AgentTransport, CodingAgentLaunch, CodingAgentLauncher};
 pub use permissions::DenyAndRecord;
 pub use session::{CancelHandle, CodingAgentSession};

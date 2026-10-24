@@ -16,8 +16,8 @@ use crate::error::SupervisorError;
 use crate::proto::supervisor as wire;
 use crate::protocol;
 use crate::request::{
-    CreateScopeRequest, ScopeHandle, SessionStatus, SpawnSandboxRequest, SpawnSessionRequest,
-    SpawnedProcess,
+    CreateScopeRequest, ScopeHandle, SessionStatus, SpawnRelayedRequest, SpawnSandboxRequest,
+    SpawnSessionRequest, SpawnedProcess,
 };
 use crate::server::SERVICE_NAME;
 use crate::service::ServiceStatus;
@@ -137,6 +137,18 @@ impl SupervisorClient {
     ) -> Result<SpawnedProcess, SupervisorError> {
         let spawned: wire::SpawnedProcess = self
             .call("SpawnSession", protocol::spawn_session_to_wire(request)?)
+            .await?;
+        Ok(protocol::spawned_process_from_wire(spawned))
+    }
+
+    /// Spawn an allowlisted coding-agent harness as an allowlisted OS user, its stdio relayed over
+    /// the unix socket `request.relay_socket`, which the caller must already be listening on.
+    pub async fn spawn_relayed(
+        &self,
+        request: SpawnRelayedRequest,
+    ) -> Result<SpawnedProcess, SupervisorError> {
+        let spawned: wire::SpawnedProcess = self
+            .call("SpawnRelayed", protocol::spawn_relayed_to_wire(request)?)
             .await?;
         Ok(protocol::spawned_process_from_wire(spawned))
     }

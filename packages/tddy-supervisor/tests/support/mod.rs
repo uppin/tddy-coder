@@ -122,6 +122,7 @@ pub struct SupervisorFixture {
     services: Vec<ServiceFixture>,
     allowed_session_users: Vec<String>,
     allowed_tool_paths: Vec<PathBuf>,
+    allowed_relay_tool_paths: Vec<PathBuf>,
     allowed_mount_roots: Vec<PathBuf>,
     memory_max_ceiling: Option<u64>,
     cpu_max_ceiling: Option<String>,
@@ -135,6 +136,7 @@ pub fn a_supervisor() -> SupervisorFixture {
         services: Vec::new(),
         allowed_session_users: Vec::new(),
         allowed_tool_paths: Vec::new(),
+        allowed_relay_tool_paths: Vec::new(),
         allowed_mount_roots: Vec::new(),
         memory_max_ceiling: None,
         cpu_max_ceiling: None,
@@ -162,6 +164,12 @@ impl SupervisorFixture {
 
     pub fn allowing_tool(mut self, tool_path: &Path) -> Self {
         self.allowed_tool_paths.push(tool_path.to_path_buf());
+        self
+    }
+
+    /// Allow `tool_path` as a harness binary a relayed spawn may exec (off unless this is called).
+    pub fn allowing_relay_tool(mut self, tool_path: &Path) -> Self {
+        self.allowed_relay_tool_paths.push(tool_path.to_path_buf());
         self
     }
 
@@ -244,6 +252,7 @@ impl SupervisorFixture {
                 "spawn_policy:\n",
                 "  allowed_session_users: [{users}]\n",
                 "  allowed_tool_paths: [{tools}]\n",
+                "  allowed_relay_tool_paths: [{relay_tools}]\n",
                 "  allowed_mount_roots: [{mount_roots}]\n",
                 "cgroup:\n",
                 "  base_override: {base}\n",
@@ -263,6 +272,13 @@ impl SupervisorFixture {
             tools = yaml_list(
                 &self
                     .allowed_tool_paths
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+            ),
+            relay_tools = yaml_list(
+                &self
+                    .allowed_relay_tool_paths
                     .iter()
                     .map(|p| p.display().to_string())
                     .collect::<Vec<_>>()
@@ -575,6 +591,19 @@ pub fn a_tool_that_exits_with(code: i32) -> ToolFixture {
     let path = workspace.path().join("exiting-tool");
     let parent_pid_log = workspace.path().join("parent.pid");
     write_script(&path, &format!("exit {code}"));
+    ToolFixture {
+        path,
+        parent_pid_log,
+        _workspace: workspace,
+    }
+}
+
+/// A harness stand-in that echoes its stdin to its stdout, for asserting on a relayed spawn.
+pub fn a_tool_that_echoes_its_stdin() -> ToolFixture {
+    let workspace = TempDir::new().expect("create tool workspace");
+    let path = workspace.path().join("echoing-tool");
+    let parent_pid_log = workspace.path().join("parent.pid");
+    write_script(&path, "exec cat");
     ToolFixture {
         path,
         parent_pid_log,
