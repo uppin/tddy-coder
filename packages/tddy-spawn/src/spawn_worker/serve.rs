@@ -20,7 +20,10 @@ pub(super) fn serve(request_reader: File, response_writer: File) {
         for line in BufReader::new(request_reader).lines() {
             let line = match line {
                 Ok(line) => line,
-                Err(_) => break,
+                Err(e) => {
+                    log::error!("spawn_worker: reading the request pipe failed: {}", e);
+                    break;
+                }
             };
             log::info!("spawn_worker: received request ({} bytes)", line.len());
             let out = &response_writer;

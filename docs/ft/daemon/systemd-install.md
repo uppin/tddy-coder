@@ -76,6 +76,15 @@ The generated unit uses **`ExecStart`** pointing at the resolved **`tddy-supervi
 - **AppArmor load is best-effort** — a missing **or failing** `apparmor_parser -r` (a host with no AppArmor LSM) is a warning; it must not abort an otherwise complete install before the units are enabled.
 - **Daemon state** — both `/var/log/tddy-daemon` and the `auth_storage` directory `/var/lib/tddy/auth` itself are created and chowned to the service user (the `auth` directory at mode `0700`). The daemon refuses to start when `auth_storage` is unwritable, so creating only its parent left a fresh host crash-looping.
 
+## Spawn worker (unsupervised hosts)
+
+With `--user` (and in Tddy Desktop) there is no supervisor, so the daemon starts sessions and clones
+repositories through a worker process it forks before its async runtime starts. The worker serves
+requests concurrently: a session start requested while a clone is running completes without waiting for
+the clone, each request receives only its own result, and a clone reports its `git` pid as soon as it is
+running. If the worker exits, every pending request fails at once with an error naming the worker's pid;
+the worker is not restarted. Implementation: [tddy-spawn — the spawn worker](../../../packages/tddy-spawn/docs/spawn-worker.md).
+
 ## One root process (privilege boundary)
 
 The unit runs **`tddy-supervisor`** as root; everything network-facing runs unprivileged:

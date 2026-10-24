@@ -7,7 +7,7 @@
 //! on the child's `PATH` through the request's own environment, as the current OS user, so nothing
 //! needs root and nothing touches the network.
 //!
-//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-worker-mux.md
+//! Feature docs: docs/ft/daemon/systemd-install.md (§ Spawn worker); packages/tddy-spawn/docs/spawn-worker.md
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
@@ -99,27 +99,33 @@ impl AWorker {
 
 #[test]
 fn a_fast_clone_completes_while_a_slow_clone_is_still_running() {
-    // Given — a clone that takes three seconds is in flight
+    // Given — a clone that takes ten seconds is in flight. The margins are wide on purpose: on a
+    // loaded host each clone's `sh` and `id` spawns alone can take seconds, so the bound proves
+    // "did not queue behind the slow clone", not "was fast".
     let worker = Arc::new(a_worker());
-    let slow_request = worker.a_clone_of("https://example.invalid/slow.git", "slow", 3);
+    let slow_request = worker.a_clone_of("https://example.invalid/slow.git", "slow", 10);
     let slow_client = worker.client.clone();
     let slow = std::thread::spawn(move || slow_client.clone_repo(slow_request));
     std::thread::sleep(Duration::from_millis(200));
+    let fast_request = worker.a_clone_of("https://example.invalid/fast.git", "fast", 0);
 
     // When — a quick one is asked for
     let started = Instant::now();
     worker
         .client
-        .clone_repo(worker.a_clone_of("https://example.invalid/fast.git", "fast", 0))
+        .clone_repo(fast_request)
         .expect("the quick clone succeeds");
+    let fast_took = started.elapsed();
 
     // Then — it did not wait behind the slow one, which is still going
     assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "the quick clone took {:?}: it queued behind the slow one",
-        started.elapsed()
+        fast_took < Duration::from_secs(5),
+        "the quick clone took {fast_took:?}: it queued behind the ten-second one"
     );
-    assert!(!slow.is_finished(), "the slow clone is still running");
+    assert!(
+        !slow.is_finished(),
+        "the slow clone is still running after the quick one finished"
+    );
     slow.join().unwrap().expect("the slow clone succeeds too");
 }
 
