@@ -450,3 +450,32 @@ async fn updates_stream_as_tool_calls_and_text() {
         ]
     );
 }
+
+#[tokio::test]
+#[serial]
+async fn session_meta_reaches_session_new() {
+    // Given
+    let stub = a_stub_agent();
+    let driver = stub.spawn_driver();
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        "claudeCode".to_string(),
+        serde_json::json!({ "options": { "disallowedTools": ["Bash", "Edit"] } }),
+    );
+
+    // When
+    driver
+        .open_session(OpenSession {
+            meta: Some(meta),
+            ..a_fresh_session_in(stub.dir.path())
+        })
+        .await
+        .expect("open session");
+
+    // Then
+    let new_session = stub.recorded("new_session");
+    assert_eq!(
+        new_session[0]["meta"],
+        serde_json::json!({ "claudeCode": { "options": { "disallowedTools": ["Bash", "Edit"] } } })
+    );
+}

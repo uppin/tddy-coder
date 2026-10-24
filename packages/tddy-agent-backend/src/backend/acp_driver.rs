@@ -59,6 +59,9 @@ pub struct OpenSession {
     /// the offered ones — never a silent fallback to the agent's default.
     pub model: Option<String>,
     pub mcp_servers: Vec<McpServerSpec>,
+    /// Sent verbatim as `_meta` on `session/new` / `session/load` — where an adapter reads options
+    /// the protocol has no field for (`claude-agent-acp` reads `disallowedTools` there).
+    pub meta: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// An opened ACP session.
@@ -261,6 +264,7 @@ pub(super) fn open_for_request(
             request.model.clone()
         },
         mcp_servers: Vec::new(),
+        meta: None,
     })
 }
 

@@ -104,6 +104,7 @@ impl acp::Agent for StubAgent {
             "session_id": session_id.to_string(),
             "cwd": args.cwd,
             "mcp_servers": mcp_server_names(&args.mcp_servers),
+            "meta": args.meta,
         }));
         Ok(
             acp::NewSessionResponse::new(acp::SessionId::new(session_id.to_string()))
@@ -119,6 +120,7 @@ impl acp::Agent for StubAgent {
             "event": "load_session",
             "session_id": args.session_id.0.to_string(),
             "mcp_servers": mcp_server_names(&args.mcp_servers),
+            "meta": args.meta,
         }));
         Ok(acp::LoadSessionResponse::default().models(self.advertised_models()))
     }
