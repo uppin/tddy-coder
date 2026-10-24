@@ -23,6 +23,20 @@ pub enum SpawnBackendChoice {
     ForkedWorker,
 }
 
+impl SpawnBackendChoice {
+    /// Decide the spawn backend from how this process was started: `Supervisor` when
+    /// `tddy-supervisor` told it its socket (`TDDY_SUPERVISOR_SOCKET`), `ForkedWorker` otherwise.
+    /// `env` reads one variable (`std::env::var_os` in production), so the decision is testable
+    /// without touching process-wide state.
+    pub fn from_environment(
+        env: impl Fn(&str) -> Option<std::ffi::OsString>,
+    ) -> SpawnBackendChoice {
+        // TODO(supervisor-handoff): implement
+        let _ = env;
+        SpawnBackendChoice::ForkedWorker
+    }
+}
+
 /// Decide the spawn backend from configuration. Pure — performs no I/O.
 pub fn spawn_backend_choice(config: &DaemonConfig) -> SpawnBackendChoice {
     match &config.supervisor {

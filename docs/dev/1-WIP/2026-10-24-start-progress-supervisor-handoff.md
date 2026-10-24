@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Bug Fix
 **Complexity**: 4 — many crates (supervisor, spawn, kernel, daemon, desktop, agent-launch, daemon-rpc, telegram-control), a config contract removal with migration in `./install`
-**Stack**: #start-progress 3/8. Base: `feature/start-progress/worker-mux`.
+**Stack**: #start-progress 3/8. PR: #736. Base: `feature/start-progress/worker-mux`.
 
 ## Initial Discovery
 
@@ -200,10 +200,10 @@ Per package as listed in Responsibility.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived by the developer for the whole of pass 2, 2026-10-24)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests (`./test -p tddy-supervisor -p tddy-spawn -p tddy-daemon-kernel -p tddy-e2e` + compile of the injected crates); full-workspace result from CI

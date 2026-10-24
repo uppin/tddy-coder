@@ -1,27 +1,35 @@
 //! How the daemon decides where privileged work goes, and what happens when the supervisor it
 //! was told about is not there.
+//!
+//! The decision follows how the daemon was started: `tddy-supervisor` tells a managed service its
+//! socket in `TDDY_SUPERVISOR_SOCKET`; anything else — the desktop app, `./install --user`, a
+//! daemon run by hand — forks its own spawn worker. There is no config switch to drift from that.
+//!
+//! Feature docs: docs/ft/daemon/1-WIP/PRD-2026-10-24-start-progress-supervisor-handoff.md
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
-use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_spawn::supervisor_client::{connect_supervisor, spawn_backend_choice, SpawnBackendChoice};
+use tddy_spawn::supervisor_client::{connect_supervisor, SpawnBackendChoice};
 
-fn a_daemon_config(yaml: &str) -> DaemonConfig {
-    serde_yaml::from_str(yaml).expect("parse daemon config")
+fn an_environment_with(
+    name: &'static str,
+    value: &'static str,
+) -> impl Fn(&str) -> Option<OsString> {
+    move |asked| (asked == name).then(|| OsString::from(value))
+}
+
+fn an_empty_environment(_: &str) -> Option<OsString> {
+    None
 }
 
 #[test]
-fn delegates_spawning_to_the_supervisor_when_the_config_declares_a_socket() {
-    // Given
-    let config = a_daemon_config(
-        r#"
-supervisor:
-  socket_path: /run/tddy-supervisor.sock
-"#,
-    );
-
+fn a_daemon_told_of_a_supervisor_spawns_through_it() {
     // When
-    let choice = spawn_backend_choice(&config);
+    let choice = SpawnBackendChoice::from_environment(an_environment_with(
+        "TDDY_SUPERVISOR_SOCKET",
+        "/run/tddy-supervisor.sock",
+    ));
 
     // Then
     assert_eq!(
@@ -33,15 +41,11 @@ supervisor:
 }
 
 #[test]
-fn keeps_the_forked_spawn_worker_when_no_supervisor_is_declared() {
-    // Given
-    let config = a_daemon_config("users: []\n");
-
-    // When
-    let choice = spawn_backend_choice(&config);
-
-    // Then
-    assert_eq!(choice, SpawnBackendChoice::ForkedWorker);
+fn a_daemon_not_told_of_a_supervisor_forks_its_own_worker() {
+    assert_eq!(
+        SpawnBackendChoice::from_environment(an_empty_environment),
+        SpawnBackendChoice::ForkedWorker
+    );
 }
 
 #[tokio::test]

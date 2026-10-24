@@ -855,6 +855,24 @@ mod startup_and_warmup_timing_tests {
     }
 
     #[test]
+    fn a_daemon_yaml_with_a_supervisor_block_is_refused_as_obsolete() {
+        // Given a daemon.yaml written before tddy-supervisor told the daemon its socket
+        let refused =
+            a_daemon_loaded_from("supervisor:\n  socket_path: /run/tddy-supervisor.sock\n")
+                .expect_err("an obsolete supervisor block must not load");
+
+        // Then the refusal names the block, says why it is obsolete and what to do, rather than
+        // serde's bare "unknown field"
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("`supervisor:`")
+                && message.contains("obsolete")
+                && message.contains("Delete the block"),
+            "the refusal must name the block and the remedy; got {message}"
+        );
+    }
+
+    #[test]
     fn a_session_room_git_timeout_below_the_floor_is_refused_too() {
         // Given a daemon YAML whose git budget is too short for git to ever answer in
         let refused =

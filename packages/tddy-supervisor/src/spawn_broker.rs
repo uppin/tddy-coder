@@ -1305,6 +1305,13 @@ const LISTEN_PID_PREFIX: &[u8] = b"LISTEN_PID=";
 /// Room for every digit of a `pid_t`.
 const LISTEN_PID_DIGITS: usize = 10;
 
+/// The variable a managed service is told the supervisor's privileged socket in.
+///
+/// Set by [`ChildEnvironment::build`] for a declared managed service, after the service's own
+/// `env:` overlay, so `supervisor.yaml` can neither set nor forge it; never set for a session or a
+/// sandbox. Its presence is how `tddy-daemon` knows it was started by a supervisor.
+pub const SUPERVISOR_SOCKET_ENV: &str = "TDDY_SUPERVISOR_SOCKET";
+
 /// Environment variables describing a socket activation. Removed from every child's environment
 /// before anything is added back, because they only ever describe one process.
 const ACTIVATION_VARIABLES: [&str; 3] = ["LISTEN_FDS", "LISTEN_PID", "LISTEN_FDNAMES"];
