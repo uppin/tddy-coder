@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-19 | 12 | first detection; signature unchanged by PR #518 |
 | 2026-10-22 | 12 | unchanged; PR #670 adds a fourth caller (`svc_start_sandboxed_cli_harness_session`), so an options struct now pays off at four sites |
+| 2026-10-25 | 12 | unchanged; PR #762 (`#term-snapshot` 3/4) carries the jail's size on the existing relay (`HostRelayConfig::with_terminal_events`) rather than a new parameter, and moves the terminal forwarder out of the body into `forward_jail_terminal_events` |
 
 ## What the tool found
 

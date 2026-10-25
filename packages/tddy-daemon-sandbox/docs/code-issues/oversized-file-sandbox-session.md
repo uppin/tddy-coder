@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-daemon-sandbox/src/sandbox_session.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/analyze-clean-code` on PR #518
-**Metrics:** **924 production lines** (2026-10-25; 911 at detection, of 1,147 total then) · budget 500 · **1.8× over**
-**Thresholds breached:** length 922 > 500; `dial_and_bridge` **12 parameters** > 5
+**Metrics:** **946 production lines** (2026-10-25, after #762; 911 at detection, of 1,147 total then) · budget 500 · **1.8× over**
+**Thresholds breached:** length 946 > 500; `dial_and_bridge` **12 parameters** > 5
 **Restructure:** `extract_module --to_file` — seam not yet designed
 **Status:** Open — regressed 2026-09-24 (911 → 916 in #509, `#keyring` 2/9, transport stamping; deferred with consent) — **unclaimed**
 
@@ -17,6 +17,7 @@
 | 2026-10-01 | 917 | **unchanged in kind** (+1 over master's 916) in PR #560 (`#agent-worktree` 1/4): `DaemonToolHandler::execute` now always calls `conversation_tool::execute_in_conversation` (which delegates on an empty conversation id), so the file carries no branch of its own; the conversation logic lives in `conversation_tool.rs`. Was +11 before that was folded. Decomposition still deferred |
 | 2026-10-22 | 922 | **worse** by 5 in PR #670 (`#provider-route` 9/9): `SandboxRunnerSpawn.route` and its doc, passed into the recipe plan. No logic added here; the route's handling is in `tddy-sandbox-recipes` (`plan.rs`, `route_files.rs`). Decomposition still deferred |
 | 2026-10-25 | 924 | **worse** by 2 in PR #760 (`#term-snapshot` 1/4): the jail's stdio loop broadcasts under the capture lock (the snapshot sequence point) — one line moved inside the lock plus its comment. Decomposition deferred with the developer's consent: the file is stack-shared with #762 and #763 |
+| 2026-10-25 | 946 | **worse** by 22 in PR #762 (`#term-snapshot` 3/4): `forward_jail_terminal_events`, which replaces the inline byte forwarder in `dial_and_bridge` and also resizes the capture when the jail reports a size. Deferred with the developer's consent: the file is stack-shared within `#term-snapshot` |
 
 ## What the tool found
 

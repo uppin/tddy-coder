@@ -304,9 +304,12 @@ the bidi `StreamSessionTerminalIO` open message (or on `StreamTerminalOutputRequ
   it never reaches the PTY — and answered with a refusal frame (`refused_input_offset`,
   `input_refusal` "terminal controlled by another screen"); the stream stays open, so re-claiming
   control resumes typing.
-- **Jailed terminals refuse it.** The daemon does not yet know a sandboxed PTY's size, so a
-  `SNAPSHOT` open of a jailed terminal is refused with `FAILED_PRECONDITION` until `#term-snapshot`
-  3/4 ([#762](https://github.com/uppin/tddy-coder/pull/762)).
+- **Jailed terminals snapshot at the jail's size.** The daemon cannot see or resize a sandboxed PTY,
+  so the runner inside the jail reports the size it applied — once when the PTY opens and again
+  after every resize — in order with its output. The daemon's screen model follows each report at
+  that point in the output stream, so the snapshot is serialized at the jail's current grid. A jailed
+  terminal that has not reported a size yet refuses a `SNAPSHOT` open with `FAILED_PRECONDITION`; it
+  is never serialized at a guessed size.
 - A watcher whose grid differs from the PTY's sees the snapshot at the PTY's size.
 
 The web terminal opens **every** stream this way (see [Web terminal](../web/web-terminal.md)).
