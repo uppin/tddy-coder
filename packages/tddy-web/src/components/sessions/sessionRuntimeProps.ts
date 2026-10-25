@@ -22,6 +22,9 @@ export interface SessionRuntimeProps {
    *  shortcut overlay; backgrounded runtimes stay mounted but `display:none`. */
   focused: boolean;
   sessionToken: string;
+  /** The signed-in user's login, which an agent-conversation tab needs in order to cancel when it
+   *  is closed. `null` (the default) when none is signed in, and the closing cancel is refused. */
+  callerLogin?: string | null;
   /** Owning daemon `session_agents.SessionAgentService` client — the agent-conversation panes hold
    *  their conversation over it, and a spawned child runtime inherits it. Pass `null`/`undefined`
    *  until the daemon is reachable. */

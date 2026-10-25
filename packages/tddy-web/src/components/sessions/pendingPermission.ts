@@ -77,3 +77,31 @@ export function answeredRecordOf(rawOutput: string | undefined): AnsweredRecord 
   if (typeof optionId === "string" && optionId !== "") return { answeredBy, optionId };
   return null;
 }
+
+/** The answer fields an entry shows for a permission request, read from its recorded answer. */
+export interface PermissionAnswerFields {
+  /** Who answered the request, or who cancelled it. */
+  readonly answeredBy: string;
+  /** True when the request was cancelled rather than answered with an option. */
+  readonly answeredCancelled: boolean;
+  /** The option the answer chose; absent for a cancellation. */
+  readonly answeredOptionId?: string;
+}
+
+/**
+ * The answer fields a permission request's completed tool call records, or `null` when it records
+ * no answer. A cancellation names the actor who cancelled the request and carries no option; an
+ * option answer names the option and the user who chose it.
+ */
+export function answerFieldsOf(rawOutput: string | undefined): PermissionAnswerFields | null {
+  const record = answeredRecordOf(rawOutput);
+  if (record === null) return null;
+  if (record.optionId === null) {
+    return { answeredBy: record.answeredBy, answeredCancelled: true };
+  }
+  return {
+    answeredBy: record.answeredBy,
+    answeredCancelled: false,
+    answeredOptionId: record.optionId,
+  };
+}

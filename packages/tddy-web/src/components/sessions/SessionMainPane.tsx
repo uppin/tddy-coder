@@ -46,6 +46,7 @@ export function SessionMainPane({
   prStackClient,
   host,
   sessionToken = "",
+  callerLogin = null,
   onCancelCreate,
   onSessionCreated,
   room = null,
@@ -176,6 +177,7 @@ export function SessionMainPane({
           }
           focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
+          callerLogin={callerLogin}
           client={sessionAgentClient}
           terminalClient={terminalClient}
           mobileShortcuts={mobileShortcuts}

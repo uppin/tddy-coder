@@ -5,7 +5,7 @@ import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpToolCallDetail } from "../chat/useAcpToolCallDetail";
 import type { PendingPermission } from "./PermissionRequestEntry";
 import { PermissionRequestEntry } from "./PermissionRequestEntry";
-import { answeredRecordOf, permissionRequestOf } from "./pendingPermission";
+import { answerFieldsOf, permissionRequestOf } from "./pendingPermission";
 import type { RosterHalf } from "./sessionRosterHalf";
 
 export interface TranscriptPermissionRequestProps {
@@ -85,15 +85,8 @@ export function TranscriptPermissionRequest({
   }
   // Only a completed call carries the answer. A call still running has none yet, whatever its
   // output holds, so the request stays open and its options stay offered.
-  const answer = message.toolStatus === "completed" ? answeredRecordOf(detail.rawOutput) : null;
-  const answered: PendingPermission =
-    answer === null
-      ? permission
-      : {
-          ...permission,
-          answeredBy: answer.answeredBy,
-          answeredOptionId: answer.optionId ?? undefined,
-        };
+  const answer = message.toolStatus === "completed" ? answerFieldsOf(detail.rawOutput) : null;
+  const answered: PendingPermission = answer === null ? permission : { ...permission, ...answer };
   return (
     <PermissionRequestEntry
       conversationId={conversationId}

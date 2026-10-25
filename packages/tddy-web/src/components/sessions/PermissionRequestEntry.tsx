@@ -15,10 +15,12 @@ export interface PendingPermission {
   options: { optionId: string; name: string; kind: string }[];
   /** The main agent handed it to the user — only then does the entry offer the options. */
   deferredToUser: boolean;
-  /** Who answered it, once answered. */
+  /** Who answered it, once answered — or who cancelled it, when it was cancelled. */
   answeredBy?: string;
   /** The option the answer chose; absent when the answer was a cancellation. */
   answeredOptionId?: string;
+  /** True when the request was cancelled by `answeredBy` rather than answered with an option. */
+  answeredCancelled?: boolean;
 }
 
 export interface PermissionRequestEntryProps {
@@ -57,6 +59,8 @@ export function PermissionRequestEntry({
   // the choice is final and no option is offered again.
   const answeredBy = recorded?.answeredBy ?? permission.answeredBy ?? null;
   const answeredOptionId = recorded?.optionId ?? permission.answeredOptionId;
+  // Only the transcript can record a cancellation; an answer this entry sent is always an option.
+  const cancelled = recorded === null && permission.answeredCancelled === true;
   const awaitingAnswer = permission.deferredToUser && answeredBy === null;
   const offerOptions = awaitingAnswer && ownerKnown;
   const cannotAnswer = awaitingAnswer && !ownerKnown;
@@ -97,7 +101,7 @@ export function PermissionRequestEntry({
       )}
       {answeredBy !== null && (
         <p data-testid="permission-answered" className="text-muted-foreground">
-          {chosen ? `${chosen.name} · answered by ${answeredBy}` : `Answered by ${answeredBy}`}
+          {answerSummary({ answeredBy, cancelled, chosenName: chosen?.name })}
         </p>
       )}
       {error !== null && (
@@ -107,4 +111,20 @@ export function PermissionRequestEntry({
       )}
     </section>
   );
+}
+
+/** What the entry says of a recorded answer: who cancelled the request, or the option chosen and
+ *  who chose it. */
+function answerSummary({
+  answeredBy,
+  cancelled,
+  chosenName,
+}: {
+  answeredBy: string;
+  cancelled: boolean;
+  chosenName: string | undefined;
+}): string {
+  if (cancelled) return `Cancelled by ${answeredBy}`;
+  if (chosenName === undefined) return `Answered by ${answeredBy}`;
+  return `${chosenName} · answered by ${answeredBy}`;
 }
