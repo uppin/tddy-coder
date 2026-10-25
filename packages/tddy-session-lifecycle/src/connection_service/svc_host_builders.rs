@@ -47,6 +47,12 @@ impl DaemonSessionHost {
         // report READY for a clone nobody built.
         let session_agent_clones =
             Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
+        let worktree_size_calculator = Arc::new(
+            tddy_worktree_service::worktrees::WorktreeSizeCalculator::new(
+                tddy_worktree_service::worktrees::projects_stats_cache_root(&tddy_data_dir),
+                tddy_worktree_service::worktrees::DAEMON_SIZE_WALK_PERMITS,
+            ),
+        );
         Self {
             config,
             sessions_base_for_user,
@@ -81,6 +87,7 @@ impl DaemonSessionHost {
             agent_conversation_frames: Arc::new(
                 tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
             ),
+            worktree_size_calculator,
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
             ),
@@ -145,6 +152,28 @@ impl DaemonSessionHost {
                 session_dir: session_dir.to_path_buf(),
             },
         })
+    }
+
+    /// Install the worktree size calculator this host reads (builder). The daemon passes the one its
+    /// worktree service streams from, so the Worktrees screen and the project-home worktree tools
+    /// share one calculation state.
+    #[must_use]
+    pub fn with_worktree_size_calculator(
+        mut self,
+        calculator: Arc<tddy_worktree_service::worktrees::WorktreeSizeCalculator>,
+    ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_worktree_size_calculator");
+        self.worktree_size_calculator = calculator;
+        self
+    }
+
+    /// The worktree size calculator this host reads, shared rather than copied, so a handler that
+    /// lists worktrees agrees with the Worktrees screen on what is being calculated.
+    #[must_use]
+    pub fn worktree_size_calculator(
+        &self,
+    ) -> Arc<tddy_worktree_service::worktrees::WorktreeSizeCalculator> {
+        Arc::clone(&self.worktree_size_calculator)
     }
 
     /// Share this daemon's model registry (builder), so an assistant defined in it is listed by

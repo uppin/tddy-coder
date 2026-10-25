@@ -30,7 +30,7 @@ use crate::project_storage;
 use crate::stream::{worktree_file_frames, MpscResultStream, MpscWorktreeStatsStream};
 use crate::worktrees::{
     self, CleanWorktreeError, RemoveWorktreeError, WorktreeDiffRow, WorktreeSizeCalculator,
-    WorktreeSizeStatus, WorktreeStatsCache,
+    WorktreeSizeStatus, WorktreeStatsCache, DAEMON_SIZE_WALK_PERMITS,
 };
 
 /// What must stop watching a checkout before it is taken away: the daemon's session rooms, through
@@ -82,8 +82,10 @@ impl WorktreeServiceImpl {
         let cache_root = worktrees::projects_stats_cache_root(&tddy_data_dir);
         Self {
             worktree_stats_cache: Arc::new(WorktreeStatsCache::new(cache_root.clone())),
-            // Daemon-global cap of 2 concurrent size walks.
-            worktree_size_calculator: Arc::new(WorktreeSizeCalculator::new(cache_root, 2)),
+            worktree_size_calculator: Arc::new(WorktreeSizeCalculator::new(
+                cache_root,
+                DAEMON_SIZE_WALK_PERMITS,
+            )),
             session_rooms: Arc::new(NoSessionRooms),
             idle_tracker: None,
             tddy_data_dir,
@@ -121,6 +123,13 @@ impl WorktreeServiceImpl {
     #[must_use]
     pub fn worktree_stats_cache(&self) -> Arc<WorktreeStatsCache> {
         Arc::clone(&self.worktree_stats_cache)
+    }
+
+    /// The size calculator this service streams and sizes from, so a caller that lists worktrees
+    /// (the project-home tools) reads the same calculation state the Worktrees screen does.
+    #[must_use]
+    pub fn worktree_size_calculator(&self) -> Arc<WorktreeSizeCalculator> {
+        Arc::clone(&self.worktree_size_calculator)
     }
 
     fn record_rpc_activity(&self) {
@@ -174,28 +183,12 @@ impl WorktreeServiceImpl {
     /// before any directory is read, and a registered project whose checkout is missing on disk is
     /// `InvalidArgument` rather than an internal error — the registration is real, the path is not.
     fn resolve_main_repo(&self, os_user: &str, project_id: &str) -> Result<PathBuf, Status> {
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let local_id = local_instance_id_for_config(&self.config);
-        let main_repo_str =
-            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let main_repo = PathBuf::from(&main_repo_str);
-        if !main_repo.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-        Ok(main_repo)
+        project_main_repo_on_host(
+            &self.tddy_data_dir,
+            os_user,
+            &local_instance_id_for_config(&self.config),
+            project_id,
+        )
     }
 
     /// Authenticates the caller, resolves the project's main repo on this host, and confirms
@@ -232,6 +225,41 @@ impl WorktreeServiceImpl {
     fn request_timeout(&self) -> Duration {
         self.config.spawn_worker_request_timeout()
     }
+}
+
+/// The project's main repository on host `local_id`, read from `os_user`'s projects directory under
+/// `tddy_data_dir`, or the refusal that says why not.
+///
+/// Every worktree RPC starts with this, in this order, and so does the project-home worktree tools
+/// on the daemon: an unknown project is `NotFound` before any directory is read, and a registered
+/// project whose checkout is missing on disk is `InvalidArgument`.
+pub fn project_main_repo_on_host(
+    tddy_data_dir: &std::path::Path,
+    os_user: &str,
+    local_id: &str,
+    project_id: &str,
+) -> Result<PathBuf, Status> {
+    if project_id.is_empty() {
+        return Err(Status::invalid_argument("project_id is required"));
+    }
+    let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
+        .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+    project_storage::find_project(&projects_dir, project_id)
+        .map_err(|e| Status::internal(e.to_string()))?
+        .ok_or_else(|| Status::not_found("project not found"))?;
+
+    let main_repo_str =
+        project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+
+    let main_repo = PathBuf::from(&main_repo_str);
+    if !main_repo.exists() {
+        return Err(Status::invalid_argument(
+            "project main repo path does not exist",
+        ));
+    }
+    Ok(main_repo)
 }
 
 /// Run blocking git/filesystem work under a wall-clock cap, so a hung git cannot block an RPC
@@ -637,45 +665,53 @@ impl WorktreeService for WorktreeServiceImpl {
         let project_id = req.project_id.trim();
         let main_repo = self.resolve_main_repo(&os_user, project_id)?;
 
-        // Discover worktrees + branch/diff off the async runtime, without the size walk.
+        let calculator = Arc::clone(&self.worktree_size_calculator);
+
+        // Subscribe before the snapshot is read, so no Calculating/Cached transition after it is missed.
+        let mut updates = calculator.subscribe(project_id);
+
+        // Worktrees, their branch/diff and their size state, off the async runtime and without a
+        // size walk. The project-home worktree tools read this same snapshot.
         let repo = main_repo.clone();
-        let diff_rows = blocking_within(
+        let snapshot_calculator = Arc::clone(&calculator);
+        let snapshot_project = project_id.to_string();
+        let rows = blocking_within(
             self.request_timeout(),
             "StreamWorktreeStats: git worktree list + diff",
-            move || Ok(worktrees::list_worktree_diff_rows(&repo)),
+            move || {
+                Ok(worktrees::project_worktree_snapshot(
+                    &repo,
+                    &snapshot_calculator,
+                    &snapshot_project,
+                ))
+            },
         )
         .await?;
 
         // Branch/diff lookup keyed by path, so each later size update rebuilds a full row.
-        let diff_by_path: HashMap<PathBuf, WorktreeDiffRow> = diff_rows
+        let diff_by_path: HashMap<PathBuf, WorktreeDiffRow> = rows
             .iter()
-            .map(|r| (r.path.clone(), r.clone()))
+            .map(|r| (r.diff.path.clone(), r.diff.clone()))
             .collect();
 
-        let calculator = Arc::clone(&self.worktree_size_calculator);
-
-        // Subscribe before enqueuing so no Calculating/Cached transition is missed.
-        let mut updates = calculator.subscribe(project_id);
-
-        // Snapshot: current size state per worktree (before any enqueue triggered below).
-        let snapshot: Vec<WorktreeRow> = diff_rows
+        // Snapshot: the size state per worktree, as read before any enqueue triggered below.
+        let snapshot: Vec<WorktreeRow> = rows
             .iter()
             .map(|r| {
-                let state = calculator.state(project_id, &r.path);
                 worktree_row_from_diff(
-                    r,
-                    state.status,
-                    state.disk_bytes,
-                    state.calculated_at_unix_ms,
+                    &r.diff,
+                    r.size.status,
+                    r.size.disk_bytes,
+                    r.size.calculated_at_unix_ms,
                 )
             })
             .collect();
 
         // Lazily enqueue: all worktrees on recalculate_all, otherwise only the never-sized ones.
-        for r in &diff_rows {
-            let status = calculator.state(project_id, &r.path).status;
+        for r in &rows {
+            let status = calculator.state(project_id, &r.diff.path).status;
             if req.recalculate_all || status == WorktreeSizeStatus::None {
-                calculator.enqueue(project_id, &r.path).await;
+                calculator.enqueue(project_id, &r.diff.path).await;
             }
         }
 

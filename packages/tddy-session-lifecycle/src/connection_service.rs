@@ -149,6 +149,11 @@ pub struct DaemonSessionHost {
     /// The live frames of every daemon-run subagent conversation. One channel per conversation, shared
     /// by the session-agents recorder that publishes into it and the activity replay that tails it.
     agent_conversation_frames: Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames>,
+    /// The worktree size calculator the Worktrees screen streams from and the project-home worktree
+    /// tools list from. One instance per daemon: a listing that reads another calculator would not
+    /// see the calculations in flight. Replaced by [`Self::with_worktree_size_calculator`] with the
+    /// one the daemon's worktree service holds.
+    worktree_size_calculator: Arc<tddy_worktree_service::worktrees::WorktreeSizeCalculator>,
     /// What each agent session's own conversation says its agent is doing
     /// (`docs/ft/daemon/agent-session-status.md`), which `ListSessions` reports. Beside the hub it
     /// subscribes to, and shared across clones so the seed a listing paid for is not re-read by the

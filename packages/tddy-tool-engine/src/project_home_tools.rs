@@ -7,6 +7,8 @@
 //! | `StartSession` | starts a session in the project with any New-session option, on any eligible host, linked to the caller as its orchestrator ([`crate::start_session_args`]) |
 //! | `ReadSessionWorktree` | reads a file or lists a directory in a target session's worktree |
 //! | `DiffSessionWorktree` | a target worktree's diff against its base |
+//! | `ListWorktrees` | the project's worktrees as the Worktrees screen shows them, a page at a time ([`crate::project_home_worktree_tools`]) |
+//! | `GetWorktree` | one of those worktrees, with the session that owns it |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
@@ -37,6 +39,10 @@ use crate::project_home_diff::worktree_diff;
 use crate::project_home_git_tools::{
     execute_project_home_git_tool, is_project_home_git_tool, project_home_git_tool_defs,
 };
+use crate::project_home_worktree_tools::{
+    run_get_worktree, run_list_worktrees, worktree_tool_defs, WorktreeEntry, GET_WORKTREE,
+    LIST_WORKTREES,
+};
 use crate::read_only::is_project_home_allowed_tool;
 use crate::start_session_args::{
     start_session_schema, start_session_schema_without_choices, StartChoices, StartSessionArgs,
@@ -48,11 +54,16 @@ pub const LIST_PROJECT_SESSIONS: &str = "ListProjectSessions";
 pub const READ_SESSION_WORKTREE: &str = "ReadSessionWorktree";
 pub const DIFF_SESSION_WORKTREE: &str = "DiffSessionWorktree";
 
-/// Whether `name` is one of the four project-home tools.
+/// Whether `name` is one of the project-home tools.
 pub fn is_project_home_tool(name: &str) -> bool {
     matches!(
         name,
-        LIST_PROJECT_SESSIONS | START_SESSION | READ_SESSION_WORKTREE | DIFF_SESSION_WORKTREE
+        LIST_PROJECT_SESSIONS
+            | START_SESSION
+            | READ_SESSION_WORKTREE
+            | DIFF_SESSION_WORKTREE
+            | LIST_WORKTREES
+            | GET_WORKTREE
     )
 }
 
@@ -135,9 +146,12 @@ pub fn target_daemon_instance_id(args_json: &str) -> Option<String> {
 }
 
 /// Whether `name` is a project-home tool that acts on a target session, and so takes
-/// [`TARGET_DAEMON_INSTANCE_ID`]: read, diff, and the seven git tools.
+/// [`TARGET_DAEMON_INSTANCE_ID`]: read, diff, the two worktree tools and the seven git tools.
 pub fn is_project_home_target_tool(name: &str) -> bool {
-    matches!(name, READ_SESSION_WORKTREE | DIFF_SESSION_WORKTREE) || is_project_home_git_tool(name)
+    matches!(
+        name,
+        READ_SESSION_WORKTREE | DIFF_SESSION_WORKTREE | LIST_WORKTREES | GET_WORKTREE
+    ) || is_project_home_git_tool(name)
 }
 
 /// The [`TARGET_DAEMON_INSTANCE_ID`] property every target tool's schema carries.
@@ -189,17 +203,10 @@ pub trait ProjectHomePort: Send + Sync {
 
     /// Every worktree of `project_id` on this host, as the Worktrees screen's snapshot has them
     /// (`#start-parity` 3/9).
-    async fn list_worktrees(
-        &self,
-        project_id: &str,
-    ) -> anyhow::Result<Vec<crate::project_home_worktree_tools::WorktreeEntry>> {
-        // TODO(worktree-list): implement in the daemon's port
-        let _ = project_id;
-        anyhow::bail!("TODO(worktree-list): list_worktrees")
-    }
+    async fn list_worktrees(&self, project_id: &str) -> anyhow::Result<Vec<WorktreeEntry>>;
 }
 
-/// The four tools' definitions, as a client registers them before the daemon is asked:
+/// The project-home tools' definitions, as a client registers them before the daemon is asked:
 /// `StartSession`'s schema names no host or recipe choices
 /// ([`start_session_schema_without_choices`]).
 pub fn project_home_tool_defs() -> Vec<ToolDef> {
@@ -207,7 +214,7 @@ pub fn project_home_tool_defs() -> Vec<ToolDef> {
 }
 
 fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
-    vec![
+    let mut defs = vec![
         tool_def(
             LIST_PROJECT_SESSIONS,
             "List the other sessions of this project on every host, with their host, worktree, activity and status. A host that does not answer is named in unreachable_hosts.",
@@ -243,10 +250,12 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
                 "required": ["session_id"]
             }),
         ),
-    ]
+    ];
+    defs.extend(worktree_tool_defs());
+    defs
 }
 
-fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
+pub(crate) fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
     ToolDef {
         name: name.to_string(),
         description: description.to_string(),
@@ -277,6 +286,8 @@ pub async fn execute_project_home_tool(
         START_SESSION => start_session(port, home, args).await,
         READ_SESSION_WORKTREE => read_session_worktree(port, home, args).await,
         DIFF_SESSION_WORKTREE => diff_session_worktree(port, home, args).await,
+        LIST_WORKTREES => run_list_worktrees(port, home, args).await,
+        GET_WORKTREE => run_get_worktree(port, home, args).await,
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }
 }

@@ -21,6 +21,7 @@ use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecTools};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;
+use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
 
 /// The exec-tool RPCs: the caller's identity, the peer a split session's tools are forwarded
 /// to, and the three places a tool actually runs — this host's task registry, a workspace sandbox,
@@ -42,6 +43,9 @@ pub struct ExecToolRpcHandler {
     /// The routes a headless conversation's permission approval is answered through. `None` on a
     /// host with none wired, which refuses every approval.
     approval_routes: Option<Arc<ApprovalRoutes>>,
+    /// The size calculator the Worktrees screen streams from, shared with the host, so a project-home
+    /// `ListWorktrees` call reads the same calculation state (`#start-parity` 3/9).
+    worktree_sizes: Arc<WorktreeSizeCalculator>,
 }
 
 impl ExecToolRpcHandler {
@@ -60,6 +64,7 @@ impl ExecToolRpcHandler {
             credential_vaults: host.credential_vaults(),
             github_cli: host.github_cli(),
             approval_routes: host.approval_routes(),
+            worktree_sizes: host.worktree_size_calculator(),
         }
     }
 

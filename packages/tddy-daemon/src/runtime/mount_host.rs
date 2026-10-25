@@ -170,6 +170,7 @@ impl BuildContext {
         &self,
         mount: &mut Mount,
         shared: &Shared,
+        served: &Served,
         askpass_endpoint: Arc<tddy_host_service::askpass::AskpassEndpoint>,
     ) -> DaemonSessionHost {
         let config = &self.config;
@@ -216,6 +217,9 @@ impl BuildContext {
             Arc::clone(livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
         )
         .with_terminal_exposure(Arc::clone(terminal_exposure))
+        // The worktree service's own calculator, so the project-home worktree tools list the same
+        // calculation state the Worktrees screen streams.
+        .with_worktree_size_calculator(served.worktree_service_impl.worktree_size_calculator())
         .with_split_rooms(split_rooms)
         .with_model_registry(Arc::clone(model_registry))
         .with_coding_agent_launcher(Arc::new(
