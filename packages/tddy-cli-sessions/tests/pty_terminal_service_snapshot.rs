@@ -51,7 +51,9 @@ impl TerminalExposure for CapturingExposure {
         _metadata_json: Option<String>,
     ) -> Result<ExposedTerminal, Status> {
         *self.terminal.lock().unwrap() = Some(terminal);
-        Ok(ExposedTerminal::new(tokio::spawn(std::future::pending::<()>())))
+        Ok(ExposedTerminal::new(tokio::spawn(
+            std::future::pending::<()>(),
+        )))
     }
 }
 
@@ -59,7 +61,14 @@ impl TerminalExposure for CapturingExposure {
 async fn a_room_terminal(dir: &Path) -> (Arc<CliSessionManager>, Arc<dyn RpcService>) {
     let manager = Arc::new(CliSessionManager::new());
     manager
-        .start(SESSION, dir.to_path_buf(), "claude-opus-4-8", &a_tui_agent(dir), None, None)
+        .start(
+            SESSION,
+            dir.to_path_buf(),
+            "claude-opus-4-8",
+            &a_tui_agent(dir),
+            None,
+            None,
+        )
         .await
         .expect("the stub agent starts under a PTY");
     manager
@@ -81,9 +90,26 @@ async fn a_room_terminal(dir: &Path) -> (Arc<CliSessionManager>, Arc<dyn RpcServ
         .ensure_exposed_terminal(SESSION, &at, &exposure)
         .await
         .expect("the terminal is exposed");
-    let terminal = exposure.terminal.lock().unwrap().clone().expect("a terminal service");
-    // Let the agent draw before anyone attaches.
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    let terminal = exposure
+        .terminal
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("a terminal service");
+    // Let the agent draw before anyone attaches: poll with throwaway opens until a snapshot shows it.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut probe = RoomStream::open(&terminal, asking_for_a_snapshot()).await;
+        let (_, snapshot) = probe.until_snapshot().await;
+        if screen_after(&[&snapshot.data]).contains("status: idle") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the agent never drew its TUI"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     (manager, terminal)
 }
 
@@ -137,7 +163,10 @@ impl RoomStream {
 }
 
 fn encoded<M: Message>(message: &M) -> RpcMessage {
-    RpcMessage::new(message.encode_to_vec(), RequestMetadata::over(RequestTransport::Direct))
+    RpcMessage::new(
+        message.encode_to_vec(),
+        RequestMetadata::over(RequestTransport::Direct),
+    )
 }
 
 fn asking_for_a_snapshot() -> TerminalInput {
@@ -167,10 +196,19 @@ async fn a_room_open_renders_the_ptys_screen_then_only_later_deltas_without_a_re
     let (before, snapshot) = stream.until_snapshot().await;
 
     // Then the very first frame is the snapshot, and it shows the TUI
-    assert!(before.is_empty(), "no raw replay precedes the snapshot: {before:?}");
-    assert!(snapshot.data.starts_with(b"\x1bc"), "a snapshot begins with RIS");
+    assert!(
+        before.is_empty(),
+        "no raw replay precedes the snapshot: {before:?}"
+    );
+    assert!(
+        snapshot.data.starts_with(b"\x1bc"),
+        "a snapshot begins with RIS"
+    );
     let shown = screen_after(&[&snapshot.data]);
-    assert!(shown.contains("ROOM-TUI"), "the snapshot shows the TUI: {shown:?}");
+    assert!(
+        shown.contains("ROOM-TUI"),
+        "the snapshot shows the TUI: {shown:?}"
+    );
     assert!(shown.contains("status: idle"));
 
     // And when the client types, the echo arrives as deltas contiguous from the sequence point
@@ -181,8 +219,14 @@ async fn a_room_open_renders_the_ptys_screen_then_only_later_deltas_without_a_re
         })
         .await;
     let delta = stream.next_frame().await;
-    assert_eq!(delta.start_offset, snapshot.end_offset, "the first delta starts at the snapshot");
-    assert_eq!(delta.end_offset, delta.start_offset + delta.data.len() as u64);
+    assert_eq!(
+        delta.start_offset, snapshot.end_offset,
+        "the first delta starts at the snapshot"
+    );
+    assert_eq!(
+        delta.end_offset,
+        delta.start_offset + delta.data.len() as u64
+    );
 
     // And the application was never sent a redraw signal
     tokio::time::sleep(Duration::from_millis(500)).await;

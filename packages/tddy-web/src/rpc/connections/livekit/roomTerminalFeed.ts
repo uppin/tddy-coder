@@ -21,6 +21,7 @@ import { RoomEvent, type Room } from "livekit-client";
 import type { TerminalSessionService } from "../../../gen/terminal_session_pb";
 import { TerminalInputSchema, type TerminalService } from "../../../gen/terminal_pb";
 import { tddyDebug } from "../../../lib/debugMask";
+import { TerminalFrameContinuity } from "../../../lib/terminalFrameContinuity";
 import { createForwardHistoryFetcher } from "../../../lib/terminalHistoryLoader";
 import type { TerminalFeed, TerminalFrame, TerminalOptions, TerminalStream } from "../terminal";
 
@@ -133,6 +134,12 @@ export function openRoomTerminalStream({
   const listeners: Array<(frame: TerminalFrame) => void> = [];
   const outbound: Uint8Array[] = [];
   let closed = false;
+  // Set when a frame did not continue the screen: the input generator sends one `requestSnapshot`
+  // message on this same stream, and the guard drops every delta until the snapshot lands.
+  let snapshotWanted = false;
+  // A request is outstanding until a snapshot arrives, so a run of gapped frames asks once.
+  let snapshotAsked = false;
+  const continuity = new TerminalFrameContinuity();
 
   const waitingForServer = whenServerJoins(room, serverIdentity);
 
@@ -172,9 +179,15 @@ export function openRoomTerminalStream({
 
   async function* input(): AsyncGenerator<ReturnType<typeof create<typeof TerminalInputSchema>>> {
     // The bridge starts its PTY read side on the first message of the stream, so one empty frame
-    // opens the terminal before anything has been typed into it.
-    yield create(TerminalInputSchema, { data: new Uint8Array(0) });
+    // opens the terminal before anything has been typed into it. It also asks for the current
+    // screen: every open starts from a snapshot, never from a replay of raw output.
+    yield create(TerminalInputSchema, { data: new Uint8Array(0), requestSnapshot: true });
     while (!closed) {
+      if (snapshotWanted) {
+        snapshotWanted = false;
+        yield create(TerminalInputSchema, { data: new Uint8Array(0), requestSnapshot: true });
+        continue;
+      }
       if (outbound.length === 0) {
         await new Promise((resume) => setTimeout(resume, INPUT_DRAIN_INTERVAL_MS));
         continue;
@@ -190,10 +203,30 @@ export function openRoomTerminalStream({
       for await (const output of terminal.streamTerminalIO(input())) {
         if (closed) break;
         if (output.data.length === 0) continue;
-        // `terminal.TerminalOutput` is `bytes data` and nothing else, so every frame is a live tail
-        // frame: there is no anchor on this wire, which is why a fill driven by this feed's history
-        // fetcher is constructed unanchored.
-        const frame: TerminalFrame = { data: output.data, endOffset: 0n, atOldest: false };
+        // A frame that does not continue what is painted is dropped, never drawn over a screen it
+        // was not computed against; the first one asks for a fresh snapshot, and the server's
+        // answer re-anchors the guard.
+        if (continuity.accept(output) === "gap") {
+          if (!snapshotAsked) {
+            snapshotAsked = true;
+            snapshotWanted = true;
+          }
+          dTerm(
+            "gap — dropping frame and asking for a snapshot sessionId=%s start=%s end=%s",
+            sessionId,
+            output.startOffset,
+            output.endOffset,
+          );
+          continue;
+        }
+        if (output.snapshot) snapshotAsked = false;
+        const frame: TerminalFrame = {
+          data: output.data,
+          endOffset: output.endOffset,
+          atOldest: false,
+          snapshot: output.snapshot,
+          startOffset: output.startOffset,
+        };
         for (const fn of listeners) fn(frame);
       }
     } catch (err) {
@@ -219,7 +252,7 @@ export function openRoomTerminalStream({
  * `options.controlToken` is not read: `StreamTerminalIO` writes straight to the PTY handle the
  * session's own process holds, so there is no lease for the daemon to compare against — the room
  * membership *is* the authorisation. `options.initialGrid` is likewise unused; this wire has no
- * pre-replay resize, and the terminal states its size with the resize OSC the PTY bridge parses out
+ * pre-snapshot resize, and the terminal states its size with the resize OSC the PTY bridge parses out
  * of the input stream.
  */
 export function openRoomTerminalFeed({

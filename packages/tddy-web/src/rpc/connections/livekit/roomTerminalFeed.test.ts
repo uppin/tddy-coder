@@ -152,6 +152,7 @@ function aSessionParticipant() {
   const typedBatches: Uint8Array[] = [];
   const historyRequests: HistoryRequest[] = [];
   let done = false;
+  let emitted = 0n;
   let wake: () => void = () => {};
   let awake = new Promise<void>((resolve) => (wake = resolve));
   let announceTyped: (batch: Uint8Array) => void = () => {};
@@ -194,7 +195,18 @@ function aSessionParticipant() {
   return {
     client: client as unknown as Client<typeof TerminalService>,
     emit(text: string): void {
-      outbound.push(create(TerminalOutputSchema, { data: bytesOf(text) }));
+      // Stamped the way the server stamps a snapshot-opened stream: the first frame is the
+      // snapshot, each later one starts where the previous ended.
+      const startOffset = emitted;
+      emitted += BigInt(text.length);
+      outbound.push(
+        create(TerminalOutputSchema, {
+          data: bytesOf(text),
+          snapshot: startOffset === 0n,
+          startOffset,
+          endOffset: emitted,
+        }),
+      );
       bump();
     },
     endStream(): void {
@@ -260,9 +272,8 @@ describe("a room-carried terminal feed", () => {
     expect(painted).toEqual(["cargo test\r\n", "running 12 tests\r\n"]);
   });
 
-  it("reports every frame as an unanchored live tail, because the room's wire carries no offsets", async () => {
-    // Given a feed on a live room. `terminal.TerminalOutput` is `bytes data` and nothing else —
-    // there is no offset on this wire to report, which is why a fill it drives is unanchored.
+  it("reports each frame with the offsets the room stamped on it", async () => {
+    // Given a feed on a live room whose participant stamps a snapshot-opened stream
     const { feed, participant } = aFeedOnALiveRoom();
     const frames: unknown[] = [];
     feed.stream.onMessage((frame) => frames.push(frame));
@@ -272,8 +283,10 @@ describe("a room-carried terminal feed", () => {
     participant.endStream();
     await feed.ended;
 
-    // Then it carries bytes and no anchor at all
-    expect(frames).toEqual([{ data: bytesOf("$ "), endOffset: 0n, atOldest: false }]);
+    // Then it carries the bytes and the anchor the room gave it
+    expect(frames).toEqual([
+      { data: bytesOf("$ "), endOffset: 2n, atOldest: false, snapshot: true, startOffset: 0n },
+    ]);
   });
 
   it("fetches scrollback from the host daemon rather than from the room", async () => {
