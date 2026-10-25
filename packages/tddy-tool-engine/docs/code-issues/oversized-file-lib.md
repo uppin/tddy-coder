@@ -4,8 +4,8 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **816 production lines** · budget 500 · **1.6× over**
-**Thresholds breached:** length 816 > 500
+**Metrics:** **884 production lines** · budget 500 · **1.6× over**
+**Thresholds breached:** length 884 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed (882 production lines, 2026-10-25)
 
@@ -111,3 +111,4 @@ budget to time out on) and green after. Re-grepped the crate for `process::Comma
 | 2026-10-25 | 881 | +1 in `#start-parity` 5/9 (#754): `pub mod start_options;`. Stack-shared, so no split here |
 | 2026-10-25 | 882 | +1 in `#start-parity` 6/9 (#755): `pub mod session_follow;`. Stack-shared, so no split here |
 | 2026-10-25 | 883 | +1 in `#start-parity` 7/9 (#756): `pub mod project_home_terminate;`. Stack-shared, so no split here |
+| 2026-10-26 | 884 | +1 in `#start-parity` 8/9 (#757): `pub mod project_home_disk_refresh;`. Stack-shared, so no split here |

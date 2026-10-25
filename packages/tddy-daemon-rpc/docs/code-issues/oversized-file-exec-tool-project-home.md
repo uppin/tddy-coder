@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-daemon-rpc/src/exec_tool/project_home.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-25 — `/pr-wrap` step 3.5 file-length gate on #753 (`#start-parity` 4/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **746 production lines** · budget 500 · 1.5× over
-**Thresholds breached:** length 746 > 500
+**Metrics:** **788 production lines** · budget 500 · 1.5× over
+**Thresholds breached:** length 788 > 500
 **Restructure:** not designed
 **Status:** Open — split deferred: the file is stack-shared (every `#start-parity` node implements its project-home port methods here), and a split mid-stack would conflict in every later node; the follow-up is after the stack lands — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seams are a first reading
@@ -17,6 +17,7 @@
 | 2026-10-25 | 708 | **regressed.** `#start-parity` 5/9 (#754): 665 → 708 (+43) — `DaemonProjectHome`'s catalogue, project, host-service and provider-account sources and `ProjectHomePort::start_options`; the answer itself is the new `exec_tool/project_home_start_options.rs` (282). **Split deferred by developer instruction** (stack-shared) |
 | 2026-10-25 | 730 | **regressed.** `#start-parity` 6/9 (#755): 708 → 730 (+22) — `DaemonProjectHome`'s `session_activity`, `session_transcript` and `session_tool_call` port methods, each delegating; the reads themselves are the new `exec_tool/project_home_session_follow.rs` (121). **Split deferred by developer instruction** (stack-shared) |
 | 2026-10-25 | 746 | **regressed.** `#start-parity` 7/9 (#756): 730 → 746 (+16) — `DaemonProjectHome::terminate_session`, delegating to `tddy_agent_launch::svc_signal_delete_session::signal_session_dir` (the `SignalSession` body, now shared). **Split deferred by developer instruction** (stack-shared) |
+| 2026-10-26 | 788 | **regressed.** `#start-parity` 8/9 (#757): 746 → 788 (+42) — `DaemonProjectHome::refresh_worktree_disk_usage` (membership check, enqueue through `WorktreeSizeCalculator`) and its imports. **Split deferred by developer instruction** (stack-shared) |
 
 ## What would close it — candidate seams (not proven)
 
