@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file terminal.proto.
  */
 export const file_terminal: GenFile = /*@__PURE__*/
-  fileDesc("Cg50ZXJtaW5hbC5wcm90bxIIdGVybWluYWwiHQoNVGVybWluYWxJbnB1dBIMCgRkYXRhGAEgASgMIh4KDlRlcm1pbmFsT3V0cHV0EgwKBGRhdGEYASABKAwyXAoPVGVybWluYWxTZXJ2aWNlEkkKEFN0cmVhbVRlcm1pbmFsSU8SFy50ZXJtaW5hbC5UZXJtaW5hbElucHV0GhgudGVybWluYWwuVGVybWluYWxPdXRwdXQoATABYgZwcm90bzM");
+  fileDesc("Cg50ZXJtaW5hbC5wcm90bxIIdGVybWluYWwiNwoNVGVybWluYWxJbnB1dBIMCgRkYXRhGAEgASgMEhgKEHJlcXVlc3Rfc25hcHNob3QYAiABKAgiWgoOVGVybWluYWxPdXRwdXQSDAoEZGF0YRgBIAEoDBIQCghzbmFwc2hvdBgCIAEoCBIUCgxzdGFydF9vZmZzZXQYAyABKAQSEgoKZW5kX29mZnNldBgEIAEoBDJcCg9UZXJtaW5hbFNlcnZpY2USSQoQU3RyZWFtVGVybWluYWxJTxIXLnRlcm1pbmFsLlRlcm1pbmFsSW5wdXQaGC50ZXJtaW5hbC5UZXJtaW5hbE91dHB1dCgBMAFiBnByb3RvMw");
 
 /**
  * @generated from message terminal.TerminalInput
@@ -20,6 +20,15 @@ export type TerminalInput = Message<"terminal.TerminalInput"> & {
    * @generated from field: bytes data = 1;
    */
   data: Uint8Array;
+
+  /**
+   * Valid on ANY message, the first included: answer with a snapshot frame of the current screen
+   * at a new sequence point, then continue live from its `end_offset`. Bytes in `data` on the same
+   * message are applied first.
+   *
+   * @generated from field: bool request_snapshot = 2;
+   */
+  requestSnapshot: boolean;
 };
 
 /**
@@ -37,6 +46,27 @@ export type TerminalOutput = Message<"terminal.TerminalOutput"> & {
    * @generated from field: bytes data = 1;
    */
   data: Uint8Array;
+
+  /**
+   * True on a snapshot frame: `data` is one repaint of the visible screen, beginning with RIS, so a
+   * client that reads only `data` still renders it correctly. `end_offset` is its sequence point.
+   *
+   * @generated from field: bool snapshot = 2;
+   */
+  snapshot: boolean;
+
+  /**
+   * Where `data` sits in the terminal's cumulative output. Every frame carries them: the first
+   * frame after a snapshot starts at its `end_offset`, each later one at the previous `end_offset`.
+   *
+   * @generated from field: uint64 start_offset = 3;
+   */
+  startOffset: bigint;
+
+  /**
+   * @generated from field: uint64 end_offset = 4;
+   */
+  endOffset: bigint;
 };
 
 /**

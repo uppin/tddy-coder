@@ -57,7 +57,11 @@ impl RpcService for PtyTerminalService {
         if let Ok(cap) = self.handle.capture.lock() {
             let replay = cap.replay();
             if !replay.is_empty() {
-                let frame = TerminalOutput { data: replay }.encode_to_vec();
+                let frame = TerminalOutput {
+                    data: replay,
+                    ..Default::default()
+                }
+                .encode_to_vec();
                 let _ = out_tx.try_send(Ok(frame));
             }
         }
@@ -75,7 +79,7 @@ impl RpcService for PtyTerminalService {
                     result = stdout_rx.recv() => {
                         match result {
                             Ok(bytes) => {
-                                let frame = TerminalOutput { data: bytes.to_vec() }.encode_to_vec();
+                                let frame = TerminalOutput { data: bytes.to_vec(), ..Default::default() }.encode_to_vec();
                                 if out_tx_clone.send(Ok(frame)).await.is_err() {
                                     break;
                                 }

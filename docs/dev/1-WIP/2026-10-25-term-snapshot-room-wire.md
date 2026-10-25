@@ -5,6 +5,7 @@
 **Type:** Bug Fix
 **Complexity**: 5 — three packages, a proto contract change (`terminal.proto`), ordering semantics (sequence point on the room wire), two servers of one RPC
 **Stack:** `#term-snapshot 4/4` — branch `feature/term-snapshot/room-wire`, base `feature/term-snapshot/jail-size`
+**PR:** [#763](https://github.com/uppin/tddy-coder/pull/763)
 **PRD:** [PRD-2026-10-25-terminal-snapshot-room.md](../../ft/daemon/1-WIP/PRD-2026-10-25-terminal-snapshot-room.md)
 
 ## Initial Discovery
@@ -16,6 +17,27 @@
 - [ ] `tddy-service`: `terminal.proto` fields; `TerminalServiceVirtualTui` answers the contract
 - [ ] `tddy-cli-sessions`: `PtyTerminalService` snapshot open, offsets, `request_snapshot`, no `trigger_redraw`
 - [ ] `tddy-web`: the room feed requests a snapshot on every open and on a continuity gap
+
+## Contract (pass 2)
+
+- Proto `terminal.proto`: `TerminalInput.request_snapshot = 2`; `TerminalOutput.snapshot = 2`,
+  `start_offset = 3`, `end_offset = 4`. 48 existing `TerminalInput`/`TerminalOutput` literals across
+  11 files got `..Default::default()`. Regenerated `terminal_pb.ts` in tddy-web and
+  tddy-rust-typescript-tests.
+- The VirtualTui test lives in **tddy-e2e** (`tests/virtual_tui_snapshot.rs`), which already owns
+  the presenter harness (`spawn_presenter_with_terminal_service`), not in tddy-service.
+- The planned `SessionMainPaneRoomTerminal.cy.tsx` extension is replaced by room-feed unit tests:
+  the wire messages are what changes, and the render path is #760's (covered by its Cypress spec).
+- Requirements change for the green stage: the existing room-feed test `reports every frame as an
+  unanchored live tail, because the room's wire carries no offsets` no longer holds, so rewrite it
+  to the stamped-offset contract.
+- Dev-dependency `vt100 = "0.15"` in tddy-cli-sessions (already in the lockfile).
+
+| Test | File | Fails today because |
+|---|---|---|
+| `a_room_open_renders_the_ptys_screen_then_only_later_deltas_without_a_redraw`, `a_mid_stream_request_snapshot_resyncs_at_a_new_sequence_point` | `packages/tddy-cli-sessions/tests/pty_terminal_service_snapshot.rs` | `PtyTerminalService` replays raw bytes and sends no snapshot |
+| `the_first_frame_and_every_requested_resync_is_a_snapshot_with_contiguous_offsets` | `packages/tddy-e2e/tests/virtual_tui_snapshot.rs` | VirtualTui sends no snapshot flag or offsets |
+| 3 × `a room-carried terminal feed, snapshot-opened` | `packages/tddy-web/src/rpc/connections/livekit/roomTerminalFeed.test.ts` | the room feed neither asks for nor checks snapshots |
 
 ## Responsibility
 
@@ -91,7 +113,7 @@ Both room servers open with a snapshot at a sequence point, stamp contiguous off
     emulator equals the server screen at `end_offset`; the deltas are contiguous; the redraw counter
     is 0.
   - `a_mid_stream_request_snapshot_resyncs_at_a_new_sequence_point`.
-- [ ] **Integration** `packages/tddy-service/tests/virtual_tui_snapshot.rs`:
+- [ ] **Integration** `packages/tddy-e2e/tests/virtual_tui_snapshot.rs`:
   `request_snapshot_repaints_the_whole_tui_flagged_as_snapshot`.
 - [ ] **Unit** `packages/tddy-web/src/rpc/connections/livekit/roomTerminalFeed.test.ts`:
   `every open's first message asks for a snapshot` and `a gap asks for a snapshot on the same stream`.
@@ -116,10 +138,10 @@ Both room servers open with a snapshot at a sequence point, stamp contiguous off
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -37,6 +37,7 @@ impl TerminalService for EchoTerminalService {
         let _ = tx
             .send(Ok(TerminalOutput {
                 data: GREETING.to_vec(),
+                ..Default::default()
             }))
             .await;
 
@@ -58,6 +59,7 @@ impl TerminalService for EchoTerminalService {
                             if tx
                                 .send(Ok(TerminalOutput {
                                     data: echo.into_bytes(),
+                                    ..Default::default()
                                 }))
                                 .await
                                 .is_err()

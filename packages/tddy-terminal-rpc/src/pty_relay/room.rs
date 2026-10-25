@@ -128,11 +128,23 @@ async fn run_livekit_terminal(
 
     tokio::spawn(async move {
         let _ = terminal_input
-            .send(TerminalInput { data: vec![] }.encode_to_vec())
+            .send(
+                TerminalInput {
+                    data: vec![],
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+            )
             .await;
         if let Some(resize) = encode_resize() {
             let _ = terminal_input
-                .send(TerminalInput { data: resize }.encode_to_vec())
+                .send(
+                    TerminalInput {
+                        data: resize,
+                        ..Default::default()
+                    }
+                    .encode_to_vec(),
+                )
                 .await;
         }
         loop {
@@ -143,7 +155,7 @@ async fn run_livekit_terminal(
                 bytes = key_rx.recv() => {
                     match bytes {
                         Some(bytes) => {
-                            if terminal_input.send(TerminalInput { data: bytes }.encode_to_vec()).await.is_err() { break; }
+                            if terminal_input.send(TerminalInput { data: bytes, ..Default::default() }.encode_to_vec()).await.is_err() { break; }
                         }
                         None => break,
                     }

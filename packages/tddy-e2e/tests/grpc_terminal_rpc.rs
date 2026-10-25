@@ -298,7 +298,12 @@ async fn grpc_terminal_io_receives_ansi_output() -> anyhow::Result<()> {
         .into_inner();
 
     // When
-    input_tx.send(TerminalInput { data: vec![] }).await?;
+    input_tx
+        .send(TerminalInput {
+            data: vec![],
+            ..Default::default()
+        })
+        .await?;
     drop(input_tx);
 
     let received = drain_output(&mut stream, Duration::from_millis(500), "ansi-init").await?;
@@ -349,13 +354,20 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
     // After scope question → PlanReview appears (View / Approve / Refine).
     // Enter answers scope, Down navigates to "Approve", Enter approves.
     let sender = tokio::spawn(async move {
-        input_tx.send(TerminalInput { data: vec![] }).await.unwrap();
+        input_tx
+            .send(TerminalInput {
+                data: vec![],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
         eprintln!("[TEST-INPUT] sending Enter (answer scope)");
         input_tx
             .send(TerminalInput {
                 data: keys::ENTER.to_vec(),
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -365,6 +377,7 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
         input_tx
             .send(TerminalInput {
                 data: keys::DOWN.to_vec(),
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -374,6 +387,7 @@ async fn grpc_terminal_io_keyboard_input_affects_output() -> anyhow::Result<()> 
         input_tx
             .send(TerminalInput {
                 data: keys::ENTER.to_vec(),
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -437,7 +451,12 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
     let mut viewer = ScreenParser::new(24, 80);
 
     // When — Phase 1: send init, drain ALL initial TUI render output into vt100
-    input_tx.send(TerminalInput { data: vec![] }).await?;
+    input_tx
+        .send(TerminalInput {
+            data: vec![],
+            ..Default::default()
+        })
+        .await?;
 
     let initial_output =
         drain_output(&mut stream, Duration::from_millis(500), "ghostty-init").await?;
@@ -467,7 +486,10 @@ async fn grpc_ghostty_virtual_terminal_e2e() -> anyhow::Result<()> {
     let mut all_raw = initial_output;
     for (key, label) in inputs {
         input_tx
-            .send(TerminalInput { data: key.to_vec() })
+            .send(TerminalInput {
+                data: key.to_vec(),
+                ..Default::default()
+            })
             .await
             .map_err(|e| anyhow::anyhow!("send {}: {}", label, e))?;
 
@@ -521,7 +543,12 @@ async fn grpc_virtual_tui_refreshes_autonomously_without_input() -> anyhow::Resu
 
     // When — send init and let the workflow reach Select mode
     // Send init to start the stream.
-    input_tx.send(TerminalInput { data: vec![] }).await?;
+    input_tx
+        .send(TerminalInput {
+            data: vec![],
+            ..Default::default()
+        })
+        .await?;
 
     // Drain the initial event burst. The workflow starts, emits GoalStarted,
     // StateChanged, ModeChanged etc., then reaches Select mode (scope question)
@@ -587,7 +614,12 @@ async fn grpc_virtual_tui_idle_animation_cadence() -> anyhow::Result<()> {
         .into_inner();
 
     // When — connect and wait for Select mode, then observe cadence without sending input
-    input_tx.send(TerminalInput { data: vec![] }).await?;
+    input_tx
+        .send(TerminalInput {
+            data: vec![],
+            ..Default::default()
+        })
+        .await?;
 
     let initial = drain_output(&mut stream, Duration::from_millis(500), "init-burst").await?;
     let initial_text = ansi_to_text(&initial);
@@ -646,7 +678,12 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
     // Approve the plan review via terminal when "Choose an action" appears.
     // The DocumentReview ModeChanged gRPC event can race with subscriber setup;
     // using the terminal stream is reliable because it's already established.
-    input_tx.send(TerminalInput { data: vec![] }).await?;
+    input_tx
+        .send(TerminalInput {
+            data: vec![],
+            ..Default::default()
+        })
+        .await?;
     let mut initial = Vec::new();
     let mut plan_approved = false;
     for _ in 0..60 {
@@ -660,11 +697,13 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
             let _ = input_tx
                 .send(TerminalInput {
                     data: keys::DOWN.to_vec(),
+                    ..Default::default()
                 })
                 .await;
             let _ = input_tx
                 .send(TerminalInput {
                     data: keys::ENTER.to_vec(),
+                    ..Default::default()
                 })
                 .await;
             plan_approved = true;
@@ -693,6 +732,7 @@ async fn grpc_select_mode_down_arrow_persists_after_periodic_render() -> anyhow:
     input_tx
         .send(TerminalInput {
             data: keys::DOWN.to_vec(),
+            ..Default::default()
         })
         .await?;
 
@@ -782,6 +822,7 @@ async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow
     input_tx
         .send(TerminalInput {
             data: encode_resize(80, 24),
+            ..Default::default()
         })
         .await?;
 
@@ -791,6 +832,7 @@ async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow
     input_tx
         .send(TerminalInput {
             data: encode_resize(80, 14),
+            ..Default::default()
         })
         .await?;
     let shrink_output = drain_output(&mut stream, Duration::from_millis(500), "shrink").await?;
@@ -799,6 +841,7 @@ async fn grpc_resize_shrink_grow_shows_pgup_pgdn_scroll_exactly_once() -> anyhow
     input_tx
         .send(TerminalInput {
             data: encode_resize(80, 24),
+            ..Default::default()
         })
         .await?;
     let grow_output = drain_output(&mut stream, Duration::from_millis(500), "grow").await?;
@@ -874,11 +917,22 @@ async fn grpc_virtual_tui_rpc_large_echo_char_by_char() -> anyhow::Result<()> {
         input_tx
             .send(TerminalInput {
                 data: encode_resize(COLS, ROWS),
+                ..Default::default()
             })
             .await?;
-        input_tx.send(TerminalInput { data: vec![] }).await?;
+        input_tx
+            .send(TerminalInput {
+                data: vec![],
+                ..Default::default()
+            })
+            .await?;
         for byte in expected.as_bytes() {
-            input_tx.send(TerminalInput { data: vec![*byte] }).await?;
+            input_tx
+                .send(TerminalInput {
+                    data: vec![*byte],
+                    ..Default::default()
+                })
+                .await?;
         }
 
         eventually_segmented_echo(

@@ -12330,6 +12330,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "vt100",
 ]
 
 [[package]]

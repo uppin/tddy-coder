@@ -76,7 +76,12 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
         .await?
         .into_inner();
 
-    input_tx1.send(TerminalInput { data: vec![] }).await?;
+    input_tx1
+        .send(TerminalInput {
+            data: vec![],
+            ..Default::default()
+        })
+        .await?;
     // Approve the plan review via the terminal when "Choose an action" appears.
     // The DocumentReview ModeChanged gRPC event can race with subscriber setup;
     // using the terminal stream is reliable because it's already established.
@@ -94,11 +99,13 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
             let _ = input_tx1
                 .send(TerminalInput {
                     data: keys::DOWN.to_vec(),
+                    ..Default::default()
                 })
                 .await;
             let _ = input_tx1
                 .send(TerminalInput {
                     data: keys::ENTER.to_vec(),
+                    ..Default::default()
                 })
                 .await;
             plan_approved = true;
@@ -124,6 +131,7 @@ async fn grpc_reconnect_second_stream_receives_full_tui_render() -> anyhow::Resu
     input_tx1
         .send(TerminalInput {
             data: keys::DOWN.to_vec(),
+            ..Default::default()
         })
         .await?;
     let after_down = collect_output_window(&mut stream1, Duration::from_millis(900)).await?;

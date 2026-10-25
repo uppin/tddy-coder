@@ -1891,6 +1891,7 @@ impl FacilitatingDaemon {
         keys.send(
             TerminalInput {
                 data: keystrokes.as_bytes().to_vec(),
+                ..Default::default()
             }
             .encode_to_vec(),
             false,

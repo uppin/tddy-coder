@@ -85,7 +85,12 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
         .await?
         .into_inner();
 
-    input_tx1.send(TerminalInput { data: vec![] }).await?;
+    input_tx1
+        .send(TerminalInput {
+            data: vec![],
+            ..Default::default()
+        })
+        .await?;
     let stream1_initial = collect_output_window(&mut stream1, Duration::from_millis(700)).await?;
 
     let mut parser1 = ScreenParser::new(24, 80);
@@ -109,6 +114,7 @@ async fn second_client_smaller_resize_does_not_blank_first_client() -> anyhow::R
     input_tx2
         .send(TerminalInput {
             data: encode_resize(60, 16),
+            ..Default::default()
         })
         .await?;
     let stream2_output = collect_output_window(&mut stream2, Duration::from_millis(1500)).await?;

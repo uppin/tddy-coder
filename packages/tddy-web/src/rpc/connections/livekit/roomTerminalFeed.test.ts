@@ -440,3 +440,114 @@ describe("a room-carried terminal feed", () => {
     expect(roster.joinWatchers()).toEqual(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Snapshots on the room wire (PRD-2026-10-25-terminal-snapshot-room): every open asks for the
+// current screen, and a gap in the offsets asks again on the same stream
+// ---------------------------------------------------------------------------
+
+/** A session participant that records every message of the stream — the empty-data ones too. */
+function aSnapshottingParticipant() {
+  const messages: Array<{ data: Uint8Array; requestSnapshot: boolean }> = [];
+  const outbound: ReturnType<typeof create<typeof TerminalOutputSchema>>[] = [];
+  let wake: () => void = () => {};
+  let awake = new Promise<void>((resolve) => (wake = resolve));
+  const client = {
+    async *streamTerminalIO(input: AsyncIterable<{ data: Uint8Array; requestSnapshot: boolean }>) {
+      void (async () => {
+        for await (const message of input) messages.push(message);
+      })();
+      for (;;) {
+        while (outbound.length > 0) yield outbound.shift() as (typeof outbound)[number];
+        await awake;
+      }
+    },
+  };
+  return {
+    client: client as unknown as Client<typeof TerminalService>,
+    messages,
+    sends(frame: { data: string; snapshot?: boolean; startOffset?: bigint; endOffset: bigint }): void {
+      outbound.push(
+        create(TerminalOutputSchema, {
+          data: bytesOf(frame.data),
+          snapshot: frame.snapshot ?? false,
+          startOffset: frame.startOffset ?? 0n,
+          endOffset: frame.endOffset,
+        }),
+      );
+      wake();
+      awake = new Promise<void>((resolve) => (wake = resolve));
+    },
+  };
+}
+
+function aSnapshottingFeed() {
+  const roster = aRoomHolding([A_SERVER_IDENTITY]);
+  const participant = aSnapshottingParticipant();
+  const feed = openRoomTerminalFeed({
+    room: roster.room,
+    serverIdentity: A_SERVER_IDENTITY,
+    terminal: participant.client,
+    host: aHostDaemon().client,
+    sessionId: A_SESSION,
+    options: terminalOptions(),
+  });
+  return { feed, participant };
+}
+
+async function until(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("condition not met within a second");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+describe("a room-carried terminal feed, snapshot-opened", () => {
+  it("asks for a snapshot in the first message of every open", async () => {
+    // Given a feed opening on a live room
+    const { participant } = aSnapshottingFeed();
+
+    // When its stream opens
+    await until(() => participant.messages.length > 0);
+
+    // Then the very first message asks for the current screen
+    expect(participant.messages[0].requestSnapshot).toBe(true);
+  });
+
+  it("hands the terminal the snapshot and the deltas after it with their offsets", async () => {
+    // Given a feed whose participant answers with a snapshot and one delta
+    const { feed, participant } = aSnapshottingFeed();
+    const frames: Array<{ snapshot?: boolean; startOffset?: bigint; endOffset: bigint; text: string }> = [];
+    feed.stream.onMessage((frame) =>
+      frames.push({ snapshot: frame.snapshot, startOffset: frame.startOffset, endOffset: frame.endOffset, text: textOf(frame.data) }),
+    );
+
+    // When both arrive
+    participant.sends({ data: "\x1bc$ ", snapshot: true, endOffset: 50n });
+    participant.sends({ data: "ls", startOffset: 50n, endOffset: 52n });
+    await until(() => frames.length === 2);
+
+    // Then the terminal sees the snapshot as one and the delta anchored after it
+    expect(frames).toEqual([
+      { snapshot: true, startOffset: 0n, endOffset: 50n, text: "\x1bc$ " },
+      { snapshot: false, startOffset: 50n, endOffset: 52n, text: "ls" },
+    ]);
+  });
+
+  it("does not hand over a delta past a gap, and asks for a snapshot on the same stream", async () => {
+    // Given a feed showing a snapshot
+    const { feed, participant } = aSnapshottingFeed();
+    const painted: string[] = [];
+    feed.stream.onMessage((frame) => painted.push(textOf(frame.data)));
+    participant.sends({ data: "\x1bcA", snapshot: true, endOffset: 50n });
+    await until(() => painted.length === 1);
+
+    // When a delta arrives that does not start where the snapshot ended
+    participant.sends({ data: "after-a-hole", startOffset: 90n, endOffset: 102n });
+    await until(() => participant.messages.slice(1).some((m) => m.requestSnapshot));
+
+    // Then it was never painted, and the resync went up the stream that is already open
+    expect(painted).toEqual(["\x1bcA"]);
+  });
+});

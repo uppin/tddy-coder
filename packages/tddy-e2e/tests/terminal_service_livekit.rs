@@ -109,7 +109,10 @@ mod livekit_tests {
         );
 
         // When — both clients open independent StreamTerminalIO streams
-        let request = TerminalInput { data: vec![] };
+        let request = TerminalInput {
+            data: vec![],
+            ..Default::default()
+        };
         let request_bytes = request.encode_to_vec();
 
         let mut rx1 = client1_rpc
@@ -239,7 +242,10 @@ mod livekit_tests {
 
         let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
 
-        let request = TerminalInput { data: vec![] };
+        let request = TerminalInput {
+            data: vec![],
+            ..Default::default()
+        };
         let request_bytes = request.encode_to_vec();
 
         let mut rx = rpc_client

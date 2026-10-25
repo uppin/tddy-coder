@@ -156,7 +156,14 @@ impl TerminalService for TerminalServiceVirtualTui {
                 if let Some(ref h) = hook {
                     h(&bytes);
                 }
-                if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
+                if tx
+                    .send(Ok(TerminalOutput {
+                        data: bytes,
+                        ..Default::default()
+                    }))
+                    .await
+                    .is_err()
+                {
                     log::debug!(
                         "[BIDI_TRACE] terminal_service: output consumer gone after {} chunks",
                         output_count,
@@ -236,7 +243,14 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
                 if let Some(ref h) = hook {
                     h(&bytes);
                 }
-                if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
+                if tx
+                    .send(Ok(TerminalOutput {
+                        data: bytes,
+                        ..Default::default()
+                    }))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
