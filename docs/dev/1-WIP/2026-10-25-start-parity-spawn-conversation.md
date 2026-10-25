@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — reroutes a live spawn path (grill-me) through the start core, three or more crates (tddy-agent-launch, tddy-tools, tddy-host-service, tddy-tool-engine), and changes which sessions are offered the start tools
+**PR**: [#758](https://github.com/uppin/tddy-coder/pull/758)
 **Stack**: `#start-parity` 9/9 — branch `feature/start-parity/spawn-conversation`, base `n8` `disk-refresh` (`feature/start-parity/disk-refresh`)
 **PRD**: [PRD-2026-10-25-start-parity-spawn-conversation.md](../../ft/daemon/1-WIP/PRD-2026-10-25-start-parity-spawn-conversation.md)
 
@@ -37,9 +38,16 @@ implementing one here collides with the PR that owns it.
 
 The **first push of this PR**, not its deliverable — this PR goes on to implement all of it:
 
-- `SpawnConversationInput` becomes the type that holds `StartSessionArgs`.
-- `ConversationSpawnHandler::spawn_conversation` returns `StartHandle`.
-- New CLI args. Failing tests.
+- `tddy-toolcall` `ConversationSpawnHandler` gains `start_conversation(args_json)`,
+  `conversation_start_status(start_id)` and `cancel_conversation_start(start_id)`.
+  - Each has a default body that fails with `TODO(spawn-conversation)`, so no implementor breaks.
+  - The arguments and answers are JSON (`StartSessionArgs` in; `StartHandle` and
+    `StartLedgerRecord` out), because `tddy-toolcall` does not depend on `tddy-tool-engine`.
+  - The old `spawn_conversation(prompt, branch, base_ref)` stays until the relay and the MCP tool
+    move over at green.
+- `GrillMeConversationSpawnHandler.service: LaunchSessions`, the start path, filled at its three
+  construction sites (two in production, one in the test harness). This mirrors
+  `StackChildSpawnHandler.service`.
 
 ## Green wave
 
@@ -63,7 +71,8 @@ n6 session-follow · n7 terminate | n8 disk-refresh · n9 spawn-conversation`, w
 
 - [ ] `tddy-agent-launch`
 - [ ] `tddy-tools`
-- [ ] `tddy-host-service`
+- [ ] `tddy-toolcall` — the handler trait's universal-start methods
+- [ ] `tddy-session-lifecycle` — handler tests
 - [ ] `tddy-tool-engine`
 - [ ] `tddy-daemon-rpc`
 
@@ -115,15 +124,31 @@ project.
 
 ### Acceptance Tests
 
-- [ ] **Integration** `packages/tddy-agent-launch/tests/spawn_conversation_universal_acceptance.rs` — `a_grill_me_session_spawns_a_cursor_cli_conversation`: A session of type cursor-cli is created with the caller as `stack_parent`.
-- [ ] **Integration** `same file` — `spawn_conversation_returns_a_handle_and_status_reaches_succeeded`: The status command polls to `succeeded` with session_id and worktree.
-- [ ] **Integration** `same file` — `spawn_conversation_cancel_stops_the_start`: The status reads `cancelled`; no session dir remains.
-- [ ] **Integration** `packages/tddy-daemon/tests/project_home_start_remote_acceptance.rs` — `a_conversation_is_spawned_on_another_host`: The peer holds the child; the orchestrator tag is on the peer.
-- [ ] **Integration** `packages/tddy-daemon-rpc/tests/start_session_tool_mapping.rs` — `a_spawn_capable_session_is_offered_the_start_tools_for_its_own_project_only`: `ListExecTools` includes the four tools. A start naming another `project_id` is refused.
-- [ ] **Unit** `packages/tddy-tools/tests/spawn_conversation_args.rs` — `spawn_conversation_accepts_every_start_session_argument`: The CLI and MCP schema properties ⊇ the `StartSession` schema properties.
+- [ ] **Unit** `packages/tddy-tools/tests/spawn_conversation_universal.rs`:
+  - `spawn_conversation_accepts_every_start_session_argument` — the MCP schema ⊇ `StartSession`'s
+    offered fields
+  - `a_spawned_conversations_start_can_be_followed_and_cancelled` — `spawn_conversation_status`
+    and `spawn_conversation_cancel` are advertised and take `start_id`
+- [ ] **Integration** `tddy-session-lifecycle` `stack_child_spawn_tests.rs` (the existing grill-me
+  handler harness):
+  - `a_conversation_of_any_session_type_is_started_through_the_universal_start` — a `workspace`,
+    on the named branch, linked to the orchestrator
+  - `a_conversation_start_the_start_path_refuses_is_the_agents_error`
+  - `an_unknown_conversation_start_is_refused_naming_it`
+- [ ] **Integration** `packages/tddy-daemon-rpc/tests/spawn_capable_session_tools_acceptance.rs`:
+  - `a_session_that_spawns_conversations_is_offered_the_start_tools`
+  - `an_ordinary_session_is_not_offered_them`
+  - `a_spawning_session_starts_in_its_own_project_linked_to_itself`
 
-Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests use the
-in-memory peer forwarder if it exists on the base, and the LiveKit testkit otherwise.
+**Green notes:**
+- **Authentication.** `start_session_on_request` authenticates a session token, but the grill-me
+  handler holds an `os_user`, not a token. Green either gives the handler the orchestrator's start
+  token (it already has the owner's `account_access`) or reaches the start core below the token
+  check, as the handler reaches `spawn_claude_cli_session_inner` today.
+- **Cross-host spawn.** It is not tested here beyond what `StartSession` already proves. The handler
+  runs the same start, so a `daemon_instance_id` in the arguments takes the same forward.
+
+Tests are written in the `fluent-tests` style (Given / When / Then). 
 
 ## Technical Debt & Production Readiness
 
@@ -154,10 +179,10 @@ in-memory peer forwarder if it exists on the base, and the LiveKit testkit other
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer: "finish the remaining nodes without stopping", 2026-10-25)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -49,6 +49,30 @@ pub trait ConversationSpawnHandler: Send + Sync {
         branch: Option<&str>,
         base_ref: Option<&str>,
     ) -> Result<String, String>;
+
+    /// Start a session of any type, on any eligible host, from `StartSession`'s own arguments
+    /// (`args_json`, the `tddy_tool_engine::start_session_args::StartSessionArgs` shape), linked to
+    /// the calling session as its orchestrator. Returns the start's handle as JSON
+    /// (`{start_id, task_id, daemon_instance_id}`) once it is under way (`#start-parity` 9/9).
+    async fn start_conversation(&self, args_json: &str) -> Result<String, String> {
+        // TODO(spawn-conversation): implement in the grill-me handler
+        let _ = args_json;
+        Err("TODO(spawn-conversation): start_conversation".to_string())
+    }
+
+    /// The start ledger's record of `start_id`, as JSON.
+    async fn conversation_start_status(&self, start_id: &str) -> Result<String, String> {
+        // TODO(spawn-conversation): implement in the grill-me handler
+        let _ = start_id;
+        Err("TODO(spawn-conversation): conversation_start_status".to_string())
+    }
+
+    /// Cancel `start_id` on whichever host runs it.
+    async fn cancel_conversation_start(&self, start_id: &str) -> Result<(), String> {
+        // TODO(spawn-conversation): implement in the grill-me handler
+        let _ = start_id;
+        Err("TODO(spawn-conversation): cancel_conversation_start".to_string())
+    }
 }
 
 /// Per-session capability to hand the agent the GitHub token of the account its project acts as.

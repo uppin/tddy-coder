@@ -206,6 +206,7 @@ impl Orchestrator {
     /// [`DaemonSessionHost::conversation_spawn_handler_for`] wires it.
     fn conversation_spawn_handler(&self) -> GrillMeConversationSpawnHandler {
         GrillMeConversationSpawnHandler {
+            service: self.service.launch_sessions(),
             stack_parent_host: Arc::new(self.service.launch_sessions()),
             config: self.config.clone(),
             tddy_data_dir: self.sessions_base().to_path_buf(),
@@ -598,4 +599,98 @@ async fn a_child_started_before_its_documents_were_written_is_told_nothing() {
         None,
         "pointing at a changeset nobody wrote would send the agent hunting"
     );
+}
+
+// ── The universal start: a conversation of any type, through the start path (`#start-parity` 9/9) ──
+
+async fn conversation_start_record(
+    handler: &GrillMeConversationSpawnHandler,
+    start_id: &str,
+) -> serde_json::Value {
+    let status = handler
+        .conversation_start_status(start_id)
+        .await
+        .expect("the start is recorded");
+    serde_json::from_str(&status).expect("the record is JSON")
+}
+
+#[tokio::test]
+async fn a_conversation_of_any_session_type_is_started_through_the_universal_start() {
+    // Given an orchestrator whose agent spawns conversations
+    let orchestrator = a_pr_stack_orchestrator();
+    let handler = orchestrator.conversation_spawn_handler();
+
+    // When it starts a workspace — not a claude-cli session — on a branch it names
+    let handle: serde_json::Value = serde_json::from_str(
+        &handler
+            .start_conversation(
+                &serde_json::json!({
+                    "session_type": "workspace",
+                    "branch_worktree_intent": "new_branch_from_base",
+                    "new_branch_name": "conversation/universal",
+                })
+                .to_string(),
+            )
+            .await
+            .expect("the start is under way"),
+    )
+    .expect("the handle is JSON");
+    let start_id = handle["start_id"].as_str().expect("a start_id").to_string();
+
+    // Then the start succeeds with a session of that type, on that branch, linked to the orchestrator
+    let done = tddy_testing_commons::wait::eventually_awaiting(
+        "the conversation's start ends",
+        std::time::Duration::from_secs(30),
+        || async {
+            let record = conversation_start_record(&handler, &start_id).await;
+            if record["state"] == "running" {
+                Err(format!("still running: {record}"))
+            } else {
+                Ok(record)
+            }
+        },
+    )
+    .await;
+    assert_eq!(done["state"], "succeeded", "{done}");
+    let child = done["session_id"].as_str().expect("the started session");
+    let metadata = tddy_core::read_session_metadata(&orchestrator.session_dir(child)).unwrap();
+    assert_eq!(metadata.session_type.as_deref(), Some("workspace"));
+    let changeset = tddy_core::read_changeset(&orchestrator.session_dir(child)).unwrap();
+    assert_eq!(changeset.branch.as_deref(), Some("conversation/universal"));
+    assert_eq!(
+        changeset.orchestrator_session_id.as_deref(),
+        Some(ORCHESTRATOR_SESSION_ID)
+    );
+}
+
+#[tokio::test]
+async fn a_conversation_start_the_start_path_refuses_is_the_agents_error() {
+    // Given
+    let orchestrator = a_pr_stack_orchestrator();
+
+    // When a claude-cli conversation is asked for without a model
+    let refused = orchestrator
+        .conversation_spawn_handler()
+        .start_conversation(&serde_json::json!({ "session_type": "claude-cli" }).to_string())
+        .await
+        .expect_err("a start the start path refuses is not under way");
+
+    // Then the refusal names why
+    assert!(refused.contains("model"), "{refused}");
+}
+
+#[tokio::test]
+async fn an_unknown_conversation_start_is_refused_naming_it() {
+    // Given
+    let orchestrator = a_pr_stack_orchestrator();
+
+    // When
+    let refused = orchestrator
+        .conversation_spawn_handler()
+        .conversation_start_status("no-such-start")
+        .await
+        .expect_err("no such start");
+
+    // Then
+    assert!(refused.contains("no-such-start"), "{refused}");
 }

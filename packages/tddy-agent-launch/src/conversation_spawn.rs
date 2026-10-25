@@ -49,6 +49,10 @@ pub(crate) fn conversation_branch_slug(prompt: &str) -> String {
 /// The generic sibling of [`StackChildSpawnHandler`] — it takes a free-form prompt instead of
 /// resolving a planned PR-stack node id, and the spawned conversation is itself unmanaged.
 pub struct GrillMeConversationSpawnHandler {
+    /// The start path `start_conversation` runs a conversation's start through — the same one a
+    /// `StartSession` call takes, so a conversation can be any session type on any eligible host
+    /// (`#start-parity` 9/9).
+    pub service: crate::launch_ports::LaunchSessions,
     /// Resolves each spawned conversation's base off the orchestrator, which is a session of *this*
     /// daemon. Held for the same reason [`StackChildSpawnHandler::stack_parent_host`] is.
     pub stack_parent_host: Arc<dyn StackParentHost>,
