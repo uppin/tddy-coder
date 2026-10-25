@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 3 — two crates, an adapter seam onto the catalog, accounts and host RPCs
+**PR**: [#754](https://github.com/uppin/tddy-coder/pull/754)
 **Stack**: `#start-parity` 5/9 — branch `feature/start-parity/start-options`, base `n4` `async-start` (`feature/start-parity/async-start`)
 **PRD**: [PRD-2026-10-25-start-parity-start-options.md](../../ft/daemon/1-WIP/PRD-2026-10-25-start-parity-start-options.md)
 
@@ -34,7 +35,15 @@ implementing one here collides with the PR that owns it.
 
 The **first push of this PR**, not its deliverable — this PR goes on to implement all of it:
 
-`DESCRIBE_SESSION_START_OPTIONS` def, `StartOptions`, `ProjectHomePort::start_options`, the fixture `stack-parent-candidates.json`, and failing tests.
+- `tddy-tool-engine::start_options`:
+  - `DESCRIBE_SESSION_START_OPTIONS` and `PR_STACK_RECIPES`;
+  - `StartOptionsQuery` (`deny_unknown_fields`);
+  - `LabelledChoice`, `ModelChoices`, `CandidateSession` and `StartOptions`;
+  - `pr_stack_orchestrators`, `stack_base_session_candidates` and `start_options_tool_def`, all
+    `TODO(start-options)`.
+- `ProjectHomePort::start_options(project_id, query)`, with a default body that bails
+  `TODO(start-options)`.
+- Shared fixture `packages/tddy-web/cypress/support/fixtures/stack-parent-candidates.json`.
 
 ## Green wave
 
@@ -105,14 +114,29 @@ stack_parents, pr_stack_base_candidates}`.
 
 ### Acceptance Tests
 
-- [ ] **Integration** `packages/tddy-daemon-rpc/tests/start_options_acceptance.rs` — `models_are_the_catalogs_models_for_the_chosen_agent`: Equal to `ListAgentModels{agent}` on the same host, default included.
-- [ ] **Integration** `same file` — `agents_subagents_and_ssh_hosts_equal_the_forms_sources`: Each equals its RPC's answer.
-- [ ] **Integration** `same file` — `a_provider_account_lists_that_accounts_models`: With `provider_account_id` set: `ListProviderAccountModels`.
-- [ ] **Cypress component** `packages/tddy-web/cypress/component/stackParentsParity.cy.ts` — `the tool offers the same stack parents and stack bases as the form`: The TS filters over the fixture sessions equal the Rust output.
-- [ ] **Integration** `packages/tddy-daemon/tests/project_home_remote_targets_acceptance.rs` — `start_options_describe_another_hosts_choices`: Agents come from the peer's catalog.
+- [ ] **Unit** `packages/tddy-tool-engine/tests/start_options.rs`:
+  - `the_stack_parents_offered_are_the_forms`
+  - `the_stack_bases_offered_are_the_forms_for_the_same_project_and_host`
+  - `no_project_offers_no_stack_base` — passing guard
+  - `the_tool_describes_every_argument_and_requires_none`
+- [ ] **Cypress component** `packages/tddy-web/cypress/component/stackParentsParity.cy.ts` — the
+  form's own `prStackOrchestrators` and `stackBaseSessionCandidates` over the shared fixture give
+  its expected answers. Passes; this pins the fixture to the form.
+- [ ] **Integration** `packages/tddy-daemon-rpc/tests/start_options_acceptance.rs` (two hosts):
+  - `the_agents_offered_are_the_hosts_agent_catalog`
+  - `the_subagents_offered_are_qualified_by_their_host`
+  - `the_models_offered_are_the_catalogs_models_for_the_session_types_agent` — needs
+    `target/debug/tddy-tools`, which `./test` builds first. Under a bare `cargo test` it fails
+    earlier, in `ListAgentModels` itself ("tddy-tools not found").
+  - `the_sessions_that_can_seed_a_stack_on_this_host_are_offered`
+  - `another_hosts_branches_are_that_hosts_project_checkout`
 
-Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests use the
-in-memory peer forwarder if it exists on the base, and the LiveKit testkit otherwise.
+**Parity note.** The form's stack-parent picker is not limited to the project
+(`prStackOrchestrators` filters every listed session), so neither is the tool's. A parent in
+another project is offered here as it is in the form. The daemon's own stack-parent checks still
+apply at start.
+
+Tests are written in the `fluent-tests` style (Given / When / Then). 
 
 ## Technical Debt & Production Readiness
 
@@ -141,10 +165,10 @@ in-memory peer forwarder if it exists on the base, and the LiveKit testkit other
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

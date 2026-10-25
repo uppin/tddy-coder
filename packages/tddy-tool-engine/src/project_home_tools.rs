@@ -226,6 +226,17 @@ pub trait ProjectHomePort: Send + Sync {
     /// Every worktree of `project_id` on this host, as the Worktrees screen's snapshot has them
     /// (`#start-parity` 3/9).
     async fn list_worktrees(&self, project_id: &str) -> anyhow::Result<Vec<WorktreeEntry>>;
+
+    /// The per-host choices behind `StartSession`'s arguments (`#start-parity` 5/9).
+    async fn start_options(
+        &self,
+        project_id: &str,
+        query: crate::start_options::StartOptionsQuery,
+    ) -> anyhow::Result<crate::start_options::StartOptions> {
+        // TODO(start-options): implement in the daemon's port
+        let _ = (project_id, query);
+        anyhow::bail!("TODO(start-options): start_options")
+    }
 }
 
 /// The project-home tools' definitions, as a client registers them before the daemon is asked:

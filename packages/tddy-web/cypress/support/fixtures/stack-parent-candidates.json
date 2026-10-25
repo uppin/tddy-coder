@@ -1,0 +1,16 @@
+{
+  "comment": "Shared by tddy-tool-engine/tests/start_options.rs and cypress/component/stackParentsParity.cy.ts: DescribeSessionStartOptions offers the stack parents and stack bases the New-session form offers.",
+  "scope": { "project_id": "p1", "daemon_instance_id": "host-a" },
+  "sessions": [
+    { "session_id": "orch", "project_id": "p1", "daemon_instance_id": "host-a", "branch": "stack/root", "recipe": "pr-stack", "orchestrator_session_id": "" },
+    { "session_id": "planner", "project_id": "p1", "daemon_instance_id": "host-a", "branch": "", "recipe": "plan-pr-stack", "orchestrator_session_id": "" },
+    { "session_id": "child", "project_id": "p1", "daemon_instance_id": "host-a", "branch": "stack/child", "recipe": "tdd", "orchestrator_session_id": "orch" },
+    { "session_id": "nested-orch", "project_id": "p1", "daemon_instance_id": "host-a", "branch": "stack/nested", "recipe": "orchestrate-pr-stack", "orchestrator_session_id": "orch" },
+    { "session_id": "plain", "project_id": "p1", "daemon_instance_id": "host-a", "branch": "feature/plain", "recipe": "tdd", "orchestrator_session_id": "" },
+    { "session_id": "no-branch", "project_id": "p1", "daemon_instance_id": "host-a", "branch": "", "recipe": "tdd", "orchestrator_session_id": "" },
+    { "session_id": "other-host", "project_id": "p1", "daemon_instance_id": "host-b", "branch": "feature/on-b", "recipe": "tdd", "orchestrator_session_id": "" },
+    { "session_id": "other-project", "project_id": "p2", "daemon_instance_id": "host-a", "branch": "feature/p2", "recipe": "pr-stack", "orchestrator_session_id": "" }
+  ],
+  "stack_parents": ["orch", "planner", "other-project"],
+  "pr_stack_base_candidates": ["orch", "plain"]
+}
