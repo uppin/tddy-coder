@@ -213,6 +213,10 @@ pub fn git_stdout(cwd: &Path, args: &[&str]) -> String {
 pub fn a_repo_with_origin() -> tempfile::TempDir {
     let repo = tempfile::tempdir().unwrap();
     git(repo.path(), &["init", "-q", "-b", "main"]);
+    // The daemon's own git commands (a session worktree's commit) do not carry the test's env
+    // identity; a CI runner has no global one.
+    git(repo.path(), &["config", "user.name", "Test"]);
+    git(repo.path(), &["config", "user.email", "t@t.com"]);
     git(
         repo.path(),
         &["commit", "-q", "--allow-empty", "-m", "init"],
