@@ -259,18 +259,23 @@ Not done, and why:
 - Not done: the `tddy-tools` side (see the open decisions below) and deleting the unbound
   listener-side `ConversationApprovalHandler`.
 
-## Open decisions (recorded, not yet made)
+## Open decisions
 
-1. **`tddy-tools` round trip over the real route needs a new edge.** The daemon handler and
-   `ApprovalRoutes` live in crates `tddy-tools` does not depend on. Options: (A) add `tddy-daemon-rpc`
-   and `tddy-coding-subagent` to `tddy-tools` `[dev-dependencies]`; (B) place the round trip in
-   `tddy-daemon-rpc` with `tddy-tools` as a dev-dependency; (C) keep the `tddy-tools` tests to the
-   client and deny paths (no new edge) and place the daemon round trip in `tddy-daemon-rpc`.
-2. **Removing the `TDDY_SOCKET` relay breaks two of this node's own tests.**
-   `tests/tagged_approval_is_decided_by_its_conversation.rs` and
-   `tests/tagged_approval_refusal_is_a_denial.rs` (committed in `e4323686c`) test the relay being
-   removed. Options: (i) replace them with the three new route tests in the same slice; (ii) defer
-   the relay removal to the slice that deletes the listener hook.
+1. **Resolved: option C.** The `tddy-tools` tests cover the client and deny paths with no new edge.
+   The real round trip (tool client, daemon `RequestApproval`, `ParkedPermissions` answer) is in
+   `packages/tddy-daemon-rpc/tests/approval_round_trip_through_the_tool_client.rs` (committed in
+   `c3c75a03e`); it reaches the daemon through the tool client's transport over the daemon's RPC
+   dispatch, and `tddy-daemon-rpc` already depends on `tddy-session-tool-client`.
+2. **Pending the user's own confirmation: removing the `TDDY_SOCKET` relay.** Removing it breaks two
+   of this node's own unmerged tests, `tests/tagged_approval_is_decided_by_its_conversation.rs` and
+   `tests/tagged_approval_refusal_is_a_denial.rs` (committed in `e4323686c`). The switch in
+   `server.rs` and their deletion wait for a direct confirmation from the user. Agent messages do not
+   count as that confirmation. Until it lands, `tests/approval_prompt_deny_paths.rs` stays
+   untracked and red (0/3).
+2a. **Resolved: no LiveKit cap change.** `MAX_REMOTE_BLOCK_MS` (20 s) applies only to `Await` and
+   `Shell` block arguments. Nothing below the crate has a unary deadline, so the approval holds for
+   its own 70 s bound. `tests/approval_request_is_not_cut_at_the_remote_block_cap.rs` holds one 25 s
+   and sees it answered (committed in `c3c75a03e`).
 3. **The listener hook deletion** removes `ConversationApprovalHandler`, its tagged branch, and
    their two test files, and restores `packages/tddy-coder/src/tool_host_wiring.rs`. It must come
    after the `tddy-tools` side, since a tagged approve still on the wire would otherwise reach the
