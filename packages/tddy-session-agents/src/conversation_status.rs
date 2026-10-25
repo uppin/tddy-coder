@@ -37,6 +37,11 @@ pub(crate) enum ConversationStatus {
 /// The row names the conversation as `sessionId`, which is how the replay reads the conversation a row belongs to.
 /// A failure is logged and not returned: the row is what a reader sees while a turn waits, and the turn itself is
 /// not affected by it, so no caller treats it as fatal.
+///
+// TODO(web-approvals): the row is durable only. It is not published on the daemon's AgentActivityHub, so a live
+// stream shows the waiting state on the next replay, not when it starts. The raw activity snapshot
+// (`tddy-session-activity`'s `StreamAgentActivity`) also returns the row as a tool call named `subagent_conversation`,
+// which a consumer of raw activity has to tell apart from the agent's own calls.
 pub(crate) fn record(session_dir: &Path, conversation_id: &str, status: ConversationStatus) {
     if let Err(e) = append(session_dir, conversation_id, status) {
         log::warn!(
