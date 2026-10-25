@@ -1,22 +1,21 @@
-# 2026-10-25 — Headless `cursor`, `codex` and `oz` subagents get no MCP config
+# 2026-10-25 — Headless `cursor`, `codex` and `oz` subagents cannot withdraw their native tools
 
-**Category:** Deferred from `#coagents` 7/8 (#726, `headless-driver`) — developer-decided known limit
-**Source:** `packages/tddy-session-lifecycle/src/coding_agent_launcher.rs` (`DaemonCodingAgentLauncher::headless_plan`, the `HeadlessHarness::Cursor | Codex | Oz => (None, None)` arm); `packages/tddy-agent-backend/src/backend/headless_driver/argv.rs`
+**Category:** Deferred from `#coagents` 7/8 (#726, `headless-driver`) — developer-decided known limit; narrowed by `#coagents` 9/9 (#776, sweep)
+**Source:** `packages/tddy-session-lifecycle/src/coding_agent_launcher.rs` (`confinement_for`, which reports all three `CannotWithdraw`)
 
-A headless `claude` conversation is handed `tddy-tools --mcp` through an owner-only `mcp.json` and
-its permission prompts are routed to `mcp__tddy-tools__approval_prompt`, which asks the daemon's
-`ExecToolService.RequestApproval`. The other three headless harnesses get nothing:
+#776 handed the three CLIs the `tddy-tools --mcp` server in each one's own shape (cursor's
+`<worktree>/.cursor/mcp.json`, `oz --mcp <path>`, codex `-c mcp_servers.*` overrides), so they now
+have the session's tddy-tools tools. What is left is the half #776 did not take: none of the three
+is proven to have a mode in which its **native** tools (shell, file edits) are withdrawn, so a
+managed session still refuses all three at attach, and an unmanaged one runs them under the fixed
+policy their row names. None of them has a permission-prompt tool either, so none asks mid-turn.
 
-- `cursor` — `HeadlessCommand.mcp_config` is never written to `<wd>/.cursor/mcp.json`, so the CLI has
-  no tddy-tools tools; it runs under its fixed read-only policy.
-- `codex`, `oz` — the argv builders ignore `mcp_config` (`oz` has `--mcp <json|path>`, observed; codex
-  takes MCP servers through `-c mcp_servers.*`).
-
-So none of the three has an approval route or the session's exec tools, and since none can withdraw
-its native tools they are refused in managed sessions anyway.
+Deferred because each CLI needs its own investigation against an installed binary (no `codex` binary
+is installed on the development machine — only the Superset shim), and a withdrawal claim that is not
+proven against the real CLI would let a managed session run unconfined tools.
 
 ## What would close it
 
-Write each CLI's MCP config in its own shape (cursor's `.cursor/mcp.json` in the conversation
-worktree, `oz --mcp <path>`, codex `-c` overrides) from the same `tool_server_spec`, and prove per CLI
-whether a tool-withdrawal mode exists so `confinement_for` can move from `CannotWithdraw`.
+Per CLI, find and prove (against the installed binary, recorded) a flag or config that removes its
+native tools while keeping MCP tools; then move that harness's `confinement_for` from
+`CannotWithdraw` to the withdrawal it supports, with a test that the managed attach admits it.

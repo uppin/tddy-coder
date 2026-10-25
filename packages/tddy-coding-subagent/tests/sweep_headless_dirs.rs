@@ -2,7 +2,7 @@
 //! previous run left under `<tddy_data_dir>/headless/` — each holds an MCP config carrying its
 //! agent's credential — and nothing another daemon sharing the data directory created.
 //!
-//! Backlog: docs/dev/todo/2026-10-25-headless-approval-route-residuals.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents (what a headless conversation leaves on disk)
 
 use std::path::Path;
 

@@ -7,7 +7,7 @@
 //! does the same two things the production plan does, through the same `ApprovalRoutes` and the same
 //! directory. What fails afterwards is real: the conversation's transcript cannot be opened.
 //!
-//! Backlog: docs/dev/todo/2026-10-25-headless-approval-route-residuals.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents (what a headless conversation leaves on disk)
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

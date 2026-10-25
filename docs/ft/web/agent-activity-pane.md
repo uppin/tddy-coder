@@ -592,7 +592,9 @@ actor (`cancelled_by`, field 5, is reserved): a token minted for the session's a
 principal ([session tokens](../../../packages/tddy-github/docs/session-token.md)) and is recorded as
 `main-agent`; any other authenticated token is recorded under its login. A reopened dialog then shows
 "Cancelled by <actor>" with no options, and `AnswerAgentPermission` answers `NOT_FOUND`, since the
-conversation is closed. The web's cancel sends no actor; with no one signed in it is refused and sends
+conversation is closed. A coding agent's `subagent_cancel` (`keep_conversation`) records the request
+the same way, then cancels only the turn: the conversation stays open, with no request pending, so an
+answer to the cancelled one is refused. The web's cancel sends no actor; with no one signed in it is refused and sends
 nothing.
 
 ### Transcript and status
@@ -604,10 +606,15 @@ nothing.
   `{ answeredBy, cancelled: true }`. `answeredBy` is the user's login, or `main-agent`.
 - While a deferred turn waits, the daemon writes **one status row per conversation** into the session's
   activity log: call id `subagent-conversation:<conversation id>`, tool name `subagent_conversation`,
-  running with `{ awaitingUser: true }` when the deferral is accepted, running without it once the
+  `source = "subagent-status"`, running with `{ awaitingUser: true }` when the deferral is accepted, running without it once the
   answer is delivered, completed at turn end. The fold lets a running row decide the bubble's status;
   once it is completed, the newest row by time decides. Only a deferred request folds to
   `awaiting_user`; a request the main agent must answer reads in progress.
+- Each row is appended to the log and then **published on the daemon's activity hub**, the path
+  `ReportAgentActivity` takes, so a client following `StreamSessionActivity` live sees "waiting for
+  you" at once. The fold reads a record as a status row by its `source`, not its tool name — an
+  agent's own tool could be named `subagent_conversation` — and any other reader of raw activity tells
+  a status row from the agent's calls the same way.
 
 ### In the conversation dialog
 
@@ -623,11 +630,9 @@ owning daemon is unknown the entry says it cannot be answered (`permission-canno
 
 ### Known limits
 
-- The status row is durable only: it is not published on the daemon's activity hub, so a client
-  following the session live sees "waiting for you" at its next replay snapshot, and the raw
-  `StreamAgentActivity` snapshot returns it as a tool call named `subagent_conversation`
-  ([`docs/dev/todo/2026-10-25-conversation-status-row-is-durable-only.md`](../../dev/todo/2026-10-25-conversation-status-row-is-durable-only.md)).
-  A refused deferral shows running-with-awaiting for a moment, then completed.
+- The raw activity pane shows status rows like any other record; whether it should hide
+  `source = "subagent-status"` rows is not decided.
+- A refused deferral shows running-with-awaiting for a moment, then completed.
 - No notification (Telegram, desktop) for a deferred request, and no answering from the Agents tab.
 - Proven over a stub coding agent and in-memory backends; no test runs two real daemons for the
   forwarded answer.

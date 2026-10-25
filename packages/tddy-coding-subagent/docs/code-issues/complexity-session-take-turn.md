@@ -13,6 +13,7 @@
 | Run | Raw lines | Brace depth | Note |
 |---|---|---|---|
 | 2026-10-25 | 39 → 71 | 3 → 5 | first detection — PR #727 grew it: the main agent's answer is delivered before the in-flight slot is taken and refused at once when a deferred turn holds the slot, a deferral is recorded on the stream, and the answer is recorded by the turn it continues. Deferred to the `#coagents` sweep node by the developer (2026-10-25) |
+| 2026-10-25 | 71 → 78 | 5 → 5 | **worse** by 7 in PR #776 (`#coagents` 9/9): a new prompt after a cancel-ended turn closes that turn into the history (`close_cancelled_turn`) and begins the next. Not split: the developer deferred every code issue of the `#coagents` stack past its sweep node too (2026-10-25), so this is left for after the stack lands |
 
 ## What the tool found
 

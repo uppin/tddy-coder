@@ -202,7 +202,13 @@ also owns the second resolver: `PermissionAnswering` (`answer_as`, `answered_by`
 `permission:<requestId>` transcript id and the answered record's output shape. A session exposes its
 handle through `SubagentSession::permission_answerer` (default `None`). In `subagent_runtime::run_turn`
 a permission answer to a remote conversation whose session a deferred turn holds is sent to the
-daemon without waiting on that lock (`RemoteConversationHandle::take_turn`). Product rules:
+daemon without waiting on that lock (`RemoteConversationHandle::take_turn`).
+
+`SubagentSession::turn_canceller` (default `None`) hands out a `TurnCancelling` handle
+(`cancel_turn`) for a session that can cancel its running turn and stay open — a coding agent's
+`session/cancel`. On the link, `AgentConversationLink::cancel(conversation_id, keep_conversation)`
+returns the daemon's `conversation_kept`; `RemoteConversationHandle::cancel` closes (`false`) and
+`cancel_turn` asks to keep the conversation (`true`). Product rules:
 [agent activity pane § The user answers a deferred permission request](../../../docs/ft/web/agent-activity-pane.md#the-user-answers-a-deferred-permission-request-added-2026-10-25).
 
 ## Features

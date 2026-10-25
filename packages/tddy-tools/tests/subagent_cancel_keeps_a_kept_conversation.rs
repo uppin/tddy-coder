@@ -6,7 +6,7 @@
 //! conversation. The setup mirrors `subagent_cancel_actor_acceptance.rs`, copied rather than shared so each file reads
 //! alone.
 //!
-//! Backlog: docs/dev/todo/2026-10-24-coding-agent-cancel-does-not-reach-session-cancel.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use std::sync::{Arc, Mutex};
 

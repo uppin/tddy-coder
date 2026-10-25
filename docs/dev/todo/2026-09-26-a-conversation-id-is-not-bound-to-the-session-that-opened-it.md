@@ -5,6 +5,12 @@
 **Severity:** authorization gap, pre-existing, not introduced by #545
 **Status:** open, deliberately not fixed in #545
 
+**Narrowed 2026-10-25 by #776 (`#coagents` 9/9):** `CancelAgentConversation` now checks the
+conversation is open on the request's `session_id` (`OpenAgentConversations::remove_on` /
+`turn_cancel_route`) and answers `NOT_FOUND` otherwise; #727 had already checked it for
+`AnswerAgentPermission`. `PromptAgentConversation` and `ResumeAgentConversation` still route by
+conversation id alone, and the `session_dirs` half (is `session_id` the token's?) is unchanged.
+
 ## What is missing
 
 Nothing checks that the `conversation_id` a request names belongs to the `session_id` — or to the

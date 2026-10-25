@@ -16,7 +16,7 @@ source modules.
 | `OpenAgentConversation` | unary | a conversation id, and where its turn loop runs |
 | `PromptAgentConversation` | server-stream | one turn's frames, local or relayed |
 | `ResumeAgentConversation` | server-stream | the same, for a turn that asks nothing new — optionally after a rewind and a correction |
-| `CancelAgentConversation` | unary | a turn interrupted and a conversation closed |
+| `CancelAgentConversation` | unary | a turn interrupted and a conversation closed — or, with `keep_conversation`, only a coding agent's turn cancelled (`conversation_kept`) |
 | `ReportAgentCloneState` | unary | a checkout's readiness, pushed by the daemon holding it |
 | `ReportAgentConversationState` | unary | what a jailed agent says it is doing, clamped |
 | `AnswerAgentPermission` | unary | the user's answer to a permission request the main agent deferred to them |
@@ -145,12 +145,28 @@ tries the session lock, and when the deferred turn holds it delivers through the
 `CancelAgentConversation` names the actor from the token (`sessions.answerer`) before it removes the
 conversation, records the request the turn still holds as answered by it (`record_cancelled_request`),
 then interrupts the turn — even when the record failed, which it reports as an internal error after
-the cancel. A remote conversation's owner derives the actor from the same token.
+the cancel. A remote conversation's owner derives the actor from the same token. A conversation open
+on another session is `NOT_FOUND` (`remove_on`, `conversation_not_open`), worded as for an unknown id.
+
+With `keep_conversation`, `OpenAgentConversations::turn_cancel_route` (the map's lock only, never the
+session's) picks the route: `Local` — the conversation's `TurnCancelling` handle, captured from
+`SubagentSession::turn_canceller` when it opened — records the held request the same way, then
+`cancel_turn`s and answers `conversation_kept: true` (`cancel_local_turn`); `Remote` forwards the flag
+(`AgentConversationPeers::cancel` returns the owner's `kept`) and drops the routing record only when
+the owner did not keep it (`cancel_remote_turn`); `Close` — a model loop, which has no turn canceller —
+falls through to the ordinary close and answers `false`.
+
+`open_agent_conversation` arms an `OpeningConversation` guard before the open, unless the id is
+already open; dropped before the conversation reaches the table (a failed open, or a caller gone
+mid-open) it calls `sessions.conversation_closed`, which removes a headless launch's approval route
+and files.
 
 While a deferred turn waits, `conversation_status` writes the conversation's status row
-(`subagent-conversation:<id>`, running with `awaitingUser`, then running, then completed) into the
-session's activity log; the replay folds it into the conversation's bubble. The row is not published
-live ([`docs/dev/todo/2026-10-25-conversation-status-row-is-durable-only.md`](../../../docs/dev/todo/2026-10-25-conversation-status-row-is-durable-only.md)).
+(`subagent-conversation:<id>`, `source = CONVERSATION_ROW_SOURCE` (`"subagent-status"`), running with
+`awaitingUser`, then running, then completed) into the session's activity log, then publishes it on
+`SessionAgentPorts.activity` (the daemon's `AgentActivityHub`, which `StreamSessionActivity` tails);
+a row that could not be appended is not published. The replay folds it into the conversation's
+bubble, keyed on its source.
 The pending request and its answer reach the conversation's transcript under `permission:<requestId>`
 from the coding agent's update stream (`AcpUpdate::ToolCallRecord`); a cancel's record is written
 directly, after what the stream already holds (`ConversationRecorder::record_after_streamed`).

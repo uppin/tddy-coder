@@ -1,7 +1,7 @@
 //! A conversation's status row is told apart from the agent's own calls by its source, which every consumer of raw
 //! activity receives — not by its tool name, which an agent's own tool could share.
 //!
-//! Backlog: docs/dev/todo/2026-10-25-conversation-status-row-is-durable-only.md
+//! Feature: docs/ft/web/agent-activity-pane.md § Transcript and status
 
 use tddy_core::agent_activity::{AgentActivityRecord, STATUS_RUNNING};
 use tddy_service::subagent_conversation_replay::{

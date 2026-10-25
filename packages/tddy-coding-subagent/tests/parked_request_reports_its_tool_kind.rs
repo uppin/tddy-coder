@@ -1,7 +1,7 @@
 //! Unit tests: a parked permission request reports the ACP tool kind of the call that asked, so the
 //! main agent (and the user it hands the request to) reads what kind of call is waiting.
 //!
-//! Backlog: docs/dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § permission requests (`toolCall.kind`)
 
 use std::sync::Arc;
 use std::time::Duration;
