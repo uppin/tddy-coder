@@ -21,6 +21,9 @@ the daemon implements (`tddy-session-lifecycle::coding_agent_launcher`).
 | `session` | `CodingAgentSession` — one `dyn ConversationDriver` per conversation: an `AcpConversation` (one ACP agent process) or a `HeadlessDriver` (one CLI invocation per turn) |
 | `transports` | `HEADLESS_HARNESSES = ["claude", "cursor", "codex", "oz"]`; `transport_of(harness)` (`Acp` / `Headless` / `None` for PTY-only), `permission_policy_of(harness)` (`AsksCaller` / `Fixed(text)`), `transport_and_policy_wire` — the catalog row's `transport` / `permission_policy` spellings, derived from the harness id so `CodingAgentDef` is unchanged |
 | `approval_routes` | `ApprovalRoutes` — the daemon's map of headless conversations to the launch that owns them and the `ParkedPermissions` their approvals park on |
+| `parked_permissions` | `ParkedPermissions` — the agent's permission requests, parked oldest first until answered; `answer` (the main agent's), `answer_recording(answer, by)` (first answer wins, a later one refused naming who answered), `defer_to_user`, `cancel_request`, `cancel_pending` |
+| `user_permission_answers` | `PermissionAnswering` for `ParkedPermissions` — the handle the daemon answers a deferred request through. The trait and `AnsweredBy { MainAgent, User(login) }` live in `tddy_discovery::subagent` and are re-exported here |
+| `permission_records` (private) | the `AcpUpdate::ToolCallRecord`s a request leaves on the update stream: pending while deferred to the user, completed with `{answeredBy, optionId}` or `{answeredBy, cancelled: true}` once answered |
 
 ## The launcher port
 
@@ -64,6 +67,16 @@ Both withdrawal mechanisms follow each adapter's documentation. That the `_meta`
 - loop-only request options (`maxTurns`, `yieldConditions`, `fromMessageId`, `correction`,
   `replacement`) are refused with `SubagentError::unsupported_by_coding_agent(option)`;
 - dropping the session stops the agent process.
+
+A turn that answers a pending request as the main agent delivers the answer **before** it takes the
+in-flight slot. When a turn already holds the slot — a request deferred to the user keeps its turn
+open until it is answered — the answer is delivered anyway and the call is refused at once
+(`answer_delivered_while_held`), since waiting behind the turn it releases would never return. A
+deferral (`TurnRequest::deferring_permission_to_user`) is accepted only for the pending request it
+names: the turn records the request as deferred, streams its pending record, and waits in `settle`
+for either side's answer, recording that answer when it is given. `permission_answerer()` exposes the
+session's `ParkedPermissions` as `dyn PermissionAnswering`, so the daemon answers without the
+conversation's lock.
 
 `cancel_handle()` returns a `CancelHandle` that sends `session/cancel` (the turn ends `cancelled`).
 The daemon's conversation table holds `Box<dyn SubagentSession>` and does not reach it yet; its

@@ -21,3 +21,4 @@ The cancel path — `CancelHandle`, `CANCEL_SETTLE_DEADLINE` and `drive_cancelle
 is one cohesive group (~70 lines) that only shares `InFlightPrompt` with the rest; moving it to a
 `cancel.rs` sibling (engine-driven, `code-restructuring`) after the `#coagents` stack lands takes the
 file under budget.
+| 2026-10-25 | gate: 575 → 699 | **worse** by 124 in PR #727 (`#coagents` 8/8): the main agent's answer delivered before the in-flight slot is taken (`deliver_main_agent_answer`), the deferral wait in `take_turn`/`resume`/`settle`, the streamed permission records and `permission_answerer`. The records and the user answers have their own modules (`permission_records.rs`, `user_permission_answers.rs`). Not split: deferred to the `#coagents` sweep node by the developer (2026-10-25) |

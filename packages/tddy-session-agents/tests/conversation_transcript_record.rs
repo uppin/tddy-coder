@@ -234,6 +234,21 @@ impl AgentSessions for OwnedLoopAnswering {
     async fn refuse_departed_owner(&self, _daemon_instance_id: &str) -> Result<(), Status> {
         Ok(())
     }
+
+    fn github_user(&self, _session_token: &str) -> Result<String, Status> {
+        Err(Status::internal(
+            "this test takes no permission answer, so it names no GitHub user",
+        ))
+    }
+
+    fn answerer(
+        &self,
+        _session_token: &str,
+    ) -> Result<tddy_discovery::subagent::AnsweredBy, Status> {
+        Err(Status::internal(
+            "this test cancels no pending request, so it names no answerer",
+        ))
+    }
 }
 
 /// Every other port. A turn on a conversation this host runs reaches none of them, so each one
@@ -325,6 +340,19 @@ impl AgentConversationPeers for NoOtherPort {
     ) -> Result<(), Status> {
         Err(Status::internal(format!(
             "this host runs the conversation itself; nothing is cancelled on '{owner}'"
+        )))
+    }
+
+    async fn answer_permission(
+        &self,
+        _session_token: &str,
+        _session_id: &str,
+        owner: &str,
+        _request: &tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest,
+    ) -> Result<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse, Status>
+    {
+        Err(Status::internal(format!(
+            "this test answers no permission, so none is forwarded to '{owner}'"
         )))
     }
 }
@@ -550,6 +578,21 @@ impl AgentSessions for OwnedLoopOnce {
 
     async fn refuse_departed_owner(&self, _daemon_instance_id: &str) -> Result<(), Status> {
         Ok(())
+    }
+
+    fn github_user(&self, _session_token: &str) -> Result<String, Status> {
+        Err(Status::internal(
+            "this test takes no permission answer, so it names no GitHub user",
+        ))
+    }
+
+    fn answerer(
+        &self,
+        _session_token: &str,
+    ) -> Result<tddy_discovery::subagent::AnsweredBy, Status> {
+        Err(Status::internal(
+            "this test cancels no pending request, so it names no answerer",
+        ))
     }
 }
 

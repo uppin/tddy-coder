@@ -32,7 +32,12 @@ pub fn permission_property() -> serde_json::Value {
                         with stopReason \"permission_requested\"). The decision is yours: you may \
                         decide on your own, or ask the user first and answer with what they chose. \
                         The subagent's paused turn continues with the answer, and this call returns \
-                        the rest of that turn."
+                        the rest of that turn. When you handed the request to the user \
+                        (`deferPermissionToUser`) and they have not answered yet, the answer is \
+                        delivered at once and this call is refused, saying it was delivered: the turn \
+                        holding the request carries on, and its outcome goes to the call that \
+                        deferred the request. A \
+                        request already answered is refused, naming who answered."
     })
 }
 

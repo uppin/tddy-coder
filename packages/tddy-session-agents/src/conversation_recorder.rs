@@ -29,8 +29,9 @@ use tddy_service::subagent_conversation_replay::{
     append_conversation_frame, conversation_transcript_dir,
 };
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
-use tokio::sync::{broadcast, mpsc, oneshot, Notify};
+use tokio::sync::{broadcast, mpsc, oneshot, Notify, OwnedMutexGuard};
 
+use crate::conversation_status::{self, ConversationStatus};
 use crate::conversation_transcript::{
     now_unix_ms, turn_end_frames, user_prompt_frame, whole_turn_frames, TurnEnd,
 };
@@ -147,6 +148,25 @@ impl ConversationRecorder {
         }
     }
 
+    /// Append a frame that ends a request outside the turn that holds it, such as a cancel's answer. Every update the
+    /// stream has carried is written first, so the frame is the latest state of its call and cannot be overtaken by an
+    /// update still queued behind it.
+    pub(crate) async fn record_after_streamed(&self, frame: AcpAgentMessage) -> Result<(), String> {
+        if let Some(stream) = &self.stream {
+            flush(stream).await;
+        }
+        self.transcript.append(frame).map_err(|e| e.to_string())
+    }
+
+    /// Write this conversation's status row. See [`conversation_status::record`]: a failure does not fail the turn.
+    pub(crate) fn note_status(&self, status: ConversationStatus) {
+        conversation_status::record(
+            &self.transcript.session_dir,
+            &self.transcript.conversation_id,
+            status,
+        );
+    }
+
     /// When a turn ends, whatever its outcome. A streamed conversation waits for the recorder task to write
     /// every update the turn produced, then writes the turn's end. A conversation recorded whole writes the
     /// whole turn once it answered, and nothing when it did not.
@@ -228,26 +248,46 @@ impl TurnError {
     }
 }
 
+/// The session a turn runs on: waited for like any turn's, or already claimed by the caller without
+/// waiting.
+pub(crate) enum SessionClaim {
+    /// Taken by the turn, behind any turn already running on the conversation.
+    Wait(Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>),
+    /// Taken by the caller, which found nothing holding the session. See `take_a_turn`: a turn that
+    /// delivers a permission answer claims the session only when nothing holds it, so it never waits
+    /// behind a turn that is waiting for that answer.
+    Claimed(OwnedMutexGuard<Box<dyn SubagentSession>>),
+}
+
 /// Take one turn of a local conversation and record it as it runs.
 ///
 /// The session is held from the turn's start to the end of its recording, so two turns on one conversation
 /// are recorded one after the other: a queued turn's prompt is not written into the middle of the turn before
 /// it. A conversation closed before or during the turn reports it closed, and the turn's end records the stop.
 pub(crate) async fn take_recorded_turn(
-    session: &tokio::sync::Mutex<Box<dyn SubagentSession>>,
+    claim: SessionClaim,
     recorder: &ConversationRecorder,
     closed: &Notify,
     requested: TurnRequest,
     prompt: Option<&str>,
 ) -> Result<PromptOutcome, TurnError> {
-    let mut session = tokio::select! {
-        // Biased so a conversation already closed is reported as closed rather than racing one more turn out
-        // of a model.
-        biased;
-        _ = closed.notified() => return Err(TurnError::Closed { recording: None }),
-        guard = session.lock() => guard,
+    let mut session = match claim {
+        SessionClaim::Claimed(guard) => guard,
+        SessionClaim::Wait(lock) => tokio::select! {
+            // Biased so a conversation already closed is reported as closed rather than racing one more turn out
+            // of a model.
+            biased;
+            _ = closed.notified() => return Err(TurnError::Closed { recording: None }),
+            guard = lock.lock_owned() => guard,
+        },
     };
     recorder.begin_turn(prompt).map_err(TurnError::Recording)?;
+    // A turn that hands a request to the user is waiting on the user from here until it ends, and its status row
+    // says so while it does. A turn that asks for no deferral writes no status row.
+    let deferred = requested.permission_deferred_to_user().is_some();
+    if deferred {
+        recorder.note_status(ConversationStatus::AwaitingUser);
+    }
     let taken = tokio::select! {
         biased;
         _ = closed.notified() => None,
@@ -259,6 +299,9 @@ pub(crate) async fn take_recorded_turn(
         Some(Err(_)) => TurnEnd::Failed,
     };
     let recorded = recorder.end_turn(prompt, end).await;
+    if deferred {
+        recorder.note_status(ConversationStatus::Completed);
+    }
     drop(session);
     match taken {
         None => Err(TurnError::Closed {
@@ -396,6 +439,24 @@ fn update_frame(update: AcpUpdate, at: i64) -> Option<AcpAgentMessage> {
                 raw_output: raw_output.map(|output| output.to_string()),
                 ..Default::default()
             }),
+        }),
+        // A whole record is a `tool_call` again: the web keeps the latest `tool_call` of an id and ignores
+        // `tool_call_update`, so the record it supersedes must be replaced by a `tool_call`, not an update.
+        AcpUpdate::ToolCallRecord {
+            id,
+            title,
+            kind,
+            status,
+            raw_input,
+            raw_output,
+        } => session_update::Update::ToolCall(ToolCall {
+            tool_call_id: Some(ToolCallId { value: id }),
+            title,
+            kind: tool_kind_of(&kind) as i32,
+            status: tool_status_of(status) as i32,
+            raw_input: raw_input.map(|input| input.to_string()),
+            raw_output: raw_output.map(|output| output.to_string()),
+            ..Default::default()
         }),
         AcpUpdate::Thought(_) | AcpUpdate::Plan(_) => return None,
     };

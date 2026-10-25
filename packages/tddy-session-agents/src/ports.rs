@@ -16,11 +16,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_core::SessionAgentRecord;
-use tddy_discovery::subagent::SubagentSession;
+use tddy_discovery::subagent::{AnsweredBy, SubagentSession};
 use tddy_rpc::Status;
 use tddy_service::proto::session_agents_svc::{
-    AgentConversationChunk, OpenAgentConversationRequest, PromptAgentConversationRequest,
-    ResumeAgentConversationRequest,
+    AgentConversationChunk, AnswerAgentPermissionRequest, AnswerAgentPermissionResponse,
+    OpenAgentConversationRequest, PromptAgentConversationRequest, ResumeAgentConversationRequest,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -192,6 +192,24 @@ pub trait AgentSessions: Send + Sync {
     /// A conversation this host opened has closed: forget what was kept for it. Defaults to nothing,
     /// for a host that keeps nothing per conversation.
     fn conversation_closed(&self, _conversation_id: &str) {}
+
+    /// The GitHub login `session_token` authenticates: the login a user's permission answer is
+    /// recorded under. The session agent's own token is refused `PERMISSION_DENIED`: the main agent
+    /// answers through `subagent_resume`, never as the user.
+    ///
+    /// Required rather than defaulted: a default would let a new adapter forget it, and every answer
+    /// it served would then be refused by a default nobody chose. The daemon's adapter answers it
+    /// from its user mapping.
+    fn github_user(&self, session_token: &str) -> Result<String, Status>;
+
+    /// Who a call made over `session_token` acts as when it ends a pending request — the actor a
+    /// cancel records it answered by: [`AnsweredBy::MainAgent`] for a token minted for the
+    /// session's agent, otherwise the user the token authenticates, by login. An unauthenticated
+    /// token is refused.
+    ///
+    /// Required for the reason [`Self::github_user`] is: a default would be a principal nobody chose.
+    /// The daemon's adapter reads the agent principal off the token its own keys verify.
+    fn answerer(&self, session_token: &str) -> Result<AnsweredBy, Status>;
 }
 
 /// Forwarding a conversation to the daemon that owns the agent.
@@ -232,6 +250,9 @@ pub trait AgentConversationPeers: Send + Sync {
     ) -> Result<UnboundedReceiver<Result<AgentConversationChunk, Status>>, Status>;
 
     /// Cancel a conversation whose turn loop runs on `owner`.
+    ///
+    /// The owner records a permission request the conversation still holds as answered by the login that
+    /// `session_token` authenticates, so the token is forwarded whole and no actor is named.
     async fn cancel(
         &self,
         session_token: &str,
@@ -239,6 +260,19 @@ pub trait AgentConversationPeers: Send + Sync {
         owner: &str,
         conversation_id: &str,
     ) -> Result<(), Status>;
+
+    /// Answer a permission request on a conversation whose turn loop runs on `owner`, handing back
+    /// the answer the owner recorded.
+    ///
+    /// Forwarded whole: the owner holds the parked request, so its own deferral gate and its
+    /// first-answer-wins resolution decide the answer, and a refusal it gives comes back as it is.
+    async fn answer_permission(
+        &self,
+        session_token: &str,
+        session_id: &str,
+        owner: &str,
+        request: &AnswerAgentPermissionRequest,
+    ) -> Result<AnswerAgentPermissionResponse, Status>;
 }
 
 /// Everything the nine handlers need from the host they run on.

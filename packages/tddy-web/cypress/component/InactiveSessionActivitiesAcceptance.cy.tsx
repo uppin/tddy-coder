@@ -66,6 +66,8 @@ const DORMANT = {
   isActive: false,
   projectId: "proj-activities-1",
   daemonInstanceId: "",
+  codebaseDaemonInstanceId: "",
+  codebaseSessionId: "",
   workflowGoal: "Parser rewrite",
   pendingElicitation: false,
 };

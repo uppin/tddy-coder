@@ -15,16 +15,31 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use tddy_core::agent_activity::{AgentActivityRecord, STATUS_COMPLETED, STATUS_ERROR};
+use tddy_core::agent_activity::{
+    AgentActivityRecord, STATUS_COMPLETED, STATUS_ERROR, STATUS_RUNNING,
+};
 
 use crate::acp_replay::{append_acp_frame, read_session_transcript, tool_call_id_of};
-use crate::proto::acp::{acp_agent_message, session_update, AcpAgentMessage, ToolCallStatus};
+use crate::proto::acp::{
+    acp_agent_message, session_update, AcpAgentMessage, ToolCall, ToolCallId, ToolCallStatus,
+};
 
 /// The `tool_call_id` prefix of a session transcript's subagent-conversation entry.
 pub const SUBAGENT_TOOL_CALL_PREFIX: &str = "subagent:";
 
 /// The main agent's MCP tool names whose calls fold into a conversation's entry.
 pub const SUBAGENT_TOOL_NAME_PREFIX: &str = "mcp__tddy-tools__subagent_";
+
+/// The `result` key a running call carries while its turn waits on a permission request held for the user.
+pub const AWAITING_USER: &str = "awaitingUser";
+
+/// The tool name of a conversation's own status row: the record the daemon writes for a turn that is waiting on
+/// the user, which no call of the main agent makes. One row per conversation, under [`conversation_row_call_id`].
+pub const CONVERSATION_ROW_TOOL_NAME: &str = "subagent_conversation";
+
+/// The `call_id` prefix of a conversation's status row. Its frame is folded into the conversation's entry, but
+/// carries its own id, so a row is told apart from the main agent's calls.
+pub const CONVERSATION_ROW_CALL_PREFIX: &str = "subagent-conversation:";
 
 /// The `stopReason` a `subagent_*` call answers with when its turn paused on a permission request: the
 /// serde spelling of `StopReason::PermissionRequested` in `tddy-discovery`.
@@ -62,22 +77,40 @@ pub fn read_conversation_transcript(
     Ok((!frames.is_empty()).then_some(frames))
 }
 
-/// Fold the subagent-conversation entries of a transcript into one entry per conversation, in the
-/// place of the first frame that named it, carrying the status and stamp of the last and the title the
-/// conversation's calls name between them. Every other frame is kept as it was, in order.
+/// Fold the subagent-conversation entries of a transcript into one entry per conversation, in the place of the
+/// first frame that named it. Every other frame is kept as it was, in order.
+///
+/// While a conversation's own status row is running, the row decides the entry's status: a conversation waiting
+/// on the user reads as pending whatever the main agent's calls say. Once the row has completed, the newest record
+/// by time decides, so a call the main agent made after the conversation ended wins. The title is the one the
+/// conversation's calls name between them, and the entry takes the conversation's id.
 pub fn fold_subagent_calls(frames: Vec<AcpAgentMessage>) -> Vec<AcpAgentMessage> {
-    let latest: HashMap<String, AcpAgentMessage> = frames
-        .iter()
-        .filter_map(|frame| subagent_entry_id(frame).map(|id| (id.to_string(), frame.clone())))
-        .collect();
     let titles = conversation_titles(&frames);
+    let mut last_call: HashMap<String, AcpAgentMessage> = HashMap::new();
+    let mut last_row: HashMap<String, AcpAgentMessage> = HashMap::new();
+    for frame in &frames {
+        let Some(entry_id) = entry_id_of(frame) else {
+            continue;
+        };
+        if is_conversation_row(frame) {
+            last_row.insert(entry_id, frame.clone());
+        } else {
+            last_call.insert(entry_id, frame.clone());
+        }
+    }
     let mut emitted: HashSet<String> = HashSet::new();
     let mut folded = Vec::with_capacity(frames.len());
     for frame in frames {
-        match subagent_entry_id(&frame).map(str::to_string) {
-            Some(id) => {
-                if emitted.insert(id.clone()) {
-                    folded.push(with_state_of(frame, &latest[&id], &titles[&id]));
+        match entry_id_of(&frame) {
+            Some(entry_id) => {
+                if emitted.insert(entry_id.clone()) {
+                    let call = last_call.get(&entry_id);
+                    let decisive = decisive_state(&frame, call, last_row.get(&entry_id)).clone();
+                    let title = titles
+                        .get(&entry_id)
+                        .map(String::as_str)
+                        .unwrap_or_default();
+                    folded.push(with_state_of(frame, &entry_id, &decisive, call, title));
                 }
             }
             None => folded.push(frame),
@@ -86,34 +119,61 @@ pub fn fold_subagent_calls(frames: Vec<AcpAgentMessage>) -> Vec<AcpAgentMessage>
     folded
 }
 
-/// The conversation-entry id of a frame that is one, else `None`.
-fn subagent_entry_id(frame: &AcpAgentMessage) -> Option<&str> {
-    tool_call_id_of(frame).filter(|id| id.starts_with(SUBAGENT_TOOL_CALL_PREFIX))
+/// The entry a frame belongs to: a call's own entry id, or the entry of the conversation its status row names.
+fn entry_id_of(frame: &AcpAgentMessage) -> Option<String> {
+    let id = tool_call_id_of(frame)?;
+    if id.starts_with(SUBAGENT_TOOL_CALL_PREFIX) {
+        return Some(id.to_string());
+    }
+    let conversation = id.strip_prefix(CONVERSATION_ROW_CALL_PREFIX)?;
+    Some(format!("{SUBAGENT_TOOL_CALL_PREFIX}{conversation}"))
+}
+
+/// Whether a frame is a conversation's own status row rather than one of the main agent's calls.
+fn is_conversation_row(frame: &AcpAgentMessage) -> bool {
+    tool_call_id_of(frame).is_some_and(|id| id.starts_with(CONVERSATION_ROW_CALL_PREFIX))
+}
+
+/// The frame whose state an entry shows: the conversation's status row while the row is running, else whichever of
+/// the conversation's last call and its row is newer by time, the call on a tie. `first` is the frame that names the
+/// entry, which is one of the two, so it is the answer only when neither is given.
+fn decisive_state<'a>(
+    first: &'a AcpAgentMessage,
+    call: Option<&'a AcpAgentMessage>,
+    row: Option<&'a AcpAgentMessage>,
+) -> &'a AcpAgentMessage {
+    match (call, row) {
+        (None, None) => first,
+        (Some(call), None) => call,
+        (None, Some(row)) => row,
+        (Some(call), Some(row)) => {
+            if is_running(row) || timestamp_of(row) > timestamp_of(call) {
+                row
+            } else {
+                call
+            }
+        }
+    }
 }
 
 /// The title of every conversation entry in `frames`, from the arguments of all the calls that name it.
 /// The agent is named by the first call that names one, and the prompt is carried by a later call, so
 /// the title needs the whole conversation rather than the first frame alone.
 fn conversation_titles(frames: &[AcpAgentMessage]) -> HashMap<String, String> {
-    let mut arguments: HashMap<&str, Vec<serde_json::Value>> = HashMap::new();
+    let mut arguments: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
     for frame in frames {
-        if let Some(entry_id) = subagent_entry_id(frame) {
+        if let Some(entry_id) = entry_id_of(frame) {
             arguments
                 .entry(entry_id)
                 .or_default()
                 .extend(raw_input_of(frame));
         }
     }
-    frames
-        .iter()
-        .filter_map(subagent_entry_id)
-        .map(|entry_id| {
-            let calls = arguments
-                .get(entry_id)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            let title = conversation_title(conversation_of(entry_id), calls);
-            (entry_id.to_string(), title)
+    arguments
+        .into_iter()
+        .map(|(entry_id, calls)| {
+            let title = conversation_title(conversation_of(&entry_id), &calls);
+            (entry_id, title)
         })
         .collect()
 }
@@ -125,48 +185,78 @@ fn conversation_of(entry_id: &str) -> &str {
         .unwrap_or(entry_id)
 }
 
-/// The arguments a tool-call frame carries, as JSON, when it carries any.
-fn raw_input_of(frame: &AcpAgentMessage) -> Option<serde_json::Value> {
-    let Some(acp_agent_message::Msg::SessionUpdate(note)) = &frame.msg else {
-        return None;
-    };
-    let Some(session_update::Update::ToolCall(call)) = note
-        .update
-        .as_ref()
-        .and_then(|update| update.update.as_ref())
-    else {
-        return None;
-    };
-    serde_json::from_str(call.raw_input.as_deref()?).ok()
+/// The tool call a frame carries, when it carries one.
+fn tool_call_of(frame: &AcpAgentMessage) -> Option<&ToolCall> {
+    match &frame.msg {
+        Some(acp_agent_message::Msg::SessionUpdate(note)) => {
+            match note
+                .update
+                .as_ref()
+                .and_then(|update| update.update.as_ref())
+            {
+                Some(session_update::Update::ToolCall(call)) => Some(call),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
-/// `first`, carrying `title` and the status, output and stamp `last` left it in: the entry a
-/// conversation's first call opened, named for the whole conversation and in the state its last call
-/// put it.
+/// The status a frame's tool call carries, when it carries one.
+fn status_of(frame: &AcpAgentMessage) -> Option<ToolCallStatus> {
+    tool_call_of(frame).and_then(|call| ToolCallStatus::try_from(call.status).ok())
+}
+
+/// Whether a frame's tool call is still running: pending on the user, or in progress.
+fn is_running(frame: &AcpAgentMessage) -> bool {
+    matches!(
+        status_of(frame),
+        Some(ToolCallStatus::Pending | ToolCallStatus::InProgress)
+    )
+}
+
+/// The stamp a frame was recorded at; `0` for a frame that carries none.
+fn timestamp_of(frame: &AcpAgentMessage) -> i64 {
+    match &frame.msg {
+        Some(acp_agent_message::Msg::SessionUpdate(note)) => note.timestamp_unix_ms,
+        _ => 0,
+    }
+}
+
+/// The arguments a tool-call frame carries, as JSON, when it carries any.
+fn raw_input_of(frame: &AcpAgentMessage) -> Option<serde_json::Value> {
+    serde_json::from_str(tool_call_of(frame)?.raw_input.as_deref()?).ok()
+}
+
+/// `first`, named for the whole conversation under `entry_id` and in the state `decisive` leaves it in, with the
+/// output of the conversation's last call: the entry a conversation's first frame opened.
 fn with_state_of(
     mut first: AcpAgentMessage,
-    last: &AcpAgentMessage,
+    entry_id: &str,
+    decisive: &AcpAgentMessage,
+    last_call: Option<&AcpAgentMessage>,
     title: &str,
 ) -> AcpAgentMessage {
+    let stamp = timestamp_of(decisive);
+    let status = tool_call_of(decisive).map(|call| call.status);
+    let output = last_call
+        .and_then(tool_call_of)
+        .and_then(|call| call.raw_output.clone());
     if let Some(acp_agent_message::Msg::SessionUpdate(note)) = first.msg.as_mut() {
-        if let Some(acp_agent_message::Msg::SessionUpdate(last_note)) = &last.msg {
-            note.timestamp_unix_ms = last_note.timestamp_unix_ms;
-            if let (
-                Some(session_update::Update::ToolCall(call)),
-                Some(session_update::Update::ToolCall(last_call)),
-            ) = (
-                note.update
-                    .as_mut()
-                    .and_then(|update| update.update.as_mut()),
-                last_note
-                    .update
-                    .as_ref()
-                    .and_then(|update| update.update.as_ref()),
-            ) {
-                call.title = title.to_string();
-                call.status = last_call.status;
-                call.raw_output = last_call.raw_output.clone();
+        note.timestamp_unix_ms = stamp;
+        if let Some(session_update::Update::ToolCall(call)) = note
+            .update
+            .as_mut()
+            .and_then(|update| update.update.as_mut())
+        {
+            call.tool_call_id = Some(ToolCallId {
+                value: entry_id.to_string(),
+            });
+            call.title = title.to_string();
+            if let Some(status) = status {
+                call.status = status;
             }
+            call.raw_output = output;
         }
     }
     first
@@ -174,7 +264,7 @@ fn with_state_of(
 
 /// What one main-agent `subagent_*` call contributes to its conversation's entry.
 pub struct SubagentEntry {
-    /// `SUBAGENT_TOOL_CALL_PREFIX` + the conversation id.
+    /// `SUBAGENT_TOOL_CALL_PREFIX` + the conversation id for a call; the row's call id for a status row.
     pub tool_call_id: String,
     /// `"<agent> · <first prompt>"`, from the parts this call names. The fold replaces it with the title
     /// of the whole conversation, since one call may name only the agent or only the prompt.
@@ -191,6 +281,25 @@ pub fn subagent_entry_of(record: &AgentActivityRecord) -> Option<SubagentEntry> 
     let conversation_id = conversation_named_by(record)?;
     Some(SubagentEntry {
         tool_call_id: format!("{SUBAGENT_TOOL_CALL_PREFIX}{conversation_id}"),
+        title: conversation_title(&conversation_id, std::slice::from_ref(&record.input)),
+        status: entry_status(record),
+    })
+}
+
+/// The `call_id` of `conversation_id`'s status row: one per conversation, so the daemon's rows for it coalesce.
+pub fn conversation_row_call_id(conversation_id: &str) -> String {
+    format!("{CONVERSATION_ROW_CALL_PREFIX}{conversation_id}")
+}
+
+/// The entry a conversation's own status row stands for. Its frame carries the row's call id, which the fold maps
+/// into the conversation's entry, and its status is the row's own. `None` for any record that is not a status row.
+pub fn conversation_row_entry(record: &AgentActivityRecord) -> Option<SubagentEntry> {
+    if record.tool_name != CONVERSATION_ROW_TOOL_NAME {
+        return None;
+    }
+    let conversation_id = conversation_named_by(record)?;
+    Some(SubagentEntry {
+        tool_call_id: conversation_row_call_id(&conversation_id),
         title: conversation_title(&conversation_id, std::slice::from_ref(&record.input)),
         status: entry_status(record),
     })
@@ -256,8 +365,10 @@ fn prompt_summary(prompt: Option<&serde_json::Value>) -> Option<String> {
     })
 }
 
-/// The entry's status follows the call: running is in progress, a turn paused on a permission request
-/// is pending, a completed call is completed and a failed one failed.
+/// The entry's status follows the call. A call whose turn is waiting on a permission request held for the
+/// user is pending: the user is the one it waits on. A turn that paused on a request the main agent keeps is
+/// still in progress, since the main agent is the one answering it. A completed call is completed and a failed
+/// one failed.
 fn entry_status(record: &AgentActivityRecord) -> ToolCallStatus {
     match record.status.as_str() {
         STATUS_COMPLETED
@@ -267,10 +378,19 @@ fn entry_status(record: &AgentActivityRecord) -> ToolCallStatus {
                 .and_then(serde_json::Value::as_str)
                 == Some(PERMISSION_REQUESTED) =>
         {
-            ToolCallStatus::Pending
+            ToolCallStatus::InProgress
         }
         STATUS_COMPLETED => ToolCallStatus::Completed,
         STATUS_ERROR => ToolCallStatus::Failed,
+        STATUS_RUNNING
+            if record
+                .result
+                .get(AWAITING_USER)
+                .and_then(serde_json::Value::as_bool)
+                == Some(true) =>
+        {
+            ToolCallStatus::Pending
+        }
         // `running` (and any not-yet-terminal state) maps to in-progress.
         _ => ToolCallStatus::InProgress,
     }

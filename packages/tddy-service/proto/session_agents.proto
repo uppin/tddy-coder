@@ -75,6 +75,11 @@ service SessionAgentService {
   // This is that agent's own report, and the only possible source for it
   // (docs/ft/daemon/session-agent-roster.md § What an agent is doing).
   rpc ReportAgentConversationState(ReportAgentConversationStateRequest) returns (ReportAgentConversationStateResponse);
+  // Answer a coding subagent's permission request the main agent deferred to the user
+  // (`subagent_resume { permission: { requestId, deferToUser: true } }`). The session's owner only;
+  // the conversation must belong to the named session. The first answer wins: one arriving after
+  // the main agent's, or after another user's, is refused naming who answered.
+  rpc AnswerAgentPermission(AnswerAgentPermissionRequest) returns (AnswerAgentPermissionResponse);
 }
 
 enum AgentCloneState {
@@ -166,6 +171,10 @@ message CancelAgentConversationRequest {
   string session_id = 2;
   string daemon_instance_id = 3;
   string conversation_id = 4;
+  // Field 5 named the actor that cancelled the conversation. The daemon reads the actor from the session
+  // token instead, so a caller cannot record another login; the number and name stay reserved.
+  reserved 5;
+  reserved "cancelled_by";
 }
 
 message CancelAgentConversationResponse {}
@@ -314,6 +323,11 @@ message ResumeAgentConversationRequest {
   // {answer: "selected"|"cancelled", requestId, optionId?} object; the coding agent's paused turn
   // continues with it. Empty when the resume answers no request.
   string permission_answer_json = 10;
+  // The request id of the conversation's pending permission request to hand to the user instead of
+  // answering it here: the turn holds until the user answers it from the conversation view, or this
+  // caller answers it. Empty or absent = none. Refused with `permission_answer_json` set, since a
+  // request is either answered by the caller or handed to the user.
+  optional string defer_permission_to_user = 11;
 }
 
 message SessionAgentEntry {
@@ -394,4 +408,21 @@ message StreamSessionAgentsRequest {
 enum AgentPlacement {
   AGENT_PLACEMENT_SHARED = 0;
   AGENT_PLACEMENT_CLONE = 1;
+}
+
+message AnswerAgentPermissionRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+  string daemon_instance_id = 3;
+  string conversation_id = 4;
+  string request_id = 5;
+  // One of the request's option ids; empty with `cancelled` set.
+  string option_id = 6;
+  bool cancelled = 7;
+}
+
+message AnswerAgentPermissionResponse {
+  // Who the answer was recorded as: the answering user's login.
+  string answered_by = 1;
 }

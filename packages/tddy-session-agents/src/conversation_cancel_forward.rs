@@ -19,8 +19,8 @@ pub async fn forward_cancel_agent_conversation(
         crate::SERVICE_NAME,
         "CancelAgentConversation",
         CancelAgentConversationRequest {
-            // The detaching caller's own token: the peer authenticates a cancel exactly as it
-            // authenticated the open, and this daemon holds no other credential to present.
+            // The caller's own token: the peer authenticates a cancel exactly as it authenticated the open, and
+            // records the actor it names from that token. This daemon holds no other credential to present.
             session_token: session_token.to_string(),
             session_id: session_id.to_string(),
             daemon_instance_id: daemon_instance_id.to_string(),

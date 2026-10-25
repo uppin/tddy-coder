@@ -472,6 +472,7 @@ async fn resume_with_a_replacement_round_trips_the_rpc_wire() {
             })
             .to_string(),
             permission_answer_json: String::new(),
+            defer_permission_to_user: None,
         }))
         .await
         .expect("resuming an open conversation must succeed")

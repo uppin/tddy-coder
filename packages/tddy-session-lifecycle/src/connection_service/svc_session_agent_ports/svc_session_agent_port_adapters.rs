@@ -11,7 +11,7 @@ use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 
 use tddy_session_agents::ports::AgentConversationPeers;
 
-use tddy_discovery::subagent::SubagentSession;
+use tddy_discovery::subagent::{AnsweredBy, SubagentSession};
 
 use tddy_session_agents::ports::AgentSessions;
 
@@ -151,6 +151,9 @@ impl RosterBroadcast for TheSessionsOwnRoom {
 /// against a session's own worktree — and the two refusals that decide whether it should.
 pub(crate) struct TurnLoopsThisDaemonCanOpen {
     pub(crate) roster: AgentRoster,
+    /// The tokens this daemon signs and verifies with — what reads the agent principal off a token.
+    /// `None` on a host built without them, which mints no agent token, so no caller is the agent.
+    pub(crate) session_tokens: Option<tddy_daemon_auth::SessionTokens>,
 }
 
 #[async_trait]
@@ -209,6 +212,44 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
 
     fn conversation_closed(&self, conversation_id: &str) {
         self.roster.conversation_closed(conversation_id);
+    }
+
+    /// The login a user's answer is recorded under — refused for the agent's own token, which
+    /// answers through `subagent_resume` and never as the user.
+    fn github_user(&self, session_token: &str) -> Result<String, Status> {
+        let login = self.roster.session_github_user(session_token)?;
+        if self.carries_the_agent_principal(session_token) {
+            return Err(Status::permission_denied(
+                "this token is the session agent's: the main agent answers a permission request \
+                 through subagent_resume, not as the user",
+            ));
+        }
+        Ok(login)
+    }
+
+    /// The main agent when this daemon's keys verify `session_token` and it carries the agent
+    /// principal; otherwise the user the token authenticates. Authentication stays the user
+    /// resolver's, as on every other call: the principal only says whose the authenticated call is.
+    fn answerer(&self, session_token: &str) -> Result<AnsweredBy, Status> {
+        let login = self.roster.session_github_user(session_token)?;
+        Ok(if self.carries_the_agent_principal(session_token) {
+            AnsweredBy::MainAgent
+        } else {
+            AnsweredBy::User(login)
+        })
+    }
+}
+
+impl TurnLoopsThisDaemonCanOpen {
+    /// Whether this daemon's keys verify `session_token` and it was minted for the session's agent.
+    /// A token they cannot verify is never the agent's.
+    fn carries_the_agent_principal(&self, session_token: &str) -> bool {
+        self.session_tokens.as_ref().is_some_and(|tokens| {
+            tokens
+                .verifier()
+                .verify_now(session_token)
+                .is_ok_and(|claims| claims.principal == Some(tddy_github::TokenPrincipal::Agent))
+        })
     }
 }
 
@@ -324,6 +365,19 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
     ) -> Result<(), Status> {
         self.roster
             .forward_cancel_agent_conversation(session_token, session_id, owner, conversation_id)
+            .await
+    }
+
+    async fn answer_permission(
+        &self,
+        session_token: &str,
+        session_id: &str,
+        owner: &str,
+        request: &tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest,
+    ) -> Result<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse, Status>
+    {
+        self.roster
+            .forward_answer_agent_permission(session_token, session_id, owner, request)
             .await
     }
 }

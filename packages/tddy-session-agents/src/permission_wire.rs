@@ -5,6 +5,14 @@
 
 use tddy_discovery::subagent::{PermissionAnswer, PermissionRequestView, TurnRequest};
 
+/// Why a permission answer the main agent sent is refused, when the answer was delivered while a turn
+/// holds the conversation: the answer reached its request, and the turn holding it carries on, with its
+/// outcome going to the call that deferred the request. Not a failure of the answer, so it is said as one.
+/// The wording is the shared one, so the daemon and the coding agent say the same thing.
+pub(crate) fn answer_delivered_while_held(request_id: &str) -> String {
+    tddy_discovery::subagent::answer_delivered_while_held(request_id)
+}
+
 /// The request as the final frame carries it: JSON, or empty when the turn did not pause on one.
 #[must_use]
 pub fn permission_request_json(request: Option<&PermissionRequestView>) -> String {
@@ -30,4 +38,23 @@ pub fn with_permission_answer(
         format!("ResumeAgentConversation permission_answer_json is not a permission answer: {e}")
     })?;
     Ok(requested.with_permission_answer(answer))
+}
+
+/// Hand the pending permission request `defer_permission_to_user` names to the user, where the
+/// resume names one. Empty is no request. A resume that both hands a request to the user and
+/// answers one is refused: a request is either answered by the caller or handed to the user.
+pub fn with_permission_deferral(
+    requested: TurnRequest,
+    defer_permission_to_user: Option<&str>,
+    answer_json: &str,
+) -> Result<TurnRequest, String> {
+    match defer_permission_to_user.filter(|request_id| !request_id.is_empty()) {
+        None => Ok(requested),
+        Some(_) if !answer_json.is_empty() => Err(
+            "ResumeAgentConversation defer_permission_to_user and permission_answer_json cannot both be set: \
+             a permission request is either answered by the caller or handed to the user"
+                .to_string(),
+        ),
+        Some(request_id) => Ok(requested.deferring_permission_to_user(request_id)),
+    }
 }

@@ -220,6 +220,21 @@ impl AgentSessions for TheTurnLoopsThisHostOpened {
     async fn refuse_departed_owner(&self, _daemon_instance_id: &str) -> Result<(), Status> {
         Ok(())
     }
+
+    fn github_user(&self, _session_token: &str) -> Result<String, Status> {
+        Err(Status::internal(
+            "this test takes no permission answer, so it names no GitHub user",
+        ))
+    }
+
+    fn answerer(
+        &self,
+        _session_token: &str,
+    ) -> Result<tddy_discovery::subagent::AnsweredBy, Status> {
+        Err(Status::internal(
+            "this test cancels no pending request, so it names no answerer",
+        ))
+    }
 }
 
 // ─── the ports an open never reaches ────────────────────────────────────────────────────────────
@@ -318,6 +333,19 @@ impl AgentConversationPeers for PortsAnOpenDoesNotUse {
     ) -> Result<(), Status> {
         Err(Status::internal(format!(
             "these tests cancel nothing on '{owner}'"
+        )))
+    }
+
+    async fn answer_permission(
+        &self,
+        _session_token: &str,
+        _session_id: &str,
+        owner: &str,
+        _request: &tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest,
+    ) -> Result<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse, Status>
+    {
+        Err(Status::internal(format!(
+            "this test answers no permission, so none is forwarded to '{owner}'"
         )))
     }
 }

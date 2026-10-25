@@ -12,7 +12,8 @@ use tddy_rpc::Status;
 use crate::agent_host_callbacks::AgentRoster;
 
 impl AgentRoster {
-    /// Ask `daemon_instance_id` to cancel a conversation its own turn loop is running.
+    /// Ask `daemon_instance_id` to cancel a conversation its own turn loop is running. The caller's token travels
+    /// with the cancel, so the owner records the actor from it.
     pub async fn forward_cancel_agent_conversation(
         &self,
         session_token: &str,

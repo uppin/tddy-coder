@@ -787,6 +787,7 @@ argument:
 | `from_message_id`, `correction` | `ResumeAgentConversationRequest` | rewind to a message the conversation holds, and append one corrective instruction after it |
 | `messages` | `AgentConversationChunk`, **final frame only** | the messages that turn appended, as `AgentMessageDescriptor { id, role, tool, tool_calls, is_error, preview }` |
 | `clamped_max_turns` | `AgentConversationChunk`, final frame only | the budget actually applied, unset when the caller got what it asked for |
+| `defer_permission_to_user` | `ResumeAgentConversationRequest` | the pending permission request the caller hands to the user instead of answering it ([Agent activity pane § The user answers a deferred permission request](../web/agent-activity-pane.md#the-user-answers-a-deferred-permission-request-added-2026-10-25)) |
 
 `ResumeAgentConversation` is a server stream like `PromptAgentConversation`, and is a member of the
 in-jail relay allowlist for the reason stated in
@@ -807,6 +808,15 @@ other test does. Recorded in
 [`docs/dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md`](../../dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md).
 A long `messages` list on the final frame can also overflow the chunk-framing threshold —
 [`docs/dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md`](../../dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md).
+
+**A permission request the main agent handed to the user** is answered by the user over
+`AnswerAgentPermission` on this service, routed like the others and forwarded to the agent's owning
+daemon when the conversation runs there. It refuses an unauthenticated caller, the session agent's
+own token, a conversation the session does not hold and a request that was not deferred.
+`CancelAgentConversation` records a request the cancel ends as answered by the actor the caller's
+token names — `main-agent` for a token minted for the session's agent, otherwise the login; the
+request carries no actor. Both are described in
+[Agent activity pane § The user answers a deferred permission request](../web/agent-activity-pane.md#the-user-answers-a-deferred-permission-request-added-2026-10-25).
 
 One shape the wire deliberately does not carry: a turn that is **both** a new prompt and a rewind.
 The local session supports it, no MCP caller can construct it, so no field was invented for it. It

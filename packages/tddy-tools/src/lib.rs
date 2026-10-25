@@ -20,6 +20,7 @@ pub mod index_console;
 pub mod list_models;
 pub mod mcp_primitives;
 pub mod permission_answer_arg;
+pub mod permission_deferral_arg;
 pub mod pty_relay;
 mod pull_ledger;
 pub mod remote_cli;

@@ -115,6 +115,9 @@ export interface SessionMainPaneProps {
    *  silently — the pane would look exactly like one whose host cannot carry a track. */
   host: HostConnection | null;
   sessionToken?: string;
+  /** The signed-in user's login, which the agent-conversation tabs need in order to cancel when
+   *  they are closed. `null` (the default) when none is signed in, and the cancel is refused. */
+  callerLogin?: string | null;
   onCancelCreate?: () => void;
   onSessionCreated?: (sessionId: string) => void;
   /** LiveKit room for the connected session — used by the VNC / screen-sharing overlay. */

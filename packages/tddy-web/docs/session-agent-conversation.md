@@ -66,6 +66,12 @@ the open is in flight lets the cancel land first (the daemon answers `NOT_FOUND`
 has not created) and the open land after — leaving a conversation, and the agent session
 `open_agent_conversation` spawns for it, with nothing left to cancel it.
 
+The cancel names no actor: the daemon records a permission request the cancel ends as answered by
+the authenticated caller. The tab still needs someone signed in (`callerLogin`, read from the auth
+context by `SessionsDrawerScreen` and passed down through `SessionRuntime` and `SessionMainPane`):
+with no signed-in user the cancel is refused locally, sends nothing, and is traced with
+`console.debug`. The login is read when the tab closes, not when the open settles.
+
 ### 3. One turn at a time, gated in `send()` and not on the button
 
 `appendAnswerChunk` extends *the open agent turn*. A second prompt sent into an answer still arriving

@@ -28,12 +28,16 @@ use tddy_daemon_auth::SessionTokens;
 /// resolves from this daemon's common-room advertisement — which is exactly why it will accept
 /// what is minted here. Every failure is a refusal rather than a fallback to forwarding the
 /// caller's token: an expired, forged or malformed credential must not buy a session-length one.
+///
+/// It carries [`tddy_github::TokenPrincipal::Agent`]: every agent token this daemon hands out —
+/// local, split or project-home — is minted here, and the principal is how a daemon tells a call
+/// the main agent made (`subagent_cancel`) from one the user made, though both name the same login.
 pub(crate) fn mint_agent_session_token(
     tokens: &SessionTokens,
     caller_token: &str,
 ) -> Result<String, Status> {
     let caller = verified_caller(tokens, caller_token)?;
-    Ok(tokens.signer().mint(&caller, SPLIT_AGENT_TOKEN_TTL))
+    Ok(tokens.signer().mint_agent(&caller, SPLIT_AGENT_TOKEN_TTL))
 }
 
 /// The identity a caller's token *proves*, or a refusal.

@@ -1,6 +1,11 @@
 import React from "react";
 import { Button } from "../ui/button";
-import { bubbleClass, elapsedBadge, toolStatusClass } from "./chatEntryPresentation";
+import {
+  bubbleClass,
+  elapsedBadge,
+  toolStatusClass,
+  toolStatusLabel,
+} from "./chatEntryPresentation";
 import { useTailFollow } from "./useTailFollow";
 import type { ChatMessage } from "./useAgentChat";
 
@@ -102,6 +107,16 @@ export function AgentTranscriptView({
       >
         {messages.map((m, i) => {
           const open = openerOf(m);
+          // A subagent bubble carries its status inside it, beside its label, because the bubble is what
+          // reads "waiting for you". A tool call's marker stays beside the entry, as it always has.
+          const statusMarker = m.toolStatus && (
+            <span
+              data-testid={`agent-chat-tool-status-${i}`}
+              className={toolStatusClass(m.toolStatus)}
+            >
+              {toolStatusLabel(m.toolStatus)}
+            </span>
+          );
           return (
             <div key={m.key} className="flex items-start justify-between gap-2">
               <div
@@ -113,16 +128,12 @@ export function AgentTranscriptView({
                 onClick={open ? () => open(m) : undefined}
               >
                 {m.from === "goal" ? `Goal: ${m.text}` : m.text}
+                {m.from === "subagent" && statusMarker && (
+                  <div className="mt-1">{statusMarker}</div>
+                )}
               </div>
               <div className="flex flex-shrink-0 items-center gap-1.5 pt-1">
-                {(m.from === "tool" || m.from === "subagent") && m.toolStatus && (
-                  <span
-                    data-testid={`agent-chat-tool-status-${i}`}
-                    className={toolStatusClass(m.toolStatus)}
-                  >
-                    {m.toolStatus}
-                  </span>
-                )}
+                {m.from === "tool" && statusMarker}
                 <span
                   data-testid={`agent-chat-elapsed-${i}`}
                   className="font-mono text-[10px] leading-none text-muted-foreground"

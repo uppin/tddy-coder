@@ -25,22 +25,26 @@ use async_trait::async_trait;
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session_agents_svc::{
-    AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
-    CancelAgentConversationResponse, DetachSessionAgentRequest, ListSessionAgentsRequest,
-    OpenAgentConversationRequest, OpenAgentConversationResponse, PromptAgentConversationRequest,
-    ReportAgentCloneStateRequest, ReportAgentCloneStateResponse,
-    ReportAgentConversationStateRequest, ReportAgentConversationStateResponse,
-    ResumeAgentConversationRequest, SessionAgentRoster, StreamSessionAgentsRequest,
+    AgentConversationChunk, AnswerAgentPermissionRequest, AnswerAgentPermissionResponse,
+    AttachSessionAgentRequest, CancelAgentConversationRequest, CancelAgentConversationResponse,
+    DetachSessionAgentRequest, ListSessionAgentsRequest, OpenAgentConversationRequest,
+    OpenAgentConversationResponse, PromptAgentConversationRequest, ReportAgentCloneStateRequest,
+    ReportAgentCloneStateResponse, ReportAgentConversationStateRequest,
+    ReportAgentConversationStateResponse, ResumeAgentConversationRequest, SessionAgentRoster,
+    StreamSessionAgentsRequest,
 };
 use tddy_worktree_service::stream::MpscResultStream;
 
 use tddy_discovery::subagent::{
-    MessageDescriptor, MessageId, MessageRole, PromptOutcome, SubagentSession, TurnRequest,
+    AnsweredBy, MessageDescriptor, MessageId, MessageRole, PermissionAnswer, PermissionAnswering,
+    PromptOutcome, SubagentSession, TurnRequest,
 };
 use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
-use crate::agent_conversations::{AgentConversation, PromptRouting};
-use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder};
+use crate::agent_conversations::{AgentConversation, AnswerRoute, PromptRouting};
+use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder, SessionClaim};
+use crate::conversation_status::{self, ConversationStatus};
+use crate::conversation_transcript::{answered_frame, now_unix_ms};
 use crate::ports::SessionAgentPorts;
 use crate::session_agent_status::ManagedAgentState;
 
@@ -86,12 +90,16 @@ impl SessionAgentServiceImpl {
                 "conversation '{conversation_id}' could not open its transcript: {e}"
             ))
         })?;
+        // Read before the session is boxed behind its lock: a turn waiting on a permission request holds
+        // that lock, and the answer to the request still has to reach it.
+        let answering = session.permission_answerer();
         Ok(AgentConversation::Local {
             session_id: session_id.to_string(),
             agent_id: agent_id.to_string(),
             session: Arc::new(tokio::sync::Mutex::new(session)),
             closed: Arc::new(tokio::sync::Notify::new()),
             recorder: Arc::new(recorder),
+            answering,
         })
     }
 
@@ -220,6 +228,26 @@ impl SessionAgentServiceImpl {
         // What the conversation's transcript records as the prompt; `None` for a resume.
         let prompt = requested.prompt_text().map(str::to_string);
 
+        // A permission answer is claimed before the badge is stamped: when it is refused as delivered it
+        // starts no turn, so the conversation's badge keeps showing the turn it is still running.
+        let claimed = match (&routing, requested.permission_answer()) {
+            (
+                PromptRouting::Local {
+                    session,
+                    answering: Some(answering),
+                    ..
+                },
+                Some(answer),
+            ) => Some(claim_for_answer(session, &**answering, answer, || {
+                conversation_status::record(
+                    &session_dir,
+                    turn.conversation_id(),
+                    ConversationStatus::Running,
+                )
+            })?),
+            _ => None,
+        };
+
         // Stamped before either branch runs, so the badge changes when the turn starts rather than
         // when it is first observed to have started.
         self.note_agent_activity(
@@ -230,12 +258,19 @@ impl SessionAgentServiceImpl {
             turn.activity_summary(),
         );
 
-        let (session, closed, recorder) = match routing {
+        let (claim, closed, recorder) = match routing {
             PromptRouting::Local {
                 session,
                 closed,
                 recorder,
-            } => (session, closed, recorder),
+                ..
+            } => {
+                let claim = match claimed {
+                    Some(guard) => SessionClaim::Claimed(guard),
+                    None => SessionClaim::Wait(session),
+                };
+                (claim, closed, recorder)
+            }
             PromptRouting::Remote(daemon_instance_id) => {
                 self.ports
                     .sessions
@@ -275,8 +310,7 @@ impl SessionAgentServiceImpl {
             // Recorded before the answer goes out, so a transcript read after the answer arrives already holds
             // the turn. A turn that cannot be written fails rather than answering: the caller would take an answer
             // the conversation's record does not hold, and a replay would show a conversation that never had this turn.
-            match take_recorded_turn(&session, &recorder, &closed, requested, prompt.as_deref())
-                .await
+            match take_recorded_turn(claim, &recorder, &closed, requested, prompt.as_deref()).await
             {
                 Ok(outcome) => {
                     // Framed rather than sent whole: over LiveKit anything past MAX_CHUNK_FRAME_BYTES is
@@ -396,6 +430,11 @@ impl TurnOnAConversation {
                         with_yield_conditions(requested, &req.yield_conditions_json)?,
                         &req.replacement_json,
                     )?,
+                    &req.permission_answer_json,
+                )?;
+                let requested = crate::permission_wire::with_permission_deferral(
+                    requested,
+                    req.defer_permission_to_user.as_deref(),
                     &req.permission_answer_json,
                 )?;
                 Ok(within(requested, req.max_turns))
@@ -982,6 +1021,10 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
     ) -> Result<Response<CancelAgentConversationResponse>, Status> {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
+        // The actor a request the cancel ends is recorded as answered by: the main agent over its own token, otherwise
+        // the user the token authenticates. Read before the conversation is removed, so a caller that cannot be named
+        // removes nothing.
+        let cancelled_by = self.ports.sessions.answerer(&req.session_token)?.name();
         let removed = self.ports.conversations.remove(&req.conversation_id).await;
         if let Some(conversation) = removed.as_ref() {
             // Back to "asked nothing", whichever daemon ran the loop: the conversation is gone, so
@@ -999,19 +1042,40 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                 "conversation '{}' is not open on session '{}'",
                 req.conversation_id, req.session_id
             ))),
-            Some(AgentConversation::Local { closed, .. }) => {
+            Some(AgentConversation::Local {
+                closed,
+                recorder,
+                answering,
+                ..
+            }) => {
+                // The request the turn holds is recorded as answered by whoever cancelled the conversation, before
+                // the turn is interrupted: nothing else records a request whose turn the cancel ends.
+                let recorded = match answering.as_deref() {
+                    Some(answering) => {
+                        record_cancelled_request(&recorder, answering, &cancelled_by).await
+                    }
+                    None => Ok(()),
+                };
                 // A turn already in flight is interrupted rather than left to finish: the caller has
                 // been told the conversation is cancelled, and an answer arriving afterwards would
-                // be one it has no reason to expect.
+                // be one it has no reason to expect. It is interrupted even when its request could not be recorded.
                 closed.notify_one();
                 self.ports
                     .sessions
                     .conversation_closed(&req.conversation_id);
-                Ok(Response::new(CancelAgentConversationResponse {}))
+                recorded
+                    .map(|()| Response::new(CancelAgentConversationResponse {}))
+                    .map_err(|e| {
+                        Status::internal(format!(
+                            "conversation '{}' was cancelled, but {e}",
+                            req.conversation_id
+                        ))
+                    })
             }
             Some(AgentConversation::Remote {
                 daemon_instance_id, ..
             }) => {
+                // The owner authenticates the same token and records the actor from it, so none is sent.
                 self.ports
                     .peers
                     .cancel(
@@ -1162,6 +1226,131 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         );
         Ok(Response::new(ReportAgentConversationStateResponse {}))
     }
+
+    /// Answer a coding subagent's permission request the main agent deferred to the user.
+    ///
+    /// Authenticated first, as the neighbouring handlers are. The conversation must be open on the
+    /// session the request names: a conversation id is host-wide, so an id another session opened is
+    /// refused as not held rather than answered.
+    ///
+    /// A conversation whose turn loop runs on another daemon is answered there: that daemon holds the
+    /// parked request, so this one forwards the answer through the peers port and returns the answer
+    /// the owner recorded, or the refusal it gave. A conversation run here must be one whose session
+    /// parks permission requests, and the request must have been handed to the user by the turn holding
+    /// it: a request the main agent keeps is the main agent's to answer, and is refused here.
+    ///
+    /// The answer is recorded under the caller's GitHub login, and the session agent's own token is refused
+    /// `PERMISSION_DENIED` before anything is routed: the main agent answers through `subagent_resume`. The first
+    /// answer to a request wins:
+    /// a second is refused naming who answered first. The answer reaches the parked request through the
+    /// handle captured when the conversation opened, not through the conversation's lock, so it is
+    /// delivered while the deferred turn is still waiting on it.
+    async fn answer_agent_permission(
+        &self,
+        request: Request<AnswerAgentPermissionRequest>,
+    ) -> Result<Response<AnswerAgentPermissionResponse>, Status> {
+        let req = request.into_inner();
+        let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
+        // The user's login, and the refusal of the agent's own token, before anything is routed or forwarded.
+        let login = self.ports.sessions.github_user(&req.session_token)?;
+        let route = self
+            .ports
+            .conversations
+            .answer_route_for(&req.session_id, &req.conversation_id)
+            .await
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "conversation '{}' is not open on session '{}'",
+                    req.conversation_id, req.session_id
+                ))
+            })?;
+        let answering = match route {
+            AnswerRoute::Remote(owner) => {
+                return self
+                    .ports
+                    .peers
+                    .answer_permission(&req.session_token, &req.session_id, &owner, &req)
+                    .await
+                    .map(Response::new);
+            }
+            AnswerRoute::Local(Some(answering)) => answering,
+            AnswerRoute::Local(None) => {
+                return Err(Status::failed_precondition(format!(
+                    "conversation '{}' has no permission requests to answer on session '{}'",
+                    req.conversation_id, req.session_id
+                )));
+            }
+        };
+        if !answering.deferred_to_user(&req.request_id) {
+            return Err(Status::failed_precondition(format!(
+                "permission request '{}' of conversation '{}' was not handed to the user, so the user may not answer it",
+                req.request_id, req.conversation_id
+            )));
+        }
+        let answer = answer_of(&req)?;
+        answering
+            .answer_as(&answer, AnsweredBy::User(login.clone()))
+            .map_err(Status::failed_precondition)?;
+        // The turn holding the request is no longer waiting on the user: its status row says so.
+        conversation_status::record(
+            &session_dir,
+            &req.conversation_id,
+            ConversationStatus::Running,
+        );
+        Ok(Response::new(AnswerAgentPermissionResponse {
+            answered_by: login,
+        }))
+    }
+}
+
+/// Claim `session` for a turn that delivers a main-agent permission answer, without waiting for it.
+///
+/// A turn already holding the session may be the one waiting on this very request: a request handed to
+/// the user keeps its turn open until it is answered. Waiting for the session would queue the answer
+/// behind the turn it has to release, so the answer is delivered through the conversation's answering
+/// handle instead, and the call is refused as delivered. The turn holding the request carries on, and its
+/// outcome goes to the call that deferred the request. A refusal of the answer itself (no such pending
+/// request, or one already answered) is returned as it is.
+///
+/// Where nothing holds the session the claim is taken, and the answer runs as any turn's does.
+fn claim_for_answer(
+    session: &Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>,
+    answering: &dyn PermissionAnswering,
+    answer: &PermissionAnswer,
+    delivered: impl FnOnce(),
+) -> Result<tokio::sync::OwnedMutexGuard<Box<dyn SubagentSession>>, Status> {
+    match Arc::clone(session).try_lock_owned() {
+        Ok(guard) => Ok(guard),
+        Err(_) => {
+            answering
+                .answer_as(answer, AnsweredBy::MainAgent)
+                .map_err(Status::failed_precondition)?;
+            delivered();
+            Err(Status::failed_precondition(
+                crate::permission_wire::answer_delivered_while_held(answer.request_id()),
+            ))
+        }
+    }
+}
+
+/// The answer an `AnswerAgentPermission` carries: one of the request's options, or cancelled. Exactly
+/// one of the two; anything else is refused, as the tools layer refuses it.
+fn answer_of(req: &AnswerAgentPermissionRequest) -> Result<PermissionAnswer, Status> {
+    match (req.option_id.is_empty(), req.cancelled) {
+        (false, false) => Ok(PermissionAnswer::Selected {
+            request_id: req.request_id.clone(),
+            option_id: req.option_id.clone(),
+        }),
+        (true, true) => Ok(PermissionAnswer::Cancelled {
+            request_id: req.request_id.clone(),
+        }),
+        (false, true) => Err(Status::invalid_argument(
+            "an answer names an optionId or cancelled, not both",
+        )),
+        (true, false) => Err(Status::invalid_argument(
+            "an answer names one of the request's optionId, or cancelled: true",
+        )),
+    }
 }
 
 impl SessionAgentServiceImpl {
@@ -1185,8 +1374,12 @@ impl SessionAgentServiceImpl {
         for conversation_id in &closed.local {
             self.ports.sessions.conversation_closed(conversation_id);
         }
+        if closed.remote.is_empty() {
+            return;
+        }
+        // A detach is the caller's own action: the owner records the actor from the token each cancel carries.
         for (daemon_instance_id, conversation_id) in closed.remote {
-            if let Err(e) = self
+            let cancelled = self
                 .ports
                 .peers
                 .cancel(
@@ -1196,14 +1389,48 @@ impl SessionAgentServiceImpl {
                     &conversation_id,
                 )
                 .await
-            {
+                .map_err(|e| e.message().to_string());
+            if let Err(e) = cancelled {
                 log::error!(
                     target: "tddy_daemon::connection_service",
                     "could not cancel conversation {conversation_id} with '{agent_id}' on daemon \
-                     {daemon_instance_id} ({}); its turn loop may still be running there",
-                    e.message()
+                     {daemon_instance_id} ({e}); its turn loop may still be running there",
                 );
             }
         }
     }
+}
+
+/// Record the permission request a cancelled conversation still holds as answered by `cancelled_by`, the way a
+/// request answered while its turn runs is recorded, and complete the conversation's status row when the request was
+/// held for the user. `Err` names what was not recorded; a cancel whose caller has no login records nothing, so it refuses.
+async fn record_cancelled_request(
+    recorder: &ConversationRecorder,
+    answering: &dyn PermissionAnswering,
+    cancelled_by: &str,
+) -> Result<(), String> {
+    let Some(request) = answering.pending_request() else {
+        return Ok(());
+    };
+    if cancelled_by.trim().is_empty() {
+        return Err(format!(
+            "permission request '{}' is pending, and the cancel's caller has no login to record it as answered by",
+            request.request_id
+        ));
+    }
+    let deferred = answering.deferred_to_user(&request.request_id);
+    let answer = PermissionAnswer::Cancelled {
+        request_id: request.request_id.clone(),
+    };
+    let frame = answered_frame(&request, deferred, cancelled_by, &answer, now_unix_ms());
+    recorder.record_after_streamed(frame).await.map_err(|e| {
+        format!(
+            "permission request '{}' could not be recorded: {e}",
+            request.request_id
+        )
+    })?;
+    if deferred {
+        recorder.note_status(ConversationStatus::Completed);
+    }
+    Ok(())
 }

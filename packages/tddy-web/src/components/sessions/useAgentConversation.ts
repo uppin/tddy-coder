@@ -30,6 +30,12 @@ export interface AgentConversationParams {
   readonly agentId: string;
   /** The caller-minted id this conversation is opened, prompted and cancelled under. */
   readonly conversationId: string;
+  /**
+   * The signed-in user's login, or `null` when no one is signed in. It is not sent: the daemon
+   * attributes a cancel to the authenticated caller itself. It decides only whether a cancel is
+   * made at all — with no signed-in user the cancel is refused.
+   */
+  readonly callerLogin: string | null;
 }
 
 export interface AgentConversationState {
@@ -50,6 +56,7 @@ export function useAgentConversation({
   daemonInstanceId,
   agentId,
   conversationId,
+  callerLogin,
 }: AgentConversationParams): AgentConversationState {
   const [turns, setTurns] = useState<readonly AgentTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +68,10 @@ export function useAgentConversation({
   // second one under the same id.
   const call = useRef({ client, sessionToken, sessionId, daemonInstanceId, agentId });
   call.current = { client, sessionToken, sessionId, daemonInstanceId, agentId };
+  // The signed-in user is read through its own ref, for the same reason and so that `route` below
+  // stays exactly the routing the open takes.
+  const signedInUser = useRef(callerLogin);
+  signedInUser.current = callerLogin;
 
   useEffect(() => {
     const { client: rpc, ...route } = call.current;
@@ -81,11 +92,19 @@ export function useAgentConversation({
 
     return () => {
       live = false;
+      // Read now, not once the open settles: whoever closes the tab is the one signed in then.
+      const signedIn = signedInUser.current;
       void opened
         .then((wasOpened) => {
           // An open that was refused created nothing; asking the daemon to cancel it would be
           // asking it to drop a conversation it never had.
           if (!wasOpened) return undefined;
+          // The daemon attributes the cancel to the authenticated caller, so the web names no login
+          // here. It refuses a cancel only when no user is signed in (an absent or empty login
+          // included). The refusal is traced below.
+          if (!signedIn) {
+            throw new Error("no signed-in user to cancel the conversation as");
+          }
           return rpc.cancelAgentConversation({
             sessionToken: route.sessionToken,
             sessionId: route.sessionId,

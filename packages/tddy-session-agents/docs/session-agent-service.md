@@ -1,8 +1,8 @@
-# `session_agents.SessionAgentService` — the ten methods and their ports
+# `session_agents.SessionAgentService` — the eleven methods and their ports
 
 ## Role
 
-`tddy-session-agents` serves the ten RPCs of family B: who is attached to a session's agent roster,
+`tddy-session-agents` serves the eleven RPCs of family B: who is attached to a session's agent roster,
 and what has been asked of them. The coordinate and the crate both arrived with `#unbundle` node 7,
 which moved the family off `connection.ConnectionService` (50 methods → 33) along with its four
 source modules.
@@ -19,6 +19,7 @@ source modules.
 | `CancelAgentConversation` | unary | a turn interrupted and a conversation closed |
 | `ReportAgentCloneState` | unary | a checkout's readiness, pushed by the daemon holding it |
 | `ReportAgentConversationState` | unary | what a jailed agent says it is doing, clamped |
+| `AnswerAgentPermission` | unary | the user's answer to a permission request the main agent deferred to them |
 
 Proto: [`packages/tddy-service/proto/session_agents.proto`](../../tddy-service/proto/session_agents.proto).
 It imports `types.proto` for `SessionAgentEntry`, `SessionAgentRoster`, `SessionAgentStatus`,
@@ -48,15 +49,15 @@ carries why the daemon supplies it.
 | `admission` | whether a checkout could be claimed on the peer owning an agent |
 | `catalog` | which def an agent id resolves to on this host |
 | `broadcast` | how a roster change reaches a session room |
-| `sessions` | how a turn loop is opened against a jail or a clone |
-| `peers` | how a conversation is delivered to the daemon running it |
+| `sessions` | how a turn loop is opened against a jail or a clone; the GitHub login a token authenticates (`github_user`, which refuses the session agent's own token) and who a caller is as an answerer (`answerer` → `AnsweredBy::MainAgent` for an agent-principal token, otherwise `User(login)`) |
+| `peers` | how a conversation — and a permission answer for it (`answer_permission`) — is delivered to the daemon running it |
 
 Two maps would be the failure this shape exists to prevent: a prompt answering `NOT_FOUND` for a
 conversation an open had just created.
 
 ## The routing split: two forwards, one of them not here
 
-Eight of the ten route on the `daemon_instance_id` the **request** names — a roster lives on the
+Nine of the eleven route on the `daemon_instance_id` the **request** names — a roster lives on the
 daemon facilitating its session, so a call served anywhere else answers about the wrong host. That
 fork needs the eligible-daemon roster, the common room slot and the LiveKit forwarding clients, so
 it lives in `tddy-session-lifecycle`'s `PeerRoutedSessionAgents`
@@ -125,6 +126,39 @@ turn outcome carrying whole tool payloads would put the agent's context back int
 `result_summary_json` is string-typed like `stop_reason` — the summary as one externally tagged
 JSON object — so the wire stays additive and a caller reads the same shape the MCP outcome carries.
 
+## A permission request handed to the user
+
+`AnswerAgentPermission` answers a coding subagent's parked request the main agent deferred
+(`ResumeAgentConversationRequest.defer_permission_to_user`). In order: resolve the session directory,
+read the caller's login (`sessions.github_user`, which refuses the agent's own token
+`PERMISSION_DENIED`), look the conversation up on the session the request names
+(`OpenAgentConversations::answer_route_for` → `AnswerRoute`), forward a remote one to its owner
+(`peers.answer_permission`), refuse a request the turn did not defer, then deliver through the
+conversation's `PermissionAnswering` handle as `AnsweredBy::User(login)`. The handle is captured at
+open and kept beside the conversation (`AgentConversation::Local.answering`), so the answer does not
+wait on the conversation's lock, which the deferred turn holds.
+
+A main agent's answer to a request its deferred turn holds is not queued either: `claim_for_answer`
+tries the session lock, and when the deferred turn holds it delivers through the same handle as
+`AnsweredBy::MainAgent` and refuses the call `FAILED_PRECONDITION`, saying the answer was delivered.
+
+`CancelAgentConversation` names the actor from the token (`sessions.answerer`) before it removes the
+conversation, records the request the turn still holds as answered by it (`record_cancelled_request`),
+then interrupts the turn — even when the record failed, which it reports as an internal error after
+the cancel. A remote conversation's owner derives the actor from the same token.
+
+While a deferred turn waits, `conversation_status` writes the conversation's status row
+(`subagent-conversation:<id>`, running with `awaitingUser`, then running, then completed) into the
+session's activity log; the replay folds it into the conversation's bubble. The row is not published
+live ([`docs/dev/todo/2026-10-25-conversation-status-row-is-durable-only.md`](../../../docs/dev/todo/2026-10-25-conversation-status-row-is-durable-only.md)).
+The pending request and its answer reach the conversation's transcript under `permission:<requestId>`
+from the coding agent's update stream (`AcpUpdate::ToolCallRecord`); a cancel's record is written
+directly, after what the stream already holds (`ConversationRecorder::record_after_streamed`).
+
+`AnswerAgentPermission` is **not** in `IN_JAIL_RELAYABLE`: the web calls it, never a jail.
+Product behaviour:
+[Agent activity pane § The user answers a deferred permission request](../../../docs/ft/web/agent-activity-pane.md#the-user-answers-a-deferred-permission-request-added-2026-10-25).
+
 ## Known gaps
 
 - **`in_jail_conversation_acceptance.rs` proves nothing today.** It carries
@@ -139,7 +173,7 @@ JSON object — so the wire stays additive and a caller reads the same shape the
   [`docs/dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md`](../../../docs/dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md);
   a long `messages` list on the final frame can also overflow the chunk-framing threshold
   ([`2026-09-26`](../../../docs/dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md)).
-- **`service.rs` is 1,055 production lines**, over this repo's 500-line budget, and was not split. See
+- **`service.rs` is 1,436 production lines**, over this repo's 500-line budget, and was not split (`code-issues/oversized-file-service.md`). See
   [`docs/dev/todo/2026-09-12-the-two-new-service-rs-files-are-over-budget.md`](../../../docs/dev/todo/2026-09-12-the-two-new-service-rs-files-are-over-budget.md).
 - **`session_agent_clone.rs` is over 1,100 production lines** and holds both sides of a clone (the
   facilitating daemon's bookkeeping and the owning daemon's room participant). It reaches its room

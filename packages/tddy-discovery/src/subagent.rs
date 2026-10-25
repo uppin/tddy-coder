@@ -39,7 +39,9 @@ use transcript::Transcript;
 
 pub use grep_context::{ContextLine, GrepContext, GREP_CONTEXT_LINE_CEILING};
 pub use permission::{
-    PermissionAnswer, PermissionChoice, PermissionRequestView, PermissionToolCall,
+    answer_delivered_while_held, answered_output, permission_title, permission_tool_call_id,
+    request_input_json, AnsweredBy, PermissionAnswer, PermissionAnswering, PermissionChoice,
+    PermissionRequestView, PermissionToolCall, MAIN_AGENT_NAME,
 };
 pub use repeated_calls::{RepeatedCall, RepeatedCalls, IDENTICAL_CALL_LIMIT};
 pub use replacement::{validate_replacement, Replacement, REPLACEMENT_RESULT_LIMIT};
@@ -250,6 +252,13 @@ pub trait SubagentSession: Send {
     /// The receiver carries only what is sent after it is created, so a caller takes it before the
     /// first turn runs. Every call returns a receiver of the same stream.
     fn updates(&self) -> Option<tokio::sync::broadcast::Receiver<tddy_agent_backend::AcpUpdate>> {
+        None
+    }
+
+    /// The handle a permission request this conversation parks is answered through, or `None` when
+    /// the conversation parks none. The daemon's `AnswerAgentPermission` reaches a conversation's
+    /// parked requests through it, without holding the conversation's own lock.
+    fn permission_answerer(&self) -> Option<std::sync::Arc<dyn PermissionAnswering>> {
         None
     }
 }

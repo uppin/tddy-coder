@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::conversation_recorder::ConversationRecorder;
-use tddy_discovery::subagent::SubagentSession;
+use tddy_discovery::subagent::{PermissionAnswering, SubagentSession};
 use tokio::sync::{Mutex, Notify};
 
 /// One open conversation with a roster agent.
@@ -32,6 +32,10 @@ pub enum AgentConversation {
         /// Records the conversation's turns as they run: the transcript a replay reads, and the frames a
         /// replay tails. Opened with the session, before its first turn.
         recorder: Arc<ConversationRecorder>,
+        /// The handle its parked permission requests are answered through, captured when the
+        /// conversation opens. Held beside the session rather than read through it, because a turn
+        /// that is waiting on a request holds the session's lock; `None` when the session parks none.
+        answering: Option<Arc<dyn PermissionAnswering>>,
     },
     /// The turn loop runs on `daemon_instance_id`; this daemon forwards to it.
     Remote {
@@ -48,6 +52,15 @@ impl AgentConversation {
         match self {
             AgentConversation::Local { agent_id, .. }
             | AgentConversation::Remote { agent_id, .. } => agent_id,
+        }
+    }
+
+    /// The session this conversation is open on, whichever daemon runs its loop.
+    #[must_use]
+    pub fn session_id(&self) -> &str {
+        match self {
+            AgentConversation::Local { session_id, .. }
+            | AgentConversation::Remote { session_id, .. } => session_id,
         }
     }
 
@@ -71,6 +84,14 @@ impl AgentConversation {
     }
 }
 
+/// Where an answer to one of a conversation's permission requests is delivered.
+pub enum AnswerRoute {
+    /// The turn loop runs here. `None` when the session parks no permission requests.
+    Local(Option<Arc<dyn PermissionAnswering>>),
+    /// The turn loop runs on the named daemon, which holds the request and decides the answer.
+    Remote(String),
+}
+
 /// What one open conversation hands a prompt, taken out of the map so the map's lock can be
 /// released before the turn is awaited.
 pub enum PromptRouting {
@@ -78,6 +99,10 @@ pub enum PromptRouting {
         session: Arc<Mutex<Box<dyn SubagentSession>>>,
         closed: Arc<Notify>,
         recorder: Arc<ConversationRecorder>,
+        /// The handle the conversation's parked permission requests are answered through, `None` when
+        /// the session parks none. Carried here so a permission answer can reach a request while a turn
+        /// holds the session, without taking the map's lock again.
+        answering: Option<Arc<dyn PermissionAnswering>>,
     },
     Remote(String),
 }
@@ -124,6 +149,7 @@ impl OpenAgentConversations {
                 session,
                 closed,
                 recorder,
+                answering,
                 agent_id,
                 ..
             } => Some((
@@ -131,6 +157,7 @@ impl OpenAgentConversations {
                     session: Arc::clone(session),
                     closed: Arc::clone(closed),
                     recorder: Arc::clone(recorder),
+                    answering: answering.clone(),
                 },
                 agent_id.clone(),
             )),
@@ -143,6 +170,30 @@ impl OpenAgentConversations {
                 agent_id.clone(),
             )),
         }
+    }
+
+    /// Where an answer to a permission request on `conversation_id` is delivered, when it is a
+    /// conversation open on `session_id`. `None` when it is not open on that session: the map is
+    /// host-wide, so a conversation another session opened is not one this session may act on.
+    ///
+    /// Takes only the map's lock, never a session's, so a local answer reaches a turn that is
+    /// waiting on it.
+    pub async fn answer_route_for(
+        &self,
+        session_id: &str,
+        conversation_id: &str,
+    ) -> Option<AnswerRoute> {
+        let open = self.open.lock().await;
+        let conversation = open.get(conversation_id)?;
+        if conversation.session_id() != session_id {
+            return None;
+        }
+        Some(match conversation {
+            AgentConversation::Local { answering, .. } => AnswerRoute::Local(answering.clone()),
+            AgentConversation::Remote {
+                daemon_instance_id, ..
+            } => AnswerRoute::Remote(daemon_instance_id.clone()),
+        })
     }
 
     /// Forget `conversation_id`, handing back what was open under it.

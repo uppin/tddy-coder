@@ -128,6 +128,21 @@ pub fn test_service_with_coding_agent_launcher(
     daemon
 }
 
+/// [`test_service_with_coding_agent_launcher`] over a host that authenticates real session tokens
+/// ([`tddy_session_lifecycle::test_util::signing_test_host`]), with the credentials it accepts.
+pub fn signing_test_service_with_coding_agent_launcher(
+    sessions_base: PathBuf,
+    launcher: Arc<dyn tddy_coding_subagent::CodingAgentLauncher>,
+) -> (
+    TestDaemon,
+    tddy_session_lifecycle::test_util::SignedTestCredentials,
+) {
+    let (host, credentials) = tddy_session_lifecycle::test_util::signing_test_host(sessions_base);
+    let daemon = TestDaemon::from_host(host.with_coding_agent_launcher(launcher));
+    daemon.as_arc().install_sandbox_rpc_bridge();
+    (daemon, credentials)
+}
+
 impl Deref for TestDaemon {
     type Target = tddy_session_lifecycle::test_util::TestDaemon;
 

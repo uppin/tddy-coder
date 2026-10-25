@@ -245,6 +245,7 @@ impl AgentConversationLink {
                 yield_conditions_json: Self::encode_yield_conditions(request),
                 replacement_json: Self::encode_replacement(request),
                 permission_answer_json: Self::encode_permission_answer(request)?,
+                defer_permission_to_user: request.permission_deferred_to_user().map(str::to_string),
             }));
         };
         if let Some(rewind_point) = request.rewind_point() {
@@ -272,7 +273,8 @@ impl AgentConversationLink {
         }))
     }
 
-    /// Close `conversation_id` on the daemon holding it.
+    /// Close `conversation_id` on the daemon holding it. The daemon records a permission request the conversation
+    /// still holds as answered by the login this session's token authenticates.
     pub async fn cancel(&self, conversation_id: &str) -> Result<(), String> {
         let request = CancelAgentConversationRequest {
             session_token: self.envelope.session_token.clone(),
@@ -365,6 +367,13 @@ pub struct RemoteConversationHandle {
 impl RemoteConversationHandle {
     pub fn conversation_id(&self) -> &str {
         &self.conversation_id
+    }
+
+    /// Run one turn of this conversation on the daemon holding it, without the session the turn would
+    /// otherwise take. The call [`RemoteAgentSession::take_turn`] makes, so the answer is the same. Used
+    /// where the session is held by a turn that is waiting on the answer this turn carries.
+    pub async fn take_turn(&self, request: &TurnRequest) -> Result<PromptOutcome, String> {
+        self.link.take_turn(&self.conversation_id, request).await
     }
 
     /// Close the conversation on the daemon holding it.

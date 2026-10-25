@@ -45,8 +45,8 @@ use tddy_session_agents::SessionAgentServiceImpl;
 
 use super::super::DaemonSessionHost;
 
-/// The crate's ten handlers, with the eight routed ones answered by the daemon that holds the
-/// roster.
+/// The crate's eleven handlers, with the nine routed ones answered by the daemon that holds the
+/// roster or the conversation.
 ///
 /// The wrapper is *this* side of the boundary for the reason node 6's `PeerRoutedSessionFiles`
 /// gives: it implements the generated service trait rather than wrapping the entry's encoded
@@ -303,5 +303,32 @@ impl SessionAgentService for PeerRoutedSessionAgents {
             return Ok(Response::new(ReportAgentConversationStateResponse {}));
         }
         self.local.report_agent_conversation_state(request).await
+    }
+
+    /// Routed BEFORE session lookup, as the conversation RPCs are: the conversation is held by the
+    /// daemon running its loop, and an answer served anywhere else would report "not open" for a
+    /// request that is pending.
+    async fn answer_agent_permission(
+        &self,
+        request: Request<tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest>,
+    ) -> Result<
+        Response<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse>,
+        Status,
+    > {
+        self.record_activity();
+        let req = request.get_ref();
+        if let Some(answered) = self
+            .connection
+            .rpc_served_by_peer::<_, tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse>(
+                SESSION_AGENT_SERVICE,
+                "AnswerAgentPermission",
+                &req.daemon_instance_id,
+                req,
+            )
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+        self.local.answer_agent_permission(request).await
     }
 }

@@ -66,6 +66,19 @@ pub enum TokenKind {
     Refresh,
 }
 
+/// Who, besides the user it names, a token was minted for. Absent on a user's own token.
+///
+/// A token minted for a session's agent names the user the agent acts for — the login a peer maps
+/// to an OS user — and says it is the agent's, so a daemon can tell the main agent's call from the
+/// user's. The signature covers it, so a user's token cannot be rewritten to claim it; a value this
+/// verifier does not know is malformed rather than read as a user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TokenPrincipal {
+    /// Minted for a session's agent (its `tddy-tools --mcp` server), under the user it acts for.
+    Agent,
+}
+
 /// Names the key that signed a token: the SHA-256 digest of the key's SPKI DER encoding, truncated
 /// to 16 bytes, then base64url without padding.
 ///
@@ -148,6 +161,12 @@ pub struct SessionClaims {
     /// Required: every `v2` signer writes it, so a payload without one is not a token this format
     /// ever produced and is refused as malformed rather than read as an access token.
     pub kind: TokenKind,
+    /// `Some` only on a token minted for an agent ([`SessionTokenSigner::mint_agent`]). Omitted from
+    /// a user's token, so a user token is byte-for-byte what it was before this claim existed, and
+    /// a token minted before it existed reads as the user's it was. A verifier that predates it
+    /// ignores it and reads an agent's token as the user's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal: Option<TokenPrincipal>,
 }
 
 impl SessionClaims {
@@ -263,6 +282,16 @@ impl SessionTokenSigner {
         self.mint_kind_with_issued_at(user, TokenKind::Access, SystemTime::now(), ttl)
     }
 
+    /// Mint an access token for a session's agent acting for `user`, valid for `ttl` from now: it
+    /// names `user` and carries [`TokenPrincipal::Agent`].
+    pub fn mint_agent(&self, user: &GitHubUser, ttl: Duration) -> String {
+        let iat = unix_seconds(SystemTime::now());
+        self.sign(SessionClaims {
+            principal: Some(TokenPrincipal::Agent),
+            ..self.claims_for(user, TokenKind::Access, iat, ttl)
+        })
+    }
+
     /// Mint an access token whose issue time is `issued_at` (expiry = `issued_at + ttl`). The clock
     /// seam lets tests produce already-expired tokens deterministically without sleeping.
     pub fn mint_with_issued_at(
@@ -283,8 +312,18 @@ impl SessionTokenSigner {
         issued_at: SystemTime,
         ttl: Duration,
     ) -> String {
-        let iat = unix_seconds(issued_at);
-        let claims = SessionClaims {
+        self.sign(self.claims_for(user, kind, unix_seconds(issued_at), ttl))
+    }
+
+    /// A user's claims of `kind`, issued at `iat` for `ttl`, naming this signer's key.
+    fn claims_for(
+        &self,
+        user: &GitHubUser,
+        kind: TokenKind,
+        iat: u64,
+        ttl: Duration,
+    ) -> SessionClaims {
+        SessionClaims {
             kid: self.key_id.clone(),
             id: user.id,
             login: user.login.clone(),
@@ -293,7 +332,12 @@ impl SessionTokenSigner {
             iat,
             exp: iat.saturating_add(ttl.as_secs()),
             kind,
-        };
+            principal: None,
+        }
+    }
+
+    /// `claims` signed as a `v2` token.
+    fn sign(&self, claims: SessionClaims) -> String {
         // Serialization of a plain struct of owned primitives cannot fail.
         let payload_json = serde_json::to_vec(&claims).expect("SessionClaims serializes");
         let signing_input = format!("{TOKEN_VERSION}.{}", URL_SAFE_NO_PAD.encode(payload_json));
@@ -708,6 +752,86 @@ mod tests {
                 Err(SessionTokenError::Malformed)
             ]
         );
+    }
+
+    #[test]
+    fn an_agent_token_carries_the_agent_principal_and_a_user_token_carries_none() {
+        // Given one signer minting a user's access token and an agent's token under that user
+        let signer = a_signer_for(the_first_key());
+        let user = signer.mint_access(&an_operator());
+        let agent = signer.mint_agent(&an_operator(), Duration::from_secs(600));
+
+        // When each is verified
+        let principal_of = |token: &str| {
+            SessionTokenVerifier::verify(token, &the_first_key().verifying_key(), now())
+                .expect("a freshly minted token verifies")
+                .principal
+        };
+
+        // Then only the agent's says so; both still name the user and authenticate an RPC
+        assert_eq!(
+            (principal_of(&user), principal_of(&agent)),
+            (None, Some(TokenPrincipal::Agent))
+        );
+        assert_eq!(the_kind_of(&agent), TokenKind::Access);
+    }
+
+    #[test]
+    fn a_token_minted_before_principals_existed_reads_as_a_user_token() {
+        // Given a genuinely signed payload in the shape every signer wrote before this claim existed
+        let key = the_first_key();
+        let payload = format!(
+            r#"{{"kid":"{}","id":1,"login":"operator","avatar_url":"","name":"operator","iat":0,"exp":9999999999,"kind":"access"}}"#,
+            KeyId::of(&key.verifying_key())
+        );
+        let token = signed(&key, &payload);
+
+        // When it is verified
+        let claims = SessionTokenVerifier::verify(&token, &key.verifying_key(), now());
+
+        // Then it is accepted as the user token it always was
+        assert_eq!(
+            claims.map(|claims| (claims.login, claims.principal)),
+            Ok((THE_LOGIN.to_string(), None))
+        );
+    }
+
+    #[test]
+    fn a_user_token_rewritten_to_claim_the_agent_principal_is_refused() {
+        // Given a user's genuine token whose payload is rewritten to claim the agent principal
+        let token = a_signer_for(the_first_key()).mint_access(&an_operator());
+        let mut claims: serde_json::Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(payload_segment(&token).trim_start_matches("v2."))
+                .expect("a minted payload is base64url"),
+        )
+        .expect("a minted payload is JSON");
+        claims["principal"] = serde_json::json!("agent");
+        let rewritten = format!(
+            "v2.{}.{}",
+            URL_SAFE_NO_PAD.encode(claims.to_string()),
+            signature_segment(&token)
+        );
+
+        // When it is verified
+        let refusal =
+            SessionTokenVerifier::verify(&rewritten, &the_first_key().verifying_key(), now());
+
+        // Then the signature, which covers the principal, refuses it
+        assert_eq!(
+            refusal.map(|_| ()),
+            Err(SessionTokenError::InvalidSignature)
+        );
+    }
+
+    /// `payload` signed by `key` in the `v2` shape, exactly as a signer lays a token out.
+    fn signed(key: &SigningKey, payload: &str) -> String {
+        let signing_input = format!("v2.{}", URL_SAFE_NO_PAD.encode(payload));
+        let signature = key.sign(signing_input.as_bytes());
+        format!(
+            "{signing_input}.{}",
+            URL_SAFE_NO_PAD.encode(signature.to_bytes())
+        )
     }
 
     /// Flip one bit of the *decoded* signature and re-encode it.

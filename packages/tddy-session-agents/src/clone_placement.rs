@@ -218,6 +218,12 @@ impl SubagentSession for CodingAgentConversationTurns {
     fn tail(&self, max_messages: usize) -> Vec<String> {
         self.session.tail(max_messages)
     }
+
+    fn permission_answerer(
+        &self,
+    ) -> Option<std::sync::Arc<dyn tddy_discovery::subagent::PermissionAnswering>> {
+        self.session.permission_answerer()
+    }
 }
 
 #[cfg(test)]

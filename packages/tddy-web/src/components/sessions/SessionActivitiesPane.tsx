@@ -7,10 +7,15 @@ import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpReplay } from "../chat/useAcpReplay";
 import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
 import { SubagentConversationDialog } from "./SubagentConversationDialog";
+import type { RosterHalf } from "./sessionRosterHalf";
 
 interface SessionActivitiesPaneProps {
   sessionId: string;
   sessionToken: string;
+  /** The roster half of the session (`rosterHalfOf`): the daemon that holds a subagent
+   *  conversation, and the session it is held under. A permission request opened from this pane is
+   *  answered to it. */
+  rosterHalf: RosterHalf;
   /** Explicit client override — session-scoped routing where available. Falls back to the shared
    *  HTTP client from the transport context. A dormant session has no LiveKit room of its own, so
    *  in practice this is the owning daemon's client and the replay comes off disk. */
@@ -33,6 +38,7 @@ interface SessionActivitiesPaneProps {
 export function SessionActivitiesPane({
   sessionId,
   sessionToken,
+  rosterHalf,
   client,
 }: SessionActivitiesPaneProps) {
   // `useHttpClient` is called unconditionally (hook rules); the explicit prop wins when present.
@@ -122,6 +128,7 @@ export function SessionActivitiesPane({
           conversationId={conversation.conversationId}
           title={conversation.title}
           sessionToken={sessionToken}
+          rosterHalf={rosterHalf}
           client={resolvedClient}
           onClose={() => setConversation(null)}
         />

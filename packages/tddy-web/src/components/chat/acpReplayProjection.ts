@@ -19,7 +19,7 @@ import {
   type ToolCall,
 } from "../../gen/tddy/acp/v1/acp_pb";
 import { createAgentChunkMerger } from "./acpAgentMerge";
-import { toolStatusOf } from "./toolCallPresentation";
+import { subagentStatusOf, toolStatusOf } from "./toolCallPresentation";
 import type { ChatMessage } from "./useAgentChat";
 
 /**
@@ -85,6 +85,9 @@ function appendToolCall(
   const id = call.toolCallId?.value ?? "";
   const conversationId = subagentConversationIdOf(id);
   const idField = id && conversationId === null ? { toolCallId: id } : {};
+  // A subagent bubble reads its status as the conversation's turn does (see `subagentStatusOf`).
+  const toolStatus =
+    conversationId === null ? toolStatusOf(call.status) : subagentStatusOf(call.status);
   const existingIndex = id ? ctx.toolIndexById.get(id) : undefined;
   if (existingIndex !== undefined) {
     const existing = entries[existingIndex];
@@ -94,7 +97,7 @@ function appendToolCall(
       // and the first prompt, which a later call on the same conversation does not restate.
       text: existing.from === "subagent" ? existing.text : call.title,
       at,
-      toolStatus: toolStatusOf(call.status),
+      toolStatus,
       ...idField,
     };
     return;
@@ -107,7 +110,7 @@ function appendToolCall(
       from: "subagent",
       conversationId,
       at,
-      toolStatus: toolStatusOf(call.status),
+      toolStatus,
     });
     return;
   }
@@ -116,7 +119,7 @@ function appendToolCall(
     text: call.title,
     from: "tool",
     at,
-    toolStatus: toolStatusOf(call.status),
+    toolStatus,
     ...idField,
   });
 }
