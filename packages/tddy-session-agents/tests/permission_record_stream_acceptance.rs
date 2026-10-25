@@ -145,6 +145,7 @@ async fn a_streamed_answer_replaces_the_pending_request_and_its_detail_is_the_an
         "sess-1",
         "conv-1",
         Arc::new(ConversationFrames::default()),
+        Arc::default(),
         &session,
     )
     .expect("the recorder opens");

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::conversation_recorder::ConversationRecorder;
-use tddy_discovery::subagent::{PermissionAnswering, SubagentSession};
+use tddy_discovery::subagent::{PermissionAnswering, SubagentSession, TurnCancelling};
 use tokio::sync::{Mutex, Notify};
 
 /// One open conversation with a roster agent.
@@ -36,6 +36,10 @@ pub enum AgentConversation {
         /// conversation opens. Held beside the session rather than read through it, because a turn
         /// that is waiting on a request holds the session's lock; `None` when the session parks none.
         answering: Option<Arc<dyn PermissionAnswering>>,
+        /// The handle its running turn is cancelled through while the conversation stays open,
+        /// captured when it opens for the reason `answering` is. `None` when a turn cannot be
+        /// cancelled on its own, and a cancel closes the conversation.
+        cancelling: Option<Arc<dyn TurnCancelling>>,
     },
     /// The turn loop runs on `daemon_instance_id`; this daemon forwards to it.
     Remote {
@@ -114,6 +118,23 @@ pub struct ClosedConversations {
     pub local: Vec<String>,
     /// The `(owning daemon, conversation id)` pairs whose loops run on another daemon, to cancel there.
     pub remote: Vec<(String, String)>,
+}
+
+/// How a cancel of only a conversation's running turn reaches it (see
+/// [`OpenAgentConversations::turn_cancel_route`]).
+pub enum TurnCancelRoute {
+    /// The turn runs here and can be cancelled on its own: the conversation stays open.
+    Local {
+        cancelling: Arc<dyn TurnCancelling>,
+        recorder: Arc<ConversationRecorder>,
+        answering: Option<Arc<dyn PermissionAnswering>>,
+    },
+    /// The turn runs here and cannot be cancelled on its own (a model loop): the cancel closes the
+    /// conversation.
+    Close,
+    /// The turn runs on the named daemon: the cancel is forwarded to it, and it says whether it kept the
+    /// conversation.
+    Remote(String),
 }
 
 /// Every conversation open on this host, keyed by conversation id.
@@ -196,9 +217,62 @@ impl OpenAgentConversations {
         })
     }
 
+    /// Whether a conversation is open under `conversation_id`, on any session.
+    pub async fn contains(&self, conversation_id: &str) -> bool {
+        self.open.lock().await.contains_key(conversation_id)
+    }
+
     /// Forget `conversation_id`, handing back what was open under it.
     pub async fn remove(&self, conversation_id: &str) -> Option<AgentConversation> {
         self.open.lock().await.remove(conversation_id)
+    }
+
+    /// Forget `conversation_id` when it is open on `session_id`, handing back what was open under
+    /// it. `None`, and nothing removed, when it is open on another session: the map is host-wide, and
+    /// a caller authenticated for one session may not close another's conversation by naming it.
+    pub async fn remove_on(
+        &self,
+        session_id: &str,
+        conversation_id: &str,
+    ) -> Option<AgentConversation> {
+        let mut open = self.open.lock().await;
+        if open.get(conversation_id)?.session_id() != session_id {
+            return None;
+        }
+        open.remove(conversation_id)
+    }
+
+    /// How a cancel of only the running turn of `conversation_id` reaches it, when it is open on
+    /// `session_id`. Takes only the map's lock, never a session's, so it reaches a turn that holds
+    /// the session.
+    pub async fn turn_cancel_route(
+        &self,
+        session_id: &str,
+        conversation_id: &str,
+    ) -> Option<TurnCancelRoute> {
+        let open = self.open.lock().await;
+        let conversation = open.get(conversation_id)?;
+        if conversation.session_id() != session_id {
+            return None;
+        }
+        Some(match conversation {
+            AgentConversation::Local {
+                cancelling: Some(cancelling),
+                recorder,
+                answering,
+                ..
+            } => TurnCancelRoute::Local {
+                cancelling: Arc::clone(cancelling),
+                recorder: Arc::clone(recorder),
+                answering: answering.clone(),
+            },
+            AgentConversation::Local {
+                cancelling: None, ..
+            } => TurnCancelRoute::Close,
+            AgentConversation::Remote {
+                daemon_instance_id, ..
+            } => TurnCancelRoute::Remote(daemon_instance_id.clone()),
+        })
     }
 
     /// Forget every conversation with `agent_id` on `session_id`, interrupting the local ones and

@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 
 use tddy_agent_backend::{AcpToolStatus, AcpUpdate};
 use tddy_daemon_kernel::conversation_frames::{ConversationFrame, ConversationFrames};
+use tddy_daemon_kernel::AgentActivityHub;
 use tddy_discovery::subagent::{PromptOutcome, SubagentError, SubagentSession, TurnRequest};
 use tddy_rpc::Status;
 use tddy_service::acp_replay::{agent_text_frame, read_acp_transcript, session_update_frame};
@@ -85,6 +86,8 @@ impl ConversationTranscript {
 /// The writer of one open conversation: its transcript, and how its turns reach it.
 pub struct ConversationRecorder {
     transcript: Arc<ConversationTranscript>,
+    /// Where the conversation's status rows are published live, beside the session's activity log.
+    activity: Arc<AgentActivityHub>,
     /// Set when the session streams its updates; `None` for a conversation recorded whole at each turn's end.
     stream: Option<UpdateStream>,
 }
@@ -107,6 +110,7 @@ impl ConversationRecorder {
         session_id: &str,
         conversation_id: &str,
         frames: Arc<ConversationFrames>,
+        activity: Arc<AgentActivityHub>,
         session: &dyn SubagentSession,
     ) -> io::Result<Self> {
         let transcript = Arc::new(ConversationTranscript::open(
@@ -126,7 +130,11 @@ impl ConversationRecorder {
             ));
             UpdateStream { flush, failure }
         });
-        Ok(Self { transcript, stream })
+        Ok(Self {
+            transcript,
+            activity,
+            stream,
+        })
     }
 
     /// Before a turn runs. A streamed conversation writes the turn's prompt now, so the transcript holds the
@@ -161,7 +169,9 @@ impl ConversationRecorder {
     /// Write this conversation's status row. See [`conversation_status::record`]: a failure does not fail the turn.
     pub(crate) fn note_status(&self, status: ConversationStatus) {
         conversation_status::record(
+            &self.activity,
             &self.transcript.session_dir,
+            &self.transcript.session_id,
             &self.transcript.conversation_id,
             status,
         );

@@ -223,14 +223,12 @@ fn view_of(ordinal: u64, request: &PermissionRequest) -> PermissionRequestView {
     PermissionRequestView {
         request_id: format!("perm-{ordinal}"),
         tool_call: PermissionToolCall {
-            // FIXME(permission-yield): the driver's `PermissionRequest` does not carry the ACP tool
-            // kind (its mapping drops it), so every request reads as `other` until the driver passes
-            // it through. Deferred to #720's driver: docs/dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md
             title: request
                 .title
                 .clone()
                 .unwrap_or_else(|| request.tool_call_id.clone()),
-            kind: "other".to_string(),
+            // ACP's own word for a call whose agent named no kind.
+            kind: request.kind.clone().unwrap_or_else(|| "other".to_string()),
             raw_input: request.raw_input.clone(),
         },
         options: request

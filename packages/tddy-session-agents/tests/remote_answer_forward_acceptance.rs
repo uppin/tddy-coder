@@ -294,7 +294,8 @@ impl AgentConversationPeers for TheOwnerAnswering {
         _session_id: &str,
         owner: &str,
         _conversation_id: &str,
-    ) -> Result<(), Status> {
+        _keep_conversation: bool,
+    ) -> Result<bool, Status> {
         Err(Status::internal(format!(
             "no cancel is sent in this test, so none reaches '{owner}'"
         )))
@@ -342,6 +343,7 @@ fn a_daemon_holding_the_conversation(
         conversation_frames: Arc::new(
             tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
         ),
+        activity: Arc::default(),
         admission: Arc::new(PortsAnAnswerDoesNotUse),
         catalog: Arc::new(PortsAnAnswerDoesNotUse),
         broadcast: Arc::new(PortsAnAnswerDoesNotUse),

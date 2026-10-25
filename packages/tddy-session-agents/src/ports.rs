@@ -249,7 +249,8 @@ pub trait AgentConversationPeers: Send + Sync {
         owner: &str,
     ) -> Result<UnboundedReceiver<Result<AgentConversationChunk, Status>>, Status>;
 
-    /// Cancel a conversation whose turn loop runs on `owner`.
+    /// Cancel a conversation whose turn loop runs on `owner` — only its running turn when
+    /// `keep_conversation` asks for that — and hand back whether the owner kept the conversation.
     ///
     /// The owner records a permission request the conversation still holds as answered by the login that
     /// `session_token` authenticates, so the token is forwarded whole and no actor is named.
@@ -259,7 +260,8 @@ pub trait AgentConversationPeers: Send + Sync {
         session_id: &str,
         owner: &str,
         conversation_id: &str,
-    ) -> Result<(), Status>;
+        keep_conversation: bool,
+    ) -> Result<bool, Status>;
 
     /// Answer a permission request on a conversation whose turn loop runs on `owner`, handing back
     /// the answer the owner recorded.
@@ -315,6 +317,9 @@ pub struct SessionAgentPorts {
     /// conversation. Shared with the activity service, which tails it for a conversation's replay, so a
     /// reader and the recorder reach the same channel.
     pub conversation_frames: Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames>,
+    /// The daemon's live agent-activity broadcast — the one `StreamSessionActivity` tails — which a
+    /// conversation's status rows are published on as they are appended to the session's log.
+    pub activity: Arc<tddy_daemon_kernel::AgentActivityHub>,
     /// What an attach must settle before a roster entry may be written — see [`AgentAdmission`].
     pub admission: Arc<dyn AgentAdmission>,
     /// Which def an agent id resolves to on this host — see [`AgentCatalog`].

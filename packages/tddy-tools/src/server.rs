@@ -2257,18 +2257,61 @@ pub async fn subagent_await_tool(args: serde_json::Value) -> String {
     }
 }
 
-/// `subagent_cancel` (ACP `session/cancel`-shaped): closes an open session, if any.
+/// `subagent_cancel` (ACP `session/cancel`-shaped): cancels an open conversation's running turn.
+///
+/// A conversation whose loop runs on the daemon is asked to cancel only its turn; the daemon keeps a coding agent's
+/// conversation open (its `session/cancel`), and the conversation stays open here too, answering
+/// `{cancelled: true, kept: true}`. Every other conversation — one the daemon closed, one whose loop runs here — is
+/// closed, as [`subagent_close_tool`] closes it. A daemon that cannot be asked leaves the conversation open, and the
+/// error is the answer.
 pub async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
     };
-    let mut sessions = subagent_sessions().lock().await;
-    // Read before the retire consumes the conversation: closing it here has to close it on the
-    // daemon running the loop, or that daemon keeps the loop and its registration of it forever.
-    let remote = sessions
+    // Read under the table's lock and asked without it: the daemon answers once the cancelled turn has ended, and
+    // a lock held that long would hold every other subagent tool behind it.
+    let remote = subagent_sessions()
+        .lock()
+        .await
         .open
         .get(session_id)
         .and_then(|conv| conv.remote.clone());
+    let Some(remote) = remote else {
+        return close_conversation(session_id, None).await;
+    };
+    match remote.cancel_turn().await {
+        Ok(true) => serde_json::json!({ "cancelled": true, "kept": true }).to_string(),
+        // The daemon closed it: closed here too, with nothing left to tell the daemon.
+        Ok(false) => close_conversation(session_id, None).await,
+        // Nothing was cancelled, so nothing is closed in its place: the conversation stays open on both sides, and the
+        // main agent is told why.
+        Err(e) => subagent_error_json(format!(
+            "conversation '{session_id}' could not have its turn cancelled: {e}"
+        )),
+    }
+}
+
+/// Close `sessionId`'s conversation, on the daemon running its loop as well when it runs on one — what
+/// `subagent_end` does once its work is taken, and what `subagent_cancel` does for a conversation that is not kept.
+pub(crate) async fn subagent_close_tool(args: serde_json::Value) -> String {
+    let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
+        return subagent_error_json("missing required field: sessionId");
+    };
+    let remote = subagent_sessions()
+        .lock()
+        .await
+        .open
+        .get(session_id)
+        .and_then(|conv| conv.remote.clone());
+    close_conversation(session_id, remote).await
+}
+
+/// Close `session_id` here, and on the daemon through `remote` when it is given.
+async fn close_conversation(
+    session_id: &str,
+    remote: Option<crate::session_agents::RemoteConversationHandle>,
+) -> String {
+    let mut sessions = subagent_sessions().lock().await;
     // The agent behind a loop running *here*, read before the retire consumes the conversation. A
     // remote one needs no report: cancelling it goes through the daemon, which records it itself.
     let reported_agent = sessions
@@ -2804,6 +2847,25 @@ fn subagent_await_schema() -> std::sync::Arc<serde_json::Map<String, serde_json:
     }))
 }
 
+/// The `subagent_cancel` tool as the main agent is offered it. What it says it does is what it does:
+/// a coding agent's conversation is kept, so the description must not promise a close.
+pub(crate) fn subagent_cancel_tool_definition() -> rmcp::model::Tool {
+    rmcp::model::Tool::new(
+        "subagent_cancel",
+        "Cancel an open subagent conversation's running turn (ACP session/cancel). A coding \
+         agent's conversation is kept: its process, context and worktree stay, the reply is \
+         {cancelled: true, kept: true}, and it takes the next subagent_prompt. Any other \
+         conversation is closed and its worktree deleted.",
+        schema_object(serde_json::json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "properties": {
+                "sessionId": {"type": "string"}
+            }
+        })),
+    )
+}
+
 /// Build the `ToolRouter` for the ACP-shaped subagent conversation tools. Merged into
 /// `PermissionServer::new()`'s router only when [`subagent_enabled`].
 fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<PermissionServer> {
@@ -2887,17 +2949,7 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
         Box::pin(subagent_await_tool(args))
     }));
 
-    let cancel_tool = rmcp::model::Tool::new(
-        "subagent_cancel",
-        "Close an open subagent session (ACP session/cancel-shaped).",
-        schema_object(serde_json::json!({
-            "type": "object",
-            "required": ["sessionId"],
-            "properties": {
-                "sessionId": {"type": "string"}
-            }
-        })),
-    );
+    let cancel_tool = subagent_cancel_tool_definition();
     router.add_route(subagent_route(cancel_tool, |args| {
         Box::pin(subagent_cancel_tool(args))
     }));

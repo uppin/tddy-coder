@@ -82,14 +82,31 @@ or `oz`, refusing rather than starting anything weaker:
   any wrap (`setpriv`, a relay) is a refusal;
 - a provider route contributes its `env` and `secret_env`; a route that writes a file or passes
   arguments other than `--model <the session's model>` is refused;
-- `claude` only: the `tddy-tools --mcp` spec (`tool_server_spec`, with `TDDY_CONVERSATION_ID`) is
-  written to `<tddy_data_dir>/headless/<conversation>/mcp.json` (`0600`, atomic) and the prompt tool
-  is `mcp__tddy-tools__approval_prompt`. `bind_approvals` registers (conversation, session, the spec's
-  `TDDY_REMOTE_SESSION_TOKEN`) in `ApprovalRoutes` (`with_approval_routes`); a spec with no token is
-  refused. `tddy-session-agents`' `AgentRoster::conversation_closed` removes the route and the
-  directory.
+- every CLI is handed the `tddy-tools --mcp` spec (`tool_server_spec`, with `TDDY_CONVERSATION_ID`)
+  in its own shape:
+  - `claude`: `<tddy_data_dir>/headless/<conversation>/mcp.json` (`{"mcpServers": …}`, `0600`,
+    atomic) and the prompt tool `mcp__tddy-tools__approval_prompt`. `bind_approvals` registers
+    (conversation, session, the spec's `TDDY_REMOTE_SESSION_TOKEN`) in `ApprovalRoutes`
+    (`with_approval_routes`) — **last**, once the file is written, so a plan that fails part-way
+    leaves no route; a spec with no token is refused;
+  - `oz`: the same directory's `mcp.json` with the servers at the top level, passed as `--mcp <path>`;
+  - `cursor`: `<worktree>/.cursor/mcp.json` (`mcpServers`, `0600`). `/.cursor/mcp.json` is added to
+    the repository's `info/exclude` (through `git rev-parse --git-common-dir`) **before** the file is
+    written; an existing file is refused by name, and a worktree that is not a git checkout is refused;
+  - `codex`: `HeadlessCommand.mcp_server`, which the argv builder turns into
+    `-c mcp_servers.<name>.{command,args,env_vars}` overrides; the server's `env` is added to the
+    CLI's own environment, so only the variables' names are on the argv.
+- the conversation directory (claude, oz) is created by `claim_conversation_files`, tagged with this
+  daemon's **durable** instance id (`local_base_instance_id_for_config`, held in `HeadlessWiring`),
+  and removed again by its `ClaimedFiles` guard unless the plan completes.
 
-`cursor`, `codex` and `oz` get no MCP config
-([`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md`](../../../docs/dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md));
-a route registered for a launch whose open then fails stays inert until close
-([`docs/dev/todo/2026-10-25-headless-approval-route-residuals.md`](../../../docs/dev/todo/2026-10-25-headless-approval-route-residuals.md)).
+`tddy-session-agents`' `AgentRoster::conversation_closed` removes the route and the directory, on a
+close and on an open that fails after the plan. `sweep_headless_files_left_by_this_daemon(config,
+tddy_data_dir)` removes the directories this daemon's previous run tagged; the daemon runtime's
+`build_session_host` calls it before the host serves, logging a failure rather than refusing to
+start. Cursor's worktree file is not removed on close, and the start-up call has no automated test —
+see the backlog.
+
+Approvals are bound for `claude` only: `cursor`, `codex` and `oz` have no permission-prompt tool.
+`confinement_for` still reports all three `CannotWithdraw`
+([`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md`](../../../docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md)).

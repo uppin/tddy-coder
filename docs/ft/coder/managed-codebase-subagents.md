@@ -163,7 +163,10 @@ was computed, paid for, and permanently unreachable.
 
 **Cancelling resolves what is pending.** `subagent_cancel`, and a detach that cancels a conversation
 underneath it, close the conversation immediately as they do today, and resolve every pending
-response of that conversation as cancelled. An `await` for a turn nobody will ever finish has to
+response of that conversation as cancelled. The one exception is `subagent_cancel` on a **coding
+agent**: it cancels only the running turn (ACP `session/cancel`) and keeps the conversation, its
+process and its worktree, answering `{cancelled: true, kept: true}`
+([Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents)). An `await` for a turn nobody will ever finish has to
 answer, not wait.
 
 ### What does not change
@@ -328,7 +331,8 @@ subagent is paused, not finished — its ACP prompt stays in flight, waiting on 
   with no `permission`, or one naming another request, or an `optionId` the request did not offer —
   and the request stays pending. An answer with nothing pending is refused too.
 - **Cancelling while one is pending** answers every parked request as cancelled, sends
-  `session/cancel`, and waits (bounded, 10 s) for the turn to end as `cancelled`.
+  `session/cancel`, and waits (bounded, 10 s) for the turn to end as `cancelled`. The conversation
+  stays open: the next `subagent_prompt` starts a new turn.
 - **Across daemons.** The request rides the final `AgentConversationChunk`
   (`permission_request_json`) and the answer rides `ResumeAgentConversationRequest`
   (`permission_answer_json`), so a conversation another daemon serves behaves the same.
@@ -340,8 +344,9 @@ subagent is paused, not finished — its ACP prompt stays in flight, waiting on 
   it with `subagent_resume`. A timeout (60 s), a cancel or a refused route is a denial. Headless
   `cursor`, `codex` and `oz` cannot ask mid-turn and run under the fixed policy their row names
   ([Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents)).
-- **Known gap:** `toolCall.kind` is always `other` — the ACP driver drops the agent's tool kind
-  ([`docs/dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md`](../../dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md)).
+- **`toolCall.kind` is the agent's ACP tool kind** by its wire name (`edit`, `execute`, `read`, …),
+  and `other` when the agent named none. A headless approval names a tool, not a kind, so it reads
+  `other`.
 
 ### A turn in which no tool call succeeded is an error
 
@@ -424,10 +429,15 @@ an agent attached with [`clone` placement](#a-daemon-run-conversation-of-a-clone
   `pulled` is `null` when the conversation never created a worktree. The caller's `HEAD` never moves
   and no commit is made on the caller's branch. It is refused while a turn is running, naming the
   turn; a failed pull leaves the conversation open so the caller can retry or cancel.
-- **`subagent_cancel`** deletes the worktree and branch; nothing reaches the caller.
+- **`subagent_cancel`** deletes the worktree and branch; nothing reaches the caller. A coding
+  agent's conversation is the exception: the cancel stops only its turn and keeps the conversation
+  and its worktree.
 
 A subagent's edits therefore reach the caller only through `subagent_pull` and `subagent_end`; a
-conversation that is cancelled loses them, which is the point, and the tool descriptions say so.
+conversation that is cancelled loses them, which is the point, and the tool descriptions say so. A
+coding agent's conversation is closed only by `subagent_end` (which pulls first) or a detach, so
+there is no tool that discards its work without applying it —
+[`docs/dev/todo/2026-10-25-no-tool-discards-a-coding-agents-conversation.md`](../../dev/todo/2026-10-25-no-tool-discards-a-coding-agents-conversation.md).
 
 Git runs on the facilitating daemon's host, never in the jail: a linked worktree's `.git` points into
 the repository's common directory, which a jail mounting only the checkout cannot see. The jail
@@ -682,8 +692,9 @@ the clone the owning daemon holds.
   a caller sync runs can be lost, or committed as a later turn's work — backlog entry *A background
   job can race the caller sync*.
 - A headless coding agent opens only `clone`-placed, only as the daemon's own OS user, and only in an
-  unmanaged session; `cursor`, `codex` and `oz` get no MCP config —
-  [`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md`](../../dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md).
+  unmanaged session: `cursor`, `codex` and `oz` get the tddy-tools MCP server but cannot withdraw
+  their native tools —
+  [`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md`](../../dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md).
 - Every merge on the branch's first-parent line is read as a caller sync, so a merge a host-run
   subagent made itself with `git merge` would be left out of every pull and taken as the last caller
   state; a jailed subagent cannot make one — backlog entry *A merge the subagent makes itself is read
@@ -850,8 +861,8 @@ fully migrated onto the array model.
     behind it and runs after it, in call order. The queued call's own grace threshold covers the
     wait, so a call that does not reach the front in time returns `{responseId, pending: true}` like
     any other slow turn.
-31. `subagent_cancel` on a conversation with a turn in flight closes it immediately, as it does
-    today, and resolves every pending response of that conversation as cancelled — so a later
+31. `subagent_cancel` on a conversation with a turn in flight closes it immediately (a coding
+    agent's is kept, and only its turn cancelled), and resolves every pending response of that conversation as cancelled — so a later
     `subagent_await` on one of those ids answers instead of waiting for a turn nobody will finish.
     A conversation cancelled because its agent was detached resolves its pending responses the same
     way.
@@ -920,7 +931,8 @@ fully migrated onto the array model.
 53. `subagent_end` applies base..tip to the caller's worktree as uncommitted changes, 3-way, with
     conflict markers and the conflicted paths reported; the caller's `HEAD` does not move. It deletes
     the worktree and branch and closes the conversation, and is refused while a turn runs.
-54. `subagent_cancel` deletes the worktree and branch; the caller's worktree is unchanged.
+54. `subagent_cancel` deletes the worktree and branch; the caller's worktree is unchanged. A coding
+    agent's conversation keeps both, and only its turn is cancelled.
 55. `subagent_end` is advertised beside `subagent_cancel` and allowlisted in the sandbox recipes
     exactly where `subagent_cancel` is.
 56. A rewind resets the worktree to the commit of the last kept entry that made one, and to the

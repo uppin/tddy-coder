@@ -264,8 +264,12 @@ descriptor per tool call the turn made). Options that act on an OpenAI-loop tran
 `subagent_resume`'s `fromMessageId`, `correction`, `replacement`, `yieldConditions`, and
 `subagent_prompt`'s `yieldConditions` and `maxTurns` — are refused with an error naming the option.
 A permission request from the agent is **denied**, and the denial appears in the turn's `messages`.
-`subagent_cancel` closes the conversation as it does for every agent — the running turn is
-interrupted and the process stopped — and `subagent_end` and a detach stop the process too.
+`subagent_cancel` cancels only the running turn: the daemon sends ACP `session/cancel` (a request
+the turn is parked on is answered `Cancelled` first), waits for the turn to end `cancelled`, and
+**keeps the conversation** — its process, context and worktree stay, the reply is
+`{cancelled: true, kept: true}`, and the next `subagent_prompt` on the same `sessionId` runs a new
+turn. `subagent_end` and a detach close the conversation and stop the process. (A model-loop
+conversation has no turn of its own to cancel, so `subagent_cancel` still closes it.)
 
 **A headless conversation** runs one CLI invocation per turn, resuming the CLI's own session
 (`--resume <id>`, `exec resume <thread>`, `--conversation <id>`), and maps its stream to the same
@@ -288,14 +292,34 @@ conversation, and holds open until the caller answers through `subagent_resume {
 denies after 60 s, on cancel, or when the asking client disconnects. Every tool but tddy-tools' own
 goes through it; nothing is pre-allowed locally.
 
+The other three CLIs get the same `tddy-tools --mcp` server in their own shape, and **no approval
+route** — none has a permission-prompt tool, so none asks:
+
+| CLI | How the server is handed over |
+|---|---|
+| `cursor` | `<worktree>/.cursor/mcp.json` (`{"mcpServers": {...}}`, `0600`), listed in the repository's `info/exclude` before it is written so the credential is never offered to a commit. An existing `.cursor/mcp.json` in the worktree is refused by name, never overwritten; a worktree that is not a git checkout is refused |
+| `oz` | `--mcp <path>`, an owner-only file under `headless/<conversation>/` with the servers at the top level |
+| `codex` | `-c mcp_servers.tddy-tools.command=…`, `.args=[…]`, `.env_vars=[…]`: the variables' values are in the CLI's own environment and only their names are on the argv |
+
+**What a headless conversation leaves on disk.** Each `headless/<conversation>/` directory is tagged
+with the creating daemon's durable instance id (`daemon-instance`; the configured
+`daemon_instance_id`, else the hostname). The approval route is bound only once every file the plan
+writes is written, and an open that fails after the plan — or whose caller goes away mid-open —
+removes the route and the directory, as a close does. At start-up, before it serves, the daemon
+removes the `headless/` directories tagged with its own id: what a previous run left when it stopped
+without closing them. Another daemon's directories, and untagged ones, are left alone.
+
 Known gaps of the headless transport:
 
-- `cursor`, `codex` and `oz` get no MCP config, so they have no tddy-tools tools and no approval
-  route — [`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md`](../../dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md).
+- `cursor`, `codex` and `oz` still cannot withdraw their native tools, so a managed session refuses
+  all three — [`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md`](../../dev/todo/2026-10-25-headless-cursor-codex-oz-cannot-withdraw-native-tools.md).
+- A cursor conversation's `<worktree>/.cursor/mcp.json` is not removed when the conversation closes —
+  [`docs/dev/todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md`](../../dev/todo/2026-10-25-cursor-project-mcp-config-outlives-its-conversation.md).
+- Two daemons sharing a data directory that both fall back to the hostname as their durable id sweep
+  each other's `headless/` directories —
+  [`docs/dev/todo/2026-10-25-headless-sweep-cannot-tell-two-hostname-daemons-apart.md`](../../dev/todo/2026-10-25-headless-sweep-cannot-tell-two-hostname-daemons-apart.md).
 - `cursor`'s tool calls are not surfaced; `codex`'s arrive when the turn ends; assistant prose
   reaches the transcript only as the turn's final text.
-- A failed open leaves an inert approval-route entry, and `mcp.json` lives until close —
-  [`docs/dev/todo/2026-10-25-headless-approval-route-residuals.md`](../../dev/todo/2026-10-25-headless-approval-route-residuals.md).
 - A turn ends on stdout EOF; a grandchild that keeps stdout open stalls it (cancel still ends it).
 - Proven against fake CLIs that replay recorded streams (the `oz` fixtures are real captures); no
   live `claude`, `cursor` or `codex` run is recorded.
@@ -815,7 +839,16 @@ daemon when the conversation runs there. It refuses an unauthenticated caller, t
 own token, a conversation the session does not hold and a request that was not deferred.
 `CancelAgentConversation` records a request the cancel ends as answered by the actor the caller's
 token names — `main-agent` for a token minted for the session's agent, otherwise the login; the
-request carries no actor. Both are described in
+request carries no actor.
+
+`CancelAgentConversation` says which cancel it is. `keep_conversation` (field 6) asks for only the
+running turn to be cancelled; the daemon keeps the conversation when its agent can cancel a turn on
+its own (a coding agent's `session/cancel`) and answers `conversation_kept: true`, and closes any
+other conversation as before, answering `false`. A forwarded cancel carries the flag to the owning
+daemon, whose answer is the caller's, and the routing record here is dropped exactly when the owner
+did not keep the conversation. `subagent_cancel` sends `true`; `subagent_end`, a detach and the web's
+tab close send `false`. A cancel naming a conversation open on **another session** is `NOT_FOUND`,
+worded as for an unknown id, and removes nothing. Both are described in
 [Agent activity pane § The user answers a deferred permission request](../web/agent-activity-pane.md#the-user-answers-a-deferred-permission-request-added-2026-10-25).
 
 One shape the wire deliberately does not carry: a turn that is **both** a new prompt and a rewind.

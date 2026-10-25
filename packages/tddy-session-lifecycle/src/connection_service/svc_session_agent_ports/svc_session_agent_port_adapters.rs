@@ -362,9 +362,16 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
         session_id: &str,
         owner: &str,
         conversation_id: &str,
-    ) -> Result<(), Status> {
+        keep_conversation: bool,
+    ) -> Result<bool, Status> {
         self.roster
-            .forward_cancel_agent_conversation(session_token, session_id, owner, conversation_id)
+            .forward_cancel_agent_conversation(
+                session_token,
+                session_id,
+                owner,
+                conversation_id,
+                keep_conversation,
+            )
             .await
     }
 

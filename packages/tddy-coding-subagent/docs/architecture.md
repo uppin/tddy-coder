@@ -79,8 +79,22 @@ session's `ParkedPermissions` as `dyn PermissionAnswering`, so the daemon answer
 conversation's lock.
 
 `cancel_handle()` returns a `CancelHandle` that sends `session/cancel` (the turn ends `cancelled`).
-The daemon's conversation table holds `Box<dyn SubagentSession>` and does not reach it yet; its
-`subagent_cancel` closes the conversation, which drops the session and stops the process.
+`turn_canceller()` hands it out as `dyn TurnCancelling`, which the daemon's conversation table
+captures beside the boxed session when the conversation opens, so a `keep_conversation` cancel
+(`subagent_cancel`) reaches a turn that holds the session's lock and the conversation stays open. A
+turn a cancel drove to its end is parked for a resume, as before; a **new prompt** after it closes
+that turn into the history (`close_cancelled_turn`) and begins the next one instead of being refused
+as "the previous turn is still open". `subagent_end` and a detach still close the conversation,
+which drops the session and stops the process.
+
+`PermissionRequestView.tool_call.kind` is the request's ACP tool kind (`PermissionRequest.kind`, by
+its wire name), `other` when the agent named none.
+
+`launcher::claim_headless_conversation_dir(dir, daemon_instance_id)` creates a headless
+conversation's directory tagged with the creating daemon (`daemon-instance`), and
+`launcher::sweep_headless_dirs(tddy_data_dir, daemon_instance_id)` removes every
+`headless/<conversation>/` tagged with that id, leaving another daemon's and untagged ones alone; a
+missing `headless/` is not an error.
 
 ## Headless sessions
 

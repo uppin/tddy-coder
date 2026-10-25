@@ -79,16 +79,36 @@ impl ConversingSession {
     }
 
     async fn cancel(&self, conversation_id: &str) -> Result<(), tddy_rpc::Status> {
+        self.cancel_on(&self.session_id, conversation_id).await
+    }
+
+    /// Cancel `conversation_id` naming `session_id` as the session it is open on.
+    async fn cancel_on(
+        &self,
+        session_id: &str,
+        conversation_id: &str,
+    ) -> Result<(), tddy_rpc::Status> {
         self.service
             .session_agents_service()
             .cancel_agent_conversation(Request::direct(CancelAgentConversationRequest {
                 session_token: TEST_TOKEN.to_string(),
-                session_id: self.session_id.clone(),
+                session_id: session_id.to_string(),
                 daemon_instance_id: String::new(),
                 conversation_id: conversation_id.to_string(),
+                keep_conversation: false,
             }))
             .await
             .map(|_| ())
+    }
+
+    /// A second session of the same user on this daemon, with nothing open on it.
+    fn another_session_of_the_same_user(&self) -> String {
+        let session_id = "1780828020299-another".to_string();
+        let session_dir = unified_session_dir_path(self._sessions.path(), &session_id);
+        std::fs::create_dir_all(&session_dir).expect("create the other session dir");
+        tddy_core::write_session_metadata(&session_dir, &a_managed_session(&session_id))
+            .expect("write the other session's metadata");
+        session_id
     }
 }
 
@@ -362,6 +382,32 @@ async fn refuses_to_cancel_a_conversation_that_is_no_longer_open() {
     // Then
     let status = result.expect_err("cancelling a closed conversation must be refused");
     assert_eq!(status.code(), Code::NotFound);
+}
+
+/// A caller authenticated for one session cannot close a conversation of another by naming its id:
+/// the conversation's own session has to match, and a mismatch reads as an unknown id.
+#[tokio::test]
+async fn refuses_to_cancel_a_conversation_named_on_another_session() {
+    // Given a conversation open on one session, and a second session of the same user
+    let session = a_session_conversing_with_a_local_agent(a_model_that_never_answers().await).await;
+    let conversation = session.open_conversation().await;
+    let other_session = session.another_session_of_the_same_user();
+
+    // When the cancel names the other session
+    let result = session.cancel_on(&other_session, &conversation).await;
+
+    // Then it is refused as for an unknown id, and the conversation is still open on its own session
+    let status = result.expect_err("a conversation of another session is not cancelled");
+    assert_eq!(status.code(), Code::NotFound);
+    assert!(
+        status.message().contains(&other_session),
+        "the refusal names the session the caller asked about: {}",
+        status.message()
+    );
+    session
+        .cancel(&conversation)
+        .await
+        .expect("the conversation is still open on its own session");
 }
 
 // ---------------------------------------------------------------------------

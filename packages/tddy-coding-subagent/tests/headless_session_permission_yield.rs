@@ -79,6 +79,7 @@ fn bash_request() -> PermissionRequest {
         tool_call_id: "tu-1".to_string(),
         title: Some("Bash".to_string()),
         raw_input: None,
+        kind: None,
         options: vec![
             PermissionOptionView {
                 option_id: "allow".to_string(),

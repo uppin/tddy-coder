@@ -267,6 +267,7 @@ impl OpenConversation {
                 session_id: SESSION_ID.to_string(),
                 daemon_instance_id: String::new(),
                 conversation_id: self.conversation_id.clone(),
+                keep_conversation: false,
             }))
             .await
             .map(|response| response.into_inner())

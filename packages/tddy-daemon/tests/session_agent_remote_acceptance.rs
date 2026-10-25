@@ -1135,6 +1135,7 @@ async fn cancels_a_remote_agents_conversation_on_the_daemon_that_owns_it() {
             session_id: fleet.session_id.clone(),
             daemon_instance_id: String::new(),
             conversation_id: conversation.clone(),
+            keep_conversation: false,
         }))
         .await
         .expect("cancelling a remote conversation must reach the daemon running the turn");

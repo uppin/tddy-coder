@@ -12,6 +12,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-25 | 441 → 502 | first detection — PR #727 crossed it: `record_after_streamed` (an answered record written after the streamed frames it follows), `note_status` (the conversation's status row), the `ToolCallRecord` arm of `update_frame`, and the turn-error replies. The status row itself is its own module (`conversation_status.rs`). Not split: deferred to the `#coagents` sweep node by the developer (2026-10-25) |
+| 2026-10-25 | 502 → 512 | **worse** by 10 in PR #776 (`#coagents` 9/9): the recorder holds the daemon's `AgentActivityHub`, so `note_status` publishes the status row live. Not split: the developer deferred every code issue of the `#coagents` stack past its sweep node too (2026-10-25), so this is left for after the stack lands |
 
 ## What would close it
 

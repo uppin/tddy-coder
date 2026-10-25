@@ -26,8 +26,9 @@ use tddy_discovery::subagent::SubagentError;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest, SubagentInfo};
 use tddy_service::proto::session_agents_svc::{
-    AttachSessionAgentRequest, CancelAgentConversationRequest, OpenAgentConversationRequest,
-    PromptAgentConversationRequest, SessionAgentService as _,
+    AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
+    CancelAgentConversationResponse, OpenAgentConversationRequest, PromptAgentConversationRequest,
+    SessionAgentService as _,
 };
 use tddy_service::proto::types::AgentKind;
 use tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher;
@@ -70,10 +71,10 @@ struct RecordingLauncher {
 const TDDY_TOOLS_PATH: &str = "/opt/tddy/bin/tddy-tools";
 
 impl RecordingLauncher {
-    fn into(dir: &Path, answer: serde_json::Value) -> Arc<Self> {
+    fn into(dir: &Path, answers: Vec<serde_json::Value>) -> Arc<Self> {
         std::fs::write(
             dir.join("scenario.json"),
-            serde_json::json!({ "responses": [answer] }).to_string(),
+            serde_json::json!({ "responses": answers }).to_string(),
         )
         .expect("write scenario");
         let daemons_own = DaemonCodingAgentLauncher::new(
@@ -166,7 +167,7 @@ struct ASession {
     managed: bool,
     profiles: Vec<(&'static str, &'static str)>,
     model_agents: Vec<&'static str>,
-    answer: serde_json::Value,
+    answers: Vec<serde_json::Value>,
     with_launcher: bool,
 }
 
@@ -175,7 +176,7 @@ fn a_session() -> ASession {
         managed: false,
         profiles: vec![("codex-fast", "codex-acp")],
         model_agents: Vec::new(),
-        answer: serde_json::json!({ "chunks": ["done"] }),
+        answers: vec![serde_json::json!({ "chunks": ["done"] })],
         with_launcher: true,
     }
 }
@@ -192,7 +193,13 @@ impl ASession {
     }
 
     fn whose_agent_answers(mut self, answer: serde_json::Value) -> Self {
-        self.answer = answer;
+        self.answers = vec![answer];
+        self
+    }
+
+    /// And answers its next turn with `answer`. The stub has no answer for a turn it was not scripted.
+    fn then_answers(mut self, answer: serde_json::Value) -> Self {
+        self.answers.push(answer);
         self
     }
 
@@ -240,7 +247,7 @@ impl ASession {
         .expect("write session metadata");
         let launcher_dir = sessions.path().join("launcher");
         std::fs::create_dir_all(&launcher_dir).expect("launcher dir");
-        let launcher = RecordingLauncher::into(&launcher_dir, self.answer);
+        let launcher = RecordingLauncher::into(&launcher_dir, self.answers);
         let service = match self.with_launcher {
             true => test_service_with_coding_agent_launcher(
                 sessions.path().to_path_buf(),
@@ -361,6 +368,52 @@ impl CodingAgentSession {
         (text, stop_reason)
     }
 
+    /// Start one prompt turn and hand back its stream, unread.
+    async fn begin_prompt(
+        &self,
+        conversation_id: &str,
+        prompt: &str,
+    ) -> impl futures_util::Stream<Item = Result<AgentConversationChunk, tddy_rpc::Status>> + Unpin
+    {
+        self.service
+            .session_agents_service()
+            .prompt_agent_conversation(Request::direct(PromptAgentConversationRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: self.session_id.clone(),
+                daemon_instance_id: String::new(),
+                conversation_id: conversation_id.to_string(),
+                prompt: prompt.to_string(),
+                max_turns: None,
+                yield_conditions_json: String::new(),
+            }))
+            .await
+            .expect("prompting succeeds")
+            .into_inner()
+    }
+
+    /// Cancel only the running turn of `conversation_id`, asking the daemon to keep the conversation.
+    async fn cancel_the_turn(&self, conversation_id: &str) -> CancelAgentConversationResponse {
+        self.service
+            .session_agents_service()
+            .cancel_agent_conversation(Request::direct(CancelAgentConversationRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: self.session_id.clone(),
+                daemon_instance_id: String::new(),
+                conversation_id: conversation_id.to_string(),
+                keep_conversation: true,
+            }))
+            .await
+            .expect("a turn cancel succeeds")
+            .into_inner()
+    }
+
+    /// The agent process's pid, as `tddy-acp-stub` recorded it at start-up.
+    fn agent_pid(&self) -> u32 {
+        self.launcher.recorded("started")[0]["pid"]
+            .as_u64()
+            .expect("the agent recorded its pid") as u32
+    }
+
     async fn cancel(&self, conversation_id: &str) {
         self.service
             .session_agents_service()
@@ -369,6 +422,7 @@ impl CodingAgentSession {
                 session_id: self.session_id.clone(),
                 daemon_instance_id: String::new(),
                 conversation_id: conversation_id.to_string(),
+                keep_conversation: false,
             }))
             .await
             .expect("cancel succeeds");
@@ -741,4 +795,162 @@ async fn ending_a_coding_agent_conversation_stops_its_process() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(!process_is_running(pid), "the agent process {pid} is gone");
+}
+
+// ---------------------------------------------------------------------------
+// Cancelling a turn
+// ---------------------------------------------------------------------------
+
+/// Read `stream` to its final frame: the text it carried and the stop reason it ended with.
+async fn read_to_the_end<S>(stream: &mut S) -> (String, String)
+where
+    S: futures_util::Stream<Item = Result<AgentConversationChunk, tddy_rpc::Status>> + Unpin,
+{
+    let (mut text, mut stop_reason) = (String::new(), String::new());
+    while let Some(chunk) = tokio::time::timeout(TURN_DEADLINE, stream.next())
+        .await
+        .expect("a chunk in time")
+    {
+        let chunk = chunk.expect("a chunk, not an error");
+        text.push_str(&chunk.content_chunk);
+        if chunk.last {
+            stop_reason = chunk.stop_reason;
+            break;
+        }
+    }
+    (text, stop_reason)
+}
+
+/// The file a held turn's agent writes into the worktree as its turn starts, before it holds the turn.
+const TURN_STARTED_MARKER: &str = "turn-started";
+
+/// An agent whose turn writes [`TURN_STARTED_MARKER`], then runs until it is cancelled.
+fn a_turn_held_until_cancelled() -> serde_json::Value {
+    serde_json::json!({
+        "chunks": ["working"],
+        "write_files": [{ "path": TURN_STARTED_MARKER, "content": "1" }],
+        "hold_until_cancel": true,
+    })
+}
+
+impl CodingAgentSession {
+    /// Wait until the agent has started its turn: it has written [`TURN_STARTED_MARKER`].
+    async fn the_turn_has_started(&self) {
+        let marker = self.worktree.join(TURN_STARTED_MARKER);
+        tokio::time::timeout(TURN_DEADLINE, async {
+            while !marker.exists() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the agent started its turn in time");
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn cancelling_a_coding_agents_turn_keeps_its_conversation_and_its_process() {
+    // Given a coding agent whose turn runs until it is cancelled
+    let session = a_session()
+        .whose_agent_answers(a_turn_held_until_cancelled())
+        .build();
+    let agent_id = session.attached("codex-fast").await;
+    let conversation_id = session.open(&agent_id).await;
+    let pid = session.agent_pid();
+    let mut turn = session.begin_prompt(&conversation_id, "Fix the bug").await;
+    session.the_turn_has_started().await;
+
+    // When the main agent cancels the turn, keeping the conversation
+    let response = session.cancel_the_turn(&conversation_id).await;
+
+    // Then the daemon kept it, the turn ended cancelled, and the agent is still running
+    assert!(
+        response.conversation_kept,
+        "a coding agent's conversation is kept: {response:?}"
+    );
+    let (_, stop_reason) = read_to_the_end(&mut turn).await;
+    assert_eq!(stop_reason, "Cancelled");
+    assert_eq!(
+        session.launcher.recorded("cancel").len(),
+        1,
+        "the agent was sent session/cancel"
+    );
+    assert!(
+        process_is_running(pid),
+        "the agent process {pid} still runs"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_coding_agent_conversation_answers_its_next_prompt_after_its_turn_was_cancelled() {
+    // Given a coding agent whose first turn is cancelled
+    let session = a_session()
+        .whose_agent_answers(a_turn_held_until_cancelled())
+        .then_answers(serde_json::json!({ "chunks": ["fixed"] }))
+        .build();
+    let agent_id = session.attached("codex-fast").await;
+    let conversation_id = session.open(&agent_id).await;
+    let turn = session.begin_prompt(&conversation_id, "Fix the bug").await;
+    session.the_turn_has_started().await;
+    session.cancel_the_turn(&conversation_id).await;
+    drop(turn);
+
+    // When the conversation is prompted again
+    let (text, stop_reason) = session.prompt(&conversation_id, "Try again").await;
+
+    // Then the same conversation answers, in the same agent process
+    assert_eq!((text.as_str(), stop_reason.as_str()), ("fixed", "EndTurn"));
+    assert_eq!(
+        session.launcher.recorded("started").len(),
+        1,
+        "no second agent was started"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn cancelling_a_turn_paused_on_a_permission_request_answers_it_cancelled_and_keeps_the_conversation(
+) {
+    // Given a coding agent turn paused on a permission request it yielded to the main agent
+    let session = a_session()
+        .whose_agent_answers(serde_json::json!({
+            "chunks": ["tests pass"],
+            "permission_requests": [{ "title": "Run cargo test" }],
+        }))
+        .then_answers(serde_json::json!({ "chunks": ["carried on"] }))
+        .build();
+    let agent_id = session.attached("codex-fast").await;
+    let conversation_id = session.open(&agent_id).await;
+    let (_, stop_reason) = session.prompt(&conversation_id, "Run the tests").await;
+    assert_eq!(stop_reason, "PermissionRequested");
+
+    // When the main agent cancels the turn, keeping the conversation
+    let response = session.cancel_the_turn(&conversation_id).await;
+
+    // Then the request was answered cancelled, and the conversation is still open
+    assert!(response.conversation_kept, "{response:?}");
+    let outcomes = session.launcher.recorded("permission_outcome");
+    assert_eq!(
+        outcomes.last().map(|outcome| outcome["outcome"].clone()),
+        Some(serde_json::json!("cancelled")),
+        "the agent saw its request cancelled: {outcomes:?}"
+    );
+    let (_, next) = session.prompt(&conversation_id, "Carry on").await;
+    assert_eq!(next, "EndTurn", "the conversation answers again");
+}
+
+#[tokio::test]
+#[serial]
+async fn cancelling_the_turn_of_a_model_agent_closes_its_conversation_as_before() {
+    // Given a conversation with a model-loop agent, which has no turn of its own to cancel
+    let session = a_session().and_a_model_agent("explorer").build();
+    let agent_id = session.attached("explorer").await;
+    let conversation_id = session.open(&agent_id).await;
+
+    // When the main agent asks to cancel only the turn
+    let response = session.cancel_the_turn(&conversation_id).await;
+
+    // Then the daemon closed it, and says so
+    assert!(!response.conversation_kept, "{response:?}");
 }

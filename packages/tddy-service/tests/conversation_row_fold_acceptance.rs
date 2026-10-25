@@ -9,7 +9,9 @@ use tddy_service::acp_replay::frame_for_agent_activity;
 use tddy_service::proto::acp::{
     acp_agent_message, session_update, AcpAgentMessage, ToolCallStatus,
 };
-use tddy_service::subagent_conversation_replay::{fold_subagent_calls, SUBAGENT_TOOL_CALL_PREFIX};
+use tddy_service::subagent_conversation_replay::{
+    fold_subagent_calls, CONVERSATION_ROW_SOURCE, SUBAGENT_TOOL_CALL_PREFIX,
+};
 
 /// The conversation's own status row, as the daemon writes it: one call id per conversation.
 fn a_conversation_row(status: &str, awaiting_user: bool, at: u64) -> AcpAgentMessage {
@@ -30,7 +32,7 @@ fn a_conversation_row(status: &str, awaiting_user: bool, at: u64) -> AcpAgentMes
         } else {
             0
         },
-        source: "coder".to_string(),
+        source: CONVERSATION_ROW_SOURCE.to_string(),
         head_commit: String::new(),
         activity_seq: 0,
         changed_paths: Vec::new(),

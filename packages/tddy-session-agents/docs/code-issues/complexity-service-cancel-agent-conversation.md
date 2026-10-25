@@ -13,6 +13,7 @@
 | Run | Raw lines | Brace depth | Note |
 |---|---|---|---|
 | 2026-10-25 | 49 → 74 | 3 → 4 | first detection — PR #727 grew it: the cancelling actor is derived from the token (`AgentSessions::answerer`), and a local conversation's pending request is recorded as answered by that actor before the turn is interrupted (`record_cancelled_request`). Deferred to the `#coagents` sweep node by the developer (2026-10-25) |
+| 2026-10-25 | 74 → 111 | 4 → 4 | **worse** by 37 in PR #776 (`#coagents` 9/9): the `keep_conversation` dispatch over `TurnCancelRoute` (its arms call `cancel_local_turn` / `cancel_remote_turn`, already extracted) and the response's `conversation_kept`. The close arms named under *What would close it* are still inline. Not split: the developer deferred every code issue of the `#coagents` stack past its sweep node too (2026-10-25), so this is left for after the stack lands |
 
 ## What the tool found
 

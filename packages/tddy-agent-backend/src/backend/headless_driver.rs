@@ -90,6 +90,10 @@ pub struct HeadlessCommand {
     /// oz only: the agent profile the run executes under (`--profile`) — what decides its
     /// permissions, since a headless `oz` run never asks.
     pub profile: Option<String>,
+    /// codex only: an MCP server handed to the CLI inline (`-c mcp_servers.<name>.*`), for a CLI that
+    /// reads no MCP config file. Its environment is the launcher's to put in [`Self::env`]: the argv
+    /// names its variables, never their values.
+    pub mcp_server: Option<super::acp_driver::McpServerSpec>,
 }
 
 /// One headless conversation: its CLI, and the CLI's own session id once the first turn named it.

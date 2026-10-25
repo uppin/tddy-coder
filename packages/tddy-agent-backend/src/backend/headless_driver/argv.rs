@@ -5,6 +5,7 @@
 use std::path::Path;
 
 use super::{HeadlessCommand, HeadlessHarness};
+use crate::backend::acp_driver::McpServerSpec;
 
 pub(super) fn turn_argv(
     harness: HeadlessHarness,
@@ -56,6 +57,9 @@ fn cursor(command: &HeadlessCommand, session: Option<&str>, prompt: &str) -> Vec
 
 fn codex(command: &HeadlessCommand, session: Option<&str>, prompt: &str) -> Vec<String> {
     let mut argv = words(&["exec"]);
+    if let Some(server) = &command.mcp_server {
+        argv.extend(codex_mcp_server_overrides(server));
+    }
     let cwd = path_text(command.cwd.as_deref());
     push_flag(&mut argv, "-C", cwd.as_deref());
     argv.extend(words(&["-s", "workspace-write"]));
@@ -66,6 +70,30 @@ fn codex(command: &HeadlessCommand, session: Option<&str>, prompt: &str) -> Vec<
     }
     argv.push(prompt.to_string());
     argv
+}
+
+/// `server` as codex's `-c mcp_servers.<name>.*` config overrides: dotted keys, TOML values. Its
+/// environment is named (`env_vars`), never valued: codex forwards those variables from its own
+/// environment, so the credential stays off the argv another user's `ps` reads.
+fn codex_mcp_server_overrides(server: &McpServerSpec) -> Vec<String> {
+    let key = |field: &str| format!("mcp_servers.{}.{field}", server.name);
+    let env_names: Vec<&str> = server.env.iter().map(|(name, _)| name.as_str()).collect();
+    [
+        (
+            key("command"),
+            toml_value(&server.command.display().to_string()),
+        ),
+        (key("args"), toml_value(&server.args)),
+        (key("env_vars"), toml_value(&env_names)),
+    ]
+    .into_iter()
+    .flat_map(|(key, value)| ["-c".to_string(), format!("{key}={value}")])
+    .collect()
+}
+
+/// A string or a list of strings as a TOML value. JSON's spelling of both is valid TOML.
+fn toml_value(value: &impl serde::Serialize) -> String {
+    serde_json::to_string(value).expect("strings always serialize as JSON")
 }
 
 fn oz(command: &HeadlessCommand, session: Option<&str>, prompt: &str) -> Vec<String> {
@@ -117,6 +145,86 @@ mod tests {
         assert!(!argv.iter().any(|arg| arg == "--resume"), "{argv:?}");
         assert_eq!(argv[0], "-p");
         assert_eq!(argv[1], "Go");
+    }
+
+    /// The `tddy-tools` MCP server a launcher hands a headless conversation, its credential in its
+    /// environment.
+    fn the_tool_server() -> crate::backend::acp_driver::McpServerSpec {
+        crate::backend::acp_driver::McpServerSpec {
+            name: "tddy-tools".to_string(),
+            command: std::path::PathBuf::from("/opt/tddy/bin/tddy-tools"),
+            args: vec!["--mcp".to_string()],
+            env: vec![
+                (
+                    "TDDY_REMOTE_SESSION_TOKEN".to_string(),
+                    "minted-agent-token".to_string(),
+                ),
+                ("TDDY_CONVERSATION_ID".to_string(), "conv-1".to_string()),
+            ],
+        }
+    }
+
+    /// The value of each `-c key=value` override in `argv`, by key.
+    fn config_overrides(argv: &[String]) -> Vec<(String, String)> {
+        argv.windows(2)
+            .filter(|pair| pair[0] == "-c")
+            .filter_map(|pair| pair[1].split_once('='))
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn codex_is_handed_its_mcp_server_as_config_overrides() {
+        // Given
+        let command = HeadlessCommand {
+            mcp_server: Some(the_tool_server()),
+            ..HeadlessCommand::default()
+        };
+
+        // When
+        let argv = turn_argv(HeadlessHarness::Codex, &command, None, "Go");
+
+        // Then
+        let overrides = config_overrides(&argv);
+        assert!(
+            overrides.contains(&(
+                "mcp_servers.tddy-tools.command".to_string(),
+                "\"/opt/tddy/bin/tddy-tools\"".to_string()
+            )),
+            "{argv:?}"
+        );
+        assert!(
+            overrides.contains(&(
+                "mcp_servers.tddy-tools.args".to_string(),
+                "[\"--mcp\"]".to_string()
+            )),
+            "{argv:?}"
+        );
+        assert!(
+            overrides.contains(&(
+                "mcp_servers.tddy-tools.env_vars".to_string(),
+                "[\"TDDY_REMOTE_SESSION_TOKEN\",\"TDDY_CONVERSATION_ID\"]".to_string()
+            )),
+            "the server's variables are named, so codex forwards them: {argv:?}"
+        );
+    }
+
+    #[test]
+    fn codex_never_carries_its_mcp_servers_credential_on_the_argv() {
+        // Given
+        let command = HeadlessCommand {
+            mcp_server: Some(the_tool_server()),
+            ..HeadlessCommand::default()
+        };
+
+        // When
+        let argv = turn_argv(HeadlessHarness::Codex, &command, None, "Go");
+
+        // Then
+        assert!(
+            !argv.iter().any(|arg| arg.contains("minted-agent-token")),
+            "another user's `ps` reads the argv: {argv:?}"
+        );
     }
 
     #[test]

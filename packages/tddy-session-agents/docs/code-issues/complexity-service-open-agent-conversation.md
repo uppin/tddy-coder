@@ -17,6 +17,7 @@
 
 | 2026-09-27 | 95 | 6 | — | — | **unchanged.** `service.rs` was edited in the same change (stop-reason mapping, +7 lines) but not this body. Re-measured by hand, not by `/analyze-clean-code`, so the branch and early-exit columns are not restated |
 | 2026-10-24 | 102 → 106 raw | — | — | — | **worse** by 4 in PR #723 (`#coagents` 4/8): both local branches now build through `local_conversation`, and the in-host branch binds `open_local`'s session before handing it over. Hand-counted raw lines at #722's tip and after |
+| 2026-10-25 | 107 → 115 raw | 5 | — | — | **worse** by 8 in PR #776 (`#coagents` 9/9): the failed-open guard (`OpeningConversation`) is armed before the open and disarmed after the insert. Hand-counted raw lines by brace matching at #727's tip and after. Not split: the developer deferred every code issue of the `#coagents` stack past its sweep node too (2026-10-25), so this is left for after the stack lands |
 ## What the tool found
 
 The body is **95 lines**, 1.6x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored.

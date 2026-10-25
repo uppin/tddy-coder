@@ -37,15 +37,15 @@ use tddy_worktree_service::stream::MpscResultStream;
 
 use tddy_discovery::subagent::{
     AnsweredBy, MessageDescriptor, MessageId, MessageRole, PermissionAnswer, PermissionAnswering,
-    PromptOutcome, SubagentSession, TurnRequest,
+    PromptOutcome, SubagentSession, TurnCancelling, TurnRequest,
 };
 use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
-use crate::agent_conversations::{AgentConversation, AnswerRoute, PromptRouting};
+use crate::agent_conversations::{AgentConversation, AnswerRoute, PromptRouting, TurnCancelRoute};
 use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder, SessionClaim};
 use crate::conversation_status::{self, ConversationStatus};
 use crate::conversation_transcript::{answered_frame, now_unix_ms};
-use crate::ports::SessionAgentPorts;
+use crate::ports::{AgentSessions, SessionAgentPorts};
 use crate::session_agent_status::ManagedAgentState;
 
 /// The `session_agents.SessionAgentService` implementation.
@@ -83,6 +83,7 @@ impl SessionAgentServiceImpl {
             session_id,
             conversation_id,
             Arc::clone(&self.ports.conversation_frames),
+            Arc::clone(&self.ports.activity),
             session.as_ref(),
         )
         .map_err(|e| {
@@ -93,6 +94,7 @@ impl SessionAgentServiceImpl {
         // Read before the session is boxed behind its lock: a turn waiting on a permission request holds
         // that lock, and the answer to the request still has to reach it.
         let answering = session.permission_answerer();
+        let cancelling = session.turn_canceller();
         Ok(AgentConversation::Local {
             session_id: session_id.to_string(),
             agent_id: agent_id.to_string(),
@@ -100,6 +102,7 @@ impl SessionAgentServiceImpl {
             closed: Arc::new(tokio::sync::Notify::new()),
             recorder: Arc::new(recorder),
             answering,
+            cancelling,
         })
     }
 
@@ -240,7 +243,9 @@ impl SessionAgentServiceImpl {
                 Some(answer),
             ) => Some(claim_for_answer(session, &**answering, answer, || {
                 conversation_status::record(
+                    &self.ports.activity,
                     &session_dir,
+                    turn.session_id(),
                     turn.conversation_id(),
                     ConversationStatus::Running,
                 )
@@ -887,6 +892,11 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         tddy_discovery::subagent::refuse_blank_system_prompt(system_prompt)
             .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
+        // What an open that fails leaves behind — a headless launch's approval route and files — is
+        // removed, unless the conversation reaches the table. Not armed for an id already open: a
+        // failed second open must not strip the open conversation's route.
+        let opening = (!self.ports.conversations.contains(&conversation_id).await)
+            .then(|| OpeningConversation::of(&self.ports.sessions, &conversation_id));
         // This host *owns* the agent: the session is another daemon's, its roster is over there,
         // and the def is here. Resolving it against a roster this host does not hold would report
         // a session that legitimately is not here as the reason an agent it does own cannot answer.
@@ -961,6 +971,9 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             .conversations
             .insert(conversation_id.clone(), conversation)
             .await;
+        if let Some(opening) = opening {
+            opening.opened();
+        }
         // Open, not running: the conversation exists and has been asked nothing. This is also the
         // first moment an entry stops reporting UNSPECIFIED, which is what a reader needs to tell
         // "attached and reachable" from "attached, and this daemon has never heard from it".
@@ -1013,8 +1026,16 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             .await
     }
 
-    /// Cancel an open conversation. An id nothing holds is `NOT_FOUND`, never a silent success — a
-    /// caller told a turn was cancelled when it is still running would go on to read a stale answer.
+    /// Cancel an open conversation — or, when the request asks to keep it, only its running turn.
+    ///
+    /// An id nothing holds is `NOT_FOUND`, never a silent success — a caller told a turn was
+    /// cancelled when it is still running would go on to read a stale answer. A conversation open on
+    /// another session is `NOT_FOUND` too, worded the same: the caller is authenticated for
+    /// `session_id` only.
+    ///
+    /// `keep_conversation` keeps the conversation open when its agent can cancel a turn on its own
+    /// (a coding agent's `session/cancel`); any other conversation is closed, and the answer says
+    /// which happened.
     async fn cancel_agent_conversation(
         &self,
         request: Request<CancelAgentConversationRequest>,
@@ -1025,7 +1046,40 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         // the user the token authenticates. Read before the conversation is removed, so a caller that cannot be named
         // removes nothing.
         let cancelled_by = self.ports.sessions.answerer(&req.session_token)?.name();
-        let removed = self.ports.conversations.remove(&req.conversation_id).await;
+        if req.keep_conversation {
+            match self
+                .ports
+                .conversations
+                .turn_cancel_route(&req.session_id, &req.conversation_id)
+                .await
+            {
+                None => return Err(conversation_not_open(&req)),
+                Some(TurnCancelRoute::Local {
+                    cancelling,
+                    recorder,
+                    answering,
+                }) => {
+                    return cancel_local_turn(
+                        &req,
+                        &cancelled_by,
+                        cancelling.as_ref(),
+                        &recorder,
+                        answering.as_deref(),
+                    )
+                    .await;
+                }
+                Some(TurnCancelRoute::Remote(daemon_instance_id)) => {
+                    return self.cancel_remote_turn(&req, &daemon_instance_id).await;
+                }
+                // A turn that cannot be cancelled on its own ends with its conversation.
+                Some(TurnCancelRoute::Close) => {}
+            }
+        }
+        let removed = self
+            .ports
+            .conversations
+            .remove_on(&req.session_id, &req.conversation_id)
+            .await;
         if let Some(conversation) = removed.as_ref() {
             // Back to "asked nothing", whichever daemon ran the loop: the conversation is gone, so
             // an agent left reporting a turn in flight would be one nothing can ever finish.
@@ -1038,10 +1092,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             );
         }
         match removed {
-            None => Err(Status::not_found(format!(
-                "conversation '{}' is not open on session '{}'",
-                req.conversation_id, req.session_id
-            ))),
+            None => Err(conversation_not_open(&req)),
             Some(AgentConversation::Local {
                 closed,
                 recorder,
@@ -1064,7 +1115,11 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                     .sessions
                     .conversation_closed(&req.conversation_id);
                 recorded
-                    .map(|()| Response::new(CancelAgentConversationResponse {}))
+                    .map(|()| {
+                        Response::new(CancelAgentConversationResponse {
+                            conversation_kept: false,
+                        })
+                    })
                     .map_err(|e| {
                         Status::internal(format!(
                             "conversation '{}' was cancelled, but {e}",
@@ -1083,9 +1138,12 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                         &req.session_id,
                         &daemon_instance_id,
                         &req.conversation_id,
+                        false,
                     )
                     .await?;
-                Ok(Response::new(CancelAgentConversationResponse {}))
+                Ok(Response::new(CancelAgentConversationResponse {
+                    conversation_kept: false,
+                }))
             }
         }
     }
@@ -1293,7 +1351,9 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             .map_err(Status::failed_precondition)?;
         // The turn holding the request is no longer waiting on the user: its status row says so.
         conversation_status::record(
+            &self.ports.activity,
             &session_dir,
+            &req.session_id,
             &req.conversation_id,
             ConversationStatus::Running,
         );
@@ -1354,6 +1414,36 @@ fn answer_of(req: &AnswerAgentPermissionRequest) -> Result<PermissionAnswer, Sta
 }
 
 impl SessionAgentServiceImpl {
+    /// Forward a cancel of only the running turn to the daemon whose loop runs the conversation. Its
+    /// routing record here is kept exactly when the owner kept the conversation.
+    async fn cancel_remote_turn(
+        &self,
+        req: &CancelAgentConversationRequest,
+        daemon_instance_id: &str,
+    ) -> Result<Response<CancelAgentConversationResponse>, Status> {
+        // The owner authenticates the same token and records the actor from it, so none is sent.
+        let kept = self
+            .ports
+            .peers
+            .cancel(
+                &req.session_token,
+                &req.session_id,
+                daemon_instance_id,
+                &req.conversation_id,
+                true,
+            )
+            .await?;
+        if !kept {
+            self.ports
+                .conversations
+                .remove_on(&req.session_id, &req.conversation_id)
+                .await;
+        }
+        Ok(Response::new(CancelAgentConversationResponse {
+            conversation_kept: kept,
+        }))
+    }
+
     /// Close every open conversation with `agent_id` — what a detach does.
     ///
     /// A conversation whose loop runs on another daemon is cancelled *there* as well as forgotten
@@ -1387,6 +1477,7 @@ impl SessionAgentServiceImpl {
                     session_id,
                     &daemon_instance_id,
                     &conversation_id,
+                    false,
                 )
                 .await
                 .map_err(|e| e.message().to_string());
@@ -1399,6 +1490,83 @@ impl SessionAgentServiceImpl {
             }
         }
     }
+}
+
+/// A conversation this host is opening. Dropped before [`Self::opened`] — the open failed, or its
+/// caller went away mid-open — it closes the conversation's id with the host, which removes what a
+/// headless launch planned for it: its approval route and its files.
+struct OpeningConversation {
+    sessions: Arc<dyn AgentSessions>,
+    conversation_id: String,
+    opened: bool,
+}
+
+impl OpeningConversation {
+    fn of(sessions: &Arc<dyn AgentSessions>, conversation_id: &str) -> Self {
+        Self {
+            sessions: Arc::clone(sessions),
+            conversation_id: conversation_id.to_string(),
+            opened: false,
+        }
+    }
+
+    /// The conversation is in the table: what was planned for it is its own now, and its close removes it.
+    fn opened(mut self) {
+        self.opened = true;
+    }
+}
+
+impl Drop for OpeningConversation {
+    fn drop(&mut self) {
+        if !self.opened {
+            self.sessions.conversation_closed(&self.conversation_id);
+        }
+    }
+}
+
+/// The refusal for a cancel naming a conversation that is not open on the caller's session — unknown
+/// here, closed, or another session's: the three read alike, so an id says nothing about another
+/// session's conversations.
+fn conversation_not_open(req: &CancelAgentConversationRequest) -> Status {
+    Status::not_found(format!(
+        "conversation '{}' is not open on session '{}'",
+        req.conversation_id, req.session_id
+    ))
+}
+
+/// Cancel only the running turn of a conversation whose loop runs here, keeping it open. The request
+/// the turn holds is recorded as answered by whoever cancelled, as a close records it; then the turn
+/// is cancelled, which answers that request `Cancelled` to the agent and waits for the turn to end.
+async fn cancel_local_turn(
+    req: &CancelAgentConversationRequest,
+    cancelled_by: &str,
+    cancelling: &dyn TurnCancelling,
+    recorder: &ConversationRecorder,
+    answering: Option<&dyn PermissionAnswering>,
+) -> Result<Response<CancelAgentConversationResponse>, Status> {
+    let recorded = match answering {
+        Some(answering) => record_cancelled_request(recorder, answering, cancelled_by).await,
+        None => Ok(()),
+    };
+    // Cancelled even when its request could not be recorded: the caller asked for the turn to stop.
+    cancelling.cancel_turn().await.map_err(|e| {
+        Status::internal(format!(
+            "conversation '{}': its turn could not be cancelled: {e}",
+            req.conversation_id
+        ))
+    })?;
+    recorded
+        .map(|()| {
+            Response::new(CancelAgentConversationResponse {
+                conversation_kept: true,
+            })
+        })
+        .map_err(|e| {
+            Status::internal(format!(
+                "conversation '{}': its turn was cancelled, but {e}",
+                req.conversation_id
+            ))
+        })
 }
 
 /// Record the permission request a cancelled conversation still holds as answered by `cancelled_by`, the way a
