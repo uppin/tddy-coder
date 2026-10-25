@@ -6,14 +6,11 @@
 use tddy_discovery::subagent::{PermissionAnswer, PermissionRequestView, TurnRequest};
 
 /// Why a permission answer the main agent sent is refused, when the answer was delivered while a turn
-/// holds the conversation: the answer reached its request, and the turn carries on under the call that
-/// deferred the request, which collects its outcome. Not a failure of the answer, so it is said as one.
+/// holds the conversation: the answer reached its request, and the turn holding it carries on, with its
+/// outcome going to the call that deferred the request. Not a failure of the answer, so it is said as one.
+/// The wording is the shared one, so the daemon and the coding agent say the same thing.
 pub(crate) fn answer_delivered_while_held(request_id: &str) -> String {
-    format!(
-        "permission request '{request_id}' was answered and the answer was delivered to the coding agent; \
-         the turn that deferred it carries on and returns its outcome to the call that deferred it, \
-         which collects it with subagent_await"
-    )
+    tddy_discovery::subagent::answer_delivered_while_held(request_id)
 }
 
 /// The request as the final frame carries it: JSON, or empty when the turn did not pause on one.

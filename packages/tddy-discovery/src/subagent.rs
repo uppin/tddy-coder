@@ -39,9 +39,9 @@ use transcript::Transcript;
 
 pub use grep_context::{ContextLine, GrepContext, GREP_CONTEXT_LINE_CEILING};
 pub use permission::{
-    answered_output, permission_title, permission_tool_call_id, request_input_json, AnsweredBy,
-    PermissionAnswer, PermissionAnswering, PermissionChoice, PermissionRequestView,
-    PermissionToolCall, MAIN_AGENT_NAME,
+    answer_delivered_while_held, answered_output, permission_title, permission_tool_call_id,
+    request_input_json, AnsweredBy, PermissionAnswer, PermissionAnswering, PermissionChoice,
+    PermissionRequestView, PermissionToolCall, MAIN_AGENT_NAME,
 };
 pub use repeated_calls::{RepeatedCall, RepeatedCalls, IDENTICAL_CALL_LIMIT};
 pub use replacement::{validate_replacement, Replacement, REPLACEMENT_RESULT_LIMIT};

@@ -418,13 +418,10 @@ fn refused_while_pending(request_id: &str) -> SubagentError {
 }
 
 /// Why an answer that was delivered is not continued by this call: the turn holding the request
-/// is still running, and it carries on with the answer and returns its outcome to the call that
-/// deferred the request, which collects it with `subagent_await`.
+/// is still running, and it carries on with the answer. The wording is the shared one.
 fn answer_delivered_while_held(request_id: &str) -> SubagentError {
-    SubagentError::from(format!(
-        "permission request '{request_id}' was answered and the answer was delivered to the coding agent; \
-         the turn that deferred it carries on and returns its outcome to the call that deferred it, \
-         which collects it with subagent_await"
+    SubagentError::from(tddy_discovery::subagent::answer_delivered_while_held(
+        request_id,
     ))
 }
 

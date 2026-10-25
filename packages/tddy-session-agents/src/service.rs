@@ -1294,9 +1294,9 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
 /// A turn already holding the session may be the one waiting on this very request: a request handed to
 /// the user keeps its turn open until it is answered. Waiting for the session would queue the answer
 /// behind the turn it has to release, so the answer is delivered through the conversation's answering
-/// handle instead, and the call is refused as delivered. The turn carries on and returns its outcome to
-/// the call that deferred the request. A refusal of the answer itself (no such pending request, or one
-/// already answered) is returned as it is.
+/// handle instead, and the call is refused as delivered. The turn holding the request carries on, and its
+/// outcome goes to the call that deferred the request. A refusal of the answer itself (no such pending
+/// request, or one already answered) is returned as it is.
 ///
 /// Where nothing holds the session the claim is taken, and the answer runs as any turn's does.
 fn claim_for_answer(

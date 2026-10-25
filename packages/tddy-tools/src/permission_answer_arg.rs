@@ -35,7 +35,8 @@ pub fn permission_property() -> serde_json::Value {
                         the rest of that turn. When you handed the request to the user \
                         (`deferPermissionToUser`) and they have not answered yet, the answer is \
                         delivered at once and this call is refused, saying it was delivered: the turn \
-                        carries on under the call that deferred it, which returns its outcome. A \
+                        holding the request carries on, and its outcome goes to the call that \
+                        deferred the request. A \
                         request already answered is refused, naming who answered."
     })
 }

@@ -79,6 +79,16 @@ pub fn permission_title(request: &PermissionRequestView) -> String {
     format!("Permission: {}", request.tool_call.title)
 }
 
+/// The refusal a main-agent answer receives while the turn holding its request is still running: the answer reached
+/// the request, and the turn carries on, with its outcome going to the call that deferred the request.
+pub fn answer_delivered_while_held(request_id: &str) -> String {
+    format!(
+        "permission request '{request_id}' was answered and the answer was delivered to the coding agent; \
+         the turn holding it carries on, and its outcome goes to the call that deferred the request, \
+         which collects it with subagent_await"
+    )
+}
+
 /// The raw output of an answered request's record, naming who answered it: `{answeredBy, optionId}` for a chosen
 /// option, `{answeredBy, cancelled: true}` for a cancellation. The one shape every answered record carries, whether
 /// the answer was given or the request was cancelled.
