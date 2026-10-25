@@ -991,6 +991,15 @@ mod unbundle_exec_tool_entry_tests {
             > {
                 Err(tddy_rpc::Status::unimplemented("stub"))
             }
+            async fn request_approval(
+                &self,
+                _request: tddy_rpc::Request<tddy_service::proto::exec_tools::ApprovalRequest>,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::exec_tools::ApprovalResponse>,
+                tddy_rpc::Status,
+            > {
+                Err(tddy_rpc::Status::unimplemented("stub"))
+            }
         }
         assert_eq!(
             super::build_exec_tool_entry(EmptyExec).name,
