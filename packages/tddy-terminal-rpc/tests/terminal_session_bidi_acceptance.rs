@@ -10,11 +10,41 @@
 mod support;
 
 use bytes::Bytes;
-use support::{an_input, typing, TerminalServiceHost, SCREEN_ID, SESSION_ID};
-use tddy_terminal_rpc::proto::terminal_session::{SessionTerminalOutput, StreamReplayMode};
+use support::{
+    a_snapshot_open, an_input, typing, StubTerminal, TerminalServiceHost, SCREEN_ID, SESSION_ID,
+};
+use tddy_terminal_rpc::proto::terminal_session::{
+    SessionTerminalInput, SessionTerminalOutput, StreamReplayMode,
+};
 
 /// A second browser tab of the same user, which can steal terminal control from the first.
 const OTHER_SCREEN_ID: &str = "screen-ada-phone";
+
+/// The grid the driving screen set on the PTY.
+const ROWS: u16 = 24;
+const COLS: u16 = 80;
+
+/// A host whose main terminal's screen model knows the PTY's grid — the precondition for a
+/// snapshot — with `output` already printed.
+fn a_host_with_a_sized_terminal(output: &[u8]) -> TerminalServiceHost {
+    let terminal = std::sync::Arc::new(StubTerminal::sized(ROWS, COLS));
+    terminal.write(output);
+    TerminalServiceHost::sharing_terminal(terminal)
+}
+
+/// A snapshot open whose opening message already carries keystrokes.
+fn typing_into_a_snapshot_open(data: &[u8], input_offset: u64) -> SessionTerminalInput {
+    SessionTerminalInput {
+        mode: StreamReplayMode::Snapshot as i32,
+        ..typing(data, input_offset)
+    }
+}
+
+/// The refused chunk's cumulative offset and the reason, asserting the frame carries no output.
+fn refusal_of(frame: &SessionTerminalOutput) -> (u64, &str) {
+    assert!(frame.data.is_empty(), "a refusal frame carries no output");
+    (frame.refused_input_offset, frame.input_refusal.as_str())
+}
 
 #[tokio::test]
 async fn replays_the_current_last_frame_before_any_live_byte() {
@@ -150,7 +180,7 @@ async fn acknowledges_the_applied_input_offset_on_the_output_half() {
 async fn resumes_from_the_clients_offset_instead_of_replaying_the_tail() {
     // Given a session whose terminal has produced ten bytes, six of which the client already holds
     let host = TerminalServiceHost::serving_main_terminal(b"0123456789");
-    let resuming = tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
+    let resuming = SessionTerminalInput {
         mode: StreamReplayMode::FromOffset as i32,
         from_offset: 6,
         ..an_input()
@@ -195,23 +225,92 @@ async fn ends_the_output_half_when_the_child_exits() {
 }
 
 #[tokio::test]
-async fn refuses_to_open_for_a_screen_that_does_not_hold_the_control_lease() {
+async fn a_screen_without_the_lease_watches_the_terminal_but_cannot_type_into_it() {
     // Given a session whose terminal control is held by another screen
-    let host = TerminalServiceHost::serving_main_terminal(b"ready");
+    let host = a_host_with_a_sized_terminal(b"$ top\r\n");
     host.control_held_by(OTHER_SCREEN_ID).await;
 
-    // When this screen opens the stream presenting no control token
-    let status = host
-        .refusal_on_bidi(
-            tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
-                control_token: String::new(),
-                ..an_input()
-            },
-        )
+    // When this screen opens the stream asking for a snapshot at its own grid, with keystrokes
+    // already in the opening message and no control token
+    let mut watcher = host
+        .open_bidi(SessionTerminalInput {
+            initial_rows: 40,
+            initial_cols: 120,
+            ..typing_into_a_snapshot_open(b"q", 1)
+        })
         .await;
 
-    // Then it is told the terminal is driven by someone else — not that the terminal is missing
-    assert_eq!(status.code(), tddy_rpc::Code::FailedPrecondition);
+    // Then it is shown the screen, at the grid the driving screen set
+    let snapshot = watcher.frames(1).await.remove(0);
+    assert_eq!(
+        (
+            snapshot.snapshot,
+            snapshot.snapshot_rows,
+            snapshot.snapshot_cols
+        ),
+        (true, ROWS as u32, COLS as u32)
+    );
+    assert_eq!(host.terminal().resizes.lock().unwrap().clone(), Vec::new());
+
+    // And its keystrokes are refused on the output half — told which chunk and why — and never typed
+    let refusal = watcher.frames(1).await.remove(0);
+    assert_eq!(
+        refusal_of(&refusal),
+        (1, "terminal controlled by another screen")
+    );
+    watcher.send(typing(b"k", 2)).await;
+    let refusal = watcher.frames(1).await.remove(0);
+    assert_eq!(
+        refusal_of(&refusal),
+        (2, "terminal controlled by another screen")
+    );
+    assert_eq!(host.typed_into_pty(), Vec::new());
+
+    // And the stream stays open, carrying what the terminal goes on to print
+    host.terminal().write(b"load average: 0.42\r\n");
+    let live = watcher.frames(1).await.remove(0);
+    assert_eq!(live.data, b"load average: 0.42\r\n".to_vec());
+}
+
+#[tokio::test]
+async fn a_screen_whose_lease_was_taken_reopens_after_a_blip_and_keeps_watching() {
+    // Given a screen that drove the terminal until another screen took control
+    let host = a_host_with_a_sized_terminal(b"$ ");
+    let stale_token = host.control_held_by(SCREEN_ID).await;
+    host.control_held_by(OTHER_SCREEN_ID).await;
+
+    // When its transport blips and it re-opens presenting the token it held
+    let mut reopened = host
+        .open_bidi(SessionTerminalInput {
+            control_token: stale_token.clone(),
+            ..a_snapshot_open()
+        })
+        .await;
+
+    // Then the re-open is served the current screen rather than refused
+    let snapshot = reopened.frames(1).await.remove(0);
+    assert!(snapshot.snapshot, "the re-open is shown the screen");
+
+    // And what it types under the stale token is refused, not typed
+    reopened
+        .send(SessionTerminalInput {
+            control_token: stale_token,
+            ..typing(b"exit\r", 5)
+        })
+        .await;
+    let refusal = reopened.frames(1).await.remove(0);
+    assert_eq!(
+        refusal_of(&refusal),
+        (5, "terminal controlled by another screen")
+    );
+    assert_eq!(host.typed_into_pty(), Vec::new());
+
+    // And output keeps flowing to it
+    host.terminal().write(b"hello\r\n");
+    assert_eq!(
+        reopened.frames(1).await.remove(0).data,
+        b"hello\r\n".to_vec()
+    );
 }
 
 #[tokio::test]
@@ -220,12 +319,10 @@ async fn refuses_keystrokes_under_a_stale_token_and_resumes_once_control_is_recl
     let host = TerminalServiceHost::serving_main_terminal(b"ready");
     let control_token = host.control_held_by(SCREEN_ID).await;
     let mut session = host
-        .open_bidi(
-            tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
-                control_token: control_token.clone(),
-                ..an_input()
-            },
-        )
+        .open_bidi(SessionTerminalInput {
+            control_token: control_token.clone(),
+            ..an_input()
+        })
         .await;
     session.frames(1).await;
 
@@ -249,12 +346,10 @@ async fn refuses_keystrokes_under_a_stale_token_and_resumes_once_control_is_recl
     // the terminal acks it — no reconnect
     let reclaimed = host.control_held_by(SCREEN_ID).await;
     session
-        .send(
-            tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
-                control_token: reclaimed,
-                ..typing(b"ls\r", 12)
-            },
-        )
+        .send(SessionTerminalInput {
+            control_token: reclaimed,
+            ..typing(b"ls\r", 12)
+        })
         .await;
     host.terminal().write(b"$ ");
     session.frames(1).await;

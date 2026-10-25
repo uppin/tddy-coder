@@ -1,7 +1,7 @@
 # Changeset: Terminal snapshot on (re)connect over the bidi terminal stream
 
 **Created:** 2026-10-25
-**Status:** 🚧 In Progress — 🔴 one open gap from /validate-changes (watcher open), needs a developer decision
+**Status:** ✅ Complete
 **Type:** Bug Fix
 **Complexity**: 5 — six packages, a proto contract change, ordering/concurrency semantics (sequence point), new dependency (`avt`), web transport migration to bidi
 **Stack:** `#term-snapshot 1/4` — branch `feature/term-snapshot/host-snapshot`, base `master`
@@ -307,11 +307,11 @@ point, no server screen model, and the web terminal on server-stream + unary inp
 - [x] Refactor code quality issues
 - [x] Final validation (/validate-changes)
 - [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
-- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+- [x] USER REVIEW — scope developed, every gap approved: ready to wrap
 
 ## Refactoring Needed
 ### From /validate-changes
-- 🔴 **OPEN — a screen without the lease can no longer open the terminal.** `stream_session_terminal_io`
+- ✅ **FIXED (developer decision 2026-10-25: "the claim is only to bar writes; reading is fine") — a screen without the lease could no longer open the terminal.** `stream_session_terminal_io`
   (`tddy-terminal-rpc/src/service.rs`) gates the *open* through `controlled_terminal` →
   `require_control`, and `verify_control` accepts an empty token only when nobody holds the lease.
   Leases are never released on disconnect. Before this PR the web watched on `StreamTerminalOutput`,

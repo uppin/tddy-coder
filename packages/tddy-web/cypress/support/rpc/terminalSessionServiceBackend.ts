@@ -24,7 +24,11 @@ import {
   TerminalSessionInfoSchema,
   TerminalSessionService,
   type SessionTerminalInput,
+  type SessionTerminalOutput,
 } from "../../../src/gen/terminal_session_pb";
+
+/** The token every `ClaimTerminalControl` grants — the lease input must present once claimed. */
+const GRANTED_CONTROL_TOKEN = "ctrl-1";
 
 export interface TerminalSessionServiceScenario {
   /** Initial `ListTerminalSessions` result — the bash terminals already open on the session.
@@ -105,10 +109,23 @@ export function aTerminalSessionServiceFake(
   ).map((t, i) => ({ terminalId: t.terminalId, kind: t.kind ?? "bash", pid: t.pid ?? 8000 + i }));
   const nextTerminalId = scenario.newTerminalId ?? ((index: number) => `bash-${index + 1}`);
 
+  // The lease each session's terminals are held under, once claimed. As on the daemon, a session
+  // nobody has claimed accepts input under any token (an empty one included), and a claimed one
+  // accepts it only under the holder's token.
+  const leaseHolders = new Map<string, string>();
+  const mayWrite = (sessionId: string, controlToken: string): boolean => {
+    const holder = leaseHolders.get(sessionId);
+    return holder === undefined || holder === controlToken;
+  };
+
   const handlers: Partial<ServiceImpl<typeof TerminalSessionService>> = {
     claimTerminalControl: async (req) => {
       claimedControlSessionIds.push(req.sessionId);
-      return create(ClaimTerminalControlResponseSchema, { granted: true, controlToken: "ctrl-1" });
+      leaseHolders.set(req.sessionId, GRANTED_CONTROL_TOKEN);
+      return create(ClaimTerminalControlResponseSchema, {
+        granted: true,
+        controlToken: GRANTED_CONTROL_TOKEN,
+      });
     },
     // The daemon's on-subscribe snapshot of the lease, then the stream completes. Its zero values
     // say "no screen is named as the holder" — the claim above is what grants control; this feed
@@ -172,7 +189,9 @@ export function aTerminalSessionServiceFake(
     // The bidi terminal stream the web opens for every host terminal: the same identifying frame as
     // the split output stream above, and every later message's bytes recorded as sent input (one
     // `sentTerminalInput` entry per message that carries any), so a spec asserting on typed bytes
-    // reads one recorder whichever wire carried them.
+    // reads one recorder whichever wire carried them. Watching needs no lease, but writing does: a
+    // chunk under a token that does not hold the claimed lease is not recorded and is answered
+    // with a refusal frame, as the daemon answers it.
     streamSessionTerminalIO: async function* (requests: AsyncIterable<SessionTerminalInput>) {
       const openIndex = streamedTerminals.length;
       const reader = requests[Symbol.asyncIterator]();
@@ -180,17 +199,35 @@ export function aTerminalSessionServiceFake(
       if (first.done) return;
       const { sessionId, terminalId: requestedTerminalId } = first.value;
       streamedTerminals.push({ sessionId, terminalId: requestedTerminalId });
+      const terminalId = requestedTerminalId || "main";
+      const refusals: SessionTerminalOutput[] = [];
+      let wakeOutput: (() => void) | null = null;
+      const accept = (message: SessionTerminalInput): void => {
+        if (message.data.length === 0) return;
+        if (!mayWrite(message.sessionId, message.controlToken)) {
+          refusals.push(
+            create(SessionTerminalOutputSchema, {
+              refusedInputOffset: message.inputOffset,
+              inputRefusal: "terminal controlled by another screen",
+              sessionId,
+              terminalId,
+            }),
+          );
+          wakeOutput?.();
+          return;
+        }
+        sentTerminalInput.push({
+          sessionId: message.sessionId,
+          terminalId: message.terminalId,
+          data: message.data,
+        });
+      };
+      accept(first.value);
       void (async () => {
         for (let next = await reader.next(); !next.done; next = await reader.next()) {
-          if (next.value.data.length === 0) continue;
-          sentTerminalInput.push({
-            sessionId: next.value.sessionId,
-            terminalId: next.value.terminalId,
-            data: next.value.data,
-          });
+          accept(next.value);
         }
       })();
-      const terminalId = requestedTerminalId || "main";
       yield create(SessionTerminalOutputSchema, {
         data: new TextEncoder().encode(`term:${terminalId}\r\n`),
         endOffset: scenario.terminalReplayEndOffset ?? 0n,
@@ -199,7 +236,17 @@ export function aTerminalSessionServiceFake(
         terminalId,
       });
       if (openIndex < (scenario.droppedTerminalStreams ?? 0)) return;
-      await new Promise<never>(() => undefined);
+      for (;;) {
+        const refusal = refusals.shift();
+        if (refusal !== undefined) {
+          yield refusal;
+          continue;
+        }
+        await new Promise<void>((resolve) => {
+          wakeOutput = resolve;
+        });
+        wakeOutput = null;
+      }
     },
     // Lazy scroll-up history — yield one chunk per call from `scenario.terminalHistory` (popped
     // in order), so a test can assert the loader chains anchors across successive calls.

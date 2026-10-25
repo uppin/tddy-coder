@@ -502,16 +502,12 @@ fn replay_mode_from_i32(mode: i32) -> StreamReplayMode {
 ///
 /// Runs the shared [`open_replay_ack_live`] sequence for the OUTPUT side, then forwards the first
 /// message's `data` and every subsequent input chunk to the PTY stdin via
-/// [`TerminalSession::send_input`] (so the bidi client also receives input-offset ACKs), verifying
-/// the control token on each chunk via `verify_control` and ending the forwarder when control is
-/// lost (matches the daemon's per-chunk control-token check).
+/// [`TerminalSession::send_input`] (so the bidi client also receives input-offset ACKs) — see
+/// [`spawn_input_forwarder`] for how the control lease gates each chunk.
 ///
-/// A session that reports itself not [`TerminalSession::requires_control`] is not re-checked at
-/// all: its input comes from the process that owns the PTY rather than from a competing screen, so
-/// there is no token to verify and a lease taken by some screen must not end the forwarder.
-///
-/// The caller remains responsible for auth (session-token resolution + OS-user mapping) and the
-/// FIRST message's control-token check; this function only verifies subsequent chunks.
+/// Opening is watching, so it needs no lease. The caller remains responsible for auth
+/// (session-token resolution + OS-user mapping) and for zeroing the first message's grid when the
+/// opener may not drive the session.
 pub async fn serve_stream_session_terminal_io_with<S, F, Fut>(
     session: Arc<dyn TerminalSession>,
     session_id: String,
@@ -545,46 +541,64 @@ where
     )
     .await?;
 
-    // Forward the first message's data (if any) to stdin.
-    if !first.data.is_empty() {
-        session.send_input(Bytes::from(first.data), first.input_offset);
-    }
-
-    // Spawn a task to forward subsequent input chunks to stdin, verifying the control token on
-    // each chunk. Ends when the client stream ends, a stream error occurs, or control is lost.
-    let control_gated = session.requires_control();
-    let session_for_input = Arc::clone(&session);
-    // Weak: the forwarder must not keep the output half open once the child has exited.
-    let refusals = tx.downgrade();
-    tokio::spawn(async move {
-        use tokio_stream::StreamExt;
-        let mut in_stream = in_stream;
-        while let Some(item) = in_stream.next().await {
-            match item {
-                Ok(msg) => {
-                    if control_gated && !verify_control(&session_id, &msg.control_token).await {
-                        // The chunk is dropped, never typed, and the client is told so on the
-                        // output half. The forwarder stays alive: a screen that re-claims control
-                        // resumes typing on this very stream, each chunk judged on its own.
-                        let refusal = identity.refusal_frame(msg.input_offset, INPUT_REFUSED);
-                        let Some(output) = refusals.upgrade() else {
-                            break;
-                        };
-                        if output.send(Ok(refusal)).await.is_err() {
-                            break;
-                        }
-                        continue;
-                    }
-                    if !msg.data.is_empty() {
-                        session_for_input.send_input(Bytes::from(msg.data), msg.input_offset);
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    // The input half: the first message's data and every later chunk, each judged on its own.
+    spawn_input_forwarder(
+        session,
+        session_id,
+        identity,
+        first,
+        in_stream,
+        verify_control,
+        tx.downgrade(),
+    );
 
     Ok(rx)
+}
+
+/// Forward the bidi stream's input — the first message's data, then every later chunk — to the
+/// PTY's stdin, one chunk at a time, until the client stream ends or errors.
+///
+/// Writing is what the control lease guards; reading is not. On a session that
+/// [`TerminalSession::requires_control`], a chunk carrying data under a token that does not hold the
+/// lease never reaches stdin and is answered with a refusal frame on the output half. That includes
+/// a resize, which travels as an OSC in the data. The stream stays open either way, so a watcher
+/// keeps receiving output and a screen that re-claims control resumes typing on the same stream.
+///
+/// `output` is weak so the forwarder does not keep the output half open after the child exits.
+fn spawn_input_forwarder<S, F, Fut>(
+    session: Arc<dyn TerminalSession>,
+    session_id: String,
+    identity: FrameIdentity,
+    first: SessionTerminalInput,
+    in_stream: S,
+    verify_control: F,
+    output: mpsc::WeakSender<Result<SessionTerminalOutput, Status>>,
+) where
+    S: Stream<Item = Result<SessionTerminalInput, Status>> + Unpin + Send + 'static,
+    F: Fn(&str, &str) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = bool> + Send,
+{
+    let control_gated = session.requires_control();
+    tokio::spawn(async move {
+        use tokio_stream::StreamExt;
+        let mut chunks = tokio_stream::once(Ok(first)).chain(in_stream);
+        while let Some(Ok(msg)) = chunks.next().await {
+            if msg.data.is_empty() {
+                continue;
+            }
+            if control_gated && !verify_control(&session_id, &msg.control_token).await {
+                let refusal = identity.refusal_frame(msg.input_offset, INPUT_REFUSED);
+                let Some(output) = output.upgrade() else {
+                    break;
+                };
+                if output.send(Ok(refusal)).await.is_err() {
+                    break;
+                }
+                continue;
+            }
+            session.send_input(Bytes::from(msg.data), msg.input_offset);
+        }
+    });
 }
 
 /// Serve `GetTerminalHistory`: one FORWARD chunk of older output starting at `from_offset`, bounded
