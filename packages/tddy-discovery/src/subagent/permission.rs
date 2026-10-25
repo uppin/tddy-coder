@@ -70,6 +70,29 @@ pub fn permission_tool_call_id(request_id: &str) -> String {
     format!("permission:{request_id}")
 }
 
+/// The name the main agent answers, and cancels, under: the `answeredBy` a record names it by, and the
+/// `cancelled_by` a `subagent_cancel` sends.
+pub const MAIN_AGENT_NAME: &str = "main-agent";
+
+/// The title a request's transcript entry carries, naming the tool the request asks to run.
+pub fn permission_title(request: &PermissionRequestView) -> String {
+    format!("Permission: {}", request.tool_call.title)
+}
+
+/// The raw output of an answered request's record, naming who answered it: `{answeredBy, optionId}` for a chosen
+/// option, `{answeredBy, cancelled: true}` for a cancellation. The one shape every answered record carries, whether
+/// the answer was given or the request was cancelled.
+pub fn answered_output(answered_by: &str, answer: &PermissionAnswer) -> serde_json::Value {
+    match answer {
+        PermissionAnswer::Selected { option_id, .. } => {
+            serde_json::json!({ "answeredBy": answered_by, "optionId": option_id })
+        }
+        PermissionAnswer::Cancelled { .. } => {
+            serde_json::json!({ "answeredBy": answered_by, "cancelled": true })
+        }
+    }
+}
+
 /// The input a request's transcript entry carries: the request as the caller reads it, its `title` at the top
 /// level, and whether the main agent handed it to the user. A request the main agent answers itself is recorded
 /// with `deferred_to_user` false.
@@ -95,6 +118,16 @@ pub enum AnsweredBy {
     User(String),
 }
 
+impl AnsweredBy {
+    /// The name a record gives as `answeredBy`: `main-agent`, or the user's login.
+    pub fn name(&self) -> String {
+        match self {
+            Self::MainAgent => MAIN_AGENT_NAME.to_string(),
+            Self::User(login) => login.clone(),
+        }
+    }
+}
+
 impl std::fmt::Display for AnsweredBy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -116,4 +149,8 @@ pub trait PermissionAnswering: Send + Sync {
 
     /// Whether `request_id` was handed to the user, so that a user may answer it.
     fn deferred_to_user(&self, request_id: &str) -> bool;
+
+    /// The request a turn is waiting on, if any: the one a cancel of the conversation leaves unanswered, so its
+    /// record can name who cancelled it.
+    fn pending_request(&self) -> Option<PermissionRequestView>;
 }

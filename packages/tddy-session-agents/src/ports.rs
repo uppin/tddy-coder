@@ -244,7 +244,8 @@ pub trait AgentConversationPeers: Send + Sync {
         owner: &str,
     ) -> Result<UnboundedReceiver<Result<AgentConversationChunk, Status>>, Status>;
 
-    /// Cancel a conversation whose turn loop runs on `owner`.
+    /// Cancel a conversation whose turn loop runs on `owner`, naming no actor. A cancel the caller makes names
+    /// who made it: see [`Self::cancel_naming_actor`].
     async fn cancel(
         &self,
         session_token: &str,
@@ -252,6 +253,24 @@ pub trait AgentConversationPeers: Send + Sync {
         owner: &str,
         conversation_id: &str,
     ) -> Result<(), Status>;
+
+    /// Cancel a conversation whose turn loop runs on `owner`, naming `cancelled_by` as the actor that cancelled it.
+    ///
+    /// The owner records a permission request the conversation still holds as answered by that actor, so a port
+    /// that cannot carry the actor refuses the cancel rather than forwarding one the owner would record under no one.
+    async fn cancel_naming_actor(
+        &self,
+        session_token: &str,
+        session_id: &str,
+        owner: &str,
+        conversation_id: &str,
+        cancelled_by: &str,
+    ) -> Result<(), Status> {
+        let _ = (session_token, session_id, cancelled_by);
+        Err(Status::unimplemented(format!(
+            "this host cannot forward the cancel of conversation '{conversation_id}' to '{owner}' naming who cancelled it"
+        )))
+    }
 }
 
 /// Everything the nine handlers need from the host they run on.

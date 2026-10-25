@@ -5,7 +5,7 @@
 
 use tddy_agent_backend::{AcpToolStatus, AcpUpdate, AcpUpdateSink};
 use tddy_discovery::subagent::{
-    permission_tool_call_id, request_input_json, AnsweredBy, PermissionAnswer,
+    answered_output, permission_title, permission_tool_call_id, request_input_json,
     PermissionRequestView,
 };
 
@@ -15,14 +15,11 @@ use crate::parked_permissions::{Answered, ParkedPermissions};
 /// transcript entry does.
 const PERMISSION_KIND: &str = "other";
 
-/// The name the main agent's answers carry as `answeredBy`.
-const MAIN_AGENT_NAME: &str = "main-agent";
-
 /// The record of a request its turn holds for the user: pending, its input saying it was deferred to the user.
 pub(crate) fn deferred_request_record(request: &PermissionRequestView) -> AcpUpdate {
     AcpUpdate::ToolCallRecord {
         id: permission_tool_call_id(&request.request_id),
-        title: titled(request),
+        title: permission_title(request),
         kind: PERMISSION_KIND.to_string(),
         status: AcpToolStatus::Pending,
         raw_input: Some(request_input_json(request, true)),
@@ -33,25 +30,16 @@ pub(crate) fn deferred_request_record(request: &PermissionRequestView) -> AcpUpd
 /// The record of an answered request: completed, its raw output naming who answered it and with which option, or
 /// that it was cancelled. The request's input is repeated, so the record reads the same request the pending one did.
 pub(crate) fn answer_record(answered: &Answered) -> AcpUpdate {
-    let answered_by = answered_by_name(&answered.by);
-    let raw_output = match &answered.answer {
-        PermissionAnswer::Selected { option_id, .. } => {
-            serde_json::json!({ "answeredBy": answered_by, "optionId": option_id })
-        }
-        PermissionAnswer::Cancelled { .. } => {
-            serde_json::json!({ "answeredBy": answered_by, "cancelled": true })
-        }
-    };
     AcpUpdate::ToolCallRecord {
         id: permission_tool_call_id(answered.answer.request_id()),
-        title: titled(&answered.request),
+        title: permission_title(&answered.request),
         kind: PERMISSION_KIND.to_string(),
         status: AcpToolStatus::Completed,
         raw_input: Some(request_input_json(
             &answered.request,
             answered.deferred_to_user,
         )),
-        raw_output: Some(raw_output),
+        raw_output: Some(answered_output(&answered.by.name(), &answered.answer)),
     }
 }
 
@@ -64,16 +52,4 @@ pub(crate) fn record_answer(
     if let Some(answered) = permissions.answered(request_id) {
         sink(answer_record(&answered));
     }
-}
-
-/// Who answered, as the answer's record names them: a user by login, the main agent as `main-agent`.
-fn answered_by_name(by: &AnsweredBy) -> String {
-    match by {
-        AnsweredBy::MainAgent => MAIN_AGENT_NAME.to_string(),
-        AnsweredBy::User(login) => login.clone(),
-    }
-}
-
-fn titled(request: &PermissionRequestView) -> String {
-    format!("Permission: {}", request.tool_call.title)
 }

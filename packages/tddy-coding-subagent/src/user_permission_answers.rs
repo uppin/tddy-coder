@@ -8,7 +8,7 @@
 
 pub use tddy_discovery::subagent::{AnsweredBy, PermissionAnswering};
 
-use tddy_discovery::subagent::PermissionAnswer;
+use tddy_discovery::subagent::{PermissionAnswer, PermissionRequestView};
 
 use crate::parked_permissions::ParkedPermissions;
 
@@ -23,5 +23,9 @@ impl PermissionAnswering for ParkedPermissions {
 
     fn deferred_to_user(&self, request_id: &str) -> bool {
         self.is_deferred_to_user(request_id)
+    }
+
+    fn pending_request(&self) -> Option<PermissionRequestView> {
+        self.pending()
     }
 }

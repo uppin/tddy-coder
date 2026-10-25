@@ -44,6 +44,7 @@ use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 use crate::agent_conversations::{AgentConversation, PromptRouting};
 use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder, SessionClaim};
 use crate::conversation_status::{self, ConversationStatus};
+use crate::conversation_transcript::{answered_frame, now_unix_ms};
 use crate::ports::SessionAgentPorts;
 use crate::session_agent_status::ManagedAgentState;
 
@@ -1037,26 +1038,47 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                 "conversation '{}' is not open on session '{}'",
                 req.conversation_id, req.session_id
             ))),
-            Some(AgentConversation::Local { closed, .. }) => {
+            Some(AgentConversation::Local {
+                closed,
+                recorder,
+                answering,
+                ..
+            }) => {
+                // The request the turn holds is recorded as answered by whoever cancelled the conversation, before
+                // the turn is interrupted: nothing else records a request whose turn the cancel ends.
+                let recorded = match answering.as_deref() {
+                    Some(answering) => {
+                        record_cancelled_request(&recorder, answering, &req.cancelled_by).await
+                    }
+                    None => Ok(()),
+                };
                 // A turn already in flight is interrupted rather than left to finish: the caller has
                 // been told the conversation is cancelled, and an answer arriving afterwards would
-                // be one it has no reason to expect.
+                // be one it has no reason to expect. It is interrupted even when its request could not be recorded.
                 closed.notify_one();
                 self.ports
                     .sessions
                     .conversation_closed(&req.conversation_id);
-                Ok(Response::new(CancelAgentConversationResponse {}))
+                recorded
+                    .map(|()| Response::new(CancelAgentConversationResponse {}))
+                    .map_err(|e| {
+                        Status::internal(format!(
+                            "conversation '{}' was cancelled, but {e}",
+                            req.conversation_id
+                        ))
+                    })
             }
             Some(AgentConversation::Remote {
                 daemon_instance_id, ..
             }) => {
                 self.ports
                     .peers
-                    .cancel(
+                    .cancel_naming_actor(
                         &req.session_token,
                         &req.session_id,
                         &daemon_instance_id,
                         &req.conversation_id,
+                        &req.cancelled_by,
                     )
                     .await?;
                 Ok(Response::new(CancelAgentConversationResponse {}))
@@ -1338,25 +1360,72 @@ impl SessionAgentServiceImpl {
         for conversation_id in &closed.local {
             self.ports.sessions.conversation_closed(conversation_id);
         }
+        if closed.remote.is_empty() {
+            return;
+        }
+        // A detach is the caller's own action, so each remote cancel names the login that made it.
+        let actor = self
+            .ports
+            .sessions
+            .github_user(session_token)
+            .map_err(|e| e.message().to_string());
         for (daemon_instance_id, conversation_id) in closed.remote {
-            if let Err(e) = self
-                .ports
-                .peers
-                .cancel(
-                    session_token,
-                    session_id,
-                    &daemon_instance_id,
-                    &conversation_id,
-                )
-                .await
-            {
+            let cancelled = match &actor {
+                Ok(actor) => self
+                    .ports
+                    .peers
+                    .cancel_naming_actor(
+                        session_token,
+                        session_id,
+                        &daemon_instance_id,
+                        &conversation_id,
+                        actor,
+                    )
+                    .await
+                    .map_err(|e| e.message().to_string()),
+                Err(e) => Err(e.clone()),
+            };
+            if let Err(e) = cancelled {
                 log::error!(
                     target: "tddy_daemon::connection_service",
                     "could not cancel conversation {conversation_id} with '{agent_id}' on daemon \
-                     {daemon_instance_id} ({}); its turn loop may still be running there",
-                    e.message()
+                     {daemon_instance_id} ({e}); its turn loop may still be running there",
                 );
             }
         }
     }
+}
+
+/// Record the permission request a cancelled conversation still holds as answered by `cancelled_by`, the way a
+/// request answered while its turn runs is recorded, and complete the conversation's status row when the request was
+/// held for the user. `Err` names what was not recorded; a cancel that names no actor records nothing, so it refuses.
+async fn record_cancelled_request(
+    recorder: &ConversationRecorder,
+    answering: &dyn PermissionAnswering,
+    cancelled_by: &str,
+) -> Result<(), String> {
+    let Some(request) = answering.pending_request() else {
+        return Ok(());
+    };
+    if cancelled_by.trim().is_empty() {
+        return Err(format!(
+            "permission request '{}' is pending, and the cancel names no actor to record it as answered by",
+            request.request_id
+        ));
+    }
+    let deferred = answering.deferred_to_user(&request.request_id);
+    let answer = PermissionAnswer::Cancelled {
+        request_id: request.request_id.clone(),
+    };
+    let frame = answered_frame(&request, deferred, cancelled_by, &answer, now_unix_ms());
+    recorder.record_after_streamed(frame).await.map_err(|e| {
+        format!(
+            "permission request '{}' could not be recorded: {e}",
+            request.request_id
+        )
+    })?;
+    if deferred {
+        recorder.note_status(ConversationStatus::Completed);
+    }
+    Ok(())
 }

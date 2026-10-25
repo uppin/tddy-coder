@@ -321,13 +321,32 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
 
     async fn cancel(
         &self,
+        _session_token: &str,
+        _session_id: &str,
+        owner: &str,
+        conversation_id: &str,
+    ) -> Result<(), Status> {
+        Err(Status::unimplemented(format!(
+            "the cancel of conversation '{conversation_id}' on '{owner}' names no actor, and every cancel forwarded here must"
+        )))
+    }
+
+    async fn cancel_naming_actor(
+        &self,
         session_token: &str,
         session_id: &str,
         owner: &str,
         conversation_id: &str,
+        cancelled_by: &str,
     ) -> Result<(), Status> {
         self.roster
-            .forward_cancel_agent_conversation(session_token, session_id, owner, conversation_id)
+            .forward_cancel_agent_conversation(
+                session_token,
+                session_id,
+                owner,
+                conversation_id,
+                cancelled_by,
+            )
             .await
     }
 }

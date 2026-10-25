@@ -12,13 +12,15 @@ use tddy_rpc::Status;
 use crate::agent_host_callbacks::AgentRoster;
 
 impl AgentRoster {
-    /// Ask `daemon_instance_id` to cancel a conversation its own turn loop is running.
+    /// Ask `daemon_instance_id` to cancel a conversation its own turn loop is running, naming `cancelled_by` as
+    /// the actor that cancelled it.
     pub async fn forward_cancel_agent_conversation(
         &self,
         session_token: &str,
         session_id: &str,
         daemon_instance_id: &str,
         conversation_id: &str,
+        cancelled_by: &str,
     ) -> Result<(), Status> {
         let slot = self
             .peer_routing
@@ -28,6 +30,7 @@ impl AgentRoster {
             session_id,
             daemon_instance_id,
             conversation_id,
+            cancelled_by,
             slot,
         )
         .await

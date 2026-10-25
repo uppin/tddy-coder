@@ -148,6 +148,16 @@ impl ConversationRecorder {
         }
     }
 
+    /// Append a frame that ends a request outside the turn that holds it, such as a cancel's answer. Every update the
+    /// stream has carried is written first, so the frame is the latest state of its call and cannot be overtaken by an
+    /// update still queued behind it.
+    pub(crate) async fn record_after_streamed(&self, frame: AcpAgentMessage) -> Result<(), String> {
+        if let Some(stream) = &self.stream {
+            flush(stream).await;
+        }
+        self.transcript.append(frame).map_err(|e| e.to_string())
+    }
+
     /// Write this conversation's status row. See [`conversation_status::record`]: a failure does not fail the turn.
     pub(crate) fn note_status(&self, status: ConversationStatus) {
         conversation_status::record(

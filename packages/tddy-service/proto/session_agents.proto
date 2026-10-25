@@ -171,6 +171,9 @@ message CancelAgentConversationRequest {
   string session_id = 2;
   string daemon_instance_id = 3;
   string conversation_id = 4;
+  // The actor cancelling the conversation: a user's login, or `main-agent` when the main agent cancels.
+  // A permission request still pending on the conversation is recorded as answered by this actor.
+  string cancelled_by = 5;
 }
 
 message CancelAgentConversationResponse {}

@@ -2258,7 +2258,7 @@ pub async fn subagent_await_tool(args: serde_json::Value) -> String {
 }
 
 /// `subagent_cancel` (ACP `session/cancel`-shaped): closes an open session, if any.
-pub(crate) async fn subagent_cancel_tool(args: serde_json::Value) -> String {
+pub async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
     };
