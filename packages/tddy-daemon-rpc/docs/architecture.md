@@ -178,7 +178,7 @@ workspace jails, hosted clones, peer roster and token store the host does. **No 
 |---|---|---:|
 | `ProjectRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `eligible_daemon_source`, `spawn_client`, `common_room_livekit_room` | 6 |
 | `CatalogRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `model_registry`, `rpc_activity` | 5 |
-| `ExecToolRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `peer_routing`, `rpc_activity`, `local_exec_tools` | 9 |
+| `ExecToolRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `peer_routing`, `rpc_activity`, `local_exec_tools`, `approval_routes` | 10 |
 | `PrStackRpcHandler` | `config`, `user_resolver`, `tddy_data_dir`, `credential_vaults`, `rpc_activity`, `peer_routing` | 7 |
 
 The budget is each family's measured transitive field set on the host, as an upper bound; a shared

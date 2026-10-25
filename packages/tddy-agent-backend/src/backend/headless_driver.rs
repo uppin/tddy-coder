@@ -6,7 +6,7 @@
 //! produces, so a caller cannot tell which transport took the turn. ACP is preferred wherever a
 //! harness offers both.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-headless-driver.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 mod argv;
 mod codex_jsonl;

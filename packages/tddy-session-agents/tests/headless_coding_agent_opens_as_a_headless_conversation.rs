@@ -4,7 +4,7 @@
 //! The fake claude is a shell script that records its argv and prints a stream-json transcript, so
 //! what the turn ran the CLI with is observed, not inferred. Real CLIs are not run.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-headless-driver.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;

@@ -1,6 +1,6 @@
 //! How each harness is spoken to as a subagent, and who answers its permission requests.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-headless-driver.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use tddy_coding_subagent::{permission_policy_of, transport_of, PermissionPolicy, Transport};
 

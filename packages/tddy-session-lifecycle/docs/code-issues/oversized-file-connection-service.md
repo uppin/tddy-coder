@@ -25,6 +25,7 @@
 | 2026-10-21 | −29 | `#satellite` 13/13 (#635), by `git diff --numstat` (26 added, 55 removed; `loc.py` not re-run): the plugin imports, the frame-headroom assert and `activity_delta_frames` leave (the assert to `tddy-daemon-livekit`), and the room fields become ports (`room_directory`, `room_tokens`, `room_connector`, `session_delta_stores`, `room_broadcast`, `session_rooms`, `session_admissions`). Narrowed, still over 500 by the record's counter |
 | 2026-10-24 | +7 | `#coagents` 2/8 (#721), by `git diff --numstat` (7 added, 0 removed; `loc.py` not re-run): the host's `coding_agent_launcher` field and its doc comment, and the `tddy_session_agents::coding_agent` re-export `ListSubagents` uses. Grown; not split here, because `#coagents` 4/8 (`conversation-bubble`) in the same stack also edits this file |
 | 2026-10-22 | ±0 | `2026-10-22-telegram-satellite`: the presenter-sink field becomes `operator_channel: SharedOperatorChannel`, doc line reworded (`git diff --numstat` 2/2; `loc.py` not re-run). Still over 500 |
+| 2026-10-25 | +3 | `#coagents` 7/8 (#726), by `git diff --numstat` (3 added, 0 removed; `loc.py` not re-run): the host's `approval_routes` field and its doc comment. Grown; not split: deferred to the `#coagents` sweep node by the developer (2026-10-25) |
 
 ## What grew it
 

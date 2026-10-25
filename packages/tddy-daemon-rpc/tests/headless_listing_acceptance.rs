@@ -1,6 +1,6 @@
 //! `ListSubagents` offers headless harnesses as coding agents, with their transport and policy.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-headless-driver.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use tddy_daemon_rpc::test_util::test_service;
 use tddy_rpc::Request;

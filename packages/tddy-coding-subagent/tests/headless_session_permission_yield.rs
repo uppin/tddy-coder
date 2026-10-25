@@ -4,7 +4,7 @@
 //! The fake claude sleeps before it prints, so its turn is still open when the request parks. The
 //! request is parked through the session's own `permissions()` handle, the way the daemon reaches it.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-24-coagents-headless-driver.md
+//! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
