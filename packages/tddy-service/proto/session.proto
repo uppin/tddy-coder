@@ -692,10 +692,10 @@ message StartSessionRequest {
   // orchestrator starts on another host is linked to it there, not on the orchestrator's host.
   // Empty = no orchestrator. Unlike `stack_parent`, it resolves no stack base and records no stack
   // node. Set by the `StartSession` exec tool from its caller (`#start-parity` 2/9).
-  string orchestrator_session_id = 44;
+  string orchestrator_session_id = 45;
   // The daemon running `orchestrator_session_id`. Empty or the creating daemon = that daemon;
   // any other is recorded beside it (`Changeset.orchestrator_daemon_instance_id`).
-  string orchestrator_daemon_instance_id = 45;
+  string orchestrator_daemon_instance_id = 46;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

@@ -6,8 +6,8 @@
 `StartProjectSession` exec tool (five arguments, own host only) is replaced by **`StartSession`**,
 whose arguments are `StartSessionRequest`'s own fields — every option the New-session form can send.
 Its schema is generated, and two parity tests keep it in step with the proto descriptor and with the
-form's request builder. The orchestrator link moves into the request (`orchestrator_session_id = 44`,
-`orchestrator_daemon_instance_id = 45`), so the daemon that creates the session records it, on any
+form's request builder. The orchestrator link moves into the request (`orchestrator_session_id = 45`,
+`orchestrator_daemon_instance_id = 46`), so the daemon that creates the session records it, on any
 host. Across:
 
 - `tddy-service` — the two `StartSessionRequest` fields; regenerated `session_pb.ts`.
