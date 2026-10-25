@@ -4,6 +4,7 @@
 
 use crate::mcp_primitives::{schema_object, subagent_access_is_managed};
 use crate::session_tool_client::pull_conversation_range;
+use crate::worktree_route::has_its_own_worktree;
 use tddy_discovery::subagent_runtime::subagent_error_json;
 
 /// The tool as advertised.
@@ -18,7 +19,9 @@ pub(crate) fn subagent_pull_tool_definition() -> rmcp::model::Tool {
          the latest. A commit already pulled is skipped, never applied twice, and a later \
          subagent_end takes only what is left. Returns {pulled: {commits, skipped, files: \
          {created, updated, removed}, lines: {added, removed}, conflicts}} — `pulled` is null when \
-         the conversation never changed a file. Refused while a turn is running.",
+         the conversation never changed a file, and for a `shared` agent: it edits the session's own \
+         worktree directly, so there is no worktree of its own to take from. Refused while a turn is \
+         running.",
         schema_object(serde_json::json!({
             "type": "object",
             "required": ["sessionId"],
@@ -33,10 +36,10 @@ pub(crate) fn subagent_pull_tool_definition() -> rmcp::model::Tool {
 
 /// `subagent_pull { sessionId, from?, to? }`.
 ///
-/// Refused while a turn is outstanding, and for an unknown conversation. A conversation whose loop
-/// runs on a daemon, and one with no daemon to ask, never has a conversation worktree: `pulled` is
-/// null without asking. Otherwise the daemon applies the range, skipping what this conversation's
-/// ledger holds, and what it applied is recorded.
+/// Refused while a turn is outstanding, and for an unknown conversation. A conversation with no
+/// worktree of its own — a shared daemon-run one, or one with no daemon to ask — answers `pulled` as
+/// null without asking ([`has_its_own_worktree`]). Otherwise the daemon applies the range, skipping
+/// what this conversation's ledger holds, and what it applied is recorded.
 pub(crate) async fn subagent_pull_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
@@ -60,8 +63,8 @@ pub(crate) async fn pull_range(
     from: Option<&str>,
     to: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-    let runs_here = crate::subagent_end::the_state_of(session_id).await?;
-    if !(runs_here && subagent_access_is_managed()) {
+    let host = crate::subagent_end::the_host_of(session_id).await?;
+    if !(has_its_own_worktree(host) && subagent_access_is_managed()) {
         return Ok(serde_json::Value::Null);
     }
     let already_pulled = crate::pull_ledger::pulled_by(session_id);

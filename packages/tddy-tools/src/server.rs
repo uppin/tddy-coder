@@ -1602,7 +1602,10 @@ pub async fn build_dynamic_tool_list(
 /// Dispatch a call to a dynamic (non-static) tool via the session daemon.
 ///
 /// Uses [`crate::session_tool_client::dispatch_session_tool`] — sandbox IPC when
-/// `TDDY_SANDBOX_TOOL_IPC` is set, otherwise HTTP to `TDDY_REMOTE_DAEMON_URL`.
+/// `TDDY_SANDBOX_TOOL_IPC` is set, otherwise HTTP to `TDDY_REMOTE_DAEMON_URL`. When
+/// `TDDY_CONVERSATION_ID` names the conversation a managed coding agent runs on,
+/// [`crate::session_tool_client::dispatch_conversation_tool`] instead, so the daemon runs the call
+/// in that conversation's worktree.
 ///
 /// A tool the session's **live** roster has withdrawn is refused here rather than run. This is the
 /// second of the two enforcement layers in docs/ft/daemon/session-agent-roster.md § Enforced at two
@@ -1615,7 +1618,13 @@ pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> 
         log::info!(target: "tddy_tools::server", "refusing {tool_name}: {refusal}");
         return serde_json::json!({"error": refusal.to_string(), "is_error": true}).to_string();
     }
-    crate::session_tool_client::dispatch_session_tool(tool_name, args).await
+    match crate::mcp_primitives::exec_conversation_from_env() {
+        Some(conversation) => {
+            crate::session_tool_client::dispatch_conversation_tool(&conversation, tool_name, args)
+                .await
+        }
+        None => crate::session_tool_client::dispatch_session_tool(tool_name, args).await,
+    }
 }
 
 /// The exec tools forwarded to Claude Code when a session-tool transport (sandbox IPC or daemon
@@ -1804,12 +1813,17 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
                     // No provider: the loop runs on the facilitating daemon, against an
                     // endpoint this process cannot see. Naming one here would report a queue
                     // the turn is not standing in.
-                    SubagentConversation::opened(
-                        opened.agent_id,
-                        None,
-                        opened.session,
-                        opened.remote,
-                    ),
+                    {
+                        let mut conversation = SubagentConversation::opened(
+                            opened.agent_id,
+                            None,
+                            opened.session,
+                            opened.remote,
+                        );
+                        conversation.clone_placed =
+                            crate::worktree_route::is_clone_placement(entry.placement);
+                        conversation
+                    },
                 );
                 serde_json::json!({ "sessionId": session_id }).to_string()
             }
@@ -3860,6 +3874,7 @@ mod tests {
                     last_activity: None,
                     kind: 0,
                     harness: String::new(),
+                    placement: 0,
                 }],
             },
         );

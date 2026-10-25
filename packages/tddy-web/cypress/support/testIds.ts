@@ -1905,6 +1905,10 @@ export const createSessionAgentOptionHost = (agentId: string) =>
 export const createSessionAgentOptionKind = (agentId: string) =>
   `${createSessionAgentOption(agentId)}-kind`;
 
+/** The placement select (`shared` or `clone`) on a picked create-session agent option. */
+export const createSessionAgentPlacement = (agentId: string) =>
+  `${createSessionAgentOption(agentId)}-placement`;
+
 /** One error row for a host that could not answer the create-session picker's fan-out. */
 export const createSessionAgentHostError = (daemonInstanceId: string) =>
   `create-session-agent-host-error-${safeTestIdPart(daemonInstanceId)}`;

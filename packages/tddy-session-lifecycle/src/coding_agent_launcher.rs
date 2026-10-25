@@ -33,8 +33,8 @@ use std::sync::Arc;
 
 use tddy_coding_subagent::{
     opencode_withdrawal_config, refuse_unless_confinable, AgentTransport, CodingAgentLaunch,
-    CodingAgentLauncher, CLAUDE_ACP, CODEX_ACP, OPENCODE, OPENCODE_CONFIG_CONTENT,
-    TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
+    CodingAgentLauncher, CLAUDE_ACP, CODEX_ACP, CONVERSATION_ID_ENV, OPENCODE,
+    OPENCODE_CONFIG_CONTENT, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
 };
 use tddy_core::provider_route::{Harness, HarnessRoute, RouteChoice, RouteSources};
 use tddy_core::{AcpAgentCommand, McpServerSpec};
@@ -379,7 +379,12 @@ impl CodingAgentLauncher for DaemonCodingAgentLauncher {
         if !launch.managed {
             return Ok(Vec::new());
         }
-        let (command, env) = (self.tool_server)(launch)?;
+        let (command, mut env) = (self.tool_server)(launch)?;
+        // A conversation with a worktree of its own names it, so its exec calls run in that
+        // worktree; a launch without one leaves the variable unset and its calls run in the session's.
+        if let Some(conversation_id) = &launch.conversation_id {
+            env.push((CONVERSATION_ID_ENV.to_string(), conversation_id.clone()));
+        }
         Ok(vec![McpServerSpec {
             name: TDDY_TOOLS_SERVER.to_string(),
             command,
@@ -487,6 +492,7 @@ mod tests {
             worktree: PathBuf::from("/home/dev/worktrees/parser-fix"),
             managed: false,
             session_token: "caller-session-token".to_string(),
+            conversation_id: None,
         }
     }
 

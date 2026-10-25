@@ -39,6 +39,7 @@ function aClaudeCliForm(overrides: Partial<CreateSessionFormValues> = {}): Creat
     sandboxedCodebase: true,
     isSplitCodebase: true,
     selectedAgentIds: ["reviewer"],
+    clonePlacedAgentIds: [],
     semanticIndex: true,
     codebaseDaemonInstanceId: "host-2",
     sshConfigHost: "",
@@ -77,6 +78,7 @@ describe("buildProjectHomeStartSpec", () => {
 
     // Then
     expect(Object.keys(spec).sort()).toEqual([
+      "clonePlacedAgents",
       "dangerouslySkipPermissions",
       "initialPrompt",
       "model",

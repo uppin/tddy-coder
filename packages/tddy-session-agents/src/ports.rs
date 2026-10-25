@@ -162,10 +162,12 @@ pub trait AgentSessions: Send + Sync {
         system_prompt: Option<&str>,
     ) -> Result<Option<Box<dyn SubagentSession>>, Status>;
 
-    /// A turn loop for an agent resolved on this host, reading the session's own worktree.
+    /// A turn loop for an agent resolved on this host, reading the session's own worktree — or, for
+    /// a `clone`-placed agent, the worktree of the conversation `conversation_id` names.
     async fn open_local(
         &self,
         session_id: &str,
+        conversation_id: &str,
         session_dir: &Path,
         record: &SessionAgentRecord,
         session_token: &str,

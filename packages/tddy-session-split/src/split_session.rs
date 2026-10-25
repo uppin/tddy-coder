@@ -931,6 +931,7 @@ mod tests {
             last_activity: None,
             kind: 0,
             harness: String::new(),
+            placement: 0,
         }
     }
 

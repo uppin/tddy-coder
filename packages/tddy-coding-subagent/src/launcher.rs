@@ -12,6 +12,10 @@ use crate::catalog::CodingAgentDef;
 pub const TDDY_TOOLS_SERVER: &str = "tddy-tools";
 /// The argument that runs `tddy-tools` as an MCP server.
 pub const TDDY_TOOLS_MCP_ARG: &str = "--mcp";
+/// The environment variable naming the conversation a managed agent's `tddy-tools --mcp` serves
+/// exec calls for. Set only for a conversation that has a worktree of its own; read by `tddy-tools`,
+/// which then runs its exec calls in that worktree rather than the session's.
+pub const CONVERSATION_ID_ENV: &str = "TDDY_CONVERSATION_ID";
 
 /// How the ACP driver reaches the agent a launcher started.
 #[derive(Debug)]
@@ -39,6 +43,9 @@ pub struct CodingAgentLaunch {
     /// The caller's session token — what the launcher reads the session owner's vault and mints the
     /// agent's own tool credential with. Never logged.
     pub session_token: String,
+    /// The conversation this launch serves, when it has a worktree of its own: its exec calls then
+    /// run in that worktree ([`CONVERSATION_ID_ENV`]). `None` runs them in the session's worktree.
+    pub conversation_id: Option<String>,
 }
 
 impl std::fmt::Debug for CodingAgentLaunch {
@@ -49,6 +56,7 @@ impl std::fmt::Debug for CodingAgentLaunch {
             .field("session_os_user", &self.session_os_user)
             .field("worktree", &self.worktree)
             .field("managed", &self.managed)
+            .field("conversation_id", &self.conversation_id)
             .field("session_token", &"<redacted>")
             .finish()
     }

@@ -372,8 +372,8 @@ and a long one can overflow the chunk-framing threshold —
 A subagent whose definition binds mutation tools (`WRITE`, `STR_REPLACE`, `DELETE`, `SHELL`) does
 not write its caller's worktree. Its edits land in a worktree of the **conversation's** own, one
 commit per mutating call, and come back to the caller when the conversation ends. This covers the
-in-process loop in `tddy-tools` running with Managed access; conversations whose loop the daemon
-runs are a [non-goal](#non-goals-out-of-scope-for-v1).
+in-process loop in `tddy-tools` running with Managed access, and a conversation the daemon runs for
+an agent attached with [`clone` placement](#a-daemon-run-conversation-of-a-clone-placed-agent).
 
 - **Created lazily.** The conversation's first *mutating* call cuts branch
   `tddy/subagent/<session id>/<conversation id>` and worktree
@@ -621,13 +621,47 @@ applied commit by commit and a failure part-way leaves the commits applied so fa
 worktree without recording them in the ledger. Mechanics:
 [`tddy-subagent-worktree`](../../../packages/tddy-subagent-worktree/docs/conversation-worktree.md).
 
+### A daemon-run conversation of a `clone`-placed agent
+
+An agent is attached with a **placement** (`session_agents.AgentPlacement`): `shared` (the default) or
+`clone` — see [session agent roster § Placement](../daemon/session-agent-roster.md#placement--shared-or-clone).
+A `shared` agent's conversations the daemon runs work the session worktree directly, as a teammate
+in the same checkout. A `clone`-placed agent's conversations each work on a conversation worktree of
+their own, the same branch and directory an in-process conversation gets:
+
+- **Cut at open.** The daemon creates the conversation worktree when the conversation opens, not on
+  its first write, because a coding agent's working directory has to exist before it starts.
+- **Every turn takes in the caller's current files first**, exactly as an in-process turn does; a
+  conflict refuses the turn before the agent sees it, and `syncWorktree: false` skips the sync.
+- **A model agent** runs its exec calls in the conversation worktree (`ExecuteTool{conversation_id}`
+  through `run_in_conversation`), one commit per mutating call, and its loop announces a merged sync
+  to its model.
+- **A coding agent** launches with the conversation worktree as its working directory, and its
+  `tddy-tools --mcp` server is handed `TDDY_CONVERSATION_ID`, so its exec calls run there too.
+  Whatever a turn changed is **one commit** on the conversation branch when the turn ends, failed
+  turns included. A merged sync's notice is prefixed to the next prompt the agent is sent; a turn
+  with no prompt (answering a permission request) carries none, and the notice waits for the next
+  prompt-bearing turn. A prompt-bearing turn that fails keeps its notice for the next one.
+- **`subagent_diff`, `subagent_pull` and `subagent_end`** read and take a `clone` conversation's
+  branch through the daemon's `ConversationWorktree` operations (`Diff`, `PullRange`, `Remove`).
+  For a `shared` conversation there is nothing of its own to take: `subagent_diff` is refused,
+  `subagent_pull` and `subagent_end` answer `pulled: null`, and the tool descriptions say so.
+
+A peer-owned conversation (`open_owned`) and a remote agent's placement are not covered: they work
+the clone the owning daemon holds.
+
 ### Known gaps
 
 - A `tddy-tools` process that dies without ending or cancelling its conversations leaves the branch
   behind —
   [`docs/dev/todo/2026-09-30-an-abandoned-subagent-conversation-leaves-its-branch.md`](../../dev/todo/2026-09-30-an-abandoned-subagent-conversation-leaves-its-branch.md).
-- Daemon-run conversations still write the session worktree —
+- A peer-owned daemon-run conversation still writes its owner's clone directly —
   [`docs/dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md`](../../dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md).
+- A `clone` coding agent's permission-answer turn carries no sync notice; the notice rides on the
+  next prompt instead, because an ACP permission answer has no text to carry it.
+- No test runs the `tddy-tools` MCP process end to end against a real daemon for a `clone`
+  conversation; the dispatch choice and the daemon's `ConversationWorktree` operations are each
+  tested on their own.
 - `subagent_end` can race a prompt arriving between its pending check and the retire —
   [`docs/dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md`](../../dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md).
 - A range pull that fails part-way (a git error after some commits applied) reports the error and
@@ -965,8 +999,8 @@ end** (this needs a sandbox the development host cannot start).
   subagents at all today — see `docs/dev/TODO.md`).
 - Per-tool replacement policies beyond a flat replaced-set (e.g. partial replacement of `Grep` for
   some file types only).
-- **Daemon-run conversations** (`open_local`, `open_owned`, a peer's `RemoteAgentSession`) have no
-  conversation worktree; their calls still run on the session worktree, and nothing is synced.
+- **Peer-owned daemon-run conversations** (`open_owned`, a peer's `RemoteAgentSession`) have no
+  conversation worktree; their calls run on the owning daemon's clone, and nothing is synced.
 - Syncing **during** a turn — a caller editing while a turn runs is picked up by the next turn.
 - Resolving a caller-sync conflict automatically.
 - **Sweeping orphaned conversation worktrees and branches.**

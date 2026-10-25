@@ -55,6 +55,7 @@ impl LaunchSessions {
         initial_prompt: &str,
         managed_codebase: bool,
         specialized_agents: &[String],
+        clone_placed_agents: &[String],
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
         // When true, index the worktree before launch (blocking; aborts on failure) and point the
         // in-jail `SemanticSearch` tool at the per-session index.
@@ -77,7 +78,7 @@ impl LaunchSessions {
         // and the defs it holds locally are what the jail env can carry.
         let mut started_agents = self
             .agent_roster
-            .seeded_roster_records(specialized_agents)
+            .seeded_roster_records_placed(specialized_agents, clone_placed_agents)
             .await?;
         let specialized_defs = self
             .agent_roster

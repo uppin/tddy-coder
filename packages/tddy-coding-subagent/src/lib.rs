@@ -18,7 +18,8 @@ pub use confinement::{
     Confinement, OPENCODE_CONFIG_CONTENT,
 };
 pub use launcher::{
-    AgentTransport, CodingAgentLaunch, CodingAgentLauncher, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
+    AgentTransport, CodingAgentLaunch, CodingAgentLauncher, CONVERSATION_ID_ENV,
+    TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
 };
 pub use parked_permissions::ParkedPermissions;
 pub use permissions::DenyAndRecord;

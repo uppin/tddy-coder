@@ -58,6 +58,7 @@ fn an_agent_this_daemon_runs() -> SessionAgentRecord {
         codebase_session_id: None,
         kind: Default::default(),
         harness: None,
+        placement: Default::default(),
     }
 }
 
@@ -195,6 +196,7 @@ impl AgentSessions for TheTurnLoopsThisHostOpened {
     async fn open_local(
         &self,
         _session_id: &str,
+        _conversation_id: &str,
         _session_dir: &Path,
         _record: &SessionAgentRecord,
         _session_token: &str,

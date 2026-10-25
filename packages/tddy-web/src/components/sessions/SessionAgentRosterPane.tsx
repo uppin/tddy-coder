@@ -5,6 +5,7 @@ import { SessionAgentService, type SessionAgentEntry } from "../../gen/session_a
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "../ui/button";
 import { AgentPicker } from "./AgentPicker";
+import { agentPlacementWire, type AgentPlacementChoice } from "./agentPlacementChoice";
 import { subagentSessionNodes } from "./agentTree";
 import { rosterHalfOf, type RosterHalf } from "./sessionRosterHalf";
 import { SessionAgentTree, type RosterDetachRequest } from "./SessionAgentTree";
@@ -111,13 +112,17 @@ export function SessionAgentRosterPane({
   const [pendingDetach, setPendingDetach] = useState<RosterDetachRequest | null>(null);
   const [detachError, setDetachError] = useState<string | null>(null);
 
-  const attach = async (agent: AvailableAgent): Promise<string | null> => {
+  const attach = async (
+    agent: AvailableAgent,
+    placement: AgentPlacementChoice,
+  ): Promise<string | null> => {
     try {
       await client.attachSessionAgent({
         sessionToken,
         sessionId,
         daemonInstanceId,
         agentId: agent.agentId,
+        placement: agentPlacementWire(placement),
       });
     } catch (err) {
       return ConnectError.from(err).rawMessage;

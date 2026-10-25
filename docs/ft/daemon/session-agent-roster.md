@@ -250,6 +250,26 @@ interrupted and the process stopped — and `subagent_end` and a detach stop the
 **At rest**, `SessionAgentRecord` carries `kind` (`model` / `coding_agent`, omitted for a model) and
 `harness`; a record written without them loads as a model entry.
 
+### Placement — shared or clone
+
+`AttachSessionAgentRequest.placement` (5) and `SessionAgentEntry.placement` (15) carry
+`session_agents.AgentPlacement { SHARED = 0, CLONE = 1 }`; at rest `SessionAgentRecord.placement` defaults to
+`shared`, so a record written without it loads as shared.
+
+- **`shared`** — the agent's conversations work the session worktree, the same checkout as the main
+  agent.
+- **`clone`** — each conversation the daemon runs works on a conversation worktree and branch of its
+  own, synced with the main agent's files before every turn and handed back through `subagent_diff`
+  / `subagent_pull` / `subagent_end`
+  ([managed-codebase subagents](../coder/managed-codebase-subagents.md#a-daemon-run-conversation-of-a-clone-placed-agent)).
+
+Re-attaching an attached agent under the **same** placement is the idempotent no-op; under the
+**other** placement it is `FAILED_PRECONDITION` naming the placement the entry holds, refused before
+any admission, so the roster and the room are unchanged. Seeding at start carries the placement as
+`StartSessionRequest.clone_placed_agents` (44) — the subset of `specialized_agents` attached as
+`clone`. The create-session picker and the Add-agent picker offer a placement select per picked
+agent; every Agents-tab row shows its entry's placement.
+
 ### Persistence
 
 `SessionMetadata.specialized_agents: Vec<String>` is **replaced** by:

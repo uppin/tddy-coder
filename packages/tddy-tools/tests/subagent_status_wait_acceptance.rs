@@ -72,6 +72,7 @@ fn an_agent(agent_id: &str) -> AgentBuilder {
         last_activity: None,
         kind: 0,
         harness: String::new(),
+        placement: 0,
     })
 }
 

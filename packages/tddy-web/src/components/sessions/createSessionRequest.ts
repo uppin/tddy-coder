@@ -56,6 +56,8 @@ export interface CreateSessionFormValues {
   sandboxedCodebase: boolean;
   isSplitCodebase: boolean;
   selectedAgentIds: string[];
+  /** The picked agents, out of `selectedAgentIds`, whose conversations work on a clone of their own. */
+  clonePlacedAgentIds: string[];
   semanticIndex: boolean;
   codebaseDaemonInstanceId: string;
   sshConfigHost: string;
@@ -97,10 +99,12 @@ export function buildStartSessionRequest(
     sandboxedCodebase,
     isSplitCodebase,
     selectedAgentIds,
+    clonePlacedAgentIds,
     semanticIndex,
     codebaseDaemonInstanceId,
     sshConfigHost,
   } = form;
+  const clonePlacedAgents = pickedClonePlacedAgents(clonePlacedAgentIds, selectedAgentIds);
   const commonParams = {
     sessionToken,
     projectId,
@@ -164,6 +168,7 @@ export function buildStartSessionRequest(
       sandbox,
       managedCodebase,
       specializedAgents: selectedAgentIds,
+      clonePlacedAgents,
       semanticIndex,
       // cursor-agent has no tool allowlist, so a split codebase could only be suggested to it,
       // never enforced — the daemon refuses such a request. Both managed-codebase blocks share
@@ -198,6 +203,7 @@ export function buildStartSessionRequest(
       sandbox: false,
       managedCodebase: false,
       specializedAgents: [],
+      clonePlacedAgents: [],
       semanticIndex: false,
       codebaseDaemonInstanceId: "",
     };
@@ -249,6 +255,7 @@ function claudeCliAgentChoices(form: CreateSessionFormValues) {
     // built wherever the worktree is. Nothing gates them here: the picker and the toggle are shown
     // on every claude-cli placement, so what the form holds is what the screen showed.
     specializedAgents: form.selectedAgentIds,
+    clonePlacedAgents: pickedClonePlacedAgents(form.clonePlacedAgentIds, form.selectedAgentIds),
     semanticIndex: form.semanticIndex,
   } satisfies StartSessionRequestInit;
 }
@@ -260,4 +267,9 @@ function claudeCliAgentChoices(form: CreateSessionFormValues) {
  */
 export function buildProjectHomeStartSpec(form: CreateSessionFormValues): StartSessionRequestInit {
   return claudeCliAgentChoices(form);
+}
+
+/** A placement names an agent that is picked: one left on a since-unpicked agent goes nowhere. */
+function pickedClonePlacedAgents(clonePlacedAgentIds: string[], selectedAgentIds: string[]): string[] {
+  return clonePlacedAgentIds.filter((id) => selectedAgentIds.includes(id));
 }

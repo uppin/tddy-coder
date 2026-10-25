@@ -178,6 +178,7 @@ fn record_from_peer_row(
         // Filled in by the caller once the clone for (session, owning daemon) is claimed: the
         // record is resolved before this daemon knows which session it is being attached to.
         codebase_session_id: None,
+        placement: Default::default(),
     })
 }
 

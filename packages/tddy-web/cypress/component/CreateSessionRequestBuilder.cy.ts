@@ -51,6 +51,7 @@ function aFormWith(values: Partial<CreateSessionFormValues>): CreateSessionFormV
     sandboxedCodebase: false,
     isSplitCodebase: false,
     selectedAgentIds: [],
+    clonePlacedAgentIds: [],
     semanticIndex: false,
     codebaseDaemonInstanceId: "",
     sshConfigHost: "",
