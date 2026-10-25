@@ -154,6 +154,37 @@ vault's state, and names the remedy when it cannot:
 `pr_lookup_for_caller(stub_mode, stored)`'s three outcomes — `Empty`, `Unavailable(reason)`,
 `Perform(token)` — are what the PR list reads by, unchanged by where the token comes from.
 
+### Development vaults without a passphrase
+
+`github.dev_vault_without_passphrase: true` makes the auth service create and open every closed vault
+under the **empty passphrase** itself, so a dev run (`./web-dev`, `./desktop-dev`; both dev configs
+set it) never prompts:
+
+- **at sign-in** (`retain_the_login_credential`) and **at every refresh** (`reopen_the_vault`, after
+  the presented unlock key, if any, failed to open it), `AuthServiceImpl::open_without_passphrase`
+  unlocks a `LOCKED` vault with `""`, or creates an `UNINITIALIZED` one, and the response reports
+  `OPEN` with the lineage's unlock key. `CredentialVaultPrompt` therefore never shows;
+- creating needs a waiting sign-in (`SessionVaults::create` → `NoFreshLogin` otherwise), so at a
+  refresh the service first notes a credential-less sign-in — exactly what a stub sign-in notes — and
+  a session that signed in before the vault existed, or before a restart, gets one without signing in
+  again. `tddy-credentials` is unchanged;
+- a vault created under a **real passphrase** is never opened, reset or replaced: `""` does not open
+  it, it stays `LOCKED`, and the prompt asks for that passphrase as without the setting.
+
+It is fenced as a development exclusion, because anyone can derive the key such a vault is sealed
+under — what is linked into it (provider accounts) is as good as plaintext under `auth_storage`:
+
+- `dev_vault::vaults_without_passphrase(github)`, called beside `VaultLifetimes::of` in
+  `build_auth_entries_admitting`, **refuses to start** a daemon with the setting unless `stub: true`,
+  naming the setting, and logs a startup `warn` when it is on;
+- `provider_auth_entry` passes it to the stub provider's service only; `AuthServiceImpl` also ignores
+  it for any provider whose access tokens are real (`issues_usable_access_token`).
+
+`tests/dev_vault_without_passphrase_acceptance.rs` pins: a stub sign-in finds its vault open; a
+refresh after a restart reopens it with no unlock key; a session signed in before the vault existed
+gets it at refresh; a real-passphrase vault stays `LOCKED` byte for byte; a real-GitHub daemon does
+not start; both checkout dev configs keep vaults and pass the check.
+
 ## First-login enrolment
 
 A server's `users:` is written by whoever installs it. A login GitHub vouches for is minted a

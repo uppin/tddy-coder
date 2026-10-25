@@ -122,6 +122,13 @@ wheel three ways depending on mouse tracking and alternate screen; and renders t
 zoom bounds, mobile keyboard, shortcut drawer, file drop and upload that both of its predecessors
 rendered identically.
 
+Dropped paths go to the PTY through `pasteInput` — the terminal handle's `paste`, bracketed when the
+program enabled DEC 2004 — rather than `sendInput`, so a program that tells pasted text from typed
+text (Claude Code attaching a pasted image path) sees a drop as the paste a native terminal would
+send. `readsLocalPaths` (from `SessionRuntime`, via `GrpcSessionTerminal` for gRPC terminals) is
+handed to the drop zone, and decides whether a file dropped inside Tddy Desktop arrives as its real
+path or is uploaded; see [terminal-file-upload.md](terminal-file-upload.md#tddy-desktop-drops-arrive-from-the-window-not-the-dom).
+
 Panes state their stacking inline, bottom-up: terminal panes `2`, the terminal-control mutex overlay
 `3`, an open agent conversation `4`. A CTA that claimed its layer only through utility classes would
 be painted over by the terminal canvas, leaving a session another screen controls looking interactive

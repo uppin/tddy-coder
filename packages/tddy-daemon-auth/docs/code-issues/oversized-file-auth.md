@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-daemon-auth/src/auth.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-24 by the `/pr-wrap` file-length gate on #510 (`#keyring` 3/9)
-**Metrics:** **622 production lines** (2026-09-24, #510 after its idle-vault follow-up, unchanged from its wrap; 576 on `origin/master` `35cf2913`), counted to the first `#[cfg(test)]` · budget 500 · ~1.24× over · 1,403 lines in all
-**Thresholds breached:** length 622 > 500
+**Metrics:** **579 production lines** (2026-10-25, #765 at its wrap; 569 on `origin/master` `a618ef29d`), counted to the first `#[cfg(test)]` · budget 500 · ~1.16× over
+**Thresholds breached:** length 579 > 500
 **Restructure:** required — module seams (see below); `build_auth_entries_admitting` was cut to 58 lines and 5 parameters by `#satellite` 16/16, which also moved the provider and vault helpers it calls into `auth/entry_parts.rs`
 **Status:** Open — partially fixed 2026-10-22 by `#satellite` 16/16 (616 → 569, still 69 over). Left there on purpose: the file was 622 when the `#satellite` stack started and the stack only shrank it, so it is outside the sweep's "what the stack added or grew" scope; the next seam is the `mint_live_kit_token` / `build_token_service_entry` group. Split deferred with the developer's consent during #510's wrap, to a follow-up after the `#keyring` stack lands — `docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`
 
@@ -21,6 +21,7 @@
 | 2026-10-18 | 622 → 619 | #626 (`#satellite` 4/13), −3: the `TokenGenerator` construction in `build_token_service_entry` and `mint_live_kit_token` leaves for the injected `RoomTokenMinter`, offset by the `minter` parameters. Improved, not clean; split remains deferred |
 | 2026-10-20 | 619 → 616 | #632 (`#satellite` 10/13), −3: the token TTL stops naming `tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS`; the six-hour constant lives in `token_provider.rs` as `ROOM_TOKEN_TTL`, so the call collapses to one line. Improved, not clean; split remains deferred |
 | 2026-10-22 | 616 → 569 | `#satellite` 16/16 (the sweep), −47: `build_auth_entries_admitting` went from 111 lines and 6 parameters to 58 and 5 (three `extract_method`s, then by hand with the developer's consent a `let … else`, `provider_auth_entry`, and `web_host`/`web_port` folded into one tuple), and the four helpers it calls (`provider_auth_entry`, `probed_credential_vaults`, `session_user_resolver`, `livekit_token_service_entry`, 105 lines) moved to `auth/entry_parts.rs` by `move_item`. Improved, not clean; the next seam is the `mint_live_kit_token` / `build_token_service_entry` group |
+| 2026-10-25 | 569 → 579 | #765, +10, measured at its wrap against `origin/master` `a618ef29d`: the `dev_vault::vaults_without_passphrase` check beside `VaultLifetimes::of`, and `auth_service_entry`'s `vaults_without_passphrase` parameter and doc. The check itself lives in its own module, `dev_vault.rs`. Not split there; the next seam is still the `mint_live_kit_token` / `build_token_service_entry` group |
 
 ## Why it grew, and why it is not split in #510
 

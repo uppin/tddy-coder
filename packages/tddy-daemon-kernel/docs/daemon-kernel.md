@@ -232,6 +232,11 @@ refresh-token lifetime, past which the **daemon does not start**) and `0` = neve
 The ceiling is `tddy_github::REFRESH_TOKEN_TTL`, and the meaning lives where the vaults are built,
 not in a crate with seventeen dependents that only parses the setting.
 
+`GitHubConfig.dev_vault_without_passphrase` (`Option<bool>`, `#[serde(default)]`) is read here the same
+way and meant in `tddy-daemon-auth` too: it opens every vault under the empty passphrase on a stub
+daemon, and stops any other daemon at startup — see
+[auth-service.md § Development vaults without a passphrase](../../tddy-daemon-auth/docs/auth-service.md#development-vaults-without-a-passphrase).
+
 `pending_login_ttl.rs` and `open_vault_idle_ttl.rs` now hold only their module doc and the parsing
 tests (absent, `0`, a value past the ceiling read as given, and the two refusals naming the
 setting), so `config.rs` carries each field and a one-line pointer.
