@@ -11,6 +11,7 @@ pub(crate) mod contained_shell;
 pub(crate) mod edited_region;
 pub(crate) mod project_home_diff;
 pub mod project_home_git_tools;
+pub mod project_home_terminate;
 pub mod project_home_tools;
 pub mod project_home_worktree_tools;
 pub mod read_only;

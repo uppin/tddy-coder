@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 2 — one tool over an existing RPC; the cross-host path is inherited
+**PR**: [#756](https://github.com/uppin/tddy-coder/pull/756)
 **Stack**: `#start-parity` 7/9 — branch `feature/start-parity/terminate`, base `n6` `session-follow` (`feature/start-parity/session-follow`)
 **PRD**: [PRD-2026-10-25-start-parity-terminate.md](../../ft/daemon/1-WIP/PRD-2026-10-25-start-parity-terminate.md)
 
@@ -32,7 +33,10 @@ implementing one here collides with the PR that owns it.
 
 The **first push of this PR**, not its deliverable — this PR goes on to implement all of it:
 
-`TERMINATE_SESSION` def, `ProjectHomePort::terminate_session`, failing tests.
+- `tddy-tool-engine::project_home_terminate`: `TERMINATE_SESSION` and
+  `terminate_session_tool_def()` (`TODO(terminate)`).
+- `ProjectHomePort::terminate_session(&SessionTarget)`, with a default body that bails
+  `TODO(terminate)`.
 
 ## Green wave
 
@@ -93,14 +97,23 @@ error. It is limited to the caller's project.
 
 ### Acceptance Tests
 
-- [ ] **Integration** `packages/tddy-daemon-rpc/tests/terminate_session_acceptance.rs` — `terminate_sends_sigterm_and_keeps_worktree_and_branch`: A live child process exits with SIGTERM. The worktree directory, the branch and the session dir all remain.
-- [ ] **Integration** `same file` — `terminating_a_stopped_session_is_an_error_naming_it`: `is_error`, and the message says the process is not alive.
-- [ ] **Integration** `same file` — `a_session_of_another_project_is_refused`: Error names "another project".
-- [ ] **Unit** `packages/tddy-tool-engine/tests/terminate_session_schema.rs` — `the_description_says_what_happens_to_worktree_and_branch`: The description mentions SIGTERM, the worktree kept and the branch kept.
-- [ ] **Integration** `packages/tddy-daemon/tests/project_home_remote_targets_acceptance.rs` — `terminate_stops_a_session_on_another_host`: The peer's process exits.
+- [ ] **Unit** `packages/tddy-tool-engine/tests/terminate_session_schema.rs`:
+  - `the_description_says_sigterm_and_that_the_worktree_and_branch_are_kept`
+  - `it_takes_the_session_and_optionally_its_host`
+- [ ] **Integration** `packages/tddy-daemon-rpc/tests/terminate_session_acceptance.rs` (two hosts;
+  a `sleep` child stands in for the session's process, its pid in `.session.yaml`):
+  - `terminate_sends_sigterm_and_keeps_the_record_worktree_and_branch`
+  - `terminating_a_session_whose_process_has_ended_is_an_error_saying_so`
+  - `a_session_of_another_project_is_refused_and_left_running`
+  - `terminate_stops_a_session_on_another_host`
 
-Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests use the
-in-memory peer forwarder if it exists on the base, and the LiveKit testkit otherwise.
+**Risk at green.** `SignalSession` resolves the sessions directory itself
+(`sessions_base_for_user(os_user, tddy_data_dir)`), not through the host's injected resolver. If the
+tool calls `SignalSession` as the UI does and the in-process world lays sessions out differently,
+the tool reports "session not found" here. The fix belongs in how the tool reaches the signal, not
+in the test world: share the handler's body, keyed by the resolved session dir.
+
+Tests are written in the `fluent-tests` style (Given / When / Then). 
 
 ## Technical Debt & Production Readiness
 
@@ -129,10 +142,10 @@ in-memory peer forwarder if it exists on the base, and the LiveKit testkit other
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

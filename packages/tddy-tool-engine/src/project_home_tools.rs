@@ -271,6 +271,13 @@ pub trait ProjectHomePort: Send + Sync {
         project_id: &str,
         query: StartOptionsQuery,
     ) -> anyhow::Result<StartOptions>;
+
+    /// Send SIGTERM to `target`'s process, as the web UI's Terminate does (`#start-parity` 7/9).
+    async fn terminate_session(&self, target: &SessionTarget) -> anyhow::Result<()> {
+        // TODO(terminate): implement in the daemon's port
+        let _ = target;
+        anyhow::bail!("TODO(terminate): terminate_session")
+    }
 }
 
 /// The project-home tools' definitions, as a client registers them before the daemon is asked:
