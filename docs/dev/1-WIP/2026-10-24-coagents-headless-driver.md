@@ -219,6 +219,38 @@ Not done, and why:
   since a prefix match would let `tddy-tools x; <anything>` through.
 - **Round-trip test in the listener first.** The conversation-tagged approve has its own red tests
   before the listener binds a handler, per the developer.
+- **Approval is a unary RPC on the ExecuteTool route, not a session socket.** A daemon-run coding
+  agent's `tddy-tools` has no `TDDY_SOCKET`; it reaches the daemon through its `RemoteToolEnv`. The
+  approval is `ExecToolService.RequestApproval`, which holds the call open until the conversation's
+  parked request is answered or cancelled. A timeout (60 s) or a cancelled request is a denial.
+  The `TDDY_SOCKET` relay in `tddy-tools` (`e4323686c`) is wrong for production and is removed by
+  the tddy-tools slice, not by this decision.
+- **Ownership binds at launch.** The minted agent token carries no session or conversation claim, so
+  the launcher registers (conversation id, session id, minted token) in `ApprovalRoutes` when the
+  headless conversation launches. A request is accepted only when its token and session id match
+  that registration; anything else is refused with `PermissionDenied`. Token comparison is
+  constant-time. Keeping the claim out of the token avoids a change to the token format.
+- **Offering from profiles only.** A profile naming `claude`, `cursor`, `codex` or `oz` is offered;
+  a bare `allowed_agents` id is offered only when it is an ACP harness. The PTY-only premise tests
+  were narrowed by the orchestrator in `60f0c7269` and are unchanged here.
+- **Headless needs clone placement and the daemon's own OS user.** A shared-placement agent has no
+  conversation id, so it is refused; a privileged daemon refuses a headless agent for another OS
+  user, because `HeadlessDriver` has no argv prefix to wrap the CLI. Both are open for a decision.
+- **Claude confinement stays `CannotWithdraw`** until the headless launcher applies
+  `--disallowedTools`, so a managed session still refuses a headless claude.
+- **Listener-side `ConversationApprovalHandler` is kept but unbound.** It answers a tagged `approve`
+  on a session listener and refuses when none is bound. The approval route above does not use it, so
+  it is dead in production; removal is proposed for a decision, not done here.
+
+## Open blocker: the approval route's handler field budget
+
+The approval route is written and its four red tests are green in the working tree, but not
+committed. It adds two fields to `ExecToolRpcHandler`, taking it from 9 to 11, and the existing
+guard `packages/tddy-daemon-rpc/tests/rpc_handlers_shape.rs` (`each_handler_holds_no_more_fields_than_its_budget`,
+line 207: `("exec_tool.rs", "ExecToolRpcHandler", 9)`) fails. The handler holds no host reference
+to read routes through, so the routes need a field. The timeout can move onto `ApprovalRoutes`,
+which leaves one new field (10). Recommended: raise the budget at that line from `9` to `10` after
+that move. This edit needs the developer's consent; it is not made.
 
 ## Refactoring Needed
 
