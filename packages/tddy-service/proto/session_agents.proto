@@ -158,7 +158,7 @@ message AttachSessionAgentRequest {
   // picks the wrong host once two daemons offer the same name.
   string agent_id = 4;
   // Where the agent's conversations work; SHARED (the default) is the session's own worktree.
-  types.AgentPlacement placement = 5;
+  AgentPlacement placement = 5;
 }
 
 message CancelAgentConversationRequest {
@@ -359,7 +359,7 @@ message SessionAgentEntry {
   // The harness of a CODING_AGENT entry; empty for MODEL entries.
   string harness = 14;
   // Where the agent's conversations work, as attached.
-  types.AgentPlacement placement = 15;
+  AgentPlacement placement = 15;
 }
 
 // Every roster read is a WHOLE snapshot. A consumer rebuilds its registry from it and never applies
@@ -380,4 +380,15 @@ message StreamSessionAgentsRequest {
   string session_token = 1;
   string session_id = 2;
   string daemon_instance_id = 3;
+}
+
+// Where a roster agent's conversations work.
+//
+// SHARED is the session's own worktree — the agent edits the main agent's checkout, as a teammate
+// in the same tree would. CLONE gives each conversation a worktree and branch of its own, synced
+// with the main agent's files before every turn, whose work is read and taken with `subagent_diff`,
+// `subagent_pull` and `subagent_end`. An entry written before this field existed reads as SHARED.
+enum AgentPlacement {
+  AGENT_PLACEMENT_SHARED = 0;
+  AGENT_PLACEMENT_CLONE = 1;
 }

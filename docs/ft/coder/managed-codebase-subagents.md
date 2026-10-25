@@ -623,7 +623,7 @@ worktree without recording them in the ledger. Mechanics:
 
 ### A daemon-run conversation of a `clone`-placed agent
 
-An agent is attached with a **placement** (`types.AgentPlacement`): `shared` (the default) or
+An agent is attached with a **placement** (`session_agents.AgentPlacement`): `shared` (the default) or
 `clone` — see [session agent roster § Placement](../daemon/session-agent-roster.md#placement--shared-or-clone).
 A `shared` agent's conversations the daemon runs work the session worktree directly, as a teammate
 in the same checkout. A `clone`-placed agent's conversations each work on a conversation worktree of

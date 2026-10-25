@@ -1,9 +1,9 @@
-import { AgentPlacement } from "../../gen/types_pb";
+import { AgentPlacement } from "../../gen/session_agents_pb";
 
 /**
  * Where a picked agent's conversations work: `shared` is the session's own worktree, `clone` a
  * worktree and branch of each conversation's own. The pickers speak these two words; the wire speaks
- * `types.AgentPlacement`.
+ * `session_agents.AgentPlacement`.
  */
 export type AgentPlacementChoice = "shared" | "clone";
 

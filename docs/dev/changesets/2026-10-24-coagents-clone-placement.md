@@ -5,7 +5,7 @@
 tddy-coding-subagent, tddy-discovery, tddy-tools, tddy-agent-launch, tddy-acp-stub, tddy-web
 (+ regenerated TS).
 
-- Proto: `types.AgentPlacement`, `AttachSessionAgentRequest.placement = 5`,
+- Proto: `session_agents.AgentPlacement`, `AttachSessionAgentRequest.placement = 5`,
   `SessionAgentEntry.placement = 15`, `StartSessionRequest.clone_placed_agents = 44` (the subset of
   `specialized_agents`); `SessionAgentRecord.placement` (serde default `Shared`).
 - Open path: `clone_placement::open_session_clone` cuts the conversation worktree at open; a model

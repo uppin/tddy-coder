@@ -32,5 +32,5 @@ pub fn has_its_own_worktree(host: ConversationHost) -> bool {
 /// unknown number is not read as a clone, because a shared agent is the one that never has a
 /// worktree of its own to take.
 pub fn is_clone_placement(placement: i32) -> bool {
-    placement == tddy_service::proto::types::AgentPlacement::Clone as i32
+    placement == tddy_service::proto::session_agents_svc::AgentPlacement::Clone as i32
 }

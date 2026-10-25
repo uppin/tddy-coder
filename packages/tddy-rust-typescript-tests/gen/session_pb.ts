@@ -1458,7 +1458,7 @@ export type StartSessionRequest = Message<"session.StartSessionRequest"> & {
 
   /**
    * The subset of `specialized_agents` whose conversations each work on a clone of their own
-   * (`types.AgentPlacement.CLONE`); the rest work on the session's worktree.
+   * (`session_agents.AgentPlacement.CLONE`); the rest work on the session's worktree.
    *
    * @generated from field: repeated string clone_placed_agents = 44;
    */

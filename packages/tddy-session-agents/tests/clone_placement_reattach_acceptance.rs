@@ -13,10 +13,10 @@ use async_trait::async_trait;
 use tddy_core::{AgentKindRecord, SessionAgentRecord};
 use tddy_discovery::subagent::SubagentSession;
 use tddy_rpc::{Code, Request, Status};
+use tddy_service::proto::session_agents_svc::AgentPlacement;
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, SessionAgentRoster, SessionAgentService,
 };
-use tddy_service::proto::types::AgentPlacement;
 use tddy_session_agents::ports::{
     AdmittedAgent, AgentAdmission, AgentCatalog, AgentConversationPeers, AgentSessions,
     RosterBroadcast, SessionAgentPorts,

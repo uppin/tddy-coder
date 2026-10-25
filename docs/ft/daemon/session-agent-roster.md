@@ -253,7 +253,7 @@ interrupted and the process stopped — and `subagent_end` and a detach stop the
 ### Placement — shared or clone
 
 `AttachSessionAgentRequest.placement` (5) and `SessionAgentEntry.placement` (15) carry
-`types.AgentPlacement { SHARED = 0, CLONE = 1 }`; at rest `SessionAgentRecord.placement` defaults to
+`session_agents.AgentPlacement { SHARED = 0, CLONE = 1 }`; at rest `SessionAgentRecord.placement` defaults to
 `shared`, so a record written without it loads as shared.
 
 - **`shared`** — the agent's conversations work the session worktree, the same checkout as the main

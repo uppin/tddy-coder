@@ -5,7 +5,7 @@
 
 use tddy_core::{AgentPlacementRecord, SessionAgentRecord};
 use tddy_rpc::Status;
-use tddy_service::proto::types::AgentPlacement;
+use tddy_service::proto::session_agents_svc::AgentPlacement;
 
 use crate::agent_host_callbacks::AgentRoster;
 

@@ -15,10 +15,10 @@ use tddy_daemon_rpc::test_util::{test_service_with_coding_agent_launcher, TestDa
 use tddy_discovery::subagent::SubagentError;
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
+use tddy_service::proto::session_agents_svc::AgentPlacement;
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, OpenAgentConversationRequest, SessionAgentService as _,
 };
-use tddy_service::proto::types::AgentPlacement;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
 const SESSION_ID: &str = "1780828020298-clone";

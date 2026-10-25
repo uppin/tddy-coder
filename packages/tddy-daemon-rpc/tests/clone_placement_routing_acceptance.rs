@@ -29,11 +29,11 @@ use tddy_service::proto::exec_tools::{
     conversation_worktree_request::Op, ConversationWorktreeRequest, DiffOp, ExecToolService as _,
     PullRangeOp, RemoveOp,
 };
+use tddy_service::proto::session_agents_svc::AgentPlacement;
 use tddy_service::proto::session_agents_svc::{
     AttachSessionAgentRequest, OpenAgentConversationRequest, PromptAgentConversationRequest,
     SessionAgentService as _,
 };
-use tddy_service::proto::types::AgentPlacement;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
 const SESSION_ID: &str = "1780828020298-routing";
