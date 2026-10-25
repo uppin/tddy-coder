@@ -55,3 +55,10 @@ This file has **three** `#[cfg(test)]` modules (L2683, L2880, L4359). Seam A in 
 ## Measurement update 2026-10-22 — #provider-route 7/9 (#668)
 
 **Regressed, split deferred:** 2,598 → 2,620 production lines (2,598 is this count on the rebased base). `--opencode-cli-path` / `TDDY_OPENCODE_CLI` (`CoderArgs`, `Args`, the `From` impls), the `opencode` arm of `create_backend` and its path parameter, the factory's path clone, and `"opencode"` in `BUILTIN_BACKEND_AGENT_IDS`. The file is stack-shared — `#provider-route` 8/9 (#669) and 9/9 (#670) sit on this branch — so no decomposition here. Still unclaimed.
+
+## Measurement update 2026-10-25 — #start-parity 6/9 (#755)
+
+**Regressed, split deferred:** 2,620 → 2,626 production lines. `run_daemon` starts
+`session_participant::pending_question::spawn_pending_question_recorder` beside the ACP transcript
+writer (the recorder itself is the new `session_participant/pending_question.rs`, 76). Already over
+budget before this PR, which did not push it past; recorded, not split, by developer instruction.
