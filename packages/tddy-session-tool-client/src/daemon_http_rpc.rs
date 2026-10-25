@@ -3,7 +3,7 @@
 //! RPCs through the local relay daemon, which forwards them to the codebase daemon named by each
 //! request's `daemon_instance_id`.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md
+//! Feature: docs/ft/daemon/remote-codebase-mode.md § Coding subagents on the codebase host
 
 use async_trait::async_trait;
 use tddy_rpc::{Code, RpcClientTransport, Status};

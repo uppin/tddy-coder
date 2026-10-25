@@ -1215,7 +1215,11 @@ called achieves the same guarantee on the path the call already takes.
 - **Migrating `specialized_agents` in existing `.session.yaml` files.** They load with an empty
   roster.
 - **A seeded `fastcontext.yaml`.** Removing the builtin means removing it, not relocating it.
-- **Rosters on `workspace` sessions.** A session with no agent has no roster.
+- **Rosters on `workspace` sessions, other than coding agents of the serving daemon.** A workspace
+  session's roster holds only `coding_agent` entries owned by the daemon serving it — the
+  remote-codebase mode's subagents ([remote-codebase-mode.md § Coding subagents on the codebase
+  host](remote-codebase-mode.md#coding-subagents-on-the-codebase-host)); a workspace session started
+  without agents has no roster.
 - **Re-resolving a def after attach.** Editing a def does not change a running session's roster.
 
 ## Related documentation

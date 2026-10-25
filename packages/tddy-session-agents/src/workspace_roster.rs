@@ -1,7 +1,7 @@
 //! Which agents a `workspace` session's roster may hold — the remote-codebase mode's coding
 //! subagents, run on the codebase host itself.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md
+//! Feature: docs/ft/daemon/remote-codebase-mode.md § Coding subagents on the codebase host
 
 use tddy_core::AgentKindRecord;
 use tddy_rpc::Status;

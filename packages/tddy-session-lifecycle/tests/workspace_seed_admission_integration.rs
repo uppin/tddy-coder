@@ -1,9 +1,8 @@
 //! Integration tests: a workspace session's seeded roster admits only the coding agents of the
 //! daemon serving it.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md ("A workspace session refuses
-//! a `model` agent or an agent owned by another daemon, naming it.").
-//! Changeset: docs/dev/1-WIP/2026-10-24-coagents-remote-codebase.md (workspace-session roster admission).
+//! Feature: docs/ft/daemon/remote-codebase-mode.md § Coding subagents on the codebase host ("Who may be on a
+//! workspace roster").
 //!
 //! A `StartSession` for a `workspace` session seeds its roster from `specialized_agents` before the
 //! worktree is cut. Each reference resolves against this daemon or a peer in the common room, so a

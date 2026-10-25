@@ -16,8 +16,7 @@
 //! service, so the routing that decides the hop is the production code. The LiveKit transport is not
 //! run here: the two-daemon LiveKit suite is not part of this change's local run.
 //!
-//! Changeset: docs/dev/1-WIP/2026-10-24-coagents-remote-codebase.md (Remote placement)
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md
+//! Feature: docs/ft/daemon/remote-codebase-mode.md § Coding subagents on the codebase host ("Where the agent runs").
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

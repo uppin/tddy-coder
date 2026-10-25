@@ -1,7 +1,7 @@
 //! The roster stream opens over the daemon-HTTP transport and yields the roster the daemon holds.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md § The roster stream
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md
+//! Feature: docs/ft/daemon/remote-codebase-mode.md § Coding subagents on the codebase host
 //!
 //! The server is the codebase daemon's own family-B mount, `DaemonSessionHost::session_agents_entry`
 //! (the entry `runtime::mount_entries` registers on `/rpc`), served on a real loopback port behind

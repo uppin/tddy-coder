@@ -22,7 +22,7 @@ impl LaunchSessions {
     /// The records a workspace start seeds its roster with. A workspace session's roster holds the
     /// coding agents of the daemon serving it and no others, so each record is admitted to that
     /// roster here: a model agent, or an agent another daemon owns, is refused naming it
-    /// (docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md).
+    /// (docs/ft/daemon/remote-codebase-mode.md § Coding subagents on the codebase host).
     ///
     /// Admission applies only when `split_agent` is None. A split start is exempt, and so is the
     /// jailed-codebase start, which carries the same placement: the PRD keeps split sessions as

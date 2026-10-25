@@ -44,11 +44,30 @@ request through `conversation_op_request` from an `Op`. All of them live in `src
 and the transports' request-taking cores (`dispatch_request_via_*`) are shared with the
 `dispatch_via_*` entry points.
 
-Over HTTP the request travels as Connect JSON built by `connect_json_body`: the request's fields, and
-the chosen operation as a key of its own — `{"pull": {}}`, `{"remove": {}}`, `{"reset": {"commit"}}`,
-`{"diff": {"from", "to"}}`, `{"pull_range": {"from", "to", "already_pulled"}}`, `{"sync": {}}`. That
-encoding is hand-written and not yet verified against a live daemon over HTTP; see the backlog entry
-*The `ConversationWorktree` call over HTTP is unverified*.
+Over HTTP the request travels as protobuf through `DaemonHttpRpcClient` (below), the encoding the
+daemon's `/rpc` mount decodes. A reply whose `result_json` is empty is an error, `the reply carries no
+result_json`, on every transport: proto3 cannot tell an absent string from an empty one, and the daemon
+always answers with a non-empty JSON document.
+
+## The daemon-HTTP client
+
+`daemon_http_rpc::DaemonHttpRpcClient` is a `tddy_rpc::RpcClientTransport` over the daemon's HTTP
+`/rpc` endpoint, in the Connect protocol: unary calls `POST <base>/<service>/<method>` as
+`application/proto`, server streams as enveloped `application/connect+proto` (flag `0x00` a message,
+`0x02` the end-of-stream trailer, which names the error a stream ended in). Client and bidirectional
+streams are `Unimplemented`. Its error mapping names no code it was not given: a Connect error object
+(`{"code": "not_found", …}`) is that code; a non-200 body of any other shape is `Unknown` with the HTTP
+status and body; a stream that ends without its end-of-stream envelope is `Unavailable`; an envelope
+with an unknown flags byte is `Internal`; a request that got no answer is `Unavailable`. One
+`reqwest::Client` is shared by every call of a client, so its connections are pooled.
+
+Every daemon-HTTP arm goes through it — `ExecuteTool`, `ListExecTools`, `ConversationWorktree` — and
+`tddy-discovery` hands it to the roster stream and the conversation link, so in remote-codebase mode the
+relay carries `StreamSessionAgents` and the conversation RPCs to the daemon each request's
+`daemon_instance_id` names ([remote-codebase-mode.md § Coding subagents on the codebase
+host](../../docs/ft/daemon/remote-codebase-mode.md#coding-subagents-on-the-codebase-host)). The wire
+tests serve the daemon's real `/rpc` router (`tddy_connectrpc::connect_router`, served by `axum`, both
+dev-dependencies) with a recording service behind the generated handlers (`tests/support/mod.rs`).
 
 ## Which exec tools the session is offered
 
@@ -75,7 +94,7 @@ have pulled the TUI into every in-jail binary that dispatches a tool call.
 arm — `LiveKitRoomKey`, `LiveKitRoomCache`, `LiveKitSession`, `room_session_via`,
 `install_room_connector` and `dispatch_via_livekit` — is `room_transport.rs`; the sandbox IPC, daemon
 UDS, daemon HTTP, plain and streaming RPC arms, and the roster's `livekit_session`, are
-`rpc_transports.rs`. Both are re-exported from the crate root, so every path a caller names is
+`rpc_transports.rs`; the daemon-HTTP Connect client is `daemon_http_rpc.rs` (public). Both are re-exported from the crate root, so every path a caller names is
 `tddy_session_tool_client::…`. The conversation calls are `conversation.rs`.
 
 ## The room transport is installed, not linked

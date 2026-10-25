@@ -1,7 +1,7 @@
 //! In remote-codebase mode `tddy-tools` reaches its daemon through the local relay's HTTP `/rpc`
 //! (`TDDY_REMOTE_DAEMON_URL`), and the roster and conversation RPCs must travel that way too.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md
+//! Feature: docs/ft/daemon/remote-codebase-mode.md § Coding subagents on the codebase host
 
 use serial_test::serial;
 use tddy_tools::session_agents::AgentConversationLink;

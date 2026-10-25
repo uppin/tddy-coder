@@ -3,7 +3,7 @@
 //!
 //! The daemon is a raw TCP stub that records what it was asked and answers bytes the test chose.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md
+//! Feature: docs/ft/daemon/remote-codebase-mode.md § Coding subagents on the codebase host
 
 use std::sync::{Arc, Mutex};
 

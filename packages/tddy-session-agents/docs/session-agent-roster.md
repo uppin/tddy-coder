@@ -313,6 +313,16 @@ session's codebase is). It asks the launcher for the MCP servers **before** the 
 refusal starts nothing; a managed `claude-acp` launch carries `withdrawal_session_meta` as
 `OpenSession.meta`. A daemon with no launcher installed refuses with `FAILED_PRECONDITION`.
 
+### Workspace rosters
+
+`workspace_roster::workspace_roster_admits(record, local_daemon_instance_id)` is the admission rule of a
+`workspace` session's roster ([Remote-codebase mode § Coding subagents on the codebase
+host](../../../docs/ft/daemon/remote-codebase-mode.md#coding-subagents-on-the-codebase-host)): a
+`coding_agent` record owned by the serving daemon is admitted; a `model` record, or one owned by another
+daemon, is `INVALID_ARGUMENT` naming its `agent_id`. Its caller is `tddy-agent-launch`'s
+`LaunchSessions::admitted_workspace_seed`, which applies it to a non-split workspace start's seed before
+the session is written.
+
 ## The sandbox-IPC bridge
 
 A managed-codebase session's agent runs in a jail, and its tool calls reach the
