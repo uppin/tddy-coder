@@ -1,7 +1,7 @@
 //! Coding backend abstraction for LLM-based coders.
 
 mod acp;
-mod acp_updates;
+pub mod acp_driver;
 mod claude;
 mod codex;
 pub mod codex_acp;

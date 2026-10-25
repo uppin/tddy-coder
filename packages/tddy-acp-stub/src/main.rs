@@ -12,6 +12,7 @@ use agent::StubAgent;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
 mod agent;
+mod recorder;
 mod scenario;
 
 use scenario::Scenario;
