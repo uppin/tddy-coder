@@ -47,3 +47,4 @@ What remains is roughly 35 lines of "resolve, stamp, route".
 2026-09-26 — Counted from the diff and confirmed against master that ~114 of the 120 lines predate
 PR #545. Confirmed the three seams are contiguous and reference no state outside their own
 arguments.
+| 2026-10-25 | 122 → 148 raw | — | 5 | **worse** by 26 in PR #727 (`#coagents` 8/8): a deferred turn writes the conversation's status row (awaiting, running, completed) and records the request it holds for the user. Hand-counted by brace matching. Deferred to the `#coagents` sweep node by the developer (2026-10-25) |

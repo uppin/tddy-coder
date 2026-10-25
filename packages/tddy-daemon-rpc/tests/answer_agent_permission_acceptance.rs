@@ -1,7 +1,7 @@
 //! `AnswerAgentPermission` — the web's answer to a permission request the main agent deferred to
 //! the user. A new write path from the browser, so who may call it, and on what, is pinned first.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use tddy_daemon_rpc::test_util::test_service;
 use tddy_rpc::{Code, Request};

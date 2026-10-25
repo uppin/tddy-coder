@@ -2,7 +2,7 @@
 //! that holds the request, and where its outcome goes: the call that deferred the request, not the turn that
 //! deferred it. A held answer may be for a request the main agent kept, so "the turn that deferred it" was loose.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use tddy_discovery::subagent::answer_delivered_while_held;
 

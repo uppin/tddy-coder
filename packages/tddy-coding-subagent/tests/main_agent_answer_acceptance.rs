@@ -1,7 +1,7 @@
 //! Which side of a parked permission request the caller may answer: a request the turn holds for the
 //! user is recorded as deferred to the user, and a request the main agent keeps is not.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::path::PathBuf;
 use std::time::Duration;

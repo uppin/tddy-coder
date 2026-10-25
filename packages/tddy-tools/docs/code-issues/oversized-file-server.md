@@ -77,3 +77,4 @@ is wrong and 2,488 is the real figure. Confirmed the subagent block is contiguou
 (`SUBAGENT_PROMPT_GRACE`) through `:2487` (end of `subagent_tool_router`) with no interleaved
 unrelated items, so the seam named above is real. Did **not** verify that extracting it passes
 `restructure check` — that has to be run before anyone relies on the estimate.
+| 2026-10-25 | 2,970 → 2,984 | **worse** by 14 in PR #727 (`#coagents` 8/8), by the module-level `#[cfg(test)]` rule (wc 4,039 → 4,053): `subagent_resume_tool` reads `deferPermissionToUser`, `take_a_turn` reports `awaitingUser`, and the schema registers the argument; the parse and the property live in `permission_deferral_arg.rs`. Not split: deferred to the `#coagents` sweep node by the developer (2026-10-25) |

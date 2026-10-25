@@ -7,7 +7,7 @@
 //!
 //! Written only for turns that hand a request to the user. A turn that does not, writes nothing here.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::io;
 use std::path::Path;
@@ -41,7 +41,8 @@ pub(crate) enum ConversationStatus {
 // TODO(web-approvals): the row is durable only. It is not published on the daemon's AgentActivityHub, so a live
 // stream shows the waiting state on the next replay, not when it starts. The raw activity snapshot
 // (`tddy-session-activity`'s `StreamAgentActivity`) also returns the row as a tool call named `subagent_conversation`,
-// which a consumer of raw activity has to tell apart from the agent's own calls.
+// which a consumer of raw activity has to tell apart from the agent's own calls. Backlog:
+// docs/dev/todo/2026-10-25-conversation-status-row-is-durable-only.md
 pub(crate) fn record(session_dir: &Path, conversation_id: &str, status: ConversationStatus) {
     if let Err(e) = append(session_dir, conversation_id, status) {
         log::warn!(

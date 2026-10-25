@@ -5,7 +5,7 @@ import type { PendingPermission } from "./PermissionRequestEntry";
  * `permission:<requestId>`, whose input carries the request — its title, its options and whether the
  * main agent deferred it to the user.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+ * Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
  */
 
 /** The `tool_call_id` prefix of a transcript entry that records a permission request. */

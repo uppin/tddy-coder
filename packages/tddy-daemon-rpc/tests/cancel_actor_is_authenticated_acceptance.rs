@@ -4,7 +4,7 @@
 //! The coding agent is `tddy-acp-stub` under a scenario that asks one permission. The setup is the one
 //! `defer_permission_wire_acceptance.rs` uses, copied rather than shared so each file reads alone.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

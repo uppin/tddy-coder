@@ -194,6 +194,17 @@ noting the model requests seen, so the order reset → sync → first model call
 refusal of an answer (it never asks). Product rules:
 [managed-codebase subagents](../../../docs/ft/coder/managed-codebase-subagents.md#a-coding-subagents-permission-request-is-the-callers-to-answer).
 
+A caller may instead hand the request to the user: `TurnRequest::deferring_permission_to_user`
+(encoded on the link as `defer_permission_to_user`) holds the turn until either side answers, and
+`PendingTurns::mark_awaiting_user` makes the pending JSON say `awaitingUser`. `subagent/permission.rs`
+also owns the second resolver: `PermissionAnswering` (`answer_as`, `answered_by`,
+`deferred_to_user`, `pending_request`) and `AnsweredBy { MainAgent, User(login) }`, plus the
+`permission:<requestId>` transcript id and the answered record's output shape. A session exposes its
+handle through `SubagentSession::permission_answerer` (default `None`). In `subagent_runtime::run_turn`
+a permission answer to a remote conversation whose session a deferred turn holds is sent to the
+daemon without waiting on that lock (`RemoteConversationHandle::take_turn`). Product rules:
+[agent activity pane § The user answers a deferred permission request](../../../docs/ft/web/agent-activity-pane.md#the-user-answers-a-deferred-permission-request-added-2026-10-25).
+
 ## Features
 
 `livekit` is **off by default** and forwards to `tddy-session-tool-client`'s. A jail that reaches its

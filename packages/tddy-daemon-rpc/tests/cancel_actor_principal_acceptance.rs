@@ -8,7 +8,7 @@
 //! The setup is `cancel_records_refusal_acceptance.rs`'s, over a host that signs real tokens, copied
 //! rather than shared so each file reads alone.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

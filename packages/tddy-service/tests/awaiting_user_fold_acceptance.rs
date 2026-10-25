@@ -1,7 +1,7 @@
 //! A subagent conversation's entry reads as waiting for the user only while a permission request is held for
 //! the user. A request the main agent answers itself is not awaiting the user, and a finished turn is completed.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use tddy_core::agent_activity::{AgentActivityRecord, STATUS_COMPLETED, STATUS_RUNNING};
 use tddy_service::proto::acp::ToolCallStatus;

@@ -493,6 +493,9 @@ Clicking it opens **the conversation itself**.
   agent id, since `AgentActivityRecord` carries no label.
 - Status follows the last call: `subagent_prompt`/`await` running → in progress,
   `permission_requested` → pending ("waiting for permission"), end/cancel → completed, error → failed.
+  A conversation whose turn waits on a request the main agent handed to the user reads
+  `awaiting_user` ("waiting for you") — see
+  [The user answers a deferred permission request](#the-user-answers-a-deferred-permission-request-added-2026-10-25).
 - The web projects it as `ChatMessage.from: "subagent"` (`data-message-kind="subagent"`), clickable in
   `AgentTranscriptView` via `onSubagentClick`.
 
@@ -530,6 +533,105 @@ instead of a transcript — told apart by the replay's `NOT_FOUND`, not by a fie
 - Live positions equal the append count; they align with replay positions unless one conversation
   sends two `tool_call` frames with the same id. A recorder more than 1024 updates behind fails the turn.
 
+## The user answers a deferred permission request (Added: 2026-10-25)
+
+A coding subagent's permission request is the main agent's to answer
+([managed-codebase subagents](../coder/managed-codebase-subagents.md#a-coding-subagents-permission-request-is-the-callers-to-answer)).
+The main agent may instead **hand it to the user**: the request then shows in the subagent's
+conversation dialog with its options as buttons, the user's choice is delivered to the subagent, and
+the main agent collects the rest of the turn with `subagent_await`. Buttons appear only after the main
+agent defers, so the decision stays the main agent's unless it gives it away.
+
+### Deferring
+
+- `subagent_resume { sessionId, deferPermissionToUser: "<requestId>" }` names the pending request
+  (`permissionRequest.requestId` from the yielded turn). It returns
+  `{ responseId, pending: true, awaitingUser: true }`; `subagent_await { responseId }` reports
+  `awaitingUser: true` while the user has not answered, then the continuation. `awaitingUser` stays
+  true until the turn ends, including the moment between the user's answer and the continuation.
+- `deferPermissionToUser` together with `permission` is refused, naming both. A deferral naming a
+  request that is not the pending one is refused, naming the pending one.
+- Over the wire the deferral is `ResumeAgentConversationRequest.defer_permission_to_user` (field 11,
+  `optional string`).
+
+### The first answer wins
+
+- The main agent may still answer a request it deferred (`subagent_resume` with `permission`). Its
+  answer is **not queued** behind the deferred turn, which holds the conversation until the request is
+  answered: the answer is delivered at once through the conversation's answering handle, and that
+  call is refused with `FAILED_PRECONDITION` saying so — "the turn holding it carries on, and its
+  outcome goes to the call that deferred the request."
+- Whichever answer reaches the parked request first is delivered; a later one is refused naming who
+  answered (`already answered by alice`, `already answered by the main agent`).
+
+### The answer route — `AnswerAgentPermission`
+
+`SessionAgentService.AnswerAgentPermission { session_token, session_id, daemon_instance_id,
+conversation_id, request_id, option_id | cancelled } → { answered_by }`, routed on
+`daemon_instance_id` like the service's other calls.
+
+- Authenticated first (`UNAUTHENTICATED` otherwise), and answered under the caller's GitHub login.
+- **The session agent's own token is refused** (`PERMISSION_DENIED`), before anything is routed or
+  forwarded: the main agent answers through `subagent_resume`, never as the user.
+- The conversation must be open on the session the request names — otherwise `NOT_FOUND` naming it.
+  A conversation id is host-wide, so an id another session opened is not held here.
+- Only a request the main agent **deferred** may be answered here (`FAILED_PRECONDITION` otherwise):
+  a request the main agent keeps is its own to answer.
+- A conversation whose turn loop runs on another daemon is answered there:
+  `AgentConversationPeers::answer_permission` forwards it to the owning daemon, and the owner's answer
+  or refusal is returned as it is.
+- The answer reaches the parked request through the handle captured when the conversation opened
+  (`SubagentSession::permission_answerer`), not through the conversation's lock, so it is delivered
+  while the deferred turn is still waiting on it.
+
+### Cancelling a conversation that holds a deferred request
+
+`CancelAgentConversation` records the pending request as **answered by whoever cancelled** before it
+interrupts the turn. The daemon derives that actor from the caller's token — a request carries no
+actor (`cancelled_by`, field 5, is reserved): a token minted for the session's agent carries the agent
+principal ([session tokens](../../../packages/tddy-github/docs/session-token.md)) and is recorded as
+`main-agent`; any other authenticated token is recorded under its login. A reopened dialog then shows
+"Cancelled by <actor>" with no options, and `AnswerAgentPermission` answers `NOT_FOUND`, since the
+conversation is closed. The web's cancel sends no actor; with no one signed in it is refused and sends
+nothing.
+
+### Transcript and status
+
+- The pending request is recorded in the conversation's transcript as a `tool_call` with id
+  `permission:<requestId>`, whose input names the options and `deferredToUser`. Its answer is written
+  as a **completed** `tool_call` under the same id — the web keeps the latest `tool_call` of an id and
+  ignores `tool_call_update` — with raw output `{ answeredBy, optionId }` or
+  `{ answeredBy, cancelled: true }`. `answeredBy` is the user's login, or `main-agent`.
+- While a deferred turn waits, the daemon writes **one status row per conversation** into the session's
+  activity log: call id `subagent-conversation:<conversation id>`, tool name `subagent_conversation`,
+  running with `{ awaitingUser: true }` when the deferral is accepted, running without it once the
+  answer is delivered, completed at turn end. The fold lets a running row decide the bubble's status;
+  once it is completed, the newest row by time decides. Only a deferred request folds to
+  `awaiting_user`; a request the main agent must answer reads in progress.
+
+### In the conversation dialog
+
+`SubagentConversationDialog` lists the transcript's permission requests
+(`subagent-permission-requests`), each a `PermissionRequestEntry` (`permission-request`): the tool
+call's title and, for a deferred request not yet answered, one button per option
+(`permission-option-<optionId>`). Choosing one sends `AnswerAgentPermission` through
+`useAnswerAgentPermission`, addressed to the **roster half** that holds the conversation
+(`rosterHalfOf(session)` — that half's session id and daemon), and the entry records the choice
+(`permission-answered`: "Answered by <login>"). An entry the transcript records as answered or
+cancelled offers no options again. A request not deferred to the user shows no buttons. When the
+owning daemon is unknown the entry says it cannot be answered (`permission-cannot-answer`).
+
+### Known limits
+
+- The status row is durable only: it is not published on the daemon's activity hub, so a client
+  following the session live sees "waiting for you" at its next replay snapshot, and the raw
+  `StreamAgentActivity` snapshot returns it as a tool call named `subagent_conversation`
+  ([`docs/dev/todo/2026-10-25-conversation-status-row-is-durable-only.md`](../../dev/todo/2026-10-25-conversation-status-row-is-durable-only.md)).
+  A refused deferral shows running-with-awaiting for a moment, then completed.
+- No notification (Telegram, desktop) for a deferred request, and no answering from the Agents tab.
+- Proven over a stub coding agent and in-memory backends; no test runs two real daemons for the
+  forwarded answer.
+
 ## Scope
 
 - **In scope:** the `agent-activity.jsonl` log + shared `AgentActivityRecord` (in `tddy-core`);
@@ -560,8 +662,13 @@ instead of a transcript — told apart by the replay's `NOT_FOUND`, not by a fie
   never flashes a skeleton; running calls excluded from the body cache in both directions.
 - **In scope (Added: 2026-10-24):** one bubble per subagent conversation, the conversation dialog, the
   per-conversation transcript and the `conversation_id` axis on the three replay requests.
-- **Out of scope (Added: 2026-10-24):** answering a permission request from the web (next `#coagents`
-  node); recording in-jail conversations; the operator's Agents-tab conversation tabs.
+- **In scope (Added: 2026-10-25):** the main agent handing a subagent's permission request to the
+  user (`deferPermissionToUser`), `AnswerAgentPermission` with its owner forward, the answer entry in
+  the conversation dialog, the `awaiting_user` bubble status, and cancels recorded under the actor the
+  token names.
+- **Out of scope (Added: 2026-10-24):** recording in-jail conversations; the operator's Agents-tab
+  conversation tabs. **(Added: 2026-10-25):** notifications for a deferred request; answering one from
+  the Agents tab.
 - **Out of scope (Added: 2026-07-26):** a retry **affordance** on a failed lookup (closing and
   reopening the row already retries); a per-session cap on cached bodies (the `MAX_SESSIONS` session
   LRU is the only bound); prefetching bodies for rows the operator has not opened.

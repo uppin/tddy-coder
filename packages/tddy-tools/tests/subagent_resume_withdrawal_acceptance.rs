@@ -6,7 +6,7 @@
 //! while a request waits for the user, and refuses an answer at once, as the daemon does while the
 //! request is held. The conversation is opened the way a remote one is, with its daemon handle.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

@@ -1,7 +1,7 @@
 //! A permission request the main agent handed to the user: the turn waits for the user's answer,
 //! and the first answer — the user's or the main agent's — is the one the agent receives.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::path::PathBuf;
 use std::time::Duration;

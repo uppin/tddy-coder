@@ -1,7 +1,7 @@
 //! A permission request's record on the conversation's update stream: pending while a deferred turn waits on
 //! it, and completed — naming who answered and with which option — once it is answered.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::path::PathBuf;
 use std::time::Duration;

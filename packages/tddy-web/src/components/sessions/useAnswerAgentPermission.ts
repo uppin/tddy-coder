@@ -11,7 +11,7 @@ import type { RosterHalf } from "./sessionRosterHalf";
  * answer the daemon accepted for this caller: the option sent and the login it recorded it under. A
  * refusal is kept as the daemon's own words and is never turned into an answer.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+ * Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
  */
 
 /** What an entry says when its owning daemon is not known: nothing can be answered from here. */

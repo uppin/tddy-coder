@@ -38,7 +38,7 @@ export interface PermissionRequestEntryProps {
  * The request's tool and, when the main agent deferred it to the user, one button per option; a
  * choice is sent with `AnswerAgentPermission` and the entry then records it and who made it.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+ * Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
  */
 export function PermissionRequestEntry({
   conversationId,

@@ -4,7 +4,7 @@
 //! a conversation can expose its parked requests without depending on this crate. They are
 //! re-exported here, where they have always been named.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 pub use tddy_discovery::subagent::{AnsweredBy, PermissionAnswering};
 

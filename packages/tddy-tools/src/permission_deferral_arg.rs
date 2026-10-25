@@ -1,7 +1,7 @@
 //! `subagent_resume`'s `deferPermissionToUser` argument: hand a coding subagent's pending
 //! permission request to the user instead of answering it.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use crate::permission_answer_arg::PERMISSION_ARG;
 

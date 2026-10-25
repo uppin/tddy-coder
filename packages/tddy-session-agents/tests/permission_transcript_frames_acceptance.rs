@@ -1,7 +1,7 @@
 //! A turn that paused on a permission request records it as a tool call the web reads by its id, with an
 //! input that says whether the main agent handed the request to the user.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{

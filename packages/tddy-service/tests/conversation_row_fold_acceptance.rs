@@ -2,7 +2,7 @@
 //! conversation waiting on the user reads as pending whatever the main agent's calls say. Once the conversation
 //! has completed, the newest record by time decides, so a later call of the main agent wins.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use tddy_core::agent_activity::{AgentActivityRecord, STATUS_COMPLETED, STATUS_RUNNING};
 use tddy_service::acp_replay::frame_for_agent_activity;

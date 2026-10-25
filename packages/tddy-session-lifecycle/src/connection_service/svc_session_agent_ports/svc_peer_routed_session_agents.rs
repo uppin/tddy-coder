@@ -45,8 +45,8 @@ use tddy_session_agents::SessionAgentServiceImpl;
 
 use super::super::DaemonSessionHost;
 
-/// The crate's ten handlers, with the eight routed ones answered by the daemon that holds the
-/// roster.
+/// The crate's eleven handlers, with the nine routed ones answered by the daemon that holds the
+/// roster or the conversation.
 ///
 /// The wrapper is *this* side of the boundary for the reason node 6's `PeerRoutedSessionFiles`
 /// gives: it implements the generated service trait rather than wrapping the entry's encoded

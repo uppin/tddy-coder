@@ -5,7 +5,7 @@
 //! The daemon is a fake `RpcClientTransport` that records each cancel it is sent. The setup mirrors
 //! `subagent_resume_defer_acceptance.rs`, copied rather than shared so each file reads alone.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::sync::{Arc, Mutex};
 

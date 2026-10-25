@@ -5,7 +5,7 @@
 //! carries the answer to the owner through the peers port and returns what the owner recorded,
 //! rather than refusing an answer it cannot deliver itself.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

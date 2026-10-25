@@ -31,6 +31,7 @@ v2.<base64url(json claims)>.<base64url(ed25519 signature)>
 | `avatar_url`, `name` | string | Display fields |
 | `iat`, `exp` | u64 | Issued-at and expiry, Unix seconds |
 | `kind` | `"access"` \| `"refresh"` | Which credential this is |
+| `principal` | `"agent"`, or absent | Absent for a user's token. `"agent"` (`TokenPrincipal::Agent`) marks a token minted for a session's agent, which a daemon then tells apart from the user it names. Optional on the wire (`serde(default, skip_serializing_if = "Option::is_none")`): a user's token is byte-for-byte what it was without the field, a token minted before it existed reads as a user's, and a verifier that predates it ignores it. The signature covers it; an unknown value is `Malformed` |
 
 ## Key id
 
@@ -58,6 +59,13 @@ general seam, with a clock argument so a test can mint an already-expired token 
 |---|---|---|
 | access (`SESSION_TOKEN_TTL`) | 5 minutes | Every RPC |
 | refresh (`REFRESH_TOKEN_TTL`) | 7 days, slid forward on each refresh | `RefreshSession` only |
+
+`mint_agent(user, ttl)` mints an access token for `user` that carries `principal: "agent"`. Every
+credential handed to an agent goes through it (`tddy-session-split`'s `mint_agent_session_token`: the
+local coding agent's tool server, the split agent, the sandboxed-codebase and project-home agents);
+the local CLI's `MintLocalToken` and the room poller's token stay user tokens. A daemon reads the
+principal off a token its own keys verify, and only then treats the caller as the agent — an agent
+token no trusted key signed is unauthenticated.
 
 The `kind` is enforced in both directions by the callers: a refresh token never authenticates an RPC,
 and an access token never mints.

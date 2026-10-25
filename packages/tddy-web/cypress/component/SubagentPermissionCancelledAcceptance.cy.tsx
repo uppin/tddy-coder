@@ -3,7 +3,7 @@
  * offers no option, however the conversation is reopened. A request answered with an option still
  * names the option and the user who chose it.
  *
- * Feature: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+ * Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
  */
 
 import React from "react";

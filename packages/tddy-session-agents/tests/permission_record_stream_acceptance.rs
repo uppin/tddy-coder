@@ -2,7 +2,7 @@
 //! pending while it is held for the user, then the answer replacing it — and the detail the web reads for the
 //! request is the answer's, not the first record's.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::path::Path;
 use std::sync::Arc;

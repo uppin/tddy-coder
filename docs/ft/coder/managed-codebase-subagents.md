@@ -30,7 +30,7 @@ See [Session agent roster § Coding agents](../daemon/session-agent-roster.md#co
 | `session/new` (`NewSessionRequest`)               | `subagent_new_session` — input `{ agent?, sessionId?, cwd? }` → `{ sessionId }` |
 | Client-chosen `SessionId`                         | `sessionId` input — the **main agent** decides the conversation id; a fresh id is generated only when omitted |
 | `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock], graceMs?, maxTurns?, syncWorktree? }` → the turn's outcome, or `{ responseId, pending: true }` once `graceMs` elapses |
-| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, replacement?, permission?, resetWorktree?, syncWorktree?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that resumes a yielded conversation with the caller's replacement call and result |
+| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, replacement?, permission?, deferPermissionToUser?, resetWorktree?, syncWorktree?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that resumes a yielded conversation with the caller's replacement call and result |
 | *(no ACP counterpart)*                            | `subagent_await` — input `{ responseId, timeoutMs? }` → the same outcome, or `{ responseId, pending: true }` again |
 | `PromptResponse.stopReason`                       | output field `stopReason`: `"end_turn"` \| `"max_turn_requests"` \| `"cancelled"` \| `"context_exhausted"` |
 | Response `content` (`ContentBlock[]`)             | output field `content`: `[{ "type": "text", "text": "..." }]` |
@@ -316,6 +316,12 @@ subagent is paused, not finished — its ACP prompt stays in flight, waiting on 
   `permission_requested` with a fresh `requestId` — under the grace period and `responseId` /
   `subagent_await` like any turn. The decision is the caller's: it may decide on its own or ask the
   user first; `subagent_resume`'s description says so.
+- **Or hands it to the user.** `subagent_resume { sessionId, deferPermissionToUser: "<requestId>" }`
+  shows the request with its options in the subagent's conversation dialog on the web and returns
+  `{ responseId, pending: true, awaitingUser: true }`; `subagent_await` returns the continuation once
+  the user answers. The caller may still answer it itself meanwhile — the first answer wins, and the
+  other is refused naming who answered. Combined with `permission` in one call it is refused. See
+  [Agent activity pane § The user answers a deferred permission request](../web/agent-activity-pane.md#the-user-answers-a-deferred-permission-request-added-2026-10-25).
 - **Always yield.** There is no per-entry auto-allow list.
 - **One question at a time.** Requests the agent raises while one is pending queue behind it, oldest
   first. While one is pending, `subagent_prompt` is refused naming its `requestId`; so is a resume
@@ -986,6 +992,9 @@ end** (this needs a sandbox the development host cannot start).
 - [x] A resume naming another request id, or with no permission, is refused naming the pending one.
 - [x] `subagent_cancel` while pending returns `cancelled` and the agent sees the request cancelled.
 - [x] The same holds when the conversation is served by another daemon — proven in two halves: the in-jail client's frame parse and resume encode, and the daemon's frames.
+- [x] `deferPermissionToUser` returns a pending outcome marked `awaitingUser`, and `subagent_await` returns the continuation once the user answers.
+- [x] A deferral combined with `permission` is refused naming both.
+- [x] The caller may still answer a deferred request; its answer is delivered at once and its call refused as delivered; the first answer wins and a later one is refused naming who answered.
 
 ## Non-goals (out of scope for v1)
 

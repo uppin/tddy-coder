@@ -1,6 +1,6 @@
 //! `subagent_resume`'s `deferPermissionToUser` argument.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use tddy_tools::permission_deferral_arg::parse_permission_deferral;
 

@@ -5,7 +5,7 @@
 //! deferred request waits for its answer. What is wrong-able here is what this process sends and
 //! what it makes of the call that is still pending.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

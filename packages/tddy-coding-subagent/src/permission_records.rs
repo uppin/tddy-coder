@@ -1,7 +1,7 @@
 //! The records a coding subagent's permission request leaves on its update stream: the request, pending while a
 //! turn holds it for the user, and its answer, once one is given.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
 
 use tddy_agent_backend::{AcpToolStatus, AcpUpdate, AcpUpdateSink};
 use tddy_discovery::subagent::{
