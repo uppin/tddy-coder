@@ -2,7 +2,7 @@
  * Acceptance: a session terminal never paints across a gap in its stream — it asks for a fresh
  * snapshot on the same stream instead.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-25-terminal-resync.md
+ * Feature: docs/ft/daemon/terminal-sessions.md (Resync at any point)
  *
  * Driven through the real `GrpcSessionTerminal` over an in-memory `TerminalSessionService` whose bidi
  * `streamSessionTerminalIO` records every message of every open and lets the test push frames.

@@ -97,8 +97,6 @@ export function openDaemonTerminalFeed({
   // Set when a frame did not continue the screen: the request half sends one `requestSnapshot`
   // message on this same stream, and the guard drops every delta until the snapshot lands.
   let snapshotWanted = false;
-  // A request is outstanding until a snapshot arrives, so a run of gapped frames asks once.
-  let snapshotAsked = false;
   const continuity = new TerminalFrameContinuity();
 
   const stream: TerminalStream = {
@@ -207,16 +205,15 @@ export function openDaemonTerminalFeed({
         // A frame that does not continue what is painted is dropped, never drawn over a screen it
         // was not computed against; the first one asks for a fresh snapshot, and the daemon's
         // answer re-anchors the guard.
-        if (continuity.accept(output) === "gap") {
-          if (!snapshotAsked) {
-            snapshotAsked = true;
+        const action = continuity.route(output);
+        if (action !== "paint") {
+          if (action === "drop-and-ask") {
             snapshotWanted = true;
             wake();
           }
           dTerm("gap — dropping frame and asking for a snapshot start=%s end=%s", output.startOffset, output.endOffset);
           continue;
         }
-        if (output.snapshot) snapshotAsked = false;
         resume.record(offsets.accept(output));
         const frame: TerminalFrame = {
           data: output.data,

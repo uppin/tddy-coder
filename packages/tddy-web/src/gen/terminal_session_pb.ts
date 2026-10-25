@@ -91,7 +91,8 @@ export type SessionTerminalInput = Message<"terminal_session.SessionTerminalInpu
    * Bidi only, valid on ANY message of StreamSessionTerminalIO (not only the first): answer with a
    * snapshot frame at a new sequence point, then continue live from its `end_offset`. Bytes in
    * `data` on the same message are applied to the PTY first. Lets a client that suspects its
-   * screen diverged resync without reconnecting.
+   * screen diverged resync without reconnecting. Answered only on a stream opened with SNAPSHOT:
+   * TAIL and FROM_OFFSET streams carry no snapshot frames and ignore it.
    *
    * @generated from field: bool request_snapshot = 11;
    */

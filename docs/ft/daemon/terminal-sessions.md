@@ -311,6 +311,28 @@ the bidi `StreamSessionTerminalIO` open message (or on `StreamTerminalOutputRequ
 
 The web terminal opens **every** stream this way (see [Web terminal](../web/web-terminal.md)).
 
+### Resync at any point
+
+> **Added: 2026-10-25** (`#term-snapshot` 2/4, [#761](https://github.com/uppin/tddy-coder/pull/761))
+
+A long-lived stream can still diverge — a slow link, a subscriber that cannot keep up. On a stream
+opened with `SNAPSHOT` the client can be shown the current screen again **at any time**, without
+reconnecting:
+
+- **On request.** `SessionTerminalInput.request_snapshot`, on **any** message of
+  `StreamSessionTerminalIO` (not only the first). Input bytes on the same message are applied to the
+  PTY first; then the host sends a snapshot frame at a new sequence point and continues live from its
+  `end_offset`, with the same ordering guarantee as the opening snapshot. Asking is a read: a watcher
+  without the control lease may ask, and the request is never refused.
+- **On lag.** A subscriber the host's live output outran is sent a fresh snapshot instead of a gap.
+- **In the web terminal.** The browser checks every frame's `start_offset` against the previous
+  `end_offset`. A frame that does not continue the screen is not painted, and the terminal sends one
+  `request_snapshot` on the same stream; it keeps the last consistent screen until the snapshot lands.
+
+`TAIL` / `FROM_OFFSET` streams are unchanged: they carry no snapshot frames, ignore
+`request_snapshot`, and a lagged subscriber still skips the dropped bytes. No resync is timed or
+heuristic — only a request, a lag or a detected gap triggers one.
+
 ### Legacy replay modes (`TAIL` / `FROM_OFFSET`)
 
 `StreamTerminalOutput`, `SendTerminalInput` and the `TAIL` / `FROM_OFFSET` modes remain for non-web

@@ -1,6 +1,6 @@
 /**
  * Unit tests for the offset-continuity guard a snapshot-opened terminal stream runs every frame
- * through. PRD: docs/ft/daemon/1-WIP/PRD-2026-10-25-terminal-resync.md
+ * through. Feature: docs/ft/daemon/terminal-sessions.md (Resync at any point)
  */
 
 import { describe, expect, it } from "bun:test";
@@ -16,6 +16,11 @@ const aDelta = (startOffset: bigint, length: number): OffsetStampedFrame => ({
 function verdictsFor(frames: OffsetStampedFrame[]): string[] {
   const guard = new TerminalFrameContinuity();
   return frames.map((frame) => guard.accept(frame));
+}
+
+function actionsFor(frames: OffsetStampedFrame[]): string[] {
+  const guard = new TerminalFrameContinuity();
+  return frames.map((frame) => guard.route(frame));
 }
 
 describe("terminal frame continuity", () => {
@@ -55,5 +60,22 @@ describe("terminal frame continuity", () => {
 
   it("refuses a delta that carries no start offset", () => {
     expect(verdictsFor([aSnapshotAt(100n), { endOffset: 0n }])).toEqual(["paint", "gap"]);
+  });
+});
+
+describe("what a feed does with each frame", () => {
+  it("asks for one snapshot per run of gapped frames", () => {
+    expect(actionsFor([aSnapshotAt(100n), aDelta(120n, 4), aDelta(124n, 4), aDelta(128n, 4)])).toEqual([
+      "paint",
+      "drop-and-ask",
+      "drop",
+      "drop",
+    ]);
+  });
+
+  it("asks again on a gap after the snapshot that answered the last ask", () => {
+    expect(
+      actionsFor([aSnapshotAt(100n), aDelta(120n, 4), aSnapshotAt(300n), aDelta(300n, 2), aDelta(400n, 1)]),
+    ).toEqual(["paint", "drop-and-ask", "paint", "paint", "drop-and-ask"]);
   });
 });

@@ -104,6 +104,25 @@ Every frame is stamped with the terminal it came from; one belonging to another 
 rather than painted, and the stream stays open — a mis-routed frame says nothing about the frames
 after it. An acknowledgement frame carries neither bytes nor an anchor and is skipped.
 
+#### Continuity guard and resync (`lib/terminalFrameContinuity.ts`)
+
+Every frame with bytes or an anchor goes through a `TerminalFrameContinuity` before it is painted.
+`accept(frame)` returns `"paint"` for a snapshot (which sets where the next delta must start) and for
+a delta whose `startOffset` is the previous frame's `endOffset`; anything else — a hole, an overlap, a
+delta with no offset or before any snapshot — is a `"gap"`, and every delta after a gap is a gap too
+until the next snapshot, because none was computed against the screen on display. `route(frame)`
+layers the request on top: `"paint"`, `"drop-and-ask"` for the first gap of a run, `"drop"` for the
+rest. On `"drop-and-ask"` the feed's request half yields one message with no data and
+`requestSnapshot: true` on the **same** open stream — no re-open — with the current control token; it
+is a read, so a watcher without the lease may send it. The host answers with a snapshot frame at a
+new sequence point (see the tddy-terminal-rpc
+[resync contract](../../tddy-terminal-rpc/docs/terminal-session-service.md#resync-at-any-point)),
+which repaints the screen and re-arms the ask. The host also resyncs on its own when this subscriber
+lags its broadcast, and that snapshot passes the guard the same way.
+
+`GrpcSessionTerminal` runs the same guard and the same request on its own bidi stream (see *Current
+limits*); `#term-snapshot` 4/4 reuses it for the room feed.
+
 ### Input refusals (`InputRefusalTracker`, `connections/inputDelivery.ts`)
 
 The control lease bars writing, not reading: a pane opens and shows the terminal whether or not its
@@ -194,9 +213,9 @@ terminal with its requested kind; `sessionTerminalTabsPage.ts` offers `newTabMen
   resume-by-offset plumbing — `TerminalResumePoint`, `GhosttyTerminalSession.onOffsetUpdate` — is
   written but no longer read in production (backlog:
   `2026-10-25-web-host-terminal-feed-leftovers-after-snapshot`).
-- **A host terminal that falls behind is not resynced.** If the host's broadcast drops frames for a
-  slow subscriber, later offsets are wrong until `#term-snapshot` 2/4
-  ([#761](https://github.com/uppin/tddy-coder/pull/761)) resyncs with a fresh snapshot.
+- **The continuity guard is wired twice.** Because of the two paths above, the gap handling
+  (`TerminalFrameContinuity.route`, the `requestSnapshot` message on the request queue) is repeated
+  in `openDaemonTerminalFeed` and `GrpcSessionTerminal`; it goes when the paths are merged.
 - **Jailed terminals refuse the snapshot open** (`FAILED_PRECONDITION`) until `#term-snapshot` 3/4
   ([#762](https://github.com/uppin/tddy-coder/pull/762)) tells the host their size.
 - **A room-carried session's frames carry no offsets**, so its fill is unanchored and its reconnect

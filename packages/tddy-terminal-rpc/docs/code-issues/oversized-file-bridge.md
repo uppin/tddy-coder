@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-terminal-rpc/src/bridge.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-25 — `/pr-wrap` step 3.5 on PR #760 (`#term-snapshot` 1/4)
-**Metrics:** **682 production lines** (no `#[cfg(test)]` block) · budget 500 · **1.3× over**
+**Metrics:** **829 production lines** (no `#[cfg(test)]` block) · budget 500 · **1.6× over**
 **Thresholds breached:** length 670 > 500
 **Restructure:** `extract_module --to_file` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-10-25 (682 → 829 in #761) — **unclaimed**
 **Related:** `complexity-bridge-open-replay-ack-live.md`, `complexity-bridge-spawn-live-bridge.md` (all in this file)
 
 ## Measurement history
@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-10-25 | 670 | first detection; already 561 on `origin/master`, 561 → 670 in PR #760: the `SNAPSHOT` open (`open_snapshot`), the snapshot and refusal frames on `FrameIdentity`, offset stamping on live frames and the input refusal frame. Decomposition deferred with the developer's consent: the file is stack-shared — `#term-snapshot` 2/4–4/4 (#761, #762, #763) modify it too |
 | 2026-10-25 | 682 | +12 later in PR #760: the bidi input forwarder moved into its own `spawn_input_forwarder` (watchers open without the lease; every data chunk is judged on its own). Still deferred, same reason |
+| 2026-10-25 | 829 | +147 in PR #761 (`#term-snapshot` 2/4): mid-stream resync — `LiveOutput` (offset stamping plus `resync`), `resync_requested`, `send_resync`, the `Weak` session handle the bridge task holds, the `OutputHalf` the input forwarder signals through, and `forward_chunk` split out of the forwarder; roughly a third of the growth is doc comments. Decomposition still deferred with the developer's consent (code issues may be deferred in this stack; `bridge.rs` is shared with #762 and #763). `LiveOutput` and its two helpers are a ready-made `bridge/live.rs` seam |
 
 ## What the tool found
 

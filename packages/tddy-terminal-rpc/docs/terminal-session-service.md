@@ -105,11 +105,35 @@ There is no mode prologue frame (the snapshot carries the modes), no raw replay 
 `trigger_redraw`: the application is never sent SIGWINCH. `end_offset` on the snapshot is the anchor
 for `GetTerminalHistory`.
 
-A subscriber that falls behind the broadcast (`Lagged`) keeps going without a resync, so the offsets
-stamped on its later frames are wrong, and a refusal or ACK it missed is not replayed. Mid-stream
-resync is `#term-snapshot` 2/4 ([#761](https://github.com/uppin/tddy-coder/pull/761)). Jailed
-terminals refuse `SNAPSHOT` until `#term-snapshot` 3/4
+Jailed terminals refuse `SNAPSHOT` until `#term-snapshot` 3/4
 ([#762](https://github.com/uppin/tddy-coder/pull/762)) sizes their capture.
+
+### Resync at any point
+
+A `SNAPSHOT` stream can be given a **fresh snapshot mid-stream**, at a new sequence point, without
+reconnecting. Two things trigger it, and both take the same path:
+
+- **The client asks.** `SessionTerminalInput.request_snapshot = 11` is honoured on **any** message of
+  `StreamSessionTerminalIO`, not only the first. The input forwarder (`spawn_input_forwarder`)
+  applies the message's own `data` to the PTY first, then signals the output half through a
+  `tokio::sync::Notify` it shares with the live bridge (`OutputHalf::resync`). Asking is a read: it
+  needs no lease and is never refused. Requests made while the bridge is busy coalesce into one.
+- **The subscriber lagged.** `RecvError::Lagged` on the live broadcast is answered with a snapshot
+  instead of a hole.
+
+`LiveOutput::resync` calls `snapshot_and_subscribe()` again, **replaces** the broadcast receiver
+(whatever the old one had queued is covered by the snapshot and dropped with it), emits a snapshot
+frame and restarts offset stamping at its `end_offset`. The deltas after it are contiguous from that
+point, as after the opening snapshot. A snapshot that cannot be taken is sent to the client as an
+error and ends the bridge (`send_resync`). The bridge task holds the session only as a `Weak`,
+upgraded for the moment of a resync: holding it strongly would keep the output broadcast alive, and
+a stream on a terminal that died (a jail's, say) would never see `Closed` and never end.
+
+`TAIL` and `FROM_OFFSET` streams carry no offsets and no snapshot frames, so they keep their byte
+semantics: a lagged subscriber skips the dropped bytes, and `request_snapshot` is ignored. The split
+`StreamTerminalOutput` has no input half and so no request channel, though a lag on a `SNAPSHOT`
+open there is resynced the same way. A refusal or ACK frame a lagged subscriber missed is not
+replayed; the ACK watch reports the current applied offset on its next change.
 
 ## The replay contract (`TAIL` / `FROM_OFFSET`)
 
@@ -289,6 +313,7 @@ named.
 | `terminal_session_service_acceptance.rs` | all nine methods answer at the registered coordinate; the request's `kind` reaches the roster, and an empty or `"bash"` kind arrives as `Bash` with the login shell |
 | `terminal_session_bidi_acceptance.rs` | `StreamSessionTerminalIO` carries a session end to end; a screen without the lease (or whose lease was taken, re-opening after a blip) watches the terminal while its keystrokes are refused; a keystroke under a stale token is answered with a refusal frame and typing resumes on the same stream once control is reclaimed |
 | `stream_snapshot_acceptance.rs` | a `SNAPSHOT` open renders the server's screen in a reference emulator (`vt100`, dev-dependency) then only contiguous deltas equal to `replay_from(snapshot.end_offset)`; no redraw signal and no prologue frame; a new grid resizes first and snapshots at it; `StreamTerminalOutput` honours `SNAPSHOT`; an unsized terminal is refused |
+| `stream_resync_acceptance.rs` | a mid-stream `request_snapshot` on a message that also types applies the keystroke, then yields a snapshot that renders the server's screen, followed only by deltas contiguous from it; a subscriber that lags a capacity-1 broadcast is resynced with a snapshot, not a hole; a `TAIL` stream that lags is never sent a snapshot frame |
 | `terminal_history_parity_acceptance.rs` | `GetTerminalHistory` frames and offsets |
 | `src/pty_runtime.rs` (6 unit) | the spawn spec carrying its target OS user; and, through the re-export, `tddy_daemon_kernel::privilege_drop`'s helpers: the `HOME`/`PATH` overrides for a target user, when a privilege drop is and is not required, and the `setpriv` launcher wrapping |
 | `src/tddy_user_config.rs` (2 unit) | the `PATH` extra read from `~/.tddy/config.yaml`, and a missing file read as none |

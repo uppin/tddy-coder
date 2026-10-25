@@ -15,7 +15,7 @@
 //! belonging to another terminal instead of painting it into the wrong one.
 
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use bytes::Bytes;
 use tddy_rpc::Status;
@@ -508,6 +508,9 @@ fn spawn_live_bridge(
     let mut acked_rx = session.subscribe_acked_offset();
     let initial_acked = *acked_rx.borrow_and_update();
     let mut pty_done = session.subscribe_pty_done();
+    // Weak: the task must not keep the session — and with it the output broadcast — alive, or a
+    // stream on a terminal that died would never see `Closed`. A resync upgrades it for the moment.
+    let session = Arc::downgrade(&session);
     let bridge_tx = tx.clone();
     tokio::spawn(async move {
         if initial_acked > 0
@@ -557,14 +560,18 @@ fn spawn_live_bridge(
     });
 }
 
-/// Resync `live` and send the snapshot frame. `false` when the bridge must stop: the client is
-/// gone, or the screen could not be snapshotted (the error is sent to the client first).
+/// Resync `live` and send the snapshot frame. `false` when the bridge must stop: the terminal or
+/// the client is gone, or the screen could not be snapshotted (the error is sent to the client
+/// first).
 async fn send_resync(
-    session: &Arc<dyn TerminalSession>,
+    session: &Weak<dyn TerminalSession>,
     identity: &FrameIdentity,
     live: &mut LiveOutput,
     tx: &mpsc::Sender<Result<SessionTerminalOutput, Status>>,
 ) -> bool {
+    let Some(session) = session.upgrade() else {
+        return false;
+    };
     let outcome = live.resync(session.as_ref(), identity);
     let failed = outcome.is_err();
     tx.send(outcome).await.is_ok() && !failed
@@ -690,11 +697,12 @@ fn spawn_input_forwarder<S, F, Fut>(
         use tokio_stream::StreamExt;
         let mut chunks = tokio_stream::once(Ok(first)).chain(in_stream);
         while let Some(Ok(msg)) = chunks.next().await {
+            let request_snapshot = msg.request_snapshot;
             if !msg.data.is_empty() {
                 let stream_open = forward_chunk(
                     &session,
                     &session_id,
-                    &msg,
+                    msg,
                     control_gated,
                     &verify_control,
                     &output,
@@ -706,7 +714,7 @@ fn spawn_input_forwarder<S, F, Fut>(
             }
             // A read, not a write: no lease needed, and it follows the message's own data so the
             // snapshot's sequence point covers it.
-            if msg.request_snapshot {
+            if request_snapshot {
                 output.resync.notify_one();
             }
         }
@@ -718,7 +726,7 @@ fn spawn_input_forwarder<S, F, Fut>(
 async fn forward_chunk<F, Fut>(
     session: &Arc<dyn TerminalSession>,
     session_id: &str,
-    msg: &SessionTerminalInput,
+    msg: SessionTerminalInput,
     control_gated: bool,
     verify_control: &F,
     output: &OutputHalf,
@@ -736,7 +744,7 @@ where
             None => false,
         };
     }
-    session.send_input(Bytes::from(msg.data.clone()), msg.input_offset);
+    session.send_input(Bytes::from(msg.data), msg.input_offset);
     true
 }
 
