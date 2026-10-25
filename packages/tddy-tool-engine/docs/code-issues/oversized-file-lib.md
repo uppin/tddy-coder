@@ -7,7 +7,7 @@ subagent turn-control changeset
 **Metrics:** **816 production lines** · budget 500 · **1.6× over**
 **Thresholds breached:** length 816 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
-**Status:** Open — unclaimed (879 production lines, 2026-10-25)
+**Status:** Open — unclaimed (880 production lines, 2026-10-25)
 
 ## Measurement history
 
@@ -26,6 +26,7 @@ subagent turn-control changeset
 | 2026-10-25 | 877 | **unchanged** by PR #726 (`#coagents` 7/8): touched only inside `#[cfg(test)] mod unbundle_exec_tool_entry_tests` (the test double answers `request_approval`) |
 | 2026-10-25 | 878 | **touched by #751** (`#start-parity` 2/9): 877 → 878 (+1) — the `pub mod start_session_args;` declaration; the module lives in `start_session_args.rs` (257 production lines) and `start_session_args/schema.rs` (292). Not split: stack-shared — every later `#start-parity` node edits this module list |
 | 2026-10-25 | 879 | **touched by #752** (`#start-parity` 3/9): 878 → 879 (+1) — the `pub mod project_home_worktree_tools;` declaration; the tools live in the new `project_home_worktree_tools.rs` (411 production lines). Not split: stack-shared (later `#start-parity` nodes edit this module list) — developer instruction for this stack |
+| 2026-10-25 | 880 | **touched by #753** (`#start-parity` 4/9): 879 → 880 (+1) — the `pub mod start_ledger;` declaration; the ledger lives in the new `start_ledger.rs` (414 production lines). Not split: stack-shared (`#start-parity` 2/9, 3/9 and 5/9–9/9 edit this module list) — developer instruction |
 
 ## What the tool found
 
