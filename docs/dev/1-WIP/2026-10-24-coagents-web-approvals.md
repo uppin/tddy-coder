@@ -181,9 +181,12 @@ tddy-discovery: --lib 97, subagent_runtime_answer_bypass 2. tddy-session-lifecyc
    request, the daemon writes a completed `permission:<requestId>` record with raw output `{answeredBy, cancelled: true}`,
    then interrupts the turn. A reopened dialog shows "Cancelled by <actor>" with no options, and AnswerAgentPermission
    then returns NOT_FOUND, since the conversation is no longer open.
-   - **(A) Trust, decision needed.** `cancelled_by` is caller-supplied, so a user can name another login. Proposed rule:
-     a caller may name only itself. `main-agent` is accepted, an empty value means the caller's own login, and any other
-     login is refused.
+   - **(A) Trust: resolved in round 7.** The daemon derives the cancelling actor from the authenticated caller, and
+     `cancelled_by` is removed from the request (proto field 5 reserved, `772bff4c9`). A caller cannot record another
+     login. **Blocked, decision needed:** the `main-agent` label. The daemon cannot tell the agent's own token from the
+     user's: `SessionClaims` has no principal, and `TokenKind` has only `Access` and `Refresh`. Option (a): add an
+     agent principal claim and mint it for every agent token, local and split. Option (b): attribute every cancel to
+     the signed-in login. Recommend (b) for this node.
    - **(B) Web cancel while a deferred request is pending, decision needed.** The committed web code sends no actor, so
      that cancel returns an internal error after the conversation has been cancelled. The fix (send the signed-in login)
      is written but held uncommitted, because it breaks `SessionAgentAttachTabAcceptance` AC10, which mounts with no
@@ -198,6 +201,21 @@ tddy-discovery: --lib 97, subagent_runtime_answer_bypass 2. tddy-session-lifecyc
 6. **awaitingUser lifetime: decision recorded.** `awaitingUser` stays true from registration until the turn ends,
    including the window between the user's answer and the continuation. The developer accepted this.
 7. **github_user: built (D-6).** Required on `AgentSessions`, and its TODO is removed.
+
+**Round 7 (2026-10-25), final pending edits.** These supersede the list below where they differ. The five cancel-literal
+edits in that list are no longer needed: after the field removal those literals compile as they are.
+
+- `packages/tddy-daemon-rpc/tests/cancel_records_refusal_acceptance.rs`: L317 doc becomes "Cancel the conversation.";
+  L318 `async fn cancel(&self, cancelled_by: &str)` becomes `async fn cancel(&self)`; delete L326
+  `                cancelled_by: cancelled_by.to_string(),`; L370, L445 and L477 `.cancel("main-agent")` become `.cancel()`;
+  L415 `.cancel(TEST_USER)` becomes `.cancel()`; delete the test at L360–404
+  (`cancelling_a_deferred_request_as_the_main_agent_records_it_answered_by_the_main_agent`, whose L390 expects
+  "main-agent"; L407 covers the same case).
+- `packages/tddy-tools/tests/subagent_cancel_actor_acceptance.rs`: delete L151
+  `assert_eq!(cancels[0].cancelled_by, "main-agent");`; rename the fn at L118 to
+  `subagent_cancel_reaches_the_daemon`; fix the L1–2 doc, which claims it names the actor.
+- Session-agents integration fakes (E0046 on the required methods, from D-3 and D-6; these targets do not compile until
+  applied): the `answer_permission` and `github_user` insertions listed below are unchanged.
 
 **Pending existing-test edits (the orchestrator applies these; no implementer edits existing tests):**
 
