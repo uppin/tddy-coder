@@ -72,8 +72,8 @@ export function NativeFileDropProvider({ bridge, children }: NativeFileDropProvi
       }
       return null;
     };
-    // A drag that carries no paths started inside the page (a Files-tab entry, a tab) — the window
-    // swallows those too, and there is nothing in one this route can deliver.
+    // A drag that carries no paths is not a file from the OS — it started inside the page (a
+    // Files-tab entry), whose own HTML5 handlers serve it — so this route has nothing to deliver.
     let carriesPaths = false;
 
     let disposed = false;

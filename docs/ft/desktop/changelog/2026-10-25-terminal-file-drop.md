@@ -11,7 +11,5 @@
   its checkout, or running its tools over SSH.
 - **A dropped folder is refused with a visible message**; the files dropped with it still go
   through.
-- Known gap: in-page drags (a Files-tab entry onto the terminal) and Finder drops on the
-  create-session attachments area are still swallowed by the window in Desktop.
 
 See [web-terminal.md § File drop upload — In Tddy Desktop](../../web/web-terminal.md#file-drop-in-tddy-desktop).

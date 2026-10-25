@@ -13,10 +13,9 @@ the page's half is [`tddy-web` terminal-file-upload.md](../../tddy-web/docs/term
 
 The window is built with Tauri's default `dragDropEnabled`. Its handler is the only thing that knows
 a dropped file's **real path** — the webview's own HTML5 `drop` hands a page `File` objects with
-none. The cost is that on macOS wry's handler (`WryWebView::draggingEntered` /
-`performDragOperation`) answers every drag itself and never forwards one to WebKit, so the page
-receives no HTML5 drag events while the window is up; everything a drop does is driven from the
-window's own events.
+none. The cost is that a file dragged from the OS is taken by that handler before WebKit sees it,
+so the page receives no HTML5 `dragover` / `drop` for it; everything such a drop does is driven from
+the window's own events.
 
 ## The relay: `tddy://native-file-drop`
 

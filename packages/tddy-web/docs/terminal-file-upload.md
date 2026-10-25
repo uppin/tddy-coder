@@ -87,9 +87,9 @@ route (Files-tab **Insert** button) reaches the focused terminal through the run
 ## Tddy Desktop: drops arrive from the window, not the DOM
 
 The desktop window keeps Tauri's native drag-drop handler, the only source of a dropped file's real
-path, and with it on the page receives **no** HTML5 `dragover` / `drop` — the zone's own handlers
-above never fire there. The window relays every drag step instead (`tddy-tauri-web`'s
-`NativeFileDropBridge`; positions already in CSS pixels, see
+path, and with it on a file dragged from the OS reaches the page as **no** HTML5 `dragover` /
+`drop` — the zone's own handlers above never fire for it. The window relays every drag step
+instead (`tddy-tauri-web`'s `NativeFileDropBridge`; positions already in CSS pixels, see
 [`tddy-desktop` file-drop.md](../../tddy-desktop/docs/file-drop.md)), and:
 
 - **`NativeFileDropProvider`** (mounted in `index.tsx` only when `daemonTransportFlavour` is
