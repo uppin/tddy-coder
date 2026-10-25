@@ -113,6 +113,18 @@ pub enum AcpUpdate {
         kind: String,
         raw_input: Option<serde_json::Value>,
     },
+    /// A tool call's whole record, with its status and raw output, as a caller keeps it rather than as the agent
+    /// streamed it. The agent's own stream never carries one: a coding subagent records a permission request this
+    /// way, pending while a turn waits on it and completed, with its answer, once the request is answered. Same
+    /// `id` as the record before it, so the later record supersedes the earlier one.
+    ToolCallRecord {
+        id: String,
+        title: String,
+        kind: String,
+        status: AcpToolStatus,
+        raw_input: Option<serde_json::Value>,
+        raw_output: Option<serde_json::Value>,
+    },
     ToolCallUpdate {
         id: String,
         title: Option<String>,

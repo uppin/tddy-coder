@@ -7,6 +7,7 @@ pub mod catalog;
 pub mod confinement;
 pub mod launcher;
 pub mod parked_permissions;
+mod permission_records;
 pub mod permissions;
 pub mod session;
 pub mod transports;

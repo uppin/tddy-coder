@@ -76,6 +76,8 @@ pub(super) fn report_progress(update: &AcpUpdate, sink: &ProgressSink) {
             }
         }
         AcpUpdate::Plan(entries) => report_plan(entries, sink),
+        // A caller's record of a call is not something the agent did in this turn, so it is not progress.
+        AcpUpdate::ToolCallRecord { .. } => {}
     }
 }
 

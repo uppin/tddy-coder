@@ -31,9 +31,9 @@ struct State {
     queue: VecDeque<Parked>,
     /// How many requests have been parked, so each one is named on its own.
     issued: u64,
-    /// Who answered each request answered through [`ParkedPermissions::answer_recording`], by
-    /// request id. Only the first answer to a request is kept.
-    answerers: HashMap<String, AnsweredBy>,
+    /// Each request answered through [`ParkedPermissions::answer_recording`], by request id, with who
+    /// answered it and how. Only the first answer to a request is kept.
+    answerers: HashMap<String, Answered>,
     /// The requests a turn handed to the user, by request id: the user may answer these, and only
     /// these, through [`PermissionAnswering`](tddy_discovery::subagent::PermissionAnswering).
     deferred: HashSet<String>,
@@ -44,6 +44,17 @@ struct Parked {
     view: PermissionRequestView,
     /// Resolves the agent's `session/request_permission` with the decision.
     decided: oneshot::Sender<PermissionDecision>,
+}
+
+/// A request that was answered: who answered it, with what, and the request as it was asked, so the
+/// record of the answer names the same request the pending record did.
+#[derive(Debug, Clone)]
+pub(crate) struct Answered {
+    pub(crate) by: AnsweredBy,
+    pub(crate) answer: PermissionAnswer,
+    pub(crate) request: PermissionRequestView,
+    /// Whether the turn holding the request had handed it to the user when it was answered.
+    pub(crate) deferred_to_user: bool,
 }
 
 impl ParkedPermissions {
@@ -80,14 +91,23 @@ impl ParkedPermissions {
     ) -> Result<(), String> {
         let mut state = self.state();
         if let Some(first) = state.answerers.get(answer.request_id()) {
-            return Err(already_answered(answer.request_id(), first));
+            return Err(already_answered(answer.request_id(), &first.by));
         }
         let decision = decision_for(state.queue.front(), answer)?;
         let parked = state
             .queue
             .pop_front()
             .ok_or_else(|| nothing_pending(answer))?;
-        state.answerers.insert(answer.request_id().to_string(), by);
+        let deferred_to_user = state.deferred.contains(answer.request_id());
+        state.answerers.insert(
+            answer.request_id().to_string(),
+            Answered {
+                by,
+                answer: answer.clone(),
+                request: parked.view.clone(),
+                deferred_to_user,
+            },
+        );
         drop(state);
         self.resolved.notify_one();
         parked.decided.send(decision).map_err(|_| {
@@ -100,6 +120,11 @@ impl ParkedPermissions {
 
     /// Who answered `request_id`, once it has been answered through [`Self::answer_recording`].
     pub(crate) fn answerer_of(&self, request_id: &str) -> Option<AnsweredBy> {
+        self.answered(request_id).map(|answered| answered.by)
+    }
+
+    /// The answer to `request_id`, once it has been answered through [`Self::answer_recording`].
+    pub(crate) fn answered(&self, request_id: &str) -> Option<Answered> {
         self.state().answerers.get(request_id).cloned()
     }
 

@@ -21,6 +21,7 @@ use tokio::sync::broadcast;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::parked_permissions::{nothing_pending, nothing_pending_to_defer, ParkedPermissions};
+use crate::permission_records::{deferred_request_record, record_answer};
 
 /// The prompt a conversation is answering, shared with its cancel handles. A turn holds the slot
 /// for as long as it runs, so a cancel waits for the turn to end before it returns.
@@ -70,6 +71,9 @@ struct InFlightPrompt {
     prompt: String,
     /// Every update the prompt has produced so far, in order; described once the prompt ends.
     updates: Arc<Mutex<Vec<AcpUpdate>>>,
+    /// The sink the prompt's updates go to. A turn that holds a permission request writes the request's records
+    /// through it too, as the agent's own updates are written.
+    sink: AcpUpdateSink,
     /// The prompt's result. It is polled by whoever holds the slot, and is not polled between turns.
     ended: Pin<Box<dyn Future<Output = Result<AcpTurnEnd, SubagentError>> + Send>>,
     /// The result, once a cancel has driven the prompt to its end. No turn was waiting to take it
@@ -258,15 +262,17 @@ impl CodingAgentSession {
         });
         let conversation = Arc::clone(&self.conversation);
         let text = prompt.clone();
+        let driver_sink = Arc::clone(&sink);
         let ended = Box::pin(async move {
             conversation
-                .prompt_turn(text, Some(sink))
+                .prompt_turn(text, Some(driver_sink))
                 .await
                 .map_err(|e| SubagentError::from(format!("the coding agent's turn failed: {e}")))
         });
         InFlightPrompt {
             prompt,
             updates,
+            sink,
             ended,
             result: None,
         }
@@ -304,8 +310,12 @@ impl CodingAgentSession {
     /// is open, and so is a turn that asks nothing while a request is pending; each refusal names
     /// the pending request. A deferral is accepted only for the pending request it names: the turn
     /// then waits for that request's answer ([`settle`]), and the request is recorded as deferred to
-    /// the user, so the user may answer it.
-    fn resume(&self, request: &TurnRequest) -> Result<(), SubagentError> {
+    /// the user, so the user may answer it. The request accepted for deferral is returned, so the
+    /// turn can record it as held for the user.
+    fn resume(
+        &self,
+        request: &TurnRequest,
+    ) -> Result<Option<PermissionRequestView>, SubagentError> {
         if request.prompt_text().is_some() {
             return Err(match self.permissions.pending() {
                 Some(pending) => refused_while_pending(&pending.request_id),
@@ -320,7 +330,7 @@ impl CodingAgentSession {
         ) {
             (Some(deferred), Some(pending)) if pending.request_id == deferred => {
                 self.permissions.defer_to_user(deferred);
-                Ok(())
+                Ok(Some(pending))
             }
             (Some(deferred), Some(pending)) => Err(SubagentError::from(format!(
                 "permission request '{}' is the one pending; the deferral names '{deferred}'",
@@ -328,7 +338,7 @@ impl CodingAgentSession {
             ))),
             (Some(deferred), None) => Err(SubagentError::from(nothing_pending_to_defer(deferred))),
             (None, Some(pending)) => Err(refused_while_pending(&pending.request_id)),
-            (None, None) => Ok(()),
+            (None, None) => Ok(None),
         }
     }
 
@@ -367,16 +377,23 @@ async fn settle(
     if let Some(result) = flight.result.take() {
         return Settled::Ended(result);
     }
+    // The deferred request this turn waits on. Once its answer is recorded it is waited on no longer.
+    let mut awaited = deferred;
     loop {
         if let Some(pending) = permissions.pending() {
-            if deferred != Some(pending.request_id.as_str()) {
+            if awaited != Some(pending.request_id.as_str()) {
                 return Settled::Paused(pending);
             }
         }
         tokio::select! {
             ended = flight.ended.as_mut() => return Settled::Ended(ended),
             () = permissions.parked() => {}
-            () = permissions.resolved() => {}
+            () = permissions.resolved() => {
+                if let Some(request_id) = awaited.filter(|id| permissions.answered(id).is_some()) {
+                    record_answer(&flight.sink, permissions, request_id);
+                    awaited = None;
+                }
+            }
         }
     }
 }
@@ -441,7 +458,9 @@ fn collect_tool_calls(updates: Vec<AcpUpdate>) -> Vec<ToolCallRecord> {
                     call.failed |= status == Some(AcpToolStatus::Failed);
                 }
             }
+            // A permission request's record is the session's account of the request, not a call the agent made.
             AcpUpdate::Text(_) | AcpUpdate::Thought(_) | AcpUpdate::Plan(_) => {}
+            AcpUpdate::ToolCallRecord { .. } => {}
         }
     }
     calls
@@ -593,9 +612,13 @@ impl SubagentSession for CodingAgentSession {
         let mut flight = match slot.take() {
             Some(flight) => {
                 if answered.is_none() {
-                    if let Err(refusal) = self.resume(&request) {
-                        *slot = Some(flight);
-                        return Err(refusal);
+                    match self.resume(&request) {
+                        Ok(Some(held)) => (flight.sink)(deferred_request_record(&held)),
+                        Ok(None) => {}
+                        Err(refusal) => {
+                            *slot = Some(flight);
+                            return Err(refusal);
+                        }
                     }
                 }
                 flight
@@ -612,6 +635,11 @@ impl SubagentSession for CodingAgentSession {
                 }
             },
         };
+        // The answer this call delivered is recorded on the stream by the turn it continues. A turn holding a
+        // deferred request records that answer itself, when it is given (see `settle`).
+        if let Some(request_id) = answered {
+            record_answer(&flight.sink, &self.permissions, request_id);
+        }
         match settle(
             &mut flight,
             &self.permissions,

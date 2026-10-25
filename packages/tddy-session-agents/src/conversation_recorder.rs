@@ -411,6 +411,24 @@ fn update_frame(update: AcpUpdate, at: i64) -> Option<AcpAgentMessage> {
                 ..Default::default()
             }),
         }),
+        // A whole record is a `tool_call` again: the web keeps the latest `tool_call` of an id and ignores
+        // `tool_call_update`, so the record it supersedes must be replaced by a `tool_call`, not an update.
+        AcpUpdate::ToolCallRecord {
+            id,
+            title,
+            kind,
+            status,
+            raw_input,
+            raw_output,
+        } => session_update::Update::ToolCall(ToolCall {
+            tool_call_id: Some(ToolCallId { value: id }),
+            title,
+            kind: tool_kind_of(&kind) as i32,
+            status: tool_status_of(status) as i32,
+            raw_input: raw_input.map(|input| input.to_string()),
+            raw_output: raw_output.map(|output| output.to_string()),
+            ..Default::default()
+        }),
         AcpUpdate::Thought(_) | AcpUpdate::Plan(_) => return None,
     };
     Some(session_update_frame(
