@@ -151,6 +151,7 @@ fn a_daemon(
         sessions_base.to_path_buf(),
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         routing,
         Arc::new(NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),

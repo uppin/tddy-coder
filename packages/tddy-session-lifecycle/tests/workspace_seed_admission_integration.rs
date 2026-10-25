@@ -227,6 +227,7 @@ fn a_codebase_host_in_a_common_room() -> ACodebaseHostInACommonRoom {
         sessions_base.clone(),
         user_resolver,
         None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
         peer_routing,
         Arc::new(NoOperatorChannel),
         Arc::new(ClaudeCliSessionManager::new()),
