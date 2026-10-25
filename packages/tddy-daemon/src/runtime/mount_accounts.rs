@@ -114,9 +114,7 @@ impl BuildContext {
             let accounts = Arc::new(accounts_service);
             self.identity
                 .rpc_entries
-                .push(tddy_accounts::build_shared_accounts_entry(Arc::clone(
-                    &accounts,
-                )));
+                .push(tddy_accounts::build_accounts_entry(Arc::clone(&accounts)));
             m.hosted
                 .rpc_handlers
                 .attach_provider_accounts(Arc::new(AccountsProviderPort(accounts)));

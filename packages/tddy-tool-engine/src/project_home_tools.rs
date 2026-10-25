@@ -309,7 +309,7 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
             }),
         ),
     ];
-    defs.extend(start_options_tool_def());
+    defs.push(start_options_tool_def());
     defs.extend(worktree_tool_defs());
     defs
 }

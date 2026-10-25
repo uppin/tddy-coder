@@ -212,8 +212,12 @@ pub fn a_daemon_as_current_user(
 
 /// The OS user this test process runs as, which resolves in the passwd database.
 pub fn current_os_user() -> String {
+    // SAFETY: `getuid` cannot fail, and `getpwuid` returns either null (checked below) or a pointer
+    // to a static passwd entry that stays valid until the next `getpw*` call on this thread.
     let pw = unsafe { libc::getpwuid(libc::getuid()) };
     assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
+    // SAFETY: `pw` is non-null, and its `pw_name` is a NUL-terminated C string owned by that entry,
+    // copied out here before any other `getpw*` call.
     unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }
         .to_string_lossy()
         .into_owned()

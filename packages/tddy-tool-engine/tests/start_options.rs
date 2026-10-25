@@ -71,7 +71,7 @@ fn no_project_offers_no_stack_base() {
 #[test]
 fn the_tool_describes_every_argument_and_requires_none() {
     // When
-    let def = start_options_tool_def().expect("DescribeSessionStartOptions is defined");
+    let def = start_options_tool_def();
     let schema: serde_json::Value = serde_json::from_str(&def.input_schema_json).unwrap();
 
     // Then

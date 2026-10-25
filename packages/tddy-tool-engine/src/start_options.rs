@@ -176,8 +176,8 @@ pub fn models_agent(query: &StartOptionsQuery) -> Result<String, String> {
 }
 
 /// The tool's definition. Every argument is optional, and each is described.
-pub fn start_options_tool_def() -> Option<ToolDef> {
-    Some(tool_def(
+pub fn start_options_tool_def() -> ToolDef {
+    tool_def(
         DESCRIBE_SESSION_START_OPTIONS,
         "Describe the choices a StartSession call can make on a host: its agents, the models of an agent or of a provider account, the provider accounts that can run a session type's harness, its SSH config hosts, its subagents, the branches of this project's checkout there, and the sessions that can parent or seed a PR stack. Narrow it with session_type, agent or provider_account_id. An empty daemon_instance_id is this host. daemon_instance_id in the answer names the host that answered; a list that could not be answered is empty and its *_unavailable field says why.",
         json!({
@@ -202,5 +202,5 @@ pub fn start_options_tool_def() -> Option<ToolDef> {
             },
             "additionalProperties": false
         }),
-    ))
+    )
 }
