@@ -62,10 +62,6 @@ fn permission_conversation_id() -> Option<String> {
     crate::mcp_primitives::exec_conversation_from_env()
 }
 
-/// How long a conversation-tagged approval may wait for its conversation's answer before it is
-/// denied. The same bound the untagged relay uses.
-const CONVERSATION_APPROVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
 /// Parameters for the approval_prompt tool (Claude Code permission-prompt-tool format).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ApprovalPromptInput {
@@ -678,12 +674,13 @@ impl PermissionServer {
         .to_string()
     }
 
-    /// Decide a prompt raised by the conversation `conversation_id`. That conversation's own decision
-    /// point answers over `TDDY_SOCKET`, and no local pre-allow applies: a headless conversation
-    /// yields every prompt to its conversation. tddy-tools' own MCP tools are the one exception.
+    /// Decide a prompt raised by the conversation `conversation_id`. The conversation's own decision
+    /// point answers, over the tool route (`RequestApproval`), and no local pre-allow applies: a
+    /// headless conversation yields every prompt to its conversation. tddy-tools' own MCP tools are
+    /// the one exception.
     ///
-    /// Fails closed: only an explicit allow from the conversation is an allow. A refusal, a
-    /// conversation that cannot be reached or does not answer, and a missing `TDDY_SOCKET` are denials.
+    /// Fails closed: only an explicit allow from the daemon is an allow. A refusal, a missing route, a
+    /// call that fails and a daemon that does not answer in time are denials, each carrying its reason.
     fn decide_for_conversation(
         &self,
         conversation_id: &str,
@@ -697,50 +694,43 @@ impl PermissionServer {
         let deny = |message: String| {
             serde_json::json!({ "behavior": "deny", "message": message }).to_string()
         };
-        let Some(socket_path) = self.socket_path.as_deref() else {
-            return deny(format!(
-                "TDDY_SOCKET is not set; the approval of {tool_name} cannot reach conversation {conversation_id}"
-            ));
-        };
-        match Self::relay_conversation_approval(socket_path, conversation_id, tool_name, input) {
+        match Self::request_conversation_approval(conversation_id, tool_name, input) {
             Ok(true) => allow_response().to_string(),
             Ok(false) => deny(format!("Permission denied for {tool_name}")),
-            Err(message) => deny(message),
+            Err(reason) => deny(reason),
         }
     }
 
-    /// One conversation-tagged `approve` round trip over `socket_path`, answered by the conversation
-    /// the request names. The round trip runs on a thread with a runtime of its own, so no runtime is
-    /// entered from inside the caller's, and it is bounded by [`CONVERSATION_APPROVAL_TIMEOUT`].
+    /// One conversation-tagged approval over the tool route, asked through the session tool client.
+    /// The round trip runs on a thread with a runtime of its own, so no runtime is entered from inside
+    /// the caller's, and it is bounded by the client's approval bound: a route that never answers
+    /// denies the prompt.
     ///
-    /// `Ok(allow)` is the conversation's decision; `Err` carries the text a denial reports.
-    fn relay_conversation_approval(
-        socket_path: &std::path::Path,
+    /// `Ok(allow)` is the daemon's decision; `Err` carries the text a denial reports.
+    fn request_conversation_approval(
         conversation_id: &str,
         tool_name: &str,
         input: &Value,
     ) -> Result<bool, String> {
-        let request = serde_json::json!({
-            "type": "approve",
-            "tool_name": tool_name,
-            "input": input,
-            "conversation_id": conversation_id,
-        });
         let round_trip = std::thread::scope(|scope| {
             scope
-                .spawn(move || -> Result<Value, String> {
+                .spawn(move || -> Result<bool, String> {
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
                         .map_err(|e| format!("could not start the approval runtime: {e}"))?;
                     runtime.block_on(async {
                         match tokio::time::timeout(
-                            CONVERSATION_APPROVAL_TIMEOUT,
-                            tddy_core::toolcall::dispatch_toolcall(socket_path, request),
+                            crate::session_tool_client::APPROVAL_CLIENT_BOUND,
+                            crate::session_tool_client::request_approval(
+                                conversation_id,
+                                tool_name,
+                                input,
+                            ),
                         )
                         .await
                         {
-                            Ok(reply) => reply,
+                            Ok(decision) => decision,
                             Err(_elapsed) => Err(format!(
                                 "the approval from conversation {conversation_id} timed out"
                             )),
@@ -750,30 +740,9 @@ impl PermissionServer {
                 .join()
         });
         match round_trip {
-            Ok(reply) => Self::conversation_decision(&reply?, conversation_id),
+            Ok(decision) => decision,
             Err(_panicked) => Err(format!(
                 "the approval from conversation {conversation_id} failed unexpectedly"
-            )),
-        }
-    }
-
-    /// The decision in a conversation's reply to an `approve` request: `Ok(true)` is an allow,
-    /// `Ok(false)` a deny, and `Err` a refusal or a reply that is neither, carrying the text to report.
-    fn conversation_decision(reply: &Value, conversation_id: &str) -> Result<bool, String> {
-        match reply.get("status").and_then(Value::as_str) {
-            Some("ok") => match reply.get("decision").and_then(Value::as_str) {
-                Some("allow") => Ok(true),
-                Some("deny") => Ok(false),
-                _ => Err(format!(
-                    "conversation {conversation_id} replied to the approval without a decision: {reply}"
-                )),
-            },
-            Some("error") => Err(reply
-                .get("message")
-                .and_then(Value::as_str)
-                .map_or_else(|| reply.to_string(), str::to_string)),
-            _ => Err(format!(
-                "conversation {conversation_id} replied to the approval with an unrecognised reply: {reply}"
             )),
         }
     }
