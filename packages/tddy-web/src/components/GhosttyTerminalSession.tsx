@@ -137,6 +137,13 @@ export interface GhosttyTerminalSessionProps {
   sessionId?: string;
 
   /**
+   * The session's agent reads this machine's filesystem, so a file dropped from the OS onto this
+   * terminal inside Tddy Desktop has its real path typed rather than being uploaded. See
+   * `TerminalFileDropZone`'s prop of the same name.
+   */
+  readsLocalPaths?: boolean;
+
+  /**
    * How the connection carrying {@link feed} is doing, when the caller has something to say about
    * it. Drives the status dot and the raw `livekit-status` readout.
    *
@@ -230,6 +237,7 @@ export function GhosttyTerminalSession({
   feed,
   sessionToken,
   sessionId,
+  readsLocalPaths = false,
   connectionStatus,
   connectionError,
   connectionOverlay,

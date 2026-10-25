@@ -11,6 +11,7 @@
 //! multi-threaded from the moment it is touched.
 
 mod config_source;
+mod file_drop;
 mod ipc;
 mod oauth_callback;
 

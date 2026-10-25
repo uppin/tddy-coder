@@ -10,3 +10,16 @@ export type {
   WebviewIpcBridge,
   WebviewIpcHost,
 } from "./transport.js";
+export {
+  DESCRIBE_DROPPED_FILES_COMMAND,
+  nativeDragEventOf,
+  READ_DROPPED_FILE_COMMAND,
+  thisWindowsNativeFileDrop,
+} from "./nativeFileDrop.js";
+export type {
+  DroppedFileInfo,
+  NativeDragEvent,
+  NativeFileDropBridge,
+  TauriDragDropPayload,
+  ViewportPoint,
+} from "./nativeFileDrop.js";

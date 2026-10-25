@@ -13,6 +13,8 @@ import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSess
 import type { TerminalFrame } from "../../src/rpc/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../support/testIds";
+import { NativeFileDropProvider } from "../../src/components/connection/nativeFileDrop";
+import { aNativeFileDropDouble, centreOf } from "../support/util/nativeFileDrop";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -224,6 +226,69 @@ describe("GhosttyTerminalSession", () => {
     // Then — the offset advances by the live frame's byte length (10 + 5 = 15)
     cy.then(() => {
       expect(offsets.at(-1)).to.equal(15n, "offset advances by live byte length");
+    });
+  });
+});
+
+// A file dropped from Finder inside Tddy Desktop reaches the PTY the way a native terminal delivers
+// it: as a paste. A program that turned bracketed paste on (`ESC [ ? 2004 h` — Claude Code does)
+// receives the paths between `ESC [ 200 ~` and `ESC [ 201 ~`, which is how it tells a dropped image
+// path from typed text and attaches the image. PRD: docs/ft/web/web-terminal.md § File drop upload.
+describe("GhosttyTerminalSession — a file dropped from the OS (Tddy Desktop)", () => {
+  const A_SCREENSHOT = "/Users/me/Desktop/Screen Shot.png";
+  const textOf = (chunks: Uint8Array[]) => chunks.map((c) => new TextDecoder().decode(c)).join("");
+
+  function mountDesktopTerminal() {
+    const fake = aTerminalFeedDouble();
+    const drop = aNativeFileDropDouble({ [A_SCREENSHOT]: new Uint8Array([1]) });
+    mountTerminal(
+      <NativeFileDropProvider bridge={drop.bridge}>
+        <GhosttyTerminalSession
+          sessionToken="fake-token"
+          sessionId="01900000-0000-7000-8000-000000000002"
+          readsLocalPaths
+          feed={{ stream: fake.stream }}
+        />
+      </NativeFileDropProvider>,
+    );
+    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    return { fake, drop };
+  }
+
+  function dropTheScreenshot(drop: ReturnType<typeof aNativeFileDropDouble>) {
+    centreOf(`[data-testid='${TEST_IDS.ghosttyTerminal}']`).then((point) => {
+      drop.emit({ type: "enter", paths: [A_SCREENSHOT], point });
+      drop.emit({ type: "drop", paths: [A_SCREENSHOT], point });
+    });
+  }
+
+  it("pastes the dropped path inside bracketed-paste markers when the program enabled them", () => {
+    // Given a program that turned bracketed paste on
+    const { fake, drop } = mountDesktopTerminal();
+    cy.then(() => fake.pushOutput(new TextEncoder().encode("\x1b[?2004h")));
+    cy.wait(100);
+
+    // When a file is dropped on the terminal
+    dropTheScreenshot(drop);
+
+    // Then the PTY receives the quoted path as one bracketed paste
+    cy.wrap(null).should(() => {
+      expect(textOf(fake.sentChunks)).to.contain(`\x1b[200~'${A_SCREENSHOT}' \x1b[201~`);
+    });
+  });
+
+  it("sends the dropped path as plain input when bracketed paste is off", () => {
+    // Given a terminal whose program never enabled bracketed paste
+    const { fake, drop } = mountDesktopTerminal();
+
+    // When a file is dropped on the terminal
+    dropTheScreenshot(drop);
+
+    // Then the PTY receives the quoted path, unwrapped
+    cy.wrap(null).should(() => {
+      const sent = textOf(fake.sentChunks);
+      expect(sent).to.contain(`'${A_SCREENSHOT}' `);
+      expect(sent).not.to.contain("\x1b[200~");
     });
   });
 });

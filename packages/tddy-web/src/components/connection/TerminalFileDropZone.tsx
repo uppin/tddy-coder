@@ -17,6 +17,13 @@ export interface TerminalFileDropZoneProps {
   sessionId: string;
   /** Types the uploaded files' host paths into the terminal input (no newline appended). */
   insertInput: (text: string) => void;
+  /**
+   * The session's agent reads this machine's filesystem (`SessionEntry.readsHostPaths`, and the
+   * session is on the host application's own daemon). A file dropped from the OS then has its real
+   * path typed; otherwise it is uploaded into the session directory. Only the host application's
+   * native drop knows real paths, so a browser drop always uploads.
+   */
+  readsLocalPaths?: boolean;
   children: React.ReactNode;
 }
 
@@ -24,8 +31,10 @@ export function TerminalFileDropZone({
   sessionToken,
   sessionId,
   insertInput,
+  readsLocalPaths = false,
   children,
 }: TerminalFileDropZoneProps) {
+  void readsLocalPaths;
   const [dragging, setDragging] = useState(false);
   const uploadChunk = useDaemonUploadChunk(sessionToken, sessionId);
   const { uploadFiles } = useSessionFileUpload({ uploadChunk, insertInput });
