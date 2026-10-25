@@ -161,8 +161,10 @@ pub fn session_list_status_from_session_dir(
         }
     };
 
-    // CLI harness sessions (claude-cli, cursor-cli, opencode-cli, ...) have no changeset — read
-    // agent/model/activity_status from metadata. The agent is the session type.
+    // CLI harness sessions (claude-cli, cursor-cli, opencode-cli, ...) run no workflow — read
+    // agent/model/activity_status from metadata. The agent is the session type. A start that
+    // creates a worktree still writes a changeset recording the branch it created; sessions
+    // started before that have none, and list without a branch.
     if let Some(harness) = meta
         .session_type
         .as_deref()
@@ -178,7 +180,10 @@ pub fn session_list_status_from_session_dir(
             orchestrator_session_id: String::new(),
             recipe: String::new(),
             stack_plan_json: String::new(),
-            branch: String::new(),
+            branch: read_changeset(session_dir)
+                .ok()
+                .and_then(|c| c.branch)
+                .unwrap_or_default(),
         });
     }
 
@@ -570,6 +575,61 @@ state:
         assert_eq!(proto.branch, "feature/auth/token-store");
     }
 
+    #[test]
+    fn claude_cli_session_lists_the_branch_its_changeset_records() {
+        // Given — a claude-cli session started from a project home with a new branch: the start
+        // writes the branch it actually created (de-duplicated, so not the requested name) to the
+        // changeset. Shape copied from a real session the bug was reported on.
+        let dir = tempdir().unwrap();
+        let session_dir = dir.path();
+        fs::write(
+            session_dir.join(tddy_core::SESSION_METADATA_FILENAME),
+            r"session_id: cli-branch-1
+project_id: proj-1
+created_at: '2026-10-25T05:51:58Z'
+updated_at: '2026-10-25T05:53:10Z'
+status: active
+repo_path: /tmp/worktrees/test-session-smoke-1
+pid: 0
+session_type: claude-cli
+model: opus
+activity_status: WaitingForInput
+",
+        )
+        .unwrap();
+        fs::write(
+            session_dir.join("changeset.yaml"),
+            r"version: 1
+models: {}
+sessions: []
+state:
+  current: Init
+  updated_at: '2026-10-25T05:51:52Z'
+  history: []
+worktree: /tmp/worktrees/test-session-smoke-1
+branch: test-session-smoke-1
+workflow:
+  branch_worktree_intent: new_branch_from_base
+  new_branch_name: test-session-smoke
+orchestrator_session_id: home-session-1
+",
+        )
+        .unwrap();
+        let mut proto = ProtoSessionEntry {
+            session_id: "cli-branch-1".to_string(),
+            ..Default::default()
+        };
+
+        // When
+        apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
+
+        // Then
+        assert_eq!(proto.branch, "test-session-smoke-1");
+        assert_eq!(proto.agent, "claude-cli");
+        assert_eq!(proto.model, "opus");
+        assert_eq!(proto.activity_status, "WaitingForInput");
+    }
+
     /// **claude_cli_session_enrichment_uses_metadata_not_changeset**: when `.session.yaml` has
     /// `session_type = "claude-cli"` and no `changeset.yaml` is present,
     /// `session_list_status_from_session_dir` must return `agent = "claude-cli"` and
@@ -615,7 +675,7 @@ state:
             session_role: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
-        // Intentionally NO changeset.yaml — claude-cli sessions never have one.
+        // Intentionally NO changeset.yaml — claude-cli sessions started without a worktree have none.
 
         let got = session_list_status_from_session_dir(&session_dir)
             .expect("enrichment must not error for claude-cli session without changeset");
