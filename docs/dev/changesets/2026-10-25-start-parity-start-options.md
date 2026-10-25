@@ -21,6 +21,6 @@ is not limited to the project, exactly as in the form. Across:
 - `tddy-web` — `stackParentsParity.cy.ts` and the shared fixture.
 
 Code issues (split deferred, stack-shared): `tddy-tool-engine/src/project_home_tools.rs` 558 → 601,
-`tddy-tool-engine/src/lib.rs` 880 → 881, `tddy-daemon-rpc/src/exec_tool/project_home.rs` 665 → 704;
+`tddy-tool-engine/src/lib.rs` 880 → 881, `tddy-daemon-rpc/src/exec_tool/project_home.rs` 665 → 708;
 `tddy-accounts/src/service.rs` 772 (touched, not grown; new record). TODO added: the shared test
 config's `testdev` OS user resolves on no machine.

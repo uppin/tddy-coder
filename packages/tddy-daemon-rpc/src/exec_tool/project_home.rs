@@ -135,7 +135,11 @@ impl ExecToolRpcHandler {
             catalog: Arc::clone(&self.project_home_host.catalog),
             projects: Arc::clone(&self.project_home_host.projects),
             host_service: Arc::clone(&self.project_home_host.host_service),
-            provider_accounts: self.project_home_host.provider_accounts.get().map(Arc::clone),
+            provider_accounts: self
+                .project_home_host
+                .provider_accounts
+                .get()
+                .map(Arc::clone),
         })
     }
 
