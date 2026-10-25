@@ -238,18 +238,28 @@ session whose record carries the `project-home` role may run them; any other cal
 
 | Tool | Arguments | Answers |
 |---|---|---|
-| `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation}]}`: every other session of the project, with the status the web's session list shows |
+| `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on, and the status the web's session list shows. A host that does not answer is named in `unreachable_hosts`, never silently left out |
 | `StartProjectSession` | `session_type` (required), `prompt`, `agent`, `new_branch_name` | `{"session_id"}`: a session of any type `StartSession` accepts, started in the project as the caller's user; its changeset records the home session as `orchestrator_session_id`. A role cannot be passed |
-| `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root) | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
-| `DiffSessionWorktree` | `session_id` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
+| `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root), `daemon_instance_id?` | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
+| `DiffSessionWorktree` | `session_id`, `daemon_instance_id?` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
 
-- **Targets.** A target is a session id on the same daemon and in the caller's project, with a
-  worktree. Another project's session, the home session itself, an unknown id and a session without a
+- **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
+  optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
+  is the caller's own host). Another project's session, the home session itself, an unknown id and a session without a
   worktree are refused as an `is_error` result naming why ("another project", …).
 - **Paths.** An absolute path, one climbing above the worktree, or one resolving through a symlink to
   outside it is refused as an `is_error` result naming "outside the worktree". A base ref that git
   would read as an option is refused too.
 - Every call is appended to the home session's tool-call log, as any exec tool is.
+- **Across hosts.** A target tool call (read, diff, every git tool) naming another host is
+  forwarded whole to that host over the peer forward and runs there unchanged: that host's path
+  containment, activity gate and push identity apply. The host receiving it does not hold the calling
+  session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
+  daemon `ListSessions` with the caller's token and serves the call only when the owner reports the
+  session with the `project-home` role, taking the project from that row. An ordinary session that
+  addresses a request at another host itself is refused there with `PERMISSION_DENIED`. A forwarded
+  call is served for that host only — its listing does not fan out and it cannot name a third host —
+  so a call travels at most one hop.
 
 ### Git tools
 
