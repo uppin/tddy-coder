@@ -8,9 +8,11 @@
 
 use std::path::{Path, PathBuf};
 
+use tddy_agent_backend::HeadlessHarness;
 use tddy_coding_subagent::{
-    coding_agent_defs_in, refuse_unless_confinable, withdrawal_session_meta, AgentTransport,
-    CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession,
+    coding_agent_defs_in, refuse_unless_confinable, transport_of, withdrawal_session_meta,
+    AgentTransport, CodingAgentDef, CodingAgentLaunch, CodingAgentLauncher, CodingAgentSession,
+    Transport,
 };
 use tddy_core::OpenSession;
 use tddy_core::{AgentKindRecord, SessionAgentRecord};
@@ -142,9 +144,45 @@ pub(crate) fn session_worktree(
         })
 }
 
-/// Start the agent `launch` names through `launcher` and open its ACP session. The MCP servers
-/// are settled first, so a refusal there never leaves a process started as another user.
-async fn start_coding_agent_session(
+/// Start the coding agent `launch` names through `launcher` and open its conversation: a headless
+/// conversation for a headless harness, an ACP session for any other.
+pub async fn start_coding_agent_session(
+    launcher: &dyn CodingAgentLauncher,
+    launch: &CodingAgentLaunch,
+) -> Result<CodingAgentSession, Status> {
+    match transport_of(&launch.def.harness) {
+        Some(Transport::Headless) => start_headless_session(launcher, launch).await,
+        Some(Transport::Acp) | None => start_acp_session(launcher, launch).await,
+    }
+}
+
+/// A headless conversation: the launcher's CLI command, run once per turn on the def's model.
+async fn start_headless_session(
+    launcher: &dyn CodingAgentLauncher,
+    launch: &CodingAgentLaunch,
+) -> Result<CodingAgentSession, Status> {
+    let refused =
+        |e: tddy_discovery::subagent::SubagentError| Status::failed_precondition(e.to_string());
+    let harness = HeadlessHarness::from_id(&launch.def.harness).ok_or_else(|| {
+        Status::failed_precondition(format!(
+            "coding agent '{}' is not a headless harness",
+            launch.def.name
+        ))
+    })?;
+    let mut command = launcher
+        .headless_command_for(launch)
+        .await
+        .map_err(refused)?;
+    // The CLI runs the model the session reports, whatever model the launcher named.
+    command.model = Some(launch.def.model.clone());
+    CodingAgentSession::start_headless(harness, command, launch.def.model.clone())
+        .await
+        .map_err(refused)
+}
+
+/// An ACP session: the agent's command, its MCP servers, and the session opened over it. The MCP
+/// servers are settled first, so a refusal there never leaves a process started as another user.
+async fn start_acp_session(
     launcher: &dyn CodingAgentLauncher,
     launch: &CodingAgentLaunch,
 ) -> Result<CodingAgentSession, Status> {

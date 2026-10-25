@@ -2,6 +2,8 @@
 
 use tddy_discovery::harness_profile::HarnessProfile;
 
+use crate::transports::transport_of;
+
 /// Claude Code over ACP (`claude-agent-acp`).
 pub const CLAUDE_ACP: &str = "claude-acp";
 /// Codex over ACP (`codex-acp`).
@@ -18,7 +20,8 @@ pub struct CodingAgentDef {
     /// The roster key: a harness profile's name, or the `allowed_agents` id.
     pub name: String,
     pub label: Option<String>,
-    /// The harness it runs (`claude-acp`, `codex-acp`, `opencode`).
+    /// The harness it runs: an ACP harness (`claude-acp`, `codex-acp`, `opencode`) or a headless one
+    /// (`claude`, `cursor`, `codex`, `oz`).
     pub harness: String,
     /// The model it runs; a bare `allowed_agents` entry gets the harness's default model.
     pub model: String,
@@ -26,8 +29,13 @@ pub struct CodingAgentDef {
     pub provider_account: Option<String>,
 }
 
-/// The coding agents offered from `profiles` (every one whose harness is in [`ACP_HARNESSES`]) and
-/// `allowed_agent_ids` (`(id, label)` pairs whose id is one), profiles first.
+/// The coding agents offered from `profiles` and `allowed_agent_ids` (`(id, label)` pairs), profiles
+/// first.
+///
+/// A profile is offered when its harness has a transport this crate runs: an ACP harness or a
+/// headless one ([`transport_of`]). A PTY-only harness is never offered. A bare `allowed_agents` id
+/// is offered only when it is an ACP harness, so a headless harness is offered through a profile
+/// alone, which names the model it runs.
 ///
 /// A name is offered once: an allowed id that a profile of the same name already took is skipped,
 /// since two defs under one name would attach as whichever resolved first.
@@ -37,7 +45,7 @@ pub fn coding_agent_defs(
 ) -> Vec<CodingAgentDef> {
     let from_profiles: Vec<CodingAgentDef> = profiles
         .iter()
-        .filter(|profile| is_acp_harness(&profile.harness))
+        .filter(|profile| transport_of(&profile.harness).is_some())
         .map(profile_def)
         .collect();
     let from_allowed: Vec<CodingAgentDef> = allowed_agent_ids

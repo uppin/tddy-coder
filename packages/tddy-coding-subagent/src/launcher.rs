@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use tddy_agent_backend::{AcpAgentCommand, McpServerSpec};
+use tddy_agent_backend::{AcpAgentCommand, HeadlessCommand, McpServerSpec};
 use tddy_discovery::subagent::SubagentError;
 
 use crate::catalog::CodingAgentDef;
@@ -94,4 +94,20 @@ pub trait CodingAgentLauncher: Send + Sync {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<Vec<McpServerSpec>, SubagentError>;
+
+    /// The command a headless coding agent's CLI runs for every turn of `launch`'s conversation: the
+    /// program, the environment it adds, its working directory and any MCP config it reads. Asked
+    /// only for a headless harness ([`crate::transports::transport_of`]). The session sets the
+    /// model itself, so the CLI runs the model the session reports.
+    ///
+    /// By default refused: a launcher that starts only ACP agents has no headless command to give.
+    async fn headless_command_for(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<HeadlessCommand, SubagentError> {
+        Err(SubagentError::from(format!(
+            "this launcher starts only ACP coding agents, so '{}' ({}) cannot be opened headless",
+            launch.def.name, launch.def.harness
+        )))
+    }
 }
