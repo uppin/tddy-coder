@@ -19,8 +19,8 @@ use tddy_core::SessionAgentRecord;
 use tddy_discovery::subagent::SubagentSession;
 use tddy_rpc::Status;
 use tddy_service::proto::session_agents_svc::{
-    AgentConversationChunk, OpenAgentConversationRequest, PromptAgentConversationRequest,
-    ResumeAgentConversationRequest,
+    AgentConversationChunk, AnswerAgentPermissionRequest, AnswerAgentPermissionResponse,
+    OpenAgentConversationRequest, PromptAgentConversationRequest, ResumeAgentConversationRequest,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -271,6 +271,19 @@ pub trait AgentConversationPeers: Send + Sync {
             "this host cannot forward the cancel of conversation '{conversation_id}' to '{owner}' naming who cancelled it"
         )))
     }
+
+    /// Answer a permission request on a conversation whose turn loop runs on `owner`, handing back
+    /// the answer the owner recorded.
+    ///
+    /// Forwarded whole: the owner holds the parked request, so its own deferral gate and its
+    /// first-answer-wins resolution decide the answer, and a refusal it gives comes back as it is.
+    async fn answer_permission(
+        &self,
+        session_token: &str,
+        session_id: &str,
+        owner: &str,
+        request: &AnswerAgentPermissionRequest,
+    ) -> Result<AnswerAgentPermissionResponse, Status>;
 }
 
 /// Everything the nine handlers need from the host they run on.

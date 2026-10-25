@@ -33,6 +33,7 @@ pub mod agent_roster_state;
 pub mod clone_placement;
 pub mod clone_readiness;
 pub mod coding_agent;
+pub mod conversation_answer_forward;
 pub mod conversation_cancel_forward;
 pub mod conversation_open_forward;
 pub mod conversation_recorder;

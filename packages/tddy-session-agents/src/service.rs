@@ -41,7 +41,7 @@ use tddy_discovery::subagent::{
 };
 use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
-use crate::agent_conversations::{AgentConversation, PromptRouting};
+use crate::agent_conversations::{AgentConversation, AnswerRoute, PromptRouting};
 use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder, SessionClaim};
 use crate::conversation_status::{self, ConversationStatus};
 use crate::conversation_transcript::{answered_frame, now_unix_ms};
@@ -1227,9 +1227,13 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
     ///
     /// Authenticated first, as the neighbouring handlers are. The conversation must be open on the
     /// session the request names: a conversation id is host-wide, so an id another session opened is
-    /// refused as not held rather than answered. It must be one whose session parks permission
-    /// requests, and the request must have been handed to the user by the turn holding it: a request
-    /// the main agent keeps is the main agent's to answer, and is refused here.
+    /// refused as not held rather than answered.
+    ///
+    /// A conversation whose turn loop runs on another daemon is answered there: that daemon holds the
+    /// parked request, so this one forwards the answer through the peers port and returns the answer
+    /// the owner recorded, or the refusal it gave. A conversation run here must be one whose session
+    /// parks permission requests, and the request must have been handed to the user by the turn holding
+    /// it: a request the main agent keeps is the main agent's to answer, and is refused here.
     ///
     /// The answer is recorded under the caller's GitHub login, and the first answer to a request wins:
     /// a second is refused naming who answered first. The answer reaches the parked request through the
@@ -1241,30 +1245,33 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
     ) -> Result<Response<AnswerAgentPermissionResponse>, Status> {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
-        let Some(answering) = self
+        let route = self
             .ports
             .conversations
-            .answering_for(&req.session_id, &req.conversation_id)
+            .answer_route_for(&req.session_id, &req.conversation_id)
             .await
-        else {
-            return Err(
-                if self
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "conversation '{}' is not open on session '{}'",
+                    req.conversation_id, req.session_id
+                ))
+            })?;
+        let answering = match route {
+            AnswerRoute::Remote(owner) => {
+                return self
                     .ports
-                    .conversations
-                    .is_open_on(&req.session_id, &req.conversation_id)
+                    .peers
+                    .answer_permission(&req.session_token, &req.session_id, &owner, &req)
                     .await
-                {
-                    Status::failed_precondition(format!(
-                        "conversation '{}' has no permission requests to answer on session '{}'",
-                        req.conversation_id, req.session_id
-                    ))
-                } else {
-                    Status::not_found(format!(
-                        "conversation '{}' is not open on session '{}'",
-                        req.conversation_id, req.session_id
-                    ))
-                },
-            );
+                    .map(Response::new);
+            }
+            AnswerRoute::Local(Some(answering)) => answering,
+            AnswerRoute::Local(None) => {
+                return Err(Status::failed_precondition(format!(
+                    "conversation '{}' has no permission requests to answer on session '{}'",
+                    req.conversation_id, req.session_id
+                )));
+            }
         };
         if !answering.deferred_to_user(&req.request_id) {
             return Err(Status::failed_precondition(format!(

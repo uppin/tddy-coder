@@ -349,4 +349,17 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
             )
             .await
     }
+
+    async fn answer_permission(
+        &self,
+        session_token: &str,
+        session_id: &str,
+        owner: &str,
+        request: &tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest,
+    ) -> Result<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse, Status>
+    {
+        self.roster
+            .forward_answer_agent_permission(session_token, session_id, owner, request)
+            .await
+    }
 }

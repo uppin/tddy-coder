@@ -84,6 +84,14 @@ impl AgentConversation {
     }
 }
 
+/// Where an answer to one of a conversation's permission requests is delivered.
+pub enum AnswerRoute {
+    /// The turn loop runs here. `None` when the session parks no permission requests.
+    Local(Option<Arc<dyn PermissionAnswering>>),
+    /// The turn loop runs on the named daemon, which holds the request and decides the answer.
+    Remote(String),
+}
+
 /// What one open conversation hands a prompt, taken out of the map so the map's lock can be
 /// released before the turn is awaited.
 pub enum PromptRouting {
@@ -164,34 +172,28 @@ impl OpenAgentConversations {
         }
     }
 
-    /// Whether `conversation_id` is open on `session_id`. The map is host-wide, so the session a
-    /// conversation was opened on is checked here too: a conversation another session opened is not
-    /// one this session may act on. Takes only the map's lock, never a session's.
-    pub async fn is_open_on(&self, session_id: &str, conversation_id: &str) -> bool {
-        self.open
-            .lock()
-            .await
-            .get(conversation_id)
-            .is_some_and(|conversation| conversation.session_id() == session_id)
-    }
-
-    /// The handle `conversation_id`'s parked permission requests are answered through, when it is a
-    /// conversation open on `session_id` whose turns run here and whose session parks requests.
-    /// `None` for a conversation another daemon runs the loop of. Takes only the map's lock, never a
-    /// session's, so an answer reaches a turn that is waiting on it.
-    pub async fn answering_for(
+    /// Where an answer to a permission request on `conversation_id` is delivered, when it is a
+    /// conversation open on `session_id`. `None` when it is not open on that session: the map is
+    /// host-wide, so a conversation another session opened is not one this session may act on.
+    ///
+    /// Takes only the map's lock, never a session's, so a local answer reaches a turn that is
+    /// waiting on it.
+    pub async fn answer_route_for(
         &self,
         session_id: &str,
         conversation_id: &str,
-    ) -> Option<Arc<dyn PermissionAnswering>> {
-        match self.open.lock().await.get(conversation_id)? {
-            AgentConversation::Local {
-                session_id: open_session,
-                answering,
-                ..
-            } if open_session == session_id => answering.clone(),
-            AgentConversation::Local { .. } | AgentConversation::Remote { .. } => None,
+    ) -> Option<AnswerRoute> {
+        let open = self.open.lock().await;
+        let conversation = open.get(conversation_id)?;
+        if conversation.session_id() != session_id {
+            return None;
         }
+        Some(match conversation {
+            AgentConversation::Local { answering, .. } => AnswerRoute::Local(answering.clone()),
+            AgentConversation::Remote {
+                daemon_instance_id, ..
+            } => AnswerRoute::Remote(daemon_instance_id.clone()),
+        })
     }
 
     /// Forget `conversation_id`, handing back what was open under it.
