@@ -27,7 +27,9 @@ use crate::proto::acp::{
     acp_agent_message, session_update, AcpAgentMessage, SessionNotification, SessionUpdate,
     ToolCall, ToolCallId, ToolCallStatus, ToolKind,
 };
-use crate::subagent_conversation_replay::{fold_subagent_calls, subagent_entry_of};
+use crate::subagent_conversation_replay::{
+    conversation_row_entry, fold_subagent_calls, subagent_entry_of,
+};
 
 /// Session-dir filename of the persisted ACP transcript (sibling of `agent-activity.jsonl`).
 pub const ACP_TRANSCRIPT_FILENAME: &str = "acp-transcript.jsonl";
@@ -360,8 +362,10 @@ pub fn frame_for_agent_activity(
     use tddy_core::agent_activity::{STATUS_COMPLETED, STATUS_ERROR};
 
     // A main-agent call on a subagent conversation is that conversation's one entry, not a call of its
-    // own: its id, title and status come from the conversation (see `subagent_conversation_replay`).
-    let (tool_call_id, title, status) = match subagent_entry_of(record) {
+    // own: its id, title and status come from the conversation (see `subagent_conversation_replay`). A
+    // conversation's own status row is folded into the same entry.
+    let entry = subagent_entry_of(record).or_else(|| conversation_row_entry(record));
+    let (tool_call_id, title, status) = match entry {
         Some(entry) => (entry.tool_call_id, entry.title, entry.status),
         None => {
             let title = match tddy_core::stream::claude::tool_use_detail(

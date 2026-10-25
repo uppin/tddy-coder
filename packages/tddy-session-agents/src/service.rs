@@ -43,6 +43,7 @@ use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
 use crate::agent_conversations::{AgentConversation, PromptRouting};
 use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder, SessionClaim};
+use crate::conversation_status::{self, ConversationStatus};
 use crate::ports::SessionAgentPorts;
 use crate::session_agent_status::ManagedAgentState;
 
@@ -236,7 +237,13 @@ impl SessionAgentServiceImpl {
                     ..
                 },
                 Some(answer),
-            ) => Some(claim_for_answer(session, &**answering, answer)?),
+            ) => Some(claim_for_answer(session, &**answering, answer, || {
+                conversation_status::record(
+                    &session_dir,
+                    turn.conversation_id(),
+                    ConversationStatus::Running,
+                )
+            })?),
             _ => None,
         };
 
@@ -1211,7 +1218,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         request: Request<AnswerAgentPermissionRequest>,
     ) -> Result<Response<AnswerAgentPermissionResponse>, Status> {
         let req = request.into_inner();
-        self.session_dir(&req.session_token, &req.session_id)?;
+        let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
         let Some(answering) = self
             .ports
             .conversations
@@ -1248,6 +1255,12 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         answering
             .answer_as(&answer, AnsweredBy::User(login.clone()))
             .map_err(Status::failed_precondition)?;
+        // The turn holding the request is no longer waiting on the user: its status row says so.
+        conversation_status::record(
+            &session_dir,
+            &req.conversation_id,
+            ConversationStatus::Running,
+        );
         Ok(Response::new(AnswerAgentPermissionResponse {
             answered_by: login,
         }))
@@ -1268,6 +1281,7 @@ fn claim_for_answer(
     session: &Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>,
     answering: &dyn PermissionAnswering,
     answer: &PermissionAnswer,
+    delivered: impl FnOnce(),
 ) -> Result<tokio::sync::OwnedMutexGuard<Box<dyn SubagentSession>>, Status> {
     match Arc::clone(session).try_lock_owned() {
         Ok(guard) => Ok(guard),
@@ -1275,6 +1289,7 @@ fn claim_for_answer(
             answering
                 .answer_as(answer, AnsweredBy::MainAgent)
                 .map_err(Status::failed_precondition)?;
+            delivered();
             Err(Status::failed_precondition(
                 crate::permission_wire::answer_delivered_while_held(answer.request_id()),
             ))

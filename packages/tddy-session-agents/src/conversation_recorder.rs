@@ -31,6 +31,7 @@ use tddy_service::subagent_conversation_replay::{
 use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 use tokio::sync::{broadcast, mpsc, oneshot, Notify, OwnedMutexGuard};
 
+use crate::conversation_status::{self, ConversationStatus};
 use crate::conversation_transcript::{
     now_unix_ms, turn_end_frames, user_prompt_frame, whole_turn_frames, TurnEnd,
 };
@@ -145,6 +146,15 @@ impl ConversationRecorder {
                 .map_err(|e| e.to_string()),
             None => Ok(()),
         }
+    }
+
+    /// Write this conversation's status row. See [`conversation_status::record`]: a failure does not fail the turn.
+    pub(crate) fn note_status(&self, status: ConversationStatus) {
+        conversation_status::record(
+            &self.transcript.session_dir,
+            &self.transcript.conversation_id,
+            status,
+        );
     }
 
     /// When a turn ends, whatever its outcome. A streamed conversation waits for the recorder task to write
@@ -262,6 +272,12 @@ pub(crate) async fn take_recorded_turn(
         },
     };
     recorder.begin_turn(prompt).map_err(TurnError::Recording)?;
+    // A turn that hands a request to the user is waiting on the user from here until it ends, and its status row
+    // says so while it does. A turn that asks for no deferral writes no status row.
+    let deferred = requested.permission_deferred_to_user().is_some();
+    if deferred {
+        recorder.note_status(ConversationStatus::AwaitingUser);
+    }
     let taken = tokio::select! {
         biased;
         _ = closed.notified() => None,
@@ -273,6 +289,9 @@ pub(crate) async fn take_recorded_turn(
         Some(Err(_)) => TurnEnd::Failed,
     };
     let recorded = recorder.end_turn(prompt, end).await;
+    if deferred {
+        recorder.note_status(ConversationStatus::Completed);
+    }
     drop(session);
     match taken {
         None => Err(TurnError::Closed {
