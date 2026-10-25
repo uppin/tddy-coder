@@ -224,7 +224,7 @@ it("a reopened conversation still shows an answered request without offering its
   cy.get("[data-testid^='permission-option-']").should("not.exist");
 });
 
-it("a request the transcript records as cancelled names who answered it, with no option", () => {
+it("a request the transcript records as cancelled names who cancelled it, with no option", () => {
   // Given
   mountASessionWhoseSubagentAsks({
     deferredToUser: true,
@@ -239,7 +239,7 @@ it("a request the transcript records as cancelled names who answered it, with no
   openTheConversation();
 
   // Then
-  byTestId("permission-answered", { timeout: 5000 }).should("have.text", "Answered by alice");
+  byTestId("permission-answered", { timeout: 5000 }).should("have.text", "Cancelled by alice");
   cy.get("[data-testid^='permission-option-']").should("not.exist");
 });
 
