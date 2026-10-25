@@ -142,11 +142,26 @@ Cancelling that task (`CancelTask`) stops the start where it stands, and the str
 |---|---|
 | Cloning the project | The clone's git process is stopped through the handle its backend hands back (forked worker, in-process, or the supervisor), and the clone removes its `.partial-*` directory. No repository and no session directory are left |
 | Between steps | No later step begins: a cancelled start cuts no worktree and spawns no agent |
-| Cutting the worktree, or spawning the agent | That step is not interrupted. When it finishes, the session it created is deleted the way `DeleteSession` deletes one: the agent is stopped, then the worktree and the session directory are removed. Only then does the stream end `CANCELLED` |
+| Cutting the worktree, or spawning the agent | That step is not interrupted. When it finishes, the session it created is deleted the way `DeleteSession` deletes one: the agent is stopped, then the worktree and the session directory are removed, and then the branch the start cut (below). Only then does the stream end `CANCELLED` |
 | A split start | The codebase host's half is cancelled too; see [Remote-managed worktree § Cancelling a split start](remote-managed-worktree.md#cancelling-a-split-start) |
 
 If the session a cancelled start created cannot be removed, the stream ends `INTERNAL` and names the
 session, so it is not left behind silently.
+
+**A cancelled start deletes the branch it cut.** When the start's changeset resolved to
+`new_branch_from_base` (an empty intent resolves to it) and its worktree is a daemon-managed one
+under the project's `.worktrees`, the branch the changeset records is force-deleted
+(`git branch -D`) in the project repository on the host that ran the start, after the session is
+removed (`packages/tddy-agent-launch/src/start_cut_branch.rs`). The branch is read from the changeset
+before the session directory goes. This applies to every cancel of a streamed start — the web UI's
+**Cancel** and the orchestrator's `CancelSessionStart` alike.
+
+- A `work_on_selected_branch` start, or a start on a client's own checkout (`repo_path`), never
+  deletes a branch.
+- A branch already absent is not an error. A branch git refuses to delete (checked out in another
+  worktree) ends the stream `INTERNAL`, naming the branch.
+- Only the local branch is deleted: a branch the start pushed to origin (`create_remote_branch`)
+  stays there (`docs/dev/todo/2026-10-25-cancelled-start-leaves-its-pushed-branch-on-origin.md`).
 
 ### Retention / cap policy
 
