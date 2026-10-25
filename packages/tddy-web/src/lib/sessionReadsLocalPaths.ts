@@ -12,15 +12,18 @@
  */
 
 import type { SessionEntry } from "../gen/session_pb";
-import type { TauriHostWindow } from "../rpc/daemonTransportFlavour";
+import { daemonTransportFlavour, type TauriHostWindow } from "../rpc/daemonTransportFlavour";
 
 export function sessionReadsLocalPaths(
   win: TauriHostWindow,
   session: Pick<SessionEntry, "daemonInstanceId" | "readsHostPaths"> | undefined,
   servingDaemonInstanceId: string | undefined,
 ): boolean {
-  void win;
-  void session;
-  void servingDaemonInstanceId;
-  return false;
+  if (daemonTransportFlavour(win) !== "webview-ipc" || !session) return false;
+  const thisMachinesDaemon = servingDaemonInstanceId?.trim() ?? "";
+  return (
+    thisMachinesDaemon !== "" &&
+    session.daemonInstanceId === thisMachinesDaemon &&
+    session.readsHostPaths
+  );
 }

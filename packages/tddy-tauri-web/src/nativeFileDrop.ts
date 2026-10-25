@@ -3,9 +3,8 @@
  *
  * The application keeps Tauri's native drag-drop handler on: it is the only thing that knows the
  * dropped files' real paths, and while it is on the webview never sees an HTML5 `dragover` or
- * `drop` at all. So the page learns of a drag from the window's own events — where the pointer is
- * and, on enter and drop, which paths are being carried — and does its own hit-testing against
- * those positions.
+ * `drop` at all. So the page learns of a drag from the window — where the pointer is and, on enter
+ * and drop, which paths are being carried — and does its own hit-testing against those positions.
  *
  * Reading a dropped file's bytes goes through two host commands that serve **only the paths of
  * the most recent drop** (`packages/tddy-desktop/src-tauri/src/file_drop.rs`).
@@ -48,30 +47,33 @@ export interface NativeFileDropBridge {
   read(path: string, offset: number, length: number): Promise<Uint8Array>;
 }
 
-/** The commands `file_drop.rs` serves. */
+/** The commands `file_drop.rs` serves, and the event it relays each drag step on. */
 export const DESCRIBE_DROPPED_FILES_COMMAND = "tddy_dropped_files_describe";
 export const READ_DROPPED_FILE_COMMAND = "tddy_dropped_file_read";
-
-/** Tauri's drag-drop payload, structurally: positions are physical pixels within the webview. */
-export type TauriDragDropPayload =
-  | { type: "enter"; paths: string[]; position: { x: number; y: number } }
-  | { type: "over"; position: { x: number; y: number } }
-  | { type: "drop"; paths: string[]; position: { x: number; y: number } }
-  | { type: "leave" };
+export const NATIVE_DRAG_EVENT = "tddy://native-file-drop";
 
 /**
- * A Tauri drag step as a page event: physical pixels divided by the display's scale, so the point
- * is one `document.elementFromPoint` can hit-test.
+ * This window's drag-drop surface. Only meaningful inside the host application.
+ *
+ * Listens to the application's own relay of each drag step rather than to Tauri's
+ * `onDragDropEvent`: Tauri types every drag position as physical pixels, but WKWebView and GTK
+ * report points, so no single conversion on this side is right on every platform. The host
+ * converts with the platform known (`file_drop::drag_step_of`) and sends CSS pixels.
  */
-export function nativeDragEventOf(payload: TauriDragDropPayload, scale: number): NativeDragEvent {
-  void payload;
-  void scale;
-  throw new Error("not implemented: nativeDragEventOf");
-}
-
-/** This window's drag-drop surface. Only meaningful inside the host application. */
 export function thisWindowsNativeFileDrop(): NativeFileDropBridge {
-  void getCurrentWebview;
-  void invoke;
-  throw new Error("not implemented: thisWindowsNativeFileDrop");
+  return {
+    listen: (onEvent) =>
+      getCurrentWebview().listen<NativeDragEvent>(NATIVE_DRAG_EVENT, (event) =>
+        onEvent(event.payload),
+      ),
+    describe: (paths) => invoke<DroppedFileInfo[]>(DESCRIBE_DROPPED_FILES_COMMAND, { paths }),
+    read: async (path, offset, length) =>
+      new Uint8Array(
+        await invoke<ArrayBuffer>(READ_DROPPED_FILE_COMMAND, {
+          path,
+          offset,
+          length,
+        }),
+      ),
+  };
 }

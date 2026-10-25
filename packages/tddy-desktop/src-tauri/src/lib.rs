@@ -19,7 +19,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tauri::webview::{PageLoadEvent, PageLoadPayload};
-use tauri::{Manager, RunEvent, Url, Webview, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    DragDropEvent, Emitter, EventTarget, Manager, RunEvent, Url, Webview, WebviewUrl,
+    WebviewWindowBuilder, Window, WindowEvent,
+};
 use tddy_daemon::runtime::{self, RuntimeOptions, RuntimeTaskHandles};
 use tddy_rpc::MultiRpcService;
 use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
@@ -95,8 +98,12 @@ pub fn run() -> anyhow::Result<()> {
         .invoke_handler(tauri::generate_handler![
             ipc::tddy_rpc_connect,
             ipc::tddy_rpc_send,
-            ipc::tddy_rpc_disconnect
+            ipc::tddy_rpc_disconnect,
+            file_drop::tddy_dropped_files_describe,
+            file_drop::tddy_dropped_file_read
         ])
+        .manage(file_drop::DroppedFiles::default())
+        .on_window_event(relay_drags_to_the_page)
         .on_page_load(reap_the_departing_pages_connections)
         .setup(move |app| {
             start_daemon(app, config, config_path, spawn_client, spawn_backend)?;
@@ -111,6 +118,48 @@ pub fn run() -> anyhow::Result<()> {
         }
     });
     Ok(())
+}
+
+/// Tell the page about a drag over the window — and make a drop's files, and only that drop's,
+/// readable by it.
+///
+/// The window keeps Tauri's native drag-drop handler, which is what knows the real paths; while it
+/// does, the page never sees an HTML5 drag. Tauri's own `tauri://drag-*` events do reach the page,
+/// but with positions in whatever unit the platform's webview measured (see
+/// [`file_drop::drag_step_of`]), so the page listens to the step re-emitted here instead. The drop
+/// is recorded before it is emitted, so by the time the page can ask to read a dropped file the
+/// file is readable.
+fn relay_drags_to_the_page(window: &Window, event: &WindowEvent) {
+    let WindowEvent::DragDrop(drag) = event else {
+        return;
+    };
+    if window.label() != MAIN_WINDOW_LABEL {
+        return;
+    }
+    if let DragDropEvent::Drop { paths, .. } = drag {
+        log::debug!(
+            "[tddy-desktop] {} path(s) dropped on the window",
+            paths.len()
+        );
+        window.state::<file_drop::DroppedFiles>().record_drop(paths);
+    }
+    let scale_factor = match window.scale_factor() {
+        Ok(scale_factor) => scale_factor,
+        Err(error) => {
+            log::warn!("[tddy-desktop] a drag step was not relayed: no scale factor: {error}");
+            return;
+        }
+    };
+    let Some(step) = file_drop::drag_step_of(drag, scale_factor) else {
+        return;
+    };
+    if let Err(error) = window.emit_to(
+        EventTarget::labeled(MAIN_WINDOW_LABEL),
+        file_drop::NATIVE_DRAG_EVENT,
+        step,
+    ) {
+        log::warn!("[tddy-desktop] a drag step was not relayed to the page: {error}");
+    }
 }
 
 /// Release every connection the page that is being replaced had open.

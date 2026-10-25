@@ -198,3 +198,31 @@ async fn an_unmanaged_session_is_listed_as_not_managed() {
     // Then
     assert!(!the_listed(&world, &session_id).await.managed_codebase);
 }
+
+// Whether the session's agent reads this host's filesystem is reported alongside, so a file dropped
+// onto the session's terminal in Tddy Desktop can be handed over by its real path rather than
+// uploaded. Feature: docs/ft/web/web-terminal.md § File drop upload.
+
+#[tokio::test]
+async fn an_unconfined_session_is_listed_as_reading_host_paths() {
+    // Given
+    let world = a_daemon_with_a_project();
+
+    // When
+    let session_id = started(&world, false).await;
+
+    // Then
+    assert!(the_listed(&world, &session_id).await.reads_host_paths);
+}
+
+#[tokio::test]
+async fn a_managed_session_is_listed_as_not_reading_host_paths() {
+    // Given
+    let world = a_daemon_with_a_project();
+
+    // When
+    let session_id = started(&world, true).await;
+
+    // Then
+    assert!(!the_listed(&world, &session_id).await.reads_host_paths);
+}

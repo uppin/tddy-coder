@@ -43,7 +43,11 @@ describe("a session reads paths on this machine", () => {
 
   it("not when its agent is confined on this machine", () => {
     expect(
-      sessionReadsLocalPaths(insideTddyDesktop(), aSession(THIS_APPS_DAEMON, false), THIS_APPS_DAEMON),
+      sessionReadsLocalPaths(
+        insideTddyDesktop(),
+        aSession(THIS_APPS_DAEMON, false),
+        THIS_APPS_DAEMON,
+      ),
     ).toBe(false);
   });
 

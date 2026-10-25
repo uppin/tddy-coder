@@ -61,6 +61,8 @@ interface GrpcSessionTerminalProps {
   /** Called with this terminal's text-insert function (see `GhosttyTerminalSession.onRegisterInsertInput`),
    *  so the runtime can expose it to the inspector's Files-tab click/tap route. */
   onRegisterInsertInput?: (insertInput: (text: string) => void) => void;
+  /** See `GhosttyTerminalSession.readsLocalPaths`. */
+  readsLocalPaths?: boolean;
 }
 
 export function GrpcSessionTerminal({
@@ -72,6 +74,7 @@ export function GrpcSessionTerminal({
   onDisconnect,
   mobileShortcuts,
   onRegisterInsertInput,
+  readsLocalPaths,
 }: GrpcSessionTerminalProps) {
   const [stream, setStream] = useState<TerminalStream | null>(null);
   // containerRef must be on a div that is ALWAYS rendered (not gated on stream),
@@ -372,6 +375,7 @@ export function GrpcSessionTerminal({
           sessionId={sessionId}
           mobileShortcuts={mobileShortcuts}
           onRegisterInsertInput={onRegisterInsertInput}
+          readsLocalPaths={readsLocalPaths}
           onOffsetUpdate={(offset) => {
             currentOffsetRef.current = offset;
             hasSyncedRef.current = true;

@@ -3,14 +3,24 @@
  * their host paths are typed into the terminal. A drag over the region shows an overlay; dropping
  * reads `dataTransfer.files` and runs the upload → type-path flow.
  *
+ * Inside Tddy Desktop the window's native drag-drop handler owns OS drags, so the HTML5 handlers
+ * below never fire for them; the same drop arrives through `nativeFileDrop`'s provider instead,
+ * carrying the files' real paths. A session that reads this machine's files (`readsLocalPaths`)
+ * gets those paths typed; any other session gets the files uploaded, read off this machine through
+ * the window. A folder has no bytes to upload, so it is refused with a visible message.
+ *
  * Changeset: `terminal-file-drop-upload`
  * PRD: docs/ft/web/web-terminal.md § File drop upload
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useSessionFileUpload, useDaemonUploadChunk } from "../../hooks/useSessionFileUpload";
 import { joinQuotedPaths } from "../../lib/shellQuote";
 import { HOST_PATH_MIME } from "../../lib/hostPathDrag";
+import { droppedFileUploadSource, useNativeFileDropTarget } from "./nativeFileDrop";
+
+/** How long a refused drop's message stays up. */
+const DROP_REFUSAL_VISIBLE_MS = 8000;
 
 export interface TerminalFileDropZoneProps {
   sessionToken: string;
@@ -34,10 +44,52 @@ export function TerminalFileDropZone({
   readsLocalPaths = false,
   children,
 }: TerminalFileDropZoneProps) {
-  void readsLocalPaths;
   const [dragging, setDragging] = useState(false);
+  const [nativeHover, setNativeHover] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const zoneRef = useRef<HTMLDivElement>(null);
   const uploadChunk = useDaemonUploadChunk(sessionToken, sessionId);
-  const { uploadFiles } = useSessionFileUpload({ uploadChunk, insertInput });
+  const { uploadFiles, uploadSources } = useSessionFileUpload({
+    uploadChunk,
+    insertInput,
+  });
+
+  const nativeDrop = useNativeFileDropTarget(zoneRef, {
+    onHover: setNativeHover,
+    onDrop: (paths) => void deliverNativeDrop(paths),
+  });
+
+  useEffect(() => {
+    if (refusal === null) return;
+    const timer = setTimeout(() => setRefusal(null), DROP_REFUSAL_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [refusal]);
+
+  async function deliverNativeDrop(paths: string[]) {
+    if (!nativeDrop || paths.length === 0) return;
+    setRefusal(null);
+    if (readsLocalPaths) {
+      insertInput(joinQuotedPaths(paths));
+      return;
+    }
+    let described;
+    try {
+      described = await nativeDrop.describe(paths);
+    } catch (error) {
+      setRefusal(`The dropped files could not be read: ${String(error)}`);
+      return;
+    }
+    const folders = described.filter((entry) => !entry.isFile);
+    if (folders.length > 0) {
+      setRefusal(
+        `Folders can't be sent to this session — drop the files inside them instead: ${folders
+          .map((folder) => folder.name)
+          .join(", ")}`,
+      );
+    }
+    const files = described.filter((entry) => entry.isFile);
+    await uploadSources(files.map((file) => droppedFileUploadSource(nativeDrop, file)));
+  }
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -68,18 +120,30 @@ export function TerminalFileDropZone({
 
   return (
     <div
+      ref={zoneRef}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       style={{ position: "relative", width: "100%", height: "100%", minWidth: 0, minHeight: 0 }}
     >
       {children}
-      {dragging && (
+      {(dragging || nativeHover) && (
         <div
           data-testid="terminal-drop-overlay"
           className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-primary bg-background/70 text-sm text-foreground"
         >
-          Drop files to upload to the session
+          {nativeHover && readsLocalPaths
+            ? "Drop to insert the file paths"
+            : "Drop files to upload to the session"}
+        </div>
+      )}
+      {refusal !== null && (
+        <div
+          data-testid="terminal-drop-refused"
+          role="alert"
+          className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[90%] rounded border border-destructive/40 bg-background/90 px-2 py-1 text-xs text-destructive"
+        >
+          {refusal}
         </div>
       )}
     </div>

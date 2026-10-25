@@ -33,6 +33,9 @@ pub struct SessionEntry {
     pub managed_codebase: bool,
     /// The session's standing role (`.session.yaml`); empty for an ordinary session.
     pub session_role: String,
+    /// Whether the session's agent reads this host's filesystem directly
+    /// ([`tddy_core::reads_host_paths`]).
+    pub reads_host_paths: bool,
 }
 
 /// Check if a process with the given PID is alive (same semantics as listing sessions).
@@ -78,6 +81,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             Err(_) => continue,
         };
         let is_active = metadata.pid.map(is_pid_alive).unwrap_or(false);
+        let reads_host_paths = tddy_core::reads_host_paths(&metadata);
         result.push(SessionEntry {
             session_id: metadata.session_id,
             created_at: metadata.created_at,
@@ -96,6 +100,7 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             ssh_config_host: metadata.ssh_config_host.unwrap_or_default(),
             managed_codebase: metadata.managed_codebase,
             session_role: metadata.session_role.unwrap_or_default(),
+            reads_host_paths,
         });
     }
 

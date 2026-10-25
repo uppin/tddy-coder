@@ -46,9 +46,12 @@ function uploadedPathOf(fileName: string): string {
 }
 
 function anUploadBackend(): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().onUnary(SessionFilesService.method.uploadSessionFileChunk, (req) => ({
-    hostPath: req.last ? uploadedPathOf(req.fileName) : "",
-  }));
+  return anInMemoryRpcBackend().onUnary(
+    SessionFilesService.method.uploadSessionFileChunk,
+    (req) => ({
+      hostPath: req.last ? uploadedPathOf(req.fileName) : "",
+    }),
+  );
 }
 
 /** The bytes the backend received for `fileName`, chunks concatenated in order. */
@@ -66,7 +69,11 @@ interface Terminal {
 }
 
 function aTerminal(testId: string, readsLocalPaths: boolean): Terminal {
-  return { testId, readsLocalPaths, insertInput: cy.stub().as(`insertInput-${testId}`) };
+  return {
+    testId,
+    readsLocalPaths,
+    insertInput: cy.stub().as(`insertInput-${testId}`),
+  };
 }
 
 function mountTerminals(
@@ -157,7 +164,10 @@ describe("Terminal native file drop (Tddy Desktop)", () => {
 
   it("types the real paths, shell-quoted, into a session that reads this machine's files", () => {
     // Given a session whose agent reads this machine's files
-    const drop = aDropOf({ [A_SCREENSHOT]: SCREENSHOT_BYTES, [A_QUOTED_NAME]: NOTES_BYTES });
+    const drop = aDropOf({
+      [A_SCREENSHOT]: SCREENSHOT_BYTES,
+      [A_QUOTED_NAME]: NOTES_BYTES,
+    });
     const backend = anUploadBackend();
     const terminal = aTerminal("terminal-a", true);
     mountTerminals(drop, backend, [terminal]);
@@ -184,7 +194,10 @@ describe("Terminal native file drop (Tddy Desktop)", () => {
 
   it("uploads the dropped files into a session that cannot read this machine's files", () => {
     // Given a session on another host (or confined on this one)
-    const drop = aDropOf({ [A_SCREENSHOT]: SCREENSHOT_BYTES, [A_QUOTED_NAME]: NOTES_BYTES });
+    const drop = aDropOf({
+      [A_SCREENSHOT]: SCREENSHOT_BYTES,
+      [A_QUOTED_NAME]: NOTES_BYTES,
+    });
     const backend = anUploadBackend();
     const terminal = aTerminal("terminal-a", false);
     mountTerminals(drop, backend, [terminal]);
@@ -213,7 +226,10 @@ describe("Terminal native file drop (Tddy Desktop)", () => {
 
   it("refuses a dropped folder with a visible message, and still uploads the files beside it", () => {
     // Given a session that cannot read this machine's files
-    const drop = aDropOf({ [A_FOLDER]: "folder", [A_SCREENSHOT]: SCREENSHOT_BYTES });
+    const drop = aDropOf({
+      [A_FOLDER]: "folder",
+      [A_SCREENSHOT]: SCREENSHOT_BYTES,
+    });
     const backend = anUploadBackend();
     const terminal = aTerminal("terminal-a", false);
     mountTerminals(drop, backend, [terminal]);

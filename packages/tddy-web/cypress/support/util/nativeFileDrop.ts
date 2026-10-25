@@ -23,7 +23,9 @@ export interface NativeFileDropDouble {
   reads: Array<{ path: string; offset: number; length: number }>;
 }
 
-export function aNativeFileDropDouble(files: Record<string, DroppedEntry> = {}): NativeFileDropDouble {
+export function aNativeFileDropDouble(
+  files: Record<string, DroppedEntry> = {},
+): NativeFileDropDouble {
   const listeners = new Set<(event: NativeDragEvent) => void>();
   const described: string[][] = [];
   const reads: Array<{ path: string; offset: number; length: number }> = [];

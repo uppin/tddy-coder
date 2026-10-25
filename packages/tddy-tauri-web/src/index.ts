@@ -12,7 +12,7 @@ export type {
 } from "./transport.js";
 export {
   DESCRIBE_DROPPED_FILES_COMMAND,
-  nativeDragEventOf,
+  NATIVE_DRAG_EVENT,
   READ_DROPPED_FILE_COMMAND,
   thisWindowsNativeFileDrop,
 } from "./nativeFileDrop.js";
@@ -20,6 +20,5 @@ export type {
   DroppedFileInfo,
   NativeDragEvent,
   NativeFileDropBridge,
-  TauriDragDropPayload,
   ViewportPoint,
 } from "./nativeFileDrop.js";

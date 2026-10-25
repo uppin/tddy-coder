@@ -178,6 +178,11 @@ export interface GhosttyTerminalHandle {
    * then forward via onData.
    */
   sendKeystroke?(data: string): void;
+  /**
+   * Paste `text` as the operator would: wrapped in `ESC [ 200 ~` … `ESC [ 201 ~` when the program
+   * enabled bracketed paste (DEC 2004), plain otherwise — then forwarded via onData.
+   */
+  paste?(text: string): void;
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
@@ -1230,6 +1235,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             e.clientX,
             e.clientY,
           );
+        },
+        paste(text: string) {
+          termRef.current?.paste(text);
         },
         sendKeystroke(data: string) {
           const t = termRef.current as unknown as {

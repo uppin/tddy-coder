@@ -180,8 +180,14 @@ pub fn paired_agent(meta: &SessionMetadata) -> Option<(&str, &str)> {
 /// directory, which each of them can see — but never a raw host path.
 #[must_use]
 pub fn reads_host_paths(meta: &SessionMetadata) -> bool {
-    let _ = meta;
-    false
+    fn names_something(field: &Option<String>) -> bool {
+        field.as_deref().is_some_and(|s| !s.trim().is_empty())
+    }
+    meta.sandbox != Some(true)
+        && !meta.managed_codebase
+        && !names_something(&meta.codebase_daemon_instance_id)
+        && !names_something(&meta.ssh_config_host)
+        && meta.session_type.as_deref() != Some("workspace")
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -838,7 +844,10 @@ session_type: workspace
         };
 
         // When / Then
-        assert!(reads_host_paths(&meta), "{session_type} should read host paths");
+        assert!(
+            reads_host_paths(&meta),
+            "{session_type} should read host paths"
+        );
     }
 
     #[rstest::rstest]
@@ -858,13 +867,19 @@ session_type: workspace
         // Given a session whose agent cannot open an arbitrary path on this host
 
         // When / Then
-        assert!(!reads_host_paths(&meta), "{meta:?} should not read host paths");
+        assert!(
+            !reads_host_paths(&meta),
+            "{meta:?} should not read host paths"
+        );
     }
 
     #[test]
     fn an_explicitly_unsandboxed_agent_reads_host_paths() {
         // Given a session that recorded `sandbox: false` rather than leaving it absent
-        let meta = SessionMetadata { sandbox: Some(false), ..a_claude_cli_session() };
+        let meta = SessionMetadata {
+            sandbox: Some(false),
+            ..a_claude_cli_session()
+        };
 
         // When / Then
         assert!(reads_host_paths(&meta));
@@ -885,7 +900,10 @@ session_type: workspace
     }
 
     fn a_claude_cli_session() -> SessionMetadata {
-        SessionMetadata { session_type: Some("claude-cli".to_string()), ..a_workspace_session() }
+        SessionMetadata {
+            session_type: Some("claude-cli".to_string()),
+            ..a_workspace_session()
+        }
     }
 
     /// **chain_child_metadata_records_previous_session_id** — `.session.yaml` must allow optional

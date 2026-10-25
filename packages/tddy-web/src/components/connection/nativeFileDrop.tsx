@@ -14,8 +14,18 @@
  * PRD: docs/ft/web/web-terminal.md § File drop upload
  */
 
-import React, { createContext, useContext, type ReactNode, type RefObject } from "react";
-import type { NativeFileDropBridge } from "tddy-tauri-web";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import type { DroppedFileInfo, NativeFileDropBridge, ViewportPoint } from "tddy-tauri-web";
+import { UPLOAD_CHUNK_SIZE } from "../../lib/fileUploadChunks";
+import type { UploadSource } from "../../hooks/useSessionFileUpload";
 
 /** What a terminal registers to receive native drops. */
 export interface NativeDropTarget {
@@ -41,8 +51,85 @@ export interface NativeFileDropProviderProps {
 }
 
 export function NativeFileDropProvider({ bridge, children }: NativeFileDropProviderProps) {
-  void bridge;
-  return <NativeFileDropContext.Provider value={null}>{children}</NativeFileDropContext.Provider>;
+  const targetsRef = useRef(new Map<HTMLElement, NativeDropTarget>());
+  const hoveredRef = useRef<NativeDropTarget | null>(null);
+
+  useEffect(() => {
+    if (!bridge) return;
+    const targets = targetsRef.current;
+    const hover = (next: NativeDropTarget | null) => {
+      if (hoveredRef.current === next) return;
+      hoveredRef.current?.onHover(false);
+      hoveredRef.current = next;
+      next?.onHover(true);
+    };
+    // The innermost registered element at the point. `elementFromPoint` skips what is hidden or
+    // `pointer-events: none`, so a terminal in a background pane is never the one hit.
+    const targetAt = (point: ViewportPoint): NativeDropTarget | null => {
+      for (let el = document.elementFromPoint(point.x, point.y); el; el = el.parentElement) {
+        const target = el instanceof HTMLElement ? targets.get(el) : undefined;
+        if (target) return target;
+      }
+      return null;
+    };
+    // A drag that carries no paths started inside the page (a Files-tab entry, a tab) — the window
+    // swallows those too, and there is nothing in one this route can deliver.
+    let carriesPaths = false;
+
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void bridge
+      .listen((event) => {
+        switch (event.type) {
+          case "enter":
+            carriesPaths = event.paths.length > 0;
+            hover(carriesPaths ? targetAt(event.point) : null);
+            break;
+          case "over":
+            hover(carriesPaths ? targetAt(event.point) : null);
+            break;
+          case "drop": {
+            const target = event.paths.length > 0 ? targetAt(event.point) : null;
+            hover(null);
+            carriesPaths = false;
+            target?.onDrop(event.paths);
+            break;
+          }
+          case "leave":
+            hover(null);
+            carriesPaths = false;
+            break;
+        }
+      })
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+      hover(null);
+    };
+  }, [bridge]);
+
+  const value = useMemo<NativeFileDropContextValue | null>(
+    () =>
+      bridge && {
+        bridge,
+        register: (target) => {
+          targetsRef.current.set(target.element, target);
+          return () => {
+            if (targetsRef.current.get(target.element) === target) {
+              targetsRef.current.delete(target.element);
+            }
+            if (hoveredRef.current === target) hoveredRef.current = null;
+          };
+        },
+      },
+    [bridge],
+  );
+
+  return <NativeFileDropContext.Provider value={value}>{children}</NativeFileDropContext.Provider>;
 }
 
 /**
@@ -53,7 +140,33 @@ export function useNativeFileDropTarget(
   ref: RefObject<HTMLElement | null>,
   handlers: Pick<NativeDropTarget, "onHover" | "onDrop">,
 ): NativeFileDropBridge | null {
-  void ref;
-  void handlers;
-  return useContext(NativeFileDropContext)?.bridge ?? null;
+  const context = useContext(NativeFileDropContext);
+  const handlersRef = useRef(handlers);
+  handlersRef.current = handlers;
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!context || !element) return;
+    return context.register({
+      element,
+      onHover: (hovering) => handlersRef.current.onHover(hovering),
+      onDrop: (paths) => handlersRef.current.onDrop(paths),
+    });
+  }, [context, ref]);
+
+  return context?.bridge ?? null;
+}
+
+/** A dropped file as an upload, its bytes read from this machine in upload-sized slices. */
+export function droppedFileUploadSource(
+  bridge: NativeFileDropBridge,
+  file: DroppedFileInfo,
+): UploadSource {
+  return {
+    name: file.name,
+    size: file.size,
+    // A zero-byte file is still one (empty) chunk, so the final chunk fires and a path comes back.
+    chunkCount: Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_SIZE)),
+    readChunk: (index) => bridge.read(file.path, index * UPLOAD_CHUNK_SIZE, UPLOAD_CHUNK_SIZE),
+  };
 }
