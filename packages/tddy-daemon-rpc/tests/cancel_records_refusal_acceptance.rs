@@ -14,6 +14,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use serial_test::serial;
 use tddy_coding_subagent::{CodingAgentLaunch, CodingAgentLauncher};
+use tddy_core::agent_activity::{AgentActivityRecord, AGENT_ACTIVITY_FILENAME, STATUS_COMPLETED};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{AcpAgentCommand, McpServerSpec, SessionMetadata};
 use tddy_daemon_rpc::test_util::{test_service_with_coding_agent_launcher, TestDaemon};
@@ -458,4 +459,34 @@ async fn an_answer_to_a_cancelled_request_is_refused_naming_the_conversation() {
         "{}",
         refusal.message
     );
+}
+
+/// Cancelling a deferred request completes the conversation's status row: the row that said the turn was waiting on the
+/// user says it has ended, and it is the newest row for the conversation.
+#[tokio::test]
+#[serial]
+async fn cancelling_a_deferred_request_completes_the_conversations_status_row() {
+    // Given a deferred resume waiting on the user
+    let paused = a_conversation_paused_on_a_permission_request().await;
+    let resume = paused.resume_deferring();
+    tokio::pin!(resume);
+    let _ = tokio::time::timeout(Duration::from_millis(300), &mut resume).await;
+
+    // When the main agent cancels the conversation
+    paused
+        .cancel("main-agent")
+        .await
+        .expect("cancelling a conversation with a pending request succeeds");
+
+    // Then the conversation's newest status row is completed
+    let call_id = format!("subagent-conversation:{}", paused.conversation_id);
+    let rows: Vec<AgentActivityRecord> =
+        std::fs::read_to_string(paused.session_dir.join(AGENT_ACTIVITY_FILENAME))
+            .expect("the activity log exists")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<AgentActivityRecord>(line).ok())
+            .filter(|record| record.call_id == call_id)
+            .collect();
+    let newest = rows.last().expect("the conversation has a status row");
+    assert_eq!(newest.status, STATUS_COMPLETED, "{rows:?}");
 }
