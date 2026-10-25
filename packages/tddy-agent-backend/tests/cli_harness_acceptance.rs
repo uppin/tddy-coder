@@ -3,7 +3,9 @@
 //!
 //! Feature: docs/ft/daemon/opencode-cli-session.md
 
-use tddy_agent_backend::cli_harness::{cli_harness, cli_harnesses, models_from_listing, CliLaunch};
+use tddy_agent_backend::cli_harness::{
+    cli_harness, cli_harness_requires_model, cli_harnesses, models_from_listing, CliLaunch,
+};
 use tddy_agent_backend::provider_route::Harness;
 
 fn opencode() -> &'static tddy_agent_backend::cli_harness::CliHarness {
@@ -97,4 +99,19 @@ fn opencode_models_are_read_one_provider_model_per_line() {
     let ids: Vec<&str> = catalog.models.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, vec!["fireworks/kimi-k2", "openai/gpt-5.6"]);
     assert_eq!(catalog.default_model, "fireworks/kimi-k2");
+}
+
+#[test]
+fn claude_and_cursor_starts_need_a_model_and_no_other_session_type_does() {
+    // When
+    let needing_a_model: Vec<&str> = cli_harnesses()
+        .iter()
+        .map(|harness| harness.session_type)
+        .filter(|session_type| cli_harness_requires_model(session_type))
+        .collect();
+
+    // Then
+    assert_eq!(needing_a_model, vec!["claude-cli", "cursor-cli"]);
+    assert!(!cli_harness_requires_model("tool"));
+    assert!(!cli_harness_requires_model("workspace"));
 }

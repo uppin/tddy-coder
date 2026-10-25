@@ -20,6 +20,7 @@ use std::path::{Component, Path};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tddy_core::cli_harness::{cli_harness_requires_model, cli_harnesses};
 use tddy_worktree_service::session_git_ops::PushIdentity;
 use tddy_worktree_service::session_target::{
     resolve_session_target, HomeCaller, SessionTarget, TargetRecord,
@@ -147,17 +148,7 @@ pub fn project_home_tool_defs() -> Vec<ToolDef> {
         tool_def(
             START_PROJECT_SESSION,
             "Start a session in this project. It is recorded as started by this project-home session.",
-            json!({
-                "type": "object",
-                "properties": {
-                    "session_type": { "type": "string" },
-                    "prompt": { "type": "string" },
-                    "agent": { "type": "string" },
-                    "new_branch_name": { "type": "string" },
-                    "model": { "type": "string" }
-                },
-                "required": ["session_type"]
-            }),
+            start_project_session_schema(),
         ),
         tool_def(
             READ_SESSION_WORKTREE,
@@ -181,6 +172,64 @@ pub fn project_home_tool_defs() -> Vec<ToolDef> {
             }),
         ),
     ]
+}
+
+/// `StartProjectSession`'s arguments as the calling agent is told them. The session types and the
+/// ones that need a model are read from the CLI harness registry, so a new harness is offered here
+/// without an edit.
+fn start_project_session_schema() -> Value {
+    let harnesses = cli_harnesses();
+    let session_types: Vec<&str> = ["tool", "workspace"]
+        .into_iter()
+        .chain(harnesses.iter().map(|harness| harness.session_type))
+        .collect();
+    let harness_list = harnesses
+        .iter()
+        .map(|harness| format!("`{}` ({})", harness.session_type, harness.label))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let needing_a_model = harnesses
+        .iter()
+        .map(|harness| harness.session_type)
+        .filter(|session_type| cli_harness_requires_model(session_type))
+        .map(|session_type| format!("`{session_type}`"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    json!({
+        "type": "object",
+        "properties": {
+            "session_type": {
+                "type": "string",
+                "enum": session_types,
+                "description": format!(
+                    "What to start. `tool`: a tddy-coder workflow session run by `agent`. \
+                     `workspace`: a worktree with no agent. Any other value runs that coding agent \
+                     interactively in a terminal: {harness_list}."
+                )
+            },
+            "prompt": {
+                "type": "string",
+                "description": "The first turn sent to the session's agent; empty starts it idle. Ignored for `workspace`."
+            },
+            "agent": {
+                "type": "string",
+                "description": "An agent id: a coding backend from the daemon's `allowed_agents`, an assistant in its registry, or a harness profile under `<tddyhome>/agents/` (which supplies its own session settings). Empty uses the session type's default."
+            },
+            "new_branch_name": {
+                "type": "string",
+                "description": "Branch to create from the project's base for the session; empty lets the start path name one. A branch another session owns is refused."
+            },
+            "model": {
+                "type": "string",
+                "description": format!(
+                    "Model id or alias for the session's agent (for `claude-cli`: `opus`, `sonnet`, …). \
+                     Required for {needing_a_model}: a start of those without one is refused. \
+                     Other session types pick their own when empty."
+                )
+            }
+        },
+        "required": ["session_type"]
+    })
 }
 
 fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
