@@ -158,6 +158,7 @@ impl TaskBody for PtyTaskBody {
                 PtyControl {
                     master: Arc::clone(&setup.master),
                     current_size: Arc::clone(&setup.current_size),
+                    capture: output_ch.capture_arc(),
                     terminal_id: self.spec.terminal_id.clone(),
                     kind: self.spec.kind.clone(),
                 },
@@ -237,6 +238,12 @@ fn open_pty_and_pump(
             return Err(msg);
         }
     };
+
+    // Size the screen model with the PTY, before the child can write: a snapshot of a capture that
+    // does not know its grid is refused.
+    if let Ok(mut capture) = output_ch.capture_arc().lock() {
+        capture.resize(initial_size.rows, initial_size.cols);
+    }
 
     let master = Arc::new(Mutex::new(pair.master));
     let current_size = Arc::new(Mutex::new(initial_size));

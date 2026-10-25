@@ -1,12 +1,12 @@
 # complexity: open_replay_ack_live
 
-**Location:** `packages/tddy-terminal-rpc/src/bridge.rs:200` — `open_replay_ack_live`
+**Location:** `packages/tddy-terminal-rpc/src/bridge.rs:242` — `open_replay_ack_live`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **135 lines** · **nesting depth 6** · 5 parameters · 8 branch/match lines · 0 early exits
 **Thresholds breached:** length 135 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-10-25 (135 → 141 lines in #760) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 135 | 6 | 8 | 0 | first detection |
+| 2026-10-25 | 141 | 6 | 9 | 1 | **worse** by 6 in PR #760 (`#term-snapshot` 1/4): the `SNAPSHOT` mode returns early into its own `open_snapshot` (the new branch is not inline), plus an `unreachable!` arm and the `Result` return. Splitting the TAIL / FROM_OFFSET branches deferred with the developer's consent (code issues may be deferred in this stack; `bridge.rs` is stack-shared with #761–#763). Brace-depth scan, not the original sweep tool |
 
 ## What the tool found
 

@@ -151,8 +151,10 @@ given moment; all other connected screens are **observers** (they still receive 
 
 #### Input Enforcement
 
-14. `SendTerminalInput` and `StreamSessionTerminalIO` with a `control_token` that does not match
-    the current lease return `FAILED_PRECONDITION` ("terminal controlled by another screen").
+14. `SendTerminalInput` with a `control_token` that does not match the current lease returns
+    `FAILED_PRECONDITION` ("terminal controlled by another screen"). `StreamSessionTerminalIO` opens
+    without the lease (watching is free) and answers each such input chunk with a refusal frame
+    instead, keeping the stream open.
 15. The enforcement is transport-agnostic: the token is validated at the `ClaudeCliSessionManager`
     level, independent of whether the RPC arrived over HTTP Connect or LiveKit.
 
@@ -202,12 +204,13 @@ For a LiveKit-backed session the coder's participant (`daemon-{instanceId}-{sess
 `terminal_session.TerminalSessionService`. The daemon serves all of it for **non-LiveKit**
 (claude-cli / cursor-cli / opencode-cli / muse-cli / warp-cli / workspace) sessions, where no coder participant exists.
 
-The coder answers **seven** of the nine terminal methods and refuses `StreamSessionTerminalIO` and
-`WatchTerminalControl` with `Unimplemented` — its control lease is a permanent self-grant, so a
-watch event from it would tell every screen it is the controller, and its bidi terminal bytes already
-travel on `terminal.TerminalService`. Nothing in the web reaches either at this participant. For the
-seven both serve, one session answers identically whichever server a client reaches, asserted at the
-wire by `packages/tddy-coder/tests/two_server_parity_acceptance.rs`.
+The coder answers **eight** of the nine terminal methods, `StreamSessionTerminalIO` among them, and
+refuses only `WatchTerminalControl` with `Unimplemented` — its control lease is a permanent
+self-grant, so a watch event from it would tell every screen it is the controller. Nothing in the web
+reaches that method at this participant. For the eight both serve — including a bidi `SNAPSHOT` open,
+which shows a coder-served terminal the same screen the daemon would — one session answers
+identically whichever server a client reaches, asserted at the wire by
+`packages/tddy-coder/tests/two_server_parity_acceptance.rs`.
 
 ### `DeleteSession` / `SignalSession` — daemon-direct
 
@@ -259,8 +262,9 @@ chunk at a time, until the capture ring's anchor is reached.
 
 ### Wire contract
 
-- `SessionTerminalOutput` gains three fields, populated **only on the initial replay frame** (live
-  tail frames carry `0`):
+- `SessionTerminalOutput` carries three offset fields. In a `TAIL` / `FROM_OFFSET` stream they are
+  populated **only on the initial replay frame** (live tail frames carry `0`); in a `SNAPSHOT` stream
+  **every** data frame carries them (see [Snapshot on (re)connect](#snapshot-on-reconnect)):
   - `start_offset` — absolute offset of the first byte in `data`.
   - `end_offset` — absolute offset after the last byte in `data` (the **anchor** for older-history fetches).
   - `at_oldest` — `true` when the chunk reaches the capture ring's oldest retained byte (no older
@@ -271,11 +275,48 @@ chunk at a time, until the capture ring's anchor is reached.
   the chunk, advances `from_offset` to the chunk's `end_offset`, and calls again until `at_end = true`
   (reached `until_offset` / the capture tip).
 
-### Reconnect resume by offset (`StreamReplayMode`)
+### Snapshot on (re)connect
 
-`StreamTerminalOutputRequest` (and the bidi `StreamSessionTerminalIO` open frame) carry a `mode`
-(`StreamReplayMode`) + `from_offset` so a terminal that has already synced its state resumes by
-offset instead of re-replaying the whole retained buffer.
+A terminal that connects or reconnects is shown **the current screen**, rendered correctly and at
+once — never a stale or blank screen waiting for a resize. The host (daemon or coder) keeps a **screen
+model** for every terminal, fed by its output at the PTY's size, and `StreamReplayMode::SNAPSHOT` on
+the bidi `StreamSessionTerminalIO` open message (or on `StreamTerminalOutputRequest`) asks for it.
+
+- **The snapshot frame** comes first: `snapshot = true`, one repaint that reproduces the visible
+  screen and what is needed to render and drive it — both screen buffers with the alternate screen
+  active or not, cursor position and visibility, colours and attributes, scroll region,
+  origin/autowrap modes, saved cursor, charsets, tab stops, and the input modes (application
+  cursor/keypad, bracketed paste, mouse tracking and encoding, focus reporting, cursor style). It
+  begins with RIS, so a client writes it into its terminal as-is. `snapshot_rows` / `snapshot_cols`
+  give the grid it was serialized at — the PTY's.
+- **Ordering guarantee.** The snapshot reflects every output byte below its `end_offset` and none at
+  or above it. Every later frame carries `start_offset` / `end_offset`; the first starts at the
+  snapshot's `end_offset` and each starts where the previous ended — no gap, no duplicate. The
+  snapshot's `end_offset` is the anchor for scroll-up history.
+- **No nudging.** A snapshot open sends no SIGWINCH, no mode prologue and no raw replay. The PTY is
+  resized to the client's grid first only when the open may drive the session and that grid differs.
+- **Input on the same stream.** Stdin messages carry a cumulative `input_offset` and are acknowledged
+  with ACK frames as on `SendTerminalInput`.
+- **Watching needs no lease; typing does.** Any screen may open the stream and is shown the screen
+  and its live output — including one without the lease, or one re-opening after another screen took
+  control. Its grid is ignored (it cannot resize the PTY). A chunk presented without the control
+  lease, the opening message's included, is dropped —
+  it never reaches the PTY — and answered with a refusal frame (`refused_input_offset`,
+  `input_refusal` "terminal controlled by another screen"); the stream stays open, so re-claiming
+  control resumes typing.
+- **Jailed terminals refuse it.** The daemon does not yet know a sandboxed PTY's size, so a
+  `SNAPSHOT` open of a jailed terminal is refused with `FAILED_PRECONDITION` until `#term-snapshot`
+  3/4 ([#762](https://github.com/uppin/tddy-coder/pull/762)).
+- A watcher whose grid differs from the PTY's sees the snapshot at the PTY's size.
+
+The web terminal opens **every** stream this way (see [Web terminal](../web/web-terminal.md)).
+
+### Legacy replay modes (`TAIL` / `FROM_OFFSET`)
+
+`StreamTerminalOutput`, `SendTerminalInput` and the `TAIL` / `FROM_OFFSET` modes remain for non-web
+clients. `StreamTerminalOutputRequest` (and the bidi open message) carry a `mode` + `from_offset` so a
+terminal that has already synced its state resumes by offset instead of re-replaying the whole
+retained buffer.
 
 - **`TAIL`** (default, first connect): the server sends the mode prologue + the current last-frame
   tail chunk (tagged with absolute offsets), resizes the PTY to the client's dimensions, drains the
@@ -288,22 +329,22 @@ offset instead of re-replaying the whole retained buffer.
   resize/drain — a terminal that already holds state up to `from_offset` receives only the bytes it
   missed, with no duplicate content.
 
-The bidi `StreamSessionTerminalIO` open frame carries the same `mode`/`from_offset` so a bidi
-client can replay-once-at-init / resume-by-offset on the same connection that carries its input;
-the params are read only from the first message of the stream.
+The replay params are read only from the first message of a bidi stream. The legacy prologue carries
+the mouse modes only, so a `TAIL` / `FROM_OFFSET` attach is not told the program is on the alternate
+screen; a snapshot is.
 
 ### Client reconnect & null-client pause
 
-The web client (`GrpcSessionTerminal`) tracks the cumulative output offset and sends `FROM_OFFSET`
-with the tracked offset on reconnect. Its `client` widens to `ConnectionClient | null`: a **null
-client** (a transient transport blip) **pauses** the terminal — it stays mounted (its scrollback and
-the ghostty instance survive), input is queued — and resumes with `FROM_OFFSET` when a non-null
-client returns. Only a stream-end with a **valid** client (a real `pty_done`) evicts the runtime.
+The web client (`GrpcSessionTerminal`) opens with `SNAPSHOT` on every (re)connect. Its `client` is
+`ConnectionClient | null`: a **null client** (a transient transport blip) **pauses** the terminal — it
+stays mounted (its scrollback and the ghostty instance survive), input is queued — and re-opens with a snapshot when a
+non-null client returns. Only a stream-end with a **valid** client (a real `pty_done`) evicts the
+runtime.
 
 ### Client scroll-up protocol
 
-1. On connect, the client receives the initial replay frame carrying `end_offset` (the anchor) and
-   `at_oldest`.
+1. On connect, the client receives the snapshot frame (or, on a legacy open, the initial replay
+   frame) carrying `end_offset` (the anchor) and `at_oldest`.
 2. When the user activates "Load earlier output" (or scrolls up on the live terminal) and `at_oldest`
    is false, the client shows a loading indicator, forward-fills a second, read-only older-history
    "page" terminal **in the background**, and calls
@@ -331,14 +372,15 @@ no-duplicate-pane fix; the page terminal carries `scrollback > 0`. The
 
 `terminal_session.TerminalSessionService` is the terminal surface, and `tddy-terminal-rpc` owns all
 of it: the proto, the nine handlers, and the `bridge` module carrying the
-streaming, replay, ACK, resize and input-forwarding logic behind the `TerminalSession` /
+streaming, snapshot, replay, ACK, refusal, resize and input-forwarding logic behind the `TerminalSession` /
 `TerminalSessionStore` async traits. There is exactly one terminal message set and one implementation
 of the offset contract.
 
 Two processes serve the coordinate. `tddy-daemon`'s `DaemonTerminalSessionStore` resolves a
 claude-cli `PtyHandle` or a jailed session's PTY — a composite, so a sandboxed terminal is an ordinary
 terminal to the bridge rather than a branch inside it. `tddy-coder`'s `CoderTerminalSessionStore`
-resolves its own bash tabs. Neither writes a handler.
+resolves its own bash tabs. Neither writes a handler. The screen model and snapshot live in
+[`tddy-task`'s `TerminalCapture`](../../../packages/tddy-task/docs/terminal-capture.md).
 
 Implementation reference:
 [terminal-session-service.md](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md).

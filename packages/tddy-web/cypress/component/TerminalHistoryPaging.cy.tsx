@@ -363,7 +363,7 @@ describe("Terminal history paging — overlay double-buffer", () => {
   });
 
   it("after a reconnect that advances the tip past the original anchor, loading earlier output fills the page with the retained history (no blank page)", () => {
-    // Given — the live terminal opened at anchor 1000, then reconnected: a FROM_OFFSET catch-up
+    // Given — the live terminal opened at anchor 1000, then reconnected: a second snapshot
     // frame snaps currentOffset to a NEW tip (2000) past the original anchor, simulating the ring
     // evicting the original anchor. The page forward-fill must be bounded by the CURRENT tip, not
     // the stale anchor — otherwise `replay_from(0, 1000)` is an evicted-empty range and the page

@@ -60,6 +60,11 @@ impl PtyHandle {
             pixel_width: 0,
             pixel_height: 0,
         };
+        // The screen model first: the child redraws as soon as the PTY resizes, and that output
+        // must be read at the new grid.
+        if let Ok(mut capture) = self.capture.lock() {
+            capture.resize(rows, cols);
+        }
         if let Ok(m) = self.master.lock() {
             let _ = m.resize(size);
         }

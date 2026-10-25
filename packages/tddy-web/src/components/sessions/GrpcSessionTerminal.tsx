@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import {
+  type SessionTerminalInputSchema,
   SessionTerminalOutput,
   StreamReplayMode,
   TerminalSessionService,
@@ -21,7 +23,7 @@ import { useEnqueuedInput } from "./useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 import { rpcFailureText } from "../../rpc/rpcFailure";
-import { inputDeliverySequence } from "../../rpc/connections/inputDelivery";
+import { InputRefusalTracker } from "../../rpc/connections/inputDelivery";
 import { InlineError } from "../ui/inline-error";
 
 const dGrpc = tddyDebug("tddy:term:grpc");
@@ -39,19 +41,28 @@ function isResizeOsc(data: Uint8Array): boolean {
 
 type TerminalClient = Client<typeof TerminalSessionService>;
 
+/** One keystroke, paste or resize waiting to go up the stream. */
+interface QueuedInput {
+  readonly data: Uint8Array;
+  /** Cumulative bytes sent on this terminal including `data`, which the daemon acks back. */
+  readonly inputOffset: number;
+  /** The lease at the instant of the send: it moves when another screen claims the terminal. */
+  readonly controlToken: string;
+}
+
 interface GrpcSessionTerminalProps {
   sessionId: string;
   sessionToken: string;
   /** The daemon `TerminalSessionService` client. `null` while the transport is in a transient blip — the
-   *  terminal stays mounted (its scrollback and the ghostty instance survive) and resumes with
-   *  `FROM_OFFSET` when a non-null client returns. Only a stream-end with a *valid* client (real
+   *  terminal stays mounted (its scrollback and the ghostty instance survive) and re-opens with a
+   *  screen snapshot when a non-null client returns. Only a stream-end with a *valid* client (real
    *  `pty_done`) evicts the runtime. */
   client: TerminalClient | null;
   /** The claimed session (lease token in hand), or `null` while the auto-claim is in flight / was
    *  denied. `sendTerminalInput` is gated on this: input sent before the claim resolves (typically
    *  the onReady resize OSC) is queued and flushed once the claim arrives, so it can never go out
-   *  with an empty/stale token. The output stream (`streamTerminalOutput`) needs no token and opens
-   *  immediately. */
+   *  with an empty/stale token. The stream itself opens immediately, presenting an empty token until
+   *  the claim resolves (a watcher: the daemon ignores its grid). */
   connected: ConnectedSession | null;
   /** Target terminal within the session. Empty (the default) resolves to the reserved main
    *  ("claude"/Agent) terminal on the daemon; a bash terminal passes its own `terminal_id`. */
@@ -87,7 +98,7 @@ export function GrpcSessionTerminal({
   connectedRef.current = connected;
   // Latest daemon client — a ref so the stream effect (keyed on `client`) and the send() closure
   // read the current value. `null` during a transient transport blip; the terminal stays mounted
-  // and resumes with `FROM_OFFSET` when a non-null client returns.
+  // and re-opens with a snapshot when a non-null client returns.
   const clientRef = useRef<TerminalClient | null>(client);
   clientRef.current = client;
   const sessionTokenRef = useRef(sessionToken);
@@ -101,13 +112,9 @@ export function GrpcSessionTerminal({
   // or the PTY stays at the previous driver's size and every tap lands on the wrong cell.
   const lastResizeRef = useRef<Uint8Array | null>(null);
 
-  // Replay-once / resume-by-offset tracking. `currentOffset` is the cumulative output byte offset
-  // the client has received up to (snapped to the frame's absolute `endOffset` on replay/catch-up
-  // frames, advanced by byte length on live tail frames). `hasSynced` records that the initial
-  // TAIL replay has landed, so a subsequent stream open (reconnect) sends `FROM_OFFSET` with the
-  // tracked offset instead of re-replaying — no duplicate content in the live terminal.
-  const currentOffsetRef = useRef(0n);
-  const hasSyncedRef = useRef(false);
+  // The input half of the open bidi stream: `send` queues a message the stream's request iterator
+  // yields. `null` while no stream is open (a blip) — input is then held in `pendingInputRef`.
+  const openInputRef = useRef<((message: QueuedInput) => void) | null>(null);
 
   // Enqueued-input accounting: assigns each sent chunk a cumulative byte offset, consumes the
   // daemon's acked_input_offset, and drives the un-acknowledged-input overlay on slow links.
@@ -115,18 +122,16 @@ export function GrpcSessionTerminal({
   const ackRef = useRef(ack);
   ackRef.current = ack;
 
-  // Why the last keystroke, paste or resize did not reach the PTY — e.g. another screen took the
-  // lease. One indicator however many sends are refused (each failure writes the same string, which
-  // React does not re-render for), and the next delivered send clears it. Answers can land out of
-  // order, so only the newest settled send is reported (see `inputDeliverySequence`).
+  // Why the last keystroke, paste or resize did not reach the PTY — the daemon's refusal frame (e.g.
+  // another screen took the lease) or the stream itself failing. One indicator however many sends
+  // are refused, cleared when an ACK passes the refused offset or a stream opens again.
   const [inputError, setInputError] = useState<string | null>(null);
-  const [nextDelivery] = useState(() => inputDeliverySequence(setInputError));
 
   // Disconnect fires automatically when the terminal goes away — either the remote
   // stream ends or this component unmounts (e.g. the user switches sessions). Read
   // the latest callback via a ref and guard so it fires at most once. CRITICAL: a stream-end with
   // a *null* client (transient transport blip) must NOT evict — the terminal pauses and waits for
-  // a non-null client to return, then resumes with `FROM_OFFSET`. Only a stream-end with a valid
+  // a non-null client to return, then re-opens with a snapshot. Only a stream-end with a valid
   // client (real `pty_done`) evicts the runtime.
   const onDisconnectRef = useRef(onDisconnect);
   onDisconnectRef.current = onDisconnect;
@@ -144,51 +149,32 @@ export function GrpcSessionTerminal({
   const sendInputRequest = useCallback(
     (data: Uint8Array) => {
       const conn = connectedRef.current;
-      const cli = clientRef.current;
-      if (conn === null || cli === null) {
-        // No lease yet (auto-claim in flight) OR no client (transient transport blip). Queue the
-        // input (typically the onReady resize OSC) until both arrive and the flush effect below
+      const sendOnOpenStream = openInputRef.current;
+      if (conn === null || clientRef.current === null || sendOnOpenStream === null) {
+        // No lease yet (auto-claim in flight) OR no open stream (transient transport blip). Queue
+        // the input (typically the onReady resize OSC) until both arrive and the flush effect below
         // releases it.
         pendingInputRef.current.push(data);
         return;
       }
       // Assign this chunk its cumulative byte offset (also tracked for the enqueued-input overlay)
-      // and send it so the daemon can ack the applied offset back on the output stream.
-      const inputOffset = enqueue(data);
-      const settle = nextDelivery();
-      cli
-        .sendTerminalInput({
-          sessionToken,
-          sessionId,
-          terminalId,
-          data,
-          controlToken: conn.controlToken,
-          inputOffset: BigInt(inputOffset),
-        })
-        .then(
-          () => settle(null),
-          (err: unknown) => {
-            dGrpc(
-              "sendTerminalInput failed sessionId=%s error=%o",
-              sessionId,
-              err instanceof Error ? err.message : err,
-            );
-            settle(rpcFailureText(err));
-          },
-        );
+      // and send it up the stream so the daemon can ack the applied offset back on the output.
+      sendOnOpenStream({ data, inputOffset: enqueue(data), controlToken: conn.controlToken });
     },
-    [client, sessionId, sessionToken, terminalId, enqueue, nextDelivery],
+    [enqueue],
   );
   const sendInputRequestRef = useRef(sendInputRequest);
   sendInputRequestRef.current = sendInputRequest;
 
   useEffect(() => {
     // No client during a transient transport blip — keep the previous stream (and the ghostty
-    // terminal instance) mounted; resume with `FROM_OFFSET` when a non-null client returns.
+    // terminal instance) mounted; re-open with a snapshot when a non-null client returns.
     if (client === null) {
-      dGrpc("streamTerminalOutput skip open — null client (transport blip), terminal stays mounted");
+      dGrpc("streamSessionTerminalIO skip open — null client (transport blip), terminal stays mounted");
       return;
     }
+    setInputError(null);
+    const refusals = new InputRefusalTracker(setInputError);
 
     const outputListeners: Array<(frame: TerminalFrame) => void> = [];
     // Frames that arrived before anything subscribed.
@@ -196,13 +182,16 @@ export function GrpcSessionTerminal({
     // This effect publishes the stream with `setStream` and starts consuming in the same pass, but
     // the subscriber — `GhosttyTerminalSession`'s own effect — cannot run until React has
     // re-rendered with a non-null `feed`. A frame delivered in that window used to reach an empty
-    // listener list and be dropped silently: no replay in the terminal, and no offset recorded,
-    // so the next open asked for TAIL and replayed from the tip instead of resuming.
+    // listener list and be dropped silently: no screen in the terminal, and no offset recorded.
     //
     // A network round trip normally hides the gap. A fast transport does not: Tddy Desktop hosts
     // the daemon *in this process*, so the first frame can and does beat a React commit.
     const framesBeforeAnyListener: TerminalFrame[] = [];
     let closed = false;
+    // The request half: queued input waits here for the iterator below to yield it.
+    const outbound: QueuedInput[] = [];
+    let wakeInput: (() => void) | null = null;
+    const wake = () => wakeInput?.();
 
     const terminalStream: TerminalStream = {
       send(data: Uint8Array) {
@@ -217,23 +206,23 @@ export function GrpcSessionTerminal({
       },
       close() {
         closed = true;
+        wake();
       },
     };
     setStream(terminalStream);
+    openInputRef.current = (message) => {
+      outbound.push(message);
+      wake();
+    };
 
-    // Measure container dimensions so the daemon can resize the PTY before replaying buffered
-    // output — eliminates the 220-col garbling on connect. Only sent on the first (TAIL) open;
-    // a FROM_OFFSET reconnect reuses the live terminal's existing dimensions (no resize/drain).
+    // Measure container dimensions so the daemon resizes the PTY before it snapshots the screen,
+    // which then arrives serialized at this pane's own grid — no 220-column re-wrap on connect.
     const { widthPx, heightPx, cols: initialCols, rows: initialRows } = measureTerminalGridFromRect(
       containerRef.current?.getBoundingClientRect(),
     );
-    const mode = hasSyncedRef.current ? StreamReplayMode.FROM_OFFSET : StreamReplayMode.TAIL;
-    const fromOffset = hasSyncedRef.current ? currentOffsetRef.current : 0n;
     dResize(
-      "streamTerminalOutput open sessionId=%s mode=%s fromOffset=%s container=%dx%dpx initialCols=%d initialRows=%d",
+      "streamSessionTerminalIO open sessionId=%s mode=SNAPSHOT container=%dx%dpx initialCols=%d initialRows=%d",
       sessionId,
-      hasSyncedRef.current ? "FROM_OFFSET" : "TAIL",
-      fromOffset.toString(),
       widthPx,
       heightPx,
       initialCols,
@@ -241,27 +230,53 @@ export function GrpcSessionTerminal({
     );
     if (initialCols === 0 || initialRows === 0) {
       dResize(
-        "streamTerminalOutput warning sessionId=%s container not laid out yet (cols=%d rows=%d)",
+        "streamSessionTerminalIO warning sessionId=%s container not laid out yet (cols=%d rows=%d)",
         sessionId,
         initialCols,
         initialRows,
       );
     }
-    void (async () => {
-      try {
-        for await (const output of client.streamTerminalOutput({
+
+    // The opening message asks for the screen as it is now, whatever this terminal showed before:
+    // a re-open is a fresh VT (or one that missed output while the transport was down), so a byte
+    // resume would paint into a screen it cannot be sure it has. The daemon honours the grid only
+    // for the screen driving the session; a watcher opens read-only and resizes the PTY once its
+    // claim lands, through the resize OSC queued until then.
+    async function* requests(): AsyncGenerator<MessageInitShape<typeof SessionTerminalInputSchema>> {
+      yield {
+        sessionToken,
+        sessionId,
+        terminalId,
+        initialCols,
+        initialRows,
+        mode: StreamReplayMode.SNAPSHOT,
+        controlToken: connectedRef.current?.controlToken ?? "",
+      };
+      while (!closed) {
+        const next = outbound.shift();
+        if (next === undefined) {
+          await new Promise<void>((resolve) => {
+            wakeInput = resolve;
+          });
+          wakeInput = null;
+          continue;
+        }
+        yield {
           sessionToken,
           sessionId,
           terminalId,
-          initialCols,
-          initialRows,
-          mode,
-          fromOffset,
-          // The daemon honours `initialCols`/`initialRows` only for the screen driving the session:
-          // a screen still watching (no lease, or another screen's) opens read-only and resizes the
-          // PTY once its claim lands, through the resize OSC queued until then.
-          controlToken: connectedRef.current?.controlToken ?? "",
-        }) as AsyncIterable<SessionTerminalOutput>) {
+          data: next.data,
+          inputOffset: BigInt(next.inputOffset),
+          controlToken: next.controlToken,
+        };
+      }
+    }
+
+    void (async () => {
+      try {
+        for await (const output of client.streamSessionTerminalIO(
+          requests(),
+        ) as AsyncIterable<SessionTerminalOutput>) {
           if (closed) break;
           // Identity guard: the daemon stamps every frame with the session and (resolved) terminal
           // it came from. A frame from anywhere else is dropped here, before it can reach this
@@ -278,18 +293,22 @@ export function GrpcSessionTerminal({
             );
             continue;
           }
+          // A refusal frame names an input chunk the daemon dropped; it carries no output.
+          if (refusals.observe(output)) continue;
           // ACK frames (empty data, non-zero offset) collapse the enqueued-input overlay.
           if (output.ackedInputOffset > 0n) {
             ackRef.current(Number(output.ackedInputOffset));
           }
           // Forward the full frame (data + offset metadata) to the shared terminal, which captures
-          // the lazy-history anchor from the initial replay frame and drives the forward fill of
-          // the older-history terminal on demand.
+          // the lazy-history anchor from the snapshot frame and drives the forward fill of the
+          // older-history terminal on demand.
           if (output.data.length > 0 || output.endOffset > 0n) {
             const frame: TerminalFrame = {
               data: output.data,
               endOffset: output.endOffset,
               atOldest: output.atOldest,
+              snapshot: output.snapshot,
+              startOffset: output.startOffset,
             };
             if (outputListeners.length === 0) {
               framesBeforeAnyListener.push(frame);
@@ -300,12 +319,17 @@ export function GrpcSessionTerminal({
         }
         if (!closed) emitDisconnect();
       } catch (err) {
-        if (!closed) emitDisconnect();
+        if (!closed) {
+          if (clientRef.current !== null) setInputError(rpcFailureText(err));
+          emitDisconnect();
+        }
       }
     })();
 
     return () => {
       closed = true;
+      wake();
+      openInputRef.current = null;
     };
   }, [client, sessionId, terminalId]);
 
@@ -376,10 +400,6 @@ export function GrpcSessionTerminal({
           mobileShortcuts={mobileShortcuts}
           onRegisterInsertInput={onRegisterInsertInput}
           readsLocalPaths={readsLocalPaths}
-          onOffsetUpdate={(offset) => {
-            currentOffsetRef.current = offset;
-            hasSyncedRef.current = true;
-          }}
         />
       )}
       <EnqueuedInputOverlay model={enqueuedModel} visible={enqueuedVisible} />

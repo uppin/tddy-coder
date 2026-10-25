@@ -1,6 +1,6 @@
 # complexity: feed
 
-**Location:** `packages/tddy-task/src/terminal_capture.rs:352` — `feed`
+**Location:** `packages/tddy-task/src/terminal_capture.rs:505` — `feed`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **54 lines** · **nesting depth 5** · 1 parameters · 9 branch/match lines · 1 early exits
@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 54 | 5 | 9 | 1 | first detection |
+| 2026-10-25 | 54 | 5 | 9 | 1 | **unchanged** in PR #760 (`#term-snapshot` 1/4), which widened the sniffer: the new keypad and DECSCUSR events went into `escape_event` and `finish_csi` beside `feed` rather than into it. Length and depth re-measured equal to `origin/master` |
 
 ## What the tool found
 

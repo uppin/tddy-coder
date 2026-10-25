@@ -28,3 +28,40 @@ export function inputDeliverySequence(
     };
   };
 }
+
+/** The part of an output frame that reports on input delivery. */
+export interface InputDeliveryFrame {
+  readonly refusedInputOffset: bigint;
+  readonly inputRefusal: string;
+  readonly ackedInputOffset: bigint;
+}
+
+/**
+ * Turns the daemon's refusal and ACK frames into delivery reports.
+ *
+ * A refusal frame names the chunk (by its cumulative input offset) that was dropped and why; the
+ * indicator stays until an ACK reaches past that offset, which means a later chunk was applied. An
+ * ACK at or below it says nothing about the refused bytes and clears nothing.
+ */
+export class InputRefusalTracker {
+  private refusedAt: bigint | null = null;
+  private readonly nextDelivery: () => InputDeliverySettle;
+
+  constructor(report: (failure: string | null) => void) {
+    this.nextDelivery = inputDeliverySequence(report);
+  }
+
+  /** Account for one frame; true when it was a refusal (it carries no output). */
+  observe(frame: InputDeliveryFrame): boolean {
+    if (frame.inputRefusal !== "") {
+      this.refusedAt = frame.refusedInputOffset;
+      this.nextDelivery()(frame.inputRefusal);
+      return true;
+    }
+    if (this.refusedAt !== null && frame.ackedInputOffset > this.refusedAt) {
+      this.refusedAt = null;
+      this.nextDelivery()(null);
+    }
+    return false;
+  }
+}

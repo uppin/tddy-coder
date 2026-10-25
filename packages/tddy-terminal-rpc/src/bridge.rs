@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use tddy_rpc::Status;
-use tddy_task::CaptureChunk;
+use tddy_task::{CaptureChunk, ScreenSnapshot};
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 
@@ -43,6 +43,10 @@ const _: () = assert!(
     DEFAULT_INITIAL_FRAME_BYTES > 0 && DEFAULT_INITIAL_FRAME_BYTES < 1024 * 1024,
     "the default initial frame budget must be a nonzero fraction of a transport message"
 );
+
+/// Why a chunk presented without the lease is refused — the same words the unary
+/// `SendTerminalInput` refusal uses.
+const INPUT_REFUSED: &str = "terminal controlled by another screen";
 
 /// Capacity of the mpsc channel bridging broadcast output to the RPC stream.
 pub const TERMINAL_OUTPUT_CHANNEL_CAPACITY: usize = 64;
@@ -91,6 +95,11 @@ impl FrameIdentity {
             at_oldest: false,
             session_id: self.session_id.clone(),
             terminal_id: self.terminal_id.clone(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
         }
     }
 
@@ -112,6 +121,34 @@ impl FrameIdentity {
             at_oldest,
             session_id: self.session_id.clone(),
             terminal_id: self.terminal_id.clone(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
+        }
+    }
+
+    /// The snapshot frame of a `SNAPSHOT` open: the repaint, spanning `[0, snapshot.offset)` of the
+    /// output stream, with the grid it was serialized at.
+    fn snapshot_frame(&self, snapshot: ScreenSnapshot) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            data: snapshot.data,
+            end_offset: snapshot.offset,
+            snapshot: true,
+            snapshot_rows: u32::from(snapshot.rows),
+            snapshot_cols: u32::from(snapshot.cols),
+            ..self.data_frame(Vec::new())
+        }
+    }
+
+    /// A refusal frame: the input chunk ending at cumulative `refused_input_offset` was dropped and
+    /// never reached the PTY, for `reason`. Carries no data; the stream stays open.
+    fn refusal_frame(&self, refused_input_offset: u64, reason: &str) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            refused_input_offset,
+            input_refusal: reason.to_string(),
+            ..self.data_frame(Vec::new())
         }
     }
 
@@ -125,6 +162,11 @@ impl FrameIdentity {
             at_oldest: false,
             session_id: self.session_id.clone(),
             terminal_id: self.terminal_id.clone(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
         }
     }
 }
@@ -177,7 +219,7 @@ pub async fn serve_stream_terminal_output_with(
         },
         initial_frame_bytes,
     )
-    .await;
+    .await?;
     Ok(rx)
 }
 
@@ -203,7 +245,10 @@ async fn open_replay_ack_live(
     identity: FrameIdentity,
     open: OpenSelection,
     initial_frame_bytes: usize,
-) {
+) -> Result<(), Status> {
+    if matches!(open.mode, StreamReplayMode::Snapshot) {
+        return open_snapshot(session, tx, identity, open).await;
+    }
     let OpenSelection {
         mode,
         from_offset,
@@ -278,7 +323,7 @@ async fn open_replay_ack_live(
                     }
                 }
             }
-            spawn_live_bridge(session, tx, identity, stdout_rx);
+            spawn_live_bridge(session, tx, identity, stdout_rx, None);
         }
         StreamReplayMode::FromOffset => {
             // Chunked catch-up: forward-fill from `from_offset` (clamped up to the ring's
@@ -328,20 +373,62 @@ async fn open_replay_ack_live(
             // No tail chunk, no resize/drain on reconnect — the terminal already holds the right
             // dimensions and state up to `from_offset`; we only fill the gap then go live.
             let stdout_rx = session.subscribe_stdout();
-            spawn_live_bridge(session, tx, identity, stdout_rx);
+            spawn_live_bridge(session, tx, identity, stdout_rx, None);
         }
+        // Handled before the prologue, by `open_snapshot`.
+        StreamReplayMode::Snapshot => unreachable!("a snapshot open returns above"),
     }
+    Ok(())
+}
+
+/// The `SNAPSHOT` open: the screen as it is now, then only what is written after it.
+///
+/// Refused with `FAILED_PRECONDITION` — before anything is streamed — while the terminal's screen
+/// model does not know the PTY's size. Otherwise the open resizes first when it asks for a grid
+/// the terminal does not have (an opener without the control lease arrives with its grid zeroed,
+/// see `service.rs`), applying it to the PTY and the model, so the snapshot is taken at the
+/// client's grid. There is no mode prologue, no raw replay and no redraw signal: the snapshot
+/// carries the modes, and the application is never nudged.
+async fn open_snapshot(
+    session: Arc<dyn TerminalSession>,
+    tx: mpsc::Sender<Result<SessionTerminalOutput, Status>>,
+    identity: FrameIdentity,
+    open: OpenSelection,
+) -> Result<(), Status> {
+    let grid = session.capture().lock().ok().and_then(|cap| cap.grid());
+    let Some(grid) = grid else {
+        return Err(crate::session::unsized_screen_refusal());
+    };
+    let wanted = (
+        req_initial_rows_as_u16(open.initial_rows),
+        req_initial_cols_as_u16(open.initial_cols),
+    );
+    let asks_for_grid = open.initial_rows > 0 && open.initial_cols > 0;
+    if asks_for_grid && session.resizable() && wanted != grid {
+        session.resize(wanted.0, wanted.1).await;
+    }
+    let (snapshot, live) = session.snapshot_and_subscribe()?;
+    let offset = snapshot.offset;
+    let _ = tx.send(Ok(identity.snapshot_frame(snapshot))).await;
+    spawn_live_bridge(session, tx, identity, live, Some(offset));
+    Ok(())
 }
 
 /// Spawn the live broadcast bridge: forward stdout bytes interleaved with input-offset ACK frames
 /// until the child exits. The current applied offset is emitted up front (before any live byte) so
 /// a stream opening after some input was already applied learns the ACK position immediately.
+///
+/// With `stamp_from = Some(offset)` the first live byte sits at that absolute offset, and every
+/// data frame is stamped with its contiguous `[start_offset, end_offset)`. Without it, live frames
+/// carry no offsets.
 fn spawn_live_bridge(
     session: Arc<dyn TerminalSession>,
     tx: mpsc::Sender<Result<SessionTerminalOutput, Status>>,
     identity: FrameIdentity,
     mut stdout_rx: tokio::sync::broadcast::Receiver<Bytes>,
+    stamp_from: Option<u64>,
 ) {
+    let mut stamp = stamp_from;
     let mut acked_rx = session.subscribe_acked_offset();
     let initial_acked = *acked_rx.borrow_and_update();
     let mut pty_done = session.subscribe_pty_done();
@@ -361,7 +448,13 @@ fn spawn_live_bridge(
             tokio::select! {
                 result = stdout_rx.recv() => match result {
                     Ok(bytes) => {
-                        let frame = identity.data_frame(bytes.to_vec());
+                        let mut frame = identity.data_frame(bytes.to_vec());
+                        if let Some(start) = stamp {
+                            let end = start + bytes.len() as u64;
+                            frame.start_offset = start;
+                            frame.end_offset = end;
+                            stamp = Some(end);
+                        }
                         if bridge_tx.send(Ok(frame)).await.is_err() {
                             break;
                         }
@@ -398,6 +491,7 @@ fn req_initial_rows_as_u16(r: u32) -> u16 {
 fn replay_mode_from_i32(mode: i32) -> StreamReplayMode {
     match mode {
         x if x == StreamReplayMode::FromOffset as i32 => StreamReplayMode::FromOffset,
+        x if x == StreamReplayMode::Snapshot as i32 => StreamReplayMode::Snapshot,
         _ => StreamReplayMode::Tail,
     }
 }
@@ -408,16 +502,12 @@ fn replay_mode_from_i32(mode: i32) -> StreamReplayMode {
 ///
 /// Runs the shared [`open_replay_ack_live`] sequence for the OUTPUT side, then forwards the first
 /// message's `data` and every subsequent input chunk to the PTY stdin via
-/// [`TerminalSession::send_input`] (so the bidi client also receives input-offset ACKs), verifying
-/// the control token on each chunk via `verify_control` and ending the forwarder when control is
-/// lost (matches the daemon's per-chunk control-token check).
+/// [`TerminalSession::send_input`] (so the bidi client also receives input-offset ACKs) — see
+/// [`spawn_input_forwarder`] for how the control lease gates each chunk.
 ///
-/// A session that reports itself not [`TerminalSession::requires_control`] is not re-checked at
-/// all: its input comes from the process that owns the PTY rather than from a competing screen, so
-/// there is no token to verify and a lease taken by some screen must not end the forwarder.
-///
-/// The caller remains responsible for auth (session-token resolution + OS-user mapping) and the
-/// FIRST message's control-token check; this function only verifies subsequent chunks.
+/// Opening is watching, so it needs no lease. The caller remains responsible for auth
+/// (session-token resolution + OS-user mapping) and for zeroing the first message's grid when the
+/// opener may not drive the session.
 pub async fn serve_stream_session_terminal_io_with<S, F, Fut>(
     session: Arc<dyn TerminalSession>,
     session_id: String,
@@ -436,10 +526,11 @@ where
     // Output side: the shared open/replay/catch-up/ack/live sequence. The open frame names the
     // terminal the caller resolved this `session` from, so its frames carry the same identity as the
     // split `StreamTerminalOutput` variant's.
+    let identity = FrameIdentity::new(&session_id, &first.terminal_id);
     open_replay_ack_live(
         Arc::clone(&session),
         tx.clone(),
-        FrameIdentity::new(&session_id, &first.terminal_id),
+        identity.clone(),
         OpenSelection {
             mode: replay_mode_from_i32(first.mode),
             from_offset: first.from_offset,
@@ -448,36 +539,66 @@ where
         },
         initial_frame_bytes,
     )
-    .await;
+    .await?;
 
-    // Forward the first message's data (if any) to stdin.
-    if !first.data.is_empty() {
-        session.send_input(Bytes::from(first.data), first.input_offset);
-    }
-
-    // Spawn a task to forward subsequent input chunks to stdin, verifying the control token on
-    // each chunk. Ends when the client stream ends, a stream error occurs, or control is lost.
-    let control_gated = session.requires_control();
-    let session_for_input = Arc::clone(&session);
-    tokio::spawn(async move {
-        use tokio_stream::StreamExt;
-        let mut in_stream = in_stream;
-        while let Some(item) = in_stream.next().await {
-            match item {
-                Ok(msg) => {
-                    if control_gated && !verify_control(&session_id, &msg.control_token).await {
-                        break;
-                    }
-                    if !msg.data.is_empty() {
-                        session_for_input.send_input(Bytes::from(msg.data), msg.input_offset);
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    // The input half: the first message's data and every later chunk, each judged on its own.
+    spawn_input_forwarder(
+        session,
+        session_id,
+        identity,
+        first,
+        in_stream,
+        verify_control,
+        tx.downgrade(),
+    );
 
     Ok(rx)
+}
+
+/// Forward the bidi stream's input — the first message's data, then every later chunk — to the
+/// PTY's stdin, one chunk at a time, until the client stream ends or errors.
+///
+/// Writing is what the control lease guards; reading is not. On a session that
+/// [`TerminalSession::requires_control`], a chunk carrying data under a token that does not hold the
+/// lease never reaches stdin and is answered with a refusal frame on the output half. That includes
+/// a resize, which travels as an OSC in the data. The stream stays open either way, so a watcher
+/// keeps receiving output and a screen that re-claims control resumes typing on the same stream.
+///
+/// `output` is weak so the forwarder does not keep the output half open after the child exits.
+fn spawn_input_forwarder<S, F, Fut>(
+    session: Arc<dyn TerminalSession>,
+    session_id: String,
+    identity: FrameIdentity,
+    first: SessionTerminalInput,
+    in_stream: S,
+    verify_control: F,
+    output: mpsc::WeakSender<Result<SessionTerminalOutput, Status>>,
+) where
+    S: Stream<Item = Result<SessionTerminalInput, Status>> + Unpin + Send + 'static,
+    F: Fn(&str, &str) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = bool> + Send,
+{
+    let control_gated = session.requires_control();
+    tokio::spawn(async move {
+        use tokio_stream::StreamExt;
+        let mut chunks = tokio_stream::once(Ok(first)).chain(in_stream);
+        while let Some(Ok(msg)) = chunks.next().await {
+            if msg.data.is_empty() {
+                continue;
+            }
+            if control_gated && !verify_control(&session_id, &msg.control_token).await {
+                let refusal = identity.refusal_frame(msg.input_offset, INPUT_REFUSED);
+                let Some(output) = output.upgrade() else {
+                    break;
+                };
+                if output.send(Ok(refusal)).await.is_err() {
+                    break;
+                }
+                continue;
+            }
+            session.send_input(Bytes::from(msg.data), msg.input_offset);
+        }
+    });
 }
 
 /// Serve `GetTerminalHistory`: one FORWARD chunk of older output starting at `from_offset`, bounded

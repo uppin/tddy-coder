@@ -82,6 +82,9 @@ fn hand_rolled_sandbox_replay(
     let from_offset = match mode {
         StreamReplayMode::FromOffset => requested_from_offset,
         StreamReplayMode::Tail => 0,
+        StreamReplayMode::Snapshot => {
+            unreachable!("the hand-rolled sandbox branch predates snapshot opens")
+        }
     };
 
     let prologue = capture.lock().unwrap().mode_prologue();
@@ -125,6 +128,11 @@ fn a_data_frame(data: Vec<u8>) -> SessionTerminalOutput {
         at_oldest: false,
         session_id: SESSION_ID.to_string(),
         terminal_id: MAIN_TERMINAL_ID.to_string(),
+        snapshot: false,
+        snapshot_rows: 0,
+        snapshot_cols: 0,
+        refused_input_offset: 0,
+        input_refusal: String::new(),
     }
 }
 
@@ -143,6 +151,11 @@ fn an_anchored_frame(
         at_oldest,
         session_id: SESSION_ID.to_string(),
         terminal_id: MAIN_TERMINAL_ID.to_string(),
+        snapshot: false,
+        snapshot_rows: 0,
+        snapshot_cols: 0,
+        refused_input_offset: 0,
+        input_refusal: String::new(),
     }
 }
 

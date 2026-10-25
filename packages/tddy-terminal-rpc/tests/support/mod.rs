@@ -55,9 +55,21 @@ impl StubTerminal {
         }
     }
 
+    /// A stub terminal whose screen model knows the PTY's grid, as every real terminal's does once
+    /// its spawner has sized it — the precondition for a snapshot.
+    pub fn sized(rows: u16, cols: u16) -> Self {
+        let terminal = Self::new();
+        terminal.capture.lock().unwrap().resize(rows, cols);
+        terminal
+    }
+
+    /// Append and broadcast under one capture lock — the producer contract a real terminal keeps,
+    /// and the one a snapshot's sequence point depends on.
     pub fn write(&self, bytes: &[u8]) {
-        self.capture.lock().unwrap().append(bytes);
+        let mut capture = self.capture.lock().unwrap();
+        capture.append(bytes);
         let _ = self.stdout_tx.send(Bytes::copy_from_slice(bytes));
+        drop(capture);
     }
 
     pub fn set_acked(&self, offset: u64) {
@@ -85,6 +97,9 @@ impl TerminalSession for StubTerminal {
     }
     async fn resize(&self, rows: u16, cols: u16) {
         self.resizes.lock().unwrap().push((rows, cols));
+        // A real terminal's resize reaches its screen model too, so later output is read at the new
+        // grid.
+        self.capture.lock().unwrap().resize(rows, cols);
     }
     fn send_input(&self, data: Bytes, input_offset: u64) {
         self.inputs.lock().unwrap().push((data, input_offset));
@@ -709,6 +724,14 @@ pub fn an_input() -> SessionTerminalInput {
         from_offset: 0,
         initial_cols: 0,
         initial_rows: 0,
+    }
+}
+
+/// The opening message of a bidi stream that asks for a snapshot of the current screen.
+pub fn a_snapshot_open() -> SessionTerminalInput {
+    SessionTerminalInput {
+        mode: StreamReplayMode::Snapshot as i32,
+        ..an_input()
     }
 }
 

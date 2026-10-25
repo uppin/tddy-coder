@@ -10,12 +10,13 @@
 //! that are genuinely the coder's: which terminals it runs, who may drive them, and which OS user
 //! they belong to.
 //!
-//! # Seven of the nine
+//! # Eight of the nine
 //!
-//! `StreamSessionTerminalIO` and `WatchTerminalControl` are refused here — see
-//! [`CoderTerminalSessionRpc`] for why each is a lie rather than an omission, and
+//! `WatchTerminalControl` is refused here — see [`CoderTerminalSessionRpc`] for why it is a lie
+//! rather than an omission, and
 //! `docs/dev/todo/2026-09-11-the-coder-terminal-coordinate-serves-seven-of-nine.md` for what a client
-//! sees as a result.
+//! sees as a result. `StreamSessionTerminalIO` is served: the web opens every host terminal on it,
+//! with a screen snapshot, so a coder-hosted session must answer it as the daemon does.
 
 use std::sync::Arc;
 
@@ -39,8 +40,8 @@ use super::terminal_session_adapter::CoderTerminalSessionStore;
 /// the unauthenticated `TokenService` it registers beside this one.
 const CODER_IDENTITY: &str = "coder";
 
-/// The two methods the coder's terminal coordinate refuses, and the bidi one among them.
-const UNSERVED_METHODS: [&str; 2] = ["StreamSessionTerminalIO", "WatchTerminalControl"];
+/// The one method the coder's terminal coordinate refuses.
+const UNSERVED_METHODS: [&str; 1] = ["WatchTerminalControl"];
 
 /// The `terminal_session.TerminalSessionService` entry the coder's participant registers.
 ///
@@ -53,7 +54,7 @@ const UNSERVED_METHODS: [&str; 2] = ["StreamSessionTerminalIO", "WatchTerminalCo
 /// # A process that cannot name its own OS user serves no terminal
 ///
 /// [`current_os_user`](super::terminal_manager::current_os_user) reads the passwd entry of this
-/// process's effective uid and falls back to `$USER`. If both come up empty, all seven served
+/// process's effective uid and falls back to `$USER`. If both come up empty, all eight served
 /// methods answer `PERMISSION_DENIED`, where the pre-move `the pre-unbundle monolithic RPC coordinate` handlers
 /// had no such gate. That is deliberate and not softened here: every one of those methods reaches
 /// a PTY, `StartTerminalSession` resolves the login shell *from the named user*, and a terminal
@@ -80,19 +81,15 @@ pub fn coder_terminal_session_entry(svc: Arc<SessionConnectionService>) -> Servi
     }
 }
 
-/// The shared `terminal_session.TerminalSessionService`, with the two methods the coder has no
+/// The shared `terminal_session.TerminalSessionService`, with the one method the coder has no
 /// honest answer for refused.
 ///
-/// * `WatchTerminalControl` reports whether the caller drives the session's terminals. The coder's
-///   lease is a permanent grant ([`CoderTerminalControl`]), so this participant would tell *every*
-///   watching screen that it is the controller — including one the daemon's real lease has just
-///   displaced, which is exactly the screen the event exists to correct.
-/// * `StreamSessionTerminalIO` carries terminal bytes bidirectionally. This participant already
-///   serves `terminal.TerminalService/StreamTerminalIO`, which is the wire the web opens against
-///   it; a second bidi terminal on the same participant is net-new behaviour rather than a
-///   relocation of anything.
+/// `WatchTerminalControl` reports whether the caller drives the session's terminals. The coder's
+/// lease is a permanent grant ([`CoderTerminalControl`]), so this participant would tell *every*
+/// watching screen that it is the controller — including one the daemon's real lease has just
+/// displaced, which is exactly the screen the event exists to correct.
 ///
-/// Refusing them is what keeps the seven that *are* served identical to the daemon's — they run
+/// Refusing it is what keeps the eight that *are* served identical to the daemon's — they run
 /// the crate's handlers untouched, through this one delegation.
 struct CoderTerminalSessionRpc {
     served: Arc<dyn RpcService>,

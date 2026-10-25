@@ -54,27 +54,28 @@ answer one session identically. The other four — `ReportSessionStatus`, `Repor
 the first two are written by per-worktree hooks against the daemon's own stores, the third is a
 daemon-wide feed across every session, and the fourth serves a worktree this process does not hold.
 
-On `terminal_session.TerminalSessionService`, **seven of the nine** methods — the **bash terminal
+On `terminal_session.TerminalSessionService`, **eight of the nine** methods — the **bash terminal
 tabs**: `StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions`, the
-`terminal_id`-addressed `StreamTerminalOutput` / `SendTerminalInput` / `GetTerminalHistory`, and
-`ClaimTerminalControl`. The coder spawns interactive shell PTYs in the session worktree via the shared
+`terminal_id`-addressed `StreamSessionTerminalIO` / `StreamTerminalOutput` / `SendTerminalInput` /
+`GetTerminalHistory`, and `ClaimTerminalControl`. The coder spawns interactive shell PTYs in the session worktree via the shared
 **`tddy-pty`** crate, and registers
 [`tddy-terminal-rpc`](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md)'s own
 entry constructor — the same one the daemon registers — supplying only the three answers that are the
 coder's: which terminals it runs, who may drive them, and which OS user they belong to. So the replay
-model, the offsets and the ACK framing are the daemon's, not a second implementation. Because the
+model, the screen snapshot, the offsets and the ACK framing are the daemon's, not a second
+implementation: a bidi `SNAPSHOT` open of a coder-served terminal is shown the current screen exactly
+as the daemon would show it. Because the
 coder already runs as the target OS user, its PTYs spawn without privilege-drop (`os_user: None`).
 
-`StreamSessionTerminalIO` and `WatchTerminalControl` are refused here with `Unimplemented`, and each
-refusal is a judgement rather than an omission. The coder's control lease is a permanent self-grant —
-it owns its own terminal and arbitrates nothing — so a watch event from it would tell every
-subscribing screen it is the controller, including the one the owning daemon's real lease has just
-displaced, which is exactly the screen the event exists to correct. And the coder already carries a
-session's bidirectional terminal bytes on `terminal.TerminalService/StreamTerminalIO`, which is the
-wire the web opens against it; a second bidi terminal on the same participant would be two.
+`WatchTerminalControl` is refused here with `Unimplemented`, and the refusal is a judgement rather
+than an omission. The coder's control lease is a permanent self-grant — it owns its own terminal and
+arbitrates nothing — so a watch event from it would tell every subscribing screen it is the
+controller, including the one the owning daemon's real lease has just displaced, which is exactly the
+screen the event exists to correct.
 
-`packages/tddy-coder/tests/two_server_parity_acceptance.rs` asserts at the wire that the seven answer
-identically to the daemon's — history offsets, stream mode, control-claim outcome.
+`packages/tddy-coder/tests/two_server_parity_acceptance.rs` asserts at the wire that the eight answer
+identically to the daemon's — history offsets, stream mode, control-claim outcome, and a bidi
+`SNAPSHOT` open.
 
 The reserved `"main"` terminal remains the VirtualTui on `terminal.TerminalService` (it is not a
 PTY); `StopTerminalSession("main")` is rejected with `INVALID_ARGUMENT`. See

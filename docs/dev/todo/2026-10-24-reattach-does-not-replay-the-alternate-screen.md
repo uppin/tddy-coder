@@ -1,5 +1,11 @@
 # 2026-10-24 — A reattach is not told the program is on the alternate screen
 
+> **Partly resolved by `#term-snapshot 1/4`:** a `SNAPSHOT` open (every web open) carries the alternate
+> screen — the snapshot is serialized from the screen model and switches to it. The legacy
+> `TAIL` / `FROM_OFFSET` replays (non-web clients, `StreamTerminalOutput`) still do not: their
+> `mode_prologue` is pinned to the mouse modes by `terminal_capture_replay`'s
+> `ignores_private_modes_outside_the_mouse_tracking_family`. What remains is below, narrowed to them.
+
 **Category:** Deferred from "No terminal history offer while a full-screen TUI owns navigation" (#714)
 **Source:** `packages/tddy-task/src/terminal_capture.rs` (`mode_prologue`, `MOUSE_TRACKING_MODES`)
 

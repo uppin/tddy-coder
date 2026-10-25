@@ -22,8 +22,10 @@ import {
 } from "../../src/gen/session_pb";
 import {
   ClaimTerminalControlResponseSchema,
-  SendTerminalInputResponseSchema,
+  SessionTerminalOutputSchema,
   TerminalSessionService,
+  type SessionTerminalInput,
+  type SessionTerminalOutput,
 } from "../../src/gen/terminal_session_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { REFRESH_INTERVAL_MS } from "../../src/components/sessions/sessionManager";
@@ -489,20 +491,47 @@ describe("claiming the terminal", () => {
 
 const TERMINAL_SESSION = "visible-errors-terminal-0000-0000-0000-000000000000";
 
-/** A terminal whose input the daemon refuses while `refusing()` says so; `sends` counts the inputs. */
+/**
+ * A terminal whose input the daemon refuses while `refusing()` says so; `sends` counts the inputs.
+ *
+ * Over the bidi stream the daemon answers each input chunk on the output half: a refusal frame
+ * naming the chunk and why when it is refused, an ACK of its offset when it is applied.
+ */
 function aTerminalBackend(refusing: () => boolean, sends = { count: 0 }) {
-  return anInMemoryRpcBackend()
-    .onUnary(TerminalSessionService.method.sendTerminalInput, () => {
-      sends.count += 1;
-      if (refusing()) throw new ConnectError("terminal controlled by another screen", Code.FailedPrecondition);
-      return create(SendTerminalInputResponseSchema, {});
-    })
-    .implement(TerminalSessionService, {
-      // eslint-disable-next-line require-yield
-      async *streamTerminalOutput() {
-        await new Promise<never>(() => {});
-      },
-    });
+  return anInMemoryRpcBackend().implement(TerminalSessionService, {
+    async *streamSessionTerminalIO(requests: AsyncIterable<SessionTerminalInput>) {
+      const answers: SessionTerminalOutput[] = [];
+      let wake: (() => void) | null = null;
+      void (async () => {
+        for await (const message of requests) {
+          if (message.data.length === 0) continue;
+          sends.count += 1;
+          answers.push(
+            refusing()
+              ? create(SessionTerminalOutputSchema, {
+                  refusedInputOffset: message.inputOffset,
+                  inputRefusal: "terminal controlled by another screen",
+                  sessionId: message.sessionId,
+                  terminalId: message.terminalId || "main",
+                })
+              : create(SessionTerminalOutputSchema, {
+                  ackedInputOffset: message.inputOffset,
+                  sessionId: message.sessionId,
+                  terminalId: message.terminalId || "main",
+                }),
+          );
+          wake?.();
+        }
+      })();
+      for (;;) {
+        while (answers.length > 0) yield answers.shift() as SessionTerminalOutput;
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+        wake = null;
+      }
+    },
+  });
 }
 
 function mountTerminal(backend: ReturnType<typeof anInMemoryRpcBackend>) {

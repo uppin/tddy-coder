@@ -24,6 +24,18 @@ export interface TerminalFrame {
   readonly data: Uint8Array;
   readonly endOffset: bigint;
   readonly atOldest: boolean;
+  /**
+   * True on a snapshot frame: `data` is one repaint of the screen (it begins with RIS, so it is
+   * written into the live terminal as-is) and `endOffset` is its sequence point — the anchor for
+   * history and the offset the next delta starts at.
+   */
+  readonly snapshot?: boolean;
+  /**
+   * Where `data` starts in the terminal's cumulative output, on every frame of a stream opened
+   * with a snapshot. The first delta starts at the snapshot's `endOffset`, each later one at the
+   * previous frame's `endOffset`.
+   */
+  readonly startOffset?: bigint;
 }
 
 /** The duplex byte pipe a terminal reads and writes. */
@@ -133,7 +145,7 @@ export interface TerminalOptions {
   readonly controlToken: () => string;
 
   /**
-   * The terminal's measured grid, so the daemon resizes the PTY *before* it replays.
+   * The terminal's measured grid, so the daemon resizes the PTY *before* it snapshots or replays.
    *
    * Omitted when the pane has not been laid out yet. This is the fix for the 220-column garbling:
    * replaying a buffer at the wrong width re-wraps every line in it.
@@ -144,8 +156,10 @@ export interface TerminalOptions {
    * Told after each send whether it reached the PTY: the daemon's reason when it was refused (the
    * lease moved, the session ended, the transport is down), `null` once one is delivered again.
    *
-   * Input has no reply the terminal renders, so without this a refused keystroke is simply gone. A
-   * feed that cannot tell — one whose input rides a stream with no per-send answer — never calls it.
+   * Input has no reply the terminal renders, so without this a refused keystroke is simply gone. The
+   * daemon's bidi `StreamSessionTerminalIO` has no per-send answer either, so it reports a refusal
+   * on its output half instead (a refusal frame, cleared by an ACK past the refused chunk). A feed
+   * that cannot tell at all — the room's `StreamTerminalIO` — never calls it.
    */
   readonly onInputDelivery?: (failure: string | null) => void;
 }

@@ -4,13 +4,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{MasterPty, PtySize};
-use tddy_task::TaskId;
+use tddy_task::{TaskId, TerminalCapture};
 use tokio::sync::RwLock;
 
 /// Live PTY control state for a running task.
 pub struct PtyControl {
     pub master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     pub current_size: Arc<Mutex<PtySize>>,
+    /// The terminal's replay capture, whose screen model must keep the PTY's size.
+    pub capture: Arc<Mutex<TerminalCapture>>,
     pub terminal_id: String,
     pub kind: String,
 }
@@ -39,6 +41,7 @@ impl PtyRegistry {
         self.inner.read().await.get(task_id).map(|c| PtyControl {
             master: Arc::clone(&c.master),
             current_size: Arc::clone(&c.current_size),
+            capture: Arc::clone(&c.capture),
             terminal_id: c.terminal_id.clone(),
             kind: c.kind.clone(),
         })
@@ -60,6 +63,11 @@ impl PtyRegistry {
         let Some(control) = reg.get(task_id) else {
             return false;
         };
+        // The screen model first: the child redraws as soon as the PTY resizes, and that output
+        // must be read at the new grid.
+        if let Ok(mut capture) = control.capture.lock() {
+            capture.resize(rows, cols);
+        }
         if let Ok(m) = control.master.lock() {
             let _ = m.resize(size);
         }
@@ -97,6 +105,7 @@ mod tests {
                 pixel_width: 0,
                 pixel_height: 0,
             })),
+            capture: Arc::new(Mutex::new(TerminalCapture::new())),
             terminal_id: "main".into(),
             kind: "claude-cli".into(),
         };

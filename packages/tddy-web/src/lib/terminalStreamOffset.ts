@@ -17,6 +17,9 @@
  * emits exactly one anchored frame per open — an empty one tagged with the capture tip when there was
  * no gap to replay — so the counter is SET by the server on every open rather than inferred.
  *
+ * A stream opened with `SNAPSHOT` is simpler: the snapshot frame is the anchor and every later frame
+ * carries its absolute `endOffset`, so each one sets the counter.
+ *
  * One instance per stream open, seeded with the offset carried over from the previous stream.
  */
 export class TerminalStreamOffset {

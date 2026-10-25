@@ -220,9 +220,9 @@ export interface GhosttyTerminalSessionProps {
    *  On a replay / catch-up frame (`endOffset > 0`) the offset snaps to the frame's absolute
    *  `endOffset`; a live tail frame (`endOffset === 0`) that follows it advances the offset by its
    *  byte length, while frames that PRECEDE it on the same open (the re-issued mode prologue) are
-   *  out-of-band VT state and leave it untouched — see `TerminalStreamOffset`. The parent uses this
-   *  to track `currentOffset` so a reconnect can resume with `FROM_OFFSET` instead of re-replaying
-   *  (no duplicates). */
+   *  out-of-band VT state and leave it untouched — see `TerminalStreamOffset`. A parent may use this
+   *  to track how far the stream has reached; the host feeds open every stream with a snapshot and
+   *  no longer resume by offset. */
   onOffsetUpdate?: (offset: bigint) => void;
 
   /** Expose the raw streamed text and byte count for E2E assertions (the `ghostty-*` suite). */
@@ -336,8 +336,7 @@ export function GhosttyTerminalSession({
   // Cumulative output offset the client has received up to, carried across stream opens: each open
   // gets its own `TerminalStreamOffset` seeded from here (see the accounting rules there), and this
   // ref holds the latest value for the next open and for the history fill's upper bound. Surfaced to
-  // the parent via `onOffsetUpdate` so a reconnect can resume with `FROM_OFFSET` instead of
-  // re-replaying (no duplicates).
+  // the parent via `onOffsetUpdate`.
   const currentOffsetRef = useRef(0n);
   const onOffsetUpdateRef = useRef(onOffsetUpdate);
   onOffsetUpdateRef.current = onOffsetUpdate;

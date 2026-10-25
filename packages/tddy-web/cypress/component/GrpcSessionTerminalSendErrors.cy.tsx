@@ -18,27 +18,30 @@
  *   - GrpcSessionTerminal must accept a `controlToken` prop (or ref) and include it
  *     in every sendTerminalInput call.
  *
- * Steps that reproduce in the browser:
+ * On the bidi wire (`StreamSessionTerminalIO`) input no longer travels as one unary call per send:
+ * every keystroke/resize is a later message on the stream whose opening message asked for the
+ * snapshot, each presenting the control token held at send time. A daemon refusal of input is the
+ * stream failing with [failed_precondition]. The two defects above map onto that wire as:
+ *   - a refused stream must be caught by the terminal (no unhandled rejection);
+ *   - every input message must carry the claimed control token.
+ * connect-web cannot carry a bidi call over HTTP, so the daemon is an in-memory
+ * `TerminalSessionService` whose stream records every message it is sent.
+ *
+ * Steps that reproduced in the browser (split unary wire):
  *   1. Open a session tab (#/sessions/<id>)
  *   2. The terminal mounts, fit() fires → onResize → stream.send → sendTerminalInput
  *   3. Console: POST .../SendTerminalInput 400 (Bad Request)
  *   4. Console: Uncaught (in promise) ConnectError: [failed_precondition] terminal controlled by another screen
  */
 
-import React, { useMemo } from "react";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
-import {
-  TerminalSessionService,
-  ClaimTerminalControlResponseSchema,
-  SessionTerminalInputSchema,
-  SendTerminalInputResponseSchema,
-} from "../../src/gen/terminal_session_pb";
+import React from "react";
+import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { TerminalSessionService, type SessionTerminalInput } from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import type { ConnectedSession } from "../../src/components/sessions/useTerminalControl";
-import { decodeProtoRequestBody, interceptProtoRpc, toArrayBuffer } from "../support/rpc/protoRpc";
+import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -47,26 +50,39 @@ import { decodeProtoRequestBody, interceptProtoRpc, toArrayBuffer } from "../sup
 const SESSION_ID = "send-error-test-session-1a2b";
 const SESSION_TOKEN = "test-session-token-xyz";
 const CONTROL_TOKEN = "granted-control-token-abc";
+const CONTROL_REFUSAL = "terminal controlled by another screen";
 
-const OK_SEND_INPUT = toArrayBuffer(
-  toBinary(SendTerminalInputResponseSchema, create(SendTerminalInputResponseSchema, {})),
-);
+type TerminalClient = Client<typeof TerminalSessionService>;
 
-/** Empty StreamTerminalOutput stream — no output data, stream ends immediately. */
-function interceptStreamTerminalOutput() {
-  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/StreamTerminalOutput", (req) => {
-    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: new ArrayBuffer(0) });
-  }).as("streamTerminalOutput");
-}
-
-/** ClaimTerminalControl → granted=true with a known token. */
-function interceptClaimTerminalControl(token = CONTROL_TOKEN) {
-  interceptProtoRpc(
-    "terminal_session.TerminalSessionService/ClaimTerminalControl",
-    ClaimTerminalControlResponseSchema,
-    create(ClaimTerminalControlResponseSchema, { granted: true, controlToken: token }),
-    "claimTerminalControl",
-  );
+/**
+ * A daemon serving the bidi terminal stream in memory. Its output side is silent; every input
+ * message after the opening one is recorded. With `refuseInput`, the first input message is
+ * answered by failing the whole stream with the control-mutex error — the bidi form of every
+ * SendTerminalInput returning [failed_precondition].
+ */
+function aTerminalDaemon({ refuseInput = false }: { refuseInput?: boolean } = {}) {
+  const inputMessages: SessionTerminalInput[] = [];
+  const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
+    async *streamSessionTerminalIO(requests: AsyncIterable<SessionTerminalInput>) {
+      const reader = requests[Symbol.asyncIterator]();
+      const opening = await reader.next();
+      if (opening.done) return;
+      if (refuseInput) {
+        const input = await reader.next();
+        if (input.done) return;
+        inputMessages.push(input.value);
+        throw new ConnectError(CONTROL_REFUSAL, Code.FailedPrecondition);
+      }
+      void (async () => {
+        for (let next = await reader.next(); !next.done; next = await reader.next()) {
+          inputMessages.push(next.value);
+        }
+      })();
+      await new Promise<never>(() => undefined);
+    },
+  });
+  const client: TerminalClient = createClient(TerminalSessionService, backend.transport());
+  return { client, inputMessages };
 }
 
 // ---------------------------------------------------------------------------
@@ -74,18 +90,11 @@ function interceptClaimTerminalControl(token = CONTROL_TOKEN) {
 // ---------------------------------------------------------------------------
 
 /**
- * Renders GrpcSessionTerminal with a real HTTP transport that Cypress can intercept. `connected`
- * is the claimed lease — when non-null, `sendTerminalInput` goes out carrying the token; when
- * `null`, input is queued (the onReady resize is held until the claim resolves) and no
- * SendTerminalInput RPC is emitted.
+ * Renders GrpcSessionTerminal against the in-memory daemon. `connected` is the claimed lease — when
+ * non-null, input goes up the stream carrying the token; when `null`, input is queued (the onReady
+ * resize is held until the claim resolves) and no input message is sent.
  */
-function Harness({ connected }: { connected: ConnectedSession | null }) {
-  const transport = useMemo(
-    () => createConnectTransport({ baseUrl: `${window.location.origin}/rpc`, useBinaryFormat: true }),
-    [],
-  );
-  const client = useMemo(() => createClient(TerminalSessionService, transport), [transport]);
-
+function Harness({ client, connected }: { client: TerminalClient; connected: ConnectedSession | null }) {
   return (
     <div style={{ width: 800, height: 400, position: "relative" }}>
       <UploadProgressProvider>
@@ -100,26 +109,22 @@ function Harness({ connected }: { connected: ConnectedSession | null }) {
   );
 }
 
+/** Waits until the daemon has received at least one input message (the resize on mount). */
+function waitForInput(daemon: { inputMessages: SessionTerminalInput[] }) {
+  cy.wrap(daemon, { timeout: 10000 }).should((d) => {
+    expect(d.inputMessages.length, "at least one input message reached the daemon").to.be.greaterThan(0);
+  });
+}
+
 // ---------------------------------------------------------------------------
-// AC1: send() errors must not produce unhandled promise rejections
+// AC1: input refusals must not produce unhandled promise rejections
 // ---------------------------------------------------------------------------
 
-describe("GrpcSessionTerminal — SendTerminalInput error handling", () => {
-  it("does not produce an unhandled promise rejection when SendTerminalInput returns [failed_precondition]", () => {
-    // Given — output stream is open but silent
-    interceptStreamTerminalOutput();
-
-    // Given — every SendTerminalInput call fails with the control-mutex error
-    cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
-      req.reply({
-        statusCode: 400,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: "failed_precondition",
-          message: "terminal controlled by another screen",
-        }),
-      });
-    }).as("sendTerminalInput");
+describe("GrpcSessionTerminal — terminal input error handling", () => {
+  it("does not produce an unhandled promise rejection when the daemon refuses input with [failed_precondition]", () => {
+    // Given — output stream is open but silent, and the daemon refuses input with the
+    // control-mutex error (the bidi stream fails with [failed_precondition])
+    const daemon = aTerminalDaemon({ refuseInput: true });
 
     // Collect uncaught exceptions (suppress Cypress auto-fail so we can assert explicitly)
     const unhandledRejections: string[] = [];
@@ -128,58 +133,55 @@ describe("GrpcSessionTerminal — SendTerminalInput error handling", () => {
       return false;
     });
 
-    // When — mount with an active lease so the resize reaches the server (input is only sent
-    // once `connected` is non-null; with `null` it would be queued and never fire). The intercept
-    // above makes every SendTerminalInput fail regardless of token.
-    cy.mount(<Harness connected={{ sessionId: SESSION_ID, controlToken: "any-lease-token" }} />);
+    // When — mount with an active lease so the resize reaches the daemon (input is only sent
+    // once `connected` is non-null; with `null` it would be queued and never fire). The daemon
+    // refuses input regardless of token.
+    cy.mount(
+      <Harness client={daemon.client} connected={{ sessionId: SESSION_ID, controlToken: "any-lease-token" }} />,
+    );
 
-    // When — wait for the resize to reach the server so we know the RPC was triggered
-    cy.wait("@sendTerminalInput");
+    // When — wait for the resize to reach the daemon so we know input was sent and refused
+    waitForInput(daemon);
 
-    // Then — the error must have been caught inside send() and must not propagate
+    // Then — the refusal reached the terminal and was handled there
+    byTestId(TEST_IDS.terminalInputError, { timeout: 10000 }).should("contain.text", CONTROL_REFUSAL);
+
+    // Then — the error must have been caught and must not propagate
     cy.wrap(null).should(() => {
       const control = unhandledRejections.filter(
         (m) => m.includes("failed_precondition") || m.includes("terminal controlled"),
       );
       expect(control).to.have.length(
         0,
-        "SendTerminalInput errors must be caught inside send() — not thrown as uncaught promise rejections. " +
+        "terminal input errors must be caught by the terminal — not thrown as uncaught promise rejections. " +
           `Unhandled: [${unhandledRejections.join("; ")}]`,
       );
     });
   });
 
   // ---------------------------------------------------------------------------
-  // AC2: controlToken from ClaimTerminalControl must be forwarded in every
-  //      sendTerminalInput request. Without this the daemon rejects even when
-  //      this screen successfully claimed control.
+  // AC2: controlToken from ClaimTerminalControl must be forwarded on every input
+  //      message. Without this the daemon rejects even when this screen
+  //      successfully claimed control.
   // ---------------------------------------------------------------------------
 
-  it("includes the control token in every SendTerminalInput request", () => {
-    // Given — output stream open
-    interceptStreamTerminalOutput();
-
-    // Given — sendTerminalInput succeeds; capture every request body
-    const capturedRequests: ReturnType<typeof fromBinary<typeof SessionTerminalInputSchema>>[] = [];
-    cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
-      const decoded = fromBinary(SessionTerminalInputSchema, decodeProtoRequestBody(req.body));
-      capturedRequests.push(decoded);
-      req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_INPUT });
-    }).as("sendTerminalInput");
+  it("includes the control token in every terminal input message", () => {
+    // Given — output stream open; every input message is captured
+    const daemon = aTerminalDaemon();
 
     // When — mount with a claimed lease carrying the known control token
-    cy.mount(<Harness connected={{ sessionId: SESSION_ID, controlToken: CONTROL_TOKEN }} />);
+    cy.mount(<Harness client={daemon.client} connected={{ sessionId: SESSION_ID, controlToken: CONTROL_TOKEN }} />);
 
     // When — wait for at least one send (the resize on mount)
-    cy.wait("@sendTerminalInput");
+    waitForInput(daemon);
 
-    // Then — every captured request must carry the control token
+    // Then — every captured input message must carry the control token
     cy.wrap(null).should(() => {
-      expect(capturedRequests.length).to.be.greaterThan(0, "at least one sendTerminalInput should have been sent");
-      for (const req of capturedRequests) {
+      expect(daemon.inputMessages.length).to.be.greaterThan(0, "at least one input message should have been sent");
+      for (const req of daemon.inputMessages) {
         expect(req.controlToken).to.equal(
           CONTROL_TOKEN,
-          `sendTerminalInput must forward the controlToken — got '${req.controlToken}' instead of '${CONTROL_TOKEN}'`,
+          `terminal input must forward the controlToken — got '${req.controlToken}' instead of '${CONTROL_TOKEN}'`,
         );
       }
     });

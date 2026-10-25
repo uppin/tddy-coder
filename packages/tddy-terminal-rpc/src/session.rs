@@ -11,8 +11,15 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use tddy_task::TerminalCapture;
+use tddy_task::{ScreenSnapshot, TerminalCapture};
 use tokio::sync::{broadcast, watch};
+
+/// Why a `SNAPSHOT` open is refused while the terminal's screen model does not know the PTY's size.
+pub(crate) fn unsized_screen_refusal() -> tddy_rpc::Status {
+    tddy_rpc::Status::failed_precondition(
+        "the terminal's size is unknown, so its screen cannot be snapshotted",
+    )
+}
 
 /// A live terminal a streaming RPC attaches to: the broadcast fan-out of stdout bytes, the rolling
 /// replay ring, the process-exit watch, and the resize / input / ACK controls.
@@ -28,6 +35,23 @@ pub trait TerminalSession: Send + Sync {
     /// Subscribe to live stdout bytes. Subscribe BEFORE snapshotting the capture ring so bytes
     /// produced between the snapshot and the first recv are still delivered.
     fn subscribe_stdout(&self) -> broadcast::Receiver<Bytes>;
+
+    /// The terminal's visible state and a live-output receiver that starts exactly where it ends.
+    ///
+    /// Both are taken under the capture lock, which every producer holds while it appends and
+    /// broadcasts, so the receiver yields precisely the bytes from `snapshot.offset` on: none lost,
+    /// none repeated. Refused with `FAILED_PRECONDITION` while the screen model does not know the
+    /// PTY's size ([`TerminalCapture::snapshot`] is `None`).
+    fn snapshot_and_subscribe(
+        &self,
+    ) -> Result<(ScreenSnapshot, broadcast::Receiver<Bytes>), tddy_rpc::Status> {
+        let capture = self.capture();
+        let capture = capture.lock().unwrap();
+        let snapshot = capture.snapshot().ok_or_else(unsized_screen_refusal)?;
+        let live = self.subscribe_stdout();
+        drop(capture);
+        Ok((snapshot, live))
+    }
 
     /// Watch for child-process exit; the bridge ends the output stream when this fires.
     fn subscribe_pty_done(&self) -> watch::Receiver<bool>;
