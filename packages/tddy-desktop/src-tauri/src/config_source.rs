@@ -336,6 +336,27 @@ mod tests {
     use super::*;
     use rstest::rstest;
 
+    /// `./desktop-dev` signs in with stub logins, and a stub login still gets a credential vault
+    /// (#711) — but only on a daemon that names somewhere to keep it. Without `auth_storage` no
+    /// AccountsService is registered, and the Accounts screen and the Projects account pickers say
+    /// "Accounts are not enabled on this host". Kept apart from `./web-dev`'s `tmp/auth`, under the
+    /// dev data directory, the way an installed app keeps it under `~/.tddy`.
+    #[test]
+    fn the_checkouts_desktop_dev_config_keeps_a_credential_vault() {
+        // Given the dev config `./desktop-dev` runs with
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = DaemonConfigSource {
+            config_path: workspace_root.join(DESKTOP_DEV_CONFIG_FILENAME),
+            workspace_root,
+        };
+
+        // When it is loaded
+        let config = source.load_config().expect("dev.desktop.yaml loads");
+
+        // Then it names where the credential vaults live
+        assert_eq!(config.auth_storage, Some(PathBuf::from("tmp/.tddy/auth")));
+    }
+
     #[rstest]
     #[case::a_plain_assignment("LIVEKIT_URL=ws://host:7880", "LIVEKIT_URL", "ws://host:7880")]
     #[case::double_quoted("GITHUB_TOKEN=\"ghp_secret\"", "GITHUB_TOKEN", "ghp_secret")]
