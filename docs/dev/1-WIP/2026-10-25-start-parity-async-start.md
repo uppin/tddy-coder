@@ -180,6 +180,12 @@ Tests are written in the `fluent-tests` style (Given / When / Then).
 - **If the consumer outlives the daemon,** a restart leaves a `running` record behind. On load,
   the record is marked `failed: "daemon restarted during the start"` — that is a recorded fact,
   not a fallback.
+- **A cancelled start deletes the branch it cut** (developer decision, 2026-10-25). The cancel's
+  undo removes the session and then force-deletes, in the project repository on the host that ran
+  the start, the branch its changeset records when the changeset resolved to `new_branch_from_base`
+  (an empty intent resolves to it). A `work_on_selected_branch` start never deletes its branch, and
+  a failure to delete the cut branch is named in the cancel's status. The branch is local only: a
+  branch the start pushed to origin (`create_remote_branch`) is not deleted there.
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
@@ -206,7 +212,7 @@ Tests are written in the `fluent-tests` style (Given / When / Then).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
