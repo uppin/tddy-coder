@@ -455,8 +455,8 @@ describe("a room-carried terminal feed", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Snapshots on the room wire (PRD-2026-10-25-terminal-snapshot-room): every open asks for the
-// current screen, and a gap in the offsets asks again on the same stream
+// Snapshots on the room wire (docs/ft/daemon/terminal-sessions.md § Room-carried terminals): every
+// open asks for the current screen, and a gap in the offsets asks again on the same stream
 // ---------------------------------------------------------------------------
 
 /** A session participant that records every message of the stream — the empty-data ones too. */
@@ -519,13 +519,14 @@ async function until(condition: () => boolean): Promise<void> {
 describe("a room-carried terminal feed, snapshot-opened", () => {
   it("asks for a snapshot in the first message of every open", async () => {
     // Given a feed opening on a live room
-    const { participant } = aSnapshottingFeed();
+    const { feed, participant } = aSnapshottingFeed();
 
     // When its stream opens
     await until(() => participant.messages.length > 0);
 
     // Then the very first message asks for the current screen
     expect(participant.messages[0].requestSnapshot).toBe(true);
+    feed.stream.close();
   });
 
   it("hands the terminal the snapshot and the deltas after it with their offsets", async () => {
@@ -546,6 +547,7 @@ describe("a room-carried terminal feed, snapshot-opened", () => {
       { snapshot: true, startOffset: 0n, endOffset: 50n, text: "\x1bc$ " },
       { snapshot: false, startOffset: 50n, endOffset: 52n, text: "ls" },
     ]);
+    feed.stream.close();
   });
 
   it("does not hand over a delta past a gap, and asks for a snapshot on the same stream", async () => {
@@ -562,5 +564,6 @@ describe("a room-carried terminal feed, snapshot-opened", () => {
 
     // Then it was never painted, and the resync went up the stream that is already open
     expect(painted).toEqual(["\x1bcA"]);
+    feed.stream.close();
   });
 });

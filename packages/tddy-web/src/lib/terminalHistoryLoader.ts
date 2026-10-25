@@ -77,18 +77,16 @@ export interface LoadedChunk extends HistoryChunk {
  * initial `StreamTerminalOutput` frame) and whether that frame already reported `atOldest` (no
  * older history exists). Call `loadNext` repeatedly to fetch and append forward chunks until done.
  *
- * `untilOffset` may also be **`null`**: the terminal's stream carries no offsets at all, so there
- * is no anchor to compare against and the fill runs to the capture tip, ending on the first chunk
- * that reports `atEnd`. That is `terminal.TerminalOutput` — `bytes data` and nothing more — which
- * is what a LiveKit-carried session's frames are. It is deliberately **not** spelled `0n`: a
- * `SessionTerminalOutput` replay frame reports an anchor of zero when the terminal has captured
- * nothing, which means the opposite (there is no history, do not ask for any). Collapsing the two
- * would have this loader page a terminal that has produced no output, and leave a LiveKit session
- * with the no-scrollback behaviour this is here to remove.
+ * `untilOffset` may also be **`null`**: no frame of the open has reported an offset past zero, so
+ * there is no anchor to compare against and the fill runs to the capture tip, ending on the first
+ * chunk that reports `atEnd`. It is deliberately **not** spelled `0n`: a snapshot frame reports an
+ * anchor of zero when the terminal has captured nothing, which means the opposite (there is no
+ * history, do not ask for any). Collapsing the two would have this loader page a terminal that has
+ * produced no output.
  */
 export class TerminalHistoryForwardLoader {
   private fromOffset: bigint;
-  /** The anchor to fill toward, or `null` when the stream carries no offsets — see the class doc. */
+  /** The anchor to fill toward, or `null` when none was captured — see the class doc. */
   private readonly untilOffset: bigint | null;
   private reachedEnd = false;
 

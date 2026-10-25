@@ -4,7 +4,7 @@
 //!
 //! The PTY is real: a stub agent draws a full-screen TUI, then idles, printing `WINCHED` if it ever
 //! receives SIGWINCH. The exposure is in memory, so the terminal's `RpcService` is driven directly.
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-25-terminal-snapshot-room.md
+//! Feature doc: docs/ft/daemon/terminal-sessions.md § Room-carried terminals
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};

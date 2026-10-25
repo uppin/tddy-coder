@@ -1,6 +1,6 @@
 # complexity: process_virtual_tui_input_chunk
 
-**Location:** `packages/tddy-tui/src/virtual_tui.rs:404` — `process_virtual_tui_input_chunk`
+**Location:** `packages/tddy-tui/src/virtual_tui.rs:467` — `process_virtual_tui_input_chunk`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **131 lines** · **nesting depth 5** · 11 parameters · 17 branch/match lines · 0 early exits
@@ -14,6 +14,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 131 | 5 | 17 | 0 | first detection |
+| 2026-10-25 | 130 | 5 | — | 0 | **unchanged in length**, worse by one parameter (15, was 14 at the PR's base): PR #763 (`#term-snapshot` 4/4) added `full_repaint_pending` and moved the resize loop (now also taking repaint requests) out into `apply_leading_control_sequences`. Not decomposed: code issues may be deferred in `#term-snapshot` |
 
 ## What the tool found
 

@@ -21,6 +21,27 @@ pub(crate) fn unsized_screen_refusal() -> tddy_rpc::Status {
     )
 }
 
+/// A terminal's visible state and a live-output receiver that starts exactly where it ends, for
+/// any holder of a capture and its broadcast — [`TerminalSession::snapshot_and_subscribe`], and a
+/// PTY handle that serves the room wire without being a [`TerminalSession`].
+///
+/// `subscribe` is called while `capture` is locked. Every producer holds that lock while it appends
+/// and broadcasts, so the receiver yields precisely the bytes from `snapshot.offset` on: none lost,
+/// none repeated. Refused with `FAILED_PRECONDITION` while the screen model does not know the PTY's
+/// size, and with `INTERNAL` when the capture is poisoned.
+pub fn snapshot_and_subscribe(
+    capture: &Mutex<TerminalCapture>,
+    subscribe: impl FnOnce() -> broadcast::Receiver<Bytes>,
+) -> Result<(ScreenSnapshot, broadcast::Receiver<Bytes>), tddy_rpc::Status> {
+    let capture = capture
+        .lock()
+        .map_err(|_| tddy_rpc::Status::internal("the terminal capture is poisoned"))?;
+    let snapshot = capture.snapshot().ok_or_else(unsized_screen_refusal)?;
+    let live = subscribe();
+    drop(capture);
+    Ok((snapshot, live))
+}
+
 /// A live terminal a streaming RPC attaches to: the broadcast fan-out of stdout bytes, the rolling
 /// replay ring, the process-exit watch, and the resize / input / ACK controls.
 ///
@@ -45,12 +66,7 @@ pub trait TerminalSession: Send + Sync {
     fn snapshot_and_subscribe(
         &self,
     ) -> Result<(ScreenSnapshot, broadcast::Receiver<Bytes>), tddy_rpc::Status> {
-        let capture = self.capture();
-        let capture = capture.lock().unwrap();
-        let snapshot = capture.snapshot().ok_or_else(unsized_screen_refusal)?;
-        let live = self.subscribe_stdout();
-        drop(capture);
-        Ok((snapshot, live))
+        snapshot_and_subscribe(&self.capture(), || self.subscribe_stdout())
     }
 
     /// Watch for child-process exit; the bridge ends the output stream when this fires.

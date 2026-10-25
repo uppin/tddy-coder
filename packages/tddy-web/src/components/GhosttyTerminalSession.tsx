@@ -410,8 +410,8 @@ export function GhosttyTerminalSession({
       if (received === 1) setFirstOutputReceived(true);
       // Capture the lazy-history anchor from the initial replay frame (endOffset > 0). The anchor
       // drives the forward fill of the older-history terminal; storing it in state ensures the
-      // affordance re-renders immediately when it is captured. A wire that carries no offsets never
-      // produces one, and its fill runs unanchored — see `startForwardFill`.
+      // affordance re-renders immediately when it is captured. Until a frame reports an offset past
+      // zero there is none, and a fill started then runs unanchored — see `startForwardFill`.
       if (frame.endOffset > 0n && anchorRef.current === null) {
         const a = { endOffset: frame.endOffset, atOldest: frame.atOldest };
         anchorRef.current = a;
@@ -507,9 +507,9 @@ export function GhosttyTerminalSession({
     // `replay_from(0, anchor)` is an empty range and the page would swap to blank. Bounding by the
     // current tip yields `[start_offset, tip]` — the full retained history at fill time.
     //
-    // `null` where no anchor was ever captured, which is a wire whose frames carry no offsets at
-    // all (`terminal.TerminalOutput` is `bytes data` and nothing else). There the fill runs to the
-    // capture tip and ends on the chunk's own `atEnd` — see `TerminalHistoryForwardLoader`.
+    // `null` where no anchor was ever captured: no frame has reported an offset past zero. There
+    // the fill runs to the capture tip and ends on the chunk's own `atEnd` — see
+    // `TerminalHistoryForwardLoader`.
     const untilOffset = a === null ? null : currentOffsetRef.current;
     if (untilOffset !== null && untilOffset <= 0n) return;
     fillingRef.current = true;

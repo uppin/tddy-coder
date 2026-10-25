@@ -141,25 +141,14 @@ pub fn pty_terminal_service(handle: Arc<pty_handle::PtyHandle>) -> Arc<dyn tddy_
     Arc::new(PtyTerminalService { handle })
 }
 
-/// The screen and a live-output receiver that starts exactly where it ends.
-///
-/// Both are taken under the capture lock, which every producer holds while it appends and
-/// broadcasts, so the receiver yields precisely the bytes from `snapshot.offset` on.
+/// The screen and a live-output receiver that starts exactly where it ends (taken under the capture
+/// lock every producer holds while it appends and broadcasts).
 fn snapshot_and_subscribe(
     handle: &pty_handle::PtyHandle,
 ) -> Result<(ScreenSnapshot, broadcast::Receiver<bytes::Bytes>), tddy_rpc::Status> {
-    let capture = handle
-        .capture
-        .lock()
-        .map_err(|_| tddy_rpc::Status::internal("the terminal capture is poisoned"))?;
-    let snapshot = capture.snapshot().ok_or_else(|| {
-        tddy_rpc::Status::failed_precondition(
-            "the terminal's size is unknown, so its screen cannot be snapshotted",
-        )
-    })?;
-    let live = handle.stdout_tx.subscribe();
-    drop(capture);
-    Ok((snapshot, live))
+    tddy_terminal_rpc::session::snapshot_and_subscribe(&handle.capture, || {
+        handle.stdout_tx.subscribe()
+    })
 }
 
 /// A snapshot frame: one repaint spanning `[0, end_offset)`.
