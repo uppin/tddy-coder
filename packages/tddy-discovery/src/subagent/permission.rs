@@ -64,6 +64,28 @@ impl PermissionAnswer {
     }
 }
 
+/// The `tool_call_id` a transcript records a permission request under: the request's id behind the
+/// `permission:` prefix the web reads it by.
+pub fn permission_tool_call_id(request_id: &str) -> String {
+    format!("permission:{request_id}")
+}
+
+/// The input a request's transcript entry carries: the request as the caller reads it, its `title` at the top
+/// level, and whether the main agent handed it to the user. A request the main agent answers itself is recorded
+/// with `deferred_to_user` false.
+pub fn request_input_json(
+    request: &PermissionRequestView,
+    deferred_to_user: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "requestId": request.request_id,
+        "title": request.tool_call.title,
+        "toolCall": request.tool_call,
+        "options": request.options,
+        "deferredToUser": deferred_to_user,
+    })
+}
+
 /// Who answered a parked permission request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnsweredBy {

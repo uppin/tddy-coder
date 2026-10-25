@@ -6,7 +6,8 @@ use std::io;
 use std::path::Path;
 
 use tddy_discovery::subagent::{
-    MessageDescriptor, MessageRole, PermissionRequestView, PromptOutcome, StopReason,
+    permission_tool_call_id, request_input_json, MessageDescriptor, MessageRole,
+    PermissionRequestView, PromptOutcome, StopReason,
 };
 use tddy_service::acp_replay::{agent_text_frame, session_update_frame};
 use tddy_service::convert_acp::{prompt_response, user_message_chunk};
@@ -138,18 +139,20 @@ fn tool_message_frame(message: &MessageDescriptor, at: i64) -> AcpAgentMessage {
 }
 
 /// A pending permission request, as a tool-call entry that names the tool it asks to run. The whole request,
-/// options included, is its input, so the detail dialog shows what the operator is asked.
+/// options included, is its input, so the detail dialog shows what the operator is asked. It is recorded under
+/// `permission:<requestId>`, which the web reads the request by; a turn that ends on the request has not handed
+/// it to the user, so its input says so.
 fn permission_frame(request: &PermissionRequestView, at: i64) -> AcpAgentMessage {
     session_update_frame(
         SessionUpdate {
             update: Some(session_update::Update::ToolCall(ToolCall {
                 tool_call_id: Some(ToolCallId {
-                    value: request.request_id.clone(),
+                    value: permission_tool_call_id(&request.request_id),
                 }),
                 title: format!("Permission: {}", request.tool_call.title),
                 kind: ToolKind::Other as i32,
                 status: ToolCallStatus::Pending as i32,
-                raw_input: serde_json::to_string(request).ok(),
+                raw_input: Some(request_input_json(request, false).to_string()),
                 ..Default::default()
             })),
         },
