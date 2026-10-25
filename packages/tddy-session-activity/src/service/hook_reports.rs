@@ -54,6 +54,25 @@ impl ActivityServiceImpl {
         tddy_core::update_activity_status(&session_dir, &req.status)
             .map_err(|e| Status::internal(format!("failed to update activity status: {}", e)))?;
 
+        // What the session waits on is kept next to the status that says it waits: a reader that is
+        // not watching live (an orchestrator's `ReadSessionActivity`) sees the agent's question.
+        // Any other status — or a wait the hook gave no message for — leaves nothing pending.
+        if req.status == tddy_core::SessionActivityStatus::WaitingForInput.as_wire()
+            && !req.message.is_empty()
+        {
+            tddy_core::pending_question::write_pending_question(
+                &session_dir,
+                &tddy_core::pending_question::PendingQuestion {
+                    kind: "permission".to_string(),
+                    question: req.message.clone(),
+                    ..Default::default()
+                },
+            )
+        } else {
+            tddy_core::pending_question::clear_pending_question(&session_dir)
+        }
+        .map_err(|e| Status::internal(format!("failed to record the pending question: {}", e)))?;
+
         log::debug!(
             target: "tddy_daemon::connection_service",
             "report_session_status: session={} status={}",

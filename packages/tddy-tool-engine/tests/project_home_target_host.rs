@@ -10,10 +10,11 @@ use tddy_tool_engine::project_home_tools::{
     READ_SESSION_WORKTREE, TARGET_DAEMON_INSTANCE_ID,
 };
 use tddy_tool_engine::project_home_worktree_tools::{GET_WORKTREE, LIST_WORKTREES};
+use tddy_tool_engine::session_follow::{READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT};
 use tddy_tool_engine::start_options::DESCRIBE_SESSION_START_OPTIONS;
 
-/// The tools that act on a target session: read, diff, the two worktree tools, the seven git tools,
-/// and the start-options describe, which names the host it describes.
+/// The tools that act on a target session: read, diff, the two worktree tools, the two follow
+/// tools, the seven git tools, and the start-options describe, which names the host it describes.
 fn target_tool_schemas() -> Vec<(String, Value)> {
     project_home_tool_defs()
         .into_iter()
@@ -24,6 +25,8 @@ fn target_tool_schemas() -> Vec<(String, Value)> {
                 LIST_WORKTREES,
                 GET_WORKTREE,
                 DESCRIBE_SESSION_START_OPTIONS,
+                READ_SESSION_ACTIVITY,
+                READ_SESSION_TRANSCRIPT,
             ]
             .contains(&tool.name.as_str())
         })
@@ -41,8 +44,8 @@ fn every_target_tool_offers_the_targets_host_as_an_optional_described_string() {
     let schemas = target_tool_schemas();
     assert_eq!(
         schemas.len(),
-        12,
-        "read, diff, the two worktree tools, the seven git tools and the start-options describe"
+        14,
+        "read, diff, the two worktree tools, the two follow tools, the seven git tools and the start-options describe"
     );
 
     for (name, schema) in schemas {

@@ -137,6 +137,8 @@ mod tests {
                 "DiffSessionWorktree",
                 "ListWorktrees",
                 "GetWorktree",
+                "ReadSessionActivity",
+                "ReadSessionTranscript",
                 "CommitSessionWorktree",
                 "PushSessionBranch",
                 "RebaseSessionBranch",

@@ -31,28 +31,31 @@ pub struct PendingQuestion {
 }
 
 /// Record `question` as the one `session_dir`'s session is waiting on, replacing any before it.
+///
+/// Written to a sibling temp file and renamed over the real one, so a concurrent reader sees the
+/// whole old question or the whole new one, never a torn file.
 pub fn write_pending_question(session_dir: &Path, question: &PendingQuestion) -> io::Result<()> {
-    // TODO(session-follow): implement
-    let _ = (session_dir, question);
-    Err(io::Error::other(
-        "TODO(session-follow): write_pending_question",
-    ))
+    let json = serde_json::to_vec_pretty(question).map_err(io::Error::other)?;
+    let temp = session_dir.join(format!("{PENDING_QUESTION_FILE}.tmp"));
+    std::fs::write(&temp, json)?;
+    std::fs::rename(&temp, session_dir.join(PENDING_QUESTION_FILE))
 }
 
 /// The session is no longer waiting. Clearing a session that waits on nothing is not an error.
 pub fn clear_pending_question(session_dir: &Path) -> io::Result<()> {
-    // TODO(session-follow): implement
-    let _ = session_dir;
-    Err(io::Error::other(
-        "TODO(session-follow): clear_pending_question",
-    ))
+    match std::fs::remove_file(session_dir.join(PENDING_QUESTION_FILE)) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// The question `session_dir`'s session is waiting on, if any.
 pub fn read_pending_question(session_dir: &Path) -> io::Result<Option<PendingQuestion>> {
-    // TODO(session-follow): implement
-    let _ = session_dir;
-    Err(io::Error::other(
-        "TODO(session-follow): read_pending_question",
-    ))
+    match std::fs::read(session_dir.join(PENDING_QUESTION_FILE)) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(io::Error::other),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
 }
