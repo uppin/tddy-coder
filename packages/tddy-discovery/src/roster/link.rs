@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use tddy_session_tool_client::daemon_http_rpc::DaemonHttpRpcClient;
 use tddy_session_tool_client::{SessionToolEnvelope, SessionToolTransport};
 
 /// Connect to the facilitating daemon over `transport`.
@@ -79,13 +80,24 @@ pub(crate) async fn connect_facilitating_daemon(
                 },
             ))
         }
-        // Refused rather than served over a second transport: the HTTP relay reaches the daemon's
-        // `ExecuteTool` only, and an `IncompleteLiveKit` environment is a split session whose
-        // variables are broken, where a stray relay would answer from the wrong host.
-        SessionToolTransport::DaemonHttp { .. } => Err(
-            "the daemon-HTTP transport has no client for the roster and conversation RPCs"
-                .to_string(),
-        ),
+        // The relay's `/rpc` is a Connect endpoint, so the same proto framing reaches it. Each
+        // request names the daemon it is for by `daemon_instance_id`, which the relay forwards.
+        SessionToolTransport::DaemonHttp {
+            session_id,
+            daemon_url,
+            session_token,
+            daemon_instance_id,
+        } => Ok((
+            Arc::new(DaemonHttpRpcClient::new(daemon_url.clone())),
+            SessionToolEnvelope {
+                session_id: session_id.clone(),
+                session_token: session_token.clone(),
+                daemon_instance_id: daemon_instance_id.clone(),
+            },
+        )),
+        // Refused rather than served over a second transport: an `IncompleteLiveKit` environment is
+        // a split session whose variables are broken, where a stray relay would answer from the
+        // wrong host.
         SessionToolTransport::IncompleteLiveKit { missing } => Err(format!(
             "a LiveKit environment is set but {} is empty or unset",
             missing.join(", ")

@@ -1,3 +1,4 @@
+use crate::daemon_http_rpc::DaemonHttpRpcClient;
 use crate::format_tool_dispatch_result;
 use crate::room_transport::installed_room_connector;
 use crate::room_transport::livekit_room_cache;
@@ -126,39 +127,35 @@ pub(crate) async fn dispatch_request_via_daemon_http(
     daemon_url: &str,
     request: &tddy_service::proto::exec_tools::ExecuteToolRequest,
 ) -> String {
-    let req_body = serde_json::json!({
-        "session_token": request.session_token,
-        "session_id": request.session_id,
-        "tool_name": request.tool_name,
-        "args_json": request.args_json,
-        "daemon_instance_id": request.daemon_instance_id,
-        "conversation_id": request.conversation_id,
-    });
+    use prost::Message;
+    use tddy_rpc::RpcClientTransport as _;
+    use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
-    let url = format!(
-        "{}/exec_tools.ExecToolService/ExecuteTool",
-        daemon_url.trim_end_matches('/')
-    );
-
-    let client = reqwest::Client::new();
-    match client
-        .post(&url)
-        .header("content-type", "application/json")
-        .json(&req_body)
-        .send()
+    // The daemon's `/rpc` mount decodes the body with the generated request type, so the request goes
+    // as protobuf and the answer is decoded with the generated response type.
+    let client = DaemonHttpRpcClient::new(daemon_url);
+    let answer = match client
+        .call_unary(
+            "exec_tools.ExecToolService",
+            "ExecuteTool",
+            request.encode_to_vec(),
+        )
         .await
     {
-        Ok(resp) => match resp.json::<serde_json::Value>().await {
-            Ok(body) => format_tool_dispatch_result(&body),
-            Err(e) => {
-                serde_json::json!({"error": format!("relay parse error: {e}"), "is_error": true})
-                    .to_string()
-            }
-        },
+        Ok(bytes) => bytes,
         Err(e) => {
-            serde_json::json!({"error": format!("relay connection error: {e}"), "is_error": true})
-                .to_string()
+            return serde_json::json!({"error": format!("relay connection error: {e}"), "is_error": true})
+                .to_string();
         }
+    };
+    match ExecuteToolResponse::decode(answer.as_slice()) {
+        Ok(response) => format_tool_dispatch_result(&serde_json::json!({
+            "result_json": response.result_json,
+            "is_error": response.is_error,
+            "error_message": response.error_message,
+        })),
+        Err(e) => serde_json::json!({"error": format!("relay parse error: {e}"), "is_error": true})
+            .to_string(),
     }
 }
 

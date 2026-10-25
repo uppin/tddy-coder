@@ -14,6 +14,7 @@ use std::time::Duration;
 use prost::Message;
 use tddy_service::proto::exec_tools::{ListExecToolsRequest, ListExecToolsResponse};
 
+use crate::daemon_http_rpc::DaemonHttpRpcClient;
 use crate::room_transport::LiveKitRoomKey;
 use crate::rpc_transports::{connect_sandbox_ipc, livekit_session};
 use crate::{detect_session_tool_transport, SessionToolTransport};
@@ -149,45 +150,14 @@ async fn list_over_rpc(
     Ok(response.tools.into_iter().map(|tool| tool.name).collect())
 }
 
+/// The same question over the daemon's HTTP `/rpc` mount, which decodes the request as protobuf.
 async fn list_via_http(
     daemon_url: &str,
     request: ListExecToolsRequest,
 ) -> Result<Vec<String>, String> {
-    let body = serde_json::json!({
-        "session_token": request.session_token,
-        "session_id": request.session_id,
-        "daemon_instance_id": request.daemon_instance_id,
-    });
-    let url = format!(
-        "{}/exec_tools.ExecToolService/ListExecTools",
-        daemon_url.trim_end_matches('/')
-    );
-    let response = reqwest::Client::new()
-        .post(&url)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("relay connection error: {e}"))?;
-    let status = response.status();
-    let value: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("relay answer is not JSON: {e}"))?;
-    if !status.is_success() {
-        return Err(format!("the daemon answered {status}: {value}"));
-    }
-    value["tools"]
-        .as_array()
-        .ok_or_else(|| format!("the daemon's answer carries no tools list: {value}"))?
-        .iter()
-        .map(|tool| {
-            tool["name"]
-                .as_str()
-                .map(str::to_string)
-                .ok_or_else(|| format!("a tool without a name in the daemon's answer: {tool}"))
-        })
-        .collect()
+    let client: Arc<dyn tddy_rpc::RpcClientTransport> =
+        Arc::new(DaemonHttpRpcClient::new(daemon_url));
+    list_over_rpc(&client, request).await
 }
 
 #[cfg(test)]

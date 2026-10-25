@@ -88,3 +88,7 @@ tddy-task = { path = "../tddy-task" }
 # own (`DaemonSigningKey`, `SessionTokens`). An existing workspace crate the lifecycle crate
 # already depends on.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
+# The roster-stream suite serves the daemon's `/rpc` mount on a loopback port: `connect_router`
+# mounts it and `axum` serves it, as the daemon does. Both are existing workspace crates.
+tddy-connectrpc = { path = "../tddy-connectrpc" }
+axum = "0.8"

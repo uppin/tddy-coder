@@ -7,7 +7,9 @@
 
 use std::sync::{Arc, Mutex};
 
+use prost::Message;
 use serde_json::json;
+use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -47,7 +49,7 @@ async fn read_request_body(stream: &mut TcpStream) -> Vec<u8> {
 
 /// A daemon endpoint that records the body of every exec call and answers each with success.
 /// Returns its URL and what it recorded.
-async fn a_daemon_recording_exec_calls() -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
+async fn a_daemon_recording_exec_calls() -> (String, Arc<Mutex<Vec<ExecuteToolRequest>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let url = format!("http://{}", listener.local_addr().expect("address"));
     let recorded = Arc::new(Mutex::new(Vec::new()));
@@ -58,18 +60,26 @@ async fn a_daemon_recording_exec_calls() -> (String, Arc<Mutex<Vec<serde_json::V
                 return;
             };
             let body = read_request_body(&mut stream).await;
-            let call: serde_json::Value = serde_json::from_slice(&body).expect("an exec call");
+            let call = ExecuteToolRequest::decode(body.as_slice()).expect("an exec call");
             sink.lock().expect("recorded calls").push(call);
-            let answer = json!({ "result_json": "{\"ok\":true}", "is_error": false }).to_string();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
-                 Connection: close\r\n\r\n{answer}",
+            let answer = ExecuteToolResponse {
+                result_json: "{\"ok\":true}".to_string(),
+                ..Default::default()
+            }
+            .encode_to_vec();
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/proto\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n",
                 answer.len()
             );
             stream
-                .write_all(response.as_bytes())
+                .write_all(head.as_bytes())
                 .await
-                .expect("write response");
+                .expect("write response head");
+            stream
+                .write_all(&answer)
+                .await
+                .expect("write response body");
         }
     });
     (url, recorded)
@@ -92,11 +102,7 @@ async fn an_exec_call_names_the_conversation_the_launch_named_and_none_otherwise
 
     // Then
     let calls = recorded.lock().expect("recorded calls").clone();
-    let named = |call: &serde_json::Value| {
-        call.get("conversation_id")
-            .cloned()
-            .unwrap_or_else(|| json!(""))
-    };
+    let named = |call: &ExecuteToolRequest| json!(call.conversation_id);
     std::env::remove_var("TDDY_REMOTE_DAEMON_URL");
     std::env::remove_var("TDDY_REMOTE_SESSION_ID");
     let answered = |answer: &str| serde_json::from_str::<serde_json::Value>(answer).expect("JSON");

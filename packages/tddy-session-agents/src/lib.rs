@@ -63,6 +63,7 @@ pub mod svc_provision_agent_clone;
 pub mod svc_resolve_listed_worktree;
 pub mod svc_start_hosted_agent_clone;
 pub mod svc_turn_end_reporter;
+pub mod workspace_roster;
 
 pub use agent_conversations::{AgentConversation, OpenAgentConversations, PromptRouting};
 pub use agent_roster_state::AgentRosterState;

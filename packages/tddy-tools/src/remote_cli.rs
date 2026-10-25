@@ -7,6 +7,14 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use tddy_service::proto::exec_tools::{
+    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse, ToolDef,
+};
+use tddy_service::proto::session::{
+    BranchConflict, ConnectSessionRequest, ConnectSessionResponse, StartSessionRequest,
+    StartSessionResponse,
+};
+use tddy_service::proto::types::BranchSession;
 
 /// Remote-codebase mode subcommands.
 #[derive(Parser)]
@@ -63,6 +71,11 @@ pub struct StartSessionArgs {
     /// Session token to associate with the new session.
     #[arg(long, value_name = "TOKEN")]
     pub session_token: Option<String>,
+
+    /// A coding agent the codebase daemon offers, as `name@daemon_instance_id`, to put on the
+    /// workspace session's roster — it runs on the codebase host. Repeatable.
+    #[arg(long = "agent", value_name = "AGENT_ID")]
+    pub agents: Vec<String>,
 }
 
 /// Args for `remote connect-session`.
@@ -106,22 +119,28 @@ pub async fn run_remote(args: RemoteArgs) -> Result<()> {
     }
 }
 
-/// POST to `{base_url}/{service}/{method}` with a JSON body.
+/// POST `request` to `{base_url}/{service}/{method}` and decode the answer as `Resp`.
 ///
-/// Uses the Connect-protocol transport: `POST /rpc/{service}/{method}` with
-/// `content-type: application/json`. Returns the parsed JSON response body.
-async fn connect_post(
+/// Uses the Connect-protocol unary transport: `POST /rpc/{service}/{method}` with
+/// `content-type: application/proto`, the body being the protobuf encoding of the request. The
+/// daemon decodes that body with the generated request type of the method, so the encoding is the
+/// one the daemon's service reads.
+async fn connect_post<Req, Resp>(
     base_url: &str,
     service: &str,
     method: &str,
-    body: serde_json::Value,
-) -> anyhow::Result<serde_json::Value> {
+    request: &Req,
+) -> anyhow::Result<Resp>
+where
+    Req: prost::Message,
+    Resp: prost::Message + Default,
+{
     let url = format!("{}/{}/{}", base_url, service, method);
     let client = reqwest::Client::new();
     let resp = client
         .post(&url)
-        .header("content-type", "application/json")
-        .json(&body)
+        .header("content-type", "application/proto")
+        .body(request.encode_to_vec())
         .send()
         .await
         .map_err(|e| anyhow::anyhow!("HTTP POST to relay daemon failed: {}", e))?;
@@ -135,11 +154,12 @@ async fn connect_post(
             text
         );
     }
-    let val = resp
-        .json::<serde_json::Value>()
+    let bytes = resp
+        .bytes()
         .await
-        .map_err(|e| anyhow::anyhow!("failed to parse relay daemon response as JSON: {}", e))?;
-    Ok(val)
+        .map_err(|e| anyhow::anyhow!("failed to read relay daemon response: {}", e))?;
+    Resp::decode(&bytes[..])
+        .map_err(|e| anyhow::anyhow!("failed to decode relay daemon response as protobuf: {}", e))
 }
 
 /// Read the relay discovery file and return the base URL for Connect RPC calls.
@@ -194,16 +214,16 @@ async fn run_list_tools(args: ListToolsArgs) -> Result<()> {
     };
 
     let token = args.session_token.as_deref().unwrap_or("");
-    let body = serde_json::json!({
-        "sessionToken": token,
-        "daemonInstanceId": ""
-    });
+    let request = ListExecToolsRequest {
+        session_token: token.to_string(),
+        ..Default::default()
+    };
 
-    let resp = match connect_post(
+    let answer: ListExecToolsResponse = match connect_post(
         &base_url,
         "exec_tools.ExecToolService",
         "ListExecTools",
-        body,
+        &request,
     )
     .await
     {
@@ -214,7 +234,8 @@ async fn run_list_tools(args: ListToolsArgs) -> Result<()> {
         }
     };
 
-    // Response shape: {"tools":[{"name":"Read","description":"...","inputSchemaJson":"{}"},...]}
+    // Shape: {"tools":[{"name":"Read","description":"...","inputSchemaJson":"{}"},...]}
+    let resp = list_tools_json(&answer);
     let tools = resp.get("tools").and_then(|v| v.as_array());
 
     if let Some(tools) = tools {
@@ -241,13 +262,21 @@ async fn run_start_session(args: StartSessionArgs) -> Result<()> {
     };
 
     let token = args.session_token.as_deref().unwrap_or("");
-    let body = serde_json::json!({
-        "sessionToken": token,
-        "sessionType": "workspace",
-        "daemonInstanceId": ""
-    });
+    let request = StartSessionRequest {
+        session_token: token.to_string(),
+        session_type: "workspace".to_string(),
+        specialized_agents: args.agents,
+        ..Default::default()
+    };
 
-    let resp = match connect_post(&base_url, "session.SessionService", "StartSession", body).await {
+    let answer: StartSessionResponse = match connect_post(
+        &base_url,
+        "session.SessionService",
+        "StartSession",
+        &request,
+    )
+    .await
+    {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -255,7 +284,7 @@ async fn run_start_session(args: StartSessionArgs) -> Result<()> {
         }
     };
 
-    println!("{}", resp);
+    println!("{}", start_session_json(&answer));
     Ok(())
 }
 
@@ -270,12 +299,18 @@ async fn run_connect_session(args: ConnectSessionArgs) -> Result<()> {
 
     let token = args.session_token.as_deref().unwrap_or("");
     let session_id = args.session_id.as_deref().unwrap_or("");
-    let body = serde_json::json!({
-        "sessionId": session_id,
-        "sessionToken": token
-    });
+    let request = ConnectSessionRequest {
+        session_id: session_id.to_string(),
+        session_token: token.to_string(),
+    };
 
-    let resp = match connect_post(&base_url, "session.SessionService", "ConnectSession", body).await
+    let answer: ConnectSessionResponse = match connect_post(
+        &base_url,
+        "session.SessionService",
+        "ConnectSession",
+        &request,
+    )
+    .await
     {
         Ok(v) => v,
         Err(e) => {
@@ -284,7 +319,7 @@ async fn run_connect_session(args: ConnectSessionArgs) -> Result<()> {
         }
     };
 
-    println!("{}", resp);
+    println!("{}", connect_session_json(&answer));
     Ok(())
 }
 
@@ -299,22 +334,28 @@ async fn run_sync_context(args: SyncContextArgs) -> Result<()> {
 
     let token = args.session_token.as_deref().unwrap_or("");
     // Fetch CLAUDE.md from the remote codebase via the ExecuteTool Read RPC.
-    let body = serde_json::json!({
-        "sessionToken": token,
-        "sessionId": "",
-        "toolName": "Read",
-        "argsJson": r#"{"path":"CLAUDE.md"}"#,
-        "daemonInstanceId": ""
-    });
+    let request = ExecuteToolRequest {
+        session_token: token.to_string(),
+        tool_name: "Read".to_string(),
+        args_json: r#"{"path":"CLAUDE.md"}"#.to_string(),
+        ..Default::default()
+    };
 
-    let resp =
-        match connect_post(&base_url, "exec_tools.ExecToolService", "ExecuteTool", body).await {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("error: {}", e);
-                std::process::exit(1);
-            }
-        };
+    let answer: ExecuteToolResponse = match connect_post(
+        &base_url,
+        "exec_tools.ExecToolService",
+        "ExecuteTool",
+        &request,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let resp = execute_tool_json(&answer);
 
     // Write the result to dest directory.
     let dest = args
@@ -342,6 +383,117 @@ async fn run_sync_context(args: SyncContextArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+// ── Connect JSON of a decoded response ───────────────────────────────────────────────────────────
+//
+// What each command prints, and the field it reads, is the JSON encoding of its response. That
+// encoding is the canonical proto3 mapping: a field is written under its camelCase name only when
+// it is not the proto3 default. The builders below write the same keys and leave out the same
+// defaults, so the output is what the CLI printed before its requests and responses were protobuf.
+
+/// One Connect-JSON object, built field by field.
+#[derive(Default)]
+struct ConnectJson(serde_json::Map<String, serde_json::Value>);
+
+impl ConnectJson {
+    /// A string field, written only when non-empty.
+    fn text(mut self, name: &str, value: &str) -> Self {
+        if !value.is_empty() {
+            self.0.insert(name.to_string(), value.into());
+        }
+        self
+    }
+
+    /// A bool field, written only when true.
+    fn flag(mut self, name: &str, value: bool) -> Self {
+        if value {
+            self.0.insert(name.to_string(), value.into());
+        }
+        self
+    }
+
+    /// A message field, written only when present.
+    fn message(mut self, name: &str, value: Option<serde_json::Value>) -> Self {
+        if let Some(value) = value {
+            self.0.insert(name.to_string(), value);
+        }
+        self
+    }
+
+    /// A repeated field, written only when non-empty.
+    fn repeated(mut self, name: &str, values: Vec<serde_json::Value>) -> Self {
+        if !values.is_empty() {
+            self.0
+                .insert(name.to_string(), serde_json::Value::Array(values));
+        }
+        self
+    }
+
+    fn into_value(self) -> serde_json::Value {
+        serde_json::Value::Object(self.0)
+    }
+}
+
+fn list_tools_json(response: &ListExecToolsResponse) -> serde_json::Value {
+    let tools = response.tools.iter().map(tool_def_json).collect();
+    ConnectJson::default().repeated("tools", tools).into_value()
+}
+
+fn tool_def_json(tool: &ToolDef) -> serde_json::Value {
+    ConnectJson::default()
+        .text("name", &tool.name)
+        .text("description", &tool.description)
+        .text("inputSchemaJson", &tool.input_schema_json)
+        .into_value()
+}
+
+fn start_session_json(response: &StartSessionResponse) -> serde_json::Value {
+    ConnectJson::default()
+        .text("sessionId", &response.session_id)
+        .text("livekitRoom", &response.livekit_room)
+        .text("livekitUrl", &response.livekit_url)
+        .text("livekitServerIdentity", &response.livekit_server_identity)
+        .message(
+            "branchConflict",
+            response.branch_conflict.as_ref().map(branch_conflict_json),
+        )
+        .into_value()
+}
+
+fn branch_conflict_json(conflict: &BranchConflict) -> serde_json::Value {
+    ConnectJson::default()
+        .text("branch", &conflict.branch)
+        .message("owner", conflict.owner.as_ref().map(branch_session_json))
+        .text("suggestedBranchName", &conflict.suggested_branch_name)
+        .into_value()
+}
+
+fn branch_session_json(owner: &BranchSession) -> serde_json::Value {
+    ConnectJson::default()
+        .flag("exists", owner.exists)
+        .text("sessionId", &owner.session_id)
+        .flag("isActive", owner.is_active)
+        .text("status", &owner.status)
+        .into_value()
+}
+
+fn connect_session_json(response: &ConnectSessionResponse) -> serde_json::Value {
+    ConnectJson::default()
+        .text("livekitRoom", &response.livekit_room)
+        .text("livekitUrl", &response.livekit_url)
+        .text("livekitServerIdentity", &response.livekit_server_identity)
+        .into_value()
+}
+
+fn execute_tool_json(response: &ExecuteToolResponse) -> serde_json::Value {
+    ConnectJson::default()
+        .text("resultJson", &response.result_json)
+        .flag("isError", response.is_error)
+        .text("errorMessage", &response.error_message)
+        .text("jobId", &response.job_id)
+        .flag("jobRunning", response.job_running)
+        .into_value()
 }
 
 fn resolve_base_dir(override_dir: Option<PathBuf>) -> PathBuf {

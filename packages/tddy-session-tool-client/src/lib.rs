@@ -16,6 +16,7 @@
 //! and no longer depend on `tddy-tools` at all.
 
 mod conversation;
+pub mod daemon_http_rpc;
 mod exec_catalog;
 mod room_transport;
 mod rpc_transports;
@@ -60,7 +61,9 @@ pub enum SessionToolTransport {
         session_token: String,
         daemon_instance_id: String,
     },
-    /// Direct HTTP Connect POST to `ExecToolService/ExecuteTool`.
+    /// Direct HTTP Connect POST to the daemon's `/rpc` — `ExecToolService/ExecuteTool` for tool
+    /// calls, and, through the relay, the roster and conversation RPCs (see
+    /// [`crate::daemon_http_rpc::DaemonHttpRpcClient`]).
     DaemonHttp {
         session_id: String,
         daemon_url: String,

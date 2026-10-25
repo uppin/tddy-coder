@@ -227,6 +227,14 @@ impl LaunchSessions {
 
         // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
         if req.session_type.trim() == "workspace" {
+            // Resolved and admitted before anything of the session is written: the session directory
+            // and its attachments are created below, so a refused entry leaves no session behind. A
+            // clone start seeds no roster and resolves none.
+            let seed = if req.agent_clone.is_none() {
+                self.admitted_workspace_seed(&req).await?
+            } else {
+                Vec::new()
+            };
             let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
                 os_user,
                 Some(&self.tddy_data_dir),
@@ -280,6 +288,7 @@ impl LaunchSessions {
                         paired_agent,
                         &sessions_base,
                         &session_id,
+                        seed,
                     )
                     .await?;
                 progress.end_phase(StartStep::Worktree);

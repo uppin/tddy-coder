@@ -1,6 +1,8 @@
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_activity::session_deletion;
 use tddy_session_agents::seed_codebase;
+use tddy_session_agents::workspace_roster::workspace_roster_admits;
 use tddy_session_split::workspace_session;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
@@ -17,6 +19,37 @@ use crate::launch_ports::LaunchSessions;
 use tddy_service::proto::session::StartSessionRequest;
 
 impl LaunchSessions {
+    /// The records a workspace start seeds its roster with. A workspace session's roster holds the
+    /// coding agents of the daemon serving it and no others, so each record is admitted to that
+    /// roster here: a model agent, or an agent another daemon owns, is refused naming it
+    /// (docs/ft/daemon/remote-codebase-mode.md § Coding subagents on the codebase host).
+    ///
+    /// Admission applies only when `split_agent` is None. A split start is exempt, and so is the
+    /// jailed-codebase start, which carries the same placement: the PRD keeps split sessions as
+    /// they are ("Split sessions (remote-managed worktree)" under What's Staying the Same), and
+    /// their roster already lives on the agent daemon. The seed is still resolved for them, because
+    /// the codebase half holds the roster the session was started with.
+    ///
+    /// Called before the caller writes anything for the session, so a refused entry leaves no
+    /// session behind. Resolving the records writes no roster and clones nothing; the only call it
+    /// makes is a peer's listing of its agents.
+    pub(super) async fn admitted_workspace_seed(
+        &self,
+        req: &StartSessionRequest,
+    ) -> Result<Vec<tddy_core::SessionAgentRecord>, Status> {
+        let seed = self
+            .agent_roster
+            .seeded_roster_records_placed(&req.specialized_agents, &req.clone_placed_agents)
+            .await?;
+        if req.split_agent.is_none() {
+            let local_instance_id = local_instance_id_for_config(&self.config);
+            for record in &seed {
+                workspace_roster_admits(record, &local_instance_id)?;
+            }
+        }
+        Ok(seed)
+    }
+
     pub(super) async fn seed_and_start_workspace_session(
         &self,
         req: &StartSessionRequest,
@@ -24,6 +57,7 @@ impl LaunchSessions {
         paired_agent: Option<workspace_session::PairedAgentSession>,
         sessions_base: &Path,
         session_id: &str,
+        seed: Vec<tddy_core::SessionAgentRecord>,
     ) -> Result<
         (
             Response<StartSessionResponse>,
@@ -32,10 +66,6 @@ impl LaunchSessions {
         ),
         Status,
     > {
-        let seed = self
-            .agent_roster
-            .seeded_roster_records_placed(&req.specialized_agents, &req.clone_placed_agents)
-            .await?;
         let started = workspace_session::start_workspace_session(
             os_user,
             session_id,
