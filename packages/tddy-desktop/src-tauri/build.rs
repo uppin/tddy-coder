@@ -10,6 +10,8 @@ fn main() {
             "tddy_rpc_connect",
             "tddy_rpc_send",
             "tddy_rpc_disconnect",
+            "tddy_dropped_files_describe",
+            "tddy_dropped_file_read",
         ]),
     ))
     .expect("tauri-build failed")

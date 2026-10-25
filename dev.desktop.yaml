@@ -49,6 +49,13 @@ daemon_instance_id_append_startup_timestamp: true
 # the debug-build default.
 tddy_data_dir: tmp/.tddy
 
+# Where each login's credential vault and the session-token signing key are kept — stub logins
+# included, which get a vault too. Without it no AccountsService is registered, so the Accounts
+# screen and the Projects account pickers have nothing to read. Under the dev data directory, as an
+# installed app keeps it under `~/.tddy`, and apart from `./web-dev`'s `tmp/auth` so the two dev
+# stacks never share sign-in state. The daemon creates it owner-only at startup.
+auth_storage: tmp/.tddy/auth
+
 listen:
   web_port: 8899
   web_host: 127.0.0.1
@@ -70,6 +77,11 @@ livekit:
 github:
   stub: true
   stub_codes: "test-code:testuser"
+  # Development only: every credential vault is created and opened under the empty passphrase by
+  # the daemon itself, so this dev run never prompts for one — not even after a restart. Anything
+  # linked on the Accounts screen is then as good as plaintext under `auth_storage`. The daemon
+  # refuses to start with this unless `stub: true`.
+  dev_vault_without_passphrase: true
   redirect_uri: "http://localhost:5173/auth/callback"
   # How long a sign-in's token waits in memory for its credential vault (and permits choosing its
   # passphrase). 0 = never; absent = 600. A stub login holds no token, but its sign-in still waits

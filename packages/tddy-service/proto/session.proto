@@ -360,6 +360,14 @@ message SessionEntry {
   // per-project, read-only managed session pinned at the top of its project's group. See
   // `#project-home` 4/7.
   string session_role = 35;
+  // The session's agent reads this host's filesystem directly — not jailed, not managed-codebase,
+  // not split from its checkout, not running its tools over SSH, and not a bare `workspace`
+  // checkout. A path on this host, dropped from the operator's file manager onto the session's
+  // terminal, then names a file the agent can open; every other session has dropped files uploaded
+  // into its session directory instead. Computed from `.session.yaml` by
+  // `tddy_changeset::reads_host_paths`. Means "this host" — the daemon named by
+  // `daemon_instance_id`; a client on another machine must not read it as its own.
+  bool reads_host_paths = 36;
 }
 
 message EnsureProjectHomeSessionRequest {

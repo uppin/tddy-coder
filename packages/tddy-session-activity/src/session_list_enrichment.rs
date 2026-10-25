@@ -516,6 +516,7 @@ state:
             ssh_config_host: String::new(),
             managed_codebase: false,
             session_role: String::new(),
+            reads_host_paths: false,
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -959,6 +960,7 @@ sessions:
             ssh_config_host: String::new(),
             managed_codebase: false,
             session_role: String::new(),
+            reads_host_paths: false,
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(

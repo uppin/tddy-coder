@@ -29,7 +29,15 @@ pub(super) fn provider_auth_entry(
             if let Some(ref codes) = github.stub_codes {
                 stub.register_code_mappings(codes);
             }
-            auth_service_entry(stub, tokens, credential_vaults, admission)
+            // Validated at startup (`crate::dev_vault`), so read as given here.
+            let without_passphrase = github.dev_vault_without_passphrase == Some(true);
+            auth_service_entry(
+                stub,
+                tokens,
+                credential_vaults,
+                admission,
+                without_passphrase,
+            )
         }
         // Two configurations, neither a fallback for the other. With a secret this is a
         // confidential client and serves the redirect flow exactly as it always has. Without one
@@ -41,12 +49,14 @@ pub(super) fn provider_auth_entry(
             tokens,
             credential_vaults,
             admission,
+            false,
         ),
         GitHubProviderKind::Public { client_id } => auth_service_entry(
             RealGitHubProvider::new_public(client_id),
             tokens,
             credential_vaults,
             admission,
+            false,
         ),
     };
     Some(entry)

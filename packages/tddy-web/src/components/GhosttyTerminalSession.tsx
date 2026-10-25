@@ -137,6 +137,13 @@ export interface GhosttyTerminalSessionProps {
   sessionId?: string;
 
   /**
+   * The session's agent reads this machine's filesystem, so a file dropped from the OS onto this
+   * terminal inside Tddy Desktop has its real path typed rather than being uploaded. See
+   * `TerminalFileDropZone`'s prop of the same name.
+   */
+  readsLocalPaths?: boolean;
+
+  /**
    * How the connection carrying {@link feed} is doing, when the caller has something to say about
    * it. Drives the status dot and the raw `livekit-status` readout.
    *
@@ -230,6 +237,7 @@ export function GhosttyTerminalSession({
   feed,
   sessionToken,
   sessionId,
+  readsLocalPaths = false,
   connectionStatus,
   connectionError,
   connectionOverlay,
@@ -369,8 +377,13 @@ export function GhosttyTerminalSession({
     feed.stream.send(encoded);
   };
 
-  /** Send what the operator produced — keystrokes, shortcuts, dropped paths. */
+  /** Send what the operator produced — keystrokes, shortcuts. */
   const sendInput = (data: string | Uint8Array) => writeToFeed(data, true);
+
+  /** Deliver dropped paths the way a native terminal does: as a paste, which ghostty wraps in
+   *  bracketed-paste markers when the program enabled them (Claude Code does, and attaches a pasted
+   *  image path as an image) and which reaches {@link sendInput} through `onData`. */
+  const pasteInput = (text: string) => termRef.current?.paste?.(text);
 
   // Expose text-insert and focus to the runtime (Files-tab click/tap route; focus-on-select). Refs
   // keep the registered functions current without re-registering every render.
@@ -861,7 +874,8 @@ export function GhosttyTerminalSession({
                 <TerminalFileDropZone
                   sessionToken={uploadTarget.sessionToken}
                   sessionId={uploadTarget.sessionId}
-                  insertInput={sendInput}
+                  insertInput={pasteInput}
+                  readsLocalPaths={readsLocalPaths}
                 >
                   {terminal}
                 </TerminalFileDropZone>

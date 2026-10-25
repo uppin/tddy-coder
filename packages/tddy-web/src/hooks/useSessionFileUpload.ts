@@ -32,9 +32,32 @@ export interface UseSessionFileUploadArgs {
   insertInput: (text: string) => void;
 }
 
+/** One file to upload, however its bytes are reached. */
+export interface UploadSource {
+  /** The name the host stores it under. */
+  name: string;
+  size: number;
+  /** How many chunks {@link readChunk} serves; at least one, so an empty file still completes. */
+  chunkCount: number;
+  readChunk(index: number): Promise<Uint8Array>;
+}
+
+/** A browser `File` as an upload. */
+export function fileUploadSource(file: File): UploadSource {
+  const chunks = chunkFile(file);
+  return {
+    name: file.name,
+    size: file.size,
+    chunkCount: chunks.length,
+    readChunk: async (index) => new Uint8Array(await chunks[index].arrayBuffer()),
+  };
+}
+
 export interface SessionFileUpload {
   /** Uploads every file under one drop id, then types the successful files' host paths. */
   uploadFiles: (files: File[]) => Promise<void>;
+  /** {@link uploadFiles} for files whose bytes are not a browser `File` — a native drop's. */
+  uploadSources: (sources: UploadSource[]) => Promise<void>;
 }
 
 export function useSessionFileUpload({
@@ -43,26 +66,25 @@ export function useSessionFileUpload({
 }: UseSessionFileUploadArgs): SessionFileUpload {
   const progress = useUploadProgressController();
 
-  const uploadFiles = useCallback(
-    async (files: File[]) => {
-      if (files.length === 0) return;
+  const uploadSources = useCallback(
+    async (sources: UploadSource[]) => {
+      if (sources.length === 0) return;
 
       // Not `crypto.randomUUID()`: that is secure-context only, so it is undefined when tddy-web
       // is served over plain http on a LAN address.
       const uploadId = randomUuid();
-      const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-      progress.startDrop(files.length, totalBytes);
+      const totalBytes = sources.reduce((sum, source) => sum + source.size, 0);
+      progress.startDrop(sources.length, totalBytes);
 
       // Insertion order follows drop order regardless of per-file completion order.
       const successfulPaths: string[] = [];
-      for (const file of files) {
+      for (const source of sources) {
         try {
-          const chunks = chunkFile(file);
           let hostPath = "";
-          for (let i = 0; i < chunks.length; i += 1) {
-            const data = new Uint8Array(await chunks[i].arrayBuffer());
-            const last = i === chunks.length - 1;
-            hostPath = await uploadChunk({ uploadId, fileName: file.name, data, last });
+          for (let i = 0; i < source.chunkCount; i += 1) {
+            const data = await source.readChunk(i);
+            const last = i === source.chunkCount - 1;
+            hostPath = await uploadChunk({ uploadId, fileName: source.name, data, last });
             progress.advance(data.length);
           }
           // The daemon returns the host path only on the final chunk; never type an empty path.
@@ -70,7 +92,7 @@ export function useSessionFileUpload({
             successfulPaths.push(hostPath);
           }
         } catch {
-          progress.failFile(file.name);
+          progress.failFile(source.name);
         }
       }
 
@@ -82,7 +104,12 @@ export function useSessionFileUpload({
     [uploadChunk, insertInput, progress],
   );
 
-  return { uploadFiles };
+  const uploadFiles = useCallback(
+    (files: File[]) => uploadSources(files.map(fileUploadSource)),
+    [uploadSources],
+  );
+
+  return { uploadFiles, uploadSources };
 }
 
 /**

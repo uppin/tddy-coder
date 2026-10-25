@@ -7,7 +7,9 @@ import { loadClientConfig, type AuthFlowDeclaration } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
-import type { TauriHostWindow } from "./rpc/daemonTransportFlavour";
+import { daemonTransportFlavour, type TauriHostWindow } from "./rpc/daemonTransportFlavour";
+import { thisWindowsNativeFileDrop } from "tddy-tauri-web";
+import { NativeFileDropProvider } from "./components/connection/nativeFileDrop";
 import { localHostRegistrationFor } from "./rpc/connections/localHost";
 import { LocalHostConnections } from "./rpc/connections/localHostRegistration";
 import type { DaemonHost } from "./lib/participantRole";
@@ -155,6 +157,21 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
     [appConfig.daemonInstanceId],
   );
 
+  /**
+   * The application window's drag-drop surface, when this page is running inside one. Its native
+   * drag-drop handler owns every drag from the OS, so files dropped on a session terminal reach it
+   * only through this (see `components/connection/nativeFileDrop`). `null` in a browser, where the
+   * terminals' own HTML5 drop handlers do the work.
+   */
+  const nativeFileDrop = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      daemonTransportFlavour(window as TauriHostWindow) === "webview-ipc"
+        ? thisWindowsNativeFileDrop()
+        : null,
+    [],
+  );
+
   // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading hash paths.
   useEffect(() => {
     if (daemonMode !== false || typeof window === "undefined") return;
@@ -184,6 +201,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
              common room: precedence is registration order and a parent renders first, so the
              desktop's own host stays on its in-process bridge even where a common room could also
              reach that machine. In a browser `localHost` is `null` and it registers nothing. */
+          <NativeFileDropProvider bridge={nativeFileDrop}>
           <LocalHostConnections registration={localHost}>
             <SelectedDaemonProvider
               livekitEnabled={appConfig.livekitEnabled}
@@ -221,6 +239,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
               )}
             </SelectedDaemonProvider>
           </LocalHostConnections>
+          </NativeFileDropProvider>
         )
       ) : (
         <ConnectionForm />

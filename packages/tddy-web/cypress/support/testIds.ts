@@ -93,6 +93,7 @@ export const TEST_IDS = {
   ctrlCButton: "ctrl-c-button",
   // File drop-to-upload (docs/ft/web/web-terminal.md § File drop upload)
   terminalDropOverlay: "terminal-drop-overlay",
+  terminalDropRefused: "terminal-drop-refused",
   terminalUploadButton: "terminal-upload-button",
   uploadProgressIndicator: "upload-progress-indicator",
   uploadProgressError: "upload-progress-error",

@@ -108,6 +108,36 @@ starts** and **auto-hides** shortly after the drop completes; a failed file brie
 error (`data-testid="upload-progress-error"`, e.g. "⚠ upload of report.iso failed — skipped").
 See [host-stats-footer.md § Upload progress](./host-stats-footer.md#upload-progress-drag-to-upload).
 
+<a id="file-drop-in-tddy-desktop"></a>
+**In Tddy Desktop.** The desktop window keeps Tauri's native drag-drop handler, because it is the
+only thing that knows a dropped file's **real path** — and while it is on, the webview never sees an
+HTML5 `dragover` or `drop` for a drag from the OS. The window relays each drag step to the page
+(`tddy://native-file-drop`, positions in CSS pixels) and the page hit-tests it against its
+terminals:
+
+1. **Drag over** a session terminal shows the same `terminal-drop-overlay` on the terminal under the
+   pointer only; it clears when the drag leaves, drops, or moves off the terminal. A drag that
+   carries no paths (one started inside the page) highlights nothing.
+2. **Drop on a session whose agent reads this machine's files** — an unconfined session on the
+   daemon the application hosts (`SessionEntry.reads_host_paths` and `daemon_instance_id` is the
+   application's own) — types the **real paths**: same quoting, separator and trailing space as
+   above, no upload. The overlay reads "Drop to insert the file paths".
+3. **Drop on any other session** — another host; or on this machine but jailed (`sandbox`),
+   managed-codebase, split from its checkout (including sandboxed-codebase), or running its tools
+   over SSH — **uploads** the files exactly as a browser drop does, reading their bytes off this
+   machine through the window, and types the uploaded paths.
+4. **A folder cannot be uploaded**: it is **refused** with a visible message on the terminal
+   (`data-testid="terminal-drop-refused"`, naming the folder); the files dropped beside it still
+   upload. A file the window cannot read is refused the same way.
+5. **Delivered as a paste**: dropped paths reach the PTY through the terminal's paste, so a program
+   that enabled bracketed paste (DEC 2004 — Claude Code does) receives them between `ESC [ 200 ~`
+   and `ESC [ 201 ~`. That is how Claude Code recognises a dropped image path and attaches the
+   image. Applies to browser drops too.
+6. **Only what was dropped is readable**: the window serves the bytes of the most recent drop's paths
+   and refuses every other path.
+
+A drop that lands outside every terminal does nothing.
+
 <a id="upload-rpc-drag-to-upload"></a>
 **Upload RPC.** A unary method on `session_files.SessionFilesService` (the web drives chunking, so
 upload **progress is known client-side** and the same call works over both grpc-web and the LiveKit

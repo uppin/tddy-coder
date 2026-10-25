@@ -24,6 +24,16 @@ Both profiles then `chdir` to the workspace root, so relative paths inside the Y
 meant when the daemon ran as a child process, and both load that root's `.env` **without overriding**
 anything already exported.
 
+A development run keeps all of its state inside the checkout: `dev.desktop.yaml` sets
+`tddy_data_dir: tmp/.tddy` and `auth_storage: tmp/.tddy/auth`, so the session-token signing key and
+the credential vaults live beside the sessions, apart from `./web-dev`'s `tmp/auth`. The vaults are
+what the Accounts screen and the Projects account pickers read; without `auth_storage` no
+AccountsService is registered. Stub sign-ins get a vault too, and `github.dev_vault_without_passphrase`
+opens it without ever prompting for a passphrase
+([auth-service.md](../../tddy-daemon-auth/docs/auth-service.md#development-vaults-without-a-passphrase)).
+`config_source`'s test `the_checkouts_desktop_dev_config_keeps_a_credential_vault` loads the real file
+and pins `auth_storage`.
+
 ## What the rendered configuration has to contain
 
 `desktop.yaml.production` is the template, and its comments are the authority operators read. Three

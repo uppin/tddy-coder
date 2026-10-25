@@ -15,6 +15,10 @@ export const terminalFileUploadPage = {
   dropOverlay: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.terminalDropOverlay, { timeout: 5000, ...options }),
 
+  /** The visible refusal of a drop the session cannot receive (a folder, an unreadable file). */
+  dropRefusal: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.terminalDropRefused, { timeout: 5000, ...options }),
+
   /** The mobile "Attach" button that opens the native file picker. */
   uploadButton: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.terminalUploadButton, { timeout: 5000, ...options }),

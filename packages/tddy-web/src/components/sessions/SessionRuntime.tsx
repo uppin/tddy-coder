@@ -19,6 +19,9 @@ import type { SessionRuntimeProps, TerminalClient } from "./sessionRuntimeProps"
 import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
 import { safeTestIdPart } from "../../lib/testId";
+import { sessionReadsLocalPaths } from "../../lib/sessionReadsLocalPaths";
+import type { TauriHostWindow } from "../../rpc/daemonTransportFlavour";
+import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { cn } from "../../lib/utils";
 import { InlineError } from "../ui/inline-error";
 
@@ -128,7 +131,17 @@ export function SessionRuntime({
   // This session's type, which decides what its "+" menu offers. A session the drawer's list does
   // not carry yet has no type here, so the tab strip offers the harnesses and the daemon refuses any
   // it does not run.
-  const sessionType = sessions.find((s) => s.sessionId === runtime.sessionId)?.sessionType;
+  const sessionEntry = sessions.find((s) => s.sessionId === runtime.sessionId);
+  const sessionType = sessionEntry?.sessionType;
+
+  // Whether a file dropped from this machine onto the session's terminals is handed over by its
+  // real path (an unconfined session on the daemon Tddy Desktop hosts) or uploaded (any other).
+  const { servingInstanceId } = useSelectedDaemon();
+  const readsLocalPaths = sessionReadsLocalPaths(
+    window as TauriHostWindow,
+    sessionEntry,
+    servingInstanceId,
+  );
 
   // The selected child conversation, or `null` when a terminal (Agent/bash) tab is active. Children
   // are attached lazily: a child's runtime pane is only mounted (and its `ConnectSession` fired)
@@ -281,6 +294,7 @@ export function SessionRuntime({
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
               onRegisterFocus={registerAgentFocus}
               onRegisterInsertInput={registerInsertInput}
+              readsLocalPaths={readsLocalPaths}
               onBytes={handleBytes}
             />
           )}
@@ -300,6 +314,7 @@ export function SessionRuntime({
               onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
               onRegisterInsertInput={registerInsertInput}
+              readsLocalPaths={readsLocalPaths}
             />
           )}
         </div>
@@ -315,6 +330,7 @@ export function SessionRuntime({
                 client={sessionTerminalClient}
                 connected={connected}
                 terminalId={id}
+                readsLocalPaths={readsLocalPaths}
                 onDisconnect={() => dropEnded(id)}
                 mobileShortcuts={
                   focused && activeTerminalId === id ? mobileShortcuts : undefined

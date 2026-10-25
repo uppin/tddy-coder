@@ -334,10 +334,19 @@ impl GitHubOAuthProvider for GitHubMintingATokenPerExchange {
 pub fn a_demo_daemon_retaining_credentials_in(
     storage: &std::path::Path,
 ) -> (DaemonConfig, tempfile::TempDir) {
+    a_demo_daemon_configured_with(storage, "")
+}
+
+/// [`a_demo_daemon_retaining_credentials_in`], with `github_lines` — indented two spaces, each
+/// ending in a newline — added to its `github:` block.
+pub fn a_demo_daemon_configured_with(
+    storage: &std::path::Path,
+    github_lines: &str,
+) -> (DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let yaml = format!(
         "auth_storage: \"{}\"\nusers:\n  - github_user: \"{THE_LOGIN}\"\n    os_user: \"{THE_LOGIN}-os\"\n\
-         github:\n  stub: true\n  stub_codes: \"the-code:{THE_LOGIN}\"\n",
+         github:\n  stub: true\n  stub_codes: \"the-code:{THE_LOGIN}\"\n{github_lines}",
         storage.display()
     );
     let path = dir.path().join("config.yaml");

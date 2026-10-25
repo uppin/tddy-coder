@@ -167,6 +167,29 @@ pub fn paired_agent(meta: &SessionMetadata) -> Option<(&str, &str)> {
     ))
 }
 
+/// Whether the session's agent reads this host's filesystem directly, so a path on this host —
+/// one dropped from the operator's file manager onto the session's terminal — names a file the
+/// agent can open.
+///
+/// Every placement that confines or relocates the agent answers `false`: a jailed agent
+/// (`sandbox`, whose Seatbelt profile reads strictly) or one that reaches the code only through
+/// daemon tools (`managed_codebase`); an agent paired with a checkout elsewhere, which is every
+/// split placement including the sandboxed-codebase one (`codebase_daemon_instance_id`); one whose
+/// tools run on an SSH target (`ssh_config_host`); and a `workspace` session, which is a checkout
+/// with no agent of its own. Those sessions still receive dropped files — uploaded into the session
+/// directory, which each of them can see — but never a raw host path.
+#[must_use]
+pub fn reads_host_paths(meta: &SessionMetadata) -> bool {
+    fn names_something(field: &Option<String>) -> bool {
+        field.as_deref().is_some_and(|s| !s.trim().is_empty())
+    }
+    meta.sandbox != Some(true)
+        && !meta.managed_codebase
+        && !names_something(&meta.codebase_daemon_instance_id)
+        && !names_something(&meta.ssh_config_host)
+        && meta.session_type.as_deref() != Some("workspace")
+}
+
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
 
 /// Options for [`write_initial_tool_session_metadata`] (CLI, gRPC daemon, LiveKit, TUI).
@@ -807,6 +830,80 @@ session_type: workspace
 
         // Then
         assert_eq!(pairing, None);
+    }
+
+    #[rstest::rstest]
+    #[case::a_claude_cli_session("claude-cli")]
+    #[case::a_tool_session("tool")]
+    #[case::a_cursor_cli_session("cursor-cli")]
+    fn an_unconfined_local_agent_reads_host_paths(#[case] session_type: &str) {
+        // Given a session whose agent runs on this host with nothing confining it
+        let meta = SessionMetadata {
+            session_type: Some(session_type.to_string()),
+            ..a_workspace_session()
+        };
+
+        // When / Then
+        assert!(
+            reads_host_paths(&meta),
+            "{session_type} should read host paths"
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::a_seatbelt_jailed_agent(SessionMetadata { sandbox: Some(true), ..a_claude_cli_session() })]
+    #[case::a_managed_codebase_agent(SessionMetadata { managed_codebase: true, ..a_claude_cli_session() })]
+    #[case::a_split_or_sandboxed_codebase_agent(SessionMetadata {
+        codebase_daemon_instance_id: Some("daemon-7".to_string()),
+        codebase_session_id: Some("session-9".to_string()),
+        ..a_claude_cli_session()
+    })]
+    #[case::an_agent_whose_tools_run_over_ssh(SessionMetadata {
+        ssh_config_host: Some("buildbox".to_string()),
+        ..a_claude_cli_session()
+    })]
+    #[case::a_workspace_checkout(a_workspace_session())]
+    fn a_confined_or_relocated_agent_does_not_read_host_paths(#[case] meta: SessionMetadata) {
+        // Given a session whose agent cannot open an arbitrary path on this host
+
+        // When / Then
+        assert!(
+            !reads_host_paths(&meta),
+            "{meta:?} should not read host paths"
+        );
+    }
+
+    #[test]
+    fn an_explicitly_unsandboxed_agent_reads_host_paths() {
+        // Given a session that recorded `sandbox: false` rather than leaving it absent
+        let meta = SessionMetadata {
+            sandbox: Some(false),
+            ..a_claude_cli_session()
+        };
+
+        // When / Then
+        assert!(reads_host_paths(&meta));
+    }
+
+    /// Blank is the same non-answer as absent, as it is for [`paired_agent`].
+    #[test]
+    fn a_blank_ssh_host_and_codebase_daemon_still_read_host_paths() {
+        // Given
+        let meta = SessionMetadata {
+            ssh_config_host: Some("  ".to_string()),
+            codebase_daemon_instance_id: Some(String::new()),
+            ..a_claude_cli_session()
+        };
+
+        // When / Then
+        assert!(reads_host_paths(&meta));
+    }
+
+    fn a_claude_cli_session() -> SessionMetadata {
+        SessionMetadata {
+            session_type: Some("claude-cli".to_string()),
+            ..a_workspace_session()
+        }
     }
 
     /// **chain_child_metadata_records_previous_session_id** — `.session.yaml` must allow optional
