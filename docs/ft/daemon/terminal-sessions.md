@@ -358,6 +358,37 @@ The replay params are read only from the first message of a bidi stream. The leg
 the mouse modes only, so a `TAIL` / `FROM_OFFSET` attach is not told the program is on the alternate
 screen; a snapshot is.
 
+### Room-carried terminals (`terminal.TerminalService/StreamTerminalIO`)
+
+> **Added: 2026-10-25** (`#term-snapshot` 4/4, [#763](https://github.com/uppin/tddy-coder/pull/763))
+
+A session carried over its own LiveKit room serves its terminal on `terminal.TerminalService`
+instead of `StreamSessionTerminalIO`, and it opens the same way: with the current screen, not a
+replay of raw output and a forced redraw.
+
+- **Snapshot on open.** The first frame of every `StreamTerminalIO` is a snapshot
+  (`TerminalOutput.snapshot = true`): one repaint of the visible screen beginning with RIS, taken at
+  a sequence point. Every frame carries `start_offset` / `end_offset` with the same ordering
+  guarantee as the host's snapshot: the first delta starts at the snapshot's `end_offset`, each
+  later one where the previous ended.
+- **Resync at any point.** `TerminalInput.request_snapshot` on any message after the first (the
+  opening snapshot already answers the first) is answered with a fresh snapshot at a new sequence
+  point; bytes on the same message are applied first. A subscriber the PTY's output outran is sent
+  one unasked.
+- **No nudging.** No raw replay, no SIGWINCH. A PTY terminal whose size is not yet known refuses the
+  open with `FAILED_PRECONDITION`, never serializing at a guessed grid.
+- **The coder's own TUI answers it too.** `TerminalServiceVirtualTui` stamps each connection's
+  output with offsets and sends its first frame, and every full repaint (a `request_snapshot`, a
+  resize), led by RIS and flagged as a snapshot. Answering a request repaints at the current size —
+  it never resizes — and mouse tracking is re-enabled after each repaint.
+- **In the web terminal.** The room feed asks for a snapshot in the first message of every open, and
+  checks every frame's offsets; a frame that does not continue the screen is dropped and one
+  `request_snapshot` goes up the same stream.
+
+A client that reads only `data` still renders a snapshot correctly, because it begins with a
+terminal reset. Scrollback for room-carried sessions still comes from the host's
+`GetTerminalHistory`; the room's offsets are the host capture's, so the fill is anchored.
+
 ### Client reconnect & null-client pause
 
 The web client (`GrpcSessionTerminal`) opens with `SNAPSHOT` on every (re)connect. Its `client` is

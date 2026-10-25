@@ -92,8 +92,10 @@ capture lock is that sequence point:
 - **Producers append and broadcast under the lock.** `TaskChannel::write` locks the capture, calls
   `append`, sends the chunk on the stdout broadcast, then unlocks. `tddy-daemon-sandbox`'s stdio loop
   does the same.
-- **Readers snapshot and subscribe under the lock.** `tddy_terminal_rpc::TerminalSession::snapshot_and_subscribe`
-  locks the capture, takes `snapshot()`, subscribes to the broadcast, then unlocks.
+- **Readers snapshot and subscribe under the lock.** `tddy_terminal_rpc::session::snapshot_and_subscribe`
+  (behind `TerminalSession::snapshot_and_subscribe`, and called directly by the room wire's
+  `PtyTerminalService`) locks the capture, takes `snapshot()`, subscribes to the broadcast, then
+  unlocks.
 
 So a chunk is either reflected in the snapshot or delivered on the subscription — never both, never
 neither. `tests/terminal_capture_sequence_point.rs` pins it under a concurrent producer.

@@ -104,6 +104,11 @@ Where the terminal will be served is a pure function of the deployment config an
 participant joins does not move *where* it is. A session with no terminal to bridge is not a failure;
 a session that has one and could not be bridged is.
 
+The bridged terminal opens like a host-served one: with a snapshot of the current screen at a
+sequence point, then offset-stamped live output, and it answers a snapshot request at any time —
+never a raw-output replay and a forced redraw. See
+[Terminal sessions § Room-carried terminals](terminal-sessions.md#room-carried-terminals-terminalterminalservicestreamterminalio).
+
 A session started from [Telegram](telegram-session-control.md) is the one start that bridges eagerly.
 Its reply hands a human the room and identity to attach with, so the LiveKit consumer has already
 arrived — the message *is* the asking — and an invitation to a room nobody joined would be no

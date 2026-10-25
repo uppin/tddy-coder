@@ -82,6 +82,14 @@ off it.
 `controlToken` is not read here: `StreamTerminalIO` writes straight to the PTY handle the session's
 own process holds, so there is no lease to compare against — room membership *is* the authorisation.
 
+**Every open asks for a snapshot.** The stream's first message — the empty one that starts the
+bridge's read side — carries `requestSnapshot: true`, and the server answers with a snapshot frame
+(`snapshot: true`, beginning with RIS) and then offset-stamped deltas, the same contract as the host
+path. Each frame goes through a `TerminalFrameContinuity`: a frame that does not continue the screen
+is dropped, and the first one of a run makes the request half yield one `requestSnapshot` message on
+the same stream; the next snapshot re-arms it. `TerminalFrame.{snapshot,startOffset,endOffset}` are
+filled from the room's frames, so a fill this feed drives is anchored like the host's.
+
 ### `openDaemonTerminalFeed` — `connections/terminalFeed.ts`
 
 The session's host, which both carries the stream and holds the capture. One bidi
@@ -149,12 +157,10 @@ The loader's anchor is `bigint | null`, and the distinction matters more than it
 - **A number** is the `endOffset` the open's first anchored frame reported — on a host terminal, the
   snapshot's `endOffset`, its sequence point. An anchor of `0` means the
   terminal has captured nothing, so there is nothing to page and the fill is done before it starts.
-- **`null`** means the wire carries no offsets at all — `terminal.TerminalOutput` is `bytes data` and
-  nothing more. There is no anchor to compare against, so the fill runs to the capture tip and ends on
-  the first chunk that reports `atEnd`.
+- **`null`** means no frame of the open has reported an offset past zero, so there is no anchor to
+  compare against: the fill runs to the capture tip and ends on the first chunk that reports `atEnd`.
 
-Collapsing the two onto `0` would page a terminal that has produced no output, and would leave a
-room-carried session with no scrollback at all — which is precisely the gap this model closes.
+Collapsing the two onto `0` would page a terminal that has produced no output.
 
 Termination is `atEnd` only. `atOldest` is **not** a terminator: the first chunk of a forward fill
 normally reports it while the fill continues, so ending on it would truncate every fill to one page.
@@ -218,7 +224,3 @@ terminal with its requested kind; `sessionTerminalTabsPage.ts` offers `newTabMen
   in `openDaemonTerminalFeed` and `GrpcSessionTerminal`; it goes when the paths are merged.
 - **A jailed terminal refuses the snapshot open** (`FAILED_PRECONDITION`) only until its runner has
   reported the PTY's size to the host, which it does as soon as the PTY opens.
-- **A room-carried session's frames carry no offsets**, so its fill is unanchored and its reconnect
-  is not shown a snapshot the way the host path is (`#term-snapshot` 4/4,
-  [#763](https://github.com/uppin/tddy-coder/pull/763)). Adding offsets to `terminal.TerminalOutput` would remove
-  the distinction entirely.
