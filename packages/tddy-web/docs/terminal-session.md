@@ -106,6 +106,10 @@ after it. An acknowledgement frame carries neither bytes nor an anchor and is sk
 
 ### Input refusals (`InputRefusalTracker`, `connections/inputDelivery.ts`)
 
+The control lease bars writing, not reading: a pane opens and shows the terminal whether or not its
+screen holds the lease (a watcher, or a screen re-opening after another took control), and only what
+it types — keystrokes, pastes and its resize OSC — is refused.
+
 The bidi stream has no per-send answer, so the host reports a dropped chunk on the output half: a
 refusal frame carries `refusedInputOffset` (the chunk's cumulative input offset) and `inputRefusal`
 (the reason, "terminal controlled by another screen"). `InputRefusalTracker` turns those frames into

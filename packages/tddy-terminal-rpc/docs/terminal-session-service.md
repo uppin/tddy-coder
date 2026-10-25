@@ -91,9 +91,8 @@ after it. `bridge::open_snapshot` serves it for both RPCs:
 1. **Refuse if unsized.** A terminal whose capture has no grid is refused with `FAILED_PRECONDITION`
    before anything is streamed.
 2. **Resize only when driving.** When the open carries a grid (`initial_rows`/`initial_cols` both
-   nonzero), the terminal is `resizable()`, the open may drive the session (the bidi open is itself
-   control-gated; a `StreamTerminalOutput` opener without the lease arrives with its grid zeroed)
-   and that grid differs from the model's, the PTY **and** the model are resized first, so the
+   nonzero), the terminal is `resizable()`, the open may drive the session (an opener without the
+   lease, on either RPC, arrives with its grid zeroed by `service.rs`) and that grid differs from the model's, the PTY **and** the model are resized first, so the
    snapshot is serialized at the client's width.
 3. **The snapshot frame** — `snapshot = true`, `data` = the repaint (it begins with RIS),
    `start_offset = 0`, `end_offset = snapshot.offset`, `snapshot_rows` / `snapshot_cols` = the grid
@@ -152,8 +151,14 @@ PTY the applied offset is recorded as a monotonic max, and the output stream int
 receives the current offset up front. The browser renders the gap between sent and acknowledged as an
 [enqueued-input overlay](../../../docs/ft/web/enqueued-input-overlay.md) on slow links.
 
+**Reading needs no lease; writing does.** `StreamSessionTerminalIO` opens for every screen — a
+watcher without the lease (or with a stale token, e.g. a screen re-opening after another took control)
+is served the snapshot and the live output, with its grid ignored. Only writes are gated, per chunk,
+by `bridge::spawn_input_forwarder`.
+
 On `StreamSessionTerminalIO` each stdin message carries the same cumulative `input_offset`. The bidi
-stream has no per-message answer, so a chunk presented without the lease is answered on the **output**
+stream has no per-message answer, so a chunk carrying data under a token that does not hold the
+lease — the opening message's included, and a resize, which travels as an OSC in the data — is answered on the **output**
 half by a **refusal frame**: `data` empty, `refused_input_offset = 11` set to that chunk's cumulative
 offset, `input_refusal = 12` the reason ("terminal controlled by another screen"). The chunk never
 reaches the PTY. The forwarder and the stream stay open and judge every later chunk on its own, so a
@@ -282,7 +287,7 @@ named.
 | Suite | What it pins |
 |---|---|
 | `terminal_session_service_acceptance.rs` | all nine methods answer at the registered coordinate; the request's `kind` reaches the roster, and an empty or `"bash"` kind arrives as `Bash` with the login shell |
-| `terminal_session_bidi_acceptance.rs` | `StreamSessionTerminalIO` carries a session end to end; an open without the lease is refused; a keystroke under a stale token is answered with a refusal frame and typing resumes on the same stream once control is reclaimed |
+| `terminal_session_bidi_acceptance.rs` | `StreamSessionTerminalIO` carries a session end to end; a screen without the lease (or whose lease was taken, re-opening after a blip) watches the terminal while its keystrokes are refused; a keystroke under a stale token is answered with a refusal frame and typing resumes on the same stream once control is reclaimed |
 | `stream_snapshot_acceptance.rs` | a `SNAPSHOT` open renders the server's screen in a reference emulator (`vt100`, dev-dependency) then only contiguous deltas equal to `replay_from(snapshot.end_offset)`; no redraw signal and no prologue frame; a new grid resizes first and snapshots at it; `StreamTerminalOutput` honours `SNAPSHOT`; an unsized terminal is refused |
 | `terminal_history_parity_acceptance.rs` | `GetTerminalHistory` frames and offsets |
 | `src/pty_runtime.rs` (6 unit) | the spawn spec carrying its target OS user; and, through the re-export, `tddy_daemon_kernel::privilege_drop`'s helpers: the `HOME`/`PATH` overrides for a target user, when a privilege drop is and is not required, and the `setpriv` launcher wrapping |
