@@ -13990,12 +13990,14 @@ name = "tddy-session-tool-client"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum 0.8.9",
  "log",
  "pretty_assertions",
  "prost 0.13.5",
  "reqwest 0.12.28",
  "serde_json",
  "serial_test",
+ "tddy-connectrpc",
  "tddy-core",
  "tddy-room-client",
  "tddy-rpc",
