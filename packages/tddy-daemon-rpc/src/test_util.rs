@@ -18,9 +18,10 @@ use tddy_service::proto::catalog::{
     ListToolsResponse,
 };
 use tddy_service::proto::exec_tools::{
-    ConversationWorktreeRequest, ConversationWorktreeResponse, ExecToolService, ExecuteToolChunk,
-    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ApprovalRequest, ApprovalResponse, ConversationWorktreeRequest, ConversationWorktreeResponse,
+    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse,
 };
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
@@ -283,6 +284,16 @@ impl ExecToolService for TestDaemon {
         self.handlers
             .exec_tool_service()
             .conversation_worktree(request)
+            .await
+    }
+
+    async fn request_approval(
+        &self,
+        request: Request<ApprovalRequest>,
+    ) -> Result<Response<ApprovalResponse>, Status> {
+        self.handlers
+            .exec_tool_service()
+            .request_approval(request)
             .await
     }
 }

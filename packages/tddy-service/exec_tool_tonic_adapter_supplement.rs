@@ -38,9 +38,7 @@ where
     }
 
     type StreamExecuteToolStream = std::pin::Pin<
-        Box<
-            dyn futures_util::Stream<Item = Result<ExecuteToolChunk, tonic::Status>> + Send,
-        >,
+        Box<dyn futures_util::Stream<Item = Result<ExecuteToolChunk, tonic::Status>> + Send>,
     >;
 
     #[allow(clippy::result_large_err)]
@@ -98,6 +96,21 @@ where
         request: tonic::Request<ConversationWorktreeRequest>,
     ) -> Result<tonic::Response<ConversationWorktreeResponse>, tonic::Status> {
         let resp = ExecToolService::conversation_worktree(
+            &*self.inner,
+            tddy_rpc::Request::with_metadata(
+                request.into_inner(),
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Grpc),
+            ),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+    async fn request_approval(
+        &self,
+        request: tonic::Request<ApprovalRequest>,
+    ) -> Result<tonic::Response<ApprovalResponse>, tonic::Status> {
+        let resp = ExecToolService::request_approval(
             &*self.inner,
             tddy_rpc::Request::with_metadata(
                 request.into_inner(),

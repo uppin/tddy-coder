@@ -40,9 +40,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tddy_coding_subagent::launcher::{HEADLESS_DIR, SESSION_TOKEN_ENV};
 use tddy_coding_subagent::{
-    opencode_withdrawal_config, refuse_unless_confinable, AgentTransport, CodingAgentLaunch,
-    CodingAgentLauncher, CLAUDE_ACP, CODEX_ACP, CONVERSATION_ID_ENV, OPENCODE,
+    opencode_withdrawal_config, refuse_unless_confinable, AgentTransport, ApprovalRoutes,
+    CodingAgentLaunch, CodingAgentLauncher, CLAUDE_ACP, CODEX_ACP, CONVERSATION_ID_ENV, OPENCODE,
     OPENCODE_CONFIG_CONTENT, TDDY_TOOLS_MCP_ARG, TDDY_TOOLS_SERVER,
 };
 use tddy_core::provider_route::{Harness, HarnessRoute, RouteChoice, RouteSources};
@@ -73,9 +74,6 @@ const OPENCODE_BINARY: &str = "opencode";
 const OPENCODE_ACP_SUBCOMMAND: &str = "acp";
 /// The directory under `<tddyhome>` a supervised launch's relay sockets are bound in.
 const RELAY_SOCKET_DIR: &str = "relay";
-/// The directory under `<tddyhome>` a headless conversation keeps its MCP config in: one
-/// subdirectory per conversation.
-const HEADLESS_DIR: &str = "headless";
 /// The MCP config file a headless CLI reads, in its conversation's directory.
 const MCP_CONFIG_FILE: &str = "mcp.json";
 /// The mode the MCP config is written with. It carries the agent's tool credential, so only its
@@ -132,6 +130,9 @@ pub struct DaemonCodingAgentLauncher {
     /// What a headless conversation is launched with; `None` on a launcher not wired for one, which
     /// refuses a headless launch naming that.
     headless: Option<HeadlessWiring>,
+    /// Where a headless conversation's permission approvals are bound at launch. `None` leaves them
+    /// unbound, so every approval for such a conversation is refused.
+    approval_routes: Option<Arc<ApprovalRoutes>>,
 }
 
 impl DaemonCodingAgentLauncher {
@@ -157,6 +158,14 @@ impl DaemonCodingAgentLauncher {
             config: Arc::new(config),
             data_dir,
         });
+        self
+    }
+
+    /// Bind each headless conversation's permission approvals through `routes` (builder): the launch
+    /// registers the session it runs for and the credential its agent is minted with.
+    #[must_use]
+    pub fn with_approval_routes(mut self, routes: Arc<ApprovalRoutes>) -> Self {
+        self.approval_routes = Some(routes);
         self
     }
 
@@ -223,6 +232,7 @@ impl DaemonCodingAgentLauncher {
             tool_server,
             relay: None,
             headless: None,
+            approval_routes: None,
         }
     }
 
@@ -398,6 +408,7 @@ impl DaemonCodingAgentLauncher {
         let (mcp_config, permission_prompt_tool) = match harness {
             HeadlessHarness::Claude => {
                 let server = self.tool_server_spec(launch)?;
+                self.bind_approvals(launch, conversation.as_str(), &server)?;
                 let path = write_mcp_config(&wiring.data_dir.join(conversation.as_str()), &server)
                     .map_err(|e| {
                         Self::refuse(launch, &format!("its MCP config could not be written: {e}"))
@@ -416,6 +427,33 @@ impl DaemonCodingAgentLauncher {
             disallowed_tools: Vec::new(),
             profile: None,
         })
+    }
+
+    /// Binds the permission approvals of conversation `conversation` to the session `launch` runs for
+    /// and to the credential its tool server is handed, so only the agent of this launch can ask for
+    /// them. Refused, rather than launched unbound, when the tool server carries no credential to bind.
+    fn bind_approvals(
+        &self,
+        launch: &CodingAgentLaunch,
+        conversation: &str,
+        server: &McpServerSpec,
+    ) -> Result<(), SubagentError> {
+        let Some(routes) = &self.approval_routes else {
+            return Ok(());
+        };
+        let token = server
+            .env
+            .iter()
+            .find(|(name, _)| name == SESSION_TOKEN_ENV)
+            .map(|(_, value)| value.as_str())
+            .ok_or_else(|| {
+                Self::refuse(
+                    launch,
+                    "its tool server carries no credential to bind its permission approvals to",
+                )
+            })?;
+        routes.register_launch(conversation, &launch.session_id, token);
+        Ok(())
     }
 
     /// Refuses a headless launch whose session runs as another OS user. The headless driver spawns its

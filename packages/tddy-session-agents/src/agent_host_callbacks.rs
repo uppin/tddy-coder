@@ -65,6 +65,12 @@ pub trait AgentHostCallbacks: Send + Sync {
     /// `LocalExecTools::hosted_clone_for`).
     fn hosted_clone_for(&self, session_id: &str) -> Option<Arc<HostedClone>>;
 
+    /// The routes a headless conversation's permission approvals are answered through, when this
+    /// host has them. `None` refuses every approval, so a host that wires none is never granting one.
+    fn approval_routes(&self) -> Option<Arc<tddy_coding_subagent::ApprovalRoutes>> {
+        None
+    }
+
     /// Serve one exec tool for a session whose checkout this daemon holds as an agent clone: the
     /// read/write split (see `LocalExecTools::run_hosted_clone_tool`).
     async fn run_hosted_clone_tool(

@@ -12,10 +12,10 @@ use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::{
-    ConversationWorktreeRequest, ConversationWorktreeResponse, ExecuteToolChunk,
-    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ToolCallInfo as ExecToolCallInfo,
-    ToolDef as ExecToolDef,
+    ApprovalRequest, ApprovalResponse, ConversationWorktreeRequest, ConversationWorktreeResponse,
+    ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
+    ListExecToolsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ToolCallInfo as ExecToolCallInfo, ToolDef as ExecToolDef,
 };
 use tddy_service::proto::exec_tools::{
     ExecuteToolChunk as ConnExecuteToolChunk, ExecuteToolRequest as ConnExecuteToolRequest,
@@ -400,5 +400,68 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
             run_conversation_worktree_op(&worktree_root, &req.session_id, &req.conversation_id, op)
                 .await?;
         Ok(Response::new(ConversationWorktreeResponse { result_json }))
+    }
+    /// A headless coding agent's permission request, held open until its conversation answers it.
+    ///
+    /// Routed and authenticated as `ExecuteTool` is: the conversation's route lives on the daemon that
+    /// launched it, and the credential must resolve to a user here. The route then decides whether
+    /// this caller owns the conversation; an approval it refuses is a `PermissionDenied`, never an
+    /// allow. A timeout or a rejection is an answer of `allow: false`.
+    async fn request_approval(
+        &self,
+        request: Request<ApprovalRequest>,
+    ) -> Result<Response<ApprovalResponse>, Status> {
+        self.rpc_activity.record();
+        let req = request.into_inner();
+
+        // Route BEFORE auth, as `ExecuteTool` does, so a relay can forward the approval.
+        if let Some(answered) = self
+            .peer_routing
+            .rpc_served_by_peer(
+                EXEC_TOOL_SERVICE,
+                "RequestApproval",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        // The same credential check as `ExecuteTool`; only the tool fields are absent.
+        let as_exec_tool = ConnExecuteToolRequest {
+            session_token: req.session_token.clone(),
+            session_id: req.session_id.clone(),
+            daemon_instance_id: req.daemon_instance_id.clone(),
+            ..Default::default()
+        };
+        authorize_exec_tool_caller(&self.config, &self.user_resolver, &as_exec_tool)?;
+
+        // Fail closed: a daemon with no routes answers no approval.
+        let routes = self
+            .approval_routes
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("this daemon has no approval routes"))?;
+        let input: serde_json::Value = serde_json::from_str(&req.input_json).map_err(|e| {
+            Status::invalid_argument(format!("the approval's input is not JSON: {e}"))
+        })?;
+        let granted = routes
+            .request(
+                &req.conversation_id,
+                &req.session_id,
+                &req.session_token,
+                &req.tool_name,
+                &input,
+            )
+            .await
+            .map_err(Status::permission_denied)?;
+        Ok(Response::new(ApprovalResponse {
+            allow: granted,
+            message: if granted {
+                String::new()
+            } else {
+                "the permission was not granted".to_string()
+            },
+        }))
     }
 }

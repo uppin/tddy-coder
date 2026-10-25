@@ -90,6 +90,7 @@ impl DaemonSessionHost {
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(NoSessionRooms),
             coding_agent_launcher: None,
+            approval_routes: None,
             model_registry: None,
             session_agent_rosters: Arc::new(
                 crate::session_agent_roster::SessionAgentRosterStore::new(
@@ -184,6 +185,25 @@ impl DaemonSessionHost {
     ) -> Self {
         self.coding_agent_launcher = Some(launcher);
         self
+    }
+
+    /// Install the routes a headless coding agent's permission approvals are answered through
+    /// (builder). Without them every approval is refused, and the exec-tool handler built from this
+    /// host answers none. Apply it before the RPC families are installed.
+    #[must_use]
+    pub fn with_approval_routes(
+        mut self,
+        routes: Arc<tddy_coding_subagent::ApprovalRoutes>,
+    ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_approval_routes");
+        self.approval_routes = Some(routes);
+        self
+    }
+
+    /// The routes approvals are answered through, when this host has them.
+    #[must_use]
+    pub fn approval_routes(&self) -> Option<Arc<tddy_coding_subagent::ApprovalRoutes>> {
+        self.approval_routes.clone()
     }
 
     /// Install which owning daemons are admitted to the rooms this daemon hosts (builder). Without

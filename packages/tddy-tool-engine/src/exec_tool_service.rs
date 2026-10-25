@@ -5,13 +5,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::{
-    ConversationWorktreeRequest, ConversationWorktreeResponse, ExecToolService, ExecuteToolChunk,
-    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ApprovalRequest, ApprovalResponse, ConversationWorktreeRequest, ConversationWorktreeResponse,
+    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse,
 };
 use tddy_worktree_service::stream::MpscResultStream;
 
-/// What the five exec-tool RPCs need from the host process.
+/// What the exec-tool RPCs need from the host process.
 #[async_trait]
 pub trait ExecToolHandler: Send + Sync {
     async fn execute_tool(
@@ -40,6 +41,13 @@ pub trait ExecToolHandler: Send + Sync {
         &self,
         request: Request<ConversationWorktreeRequest>,
     ) -> Result<Response<ConversationWorktreeResponse>, Status>;
+
+    /// Answer a headless coding agent's permission request, held open until the conversation
+    /// answers it or it is denied.
+    async fn request_approval(
+        &self,
+        request: Request<ApprovalRequest>,
+    ) -> Result<Response<ApprovalResponse>, Status>;
 }
 
 /// Thin `ExecToolService` adapter over an [`ExecToolHandler`].
@@ -91,5 +99,12 @@ impl<H: ExecToolHandler + 'static> ExecToolService for ExecToolServiceImpl<H> {
         request: Request<ConversationWorktreeRequest>,
     ) -> Result<Response<ConversationWorktreeResponse>, Status> {
         self.host.conversation_worktree(request).await
+    }
+
+    async fn request_approval(
+        &self,
+        request: Request<ApprovalRequest>,
+    ) -> Result<Response<ApprovalResponse>, Status> {
+        self.host.request_approval(request).await
     }
 }

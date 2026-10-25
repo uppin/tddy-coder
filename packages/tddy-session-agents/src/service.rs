@@ -1004,6 +1004,9 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                 // been told the conversation is cancelled, and an answer arriving afterwards would
                 // be one it has no reason to expect.
                 closed.notify_one();
+                self.ports
+                    .sessions
+                    .conversation_closed(&req.conversation_id);
                 Ok(Response::new(CancelAgentConversationResponse {}))
             }
             Some(AgentConversation::Remote {
@@ -1174,12 +1177,15 @@ impl SessionAgentServiceImpl {
         session_id: &str,
         agent_id: &str,
     ) {
-        let cancelled_remotely = self
+        let closed = self
             .ports
             .conversations
             .close_every_conversation_with(session_id, agent_id)
             .await;
-        for (daemon_instance_id, conversation_id) in cancelled_remotely {
+        for conversation_id in &closed.local {
+            self.ports.sessions.conversation_closed(conversation_id);
+        }
+        for (daemon_instance_id, conversation_id) in closed.remote {
             if let Err(e) = self
                 .ports
                 .peers

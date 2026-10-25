@@ -188,6 +188,10 @@ pub trait AgentSessions: Send + Sync {
     /// Named rather than left to a forward deadline: an agent on a departed daemon must fail *its
     /// own* prompts with an error naming that daemon, while the rest of the roster keeps working.
     async fn refuse_departed_owner(&self, daemon_instance_id: &str) -> Result<(), Status>;
+
+    /// A conversation this host opened has closed: forget what was kept for it. Defaults to nothing,
+    /// for a host that keeps nothing per conversation.
+    fn conversation_closed(&self, _conversation_id: &str) {}
 }
 
 /// Forwarding a conversation to the daemon that owns the agent.

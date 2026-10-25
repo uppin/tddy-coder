@@ -206,6 +206,10 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
     async fn refuse_departed_owner(&self, daemon_instance_id: &str) -> Result<(), Status> {
         self.roster.refuse_departed_daemon(daemon_instance_id).await
     }
+
+    fn conversation_closed(&self, conversation_id: &str) {
+        self.roster.conversation_closed(conversation_id);
+    }
 }
 
 /// How a conversation with an agent another daemon owns reaches that daemon: over this daemon's
