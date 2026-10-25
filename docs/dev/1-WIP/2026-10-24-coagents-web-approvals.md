@@ -224,8 +224,21 @@ cancelled request reads "Cancelled by <actor>"), `4b8b7e241` (red), `b85d77c6e` 
 - Test support: `tddy_session_lifecycle::test_util::signing_test_host` and
   `tddy_daemon_rpc::test_util::signing_test_service_with_coding_agent_launcher` build a host that authenticates real
   tokens, with `SignedTestCredentials { user_token, agent_token }` for `TEST_USER`.
-- **Open, design question (not built):** `AnswerAgentPermission` over an agent-principal token is accepted as the
-  user's answer and recorded under the login. Should the user route refuse the agent's token?
+- **The user's answer route refuses the agent's token (developer decision, built).** `AnswerAgentPermission` over an
+  agent-principal token is `PERMISSION_DENIED`, naming `subagent_resume` as the route the main agent answers through.
+  The daemon's `AgentSessions::github_user` refuses it, and the handler asks for the login right after authentication,
+  before routing or forwarding. Pinned by `cancel_actor_principal_acceptance::the_users_answer_route_refuses_the_agents_token`.
+- The round-8 test edits below were approved by the developer and applied by the orchestrator in `1ffc992b6`.
+
+**Verified at the end of round 8 (scoped, all passed):** Cypress, one spec at a time: SubagentConversationCancelActor 2,
+SubagentPermissionCancelled 3, SubagentPermissionDelivery 6, SubagentPermissionAnswer 4, SubagentPermissionOwner 2,
+SessionAgentAttachTab 14, SubagentConversationBubble 5. tddy-github --lib 78; tddy-session-split --lib 37;
+tddy-daemon-auth --lib 53; tddy-session-lifecycle --lib 165; `./test -p tddy-session-agents`: every target passes but
+`workspace_roster_admission` (3, the pre-existing remote-codebase stub). tddy-daemon-rpc: cancel_actor_principal 4,
+cancel_records_refusal 4, answer_agent_permission 2, defer_permission_wire 3, main_agent_withdrawal 2,
+waiting_state_record 2, session_agent_conversation 5, coding_subagent 15, in_jail_conversation 1. tddy-tools
+subagent_cancel_actor 1. `cargo clippy --all-targets -D warnings`: tddy-daemon-rpc, tddy-session-lifecycle,
+tddy-session-agents, tddy-github, tddy-session-split clean.
 
 **Pending existing-test edits after round 8 (the orchestrator applies these; each was checked by compiling and running
 a temporary copy, then removed).** These supersede round 7's for the two files named.
@@ -426,7 +439,7 @@ in an earlier round). Watch CI.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code (partial: open items 1–2 under Technical Debt & Production Readiness)
+- [x] TDD Green — implement with quality code (open gaps kept as `TODO(web-approvals)`: the status row is not published on the activity hub; the peer-forward cross-daemon test)
 - [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-coding-subagent -p tddy-session-agents -p tddy-daemon-rpc -p tddy-tools-cli`; the new Cypress spec) — verify 100% pass
