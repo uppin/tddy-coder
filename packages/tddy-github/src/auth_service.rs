@@ -78,6 +78,10 @@ pub struct AuthServiceImpl<P: GitHubOAuthProvider> {
     /// Bounds what `UnlockVault` / `ResetVault` passphrases cost this daemon: concurrent key
     /// derivations, and each user's backoff after wrong passphrases.
     unlock_throttle: vault::UnlockThrottle,
+    /// Development only (`github.dev_vault_without_passphrase`): every closed vault is created or
+    /// opened under the empty passphrase by the service itself, at sign-in and at refresh, so no
+    /// prompt is ever needed. Honoured only for a provider whose access tokens are synthetic.
+    vaults_without_passphrase: bool,
 }
 
 /// The provider a GitHub login's access token is filed under in the credential vault.
@@ -103,6 +107,7 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
             credential_vaults: None,
             admission: None,
             unlock_throttle: vault::UnlockThrottle::default(),
+            vaults_without_passphrase: false,
         }
     }
 
@@ -121,6 +126,7 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
             credential_vaults: None,
             admission: None,
             unlock_throttle: vault::UnlockThrottle::default(),
+            vaults_without_passphrase: false,
         }
     }
 
@@ -129,6 +135,16 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
     /// dropped at the end of the exchange, and GitHub-backed reads report themselves unavailable.
     pub fn with_credential_vaults(mut self, vaults: Arc<SessionVaults>) -> Self {
         self.credential_vaults = Some(vaults);
+        self
+    }
+
+    /// Create and open every closed vault under the empty passphrase, without a prompt (builder).
+    ///
+    /// A development exclusion: the daemon refuses to start with it unless its provider is the
+    /// stub, and the service ignores it for a provider whose access tokens are real — anyone can
+    /// derive the key a vault opened this way is sealed under.
+    pub fn with_vaults_without_passphrase(mut self) -> Self {
+        self.vaults_without_passphrase = true;
         self
     }
 

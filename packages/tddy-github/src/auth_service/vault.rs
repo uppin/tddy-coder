@@ -149,6 +149,9 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
                 .map_err(|e| refused_by_the_vault(login, "note the sign-in", e))?
         };
         if retained.state != VaultState::Open {
+            if let Some(unlock) = self.open_without_passphrase(vaults, login) {
+                return Ok((ProtoVaultState::Open, unlock.to_wire()));
+            }
             log::info!(
                 target: "tddy_github::auth_service",
                 "the credential vault of '{login}' is {:?} on this daemon; its sign-in is held in \
@@ -185,6 +188,23 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
         let Some(vaults) = self.vaults() else {
             return (String::new(), ProtoVaultState::None);
         };
+        let (unlock_key, state) = self.reopen_with_the_presented_key(vaults, login, presented);
+        if state == ProtoVaultState::Open {
+            return (unlock_key, state);
+        }
+        match self.open_without_passphrase(vaults, login) {
+            Some(unlock) => (unlock.to_wire(), ProtoVaultState::Open),
+            None => (unlock_key, state),
+        }
+    }
+
+    /// [`Self::reopen_the_vault`] through the presented key alone.
+    fn reopen_with_the_presented_key(
+        &self,
+        vaults: &SessionVaults,
+        login: &str,
+        presented: &str,
+    ) -> (String, ProtoVaultState) {
         if presented.is_empty() {
             return (String::new(), to_proto_state(vaults.state(login)));
         }
@@ -210,6 +230,57 @@ impl<P: GitHubOAuthProvider> AuthServiceImpl<P> {
                      handing the presented unlock key back unrotated"
                 );
                 (presented.to_string(), to_proto_state(vaults.state(login)))
+            }
+        }
+    }
+
+    /// The development exclusion (`github.dev_vault_without_passphrase`): open `login`'s closed
+    /// vault under the empty passphrase, creating it first when there is none, and hand back the
+    /// lineage's unlock key. `None` leaves the vault as it was — the exclusion is off, or the vault
+    /// is open already, or it was created under a real passphrase, which the empty one never opens
+    /// and this never resets.
+    ///
+    /// Creating needs a fresh sign-in ([`SessionVaults::create`]). A stub login proves nothing
+    /// either way, so one is noted here first — exactly what a stub sign-in notes — which is what
+    /// lets a session that only refreshed get its vault without signing in again. The key
+    /// derivation runs on the calling task: one Argon2id derivation, only on a closed vault, only on
+    /// a stub daemon.
+    fn open_without_passphrase(&self, vaults: &SessionVaults, login: &str) -> Option<UnlockKey> {
+        if !self.vaults_without_passphrase {
+            return None;
+        }
+        if self.provider.issues_usable_access_token() {
+            log::error!(
+                target: "tddy_github::auth_service",
+                "vaults without a passphrase are configured for a provider whose GitHub tokens are \
+                 real; the vault of '{login}' is left closed"
+            );
+            return None;
+        }
+        let empty = SecretString::new("");
+        let opened = match vaults.state(login) {
+            VaultState::Open => return None,
+            VaultState::Uninitialized => vaults
+                .sign_in_without_credential(login)
+                .and_then(|_| vaults.create(login, &empty)),
+            VaultState::Locked => vaults.unlock(login, &empty),
+        };
+        match opened {
+            Ok(unlock) => Some(unlock),
+            Err(VaultError::Locked) => {
+                log::warn!(
+                    target: "tddy_github::auth_service",
+                    "the credential vault of '{login}' was created under a passphrase; it stays \
+                     locked until that passphrase is given"
+                );
+                None
+            }
+            Err(e) => {
+                log::error!(
+                    target: "tddy_github::auth_service",
+                    "could not open the credential vault of '{login}' without a passphrase: {e}"
+                );
+                None
             }
         }
     }

@@ -120,10 +120,7 @@ async fn a_vault_with_a_real_passphrase_stays_locked_and_untouched() {
 
     // Then the vault is still locked — its passphrase opens it, nothing reset or replaced it
     assert_eq!(
-        (
-            state(refreshed.vault_state),
-            vault_bytes_in(storage.path())
-        ),
+        (state(refreshed.vault_state), vault_bytes_in(storage.path())),
         (VaultState::Locked, vault_before)
     );
 }
@@ -154,6 +151,31 @@ fn a_daemon_signing_in_with_real_github_does_not_start_with_the_switch() {
         error.contains("dev_vault_without_passphrase") && error.contains("stub: true"),
         "the refusal names the setting and the stub it needs: {error}"
     );
+}
+
+/// `./web-dev` and `./desktop-dev` are what the switch is for: both of the checkout's dev configs
+/// keep vaults and turn it on, and both pass the startup check.
+#[test]
+fn web_devs_config_opens_its_vaults_without_a_passphrase() {
+    assert_eq!(the_dev_vault_posture_of("dev.daemon.yaml"), (true, true));
+}
+
+#[test]
+fn desktop_devs_config_opens_its_vaults_without_a_passphrase() {
+    assert_eq!(the_dev_vault_posture_of("dev.desktop.yaml"), (true, true));
+}
+
+/// Whether the checkout's `file` keeps vaults, and whether they open without a passphrase — as
+/// checked when auth is wired.
+fn the_dev_vault_posture_of(file: &str) -> (bool, bool) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(file);
+    let config = DaemonConfig::load(&path).expect("the dev config loads");
+    let github = config.github.as_ref().expect("a dev config signs in");
+    let without_passphrase = tddy_daemon_auth::dev_vault::vaults_without_passphrase(github)
+        .expect("a stub dev daemon may open its vaults without a passphrase");
+    (config.auth_storage.is_some(), without_passphrase)
 }
 
 /// Complete a whole stub sign-in through one served `auth.AuthService`.
