@@ -32,7 +32,7 @@ entry gets fixed here rather than worked around.
 - Relay: `tddy-daemon --relay` forwards `session_agents.SessionAgentService` (stream + unary) to the addressed peer.
 - `tddy-session-tool-client`: the relay (`DaemonHttp` to the relay) transport is accepted by `connect_facilitating_daemon` for the roster stream and conversation RPCs when the relay is the endpoint.
 - `tddy-tools`: subagent tools advertised in remote-codebase mode once the workspace roster is non-empty.
-- Remote placement (developer definition, hand-off cited under Decisions): a subagent attached in remote-codebase mode runs on the codebase host's daemon, on a clone that daemon owns (`open_owned`), with results reported back over the hop. **Blocked — the definition does not reconcile with `open_owned`, the roster's no-clone rule or the workspace admission rule; not implemented.**
+- Remote placement (developer decision, 2026-10-25, recorded under Decisions): a subagent attached in remote-codebase mode runs on the codebase host's daemon, on the per-conversation worktree that daemon serves for `clone` placement through `open_local`, with results reported back over the hop. There is no `open_owned` path; the workspace admission rule is unchanged.
 
 ## Boundaries
 
@@ -51,11 +51,11 @@ entry gets fixed here rather than worked around.
 The `--agent` flag, the workspace admission rule's signature, the relay forward entry, the transport
 acceptance — bodies `TODO(remote-codebase)` — and the failing tests below.
 
-**Remote placement — no failing tests written.** The definition is blocked on a developer decision
-(Decisions: *Remote placement is blocked*). The surfaces it names are `open_owned`
-(`packages/tddy-session-agents/src/ports.rs:158`, called at `packages/tddy-session-agents/src/service.rs:857`)
-and the workspace admission (`packages/tddy-session-agents/src/workspace_roster.rs:11`). No surface is
-changed for it, and no test is proposed until the decision is made.
+**Remote placement — tests 10–12** in `packages/tddy-daemon-rpc/tests/remote_codebase_clone_placement_acceptance.rs`:
+a clone-placed coding agent of a workspace session opens on its conversation worktree (10); a diff asked through
+the relay's HTTP endpoint is answered by the codebase host it forwards to (11); a pull asked through the relay applies
+the conversation's change to the codebase host's session worktree (12). All three pass on arrival: the premise already
+holds on this branch, so no production surface changed for them.
 
 ## Green wave
 
@@ -145,10 +145,10 @@ laptop: main agent ─MCP─ tddy-tools --mcp ─HTTP─ relay ─LiveKit─ cod
 - **The `remote` output is not pinned by any test.** The printed JSON comes from the `ConnectJson`
   builders in `packages/tddy-tools/src/remote_cli.rs` (the section "Connect JSON of a decoded response"),
   and no test compares it with the output the CLI printed before its wire was protobuf.
-- **`ConversationWorktree` over HTTP is still unverified** (`docs/dev/todo/2026-10-01-conversation-worktree-over-http-is-unverified.md`).
-  No red test in this node sends it. Prerequisite text "Test 6 exercises it" is stale: test 6 is roster
-  admission. The first test that reaches the clone call over the relay is the two-daemon suite below,
-  and it inherits the JSON defect above.
+- **`ConversationWorktree` over HTTP: covered in-process; the LiveKit hop is NOT RUN.**
+  Tests 11 and 12 (`remote_codebase_clone_placement_acceptance.rs`) send it through the relay's HTTP
+  endpoint, in-process, and pass. The entry in `docs/dev/todo` is not edited here. Prerequisite text
+  "Test 6 exercises it" is stale: test 6 is roster admission. The two-daemon suite below adds the LiveKit hop, which is NOT RUN.
 - **Daemon-side workspace seeding does not admit.** `workspace_roster_admits` has no production caller.
   A workspace start seeds through `seed_and_start_workspace_session`
   (`packages/tddy-agent-launch/src/workspace_branch_start.rs:36-39`) → `seeded_roster_records_placed`
@@ -186,40 +186,33 @@ laptop: main agent ─MCP─ tddy-tools --mcp ─HTTP─ relay ─LiveKit─ cod
   stream. `packages/tddy-daemon-rpc/tests/roster_stream_over_daemon_http_integration.rs` opens it over
   `DaemonHttp` against the daemon's real `/rpc` mount and asserts the roster the daemon holds is the one
   applied. The test fails with the old refusal restored (checked by a temporary mutation, reverted).
-- **Remote placement is blocked: the developer's definition contradicts the code and the docs
-  (2026-10-25).** The hand-off is [`2026-10-24-coagents-clone-placement.md`](./2026-10-24-coagents-clone-placement.md):
-  its Decisions ("`open_owned` (peer-owned) and remote placement belong to n8 `remote-codebase`"), its
-  Scope ("No remote placement — n8") and its TODO ("Carry to n8 `remote-codebase`: `open_owned`
-  (peer-owned) and remote placement"). The definition for this node is: a subagent attached in
-  remote-codebase mode runs on the codebase host's daemon, on a clone that daemon owns (`open_owned`),
-  with results reported back over the hop. It does not reconcile with the branch or the docs:
-  1. `open_owned` runs an agent this daemon owns **reading the clone it holds for another daemon's
-     session** (`packages/tddy-session-agents/src/ports.rs:152-153`;
-     `packages/tddy-session-agents/src/svc_start_hosted_agent_clone.rs:236-237`). A workspace session
-     belongs to the codebase daemon, so that daemon holds no such clone. `open_owned` returns `None`
-     (`packages/tddy-session-agents/src/service.rs:857`), and the codebase daemon's own agent takes the
-     local branch (`service.rs:878`), which reads the authoritative worktree.
-  2. An agent owned by the codebase host "is co-located and gets no clone"
-     (`docs/ft/daemon/session-agent-roster.md:487-488`), and AC55 says it "succeeds with **no clone**:
-     that agent reads the authoritative worktree directly" (`session-agent-roster.md:1105`).
-  3. Workspace admission refuses any coding agent another daemon owns
-     (`packages/tddy-session-agents/src/workspace_roster.rs:21-27`; this changeset's test 8), and the
-     roster spec says "A coding agent owned by another daemon is not supported"
-     (`session-agent-roster.md:218`). Remote placement of a coding agent has no workspace-session case
-     to run in.
-  4. The PRD says "this agent works on the authoritative worktree, not on a clone of someone else's"
-     (`docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md:53-54`).
-
-  The PRD's other use of "clone" is "its own clone with `clone` placement"
-  (`docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md:44-45`). That is the
-  per-conversation worktree of `AgentPlacement::Clone`, which the open path serves through `open_local`
-  with the conversation id (`packages/tddy-session-agents/src/ports.rs:165-166`), not through
-  `open_owned`. So "clone" and "(open_owned)" in the definition name different things. Not implemented;
-  no failing tests written. **Developer decision needed:** (a) co-located only, which the code already
-  does, with remote placement moved to a node that changes the admission rule; (b) "clone" means the
-  per-conversation worktree, and the `(open_owned)` label becomes `open_local`; or (c) peer-owned coding
-  agents on workspace sessions, which reverses `workspace_roster_admits` and the roster spec's "not
-  supported" — a design change the developer must approve.
+- **Remote placement: resolved by the developer (2026-10-25).** The earlier block came from a hand-off
+  that said remote placement runs on `open_owned`, a clone this daemon holds for a peer's session. A
+  workspace session belongs to the codebase daemon, which holds no such clone, and the roster spec and
+  the workspace admission rule refuse peer-owned coding agents. The developer's reading: `clone` on a
+  remote-codebase session is the per-conversation worktree the codebase daemon serves through
+  `open_local`, with the conversation id (`packages/tddy-session-agents/src/ports.rs:165-166`;
+  `open_coding_agent_session` in `packages/tddy-session-agents/src/coding_agent.rs`). The `open_owned`
+  label is dropped from this changeset, and the hand-off's `open_owned`
+  ([`2026-10-24-coagents-clone-placement.md`](./2026-10-24-coagents-clone-placement.md)) resolves to this
+  reading. The admission rule is unchanged: a workspace session's roster holds only the coding agents of
+  the daemon serving it. Pinned by `packages/tddy-daemon-rpc/tests/remote_codebase_clone_placement_acceptance.rs`
+  (tests 10–12), which pass on arrival.
+- **Accepted: axum 0.8 dev-dependency (developer-approved).** `axum = "0.8"` is a dev-dependency of
+  `tddy-session-tool-client` and `tddy-daemon-rpc`. It serves the daemon's `/rpc` mount on a loopback port
+  in the roster-stream and remote-placement tests. Nothing else enters the tree.
+- **Accepted behaviour changes.** The `remote` output is canonical proto3 JSON with proto3 defaults omitted.
+  Its keys are camelCase before and after: the pre-change CLI printed the daemon's JSON body, and its
+  fixtures in `remote_cli_subcommand_acceptance.rs` (at `95bce3dfd`) read `sessionId`, `livekitRoom`,
+  `livekitUrl` and `livekitServerIdentity`, which the `ConnectJson` builders still write. So no key style
+  changed, and no format pin was needed. Whether the default omission matches the pre-change bodies byte
+  for byte is not compared. A missing `result_json` is an error on every conversation transport (see
+  above).
+- **Two-daemon suite: NOT RUN (2026-10-25).** The LiveKit two-daemon suite is not written and was not run.
+  `LIVEKIT_TESTKIT_WS_URL` is unset here, so no LiveKit testkit was started, and nothing is faked. The
+  remote-placement behaviour is covered in-process instead: `remote_codebase_clone_placement_acceptance.rs`
+  puts the relay and the codebase host in one process, with an in-process forwarder standing in for the
+  common room's LiveKit transport. NOT RUN: the LiveKit hop and the real two-daemon handshake.
 
 - **`remote` output is canonical proto3 JSON, defaults omitted (behaviour change).** `tddy-tools remote`
   decodes each answer from protobuf and prints it through the `ConnectJson` builders in
