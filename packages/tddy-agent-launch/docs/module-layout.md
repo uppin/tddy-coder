@@ -6,8 +6,8 @@ connect, signal and delete handlers; `tddy-session-lifecycle` wires it to the ho
 ([module-layout](../../tddy-session-lifecycle/docs/module-layout.md)) and re-exports it at the old
 `tddy_session_lifecycle::…` paths.
 
-About **9.4k production lines** in 54 modules, under the 10k receiver budget. No production file is over 500 (the largest, by the count to the first `#[cfg(test)]`:
-`svc_start_session_core.rs` 498, `svc_start_sandboxed_claude_cli_session.rs` 493,
+About **9.5k production lines** in 55 modules, under the 10k receiver budget. No production file is over 500 (the largest, by the count to the first `#[cfg(test)]`:
+`svc_start_sandboxed_claude_cli_session.rs` 493, `svc_start_session_core.rs` 486,
 `session_coordinate_handlers.rs` 460).
 Standing findings are in [`code-issues/`](code-issues/). A production line is any line of a `src/` file
 outside an inline `#[cfg(test)] mod x { … }` block, excluding `*_tests.rs`.
@@ -32,8 +32,15 @@ socket. `impl StackParentHost` is on the handle.
 ## Session start
 
 `svc_start_session_core.rs` holds `start_session_core`, the one implementation behind `StartSession` and
-`StreamStartSession`: it checks the request, routes it, and dispatches by placement and session type. Its
-steps are in sibling modules:
+`StreamStartSession`: it checks the request, routes it, and dispatches by placement and session type.
+`start_session_on_request` decides the route and the placement, refuses an orchestrated `tool` start
+(`start_request_checks::refuse_an_orchestrated_tool_start` — a `tool` session's changeset is written by
+its own `tddy-coder`), then calls `start_here` (the per-session-type start). When the request names an
+orchestrator (`orchestrator_session_id`, and `orchestrator_daemon_instance_id` when it is another
+daemon), `svc_start_session_core/orchestrator_record.rs` (`LaunchSessions::record_orchestrator`) writes
+it into the new session's changeset once the start has returned — on the daemon that created the
+session, so a start forwarded from the orchestrator's host is linked where it lives. Its steps are in
+sibling modules:
 
 | Module | Holds |
 |---|---|
@@ -247,7 +254,9 @@ harness has no default.
 `placement.rs` classifies where a start's codebase goes: `CodebasePlacement` (co-located, split, or
 sandboxed), `PlacementRequest` (everything a start says about it, gathered into one value) and
 `classify_placement`, which refuses any request asking for more than one placement and names both it
-found. `svc_start_session_core.rs` is its only caller.
+found. `classify_start_placement` applies it to a `StartSessionRequest` (refusal as `INVALID_ARGUMENT`)
+for `svc_start_session_core.rs`, and `managed_recipe_for` resolves the workflow recipe a managed
+codebase runs.
 
 `session_git.rs` builds the git environment a session's own commits are made under:
 `session_git_environment(&ActingIdentity)` (and `session_git_environment_of(&GitIdentity)`) returns the four

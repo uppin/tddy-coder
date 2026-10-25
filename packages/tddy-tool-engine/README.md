@@ -49,7 +49,7 @@ is the one answer to "which exec tools is this session offered" (the project-hom
 project-home session, its `StartSession` schema offering the daemon's eligible hosts and recipes;
 `tool_catalog()` otherwise). `start_session_args` holds `StartSession`'s arguments — every
 `StartSessionRequest` field the New-session form can send, under its proto name — the generated schema
-(`start_session_schema`), the mapping onto the request (`StartSessionArgs::into_request`), and the
+(`start_session_schema`, in `start_session_args/schema.rs`), the mapping onto the request (`StartSessionArgs::into_request`), and the
 tables of fields the caller's context fills or the tool withholds. `project_home_diff` takes the worktree's diff
 against its base over a temporary `GIT_INDEX_FILE` (`read-tree HEAD`, `add -A`, `diff --cached`), so
 untracked files appear and the worktree's own index is never written; an option-shaped base ref is
