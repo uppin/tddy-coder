@@ -194,7 +194,8 @@ pub trait AgentSessions: Send + Sync {
     fn conversation_closed(&self, _conversation_id: &str) {}
 
     /// The GitHub login `session_token` authenticates: the login a user's permission answer is
-    /// recorded under.
+    /// recorded under. The session agent's own token is refused `PERMISSION_DENIED`: the main agent
+    /// answers through `subagent_resume`, never as the user.
     ///
     /// Required rather than defaulted: a default would let a new adapter forget it, and every answer
     /// it served would then be refused by a default nobody chose. The daemon's adapter answers it

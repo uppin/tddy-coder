@@ -214,8 +214,17 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
         self.roster.conversation_closed(conversation_id);
     }
 
+    /// The login a user's answer is recorded under — refused for the agent's own token, which
+    /// answers through `subagent_resume` and never as the user.
     fn github_user(&self, session_token: &str) -> Result<String, Status> {
-        self.roster.session_github_user(session_token)
+        let login = self.roster.session_github_user(session_token)?;
+        if self.carries_the_agent_principal(session_token) {
+            return Err(Status::permission_denied(
+                "this token is the session agent's: the main agent answers a permission request \
+                 through subagent_resume, not as the user",
+            ));
+        }
+        Ok(login)
     }
 
     /// The main agent when this daemon's keys verify `session_token` and it carries the agent
@@ -223,16 +232,23 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
     /// resolver's, as on every other call: the principal only says whose the authenticated call is.
     fn answerer(&self, session_token: &str) -> Result<AnsweredBy, Status> {
         let login = self.roster.session_github_user(session_token)?;
-        let carries_the_agent_principal = self.session_tokens.as_ref().is_some_and(|tokens| {
+        Ok(if self.carries_the_agent_principal(session_token) {
+            AnsweredBy::MainAgent
+        } else {
+            AnsweredBy::User(login)
+        })
+    }
+}
+
+impl TurnLoopsThisDaemonCanOpen {
+    /// Whether this daemon's keys verify `session_token` and it was minted for the session's agent.
+    /// A token they cannot verify is never the agent's.
+    fn carries_the_agent_principal(&self, session_token: &str) -> bool {
+        self.session_tokens.as_ref().is_some_and(|tokens| {
             tokens
                 .verifier()
                 .verify_now(session_token)
                 .is_ok_and(|claims| claims.principal == Some(tddy_github::TokenPrincipal::Agent))
-        });
-        Ok(if carries_the_agent_principal {
-            AnsweredBy::MainAgent
-        } else {
-            AnsweredBy::User(login)
         })
     }
 }

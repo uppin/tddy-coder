@@ -26,8 +26,9 @@ use tddy_service::proto::acp::{acp_agent_message, session_update, AcpAgentMessag
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, AnswerAgentPermissionRequest, AnswerAgentPermissionResponse,
-    AttachSessionAgentRequest, CancelAgentConversationRequest, CancelAgentConversationResponse, OpenAgentConversationRequest, PromptAgentConversationRequest,
-    ResumeAgentConversationRequest, SessionAgentService as _,
+    AttachSessionAgentRequest, CancelAgentConversationRequest, CancelAgentConversationResponse,
+    OpenAgentConversationRequest, PromptAgentConversationRequest, ResumeAgentConversationRequest,
+    SessionAgentService as _,
 };
 use tddy_service::subagent_conversation_replay::read_conversation_transcript;
 use tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher;

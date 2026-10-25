@@ -1239,7 +1239,9 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
     /// parks permission requests, and the request must have been handed to the user by the turn holding
     /// it: a request the main agent keeps is the main agent's to answer, and is refused here.
     ///
-    /// The answer is recorded under the caller's GitHub login, and the first answer to a request wins:
+    /// The answer is recorded under the caller's GitHub login, and the session agent's own token is refused
+    /// `PERMISSION_DENIED` before anything is routed: the main agent answers through `subagent_resume`. The first
+    /// answer to a request wins:
     /// a second is refused naming who answered first. The answer reaches the parked request through the
     /// handle captured when the conversation opened, not through the conversation's lock, so it is
     /// delivered while the deferred turn is still waiting on it.
@@ -1249,6 +1251,8 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
     ) -> Result<Response<AnswerAgentPermissionResponse>, Status> {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
+        // The user's login, and the refusal of the agent's own token, before anything is routed or forwarded.
+        let login = self.ports.sessions.github_user(&req.session_token)?;
         let route = self
             .ports
             .conversations
@@ -1284,7 +1288,6 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             )));
         }
         let answer = answer_of(&req)?;
-        let login = self.ports.sessions.github_user(&req.session_token)?;
         answering
             .answer_as(&answer, AnsweredBy::User(login.clone()))
             .map_err(Status::failed_precondition)?;
