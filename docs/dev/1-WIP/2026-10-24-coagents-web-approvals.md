@@ -126,7 +126,64 @@ Cypress component for the entry (`mountWithRpc` + in-memory `SessionAgentService
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+### Progress (2026-10-25, /green rounds 1–4)
+
+Committed on `feature/coagents/web-approvals` (new commits only, nothing amended). Done: the answer route,
+the deferral wire field, non-queueing main-agent answers end to end, the deferred-only user gate,
+`deferPermissionToUser` honoured, the owning daemon id threaded into the entry, the answered record
+rendered without re-offering options, and the fold's deferred-only `awaiting_user`. The eleven acceptance
+tests of this node pass: the Rust targets listed under Verification, and the web spec
+`SubagentPermissionDeliveryAcceptance.cy.tsx`. The web spec `SubagentPermissionAnswerAcceptance.cy.tsx`
+is red until the fixture edit below is applied.
+
+**Open. Each needs a developer decision before wrap:**
+
+1. **No writer makes a conversation "awaiting the user".** The fold reads `running` plus
+   `awaitingUser: true` as Pending, but nothing writes that. The daemon's `SessionAgentService` turns write
+   roster state, not `AgentActivityRecord` rows. Under claude-cli, a deferred resume's PostToolUse record is
+   `completed` with `awaitingUser`, which folds to Completed. So "waiting for you" does not show in practice.
+   Options: (a) the daemon writes a dedicated conversation-status record: running with `awaitingUser` on
+   defer, cleared on answer, completed at turn end, with a stable call id per conversation. (b) Fold a
+   completed `subagent_*` record with `awaitingUser: true` as Pending, and carry `sessionId` on the
+   resume/await PostToolUse. Recommend (a). Option (b) leaves a stale Pending between the answer and the
+   await's return, unless (a)'s clear exists.
+2. **Cancelling a deferred request is not recorded.** `cancel_pending` answers a deferred request as
+   cancelled with no answerer. No answered record is written, so the transcript keeps a pending deferred
+   entry, the web re-offers buttons after a reopen, and `AnswerAgentPermission` is refused. Needs the
+   cancelling actor: `subagent_cancel` would carry who cancelled, and the cancel would record it.
+3. **Remote conversations cannot be answered.** `answering_for` returns `None` for a remote conversation,
+   so `AnswerAgentPermission` refuses with FAILED_PRECONDITION rather than forwarding to the owner.
+   Recommend forwarding through `AgentConversationPeers`, as prompts already are.
+4. **Split sessions may name the wrong daemon.** The web sends `session.daemonInstanceId`, paired with the
+   session id. `rosterHalfOf` may name the daemon that holds the conversation, and then the daemon answers
+   NOT_FOUND. Decide which id the entry carries.
+5. **A held answer is delivered whether or not its request is deferred.** The window is narrow, before a
+   non-deferred request settles. The wording "the turn that deferred it" is slightly loose there. Recommend
+   rewording to "the turn holding it".
+6. **`awaitingUser` stays `true` from registration until the turn ends.** That includes the window after the
+   user's answer and before the continuation arrives.
+7. **`AgentSessions::github_user` has a refusing default** (`packages/tddy-session-agents/src/ports.rs:197`,
+   TODO(web-approvals)). Make it required when the test fakes are next touched.
+
+**Pending existing-test edits (the developer's rule: no existing test is edited by an implementer; the
+orchestrator applies these):**
+
+- `packages/tddy-daemon-rpc/tests/session_agent_conversation_acceptance.rs`: after line 474
+  (`            permission_answer_json: String::new(),`) insert `            defer_permission_to_user: None,`. The
+  target does not compile until this is applied.
+- `packages/tddy-web/cypress/component/SubagentPermissionAnswerAcceptance.cy.tsx`: after line 80
+  (`sessionId: "managed-1",`) insert `daemonInstanceId: "daemon-a",`. Tests 1 and 3 are red until this is applied.
+- `packages/tddy-web/cypress/component/ActivitiesTailScrollAcceptance.cy.tsx`: lines 70 and 105, add
+  `daemonInstanceId="daemon-a"` to each `<SessionActivitiesPane />`. This is a tsc error only, and the runtime
+  is unaffected.
+
+**Pre-existing reds outside this node, left untouched:** `transports_acceptance` (4, headless-driver's
+TODO stubs), `workspace_roster_admission` (3, remote-codebase's TODO stub), and
+`projectHomeStartSpec.test.ts` (3, fixture lacks `clonePlacedAgentIds`).
+
+**Known flake:** `coding_agent_session_acceptance::cancelling_a_running_turn_returns_cancelled` failed once in
+a full package run and then passed in every later run (three repeats, plus 15 sequential and 40 parallel runs
+in an earlier round). Watch CI.
 
 ## Decisions & Trade-offs
 
@@ -134,6 +191,34 @@ _(populated during development)_
   keeps the decision the main agent's, as the user chose.
 - **First answer wins** rather than locking the main agent out once deferred — a main agent that
   changes its mind is not stuck.
+- **Answer route built in this node (developer decision, 2026-10-25).** The conversation's answering
+  handle is captured at open and stored beside the conversation (`AgentConversation::Local.answering`),
+  so `AnswerAgentPermission` delivers to `ParkedPermissions`. `PermissionAnswering` and `AnsweredBy`
+  moved to `tddy-discovery`, and `SubagentSession::permission_answerer` (default `None`) exposes the
+  handle through the boxed session. `tddy-coding-subagent` re-exports them, so existing paths hold.
+- **Deferral wire field (developer decision).** `ResumeAgentConversationRequest.defer_permission_to_user`
+  (proto field 11, `optional string`) is additive and carries the deferral from the tools layer to the
+  daemon. #722's message is otherwise unchanged. The regenerated TypeScript carries only that field.
+- **A main-agent answer does not queue (developer decision).** The daemon claims the session without
+  waiting. Where a deferred turn holds it, the answer is delivered through the handle and the call is
+  refused at once with FAILED_PRECONDITION naming the delivery. The tools runtime sends a permission
+  answer to the daemon without waiting on its own lock. The PRD's withdrawal holds: the main agent may
+  still answer the request it deferred.
+- **The daemon accepts a user answer only for a deferred request (developer decision).** The gate is in
+  the `AnswerAgentPermission` handler. The session-level `answer_as` stays permissive, because
+  `permission_defer_acceptance.rs` answers a non-deferred request as a user and expects `Ok`.
+- **`deferPermissionToUser` is advertised and honoured (developer decision).** `subagent_resume` hands
+  the request to the user, and a pending turn says `awaitingUser: true`.
+- **Only deferred requests fold to `awaiting_user` (developer decision).** A request the main agent
+  must answer itself reads in progress. Its transcript entry is `permission:<requestId>`, with
+  `deferredToUser` in its input.
+- **Kept off-brief changes (developer decision).** The subagent bubble's status renders inside #723's
+  bubble, and a second main-agent answer reads "already answered by the main agent". The dead
+  `ParkedPermissions::answer()` is removed.
+- **Answered records are re-emitted as completed tool calls.** The web projection ignores
+  `tool_call_update`, so the answered record is a completed `ToolCallRecord` under the same
+  `permission:<requestId>` id, carrying `{answeredBy, optionId}` or `{answeredBy, cancelled: true}`.
+  `answeredBy` is the login for a user and `main-agent` for the main agent.
 
 ## Refactoring Needed
 
@@ -159,8 +244,8 @@ _(populated during development)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [ ] TDD Green — implement with quality code (partial: open items 1–2 under Technical Debt & Production Readiness)
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-coding-subagent -p tddy-session-agents -p tddy-daemon-rpc -p tddy-tools-cli`; the new Cypress spec) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
