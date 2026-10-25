@@ -271,6 +271,10 @@ pub struct SessionAgentPorts {
     /// `NOT_FOUND` for a conversation an open had just created. The daemon holds the one `Arc` and
     /// hands it to both.
     pub conversations: Arc<OpenAgentConversations>,
+    /// The live frames every daemon-run conversation publishes as it is recorded, keyed by session and
+    /// conversation. Shared with the activity service, which tails it for a conversation's replay, so a
+    /// reader and the recorder reach the same channel.
+    pub conversation_frames: Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames>,
     /// What an attach must settle before a roster entry may be written — see [`AgentAdmission`].
     pub admission: Arc<dyn AgentAdmission>,
     /// Which def an agent id resolves to on this host — see [`AgentCatalog`].

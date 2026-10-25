@@ -243,6 +243,15 @@ pub trait SubagentSession: Send {
     /// Bounded per message so that reading the tail of one full context cannot fill the reader's
     /// own.
     fn tail(&self, max_messages: usize) -> Vec<String>;
+
+    /// The updates this conversation streams as its turns run, or `None` when it does not stream: a
+    /// model loop answers each turn whole, when the turn ends.
+    ///
+    /// The receiver carries only what is sent after it is created, so a caller takes it before the
+    /// first turn runs. Every call returns a receiver of the same stream.
+    fn updates(&self) -> Option<tokio::sync::broadcast::Receiver<tddy_agent_backend::AcpUpdate>> {
+        None
+    }
 }
 
 /// Boxed async dispatch fn injected by the caller (`tddy-tools`) for managed codebase access.

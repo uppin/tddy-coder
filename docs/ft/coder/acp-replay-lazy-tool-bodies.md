@@ -93,6 +93,15 @@ Both hosts read through the same module, so the strip and the lookup live there:
   view the stream replays, the id an operator clicked is guaranteed resolvable to the same call the
   stream showed (latest state, deduped by `tool_call_id`).
 
+### A conversation axis (Added: 2026-10-24)
+
+`StreamAcpReplayRequest` (field 6), `GetAcpReplayPageRequest` (6) and `GetAcpToolCallDetailRequest`
+(5) carry an optional `conversation_id`. With it, every helper here reads that subagent
+conversation's own transcript (`tddy_service::subagent_conversation_replay`,
+`<session dir>/conversations/<id>/acp-transcript.jsonl`) instead of the session's; a conversation
+that recorded nothing is `NOT_FOUND` naming it. See
+[agent activity pane § a subagent conversation is one bubble](../web/agent-activity-pane.md#a-subagent-conversation-is-one-bubble-added-2026-10-24).
+
 ## Hosting
 
 Both `StreamAcpReplay` hosts strip at their existing frame-wrap seam and gain the new unary:

@@ -35,11 +35,12 @@ use tddy_service::proto::session_agents_svc::{
 use tddy_worktree_service::stream::MpscResultStream;
 
 use tddy_discovery::subagent::{
-    MessageDescriptor, MessageId, MessageRole, PromptOutcome, TurnRequest,
+    MessageDescriptor, MessageId, MessageRole, PromptOutcome, SubagentSession, TurnRequest,
 };
 use tddy_service::proto::session_agents_svc::AgentMessageDescriptor;
 
 use crate::agent_conversations::{AgentConversation, PromptRouting};
+use crate::conversation_recorder::{take_recorded_turn, ConversationRecorder};
 use crate::ports::SessionAgentPorts;
 use crate::session_agent_status::ManagedAgentState;
 
@@ -61,6 +62,37 @@ impl SessionAgentServiceImpl {
         session_id: &str,
     ) -> Result<std::path::PathBuf, Status> {
         (self.ports.session_dirs)(session_token, session_id)
+    }
+
+    /// A conversation whose turns run on this host. Its recorder is opened here, before the conversation is
+    /// reachable, so the updates of its first turn are not missed.
+    fn local_conversation(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+        session_dir: &std::path::Path,
+        conversation_id: &str,
+        session: Box<dyn SubagentSession>,
+    ) -> Result<AgentConversation, Status> {
+        let recorder = ConversationRecorder::open(
+            session_dir,
+            session_id,
+            conversation_id,
+            Arc::clone(&self.ports.conversation_frames),
+            session.as_ref(),
+        )
+        .map_err(|e| {
+            Status::internal(format!(
+                "conversation '{conversation_id}' could not open its transcript: {e}"
+            ))
+        })?;
+        Ok(AgentConversation::Local {
+            session_id: session_id.to_string(),
+            agent_id: agent_id.to_string(),
+            session: Arc::new(tokio::sync::Mutex::new(session)),
+            closed: Arc::new(tokio::sync::Notify::new()),
+            recorder: Arc::new(recorder),
+        })
     }
 
     /// Record what a roster agent is doing, and push the roster that says so — see
@@ -185,6 +217,8 @@ impl SessionAgentServiceImpl {
         // conditions array that never parses — is refused while the conversation still shows what
         // it was doing, not a Prompting badge over a turn that never started.
         let requested = turn.turn_request().map_err(Status::invalid_argument)?;
+        // What the conversation's transcript records as the prompt; `None` for a resume.
+        let prompt = requested.prompt_text().map(str::to_string);
 
         // Stamped before either branch runs, so the badge changes when the turn starts rather than
         // when it is first observed to have started.
@@ -196,8 +230,12 @@ impl SessionAgentServiceImpl {
             turn.activity_summary(),
         );
 
-        let (session, closed) = match routing {
-            PromptRouting::Local { session, closed } => (session, closed),
+        let (session, closed, recorder) = match routing {
+            PromptRouting::Local {
+                session,
+                closed,
+                recorder,
+            } => (session, closed, recorder),
             PromptRouting::Remote(daemon_instance_id) => {
                 self.ports
                     .sessions
@@ -234,22 +272,15 @@ impl SessionAgentServiceImpl {
         let conversation_id = turn.conversation_id().to_string();
         let turn_ended = self.turn_end_reporter(turn.session_id(), &session_dir, &agent_id);
         tokio::spawn(async move {
-            let outcome = tokio::select! {
-                // Biased so a conversation already closed is reported as closed rather than racing
-                // one more turn out of a model.
-                biased;
-                _ = closed.notified() => {
-                    let _ = tx.send(Err(Status::failed_precondition(format!(
-                        "conversation '{conversation_id}' was closed while its turn was in flight"
-                    ))));
-                    return;
-                }
-                outcome = async { session.lock().await.take_turn(requested).await } => outcome,
-            };
-            match outcome {
-                // Framed rather than sent whole: over LiveKit anything past MAX_CHUNK_FRAME_BYTES is
-                // chunk-framed, and one lost chunk frame wedges the call with no error at all.
+            // Recorded before the answer goes out, so a transcript read after the answer arrives already holds
+            // the turn. A turn that cannot be written fails rather than answering: the caller would take an answer
+            // the conversation's record does not hold, and a replay would show a conversation that never had this turn.
+            match take_recorded_turn(&session, &recorder, &closed, requested, prompt.as_deref())
+                .await
+            {
                 Ok(outcome) => {
+                    // Framed rather than sent whole: over LiveKit anything past MAX_CHUNK_FRAME_BYTES is
+                    // chunk-framed, and one lost chunk frame wedges the call with no error at all.
                     let frames = agent_turn_frames(&outcome);
                     // Reported after the frames are on the wire, not before: a badge that drops to
                     // idle while the answer is still arriving is one a reader acts on too early.
@@ -271,13 +302,12 @@ impl SessionAgentServiceImpl {
                     }
                     turn_ended(answered);
                 }
-                Err(e) => {
-                    // Idle, not ERROR: the agent is still attached and still promptable, and it is
-                    // the *clone* that ERROR is reserved for. The summary is what says what happened.
-                    turn_ended(format!("turn failed: {e}"));
-                    let _ = tx.send(Err(Status::internal(format!(
-                        "agent conversation '{conversation_id}' failed: {e}"
-                    ))));
+                Err(error) => {
+                    let (badge, status) = error.into_reply(&conversation_id);
+                    if let Some(badge) = badge {
+                        turn_ended(badge);
+                    }
+                    let _ = tx.send(Err(status));
                 }
             }
         });
@@ -814,12 +844,13 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             .open_owned(&req.session_id, &req.agent_id, system_prompt)
             .await?;
         let conversation = match owned {
-            Some(session) => AgentConversation::Local {
-                session_id: req.session_id.clone(),
-                agent_id: req.agent_id.clone(),
-                session: Arc::new(tokio::sync::Mutex::new(session)),
-                closed: Arc::new(tokio::sync::Notify::new()),
-            },
+            Some(session) => self.local_conversation(
+                &req.session_id,
+                &req.agent_id,
+                &session_dir,
+                &conversation_id,
+                session,
+            )?,
             None => {
                 let record = self
                     .ports
@@ -832,23 +863,26 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                         ))
                     })?;
                 match record.daemon_instance_id == self.ports.local_instance_id {
-                    true => AgentConversation::Local {
-                        session_id: req.session_id.clone(),
-                        agent_id: record.agent_id.clone(),
-                        session: Arc::new(tokio::sync::Mutex::new(
-                            self.ports
-                                .sessions
-                                .open_local(
-                                    &req.session_id,
-                                    &session_dir,
-                                    &record,
-                                    &req.session_token,
-                                    system_prompt,
-                                )
-                                .await?,
-                        )),
-                        closed: Arc::new(tokio::sync::Notify::new()),
-                    },
+                    true => {
+                        let session = self
+                            .ports
+                            .sessions
+                            .open_local(
+                                &req.session_id,
+                                &session_dir,
+                                &record,
+                                &req.session_token,
+                                system_prompt,
+                            )
+                            .await?;
+                        self.local_conversation(
+                            &req.session_id,
+                            &record.agent_id,
+                            &session_dir,
+                            &conversation_id,
+                            session,
+                        )?
+                    }
                     false => {
                         self.ports
                             .sessions

@@ -339,6 +339,9 @@ fn a_daemon_serving(
         )),
         clones,
         conversations: Arc::new(OpenAgentConversations::new()),
+        conversation_frames: Arc::new(
+            tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
+        ),
         admission: Arc::new(PortsAnOpenDoesNotUse),
         catalog: Arc::new(PortsAnOpenDoesNotUse),
         broadcast: Arc::new(PortsAnOpenDoesNotUse),

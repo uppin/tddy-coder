@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import type { ActivityService } from "../../gen/activity_pb";
-import { agentActivityRegistry } from "../sessions/agentActivityRegistry";
+import { agentActivityRegistry, replayKeyOf } from "../sessions/agentActivityRegistry";
 
 /** Why a body lookup could not be answered. The hosts reserve `NOT_FOUND` for "no such
  *  `tool_call_id` in this session's transcript" and report everything else (host unreachable,
@@ -23,7 +23,7 @@ export type AcpToolCallDetailState =
  *  `sessionId`) changed reads as loading again from the very first render rather than briefly showing
  *  the previous call's bodies. */
 interface Resolution {
-  readonly forSessionId: string;
+  readonly forReplayKey: string;
   readonly forToolCallId: string;
   readonly state: AcpToolCallDetailState;
 }
@@ -59,8 +59,13 @@ export function useAcpToolCallDetail(args: {
   toolCallId: string;
   /** Whether the resolved bodies are final and may be cached for the session. */
   cacheable: boolean;
+  /** The subagent conversation the call belongs to; unset ⇒ a call of the session's own transcript. */
+  conversationId?: string;
 }): AcpToolCallDetailState {
   const { sessionId, sessionToken, client, toolCallId, cacheable } = args;
+  const conversationId = args.conversationId ?? "";
+  // The bodies are cached under the replay they were read from: the session's or a conversation's.
+  const key = replayKeyOf(sessionId, conversationId);
   const [resolution, setResolution] = useState<Resolution | null>(null);
 
   /**
@@ -84,12 +89,12 @@ export function useAcpToolCallDetail(args: {
     // `cacheable` gates the cache *read* as much as the write: a running call must re-fetch even if an
     // earlier open of the same row cached its then-partial bodies.
     const cached = cacheable
-      ? agentActivityRegistry.get(sessionId)?.toolDetails.get(toolCallId)
+      ? agentActivityRegistry.get(key)?.toolDetails.get(toolCallId)
       : undefined;
     return cached
       ? { status: "loaded", rawInput: cached.rawInput, rawOutput: cached.rawOutput }
       : null;
-  }, [cacheable, sessionId, toolCallId]);
+  }, [cacheable, key, toolCallId]);
 
   useEffect(() => {
     if (withoutRequest) return;
@@ -106,15 +111,16 @@ export function useAcpToolCallDetail(args: {
           // requests use.
           daemonInstanceId: "",
           toolCallId,
+          conversationId,
         });
         if (cancelled) return;
         setResolution({
-          forSessionId: sessionId,
+          forReplayKey: key,
           forToolCallId: toolCallId,
           state: { status: "loaded", rawInput: detail.rawInput, rawOutput: detail.rawOutput },
         });
         if (cacheable) {
-          agentActivityRegistry.setToolDetail(sessionId, toolCallId, {
+          agentActivityRegistry.setToolDetail(key, toolCallId, {
             rawInput: detail.rawInput,
             rawOutput: detail.rawOutput,
           });
@@ -126,7 +132,7 @@ export function useAcpToolCallDetail(args: {
         const kind: ToolCallDetailErrorKind =
           ConnectError.from(err).code === Code.NotFound ? "notFound" : "failed";
         setResolution({
-          forSessionId: sessionId,
+          forReplayKey: key,
           forToolCallId: toolCallId,
           state: { status: "error", kind },
         });
@@ -136,11 +142,11 @@ export function useAcpToolCallDetail(args: {
     return () => {
       cancelled = true;
     };
-  }, [cacheable, client, sessionId, sessionToken, toolCallId, withoutRequest]);
+  }, [cacheable, client, conversationId, key, sessionId, sessionToken, toolCallId, withoutRequest]);
 
   if (withoutRequest) return withoutRequest;
   // A resolution left over from another lookup reads as `loading`, not as that lookup's bodies.
-  return resolution?.forSessionId === sessionId && resolution.forToolCallId === toolCallId
+  return resolution?.forReplayKey === key && resolution.forToolCallId === toolCallId
     ? resolution.state
     : LOADING;
 }

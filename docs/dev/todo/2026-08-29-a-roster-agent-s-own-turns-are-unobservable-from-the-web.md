@@ -40,3 +40,15 @@ across two crates rather than one file:
   `tddy-session-agents`' (it is where the turn's text exists), reading it back is
   `tddy-session-activity`'s, and the peer forward is `tddy-daemon`'s. That is three owners where the
   entry assumed one — worth knowing before it is scheduled.
+
+## Narrowed at `#coagents` 4/8's wrap (2026-10-24, #723)
+
+**Resolved for daemon-run conversations.** Each daemon-run conversation now records its own ACP
+transcript (`<session>/conversations/<id>/acp-transcript.jsonl`, written by
+`tddy-session-agents/src/conversation_recorder.rs`), and the replay RPCs take a `conversation_id`
+(`tddy-session-activity/src/service/conversation_replay.rs`). See
+[agent activity pane](../../ft/web/agent-activity-pane.md#a-subagent-conversation-is-one-bubble-added-2026-10-24).
+
+**What remains open:** conversations run **in the jail** (seeded `model` agents) are still
+unrecorded — their history lives only in the jail's memory, and the web says so. Closing it needs the
+in-jail loop to append frames somewhere the daemon can read.

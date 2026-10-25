@@ -15,6 +15,7 @@
 | 2026-09-26 | 120 | 93 | 5 | first detection, in PR #545 |
 
 | 2026-09-27 | 120 | 93 | 5 | **unchanged.** `service.rs` grew by 7 lines in the same change, in the stop-reason mapping only |
+| 2026-10-24 | 124 → 122 raw | — | 5 | **better** by 2 in PR #723 (`#coagents` 4/8): the turn now runs through `take_recorded_turn` and its failed-turn replies through `TurnError::into_reply` (`conversation_recorder.rs`). Hand-counted raw lines at #722's tip (124) and after; code-line column not restated |
 ## What the tool found
 
 The worst single unit in PR #545, breaching both thresholds at once. The nesting path is

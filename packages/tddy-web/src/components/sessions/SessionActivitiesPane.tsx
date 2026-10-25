@@ -6,6 +6,7 @@ import { AgentChatView, TRANSCRIPT_ROOT_STYLE } from "../chat/AgentChat";
 import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpReplay } from "../chat/useAcpReplay";
 import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
+import { SubagentConversationDialog } from "./SubagentConversationDialog";
 
 interface SessionActivitiesPaneProps {
   sessionId: string;
@@ -43,6 +44,10 @@ export function SessionActivitiesPane({
   const { atOldest, loadingOlder, loadOlder } = chat;
 
   const [detail, setDetail] = useState<ChatMessage | null>(null);
+  // The subagent conversation whose bubble was clicked, opened over the pane. Its title is the bubble's.
+  const [conversation, setConversation] = useState<{ conversationId: string; title: string } | null>(
+    null,
+  );
 
   // Pull the transcript as soon as the view mounts, and keep the unread baseline level with what is
   // on screen — entries arriving while the operator is reading them are not unread, and the overlay
@@ -55,6 +60,7 @@ export function SessionActivitiesPane({
   // Switching to another session drops a detail dialog carried over from the previous one.
   useEffect(() => {
     setDetail(null);
+    setConversation(null);
   }, [sessionId]);
 
   return (
@@ -83,6 +89,11 @@ export function SessionActivitiesPane({
           readOnly
           chat={chat}
           onToolClick={setDetail}
+          onSubagentClick={(message) => {
+            if (message.conversationId) {
+              setConversation({ conversationId: message.conversationId, title: message.text });
+            }
+          }}
           onLoadOlder={loadOlder}
           hasOlder={!atOldest}
           loadingOlder={loadingOlder}
@@ -103,6 +114,16 @@ export function SessionActivitiesPane({
           sessionToken={sessionToken}
           client={resolvedClient}
           onClose={() => setDetail(null)}
+        />
+      )}
+      {conversation && (
+        <SubagentConversationDialog
+          sessionId={sessionId}
+          conversationId={conversation.conversationId}
+          title={conversation.title}
+          sessionToken={sessionToken}
+          client={resolvedClient}
+          onClose={() => setConversation(null)}
         />
       )}
     </div>

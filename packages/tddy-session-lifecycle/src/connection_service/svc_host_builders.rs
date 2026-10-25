@@ -78,6 +78,9 @@ impl DaemonSessionHost {
             demo_vm_state,
             host_session_sockets,
             agent_activity_hub: Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
+            agent_conversation_frames: Arc::new(
+                tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
+            ),
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
             ),
@@ -315,6 +318,14 @@ impl DaemonSessionHost {
     /// `StreamSessionActivity` subscribers read.
     pub fn agent_activity_hub(&self) -> Arc<tddy_daemon_kernel::AgentActivityHub> {
         Arc::clone(&self.agent_activity_hub)
+    }
+
+    /// The live frames of every daemon-run subagent conversation, shared by the recorder that publishes
+    /// into them and the replay that tails them.
+    pub fn conversation_frames(
+        &self,
+    ) -> Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames> {
+        Arc::clone(&self.agent_conversation_frames)
     }
 
     /// Return the shared `TaskRegistry` so `main.rs` can pass it to other services.

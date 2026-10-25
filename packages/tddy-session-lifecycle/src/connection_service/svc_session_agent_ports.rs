@@ -80,6 +80,7 @@ impl DaemonSessionHost {
             rosters: Arc::clone(&self.session_agent_rosters),
             clones: Arc::clone(&self.session_agent_clones),
             conversations: Arc::clone(&self.agent_conversations),
+            conversation_frames: Arc::clone(&self.agent_conversation_frames),
             admission: Arc::new(
                 svc_session_agent_port_adapters::ClonesClaimedOnOwningPeers {
                     roster: self.agent_roster(),
