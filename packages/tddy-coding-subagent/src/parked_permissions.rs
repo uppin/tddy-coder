@@ -79,6 +79,12 @@ impl ParkedPermissions {
         self.resolved.notified().await;
     }
 
+    /// Deliver `answer` as the main agent's: [`Self::answer_recording`] with
+    /// [`AnsweredBy::MainAgent`], the answerer a caller that names none is.
+    pub fn answer(&self, answer: &PermissionAnswer) -> Result<(), String> {
+        self.answer_recording(answer, AnsweredBy::MainAgent)
+    }
+
     /// Deliver `answer` to the pending request it names, recording `by` as who answered. A different
     /// `request_id`, a selected option the request did not offer, or no pending request at all is
     /// refused — naming the pending request where there is one — and leaves the pending request
