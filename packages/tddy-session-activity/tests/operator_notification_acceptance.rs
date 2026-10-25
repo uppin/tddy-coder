@@ -71,6 +71,9 @@ impl AnActivityHost {
             }),
             tddy_data_dir: data_dir.path().to_path_buf(),
             activity: Arc::new(AgentActivityHub::default()),
+            conversation_frames: Arc::new(
+                tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
+            ),
             notifications: Some(Arc::new(bus)),
             session_labels: Arc::new(EverySessionIsLabelled),
             deltas: Arc::new(NoSessionDeltaStores),
