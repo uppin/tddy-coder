@@ -8,18 +8,20 @@ import { useAcpReplay } from "../chat/useAcpReplay";
 import type { ChatMessage } from "../chat/useAgentChat";
 import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
 import { permissionRequestIdOf } from "./pendingPermission";
+import type { RosterHalf } from "./sessionRosterHalf";
 import { TranscriptPermissionRequest } from "./TranscriptPermissionRequest";
 
 export interface SubagentConversationDialogProps {
+  /** The session the conversation's transcript is read under. */
   sessionId: string;
   /** The conversation the clicked bubble stands for. */
   conversationId: string;
   /** The bubble's text — the agent and what it was asked — shown as the dialog's title. */
   title: string;
   sessionToken: string;
-  /** The daemon that owns the session (`SessionEntry.daemonInstanceId`); empty when not known. A
-   *  permission request's answer is addressed to it. */
-  daemonInstanceId: string;
+  /** The roster half of the session: the daemon that holds the conversation, and the session it is
+   *  held under. A permission request's answer is addressed to it. */
+  rosterHalf: RosterHalf;
   client: Client<typeof ActivityService>;
   onClose: () => void;
 }
@@ -43,7 +45,7 @@ export function SubagentConversationDialog({
   conversationId,
   title,
   sessionToken,
-  daemonInstanceId,
+  rosterHalf,
   client,
   onClose,
 }: SubagentConversationDialogProps) {
@@ -137,7 +139,7 @@ export function SubagentConversationDialog({
                 message={message}
                 sessionId={sessionId}
                 sessionToken={sessionToken}
-                daemonInstanceId={daemonInstanceId}
+                rosterHalf={rosterHalf}
                 conversationId={conversationId}
                 activityClient={client}
                 agentClient={agentClient}

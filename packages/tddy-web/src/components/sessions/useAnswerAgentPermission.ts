@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { ConnectError, type Client } from "@connectrpc/connect";
 import type { SessionAgentService } from "../../gen/session_agents_pb";
+import type { RosterHalf } from "./sessionRosterHalf";
 
 /**
  * Answers one permission request a subagent conversation parked, through
@@ -26,9 +27,9 @@ export function owningDaemonKnown(daemonInstanceId: string): boolean {
 export interface AnswerAgentPermissionParams {
   readonly client: Client<typeof SessionAgentService>;
   readonly sessionToken: string;
-  readonly sessionId: string;
-  /** The daemon that owns the session (`SessionEntry.daemonInstanceId`). Empty when not known. */
-  readonly daemonInstanceId: string;
+  /** The roster half of the session the conversation is open on: the daemon that holds the
+   *  conversation, and the session it is held under. An empty daemon id is "not known". */
+  readonly rosterHalf: RosterHalf;
   /** The conversation the request was parked in. */
   readonly conversationId: string;
 }
@@ -53,13 +54,13 @@ export interface AnswerAgentPermissionState {
 export function useAnswerAgentPermission({
   client,
   sessionToken,
-  sessionId,
-  daemonInstanceId,
+  rosterHalf,
   conversationId,
 }: AnswerAgentPermissionParams): AnswerAgentPermissionState {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<RecordedPermissionAnswer | null>(null);
+  const { sessionId, daemonInstanceId } = rosterHalf;
 
   const answer = useCallback(
     async (requestId: string, optionId: string) => {

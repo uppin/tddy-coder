@@ -6,6 +6,7 @@ import { SessionActivitiesPane } from "./SessionActivitiesPane";
 import { PARAM_CODE } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
+import { rosterHalfOf } from "./sessionRosterHalf";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { AgentPicker } from "./AgentPicker";
@@ -199,7 +200,7 @@ export function SessionMainPane({
       <SessionActivitiesPane
         sessionId={selectedSession.sessionId}
         sessionToken={sessionToken}
-        daemonInstanceId={selectedSession.daemonInstanceId}
+        rosterHalf={rosterHalfOf(selectedSession)}
         client={buildSessionActivityClient?.() ?? activityClient}
       />
     ) : null);

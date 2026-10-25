@@ -6,14 +6,16 @@ import { useAcpToolCallDetail } from "../chat/useAcpToolCallDetail";
 import type { PendingPermission } from "./PermissionRequestEntry";
 import { PermissionRequestEntry } from "./PermissionRequestEntry";
 import { answeredRecordOf, permissionRequestOf } from "./pendingPermission";
+import type { RosterHalf } from "./sessionRosterHalf";
 
 export interface TranscriptPermissionRequestProps {
   /** The transcript entry that records the request: a tool call whose id is `permission:<requestId>`. */
   message: ChatMessage;
+  /** The session the conversation is read under. */
   sessionId: string;
   sessionToken: string;
-  /** The daemon that owns the session (`SessionEntry.daemonInstanceId`); empty when not known. */
-  daemonInstanceId: string;
+  /** The roster half the request's answer is addressed to: the daemon holding the conversation. */
+  rosterHalf: RosterHalf;
   /** The subagent conversation the request was parked in. */
   conversationId: string;
   /** Reads the request's input from the conversation's transcript, as any tool call's bodies are read. */
@@ -36,7 +38,7 @@ export function TranscriptPermissionRequest({
   message,
   sessionId,
   sessionToken,
-  daemonInstanceId,
+  rosterHalf,
   conversationId,
   activityClient,
   agentClient,
@@ -94,10 +96,9 @@ export function TranscriptPermissionRequest({
         };
   return (
     <PermissionRequestEntry
-      sessionId={sessionId}
       conversationId={conversationId}
       sessionToken={sessionToken}
-      daemonInstanceId={daemonInstanceId}
+      rosterHalf={rosterHalf}
       permission={answered}
       client={agentClient}
     />

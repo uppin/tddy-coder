@@ -1,6 +1,7 @@
 import type { Client } from "@connectrpc/connect";
 import type { SessionAgentService } from "../../gen/session_agents_pb";
 import { Button } from "../ui/button";
+import type { RosterHalf } from "./sessionRosterHalf";
 import {
   OWNING_DAEMON_UNKNOWN_TEXT,
   owningDaemonKnown,
@@ -21,12 +22,12 @@ export interface PendingPermission {
 }
 
 export interface PermissionRequestEntryProps {
-  sessionId: string;
   conversationId: string;
   sessionToken: string;
-  /** The daemon that owns the session (`SessionEntry.daemonInstanceId`). Empty when not known, and
-   *  then the entry offers no answer and says so. */
-  daemonInstanceId: string;
+  /** The roster half of the session the conversation is open on: the daemon that holds the
+   *  conversation, and the session it is held under. An empty daemon id is "not known", and then
+   *  the entry offers no answer and says so. */
+  rosterHalf: RosterHalf;
   permission: PendingPermission;
   client: Client<typeof SessionAgentService>;
 }
@@ -38,28 +39,27 @@ export interface PermissionRequestEntryProps {
  * PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-web-approvals.md
  */
 export function PermissionRequestEntry({
-  sessionId,
   conversationId,
   sessionToken,
-  daemonInstanceId,
+  rosterHalf,
   permission,
   client,
 }: PermissionRequestEntryProps) {
   const { answer, pending, error, recorded } = useAnswerAgentPermission({
     client,
     sessionToken,
-    sessionId,
-    daemonInstanceId,
+    rosterHalf,
     conversationId,
   });
+  const ownerKnown = owningDaemonKnown(rosterHalf.daemonInstanceId);
 
   // Once the daemon has accepted an answer — from this entry, or one the transcript already records —
   // the choice is final and no option is offered again.
   const answeredBy = recorded?.answeredBy ?? permission.answeredBy ?? null;
   const answeredOptionId = recorded?.optionId ?? permission.answeredOptionId;
   const awaitingAnswer = permission.deferredToUser && answeredBy === null;
-  const offerOptions = awaitingAnswer && owningDaemonKnown(daemonInstanceId);
-  const cannotAnswer = awaitingAnswer && !owningDaemonKnown(daemonInstanceId);
+  const offerOptions = awaitingAnswer && ownerKnown;
+  const cannotAnswer = awaitingAnswer && !ownerKnown;
   const chosen =
     answeredOptionId === undefined
       ? undefined
