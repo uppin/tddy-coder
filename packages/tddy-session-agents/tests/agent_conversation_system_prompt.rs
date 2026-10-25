@@ -226,6 +226,15 @@ impl AgentSessions for TheTurnLoopsThisHostOpened {
             "this test takes no permission answer, so it names no GitHub user",
         ))
     }
+
+    fn answerer(
+        &self,
+        _session_token: &str,
+    ) -> Result<tddy_discovery::subagent::AnsweredBy, Status> {
+        Err(Status::internal(
+            "this test cancels no pending request, so it names no answerer",
+        ))
+    }
 }
 
 // ─── the ports an open never reaches ────────────────────────────────────────────────────────────

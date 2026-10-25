@@ -193,6 +193,15 @@ impl AgentSessions for NoTurnLoopHere {
     fn github_user(&self, _session_token: &str) -> Result<String, Status> {
         Ok("the-holding-daemons-user".to_string())
     }
+
+    fn answerer(
+        &self,
+        _session_token: &str,
+    ) -> Result<tddy_discovery::subagent::AnsweredBy, Status> {
+        Err(Status::internal(
+            "this test cancels no pending request, so it names no answerer",
+        ))
+    }
 }
 
 /// Every port this test does not reach. Each answers by naming itself, so a handler that starts

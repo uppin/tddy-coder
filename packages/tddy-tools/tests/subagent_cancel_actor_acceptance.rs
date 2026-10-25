@@ -1,5 +1,6 @@
-//! `subagent_cancel` names the actor that cancelled the conversation on the wire: the main agent, so the daemon
-//! can record who closed a deferred request. The daemon running a remote conversation's loop receives it.
+//! `subagent_cancel` reaches the daemon running a remote conversation's loop over the main agent's own session
+//! token, which is what that daemon derives the cancelling actor from: the token minted for the agent carries the
+//! agent principal, so the daemon records `main-agent` for a deferred request the cancel closes.
 //!
 //! The daemon is a fake `RpcClientTransport` that records each cancel it is sent. The setup mirrors
 //! `subagent_resume_defer_acceptance.rs`, copied rather than shared so each file reads alone.
@@ -115,7 +116,7 @@ fn open_on_the_roster(conversation_id: &str, revision: u64) {
 
 #[tokio::test]
 #[serial]
-async fn subagent_cancel_names_the_main_agent_as_the_actor_the_daemon_receives() {
+async fn subagent_cancel_reaches_the_daemon_over_the_main_agents_token() {
     // Given a conversation with a daemon-run loop, open on the roster
     let daemon = Arc::new(RecordingDaemon::default());
     open_on_the_roster("conv-cancel-7", 9_001);
@@ -143,10 +144,10 @@ async fn subagent_cancel_names_the_main_agent_as_the_actor_the_daemon_receives()
     )
     .expect("subagent_cancel returns JSON");
 
-    // Then the tool reports it cancelled, and the daemon was told by whom
+    // Then the tool reports it cancelled, and the daemon received it over the main agent's token
     assert_eq!(reply["cancelled"], json!(true), "{reply}");
     let cancels = daemon.cancels.lock().expect("read the cancels").clone();
     assert_eq!(cancels.len(), 1, "{cancels:?}");
     assert_eq!(cancels[0].conversation_id, "conv-cancel-7");
-    assert_eq!(cancels[0].cancelled_by, "main-agent");
+    assert_eq!(cancels[0].session_token, an_envelope().session_token);
 }

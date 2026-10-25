@@ -240,6 +240,15 @@ impl AgentSessions for OwnedLoopAnswering {
             "this test takes no permission answer, so it names no GitHub user",
         ))
     }
+
+    fn answerer(
+        &self,
+        _session_token: &str,
+    ) -> Result<tddy_discovery::subagent::AnsweredBy, Status> {
+        Err(Status::internal(
+            "this test cancels no pending request, so it names no answerer",
+        ))
+    }
 }
 
 /// Every other port. A turn on a conversation this host runs reaches none of them, so each one
@@ -574,6 +583,15 @@ impl AgentSessions for OwnedLoopOnce {
     fn github_user(&self, _session_token: &str) -> Result<String, Status> {
         Err(Status::internal(
             "this test takes no permission answer, so it names no GitHub user",
+        ))
+    }
+
+    fn answerer(
+        &self,
+        _session_token: &str,
+    ) -> Result<tddy_discovery::subagent::AnsweredBy, Status> {
+        Err(Status::internal(
+            "this test cancels no pending request, so it names no answerer",
         ))
     }
 }

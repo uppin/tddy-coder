@@ -17,7 +17,7 @@ use tddy_coding_subagent::{CodingAgentLaunch, CodingAgentLauncher};
 use tddy_core::agent_activity::{AgentActivityRecord, AGENT_ACTIVITY_FILENAME, STATUS_COMPLETED};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{AcpAgentCommand, McpServerSpec, SessionMetadata};
-use tddy_daemon_rpc::test_util::{test_service_with_coding_agent_launcher, TestDaemon};
+use tddy_daemon_rpc::test_util::{signing_test_service_with_coding_agent_launcher, TestDaemon};
 use tddy_discovery::subagent::SubagentError;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::acp_replay::tool_call_detail_in;
@@ -33,7 +33,7 @@ use tddy_service::proto::session_agents_svc::{
 };
 use tddy_service::subagent_conversation_replay::read_conversation_transcript;
 use tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher;
-use tddy_session_lifecycle::test_util::{TEST_TOKEN, TEST_USER};
+use tddy_session_lifecycle::test_util::{SignedTestCredentials, TEST_USER};
 
 /// `tddy-acp-stub` in the target directory cargo builds into.
 fn stub_agent_path() -> PathBuf {
@@ -117,6 +117,7 @@ const SESSION_ID: &str = "1780828020298-waiting";
 /// conversation paused on one permission request.
 struct PausedConversation {
     service: TestDaemon,
+    credentials: SignedTestCredentials,
     conversation_id: String,
     request_id: String,
     session_dir: PathBuf,
@@ -151,7 +152,7 @@ async fn a_conversation_paused_on_a_permission_request() -> PausedConversation {
         .to_string(),
     )
     .expect("write scenario");
-    let service = test_service_with_coding_agent_launcher(
+    let (service, credentials) = signing_test_service_with_coding_agent_launcher(
         sessions.path().to_path_buf(),
         ScenarioLauncher::new(&launcher_dir),
     );
@@ -169,7 +170,7 @@ async fn a_conversation_paused_on_a_permission_request() -> PausedConversation {
     service
         .session_agents_service()
         .attach_session_agent(Request::direct(AttachSessionAgentRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: credentials.user_token.clone(),
             session_id: SESSION_ID.to_string(),
             daemon_instance_id: String::new(),
             agent_id: agent_id.clone(),
@@ -180,7 +181,7 @@ async fn a_conversation_paused_on_a_permission_request() -> PausedConversation {
     let conversation_id = service
         .session_agents_service()
         .open_agent_conversation(Request::direct(OpenAgentConversationRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: credentials.user_token.clone(),
             session_id: SESSION_ID.to_string(),
             daemon_instance_id: String::new(),
             agent_id,
@@ -195,7 +196,7 @@ async fn a_conversation_paused_on_a_permission_request() -> PausedConversation {
     let mut prompt = service
         .session_agents_service()
         .prompt_agent_conversation(Request::direct(PromptAgentConversationRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: credentials.user_token.clone(),
             session_id: SESSION_ID.to_string(),
             daemon_instance_id: String::new(),
             conversation_id: conversation_id.clone(),
@@ -218,6 +219,7 @@ async fn a_conversation_paused_on_a_permission_request() -> PausedConversation {
 
     PausedConversation {
         service,
+        credentials,
         conversation_id,
         request_id,
         session_dir,
@@ -231,7 +233,7 @@ impl PausedConversation {
         &self,
     ) -> impl futures_util::Future<Output = Vec<AgentConversationChunk>> + '_ {
         let request = ResumeAgentConversationRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: self.credentials.user_token.clone(),
             session_id: SESSION_ID.to_string(),
             daemon_instance_id: String::new(),
             conversation_id: self.conversation_id.clone(),
@@ -264,7 +266,7 @@ impl PausedConversation {
         self.service
             .session_agents_service()
             .answer_agent_permission(Request::direct(AnswerAgentPermissionRequest {
-                session_token: TEST_TOKEN.to_string(),
+                session_token: self.credentials.user_token.clone(),
                 session_id: SESSION_ID.to_string(),
                 daemon_instance_id: String::new(),
                 conversation_id: self.conversation_id.clone(),
@@ -314,16 +316,18 @@ fn a_session_metadata(worktree: &Path) -> SessionMetadata {
 }
 
 impl PausedConversation {
-    /// Cancel the conversation, naming `cancelled_by` as the actor that cancelled it.
-    async fn cancel(&self, cancelled_by: &str) -> Result<CancelAgentConversationResponse, Status> {
+    /// Cancel the conversation over `session_token`: the daemon derives the actor from it.
+    async fn cancel_over(
+        &self,
+        session_token: &str,
+    ) -> Result<CancelAgentConversationResponse, Status> {
         self.service
             .session_agents_service()
             .cancel_agent_conversation(Request::direct(CancelAgentConversationRequest {
-                session_token: TEST_TOKEN.to_string(),
+                session_token: session_token.to_string(),
                 session_id: SESSION_ID.to_string(),
                 daemon_instance_id: String::new(),
                 conversation_id: self.conversation_id.clone(),
-                cancelled_by: cancelled_by.to_string(),
             }))
             .await
             .map(|response| response.into_inner())
@@ -367,7 +371,7 @@ async fn cancelling_a_deferred_request_as_the_main_agent_records_it_answered_by_
     tokio::pin!(resume);
     let _ = tokio::time::timeout(Duration::from_millis(300), &mut resume).await;
     paused
-        .cancel("main-agent")
+        .cancel_over(&paused.credentials.agent_token)
         .await
         .expect("cancelling a conversation with a pending request succeeds");
 
@@ -412,7 +416,7 @@ async fn cancelling_a_deferred_request_as_a_user_records_it_answered_by_that_log
     tokio::pin!(resume);
     let _ = tokio::time::timeout(Duration::from_millis(300), &mut resume).await;
     paused
-        .cancel(TEST_USER)
+        .cancel_over(&paused.credentials.user_token)
         .await
         .expect("cancelling a conversation with a pending request succeeds");
 
@@ -442,7 +446,7 @@ async fn an_answer_to_a_cancelled_request_is_refused_naming_the_conversation() {
     tokio::pin!(resume);
     let _ = tokio::time::timeout(Duration::from_millis(300), &mut resume).await;
     paused
-        .cancel("main-agent")
+        .cancel_over(&paused.credentials.agent_token)
         .await
         .expect("cancelling a conversation with a pending request succeeds");
 
@@ -474,7 +478,7 @@ async fn cancelling_a_deferred_request_completes_the_conversations_status_row() 
 
     // When the main agent cancels the conversation
     paused
-        .cancel("main-agent")
+        .cancel_over(&paused.credentials.agent_token)
         .await
         .expect("cancelling a conversation with a pending request succeeds");
 
