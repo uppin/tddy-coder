@@ -1,7 +1,8 @@
 //! The daemon derives who cancelled a conversation from the token the cancel arrives over: a token
 //! minted for the session's agent carries the agent principal and is recorded as `main-agent`, the
 //! operator's own token is recorded under its login, and an agent token no key this daemon trusts
-//! signed authenticates nothing. (A user's genuine token rewritten to claim the principal fails its
+//! signed authenticates nothing. The user's answer route refuses the agent's token: the main agent
+//! answers through `subagent_resume`, never as the user. (A user's genuine token rewritten to claim the principal fails its
 //! signature: `tddy-github`'s `session_token_v2` tests pin that.)
 //!
 //! The setup is `cancel_records_refusal_acceptance.rs`'s, over a host that signs real tokens, copied
@@ -24,8 +25,8 @@ use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::acp::{acp_agent_message, session_update, AcpAgentMessage};
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
-    AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
-    CancelAgentConversationResponse, OpenAgentConversationRequest, PromptAgentConversationRequest,
+    AgentConversationChunk, AnswerAgentPermissionRequest, AnswerAgentPermissionResponse,
+    AttachSessionAgentRequest, CancelAgentConversationRequest, CancelAgentConversationResponse, OpenAgentConversationRequest, PromptAgentConversationRequest,
     ResumeAgentConversationRequest, SessionAgentService as _,
 };
 use tddy_service::subagent_conversation_replay::read_conversation_transcript;
@@ -309,6 +310,27 @@ impl PausedConversation {
             .map(|response| response.into_inner())
     }
 
+    /// Answer the paused request over `session_token`, choosing `option_id`, as the web does.
+    async fn answer_over(
+        &self,
+        session_token: &str,
+        option_id: &str,
+    ) -> Result<AnswerAgentPermissionResponse, Status> {
+        self.service
+            .session_agents_service()
+            .answer_agent_permission(Request::direct(AnswerAgentPermissionRequest {
+                session_token: session_token.to_string(),
+                session_id: SESSION_ID.to_string(),
+                daemon_instance_id: String::new(),
+                conversation_id: self.conversation_id.clone(),
+                request_id: self.request_id.clone(),
+                option_id: option_id.to_string(),
+                cancelled: false,
+            }))
+            .await
+            .map(|response| response.into_inner())
+    }
+
     /// Defer the paused request to the user and give the resume time to register it.
     async fn defer_to_the_user(&self) {
         let resume = self.resume_deferring();
@@ -416,4 +438,32 @@ async fn an_agent_token_no_trusted_key_signed_cancels_nothing() {
         .await
         .expect("the conversation was left open");
     assert_eq!(paused.answered_by().as_deref(), Some(TEST_USER));
+}
+
+#[tokio::test]
+#[serial]
+async fn the_users_answer_route_refuses_the_agents_token() {
+    // Given a request the main agent deferred to the user
+    let paused = a_conversation_paused_on_a_permission_request().await;
+    paused.defer_to_the_user().await;
+
+    // When an answer arrives on the user's route over the agent's token
+    let refusal = paused
+        .answer_over(&paused.credentials.agent_token.clone(), "allow-once")
+        .await
+        .expect_err("the agent does not answer as the user");
+
+    // Then it is refused as not permitted, naming the route the agent answers through, and the
+    // request is still the user's to answer
+    assert_eq!(refusal.code, Code::PermissionDenied);
+    assert!(
+        refusal.message.contains("subagent_resume"),
+        "{}",
+        refusal.message
+    );
+    let answered = paused
+        .answer_over(&paused.credentials.user_token.clone(), "allow-once")
+        .await
+        .expect("the user still answers the request");
+    assert_eq!(answered.answered_by, TEST_USER);
 }
