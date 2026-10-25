@@ -59,6 +59,8 @@ const CONNECTED_SESSION = {
   isActive: true,
   projectId: "proj-docked-1",
   daemonInstanceId: "",
+  codebaseDaemonInstanceId: "",
+  codebaseSessionId: "",
   workflowGoal: "Live session",
   pendingElicitation: false,
 };
@@ -72,6 +74,8 @@ const DISCONNECTED_SESSION = {
   isActive: false,
   projectId: "proj-docked-1",
   daemonInstanceId: "",
+  codebaseDaemonInstanceId: "",
+  codebaseSessionId: "",
   workflowGoal: "Old work",
   pendingElicitation: false,
 };
