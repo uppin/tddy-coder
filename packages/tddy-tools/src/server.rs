@@ -261,36 +261,45 @@ pub struct PrAdoptInput {
     pub parents: Vec<String>,
 }
 
-/// Parameters for [`spawn_conversation`](PermissionServer::spawn_conversation).
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SpawnConversationInput {
-    #[schemars(description = "Prompt to seed the new interactive conversation with.")]
-    pub prompt: String,
-    #[schemars(
-        description = "Optional branch name for the new worktree (derived from the prompt when omitted)."
-    )]
-    #[serde(default)]
-    pub branch: Option<String>,
-    #[schemars(
-        description = "Optional base ref to root the new worktree on (defaults to the session's base)."
-    )]
-    #[serde(default)]
-    pub base_ref: Option<String>,
+/// Parameters for [`spawn_conversation`](PermissionServer::spawn_conversation): exactly
+/// `StartSession`'s arguments, advertised under its schema so the agent is offered every option the
+/// New-session form has (`#start-parity` 9/9).
+#[derive(Debug, Deserialize)]
+#[serde(transparent)]
+pub struct SpawnConversationInput(pub tddy_tool_engine::start_session_args::StartSessionArgs);
+
+impl schemars::JsonSchema for SpawnConversationInput {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SpawnConversationInput".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::Schema::try_from(
+            tddy_tool_engine::start_session_args::start_session_schema_without_choices(),
+        )
+        .expect("StartSession's schema is a JSON object")
+    }
 }
 
-/// Build the `spawn-conversation` relay request. Pure so it can be unit-tested without a socket;
-/// `None` options serialize to JSON `null`.
-fn spawn_conversation_request_json(
-    prompt: &str,
-    branch: Option<&str>,
-    base_ref: Option<&str>,
+/// Parameters for [`spawn_conversation_status`](PermissionServer::spawn_conversation_status) and
+/// [`spawn_conversation_cancel`](PermissionServer::spawn_conversation_cancel).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SpawnConversationStartInput {
+    #[schemars(description = "The start_id `spawn_conversation` returned.")]
+    pub start_id: String,
+}
+
+/// Build the `start-conversation` relay request: `StartSession`'s arguments, as given. Pure so it
+/// can be unit-tested without a socket.
+fn start_conversation_request_json(
+    args: &tddy_tool_engine::start_session_args::StartSessionArgs,
 ) -> serde_json::Value {
-    serde_json::json!({
-        "type": "spawn-conversation",
-        "prompt": prompt,
-        "branch": branch,
-        "base_ref": base_ref,
-    })
+    serde_json::json!({ "type": "start-conversation", "args": args })
+}
+
+/// Build a `conversation-start-status` (`verb`) or `conversation-start-cancel` relay request.
+pub(crate) fn conversation_start_request_json(verb: &str, start_id: &str) -> serde_json::Value {
+    serde_json::json!({ "type": verb, "start_id": start_id })
 }
 
 /// How [`PermissionServer::call_tool_by_name`] rejects a name it holds no dispatch arm for.
@@ -519,6 +528,14 @@ impl PermissionServer {
             "pr_adopt" => self.pr_adopt(Parameters(parse(args)?)),
             "pr_spawn_child" => self.pr_spawn_child(Parameters(parse(args)?)).await,
             "spawn_conversation" => self.spawn_conversation(Parameters(parse(args)?)).await,
+            "spawn_conversation_status" => {
+                self.spawn_conversation_status(Parameters(parse(args)?))
+                    .await
+            }
+            "spawn_conversation_cancel" => {
+                self.spawn_conversation_cancel(Parameters(parse(args)?))
+                    .await
+            }
             other => return Err(format!("{UNKNOWN_TOOL_REJECTION}: {other}")),
         })
     }
@@ -1090,27 +1107,59 @@ impl PermissionServer {
     }
 
     #[tool(
-        description = "Start a brand-new interactive coding conversation on a fresh worktree, seeded with the given prompt and tagged with the current session as its orchestrator. Returns the new child session id."
+        description = "Start a session — any type, on this host or another eligible one, with any option the New-session form offers — in this session's own project, tagged with the current session as its orchestrator. Returns at once with start_id, task_id and daemon_instance_id: follow it with spawn_conversation_status, stop it with spawn_conversation_cancel. A start the form would refuse outright (a CLI session without a model, a branch another session owns) is refused now, naming why."
     )]
     async fn spawn_conversation(
         &self,
         Parameters(p): Parameters<SpawnConversationInput>,
     ) -> String {
-        // Relay to the daemon over the per-session TDDY_SOCKET. The daemon spawns a new claude-cli
-        // conversation on a new worktree tagged with this session as its orchestrator — the generic
-        // sibling of `pr_spawn_child`, available to any managed session (e.g. grill-me).
-        let Some(socket) = permission_relay_socket_path() else {
-            return serde_json::json!({
-                "error": "TDDY_SOCKET is not set; spawn_conversation requires a managed session"
-            })
-            .to_string();
-        };
-        let request =
-            spawn_conversation_request_json(&p.prompt, p.branch.as_deref(), p.base_ref.as_deref());
-        match tddy_core::toolcall::dispatch_toolcall(&socket, request).await {
-            Ok(resp) => resp.to_string(),
-            Err(e) => serde_json::json!({ "error": e }).to_string(),
-        }
+        // Relay to the daemon over the per-session TDDY_SOCKET. The daemon runs the same start a
+        // `StartSession` call gets, linked to this session — available to any managed session that
+        // can spawn conversations (e.g. grill-me).
+        relay_to_daemon("spawn_conversation", start_conversation_request_json(&p.0)).await
+    }
+
+    #[tool(
+        description = "Read a conversation's start by start_id: its state (running, succeeded, failed or cancelled), the step it is in, the clone's progress, and once it succeeded its session_id, branch and worktree, or once it failed or was cancelled, why."
+    )]
+    async fn spawn_conversation_status(
+        &self,
+        Parameters(p): Parameters<SpawnConversationStartInput>,
+    ) -> String {
+        relay_to_daemon(
+            "spawn_conversation_status",
+            conversation_start_request_json("conversation-start-status", &p.start_id),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Cancel a conversation's start by start_id while it is running, on whichever host runs it. It returns at once; the start reads cancelled once it has stopped, and a session it had already created is removed."
+    )]
+    async fn spawn_conversation_cancel(
+        &self,
+        Parameters(p): Parameters<SpawnConversationStartInput>,
+    ) -> String {
+        relay_to_daemon(
+            "spawn_conversation_cancel",
+            conversation_start_request_json("conversation-start-cancel", &p.start_id),
+        )
+        .await
+    }
+}
+
+/// Send `request` to the daemon over the per-session `TDDY_SOCKET` and return its answer, or the
+/// refusal as `{"error": …}`.
+async fn relay_to_daemon(tool: &str, request: serde_json::Value) -> String {
+    let Some(socket) = permission_relay_socket_path() else {
+        return serde_json::json!({
+            "error": format!("TDDY_SOCKET is not set; {tool} requires a managed session")
+        })
+        .to_string();
+    };
+    match tddy_core::toolcall::dispatch_toolcall(&socket, request).await {
+        Ok(resp) => resp.to_string(),
+        Err(e) => serde_json::json!({ "error": e }).to_string(),
     }
 }
 
@@ -3468,11 +3517,12 @@ mod tests {
 
         // When the agent calls spawn_conversation
         let result = server
-            .spawn_conversation(Parameters(SpawnConversationInput {
-                prompt: "Implement plans/foo.md".to_string(),
-                branch: None,
-                base_ref: None,
-            }))
+            .spawn_conversation(Parameters(SpawnConversationInput(
+                tddy_tool_engine::start_session_args::StartSessionArgs {
+                    session_type: "workspace".to_string(),
+                    ..Default::default()
+                },
+            )))
             .await;
 
         // Then it returns an error naming TDDY_SOCKET rather than attempting a spawn
@@ -3584,18 +3634,24 @@ mod tests {
         assert!(err.is_err(), "unknown tool must be an error");
     }
 
-    /// The relayed request carries the `spawn-conversation` verb with the prompt and branch, so the
-    /// daemon's `ConversationSpawnHandler` receives an explicit prompt (not a PR-stack node id).
+    /// The relayed request carries `StartSession`'s arguments as given, under the
+    /// `start-conversation` verb, so the daemon starts exactly what the agent asked for.
     #[test]
-    fn spawn_conversation_request_relays_the_spawn_conversation_shape() {
-        // Given a prompt and an explicit branch
-        let request =
-            spawn_conversation_request_json("Implement plans/foo.md", Some("implement-foo"), None);
+    fn start_conversation_request_relays_the_start_session_arguments() {
+        // Given a workspace on a named branch
+        let args = tddy_tool_engine::start_session_args::StartSessionArgs {
+            session_type: "workspace".to_string(),
+            new_branch_name: "implement-foo".to_string(),
+            ..Default::default()
+        };
 
-        // Then the relayed request carries the spawn-conversation verb and fields
-        assert_eq!(request["type"], "spawn-conversation");
-        assert_eq!(request["prompt"], "Implement plans/foo.md");
-        assert_eq!(request["branch"], "implement-foo");
+        // When the request is built
+        let request = start_conversation_request_json(&args);
+
+        // Then the relayed request carries the verb and the arguments
+        assert_eq!(request["type"], "start-conversation");
+        assert_eq!(request["args"]["session_type"], "workspace");
+        assert_eq!(request["args"]["new_branch_name"], "implement-foo");
     }
 
     // -----------------------------------------------------------------------

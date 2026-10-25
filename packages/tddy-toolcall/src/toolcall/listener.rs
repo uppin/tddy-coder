@@ -3,10 +3,10 @@
 use super::build::BuildListQuery;
 use super::{
     build_executor, store_submit_result, transition_handler, ApproveRequestWire, AskRequestWire,
-    BuildListRequestWire, BuildOptions, BuildRequestWire, GithubTokenRequestWire,
-    InvokeActionRequestWire, ListActionsRequestWire, SpawnChildRequestWire,
-    SpawnConversationRequestWire, SubmitRequestWire, ToolCallRequest, ToolCallResponse,
-    TransitionRelayOutcome, TransitionRequestWire,
+    BuildListRequestWire, BuildOptions, BuildRequestWire, ConversationStartRequestWire,
+    GithubTokenRequestWire, InvokeActionRequestWire, ListActionsRequestWire, SpawnChildRequestWire,
+    SpawnConversationRequestWire, StartConversationRequestWire, SubmitRequestWire, ToolCallRequest,
+    ToolCallResponse, TransitionRelayOutcome, TransitionRequestWire,
 };
 use crate::session_actions::{
     classify_session_actions_exit_code, derive_repo_key, invoke_action_core, list_action_summaries,
@@ -72,6 +72,16 @@ pub trait ConversationSpawnHandler: Send + Sync {
         // TODO(spawn-conversation): implement in the grill-me handler
         let _ = start_id;
         Err("TODO(spawn-conversation): cancel_conversation_start".to_string())
+    }
+}
+
+/// A handler's JSON answer as the wire response, or its refusal.
+fn json_answer(answer: Result<String, String>) -> ToolCallResponse {
+    match answer.and_then(|json| {
+        serde_json::from_str(&json).map_err(|e| format!("the answer is not JSON: {e}"))
+    }) {
+        Ok(value) => ToolCallResponse::ConversationStartJson { value },
+        Err(message) => ToolCallResponse::Error { message },
     }
 }
 
@@ -373,6 +383,9 @@ impl ToolcallRpcService {
                 | "Transition"
                 | "SpawnChild"
                 | "SpawnConversation"
+                | "StartConversation"
+                | "ConversationStartStatus"
+                | "ConversationStartCancel"
                 | "GithubToken"
         ) {
             toolcall_log(&format!("[error] unknown method: {}", method));
@@ -395,6 +408,9 @@ impl ToolcallRpcService {
             "Transition" => self.handle_transition(request),
             "SpawnChild" => self.handle_spawn_child(request).await,
             "SpawnConversation" => self.handle_spawn_conversation(request).await,
+            "StartConversation" => self.handle_start_conversation(request).await,
+            "ConversationStartStatus" => self.handle_conversation_start_status(request).await,
+            "ConversationStartCancel" => self.handle_conversation_start_cancel(request).await,
             "GithubToken" => self.handle_github_token(request).await,
             _ => unreachable!("checked above"),
         }
@@ -491,6 +507,76 @@ impl ToolcallRpcService {
                 Err(message) => ToolCallResponse::Error { message },
             },
         )
+    }
+
+    /// start-conversation: start a session of any type, on any eligible host, from `StartSession`'s
+    /// own arguments, linked to this session, through the per-instance [`ConversationSpawnHandler`].
+    /// Answers with the start's handle.
+    async fn handle_start_conversation(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<ToolCallResponse, Status> {
+        let wire: StartConversationRequestWire = serde_json::from_value(request).map_err(|e| {
+            Status::invalid_argument(format!("invalid start-conversation request: {e}"))
+        })?;
+        toolcall_log("[start-conversation]");
+        let Some(handler) = self.conversation_spawn_handler.clone() else {
+            return Ok(Self::spawn_only_in_a_managed_session());
+        };
+        Ok(json_answer(
+            handler.start_conversation(&wire.args.to_string()).await,
+        ))
+    }
+
+    /// conversation-start-status: the start ledger's record of a conversation's start.
+    async fn handle_conversation_start_status(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<ToolCallResponse, Status> {
+        let wire: ConversationStartRequestWire = serde_json::from_value(request).map_err(|e| {
+            Status::invalid_argument(format!("invalid conversation-start-status request: {e}"))
+        })?;
+        toolcall_log(&format!(
+            "[conversation-start-status] start_id={}",
+            wire.start_id
+        ));
+        let Some(handler) = self.conversation_spawn_handler.clone() else {
+            return Ok(Self::spawn_only_in_a_managed_session());
+        };
+        Ok(json_answer(
+            handler.conversation_start_status(&wire.start_id).await,
+        ))
+    }
+
+    /// conversation-start-cancel: stop a conversation's start on whichever host runs it.
+    async fn handle_conversation_start_cancel(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<ToolCallResponse, Status> {
+        let wire: ConversationStartRequestWire = serde_json::from_value(request).map_err(|e| {
+            Status::invalid_argument(format!("invalid conversation-start-cancel request: {e}"))
+        })?;
+        toolcall_log(&format!(
+            "[conversation-start-cancel] start_id={}",
+            wire.start_id
+        ));
+        let Some(handler) = self.conversation_spawn_handler.clone() else {
+            return Ok(Self::spawn_only_in_a_managed_session());
+        };
+        Ok(
+            match handler.cancel_conversation_start(&wire.start_id).await {
+                Ok(()) => ToolCallResponse::ConversationStartJson {
+                    value: serde_json::json!({ "start_id": wire.start_id, "cancel_requested": true }),
+                },
+                Err(message) => ToolCallResponse::Error { message },
+            },
+        )
+    }
+
+    fn spawn_only_in_a_managed_session() -> ToolCallResponse {
+        ToolCallResponse::Error {
+            message: "spawn_conversation is only available in a managed session".to_string(),
+        }
     }
 
     /// github-token: the token of the account this session's project acts as, resolved by the
@@ -1082,6 +1168,92 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["status"], "ok");
         assert_eq!(v["session_id"], "child-session-123");
+    }
+
+    /// The three universal-start requests reach the bound handler with their arguments and answer
+    /// with its JSON: the handle of a start, a start's record, and the cancel's acknowledgement.
+    #[tokio::test]
+    async fn conversation_start_requests_reach_the_bound_handler_and_answer_its_json() {
+        /// Echoes what it was asked, so the test can tell each request reached its own method.
+        struct EchoingStarts;
+        #[async_trait]
+        impl ConversationSpawnHandler for EchoingStarts {
+            async fn spawn_conversation(
+                &self,
+                _prompt: &str,
+                _branch: Option<&str>,
+                _base_ref: Option<&str>,
+            ) -> Result<String, String> {
+                Err("not used".to_string())
+            }
+            async fn start_conversation(&self, args_json: &str) -> Result<String, String> {
+                let args: serde_json::Value = serde_json::from_str(args_json).unwrap();
+                Ok(json!({ "start_id": "s-1", "session_type": args["session_type"] }).to_string())
+            }
+            async fn conversation_start_status(&self, start_id: &str) -> Result<String, String> {
+                Ok(json!({ "start_id": start_id, "state": "running" }).to_string())
+            }
+            async fn cancel_conversation_start(&self, start_id: &str) -> Result<(), String> {
+                (start_id == "s-1")
+                    .then_some(())
+                    .ok_or_else(|| format!("no start {start_id}"))
+            }
+        }
+        async fn answer(
+            service: &ToolcallRpcService,
+            method: &str,
+            request: serde_json::Value,
+        ) -> serde_json::Value {
+            let req = RpcMessage::new(
+                serde_json::to_vec(&request).unwrap(),
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+            );
+            let RpcResult::Unary(Ok(bytes)) = service
+                .handle_rpc("tddy.toolcall.ToolcallService", method, &req)
+                .await
+            else {
+                panic!("expected a unary {method} response");
+            };
+            serde_json::from_slice(&bytes).unwrap()
+        }
+
+        // Given a service with a bound handler
+        let (service, _rx, _repo_root) = a_toolcall_service();
+        let service = service.with_conversation_spawn_handler(Some(Arc::new(EchoingStarts)));
+
+        // When each request is dispatched
+        let started = answer(
+            &service,
+            "StartConversation",
+            json!({"type":"start-conversation","args":{"session_type":"workspace"}}),
+        )
+        .await;
+        let status = answer(
+            &service,
+            "ConversationStartStatus",
+            json!({"type":"conversation-start-status","start_id":"s-1"}),
+        )
+        .await;
+        let cancelled = answer(
+            &service,
+            "ConversationStartCancel",
+            json!({"type":"conversation-start-cancel","start_id":"s-1"}),
+        )
+        .await;
+        let refused = answer(
+            &service,
+            "ConversationStartCancel",
+            json!({"type":"conversation-start-cancel","start_id":"s-2"}),
+        )
+        .await;
+
+        // Then each answers the handler's JSON, and a refusal is the handler's own words
+        assert_eq!(started["start_id"], "s-1");
+        assert_eq!(started["session_type"], "workspace");
+        assert_eq!(status["state"], "running");
+        assert_eq!(cancelled["cancel_requested"], true);
+        assert_eq!(refused["status"], "error");
+        assert_eq!(refused["message"], "no start s-2");
     }
 
     /// Without a bound handler, `spawn-conversation` is refused with an actionable message rather

@@ -16,7 +16,7 @@
 //! every call answered `{"error":"unknown tool: ListActions","is_error":true}`. They are now
 //! merged only where the host claims to serve them, with
 //! `tddy_core::session_actions::SESSION_ACTION_TOOLS_ENV`, which `tddy-sandbox-app`'s spawn path
-//! sets and the daemon path does not. The surface is therefore **47** where they are served and
+//! sets and the daemon path does not. The surface is therefore **49** where they are served and
 //! **44** where they are not, differing in exactly those three.
 
 #[path = "support/exec_catalog.rs"]
@@ -35,9 +35,9 @@ const IO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Every tool a session with all four of its optional surfaces present advertises, sorted.
 ///
 /// Held as names rather than a length so that a tool renamed, dropped or re-homed during a crate
-/// move fails here by name. The count is the array's own length — `[&str; 47]` is the "exactly 47"
+/// move fails here by name. The count is the array's own length — `[&str; 49]` is the "exactly 49"
 /// half of the assertion, checked by the compiler.
-const EVERY_ADVERTISED_TOOL: [&str; 47] = [
+const EVERY_ADVERTISED_TOOL: [&str; 49] = [
     "Await",
     "Delete",
     "Glob",
@@ -75,6 +75,8 @@ const EVERY_ADVERTISED_TOOL: [&str; 47] = [
     "pr_update_planned",
     "request_action",
     "spawn_conversation",
+    "spawn_conversation_cancel",
+    "spawn_conversation_status",
     "subagent_await",
     "subagent_cancel",
     "subagent_diff",
@@ -282,7 +284,7 @@ async fn advertises_all_forty_seven_tool_names_where_the_host_serves_the_action_
     assert_eq!(
         advertised,
         names(&EVERY_ADVERTISED_TOOL),
-        "the fully configured MCP surface must be exactly these 47 tools"
+        "the fully configured MCP surface must be exactly these 49 tools"
     );
 }
 

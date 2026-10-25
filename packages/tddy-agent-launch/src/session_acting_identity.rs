@@ -148,6 +148,12 @@ impl SessionAccountAccess {
         Self::new(None, Arc::new(|_| None), "")
     }
 
+    /// The token the session this access was built for started with; empty for [`Self::none`].
+    /// What a start the session asks for authenticates as.
+    pub fn session_token(&self) -> &str {
+        &self.session_token
+    }
+
     /// The account `accounts` name — one `acting_identity` resolution over what the session's vault
     /// holds right now, or the reason there is none.
     pub fn acting_identity(

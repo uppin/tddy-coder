@@ -20,8 +20,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_core::toolcall::{
-    ConversationSpawnHandler, GithubCredentialHandler, GITHUB_TOKEN_METHOD, HOST_SESSION_SERVICE,
-    SPAWN_CONVERSATION_METHOD,
+    ConversationSpawnHandler, GithubCredentialHandler, CONVERSATION_START_CANCEL_METHOD,
+    CONVERSATION_START_STATUS_METHOD, GITHUB_TOKEN_METHOD, HOST_SESSION_SERVICE,
+    SPAWN_CONVERSATION_METHOD, START_CONVERSATION_METHOD,
 };
 use tddy_rpc::bridge::{RpcResult, RpcService};
 use tddy_rpc::{RpcClientTransport, RpcMessage, Status};
@@ -179,6 +180,48 @@ impl ConversationSpawnHandler for DaemonRelayConversationSpawnHandler {
             .as_str()
             .map(str::to_string)
             .ok_or_else(|| "daemon spawn-conversation response missing session_id".to_string())
+    }
+
+    async fn start_conversation(&self, args_json: &str) -> Result<String, String> {
+        let args: serde_json::Value = serde_json::from_str(args_json)
+            .map_err(|e| format!("invalid spawn_conversation arguments: {e}"))?;
+        let handle = self
+            .host
+            .call(
+                START_CONVERSATION_METHOD,
+                serde_json::json!({ "type": "start-conversation", "args": args }),
+                // The start may have begun when the connection dropped; never send it twice.
+                false,
+            )
+            .await
+            .map_err(|e| format!("daemon start-conversation relay failed: {e}"))?;
+        Ok(handle.to_string())
+    }
+
+    async fn conversation_start_status(&self, start_id: &str) -> Result<String, String> {
+        let record = self
+            .host
+            .call(
+                CONVERSATION_START_STATUS_METHOD,
+                serde_json::json!({ "type": "conversation-start-status", "start_id": start_id }),
+                // A read: safe to repeat on a fresh connection.
+                true,
+            )
+            .await
+            .map_err(|e| format!("daemon conversation-start-status relay failed: {e}"))?;
+        Ok(record.to_string())
+    }
+
+    async fn cancel_conversation_start(&self, start_id: &str) -> Result<(), String> {
+        self.host
+            .call(
+                CONVERSATION_START_CANCEL_METHOD,
+                serde_json::json!({ "type": "conversation-start-cancel", "start_id": start_id }),
+                false,
+            )
+            .await
+            .map_err(|e| format!("daemon conversation-start-cancel relay failed: {e}"))?;
+        Ok(())
     }
 }
 

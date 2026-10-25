@@ -16,6 +16,25 @@ pub(crate) fn recipe_enables_conversation_spawn(recipe_name: &str) -> bool {
     recipe_name == "grill-me"
 }
 
+/// What `metadata`'s role entitles its agent to among the project-home tools: the project-home
+/// session's own, a conversation spawner's four start tools, or none.
+pub fn session_tool_role(
+    metadata: &tddy_core::SessionMetadata,
+) -> tddy_tool_engine::project_home_tools::SessionToolRole {
+    use tddy_tool_engine::project_home_tools::SessionToolRole;
+    if metadata.session_role.as_deref() == Some(tddy_core::session_metadata::PROJECT_HOME_ROLE) {
+        SessionToolRole::ProjectHome
+    } else if metadata
+        .recipe
+        .as_deref()
+        .is_some_and(recipe_enables_conversation_spawn)
+    {
+        SessionToolRole::ConversationSpawner
+    } else {
+        SessionToolRole::Ordinary
+    }
+}
+
 /// Derive a git-friendly branch slug from a free-form conversation prompt when the agent did not
 /// supply an explicit `branch`. Lowercased, non-alphanumeric runs collapsed to a single `-`, and
 /// truncated so the worktree branch name stays reasonable. Falls back to a stable label when the

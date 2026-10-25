@@ -98,15 +98,15 @@ Do **not** rely on `tddy-tools submit` to finish the workflow; normal assistant 
 
 ## Hand off to implementation (required)
 
-Once **both** brief files exist, commit the working-copy brief (e.g. **`plans/<slug>.md`**), then start a fresh implementation conversation by calling the **`spawn_conversation`** tool from a shell (the session sets **`TDDY_SOCKET`**; run the CLI from **Bash**). This spawns a new interactive conversation on its own worktree, tagged with this session as its orchestrator, and does **not** replace this planning turn.
+Once **both** brief files exist, commit the working-copy brief (e.g. **`plans/<slug>.md`**), then start a fresh implementation conversation by calling the **`spawn_conversation`** tool from a shell (the session sets **`TDDY_SOCKET`**; run the CLI from **Bash**). This starts a new session in this project — on its own worktree, tagged with this session as its orchestrator — and does **not** replace this planning turn. The tool takes **`StartSession`'s arguments** and returns at once with a **`start_id`**: follow the start with **`tddy-tools spawn-conversation-status --data '{{"start_id":"<start_id>"}}'`** and stop it with **`tddy-tools spawn-conversation-cancel`**. A `claude-cli` conversation needs a **`model`** (it is not inherited from this session).
 
 **Command shape** (escape JSON for your shell). Reference the **absolute** session-artifact brief path — **`{session_dir}/artifacts/{basename}`** — and the committed working-copy brief so the implementer can read both:
 
 ```text
-tddy-tools spawn-conversation --data '{{"prompt":"Read the plan brief at {session_dir}/artifacts/{basename} and plans/<slug>.md, then implement it.","branch":"<slug>"}}'
+tddy-tools spawn-conversation --data '{{"session_type":"claude-cli","model":"<model id>","branch_worktree_intent":"new_branch_from_base","new_branch_name":"<slug>","initial_prompt":"Read the plan brief at {session_dir}/artifacts/{basename} and plans/<slug>.md, then implement it."}}'
 ```
 
-Derive **`<slug>`** from the feature intent (a short, kebab-case label). Omit **`branch`** to let the daemon derive one from the prompt.
+Derive **`<slug>`** from the feature intent (a short, kebab-case label). Use this session's own model id for **`model`** unless the user asked for another.
 
 ## Style
 

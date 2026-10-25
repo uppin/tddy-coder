@@ -100,7 +100,8 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         sessions,
         agent_command_line_path,
         agent_environment_path,
-        account_access: SessionAccountAccess::none(),
+        // The orchestrator's own session token: a start it asks for authenticates as it.
+        account_access: SessionAccountAccess::new(None, Arc::new(|_| None), VALID_TOKEN),
         _vault: None,
         _repo: repo,
         _config_dir: config_dir,

@@ -24,7 +24,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use tddy_core::toolcall::{
-    ConversationSpawnHandler, GithubCredentialHandler, SpawnConversationRequestWire,
+    ConversationSpawnHandler, ConversationStartRequestWire, GithubCredentialHandler,
+    SpawnConversationRequestWire, StartConversationRequestWire,
 };
 use tddy_rpc::bridge::{RpcResult, RpcService};
 use tddy_rpc::{RpcMessage, Status};
@@ -32,7 +33,8 @@ use tddy_rpc::{RpcMessage, Status};
 // Service/method names are shared with the coder-side relay client via tddy-core so both agree on
 // the address without either crate depending on the other.
 pub use tddy_core::toolcall::{
-    GITHUB_TOKEN_METHOD, HOST_SESSION_SERVICE, SPAWN_CONVERSATION_METHOD,
+    CONVERSATION_START_CANCEL_METHOD, CONVERSATION_START_STATUS_METHOD, GITHUB_TOKEN_METHOD,
+    HOST_SESSION_SERVICE, SPAWN_CONVERSATION_METHOD, START_CONVERSATION_METHOD,
 };
 
 /// What the daemon registered for one tool session when it started or resumed it.
@@ -210,6 +212,57 @@ impl HostSessionService {
             .map_err(|e| Status::internal(format!("serialize spawn-conversation response: {e}")))
     }
 
+    /// The handler of the session a request names, refused when its recipe spawns no conversations.
+    fn conversation_handler_for(
+        &self,
+        payload: &[u8],
+    ) -> Result<Arc<dyn ConversationSpawnHandler>, Status> {
+        self.session_for(payload)?
+            .conversation_spawn_handler
+            .ok_or_else(|| {
+                Status::failed_precondition("this session's recipe does not spawn conversations")
+            })
+    }
+
+    async fn handle_start_conversation(&self, payload: &[u8]) -> Result<Vec<u8>, Status> {
+        let handler = self.conversation_handler_for(payload)?;
+        let wire: StartConversationRequestWire = serde_json::from_slice(payload).map_err(|e| {
+            Status::invalid_argument(format!("invalid start-conversation request: {e}"))
+        })?;
+        let handle = handler
+            .start_conversation(&wire.args.to_string())
+            .await
+            .map_err(Status::internal)?;
+        Ok(handle.into_bytes())
+    }
+
+    async fn handle_conversation_start_status(&self, payload: &[u8]) -> Result<Vec<u8>, Status> {
+        let handler = self.conversation_handler_for(payload)?;
+        let wire: ConversationStartRequestWire = serde_json::from_slice(payload).map_err(|e| {
+            Status::invalid_argument(format!("invalid conversation-start-status request: {e}"))
+        })?;
+        let record = handler
+            .conversation_start_status(&wire.start_id)
+            .await
+            .map_err(Status::internal)?;
+        Ok(record.into_bytes())
+    }
+
+    async fn handle_conversation_start_cancel(&self, payload: &[u8]) -> Result<Vec<u8>, Status> {
+        let handler = self.conversation_handler_for(payload)?;
+        let wire: ConversationStartRequestWire = serde_json::from_slice(payload).map_err(|e| {
+            Status::invalid_argument(format!("invalid conversation-start-cancel request: {e}"))
+        })?;
+        handler
+            .cancel_conversation_start(&wire.start_id)
+            .await
+            .map_err(Status::internal)?;
+        serde_json::to_vec(
+            &serde_json::json!({ "start_id": wire.start_id, "cancel_requested": true }),
+        )
+        .map_err(|e| Status::internal(format!("serialize conversation-start-cancel response: {e}")))
+    }
+
     async fn handle_github_token(&self, payload: &[u8]) -> Result<Vec<u8>, Status> {
         let session = self.session_for(payload)?;
         let handler = session.github_credential_handler.ok_or_else(|| {
@@ -238,6 +291,15 @@ impl RpcService for HostSessionService {
         }
         RpcResult::Unary(match method {
             SPAWN_CONVERSATION_METHOD => self.handle_spawn_conversation(&message.payload).await,
+            START_CONVERSATION_METHOD => self.handle_start_conversation(&message.payload).await,
+            CONVERSATION_START_STATUS_METHOD => {
+                self.handle_conversation_start_status(&message.payload)
+                    .await
+            }
+            CONVERSATION_START_CANCEL_METHOD => {
+                self.handle_conversation_start_cancel(&message.payload)
+                    .await
+            }
             GITHUB_TOKEN_METHOD => self.handle_github_token(&message.payload).await,
             _ => Err(Status::unimplemented(format!(
                 "HostSessionService has no method {service}/{method}"

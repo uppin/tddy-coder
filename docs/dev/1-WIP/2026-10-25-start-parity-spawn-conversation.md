@@ -69,12 +69,12 @@ n6 session-follow · n7 terminate | n8 disk-refresh · n9 spawn-conversation`, w
 
 ## Affected Packages
 
-- [ ] `tddy-agent-launch`
-- [ ] `tddy-tools`
-- [ ] `tddy-toolcall` — the handler trait's universal-start methods
-- [ ] `tddy-session-lifecycle` — handler tests
-- [ ] `tddy-tool-engine`
-- [ ] `tddy-daemon-rpc`
+- [x] `tddy-agent-launch`
+- [x] `tddy-tools`
+- [x] `tddy-toolcall` — the handler trait's universal-start methods
+- [x] `tddy-session-lifecycle` — handler tests
+- [x] `tddy-tool-engine`
+- [x] `tddy-daemon-rpc`
 
 ## Related Feature Documentation
 
@@ -158,6 +158,29 @@ Tests are written in the `fluent-tests` style (Given / When / Then).
   grill-me-only, claude-cli-only or local-only rule. Who may start stays: project-home and
   spawn-capable sessions, each limited to its own project (Q2).
 
+- **Authentication: the orchestrator's start token** (green). The handler starts as the orchestrator
+  session itself, with the token its `account_access` already holds (`SessionAccountAccess::session_token`),
+  rather than reaching the start core below the token check. The token travels the whole start — the
+  forward to a peer host, the cancel's `CancelTask`, the undo of a cancelled start — so a start below the
+  check could not be forwarded or cancelled on another host. A session holding no token starts nothing
+  (a refusal, not a fallback). The test harness's `account_access` now carries the valid token.
+- **Shared start path** (green): the project-home port's begin-and-record and cancel moved to
+  `LaunchSessions::begin_recorded_start` / `cancel_recorded_start`, and the ledger's once-per-process
+  recovery to `StartLedger::recovered_in_session_dir`, so a grill-me session that polls its ledger through
+  the `GetSessionStart` tool and one that spawns through `spawn_conversation` cannot race the recovery
+  into marking a live start failed. Behaviour of `StartSession` / `CancelSessionStart` is unchanged.
+- **`spawn_conversation`'s shape is replaced** (green): it takes `StartSessionArgs` (the old `prompt`
+  is `initial_prompt`, `branch` is `new_branch_name` with `branch_worktree_intent`). The model is no
+  longer inherited from the orchestrator: a `claude-cli` conversation names its own (the grill-me prompt
+  says so). `stack_parent` is not defaulted to the caller: the orchestrator link is
+  `orchestrator_session_id`, and a grill-me session has no stack to resolve a base from.
+- **Legacy relay kept**: the old `SpawnConversation` toolcall verb and `ConversationSpawnHandler::spawn_conversation`
+  stay, as an already-running tddy-coder session may carry an older `tddy-tools`; nothing in this tree sends it.
+- **Offered by capability**: `session_tool_role` (grill-me recipe) selects the four start tools for the
+  daemon catalogue (`session_offered_catalog_for`) and for serving (`project_home_caller` accepts a
+  spawner for exactly those four). A spawner whose call is forwarded from another host is still refused
+  (the owner confirms project-home only).
+
 ## Refactoring Needed
 ### From /red (TDD red phase)
 ### From /validate-changes
@@ -183,7 +206,7 @@ Tests are written in the `fluent-tests` style (Given / When / Then).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer: "finish the remaining nodes without stopping", 2026-10-25)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

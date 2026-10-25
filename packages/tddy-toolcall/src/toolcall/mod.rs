@@ -211,6 +211,11 @@ pub enum ToolCallResponse {
     SpawnChildOk {
         session_id: String,
     },
+    /// A `start-conversation`, `conversation-start-status` or `conversation-start-cancel` relay
+    /// succeeded; carries the start's handle, its ledger record, or the cancel's acknowledgement.
+    ConversationStartJson {
+        value: serde_json::Value,
+    },
     /// A `github-token` relay succeeded; carries the token the session's project account resolved
     /// to. A refusal travels as [`ToolCallResponse::Error`] with the resolver's own message.
     GithubTokenOk {
@@ -310,6 +315,14 @@ impl ToolCallResponse {
             ToolCallResponse::SpawnChildOk { session_id } => {
                 serde_json::json!({"status":"ok","session_id":session_id})
             }
+            ToolCallResponse::ConversationStartJson { value } => {
+                let mut value = value.clone();
+                if let serde_json::Value::Object(map) = &mut value {
+                    map.entry("status".to_string())
+                        .or_insert_with(|| serde_json::Value::String("ok".to_string()));
+                }
+                value
+            }
             ToolCallResponse::GithubTokenOk { token } => {
                 serde_json::json!({"status":"ok","token":token.expose()})
             }
@@ -392,6 +405,25 @@ pub struct SpawnConversationRequestWire {
     pub base_ref: Option<String>,
 }
 
+/// Wire format for `start-conversation` request (from tddy-tools): `StartSession`'s own arguments,
+/// as the `StartSessionArgs` JSON object, for the daemon to start as the calling session's
+/// conversation.
+#[derive(Debug, Deserialize)]
+pub struct StartConversationRequestWire {
+    pub r#type: String,
+    /// `tddy_tool_engine::start_session_args::StartSessionArgs`, left as JSON: this crate does not
+    /// depend on the tool engine, and the handler that starts the session parses it.
+    pub args: serde_json::Value,
+}
+
+/// Wire format for `conversation-start-status` and `conversation-start-cancel` requests (from
+/// tddy-tools): the `start_id` the start's handle named.
+#[derive(Debug, Deserialize)]
+pub struct ConversationStartRequestWire {
+    pub r#type: String,
+    pub start_id: String,
+}
+
 /// Wire format for `github-token` request (from tddy-tools). It names no session and no project:
 /// the listener is bound per session, so which account answers is decided by who holds the socket.
 #[derive(Debug, Deserialize)]
@@ -406,6 +438,13 @@ pub struct GithubTokenRequestWire {
 pub const HOST_SESSION_SERVICE: &str = "tddy.host.HostSessionService";
 /// Unary method on [`HOST_SESSION_SERVICE`]: spawn a new conversation for the calling session.
 pub const SPAWN_CONVERSATION_METHOD: &str = "SpawnConversation";
+/// Unary method on [`HOST_SESSION_SERVICE`]: start a conversation of any session type from
+/// `StartSession`'s arguments, answering with the start's handle.
+pub const START_CONVERSATION_METHOD: &str = "StartConversation";
+/// Unary method on [`HOST_SESSION_SERVICE`]: the start ledger's record of a conversation's start.
+pub const CONVERSATION_START_STATUS_METHOD: &str = "ConversationStartStatus";
+/// Unary method on [`HOST_SESSION_SERVICE`]: cancel a conversation's start.
+pub const CONVERSATION_START_CANCEL_METHOD: &str = "ConversationStartCancel";
 /// Unary method on [`HOST_SESSION_SERVICE`]: the GitHub token of the account the **named** session's
 /// project acts as. Like every request on that service it carries the caller's `session_id`, because
 /// the socket it arrives on serves every tool session of one OS user.

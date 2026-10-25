@@ -15,9 +15,10 @@
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
@@ -105,6 +106,9 @@ pub trait StartedSessionDetails: Send + Sync {
     ) -> Option<(String, String)>;
 }
 
+/// The ledgers this process has already recovered, by their session directory.
+static RECOVERED_LEDGERS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+
 /// The ledger of the starts one orchestrator session asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartLedger {
@@ -117,6 +121,29 @@ impl StartLedger {
         Self {
             dir: session_dir.join("artifacts").join("session-starts"),
         }
+    }
+
+    /// The ledger kept in `session_dir`, with the starts an earlier daemon left running marked
+    /// failed the first time this process opens it. A start is only ever begun in a ledger after
+    /// that, so every caller that begins or reads starts opens it here: a record still `running`
+    /// is then one an earlier daemon was draining when it stopped, never one this process runs.
+    pub fn recovered_in_session_dir(session_dir: &Path) -> anyhow::Result<Self> {
+        let ledger = Self::in_session_dir(session_dir);
+        let recovered = RECOVERED_LEDGERS.get_or_init(Default::default);
+        let mut recovered = recovered
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !recovered.contains(session_dir) {
+            let count = ledger.recover_interrupted()?;
+            if count > 0 {
+                log::info!(
+                    "start ledger {}: {count} start(s) left running by an earlier daemon were marked failed",
+                    ledger.dir.display()
+                );
+            }
+            recovered.insert(session_dir.to_path_buf());
+        }
+        Ok(ledger)
     }
 
     /// The record of `start_id`, or an error naming it when this ledger has none.

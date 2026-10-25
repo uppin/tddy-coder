@@ -34,8 +34,14 @@ enum Subcommand {
     /// Ask clarification questions. Blocks until user answers in TUI.
     Ask(cli::AskArgs),
 
-    /// Start a new implementation conversation on a fresh worktree (grill-me handoff).
+    /// Start a session in this session's project, linked to it (grill-me handoff): StartSession's arguments.
     SpawnConversation(cli::SpawnConversationArgs),
+
+    /// Read a conversation's start by `start_id`.
+    SpawnConversationStatus(cli::SpawnConversationStatusArgs),
+
+    /// Cancel a conversation's start by `start_id`.
+    SpawnConversationCancel(cli::SpawnConversationCancelArgs),
 
     /// List every tool available to the session as JSON (web Inspector → Tools panel).
     ListTools(cli::ListToolsArgs),
@@ -168,6 +174,12 @@ async fn main() -> Result<()> {
         Some(Subcommand::Submit(s)) => cli::run_submit(s).await?,
         Some(Subcommand::Ask(s)) => cli::run_ask(s).await?,
         Some(Subcommand::SpawnConversation(s)) => cli::run_spawn_conversation(s).await?,
+        Some(Subcommand::SpawnConversationStatus(s)) => {
+            cli::run_spawn_conversation_status(s).await?
+        }
+        Some(Subcommand::SpawnConversationCancel(s)) => {
+            cli::run_spawn_conversation_cancel(s).await?
+        }
         Some(Subcommand::ListTools(s)) => cli::run_list_tools(s)?,
         Some(Subcommand::CallTool(s)) => cli::run_call_tool(s).await?,
         Some(Subcommand::Transition(s)) => cli::run_transition(s).await?,
