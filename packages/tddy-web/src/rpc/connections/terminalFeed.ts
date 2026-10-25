@@ -21,6 +21,7 @@ import {
 import { tddyDebug } from "../../lib/debugMask";
 import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
+import { InputRefusalTracker } from "./inputDelivery";
 import { TerminalStreamOffset } from "../../lib/terminalStreamOffset";
 import type { TerminalFeed, TerminalFrame, TerminalOptions, TerminalStream } from "./terminal";
 
@@ -112,6 +113,8 @@ export function openDaemonTerminalFeed({
   };
 
   const offsets = new TerminalStreamOffset(0n);
+  // The daemon says on the output half when it drops an input chunk, and acks once input flows again.
+  const refusals = new InputRefusalTracker((failure) => options.onInputDelivery?.(failure));
   const { cols: initialCols, rows: initialRows } = options.initialGrid ?? { cols: 0, rows: 0 };
 
   // Settled when the daemon stops sending — `pty_done`, or a transport that gave up. Not settled by
@@ -178,6 +181,7 @@ export function openDaemonTerminalFeed({
           );
           continue;
         }
+        if (refusals.observe(output)) continue;
         // An ACK frame carries neither bytes nor an anchor. It is the daemon confirming applied
         // input, and there is nowhere on a `TerminalFrame` to put it — see the changeset.
         if (output.data.length === 0 && output.endOffset === 0n) continue;

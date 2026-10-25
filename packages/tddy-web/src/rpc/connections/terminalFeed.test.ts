@@ -117,6 +117,16 @@ function anAckFrameFor(appliedInputOffset: bigint): OutputFrame {
   });
 }
 
+/** The daemon dropping the input chunk that ended at cumulative offset `refusedAt`. */
+function aRefusalOf(refusedAt: bigint, reason: string): OutputFrame {
+  return create(SessionTerminalOutputSchema, {
+    refusedInputOffset: refusedAt,
+    inputRefusal: reason,
+    sessionId: A_SESSION,
+    terminalId: A_TERMINAL_ID,
+  });
+}
+
 /** A frame from a different session's terminal, mis-routed onto this subscription. */
 function aFrameFromAnotherTerminal(text: string): OutputFrame {
   return create(SessionTerminalOutputSchema, {
@@ -505,5 +515,52 @@ describe("a daemon-served terminal feed over the bidi stream", () => {
 
     // Then the frame stamped `main` is this pane's own, not a foreign one
     expect(painted).toEqual(["claude> "]);
+  });
+
+  it("says why input was not delivered, and clears it once an ACK passes the refused chunk", async () => {
+    // Given a daemon that refuses the first chunk, then acks the second
+    const deliveries: Array<string | null> = [];
+    const daemon = aBidiDaemonAnswering(
+      [
+        aRefusalOf(1n, "terminal controlled by another screen"),
+        anAckFrameFor(2n),
+      ],
+    );
+    openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: { ...terminalOptions(), onInputDelivery: (failure) => deliveries.push(failure) },
+    });
+
+    // When both frames arrive
+    await eventually(() => deliveries.length === 2);
+
+    // Then the pane was told the daemon's reason, then that input flows again
+    expect(deliveries).toEqual(["terminal controlled by another screen", null]);
+  });
+
+  it("never lets an ACK of an earlier chunk clear a refusal of a later one", async () => {
+    // Given a daemon that acks chunk 1 only after it refused chunk 2
+    const deliveries: Array<string | null> = [];
+    const daemon = aBidiDaemonAnswering(
+      [
+        aRefusalOf(2n, "terminal controlled by another screen"),
+        anAckFrameFor(1n),
+        anOutputFrameOf("$ "),
+      ],
+    );
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: { ...terminalOptions(), onInputDelivery: (failure) => deliveries.push(failure) },
+    });
+
+    // When the stream runs to its end
+    await feed.ended;
+
+    // Then the indicator was raised and never cleared by the stale ACK
+    expect(deliveries).toEqual(["terminal controlled by another screen"]);
   });
 });

@@ -16,7 +16,7 @@
 
 | Record | Verdict |
 |---|---|
-| [2026-10-24-reattach-does-not-replay-the-alternate-screen.md](../todo/2026-10-24-reattach-does-not-replay-the-alternate-screen.md) | ✅ RESOLVED HERE: the snapshot carries the alternate screen, and `mode_prologue` replays it for the legacy modes. Delete at wrap |
+| [2026-10-24-reattach-does-not-replay-the-alternate-screen.md](../todo/2026-10-24-reattach-does-not-replay-the-alternate-screen.md) | ⚠ partly resolved: snapshot opens carry the alternate screen, legacy TAIL/FROM_OFFSET do not (`mode_prologue` stays mouse-only, pinned by an existing test). The record is narrowed to the legacy replays, not deleted |
 | [2026-09-11-the-coder-terminal-coordinate-serves-seven-of-nine.md](../todo/2026-09-11-the-coder-terminal-coordinate-serves-seven-of-nine.md) | ⚠ during: the coder starts serving `StreamSessionTerminalIO`. Narrow the entry to `WatchTerminalControl` at wrap |
 | `packages/tddy-terminal-rpc/docs/code-issues/complexity-bridge-open-replay-ack-live.md` | ⚠ during: the `SNAPSHOT` branch goes in its own function rather than inline. Splitting the existing two branches may be deferred (developer consent: code issues may be deferred in this stack) |
 | `packages/tddy-task/docs/code-issues/complexity-terminal-capture-feed.md` | ⚠ during: widening the sniffer must not deepen `feed`'s nesting |
@@ -57,6 +57,16 @@
   terminal feed`) for the bidi wire.
 - **Pre-existing failure, not this node's:** `tddy-daemon-sandbox` test target
   `sandbox_stdio_seatbelt_acceptance` does not compile on the base (`SandboxHandle` unresolved).
+
+- **Input refusal frame (developer, 2026-10-25).** The bidi stream has no per-send answer, so the
+  bridge answers a chunk presented without the lease with a refusal frame on the output half:
+  `SessionTerminalOutput.refused_input_offset = 11` (the dropped chunk's cumulative offset) and
+  `input_refusal = 12` (the reason). The chunk never reaches the PTY, and the forwarder and stream stay
+  alive so a re-claim resumes typing. The web maps it to the "Input not delivered" indicator
+  (`InputRefusalTracker`), cleared by an ACK past the refused offset. This supersedes the bidi
+  acceptance test that pinned "the forwarder ends when control is lost" (rewritten, not deleted).
+- **One message per `send`** on the web bidi feed (no 20 ms drain batching): the planned feed test
+  expects separate messages, and the unary path it replaces sent one message per send too.
 
 ## Failing tests (the contract)
 
@@ -270,9 +280,8 @@ point, no server screen model, and the web terminal on server-stream + unary inp
   blank runs (a lone interior blank stays a space) so the snapshot matches the reference emulator.
 - **Lagged subscribers** keep today's behavior: on `Lagged` the offsets stamped on later frames are
   wrong until `#term-snapshot 2/4` resyncs.
-- **No per-send input refusal over bidi.** `SessionsDrawerVisibleErrorsAcceptance` "typing into the
-  terminal" (2 tests) asserts a visible indicator from per-send `sendTerminalInput` refusals; the bidi
-  stream has no per-send answer. NEEDS A DEVELOPER DECISION (see PR).
+- **Refusal frames are best-effort in order only:** on `Lagged` the refusal/ACK a lagged subscriber
+  missed is not replayed (resync is `#term-snapshot 2/4`).
 
 ## TODO
 
@@ -284,10 +293,10 @@ point, no server screen model, and the web terminal on server-stream + unary inp
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [~] TDD Green — implemented; 2 VisibleErrors specs blocked on a decision (see Technical Debt)
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -298,7 +307,7 @@ point, no server screen model, and the web terminal on server-stream + unary inp
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
 
 ## Refactoring Needed

@@ -44,6 +44,10 @@ const _: () = assert!(
     "the default initial frame budget must be a nonzero fraction of a transport message"
 );
 
+/// Why a chunk presented without the lease is refused — the same words the unary
+/// `SendTerminalInput` refusal uses.
+const INPUT_REFUSED: &str = "terminal controlled by another screen";
+
 /// Capacity of the mpsc channel bridging broadcast output to the RPC stream.
 pub const TERMINAL_OUTPUT_CHANNEL_CAPACITY: usize = 64;
 
@@ -94,6 +98,8 @@ impl FrameIdentity {
             snapshot: false,
             snapshot_rows: 0,
             snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
         }
     }
 
@@ -118,6 +124,8 @@ impl FrameIdentity {
             snapshot: false,
             snapshot_rows: 0,
             snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
         }
     }
 
@@ -130,6 +138,16 @@ impl FrameIdentity {
             snapshot: true,
             snapshot_rows: u32::from(snapshot.rows),
             snapshot_cols: u32::from(snapshot.cols),
+            ..self.data_frame(Vec::new())
+        }
+    }
+
+    /// A refusal frame: the input chunk ending at cumulative `refused_input_offset` was dropped and
+    /// never reached the PTY, for `reason`. Carries no data; the stream stays open.
+    fn refusal_frame(&self, refused_input_offset: u64, reason: &str) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            refused_input_offset,
+            input_refusal: reason.to_string(),
             ..self.data_frame(Vec::new())
         }
     }
@@ -147,6 +165,8 @@ impl FrameIdentity {
             snapshot: false,
             snapshot_rows: 0,
             snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
         }
     }
 }
@@ -512,10 +532,11 @@ where
     // Output side: the shared open/replay/catch-up/ack/live sequence. The open frame names the
     // terminal the caller resolved this `session` from, so its frames carry the same identity as the
     // split `StreamTerminalOutput` variant's.
+    let identity = FrameIdentity::new(&session_id, &first.terminal_id);
     open_replay_ack_live(
         Arc::clone(&session),
         tx.clone(),
-        FrameIdentity::new(&session_id, &first.terminal_id),
+        identity.clone(),
         OpenSelection {
             mode: replay_mode_from_i32(first.mode),
             from_offset: first.from_offset,
@@ -535,6 +556,8 @@ where
     // each chunk. Ends when the client stream ends, a stream error occurs, or control is lost.
     let control_gated = session.requires_control();
     let session_for_input = Arc::clone(&session);
+    // Weak: the forwarder must not keep the output half open once the child has exited.
+    let refusals = tx.downgrade();
     tokio::spawn(async move {
         use tokio_stream::StreamExt;
         let mut in_stream = in_stream;
@@ -542,7 +565,17 @@ where
             match item {
                 Ok(msg) => {
                     if control_gated && !verify_control(&session_id, &msg.control_token).await {
-                        break;
+                        // The chunk is dropped, never typed, and the client is told so on the
+                        // output half. The forwarder stays alive: a screen that re-claims control
+                        // resumes typing on this very stream, each chunk judged on its own.
+                        let refusal = identity.refusal_frame(msg.input_offset, INPUT_REFUSED);
+                        let Some(output) = refusals.upgrade() else {
+                            break;
+                        };
+                        if output.send(Ok(refusal)).await.is_err() {
+                            break;
+                        }
+                        continue;
                     }
                     if !msg.data.is_empty() {
                         session_for_input.send_input(Bytes::from(msg.data), msg.input_offset);

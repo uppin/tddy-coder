@@ -38,6 +38,8 @@ async fn replays_the_current_last_frame_before_any_live_byte() {
             snapshot: false,
             snapshot_rows: 0,
             snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
         }]
     );
 }
@@ -107,6 +109,8 @@ async fn delivers_output_the_terminal_produces_after_the_stream_opened() {
             snapshot: false,
             snapshot_rows: 0,
             snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
         }]
     );
 }
@@ -136,6 +140,8 @@ async fn acknowledges_the_applied_input_offset_on_the_output_half() {
             snapshot: false,
             snapshot_rows: 0,
             snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
         }]
     );
 }
@@ -167,6 +173,8 @@ async fn resumes_from_the_clients_offset_instead_of_replaying_the_tail() {
             snapshot: false,
             snapshot_rows: 0,
             snapshot_cols: 0,
+            refused_input_offset: 0,
+            input_refusal: String::new(),
         }]
     );
 }
@@ -207,7 +215,7 @@ async fn refuses_to_open_for_a_screen_that_does_not_hold_the_control_lease() {
 }
 
 #[tokio::test]
-async fn stops_carrying_keystrokes_once_the_control_lease_is_lost_mid_stream() {
+async fn refuses_keystrokes_under_a_stale_token_and_resumes_once_control_is_reclaimed() {
     // Given an open bidi stream held by this screen
     let host = TerminalServiceHost::serving_main_terminal(b"ready");
     let control_token = host.control_held_by(SCREEN_ID).await;
@@ -225,10 +233,36 @@ async fn stops_carrying_keystrokes_once_the_control_lease_is_lost_mid_stream() {
     host.control_held_by(OTHER_SCREEN_ID).await;
     session.send(typing(b"rm -rf /\r", 9)).await;
 
-    // Then nothing reaches the PTY. The live output frame below is the synchronisation point: it
-    // travels the same runtime as the input forwarder, so by the time it arrives the stale chunk
-    // has been seen and rejected.
+    // Then the chunk is refused on the output half — told which chunk and why — and never typed
+    let refusal = session.frames(1).await.remove(0);
+    assert_eq!(
+        (
+            refusal.data.is_empty(),
+            refusal.refused_input_offset,
+            refusal.input_refusal.as_str()
+        ),
+        (true, 9, "terminal controlled by another screen")
+    );
+    assert_eq!(host.typed_into_pty(), Vec::new());
+
+    // And when this screen re-claims control, the same stream carries its next chunk to the PTY and
+    // the terminal acks it — no reconnect
+    let reclaimed = host.control_held_by(SCREEN_ID).await;
+    session
+        .send(
+            tddy_terminal_rpc::proto::terminal_session::SessionTerminalInput {
+                control_token: reclaimed,
+                ..typing(b"ls\r", 12)
+            },
+        )
+        .await;
     host.terminal().write(b"$ ");
     session.frames(1).await;
-    assert_eq!(host.typed_into_pty(), Vec::new());
+    assert_eq!(
+        host.typed_into_pty(),
+        vec![(Bytes::from_static(b"ls\r"), 12)]
+    );
+    host.terminal().set_acked(12);
+    let ack = session.frames(1).await.remove(0);
+    assert_eq!(ack.acked_input_offset, 12);
 }

@@ -23,6 +23,7 @@ import { useEnqueuedInput } from "./useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 import { rpcFailureText } from "../../rpc/rpcFailure";
+import { InputRefusalTracker } from "../../rpc/connections/inputDelivery";
 import { InlineError } from "../ui/inline-error";
 
 const dGrpc = tddyDebug("tddy:term:grpc");
@@ -121,9 +122,9 @@ export function GrpcSessionTerminal({
   const ackRef = useRef(ack);
   ackRef.current = ack;
 
-  // Why the terminal stream ended abnormally — the transport refused it or dropped it. Input has no
-  // per-send answer on the bidi stream, so a refusal of the stream itself is the one failure this
-  // pane can report; it clears when a stream opens again.
+  // Why the last keystroke, paste or resize did not reach the PTY — the daemon's refusal frame (e.g.
+  // another screen took the lease) or the stream itself failing. One indicator however many sends
+  // are refused, cleared when an ACK passes the refused offset or a stream opens again.
   const [inputError, setInputError] = useState<string | null>(null);
 
   // Disconnect fires automatically when the terminal goes away — either the remote
@@ -173,6 +174,7 @@ export function GrpcSessionTerminal({
       return;
     }
     setInputError(null);
+    const refusals = new InputRefusalTracker(setInputError);
 
     const outputListeners: Array<(frame: TerminalFrame) => void> = [];
     // Frames that arrived before anything subscribed.
@@ -291,6 +293,8 @@ export function GrpcSessionTerminal({
             );
             continue;
           }
+          // A refusal frame names an input chunk the daemon dropped; it carries no output.
+          if (refusals.observe(output)) continue;
           // ACK frames (empty data, non-zero offset) collapse the enqueued-input overlay.
           if (output.ackedInputOffset > 0n) {
             ackRef.current(Number(output.ackedInputOffset));

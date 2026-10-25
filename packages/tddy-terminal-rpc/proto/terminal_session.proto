@@ -97,6 +97,14 @@ message SessionTerminalOutput {
   // The grid the snapshot was serialized at (the PTY's size). Zero on every other frame.
   uint32 snapshot_rows = 9;
   uint32 snapshot_cols = 10;
+  // A refused input chunk (StreamSessionTerminalIO only): on a refusal frame `data` is empty,
+  // `refused_input_offset` is the cumulative `input_offset` of the chunk that was dropped (it never
+  // reached the PTY) and `input_refusal` says why, e.g. "terminal controlled by another screen".
+  // The stream stays open and later chunks are judged on their own, so a screen that re-claims
+  // control resumes typing without reconnecting. A later ACK past `refused_input_offset` means
+  // input is flowing again. Zero / empty on every other frame.
+  uint64 refused_input_offset = 11;
+  string input_refusal = 12;
 }
 
 // Used by StreamTerminalOutput (browser-compatible server-streaming variant).

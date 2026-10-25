@@ -131,6 +131,8 @@ fn a_data_frame(data: Vec<u8>) -> SessionTerminalOutput {
         snapshot: false,
         snapshot_rows: 0,
         snapshot_cols: 0,
+        refused_input_offset: 0,
+        input_refusal: String::new(),
     }
 }
 
@@ -152,6 +154,8 @@ fn an_anchored_frame(
         snapshot: false,
         snapshot_rows: 0,
         snapshot_cols: 0,
+        refused_input_offset: 0,
+        input_refusal: String::new(),
     }
 }
 
