@@ -73,6 +73,18 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
             >(&answered)?));
         }
 
+        // A project-home tool called by a session another host holds — forwarded here by that
+        // host — has no session here to resolve; its caller is confirmed at its owner instead.
+        if let Some(answered) = self
+            .serve_project_home_for_caller_held_elsewhere(&req_conn)
+            .await?
+        {
+            return Ok(Response::new(wire_same::<
+                ConnExecuteToolResponse,
+                ExecuteToolResponse,
+            >(&answered)?));
+        }
+
         let (sessions_base, worktree_root) = resolve_exec_tool_worktree(
             &self.config,
             &self.user_resolver,
@@ -149,17 +161,23 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                     .run_hosted_clone_tool(&req_conn, &clone)
                     .await
             }
-            None => {
-                let (sessions_base, worktree_root) = resolve_exec_tool_worktree(
-                    &self.config,
-                    &self.user_resolver,
-                    &self.tddy_data_dir,
-                    &req_conn,
-                )?;
-                reject_refused_local_exec_tool(&sessions_base, &req)?;
-                self.run_locally(&req_conn, &sessions_base, &worktree_root)
-                    .await?
-            }
+            None => match self
+                .serve_project_home_for_caller_held_elsewhere(&req_conn)
+                .await?
+            {
+                Some(answered) => answered,
+                None => {
+                    let (sessions_base, worktree_root) = resolve_exec_tool_worktree(
+                        &self.config,
+                        &self.user_resolver,
+                        &self.tddy_data_dir,
+                        &req_conn,
+                    )?;
+                    reject_refused_local_exec_tool(&sessions_base, &req)?;
+                    self.run_locally(&req_conn, &sessions_base, &worktree_root)
+                        .await?
+                }
+            },
         };
 
         // The result is already complete in memory, so every frame can be queued now: the stream

@@ -3,7 +3,7 @@
 //!
 //! | Tool | Does |
 //! |---|---|
-//! | `ListProjectSessions` | every other session of the project, with status and worktree |
+//! | `ListProjectSessions` | every other session of the project on every host, with its host, status and worktree |
 //! | `StartProjectSession` | starts a session in the project, tagged with the caller as orchestrator |
 //! | `ReadSessionWorktree` | reads a file or lists a directory in a target session's worktree |
 //! | `DiffSessionWorktree` | a target worktree's diff against its base |
@@ -12,6 +12,10 @@
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
 //! The role gate is the daemon's: it refuses these names for any session that is not a
 //! project-home one before anything here runs.
+//!
+//! A target tool takes [`TARGET_DAEMON_INSTANCE_ID`] to name the host its target runs on; the
+//! daemon forwards such a call to that host whole, and it runs there unchanged (`#start-parity`
+//! 1/9). The argument is never read here.
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
@@ -116,9 +120,23 @@ pub const TARGET_DAEMON_INSTANCE_ID: &str = "daemon_instance_id";
 /// The host `args_json` names in [`TARGET_DAEMON_INSTANCE_ID`], or `None` for this host (the
 /// argument absent or empty, or `args_json` not an object).
 pub fn target_daemon_instance_id(args_json: &str) -> Option<String> {
-    // TODO(remote-targets): implement
-    let _ = args_json;
-    None
+    let args: Value = serde_json::from_str(args_json).ok()?;
+    let host = args.get(TARGET_DAEMON_INSTANCE_ID)?.as_str()?.trim();
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+/// Whether `name` is a project-home tool that acts on a target session, and so takes
+/// [`TARGET_DAEMON_INSTANCE_ID`]: read, diff, and the seven git tools.
+pub fn is_project_home_target_tool(name: &str) -> bool {
+    matches!(name, READ_SESSION_WORKTREE | DIFF_SESSION_WORKTREE) || is_project_home_git_tool(name)
+}
+
+/// The [`TARGET_DAEMON_INSTANCE_ID`] property every target tool's schema carries.
+pub(crate) fn target_host_property() -> Value {
+    json!({
+        "type": "string",
+        "description": "The host the session runs on, as ListProjectSessions reports it in its daemon_instance_id; empty for this host."
+    })
 }
 
 /// `StartProjectSession`'s arguments.
@@ -145,12 +163,21 @@ pub struct StartProjectSessionArgs {
 /// project a target may be in.
 #[async_trait]
 pub trait ProjectHomePort: Send + Sync {
-    /// Every session of `project_id` except `home_session_id`.
+    /// Every session of `project_id` on this daemon except `home_session_id`.
     async fn list_sessions(
         &self,
         project_id: &str,
         home_session_id: &str,
     ) -> anyhow::Result<Vec<ListedSession>>;
+
+    /// The sessions of `project_id` on every other eligible host, each asked for its own, and the
+    /// hosts that did not answer. Empty when the call is not this daemon's to fan out — one that
+    /// arrived from a peer — so a listing never recurses.
+    async fn list_peer_sessions(
+        &self,
+        project_id: &str,
+        home_session_id: &str,
+    ) -> ListProjectSessionsResult;
 
     /// Start a session in `project_id` with `home_session_id` as its orchestrator; its id.
     async fn start_session(
@@ -173,7 +200,7 @@ pub fn project_home_tool_defs() -> Vec<ToolDef> {
     vec![
         tool_def(
             LIST_PROJECT_SESSIONS,
-            "List the other sessions of this project with their worktree, activity and status.",
+            "List the other sessions of this project on every host, with their host, worktree, activity and status. A host that does not answer is named in unreachable_hosts.",
             json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         ),
         tool_def(
@@ -188,7 +215,8 @@ pub fn project_home_tool_defs() -> Vec<ToolDef> {
                 "type": "object",
                 "properties": {
                     "session_id": { "type": "string" },
-                    "path": { "type": "string", "description": "Relative to the worktree root; empty for the root." }
+                    "path": { "type": "string", "description": "Relative to the worktree root; empty for the root." },
+                    TARGET_DAEMON_INSTANCE_ID: target_host_property()
                 },
                 "required": ["session_id"]
             }),
@@ -198,7 +226,10 @@ pub fn project_home_tool_defs() -> Vec<ToolDef> {
             "Diff another session's worktree of this project against its base, including uncommitted and untracked files.",
             json!({
                 "type": "object",
-                "properties": { "session_id": { "type": "string" } },
+                "properties": {
+                    "session_id": { "type": "string" },
+                    TARGET_DAEMON_INSTANCE_ID: target_host_property()
+                },
                 "required": ["session_id"]
             }),
         ),
@@ -298,10 +329,23 @@ pub async fn execute_project_home_tool(
     }
 }
 
+/// This host's sessions of the project, then every other host's.
 async fn list_project_sessions(port: &dyn ProjectHomePort, home: &HomeCaller) -> ToolOutcome {
-    match port.list_sessions(&home.project_id, &home.session_id).await {
-        Ok(sessions) => ToolOutcome::ok(json!({ "sessions": sessions }).to_string()),
-        Err(e) => ToolOutcome::err(format!("{LIST_PROJECT_SESSIONS}: {e:#}")),
+    let mut sessions = match port.list_sessions(&home.project_id, &home.session_id).await {
+        Ok(sessions) => sessions,
+        Err(e) => return ToolOutcome::err(format!("{LIST_PROJECT_SESSIONS}: {e:#}")),
+    };
+    let peers = port
+        .list_peer_sessions(&home.project_id, &home.session_id)
+        .await;
+    sessions.extend(peers.sessions);
+    let result = ListProjectSessionsResult {
+        sessions,
+        unreachable_hosts: peers.unreachable_hosts,
+    };
+    match serde_json::to_string(&result) {
+        Ok(json) => ToolOutcome::ok(json),
+        Err(e) => ToolOutcome::err(format!("{LIST_PROJECT_SESSIONS}: {e}")),
     }
 }
 

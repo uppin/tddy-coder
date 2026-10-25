@@ -22,7 +22,9 @@ use tddy_worktree_service::session_git_ops::{run_git_op, GitOp, GitOpOutcome, Re
 use tddy_worktree_service::session_target::HomeCaller;
 
 use crate::catalog::ToolDef;
-use crate::project_home_tools::{resolve_target, ProjectHomePort};
+use crate::project_home_tools::{
+    resolve_target, target_host_property, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
+};
 use crate::ToolOutcome;
 
 pub const COMMIT_SESSION_WORKTREE: &str = "CommitSessionWorktree";
@@ -101,9 +103,13 @@ pub fn project_home_git_tool_defs() -> Vec<ToolDef> {
     ]
 }
 
-/// An object schema with a required `session_id` plus `properties`, of which `required` are too.
+/// An object schema with a required `session_id`, the optional target host, plus `properties`, of
+/// which `required` are required too.
 fn target_schema(properties: Value, required: &[&str]) -> Value {
-    let mut all = json!({ "session_id": { "type": "string" } });
+    let mut all = json!({
+        "session_id": { "type": "string" },
+        TARGET_DAEMON_INSTANCE_ID: target_host_property()
+    });
     if let (Some(all), Value::Object(extra)) = (all.as_object_mut(), properties) {
         all.extend(extra);
     }
