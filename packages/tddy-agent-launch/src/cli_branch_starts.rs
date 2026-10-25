@@ -17,13 +17,13 @@ use std::sync::Arc;
 use crate::svc_start_session_core::CliStart;
 
 use crate::launch_ports::LaunchSessions;
+use crate::placement::managed_recipe_for;
 use crate::session_provider_route::{
     sandboxed_start_route, session_route_sources_with_default, start_route,
 };
 use crate::start_request_checks::{
     refuse_a_cli_start_without_a_model, refuse_an_unsupported_cli_harness_start,
 };
-use crate::svc_start_session_core::managed_recipe_for;
 use tddy_core::cli_harness::CliHarness;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::provider_route::{Harness, HarnessRoute};

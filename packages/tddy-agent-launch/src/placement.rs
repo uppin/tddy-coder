@@ -1,3 +1,7 @@
+use std::sync::Arc;
+use tddy_rpc::Status;
+use tddy_service::proto::session::StartSessionRequest;
+
 /// Where a session's git worktree lives relative to the daemon running its agent.
 ///
 /// The second placement axis added by `docs/ft/daemon/remote-managed-worktree.md`:
@@ -152,4 +156,42 @@ pub fn classify_codebase_placement(
     Ok(CodebasePlacement::Split {
         codebase_instance_id: requested.to_string(),
     })
+}
+
+pub(crate) fn classify_start_placement(
+    req: &StartSessionRequest,
+    local_id: String,
+    eligible_ids: Vec<String>,
+) -> Result<CodebasePlacement, Status> {
+    let placement = classify_placement(&PlacementRequest {
+        local_instance_id: local_id.clone(),
+        requested_codebase_id: req.codebase_daemon_instance_id.clone(),
+        eligible_ids: eligible_ids.clone(),
+        managed_codebase: req.managed_codebase,
+        sandbox: req.sandbox,
+        sandboxed_codebase: req.sandboxed_codebase,
+        session_type: req.session_type.trim().to_string(),
+        recipe: req.recipe.clone(),
+        dangerously_skip_permissions: req.dangerously_skip_permissions,
+    })
+    .map_err(|msg| {
+        log::info!("StartSession: rejected codebase placement: {msg}");
+        Status::invalid_argument(msg)
+    })?;
+    Ok(placement)
+}
+
+pub(crate) fn managed_recipe_for(
+    req: &StartSessionRequest,
+) -> Result<Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>, Status> {
+    let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
+        if req.managed_codebase && !req.recipe.trim().is_empty() {
+            Some(
+                tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
+                    .map_err(Status::invalid_argument)?,
+            )
+        } else {
+            None
+        };
+    Ok(managed_recipe)
 }

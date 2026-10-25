@@ -1,7 +1,7 @@
+mod orchestrator_record;
+
 use tddy_session_split::service_util;
 use tddy_spawn::spawner;
-
-use std::sync::Arc;
 
 use tddy_session_files::attachment_progress::AttachmentMaterialization;
 
@@ -18,8 +18,6 @@ use tddy_session_split::split_start::resolve_split_agent_placement;
 
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
-use crate::placement::classify_placement;
-use crate::placement::PlacementRequest;
 use crate::start_request_checks::{
     refuse_a_cli_start_without_a_model, refuse_an_orchestrated_tool_start,
 };
@@ -487,90 +485,11 @@ impl LaunchSessions {
             branch_conflict: None,
         }))
     }
-
-    /// Record `orchestrator` — on `orchestrator_host`, when that is another daemon — in the changeset
-    /// of the session `started` names. A start that created nothing (a reported branch conflict)
-    /// records nothing.
-    ///
-    /// TODO(start-parity): written once the start has returned, after the session's agent is
-    /// running, rather than in the changeset each session type first writes
-    /// (`write_initial_changeset`, the workspace start). Threading it there removes the
-    /// read-modify-write.
-    fn record_orchestrator(
-        &self,
-        os_user: &str,
-        started: &StartSessionResponse,
-        orchestrator: &str,
-        orchestrator_host: Option<String>,
-    ) -> Result<(), Status> {
-        if started.session_id.is_empty() {
-            return Ok(());
-        }
-        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
-            os_user,
-            Some(&self.tddy_data_dir),
-        )
-        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &started.session_id);
-        let recorded = tddy_core::read_changeset(&session_dir).and_then(|mut changeset| {
-            changeset.orchestrator_session_id = Some(orchestrator.to_string());
-            changeset.orchestrator_daemon_instance_id = orchestrator_host;
-            tddy_core::write_changeset(&session_dir, &changeset)
-        });
-        recorded.map_err(|e| {
-            Status::internal(format!(
-                "session {} was started, but its orchestrator {orchestrator} could not be recorded \
-                 in its changeset: {e}",
-                started.session_id
-            ))
-        })?;
-        log::info!(
-            "StartSession: session {} recorded with orchestrator {orchestrator}",
-            started.session_id
-        );
-        Ok(())
-    }
 }
 
+use crate::placement::classify_start_placement;
+use crate::placement::managed_recipe_for;
 pub use crate::{
     cli_branch_starts, start_request_checks, tool_session_spawn, tool_spawn_plan,
     workspace_branch_start,
 };
-
-fn classify_start_placement(
-    req: &StartSessionRequest,
-    local_id: String,
-    eligible_ids: Vec<String>,
-) -> Result<CodebasePlacement, Status> {
-    let placement = classify_placement(&PlacementRequest {
-        local_instance_id: local_id.clone(),
-        requested_codebase_id: req.codebase_daemon_instance_id.clone(),
-        eligible_ids: eligible_ids.clone(),
-        managed_codebase: req.managed_codebase,
-        sandbox: req.sandbox,
-        sandboxed_codebase: req.sandboxed_codebase,
-        session_type: req.session_type.trim().to_string(),
-        recipe: req.recipe.clone(),
-        dangerously_skip_permissions: req.dangerously_skip_permissions,
-    })
-    .map_err(|msg| {
-        log::info!("StartSession: rejected codebase placement: {msg}");
-        Status::invalid_argument(msg)
-    })?;
-    Ok(placement)
-}
-
-pub(crate) fn managed_recipe_for(
-    req: &StartSessionRequest,
-) -> Result<Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>, Status> {
-    let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
-        if req.managed_codebase && !req.recipe.trim().is_empty() {
-            Some(
-                tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
-                    .map_err(Status::invalid_argument)?,
-            )
-        } else {
-            None
-        };
-    Ok(managed_recipe)
-}
