@@ -1,6 +1,7 @@
 # complexity: reclaim_scope
 
-**Location:** `packages/tddy-supervisor/src/supervisor.rs:700` — `reclaim_scope`
+**Location:** `packages/tddy-supervisor/src/supervisor/session_table.rs:337` — `reclaim_scope`
+**Moved:** 2026-10-24 — from `src/supervisor.rs` by `#coagents` 2/8 (#721), which split the session table out of `supervisor.rs` with an engine `move_impl_members`; the body moved unchanged
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **49 lines** · **nesting depth 7** · 1 parameters · 3 branch/match lines · 3 early exits
@@ -14,6 +15,7 @@
 | Run | Lines | Nesting | Branches | Early exits | Note |
 |---|---|---|---|---|---|
 | 2026-09-18 | 49 | 7 | 3 | 3 | first detection |
+| 2026-10-24 | 49 | 7 | — | — | **unchanged**, moved to `supervisor/session_table.rs` (#721) |
 
 ## What the tool found
 

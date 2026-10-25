@@ -4,6 +4,7 @@
 //! receiving while a prompt is in flight: a cancel reaches a turn that is still running.
 
 use std::future::Future;
+use std::os::unix::net::UnixStream;
 use std::process::Stdio;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -11,9 +12,10 @@ use std::sync::Arc;
 use std::task::{Context, Waker};
 
 use agent_client_protocol as acp;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::{spawn_local, LocalSet};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use tokio::task::{spawn_local, JoinHandle, LocalSet};
+use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use super::client::{DriverClient, Turns};
 use super::session::AgentConnection;
@@ -49,16 +51,42 @@ pub(super) enum Command {
     },
 }
 
-/// What the worker starts from: the child to spawn, the handlers its requests use, the channel its
-/// requests arrive on, and the places it reports back to its creator (whether the child started, and
-/// the child's pid).
+/// How the worker reaches its agent: a child it spawns and owns, or a connected stream to an agent
+/// started elsewhere (a relayed spawn).
+pub(super) enum AgentIo {
+    Spawn(AcpAgentCommand),
+    Relayed(UnixStream),
+}
+
+/// What the worker starts from: how to reach the agent, the handlers its requests use, the channel
+/// its requests arrive on, and the places it reports back to its creator (whether the agent
+/// started, and the child's pid).
 pub(super) struct Setup {
-    pub(super) command: AcpAgentCommand,
+    pub(super) io: AgentIo,
     pub(super) permissions: Arc<dyn PermissionHandler>,
     pub(super) hooks: Arc<dyn AcpAgentHooks>,
     pub(super) commands: mpsc::Receiver<Command>,
-    pub(super) started: std::sync::mpsc::SyncSender<Result<(), BackendError>>,
+    pub(super) started: Started,
     pub(super) pid: Arc<AtomicU32>,
+}
+
+/// Where the worker reports whether its agent started.
+type Started = std::sync::mpsc::SyncSender<Result<(), BackendError>>;
+/// The agent's output, as the connection reads it.
+type AgentReader = Compat<Box<dyn AsyncRead + Unpin>>;
+/// The agent's input, as the connection writes it.
+type AgentWriter = Compat<Box<dyn AsyncWrite + Unpin>>;
+/// The child this worker owns: the signal that ends it, and the task that reaps it.
+type OwnedChild = (oneshot::Sender<()>, JoinHandle<()>);
+/// The agent's stdio, and the child behind it when this worker spawned one.
+type AgentHalves = (AgentReader, AgentWriter, Option<OwnedChild>);
+
+/// Everything the connection serves with, apart from the agent's stdio.
+struct Conversation {
+    permissions: Arc<dyn PermissionHandler>,
+    hooks: Arc<dyn AcpAgentHooks>,
+    commands: mpsc::Receiver<Command>,
+    started: Started,
 }
 
 /// The worker thread's body: serve requests until the driver is dropped.
@@ -82,36 +110,91 @@ pub(super) fn run(setup: Setup) {
 
 async fn serve(setup: Setup) {
     let Setup {
-        command,
+        io,
         permissions,
         hooks,
-        mut commands,
+        commands,
         started,
         pid,
     } = setup;
-    let mut child = match spawn_agent(&command) {
-        Ok(child) => child,
+    let halves = match io {
+        AgentIo::Relayed(stream) => relayed_halves(stream),
+        AgentIo::Spawn(command) => spawned_halves(&command, pid),
+    };
+    let (reader, writer, child) = match halves {
+        Ok(halves) => halves,
         Err(error) => {
             let _ = started.send(Err(error));
             return;
         }
     };
+    let conversation = Conversation {
+        permissions,
+        hooks,
+        commands,
+        started,
+    };
+    converse(reader, writer, conversation, child).await;
+}
+
+/// The two halves of a relayed agent's stream. No child here: the process runs where the stream
+/// leads, and ends when it is closed.
+fn relayed_halves(stream: UnixStream) -> Result<AgentHalves, BackendError> {
+    let stream = stream
+        .set_nonblocking(true)
+        .and_then(|()| tokio::net::UnixStream::from_std(stream))
+        .map_err(|e| {
+            BackendError::InvocationFailed(format!("could not use the relayed agent stream: {e}"))
+        })?;
+    let (read, write) = stream.into_split();
+    Ok((boxed_reader(read), boxed_writer(write), None))
+}
+
+/// Spawn the agent and take its stdio, recording its pid and handing it to a supervisor task.
+fn spawned_halves(
+    command: &AcpAgentCommand,
+    pid: Arc<AtomicU32>,
+) -> Result<AgentHalves, BackendError> {
+    let mut child = spawn_agent(command)?;
     let (Some(child_pid), Some(stdin), Some(stdout)) =
         (child.id(), child.stdin.take(), child.stdout.take())
     else {
-        let _ = started.send(Err(BackendError::InvocationFailed(
+        return Err(BackendError::InvocationFailed(
             "the ACP agent started without its pid or stdio pipes".to_string(),
-        )));
-        return;
+        ));
     };
     pid.store(child_pid, Ordering::SeqCst);
     let (end_child, child_ended) = oneshot::channel();
-    let supervisor = spawn_local(supervise(child, child_ended, Arc::clone(&pid)));
+    let supervisor = spawn_local(supervise(child, child_ended, pid));
+    let owned = Some((end_child, supervisor));
+    Ok((boxed_reader(stdout), boxed_writer(stdin), owned))
+}
 
+fn boxed_reader(read: impl AsyncRead + Unpin + 'static) -> AgentReader {
+    (Box::new(read) as Box<dyn AsyncRead + Unpin>).compat()
+}
+
+fn boxed_writer(write: impl AsyncWrite + Unpin + 'static) -> AgentWriter {
+    (Box::new(write) as Box<dyn AsyncWrite + Unpin>).compat_write()
+}
+
+/// Run the ACP connection over `reader`/`writer` until every driver handle is gone, then end the
+/// child (when this driver owns one) and wait until it is reaped.
+async fn converse(
+    reader: AgentReader,
+    writer: AgentWriter,
+    conversation: Conversation,
+    child: Option<OwnedChild>,
+) {
+    let Conversation {
+        permissions,
+        hooks,
+        mut commands,
+        started,
+    } = conversation;
     let turns = Turns::default();
     let client = DriverClient::new(turns.clone(), permissions);
-    let (conn, io) =
-        acp::ClientSideConnection::new(client, stdin.compat_write(), stdout.compat(), run_or_spawn);
+    let (conn, io) = acp::ClientSideConnection::new(client, writer, reader, run_or_spawn);
     spawn_local(async move {
         let _ = io.await;
     });
@@ -121,9 +204,11 @@ async fn serve(setup: Setup) {
     while let Some(command) = commands.recv().await {
         dispatch(Rc::clone(&agent), command);
     }
-    // Every driver handle is gone: end the child and wait until it is reaped.
-    let _ = end_child.send(());
-    let _ = supervisor.await;
+    if let Some((end_child, supervisor)) = child {
+        // Every driver handle is gone: end the child and wait until it is reaped.
+        let _ = end_child.send(());
+        let _ = supervisor.await;
+    }
 }
 
 /// Start a future the connection spawns for one incoming message.

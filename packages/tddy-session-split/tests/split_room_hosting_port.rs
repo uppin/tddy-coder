@@ -457,6 +457,7 @@ fn an_agent_roster_with_nothing_attached(
         roster_keepalive_interval: Duration::from_secs(8),
         session_admissions: Arc::new(NoRoomAdmission),
         model_registry: None,
+        coding_agent_launcher: None,
         host,
     }
 }

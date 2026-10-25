@@ -41,8 +41,12 @@ run on the account at all is the [capability matrix](provider-accounts.md#runnin
 ## In the agent list
 
 `ListAgents` offers every profile after the configured agents and registry assistants, under its
-`label` (or name); its id is the profile name. Profiles are not offered by `ListSubagents` and cannot be
-attached to a session's roster.
+`label` (or name); its id is the profile name.
+
+A profile whose harness speaks ACP (`claude-acp`, `codex-acp`, `opencode`) is also offered by
+`ListSubagents` as a **coding agent** a session can attach to its roster — see
+[Session agent roster § Coding agents](session-agent-roster.md#coding-agents). Headless and PTY
+harness profiles are not offered there.
 
 ## Starting a session with a profile
 

@@ -30,6 +30,13 @@ impl MessageId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The id of a conversation's `ordinal`-th message. Every conversation mints its ids this one
+    /// way, so an id handed back to any of them reads the same.
+    #[must_use]
+    pub fn from_ordinal(ordinal: u64) -> Self {
+        MessageId(format!("m{ordinal}"))
+    }
 }
 
 impl From<&str> for MessageId {
@@ -144,7 +151,7 @@ pub struct MessageDescriptor {
 /// Cut `text` to [`MESSAGE_PREVIEW_CHARS`], marking that it was cut.
 ///
 /// Counted in `char`s, not bytes: a byte slice through a multi-byte character panics.
-fn preview_of(text: &str) -> String {
+pub fn preview_of(text: &str) -> String {
     let total = text.chars().count();
     if total <= MESSAGE_PREVIEW_CHARS {
         return text.to_string();
@@ -254,7 +261,7 @@ impl Transcript {
         worktree_change: Option<tddy_subagent_worktree::WorktreeChange>,
     ) -> MessageId {
         self.next_ordinal += 1;
-        let id = MessageId(format!("m{}", self.next_ordinal));
+        let id = MessageId::from_ordinal(self.next_ordinal);
         self.entries.push(TranscriptEntry {
             id: id.clone(),
             message,

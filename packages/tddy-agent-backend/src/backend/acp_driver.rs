@@ -207,6 +207,9 @@ impl AcpAgentHooks for NoHooks {}
 /// How many requests may wait for the worker before a caller waits to send one.
 const COMMAND_QUEUE_DEPTH: usize = 16;
 
+/// The program a relayed driver reports: the agent runs elsewhere, so no path is known here.
+const RELAYED_AGENT_PROGRAM: &str = "<relayed agent>";
+
 /// The driver a backend runs its agent on. A backend starts it on first use and replaces it when
 /// its provider route changes; dropping the replaced driver ends its child.
 pub(super) type DriverSlot = Mutex<Option<Arc<AcpDriver>>>;
@@ -316,12 +319,36 @@ impl AcpDriver {
         permissions: Arc<dyn PermissionHandler>,
         hooks: Arc<dyn AcpAgentHooks>,
     ) -> Result<Self, BackendError> {
-        let program = command.program.clone();
+        Self::start_worker(worker::AgentIo::Spawn(command), permissions, hooks)
+    }
+
+    /// Serve an ACP agent that is already running elsewhere and reachable over `stream` — one a
+    /// supervisor started as another OS user and relays — instead of spawning a child here. No pid
+    /// is known ([`Self::agent_pid`] is `None`); closing the stream, which dropping the driver does,
+    /// is what ends the agent.
+    pub fn spawn_over(
+        stream: std::os::unix::net::UnixStream,
+        permissions: Arc<dyn PermissionHandler>,
+        hooks: Arc<dyn AcpAgentHooks>,
+    ) -> Result<Self, BackendError> {
+        Self::start_worker(worker::AgentIo::Relayed(stream), permissions, hooks)
+    }
+
+    /// Start the worker thread over `io` and wait until it reports the agent started (or connected).
+    fn start_worker(
+        io: worker::AgentIo,
+        permissions: Arc<dyn PermissionHandler>,
+        hooks: Arc<dyn AcpAgentHooks>,
+    ) -> Result<Self, BackendError> {
+        let (program, ready) = match &io {
+            worker::AgentIo::Spawn(command) => (command.program.clone(), "started"),
+            worker::AgentIo::Relayed(_) => (PathBuf::from(RELAYED_AGENT_PROGRAM), "connected"),
+        };
         let (commands, receiver) = mpsc::channel(COMMAND_QUEUE_DEPTH);
         let (started, spawned) = std::sync::mpsc::sync_channel(1);
         let pid = Arc::new(AtomicU32::new(0));
         let setup = worker::Setup {
-            command,
+            io,
             permissions,
             hooks,
             commands: receiver,
@@ -337,9 +364,9 @@ impl AcpDriver {
                 ))
             })?;
         spawned.recv().map_err(|_| {
-            BackendError::InvocationFailed(
-                "the ACP driver thread stopped before its agent started".to_string(),
-            )
+            BackendError::InvocationFailed(format!(
+                "the ACP driver thread stopped before its agent {ready}"
+            ))
         })??;
         Ok(Self {
             program,

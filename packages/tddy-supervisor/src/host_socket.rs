@@ -26,7 +26,7 @@ use std::path::Path;
 use anyhow::Context;
 
 use crate::config::HostSocket;
-use crate::spawn_broker;
+use crate::spawn_broker::accounts;
 
 /// Mode of a host socket's directory, and of the socket inside it: the user, nobody else.
 const DIRECTORY_MODE: u32 = 0o700;
@@ -34,7 +34,7 @@ const SOCKET_MODE: u32 = 0o600;
 
 /// Create `socket`'s directory and socket for its user, bound and listening. See the module docs.
 pub fn bind_host_socket(service: &str, socket: &HostSocket) -> anyhow::Result<UnixListener> {
-    let target = spawn_broker::resolve_target_user(&socket.user).map_err(|error| {
+    let target = accounts::resolve_target_user(&socket.user).map_err(|error| {
         anyhow::anyhow!(
             "service `{service}`: host socket user `{}`: {error}",
             socket.user

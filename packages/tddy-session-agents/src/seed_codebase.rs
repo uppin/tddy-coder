@@ -60,19 +60,33 @@ impl SeedCodebase {
     /// The codebase of a session already on disk — every path but a co-located start, which has no
     /// `.session.yaml` to read at the point it seeds.
     pub fn read(session_id: &str, session_dir: &Path) -> Result<Self, Status> {
-        let meta = tddy_core::read_session_metadata(session_dir).map_err(|e| {
-            Status::not_found(format!(
-                "session '{session_id}' has no readable metadata at {}: {e}",
-                session_dir.display()
-            ))
-        })?;
-        Ok(Self {
+        let meta = read_session_metadata(session_id, session_dir)?;
+        Ok(Self::of_session_metadata(session_dir, &meta))
+    }
+
+    /// The codebase `meta` — a session's `.session.yaml`, already read — describes; for a caller
+    /// that needs other fields of the same read.
+    pub fn of_session_metadata(session_dir: &Path, meta: &tddy_core::SessionMetadata) -> Self {
+        Self {
             session_dir: session_dir.to_path_buf(),
             worktree_root: meta.repo_path.as_ref().map(PathBuf::from),
             project_id: meta.project_id.clone(),
-            enforces_withdrawal: session_enforces_a_withdrawal(&meta),
-        })
+            enforces_withdrawal: session_enforces_a_withdrawal(meta),
+        }
     }
+}
+
+/// A session's `.session.yaml`, or `not_found` naming the session and where it was looked for.
+pub fn read_session_metadata(
+    session_id: &str,
+    session_dir: &Path,
+) -> Result<tddy_core::SessionMetadata, Status> {
+    tddy_core::read_session_metadata(session_dir).map_err(|e| {
+        Status::not_found(format!(
+            "session '{session_id}' has no readable metadata at {}: {e}",
+            session_dir.display()
+        ))
+    })
 }
 
 /// This daemon in its capacity as the claimant of the clones a session's seeded agents read.

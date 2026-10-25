@@ -277,12 +277,21 @@ fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
         "types.proto holds BranchSession for ListSessions and QueryBranch"
     );
 
+    // Then #coagents 2/8 added AgentKind, which catalog.SubagentInfo and
+    // session_agents.SessionAgentEntry both carry
+    assert!(
+        types.contains("enum AgentKind")
+            && catalog_reaches_agent_kind()
+            && session_agents.contains("types.AgentKind"),
+        "types.proto holds AgentKind for the subagent catalog and the session-agent roster"
+    );
+
     // Then nothing else has been parked there
     let declared = types.matches("\nenum ").count() + types.matches("\nmessage ").count();
     assert_eq!(
-        declared, 4,
-        "types.proto must hold only what genuinely crosses; node 8 added BranchSession as the \
-         fourth type"
+        declared, 5,
+        "types.proto must hold only what genuinely crosses; #coagents 2/8 added AgentKind as the \
+         fifth type"
     );
 }
 
@@ -663,10 +672,11 @@ fn connection_service_ends_at_exactly_the_residual() {
 
 /// The three protos node 8 adds are the last, and the shared types file must not have grown beyond
 /// what genuinely crosses: `HostDocumentScope` (node 6), `SessionAgentStatus` and
-/// `SessionAgentActivity` (node 7), `BranchSession` (node 8) — four types, each reached by a service
-/// that stays as well as one that moved, each established by walking field types.
+/// `SessionAgentActivity` (node 7), `BranchSession` (node 8), and `AgentKind` (`#coagents` 2/8, on
+/// both the subagent catalog's rows and the session-agent roster's entries) — five types, each
+/// reached by two services, each established by walking field types.
 #[test]
-fn the_shared_types_file_holds_only_the_four_types_that_genuinely_cross() {
+fn the_shared_types_file_holds_only_the_five_types_that_genuinely_cross() {
     // Given
     let types = read("types.proto");
 
@@ -675,7 +685,7 @@ fn the_shared_types_file_holds_only_the_four_types_that_genuinely_cross() {
 
     // Then
     assert_eq!(
-        declared, 4,
+        declared, 5,
         "types.proto grew past what two really-served services both reach"
     );
     for expected in [
@@ -683,6 +693,7 @@ fn the_shared_types_file_holds_only_the_four_types_that_genuinely_cross() {
         "SessionAgentStatus",
         "SessionAgentActivity",
         "BranchSession",
+        "AgentKind",
     ] {
         assert!(
             types.contains(expected),
@@ -795,4 +806,10 @@ fn nothing_in_the_workspace_names_the_connection_service() {
         hits.is_empty(),
         "these still name the deleted service: {hits:?}"
     );
+}
+
+/// `catalog.proto`'s `SubagentInfo` carries the shared `types.AgentKind`.
+fn catalog_reaches_agent_kind() -> bool {
+    let catalog = read("catalog.proto");
+    catalog.contains("import \"types.proto\"") && catalog.contains("types.AgentKind")
 }

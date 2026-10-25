@@ -16,3 +16,8 @@ visible — but it is a request that should not be made.
 
 **What would close it:** a harness/definition flag on the catalog's agents, and the pane not asking
 for routes for an agent the catalog marks as a definition.
+
+**Answered for the subagent catalog (2026-10-24, #721):** `SubagentInfo` carries `kind` and
+`harness`, so the subagent pickers know which rows are coding agents and on which harness.
+`AgentInfo` (the tool-session agent list this entry is about) is unchanged; the flag it needs is still
+open.

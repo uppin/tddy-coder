@@ -27,6 +27,26 @@ pub struct SpawnSessionRequest {
     pub scope: Option<String>,
 }
 
+/// Spawn a coding-agent harness as another OS user, its stdio relayed over a socket the caller owns.
+///
+/// Gated like [`SpawnSessionRequest`] and by one more allowlist of its own
+/// (`SpawnPolicy::allowed_relay_tool_paths`), so enabling sessions never enables relayed stdio.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpawnRelayedRequest {
+    /// Must appear in `SpawnPolicy::allowed_session_users`.
+    pub os_user: String,
+    /// Must appear in `SpawnPolicy::allowed_relay_tool_paths`.
+    pub tool_path: PathBuf,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub working_dir: Option<PathBuf>,
+    /// The caller's listening socket: absolute, owned by the caller's uid.
+    pub relay_socket: PathBuf,
+}
+
 /// A process the supervisor spawned on the caller's behalf.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnedProcess {

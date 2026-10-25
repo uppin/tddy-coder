@@ -10,33 +10,29 @@
 //! They are separate because they answer different questions, and a regression in one must not be
 //! able to hide behind the other.
 
+pub(crate) mod listener;
+mod rpc;
+
 use std::collections::BTreeMap;
-use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
-use tddy_rpc::{Request, Response, Status};
-use tddy_stdio::StdioEndpoint;
-use tokio::net::UnixListener;
-
-use crate::authz::{Authorizer, PeerIdentity};
+use crate::authz::Authorizer;
 use crate::cgroup_broker::CgroupBroker;
 use crate::clone::{self, CloneEvents, RunningClone};
-use crate::config::{SocketConfig, SupervisorConfig};
+use crate::config::SupervisorConfig;
 use crate::error::SupervisorError;
 use crate::policy;
-use crate::proto::supervisor::{self as wire, SupervisorService, SupervisorServiceServer};
-use crate::protocol;
+use crate::proto::supervisor::{self as wire, SupervisorServiceServer};
 use crate::request::{
-    CreateScopeRequest, ScopeHandle, SessionStatus, SpawnSandboxRequest, SpawnSessionRequest,
-    SpawnedProcess,
+    CreateScopeRequest, ScopeHandle, SessionStatus, SpawnRelayedRequest, SpawnSandboxRequest,
+    SpawnSessionRequest, SpawnedProcess,
 };
-use crate::socket::{resolve_socket_source, SocketSource};
-use crate::spawn_broker::{
-    self, ChildOutput, EnvironmentBase, JailMount, SandboxJail, SpawnPlan, TargetUser,
-};
+use crate::server::rpc::SupervisorServiceImpl;
+use crate::spawn_broker::accounts;
+use crate::spawn_broker::accounts::TargetUser;
+use crate::spawn_broker::{ChildOutput, EnvironmentBase, JailMount, SandboxJail, SpawnPlan};
 use crate::supervisor::Supervisor;
 
 /// Name this service answers to on the wire, taken from the generated server so a client and a
@@ -83,6 +79,49 @@ impl PrivilegedSurface {
         // `SpawnSession` spawns a plain process. Jailing is `SpawnSandbox`'s job.
         let plan = resolved.plan(request.args, None);
         self.spawn(plan, "session", &os_user).await
+    }
+
+    /// Spawn a coding-agent harness as an allowlisted user with its stdio relayed to the caller.
+    ///
+    /// The same user, environment and working-directory gates as [`Self::spawn_session`], plus the
+    /// relay's own allowlist. The caller's socket is connected to **before** the fork, so a socket
+    /// that is not the caller's costs nothing and spawns nothing.
+    async fn spawn_relayed(
+        &self,
+        request: SpawnRelayedRequest,
+        caller_uid: u32,
+    ) -> Result<SpawnedProcess, SupervisorError> {
+        let policy = &self.config.spawn_policy;
+        // The relay allowlist first: with it empty (the default) nothing below runs at all.
+        let program = policy::resolve_relay_tool_path(policy, &request.tool_path)?;
+        // `resolve_spawn_of`, not `resolve_spawn`: the relay allowlist has passed the program, and
+        // resolving it against `allowed_tool_paths` as well would make a relayed harness need both
+        // lists — and so grant it `SpawnSession` too.
+        let resolved = self.resolve_spawn_of(
+            &request.os_user,
+            program,
+            request.working_dir.as_deref(),
+            None,
+            &request.env,
+        )?;
+        let stream =
+            crate::relay::connect_to_callers_socket(&request.relay_socket, caller_uid).await?;
+        let os_user = resolved.os_user.clone();
+        let plan = resolved.plan(request.args, None);
+        let (pid, stdio) = spawn_outcome(
+            self.supervisor.spawn_session_piped(plan).await,
+            "relayed session",
+            &os_user,
+            |(pid, _)| *pid,
+        )?;
+        crate::relay::relay(
+            Arc::clone(&self.supervisor),
+            pid,
+            stream,
+            stdio,
+            self.shutdown_grace(),
+        );
+        Ok(SpawnedProcess { pid })
     }
 
     /// Resolve a sandbox request against policy and hand the jail plan to the supervisor.
@@ -143,7 +182,9 @@ impl PrivilegedSurface {
         self.resolve_spawn_of(os_user, program, working_dir, scope, env)
     }
 
-    /// The rest of [`Self::resolve_spawn`], for a `program` the tool allowlist has already passed.
+    /// The rest of [`Self::resolve_spawn`], for a `program` an allowlist has already passed —
+    /// `allowed_tool_paths` for a session, sandbox or clone, `allowed_relay_tool_paths` for a
+    /// relayed spawn.
     fn resolve_spawn_of(
         &self,
         os_user: &str,
@@ -154,9 +195,9 @@ impl PrivilegedSurface {
     ) -> Result<ResolvedSpawn, SupervisorError> {
         let policy = &self.config.spawn_policy;
         let os_user = policy::resolve_session_user(policy, os_user)?;
-        // Here rather than in either caller: the environment is as much a way to choose what runs as
-        // the tool path is, and a gate that only one of the two spawn methods passed through would be
-        // a gate the other one is missing.
+        // Here rather than in any caller: the environment is as much a way to choose what runs as
+        // the tool path is, and a gate that only some of the spawn methods passed through would be a
+        // gate the others are missing.
         let env = policy::resolve_env(policy, env)?;
         let scope_procs = match scope {
             Some(scope) => Some(self.cgroups.scope_procs_path(scope)?),
@@ -166,7 +207,7 @@ impl PrivilegedSurface {
         // An allowlisted account that does not exist on this host is refused exactly like one the
         // policy never listed. Distinguishing the two would tell the caller which names are
         // allowlisted, which is the oracle this boundary exists to close.
-        let target = spawn_broker::resolve_target_user(&os_user).map_err(|error| {
+        let target = accounts::resolve_target_user(&os_user).map_err(|error| {
             log::warn!(
                 target: "tddy_supervisor::server",
                 "spawn refused: {error}"
@@ -255,19 +296,12 @@ impl PrivilegedSurface {
         kind: &str,
         os_user: &str,
     ) -> Result<SpawnedProcess, SupervisorError> {
-        // A failure here is reported as what it is. In particular a jail the supervisor cannot build
-        // surfaces as `OperationFailed` carrying the reason: dressing it as a denial would hide a
-        // host that cannot jail behind a policy-shaped error, and spawning the session without the
-        // jail it asked for would be worse than either.
-        let pid = self.supervisor.spawn_session(plan).await.map_err(|error| {
-            SupervisorError::OperationFailed {
-                message: format!("spawn {kind}: {error}"),
-            }
-        })?;
-        log::info!(
-            target: "tddy_supervisor::server",
-            "spawned {kind} pid {pid} as `{os_user}`"
-        );
+        let pid = spawn_outcome(
+            self.supervisor.spawn_session(plan).await,
+            kind,
+            os_user,
+            |pid| *pid,
+        )?;
         Ok(SpawnedProcess { pid })
     }
 
@@ -275,8 +309,12 @@ impl PrivilegedSurface {
     /// gives a child: how long a process gets to exit on request is a property of the host, not of
     /// who asked.
     fn stop_session(&self, pid: u32) -> Result<SessionStatus, SupervisorError> {
-        self.supervisor
-            .stop_session(pid, Duration::from_secs(self.config.shutdown_grace_secs))
+        self.supervisor.stop_session(pid, self.shutdown_grace())
+    }
+
+    /// How long a stopped session gets before `SIGKILL` — see [`Self::stop_session`].
+    fn shutdown_grace(&self) -> Duration {
+        Duration::from_secs(self.config.shutdown_grace_secs)
     }
 
     fn create_scope(&self, request: CreateScopeRequest) -> Result<ScopeHandle, SupervisorError> {
@@ -294,6 +332,29 @@ impl PrivilegedSurface {
         self.supervisor.require_running_session(pid)?;
         self.cgroups.attach_pid(scope, pid)
     }
+}
+
+/// What the outcome of a fork is reported as, the same for every spawn method: a success is logged,
+/// and a failure is reported as what it is.
+///
+/// In particular a jail the supervisor cannot build surfaces as `OperationFailed` carrying the
+/// reason: dressing it as a denial would hide a host that cannot jail behind a policy-shaped error,
+/// and spawning the session without the jail it asked for would be worse than either.
+fn spawn_outcome<T>(
+    outcome: std::io::Result<T>,
+    kind: &str,
+    os_user: &str,
+    pid_of: impl FnOnce(&T) -> u32,
+) -> Result<T, SupervisorError> {
+    let spawned = outcome.map_err(|error| SupervisorError::OperationFailed {
+        message: format!("spawn {kind}: {error}"),
+    })?;
+    log::info!(
+        target: "tddy_supervisor::server",
+        "spawned {kind} pid {} as `{os_user}`",
+        pid_of(&spawned)
+    );
+    Ok(spawned)
 }
 
 /// A spawn request with every policy decision already made: the account, the binary, the directory
@@ -327,478 +388,17 @@ impl ResolvedSpawn {
     }
 }
 
-/// One connection's view of the surface: the surface itself, plus the peer that opened it.
-///
-/// Peer credentials are read once, at accept time, and belong to the connection — not to a request
-/// field a caller could set.
-pub struct SupervisorServiceImpl {
-    surface: Arc<PrivilegedSurface>,
-    peer: PeerIdentity,
-}
-
-impl SupervisorServiceImpl {
-    pub fn new(surface: Arc<PrivilegedSurface>, peer: PeerIdentity) -> SupervisorServiceImpl {
-        SupervisorServiceImpl { surface, peer }
-    }
-
-    /// The first gate. Runs before any request field is looked at, for every method.
-    fn authorize_peer(&self) -> Result<(), Status> {
-        self.surface
-            .authorizer
-            .authorize(&self.peer)
-            .map_err(|denied| {
-                log::warn!(
-                    target: "tddy_supervisor::server",
-                    "denied a request from uid {} pid {}",
-                    self.peer.uid,
-                    self.peer.pid
-                );
-                protocol::status_from_error(denied)
-            })
-    }
-}
-
-#[async_trait]
-impl SupervisorService for SupervisorServiceImpl {
-    async fn list_services(
-        &self,
-        _request: Request<wire::ListServicesRequest>,
-    ) -> Result<Response<wire::ListServicesResponse>, Status> {
-        self.authorize_peer()?;
-        let services = self
-            .surface
-            .supervisor
-            .statuses()
-            .into_iter()
-            .map(protocol::service_status_to_wire)
-            .collect();
-        Ok(Response::new(wire::ListServicesResponse { services }))
-    }
-
-    async fn start_service(
-        &self,
-        request: Request<wire::ServiceRef>,
-    ) -> Result<Response<wire::ServiceStatus>, Status> {
-        self.authorize_peer()?;
-        let status = self
-            .surface
-            .supervisor
-            .start_by_name(&request.into_inner().name)
-            .await
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(protocol::service_status_to_wire(status)))
-    }
-
-    async fn stop_service(
-        &self,
-        request: Request<wire::ServiceRef>,
-    ) -> Result<Response<wire::ServiceStatus>, Status> {
-        self.authorize_peer()?;
-        let status = self
-            .surface
-            .supervisor
-            .stop_by_name(&request.into_inner().name)
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(protocol::service_status_to_wire(status)))
-    }
-
-    async fn spawn_session(
-        &self,
-        request: Request<wire::SpawnSessionRequest>,
-    ) -> Result<Response<wire::SpawnedProcess>, Status> {
-        self.authorize_peer()?;
-        let spawned = self
-            .surface
-            .spawn_session(protocol::spawn_session_from_wire(request.into_inner()))
-            .await
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(protocol::spawned_process_to_wire(spawned)))
-    }
-
-    async fn spawn_sandbox(
-        &self,
-        request: Request<wire::SpawnSandboxRequest>,
-    ) -> Result<Response<wire::SpawnedProcess>, Status> {
-        self.authorize_peer()?;
-        let spawned = self
-            .surface
-            .spawn_sandbox(protocol::spawn_sandbox_from_wire(request.into_inner()))
-            .await
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(protocol::spawned_process_to_wire(spawned)))
-    }
-
-    async fn session_status(
-        &self,
-        request: Request<wire::SessionRef>,
-    ) -> Result<Response<wire::SessionStatus>, Status> {
-        self.authorize_peer()?;
-        let status = self
-            .surface
-            .supervisor
-            .session_status(request.into_inner().pid)
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(protocol::session_status_to_wire(status)))
-    }
-
-    type CloneRepositoryStream = CloneEvents;
-
-    async fn clone_repository(
-        &self,
-        request: Request<wire::CloneRepositoryRequest>,
-    ) -> Result<Response<Self::CloneRepositoryStream>, Status> {
-        self.authorize_peer()?;
-        let events = self
-            .surface
-            .clone_repository(request.into_inner())
-            .await
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(events))
-    }
-
-    async fn stop_session(
-        &self,
-        request: Request<wire::SessionRef>,
-    ) -> Result<Response<wire::SessionStatus>, Status> {
-        self.authorize_peer()?;
-        let status = self
-            .surface
-            .stop_session(request.into_inner().pid)
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(protocol::session_status_to_wire(status)))
-    }
-
-    async fn create_scope(
-        &self,
-        request: Request<wire::CreateScopeRequest>,
-    ) -> Result<Response<wire::ScopeHandle>, Status> {
-        self.authorize_peer()?;
-        let scope = self
-            .surface
-            .create_scope(protocol::create_scope_from_wire(request.into_inner()))
-            .map_err(protocol::status_from_error)?;
-        let scope = protocol::scope_handle_to_wire(scope).map_err(protocol::status_from_error)?;
-        Ok(Response::new(scope))
-    }
-
-    async fn attach_pid(
-        &self,
-        request: Request<wire::AttachPidRequest>,
-    ) -> Result<Response<wire::AttachPidResponse>, Status> {
-        self.authorize_peer()?;
-        let request = request.into_inner();
-        self.surface
-            .attach_pid(&request.scope, request.pid)
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(wire::AttachPidResponse {}))
-    }
-
-    async fn destroy_scope(
-        &self,
-        request: Request<wire::ScopeRef>,
-    ) -> Result<Response<wire::DestroyScopeResponse>, Status> {
-        self.authorize_peer()?;
-        self.surface
-            .cgroups
-            .destroy_scope(&request.into_inner().name)
-            .map_err(protocol::status_from_error)?;
-        Ok(Response::new(wire::DestroyScopeResponse {}))
-    }
-}
-
-/// Bind the privileged socket, or adopt the one systemd created for us.
-///
-/// When systemd handed over a listener it also owns the socket node's ownership and mode, so
-/// nothing here creates a directory, unlinks a stale file, or chmods anything.
-pub fn bind_privileged_listener(socket: &SocketConfig) -> anyhow::Result<UnixListener> {
-    let mode = socket
-        .mode_bits()
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
-    let source = resolve_socket_source(
-        std::process::id(),
-        std::env::var("LISTEN_PID").ok().as_deref(),
-        std::env::var("LISTEN_FDS").ok().as_deref(),
-        &socket.path,
-    );
-
-    match source {
-        SocketSource::Activated(fd) => {
-            // Consume the activation environment so managed services do not inherit it and adopt
-            // whatever fd 3 happens to be for them.
-            std::env::remove_var("LISTEN_PID");
-            std::env::remove_var("LISTEN_FDS");
-            std::env::remove_var("LISTEN_FDNAMES");
-
-            let listener = adopt_activation_listener(fd)?;
-            log::info!(
-                target: "tddy_supervisor::server",
-                "adopted the systemd activation listener on fd {fd}"
-            );
-            Ok(listener)
-        }
-        SocketSource::SelfBind(path) => {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| {
-                    anyhow::anyhow!("create socket directory {}: {error}", parent.display())
-                })?;
-            }
-            // A socket left behind by a previous run would make `bind` fail with EADDRINUSE.
-            let _ = std::fs::remove_file(&path);
-            let listener = UnixListener::bind(&path)
-                .map_err(|error| anyhow::anyhow!("bind {}: {error}", path.display()))?;
-            apply_socket_ownership(&path, socket.group.as_deref(), mode)?;
-            log::info!(
-                target: "tddy_supervisor::server",
-                "listening on {} (mode {:o})",
-                path.display(),
-                mode
-            );
-            Ok(listener)
-        }
-    }
-}
-
-/// Take ownership of a listener systemd handed over, and make it safe to keep.
-///
-/// Two things have to be true of the adopted descriptor, and systemd guarantees neither:
-///
-/// * **Non-blocking**, because tokio drives it.
-/// * **Close-on-exec.** Activation descriptors arrive with `FD_CLOEXEC` *clear* — `sd_listen_fds(1)`
-///   is what sets it for you, and this hand-rolled adoption is not that. Rust's `Command` manages
-///   only stdio, so an inherited descriptor stays open across `exec`: without the flag, every child
-///   the supervisor forks — a managed service, or a session running as another OS user — execs
-///   holding a *listening* descriptor on the root broker's privileged socket, and can `accept()` the
-///   daemon's connections to it. Measured, not inferred: before this, a managed service's fd 3 was
-///   the same socket inode as the supervisor's listener.
-fn adopt_activation_listener(fd: std::os::fd::RawFd) -> anyhow::Result<UnixListener> {
-    // SAFETY: `resolve_socket_source` returned `Activated` only because LISTEN_PID names this
-    // process and LISTEN_FDS >= 1, which is systemd's guarantee that `fd` is an open listening
-    // AF_UNIX socket. Ownership is taken here and the raw fd is never touched again except through
-    // the listener that now owns it.
-    let inherited = unsafe { std::os::unix::net::UnixListener::from_raw_fd(fd) };
-    inherited
-        .set_nonblocking(true)
-        .map_err(|error| anyhow::anyhow!("adopted activation socket: {error}"))?;
-    // SAFETY: `inherited` owns the descriptor and keeps it open for the duration of the call.
-    // `F_SETFD` writes only this descriptor's flags.
-    let marked = unsafe { libc::fcntl(inherited.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
-    if marked != 0 {
-        return Err(anyhow::anyhow!(
-            "close-on-exec on the adopted activation socket: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
-    UnixListener::from_std(inherited)
-        .map_err(|error| anyhow::anyhow!("adopt activation listener: {error}"))
-}
-
-/// Serve the privileged surface until the listener itself becomes unusable.
-///
-/// Each connection gets its own [`SupervisorServiceImpl`] carrying that connection's peer
-/// credentials, and its own task — a caller that stalls mid-frame cannot hold up anyone else.
-pub async fn serve(listener: UnixListener, surface: Arc<PrivilegedSurface>) {
-    let slots = ConnectionSlots::new(MAX_CONCURRENT_CONNECTIONS);
-    loop {
-        // A slot is taken *before* accepting, not after. At the cap the next caller waits in the
-        // kernel's backlog, which is backpressure; accepting first and then finding nothing to serve
-        // it with would mean spending a descriptor and a task on a connection anyway.
-        if slots.available() == 0 {
-            log::warn!(
-                target: "tddy_supervisor::server",
-                "the privileged surface is serving its maximum of {MAX_CONCURRENT_CONNECTIONS} \
-                 connections; no further connection is accepted until one of them finishes"
-            );
-        }
-        let Some(slot) = slots.acquire().await else {
-            log::error!(
-                target: "tddy_supervisor::server",
-                "the connection limiter was closed; the privileged surface is no longer accepting"
-            );
-            return;
-        };
-
-        let stream = match listener.accept().await {
-            Ok((stream, _address)) => stream,
-            Err(error) => match classify_accept_failure(&error) {
-                AcceptFailure::RetryImmediately => {
-                    // One caller's connection died on its way in, or a signal arrived. The listener
-                    // is untouched, and the next `accept` is the one that matters.
-                    log::debug!(
-                        target: "tddy_supervisor::server",
-                        "a connection to the privileged socket was lost before it was served: {error}"
-                    );
-                    continue;
-                }
-                AcceptFailure::RetryAfterBackoff => {
-                    // A shortage, not a broken listener: retrying without pausing would spin a core
-                    // for as long as it lasts, and the shortage clears when something else releases
-                    // what it is holding.
-                    log::warn!(
-                        target: "tddy_supervisor::server",
-                        "accept on the privileged socket failed for lack of a host resource, \
-                         retrying in {ACCEPT_BACKOFF:?}: {error}"
-                    );
-                    drop(slot);
-                    tokio::time::sleep(ACCEPT_BACKOFF).await;
-                    continue;
-                }
-                AcceptFailure::Fatal => {
-                    // The listener is the thing that is broken, so every later `accept` fails the
-                    // same way. Retrying would be an infinite loop that logs.
-                    log::error!(
-                        target: "tddy_supervisor::server",
-                        "the privileged socket is no longer usable, so the supervisor is no longer \
-                         serving it: {error}"
-                    );
-                    return;
-                }
-            },
-        };
-
-        // A connection whose credentials cannot be read is dropped rather than served: without
-        // them the first gate has nothing to decide on.
-        let peer = match stream.peer_cred() {
-            Ok(credentials) => PeerIdentity {
-                uid: credentials.uid(),
-                gid: credentials.gid(),
-                pid: credentials.pid().unwrap_or(0) as u32,
-            },
-            Err(error) => {
-                log::warn!(
-                    target: "tddy_supervisor::server",
-                    "dropped a connection with unreadable peer credentials: {error}"
-                );
-                continue;
-            }
-        };
-
-        let (reader, writer) = stream.into_split();
-        let service =
-            SupervisorServiceServer::new(SupervisorServiceImpl::new(Arc::clone(&surface), peer));
-        // The supervisor never calls back into a caller, so the client half of the endpoint is
-        // dropped; the connection is request/response in one direction only.
-        let (_client, endpoint) = StdioEndpoint::from_duplex(
-            reader,
-            writer,
-            service,
-            tddy_rpc::RequestTransport::UnixSocket,
-        );
-        tokio::spawn(async move {
-            endpoint.run().await;
-            // Held until the connection is finished with, which is what makes the cap a cap on
-            // *concurrent* connections rather than on connections ever accepted.
-            drop(slot);
-        });
-    }
-}
-
-/// How many connections the privileged surface serves at once.
-///
-/// Some cap is mandatory, because authorization is per-*request*: any peer that gets past the
-/// socket's group check has its connection accepted and a task of its own for as long as it stays
-/// connected, before it has asked for anything. Unbounded, a loop of `connect()` calls costs the
-/// supervisor a descriptor and a task each until it runs out of descriptors.
-///
-/// 64 rather than a number fitted to a workload: the peers are the handful of processes that own a
-/// declared service, and [`crate::SupervisorClient`] holds *one* connection per client for a burst of
-/// requests. Sixty-four is far more than the daemon has ever needed at once, and small enough that
-/// the surface cannot be made to exhaust the process's descriptors by connecting to it.
-const MAX_CONCURRENT_CONNECTIONS: usize = 64;
-
-/// How long the accept loop waits out a host resource shortage before trying again.
-const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
-
-/// Permits for the connections being served, one per connection, held for its lifetime.
-#[derive(Debug, Clone)]
-struct ConnectionSlots {
-    permits: Arc<tokio::sync::Semaphore>,
-}
-
-impl ConnectionSlots {
-    fn new(limit: usize) -> ConnectionSlots {
-        ConnectionSlots {
-            permits: Arc::new(tokio::sync::Semaphore::new(limit)),
-        }
-    }
-
-    /// Wait for a free slot. `None` only if the limiter was closed, which nothing does.
-    async fn acquire(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
-        Arc::clone(&self.permits).acquire_owned().await.ok()
-    }
-
-    fn available(&self) -> usize {
-        self.permits.available_permits()
-    }
-}
-
-/// What an `accept` failure says about whether the listener is still worth using.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AcceptFailure {
-    /// One inbound connection was lost, or a signal interrupted the call. The listener is fine.
-    RetryImmediately,
-    /// The host has run out of descriptors, memory or buffers. The listener is fine, but retrying
-    /// without pausing would spin.
-    RetryAfterBackoff,
-    /// The listener itself is unusable, so every later `accept` fails identically.
-    Fatal,
-}
-
-/// Decide what an `accept` failure means. Pure, so every branch is assertable.
-///
-/// The distinction is the whole point: treating a transient failure as fatal destroys the privileged
-/// surface for the life of the process — its `JoinHandle` is only ever `abort`ed, so nothing restarts
-/// it, and systemd goes on reporting the unit `active` — while treating a fatal one as transient turns
-/// the accept loop into a spin.
-fn classify_accept_failure(error: &std::io::Error) -> AcceptFailure {
-    match error.raw_os_error() {
-        Some(libc::EMFILE | libc::ENFILE | libc::ENOBUFS | libc::ENOMEM) => {
-            AcceptFailure::RetryAfterBackoff
-        }
-        Some(libc::ECONNABORTED | libc::EINTR | libc::EAGAIN) => AcceptFailure::RetryImmediately,
-        // Anything else — `EBADF`, `EINVAL`, `ENOTSOCK`, or an errno this does not know — is treated
-        // as a broken listener. Unknown failures fail closed: stopping is loud and bounded, whereas
-        // retrying an error whose cause is unknown is a loop nothing breaks out of.
-        _ => AcceptFailure::Fatal,
-    }
-}
-
-/// Give the socket the group and mode the config asks for.
-///
-/// The socket stays owned by root; the group is the entire grant, which is why a missing group is
-/// an error rather than something to shrug at.
-fn apply_socket_ownership(
-    path: &std::path::Path,
-    group: Option<&str>,
-    mode: u32,
-) -> anyhow::Result<()> {
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::PermissionsExt;
-
-    if let Some(group) = group {
-        let gid = spawn_broker::resolve_group_gid(group)
-            .map_err(|error| anyhow::anyhow!("socket group `{group}`: {error}"))?;
-        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
-            .map_err(|_| anyhow::anyhow!("socket path contains a nul byte"))?;
-        // SAFETY: `c_path` outlives the call; `-1` leaves the owning uid untouched.
-        let changed = unsafe { libc::chown(c_path.as_ptr(), u32::MAX, gid) };
-        if changed != 0 {
-            return Err(anyhow::anyhow!(
-                "chown {} to group `{group}`: {}",
-                path.display(),
-                std::io::Error::last_os_error()
-            ));
-        }
-    }
-
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-        .map_err(|error| anyhow::anyhow!("chmod {}: {error}", path.display()))
-}
-
+// TODO(restructure): every test here is about `listener`, which the move took out of this file;
+// `restructure` cannot carry an inline `mod tests`, so they still live here.
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
 
-    use super::*;
+    use crate::server::listener::adopt_activation_listener;
+    use crate::server::listener::classify_accept_failure;
+    use crate::server::listener::AcceptFailure;
+    use crate::server::listener::ConnectionSlots;
+    use std::os::fd::AsRawFd;
 
     // -----------------------------------------------------------------------------------------
     // Adopting a listener systemd handed over

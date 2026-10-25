@@ -1811,6 +1811,9 @@ export const agentRosterRow = (agentId: string) => `agent-roster-row-${safeTestI
 /** The owning-daemon label on an attached agent's row. */
 export const agentRosterRowHost = (agentId: string) => `${agentRosterRow(agentId)}-host`;
 
+/** The coding-agent badge on a roster row; absent on a model row. */
+export const agentRosterRowKind = (agentId: string) => `${agentRosterRow(agentId)}-kind`;
+
 /** The tools an attached agent withdraws from the main agent. */
 export const agentRosterRowReplaces = (agentId: string) => `${agentRosterRow(agentId)}-replaces`;
 
@@ -1882,6 +1885,10 @@ export const agentRosterPickerOption = (agentId: string) =>
 export const agentRosterPickerOptionHost = (agentId: string) =>
   `${agentRosterPickerOption(agentId)}-host`;
 
+/** The coding-agent badge on a picker option; absent on a model option. */
+export const agentRosterPickerOptionKind = (agentId: string) =>
+  `${agentRosterPickerOption(agentId)}-kind`;
+
 /** One error row for a host that could not answer the picker's fan-out. */
 export const agentRosterPickerHostError = (daemonInstanceId: string) =>
   `agent-roster-picker-host-error-${safeTestIdPart(daemonInstanceId)}`;
@@ -1893,6 +1900,10 @@ export const createSessionAgentOption = (agentId: string) =>
 /** The owning-daemon label on a create-session agent option. */
 export const createSessionAgentOptionHost = (agentId: string) =>
   `${createSessionAgentOption(agentId)}-host`;
+
+/** The coding-agent badge on a create-session agent option; absent on a model option. */
+export const createSessionAgentOptionKind = (agentId: string) =>
+  `${createSessionAgentOption(agentId)}-kind`;
 
 /** One error row for a host that could not answer the create-session picker's fan-out. */
 export const createSessionAgentHostError = (daemonInstanceId: string) =>

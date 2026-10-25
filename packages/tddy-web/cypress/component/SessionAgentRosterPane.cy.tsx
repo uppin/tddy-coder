@@ -29,6 +29,7 @@ import {
   aSessionAgentRosterBackend,
   anAttachedAgent,
   anAvailableAgent,
+  anAvailableCodingAgent,
   type RosterBackend,
 } from "../support/rpc/sessionAgentRosterBackend";
 import { mountWithPerDaemonLiveKitRpc } from "../support/rpc/perDaemonLiveKitRpc";
@@ -38,6 +39,7 @@ import { sessionAgentRosterPage as page } from "../support/pages/sessionAgentRos
 const SESSION_ID = "1780828020298-roster";
 const EXPLORER_LOCAL = "explorer@workstation-1";
 const LINTER_REMOTE = "linter@server-2";
+const CODEX_REMOTE = "codex-fast@server-2";
 
 /** The host facilitating the session — it owns the roster and answers the picker for its own defs. */
 const HOST_A: DaemonHost = { instanceId: "workstation-1", label: "workstation-1 (this daemon)" };
@@ -317,6 +319,26 @@ describe("Agent roster pane", () => {
     page.pickerOption(EXPLORER_LOCAL).should("exist");
     page.pickerOption(LINTER_REMOTE).should("exist");
     catalogReadsReceivedBy(roster).should("have.length", 1);
+  });
+
+  it("offers a coding agent in the Add-agent picker with its coding-agent badge", () => {
+    // Given — the peer host offers a Codex coding agent beside nothing else
+    const roster = aSessionAgentRosterBackend({
+      sessionId: SESSION_ID,
+      initial: [],
+      rev: 0,
+      offers: [],
+    });
+    mountPaneAcrossHosts(
+      roster,
+      aDaemonOfferingAgents([anAvailableCodingAgent("codex-fast", HOST_B.instanceId, "codex-acp")]),
+    );
+
+    // When
+    page.openPicker();
+
+    // Then
+    page.pickerOptionKind(CODEX_REMOTE).should("have.text", "coding agent · codex-acp");
   });
 
   // -------------------------------------------------------------------------

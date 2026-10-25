@@ -86,6 +86,7 @@ impl DaemonSessionHost {
             session_tokens: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(NoSessionRooms),
+            coding_agent_launcher: None,
             model_registry: None,
             session_agent_rosters: Arc::new(
                 crate::session_agent_roster::SessionAgentRosterStore::new(
@@ -168,6 +169,17 @@ impl DaemonSessionHost {
     #[must_use]
     pub fn with_session_rooms(mut self, rooms: Arc<dyn SessionRooms>) -> Self {
         self.session_rooms = rooms;
+        self
+    }
+
+    /// Install what starts a coding-agent subagent for a conversation (builder). Without it a
+    /// coding-agent conversation is refused.
+    #[must_use]
+    pub fn with_coding_agent_launcher(
+        mut self,
+        launcher: Arc<dyn tddy_coding_subagent::CodingAgentLauncher>,
+    ) -> Self {
+        self.coding_agent_launcher = Some(launcher);
         self
     }
 

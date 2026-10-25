@@ -172,6 +172,9 @@ pub struct DaemonSessionHost {
     /// (`docs/ft/daemon/session-room.md`); `DeleteSession` closes one again.
     /// [`tddy_daemon_extensions::NoSessionRooms`] until [`Self::with_session_rooms`].
     session_rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
+    /// What starts a coding-agent subagent for a conversation; `None` until
+    /// [`Self::with_coding_agent_launcher`].
+    coding_agent_launcher: Option<Arc<dyn tddy_coding_subagent::CodingAgentLauncher>>,
     /// This daemon's model registry, whose assistants are selectable agents alongside the
     /// `allowed_agents` config entries. `None` means no registry is wired (a test fixture), in
     /// which case `ListAgents` reports the config entries alone.
@@ -283,6 +286,10 @@ mod svc_split_delegators;
 pub(crate) use agent_roster::*;
 /// Shared with `tddy-daemon-rpc`'s `ListSubagents`, whose rows name agents the way the roster does.
 pub use agent_roster::{def_tool_names, qualified_agent_id};
+/// Shared with `tddy-daemon-rpc`'s `ListSubagents`: the coding agents a daemon offers.
+pub use tddy_session_agents::coding_agent::{
+    agent_kind_to_wire, coding_agent_defs_for, coding_agent_record,
+};
 
 pub use svc_resolve_listed_worktree::resolvable_agent_defs;
 

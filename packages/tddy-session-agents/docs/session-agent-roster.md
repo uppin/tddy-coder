@@ -293,6 +293,26 @@ provisioning, tearing down and unwinding clones, and the roster records — runs
 `AgentRoster` and its `AgentHostCallbacks` port (the host's exec-tool, session-room and
 worktree-snapshot capabilities).
 
+## Coding-agent entries
+
+`coding_agent` holds what the roster needs to treat a coding agent
+([Session agent roster § Coding agents](../../../docs/ft/daemon/session-agent-roster.md#coding-agents))
+like any other entry:
+
+| Function | Role |
+|---|---|
+| `coding_agent_defs_for` | the daemon's `CodingAgentDef`s: harness profiles under `<tddy_data_dir>/agents` and ACP `allowed_agents` ids |
+| `coding_agent_record` | the `SessionAgentRecord` a coding-agent row attaches as (`kind: coding_agent`, its harness, no `replaces`) — `tddy-daemon-rpc`'s `ListSubagents` row is built from the same record |
+| `agent_kind_to_wire`, `agent_kind_from_wire` | `AgentKindRecord` ↔ `types.AgentKind`; an unknown wire value (a newer peer's row) is `INVALID_ARGUMENT`, never read as a model |
+| `refuse_unconfinable_harness` | attach admission: in a managed-codebase session, `tddy_coding_subagent::refuse_unless_confinable` → `FAILED_PRECONDITION` naming the harness |
+| `AgentRoster::open_coding_agent_session` | `open_local_agent_session`'s branch for a `coding_agent` record |
+
+Opening a conversation refuses a system prompt (a coding agent has its own), resolves the session's
+GitHub user to its OS user and its worktree, and builds a `CodingAgentLaunch` (managed when the
+session's codebase is). It asks the launcher for the MCP servers **before** the transport, so a
+refusal starts nothing; a managed `claude-acp` launch carries `withdrawal_session_meta` as
+`OpenSession.meta`. A daemon with no launcher installed refuses with `FAILED_PRECONDITION`.
+
 ## The sandbox-IPC bridge
 
 A managed-codebase session's agent runs in a jail, and its tool calls reach the

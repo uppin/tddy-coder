@@ -25,7 +25,7 @@ use crate::privilege_drop::{plan_privilege_change, resolve_target_account};
 use std::process::Stdio;
 
 /// The variables `gh` honours ahead of its own login.
-const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
+pub const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
     "GH_TOKEN",
     "GITHUB_TOKEN",
     "GH_ENTERPRISE_TOKEN",
