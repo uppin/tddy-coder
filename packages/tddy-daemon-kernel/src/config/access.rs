@@ -15,6 +15,11 @@ pub struct GitHubConfig {
     pub pending_login_ttl_seconds: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")] // `open_vault_idle_ttl.rs`
     pub open_vault_idle_ttl_seconds: Option<u64>,
+    /// Development only: every credential vault is created and opened under the empty passphrase,
+    /// by the daemon itself, so a dev run never prompts for one. Refused at startup unless
+    /// `stub: true` — see `tddy_daemon_auth`'s `dev_vault`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dev_vault_without_passphrase: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
