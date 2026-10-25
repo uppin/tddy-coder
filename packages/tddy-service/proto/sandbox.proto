@@ -59,7 +59,20 @@ message SessionFrame {
     // request id because the host keeps exactly one in-jail call outstanding at a time, the same
     // one-at-a-time discipline `tool_request`/`tool_response` already use.
     exec_tools.ExecuteToolResponse in_jail_tool_response = 17;
+    // Sandbox → host: the jail's PTY is now `cols`×`rows` — sent once after the PTY opens and again
+    // after every resize the runner applied. It travels in the same poll-gated backlog as
+    // `terminal_output`, so the host sees it at the exact point in the output stream where the size
+    // changed and can keep its screen model (and therefore its snapshots) at the jail's real size.
+    SandboxTerminalResized terminal_resized = 18;
   }
+}
+
+/// The size the jail's PTY was opened or resized to — the applied size, not a requested one.
+message SandboxTerminalResized {
+  uint32 cols = 1;
+  uint32 rows = 2;
+  string session_id = 3;
+  string terminal_id = 4;
 }
 
 /// An RPC the in-jail agent asked the host to dispatch to its `ConnectionService`. The host is the

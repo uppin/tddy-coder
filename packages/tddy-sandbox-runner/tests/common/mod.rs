@@ -47,6 +47,9 @@ pub enum Mode {
         method: String,
         payload: Vec<u8>,
     },
+    /// Push these terminal frames, in order — output and size changes as a jail's backlog
+    /// delivers them.
+    PushTerminalFrames(Vec<SessionPayload>),
     /// Play a `--workspace-tools` jail: answer every inbound `in_jail_tool_request` with
     /// `result_json`, recording what was asked and whether the host ever had two calls in flight.
     ServeInJailTools { result_json: String },
@@ -162,6 +165,15 @@ impl SandboxService for FakeSandboxService {
                             )),
                         }))
                         .await;
+                }
+                Mode::PushTerminalFrames(payloads) => {
+                    for payload in payloads {
+                        let _ = tx
+                            .send(Ok(SessionFrame {
+                                payload: Some(payload.clone()),
+                            }))
+                            .await;
+                    }
                 }
                 Mode::EchoOnly
                 | Mode::ServeInJailTools { .. }

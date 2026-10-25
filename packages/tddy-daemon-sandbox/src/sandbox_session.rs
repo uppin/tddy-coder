@@ -458,6 +458,33 @@ pub async fn dial_and_bridge(
 }
 
 /// Map [`SandboxError`] to gRPC status for StartSession failures.
+/// Feed a jailed terminal's reported events into its capture and live broadcast: output is appended
+/// and broadcast under the capture lock (the sequence point a snapshot depends on), and a size
+/// change resizes the capture's screen model at the same point in the stream, so snapshots of a
+/// jailed terminal are serialized at the jail's real grid. Runs until `events` closes.
+pub fn forward_jail_terminal_events(
+    mut events: mpsc::UnboundedReceiver<tddy_sandbox_runner::HostTerminalEvent>,
+    capture: Arc<StdMutex<TerminalCapture>>,
+    stdout_tx: broadcast::Sender<Bytes>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                tddy_sandbox_runner::HostTerminalEvent::Output(chunk) => {
+                    if let Ok(mut cap) = capture.lock() {
+                        cap.append(&chunk);
+                        let _ = stdout_tx.send(chunk);
+                    }
+                }
+                tddy_sandbox_runner::HostTerminalEvent::Resized { cols, rows } => {
+                    // TODO(jail-size): implement
+                    let _ = (cols, rows);
+                }
+            }
+        }
+    })
+}
+
 pub fn sandbox_error_to_status(err: SandboxError) -> Status {
     match err {
         SandboxError::Unsupported { platform, message } => {

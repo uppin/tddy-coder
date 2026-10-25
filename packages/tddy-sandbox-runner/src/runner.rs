@@ -681,6 +681,17 @@ impl SandboxSessionRelay {
         self.terminal_backlog.lock().unwrap().push_back(chunk);
     }
 
+    /// Report that the jail's PTY is now `cols`×`rows` — after it opens and after every resize the
+    /// runner applied. Queued in the terminal backlog behind the output produced before it, so the
+    /// host learns of the size at the exact point in the stream where it changed.
+    // TODO(jail-size): called from the PTY threads after `openpty` and after each applied resize;
+    // drop this allow once they call it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn push_terminal_size(&self, cols: u16, rows: u16) {
+        // TODO(jail-size): implement
+        let _ = (cols, rows);
+    }
+
     /// Tell the host the pty command exited, so it stops `HostPoll`-ing and lets the session
     /// channel close. Always deferred to the next `HostPoll` (`handle_host_poll` delivers it
     /// exactly once) rather than pushed immediately: an immediate push on `outbound` could race
@@ -3534,6 +3545,47 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         relay.set_outbound(tx);
         (relay, rx)
+    }
+
+    /// The jail's PTY size reaches the host as a `TerminalResized` frame sitting exactly between
+    /// the output produced before the resize and the output produced after it — the host's screen
+    /// model reads every byte at the grid it was drawn for only if the order survives the backlog.
+    #[tokio::test]
+    async fn a_reported_size_reaches_the_host_in_order_with_the_output_around_it() {
+        // Given a relay whose host has subscribed to the terminal
+        let relay = Arc::new(SandboxSessionRelay::default());
+        *relay.terminal_subscribed.lock().unwrap() = true;
+
+        // When output, a resize to 140x40 and more output are produced before the next poll
+        relay.push_terminal(Bytes::from_static(b"before"));
+        relay.push_terminal_size(140, 40);
+        relay.push_terminal(Bytes::from_static(b"after"));
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel();
+        relay.handle_host_poll(&out_tx);
+        drop(out_tx);
+
+        // Then the host receives them in exactly that order
+        let mut reported = Vec::new();
+        while let Some(Ok(frame)) = out_rx.recv().await {
+            match frame.payload {
+                Some(SessionPayload::TerminalOutput(out)) => {
+                    reported.push(format!("output {}", String::from_utf8_lossy(&out.data)))
+                }
+                Some(SessionPayload::TerminalResized(size)) => reported.push(format!(
+                    "resized {}x{} {}",
+                    size.cols, size.rows, size.terminal_id
+                )),
+                _ => {}
+            }
+        }
+        assert_eq!(
+            reported,
+            vec![
+                "output before".to_string(),
+                format!("resized 140x40 {MAIN_TERMINAL_ID}"),
+                "output after".to_string(),
+            ]
+        );
     }
 
     /// A `(service, method)` the allowlist does not carry is refused here, and never reaches

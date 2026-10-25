@@ -5,6 +5,7 @@
 **Type:** Feature
 **Complexity**: 5 — three crates, a stdio-bridge contract change, ordering semantics (size change must sit at the right point in the output stream)
 **Stack:** `#term-snapshot 3/4` — branch `feature/term-snapshot/jail-size`, base `feature/term-snapshot/resync`
+**PR:** [#762](https://github.com/uppin/tddy-coder/pull/762)
 **PRD:** [PRD-2026-10-25-terminal-snapshot-jail.md](../../ft/daemon/1-WIP/PRD-2026-10-25-terminal-snapshot-jail.md)
 
 ## Initial Discovery
@@ -22,6 +23,30 @@
 - [ ] `tddy-sandbox-runner`: report the applied PTY size at spawn and after each resize
 - [ ] `tddy-daemon-sandbox`: consume the size message and resize the terminal's capture/model in order with output
 - [ ] `tddy-session-lifecycle`: the sandbox adapter stops refusing `SNAPSHOT`
+
+## Contract (pass 2, approved 2026-10-25)
+
+- **Opt-in event channel.** `HostRelayConfig::with_terminal_events(tx)` delivers
+  `HostTerminalEvent::{Output, Resized}` in order *instead of* bytes on `terminal_sink`. The 11
+  byte-only consumers (sandbox-app, sandbox-qemu, testing-commons, integration-tests, runner tests)
+  are untouched. Only the daemon's `dial_and_bridge` switches to it, and to
+  `forward_jail_terminal_events`, in green.
+- Proto: `SessionFrame.terminal_resized = 18` / `SandboxTerminalResized { cols, rows, session_id,
+  terminal_id }`. Regenerated `sandbox_pb.ts` in tddy-web and tddy-rust-typescript-tests.
+- Runner: `SandboxSessionRelay::push_terminal_size` (stub). The PTY threads (generic, claude,
+  cursor) call it after `openpty` and after each applied `master.resize`, and its
+  `cfg_attr(not(test), allow(dead_code))` goes once they do.
+- Daemon: `sandbox_session::forward_jail_terminal_events` (output path real, `Resized` stubbed).
+- The `session-lifecycle` parity extension is dropped: a sized capture answers through #760's
+  default `snapshot_and_subscribe`, which #760's tests cover.
+- Dev-dependency `vt100 = "0.15"` in tddy-daemon-sandbox (already in the lockfile).
+
+| Test | File | Fails today because |
+|---|---|---|
+| `a_reported_size_reaches_the_host_in_order_with_the_output_around_it` | `packages/tddy-sandbox-runner/src/runner.rs` tests | `push_terminal_size` stub |
+| `the_host_relay_reports_the_jails_output_and_size_changes_in_order` | `packages/tddy-sandbox-runner/tests/host_relay_terminal_events.rs` | relay does not route to `terminal_events` |
+| `a_jailed_terminal_snapshots_at_the_size_the_jail_reported` | `packages/tddy-daemon-sandbox/tests/jail_terminal_snapshot_acceptance.rs` | `Resized` stub, plus #760's `snapshot()` |
+| `a_jailed_terminal_that_never_reported_its_size_has_no_snapshot` | same | passes today, as a guard |
 
 ## Responsibility
 
@@ -114,10 +139,10 @@ output stream, so jailed terminals snapshot like every other terminal.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
