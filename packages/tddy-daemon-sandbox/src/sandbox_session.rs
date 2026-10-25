@@ -428,6 +428,7 @@ pub async fn dial_and_bridge(
     // Output and the jail's size changes arrive on one channel, in order: a size change read apart
     // from the output around it would reinterpret that output at the wrong grid.
     let (events_tx, events_rx) = mpsc::unbounded_channel();
+    // `HostRelayConfig::new` requires a byte sink; with events set the relay never writes to it.
     let (term_tx, _unused_bytes_sink) = mpsc::unbounded_channel::<Bytes>();
     forward_jail_terminal_events(events_rx, Arc::clone(&capture), stdout_tx.clone());
 
@@ -450,7 +451,6 @@ pub async fn dial_and_bridge(
     Ok(())
 }
 
-/// Map [`SandboxError`] to gRPC status for StartSession failures.
 /// Feed a jailed terminal's reported events into its capture and live broadcast: output is appended
 /// and broadcast under the capture lock (the sequence point a snapshot depends on), and a size
 /// change resizes the capture's screen model at the same point in the stream, so snapshots of a
@@ -479,6 +479,7 @@ pub fn forward_jail_terminal_events(
     })
 }
 
+/// Map [`SandboxError`] to gRPC status for StartSession failures.
 pub fn sandbox_error_to_status(err: SandboxError) -> Status {
     match err {
         SandboxError::Unsupported { platform, message } => {
