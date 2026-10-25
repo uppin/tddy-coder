@@ -1064,7 +1064,11 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                     .sessions
                     .conversation_closed(&req.conversation_id);
                 recorded
-                    .map(|()| Response::new(CancelAgentConversationResponse {}))
+                    .map(|()| {
+                        Response::new(CancelAgentConversationResponse {
+                            conversation_kept: false,
+                        })
+                    })
                     .map_err(|e| {
                         Status::internal(format!(
                             "conversation '{}' was cancelled, but {e}",
@@ -1085,7 +1089,9 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                         &req.conversation_id,
                     )
                     .await?;
-                Ok(Response::new(CancelAgentConversationResponse {}))
+                Ok(Response::new(CancelAgentConversationResponse {
+                    conversation_kept: false,
+                }))
             }
         }
     }

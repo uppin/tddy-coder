@@ -206,6 +206,26 @@ same PR.
 - `tddy_coding_subagent::launcher::sweep_headless_dirs(&Path) -> io::Result<()>`.
 - `tddy_discovery::subagent::{TurnCancelling, SubagentSession::turn_canceller}`.
 
+### Red tests (commit 2)
+
+| Item | Test | Fails in red because |
+|---|---|---|
+| 1 | `tddy-daemon-rpc/tests/coding_subagent_acceptance.rs`: `cancelling_a_coding_agents_turn_keeps_its_conversation_and_its_process`, `a_coding_agent_conversation_answers_its_next_prompt_after_its_turn_was_cancelled`, `cancelling_a_turn_paused_on_a_permission_request_answers_it_cancelled_and_keeps_the_conversation` | the cancel closes the conversation |
+| 1 | `tddy-tools/tests/subagent_cancel_keeps_a_kept_conversation.rs` (both) | `subagent_cancel` sends `keep_conversation: false` and retires the conversation |
+| 2 | `tddy-daemon-rpc/tests/session_agent_conversation_acceptance.rs`: `refuses_to_cancel_a_conversation_named_on_another_session` | the cancel succeeds |
+| 3 | `tddy-agent-backend` `mapping::tests::a_permission_request_carries_the_tool_kind_the_agent_named`; `tddy-coding-subagent/tests/parked_request_reports_its_tool_kind.rs` | `kind` is `None` / `other` |
+| 4 | `tddy-session-lifecycle` `headless_tests::a_headless_plan_whose_mcp_config_cannot_be_written_leaves_no_approval_route`; `tddy-daemon-rpc/tests/headless_failed_open_leaves_nothing_behind.rs`; `tddy-coding-subagent/tests/sweep_headless_dirs.rs` | the route and the directory stay; the sweep is a no-op |
+| 5 | `tddy-daemon-rpc/tests/waiting_state_record_acceptance.rs`: `a_live_activity_subscriber_sees_the_conversation_waiting_on_the_user_at_once`, `every_status_row_is_marked_as_the_daemons_status_row`; `tddy-service/tests/conversation_row_source_marker.rs` | the row is not published; its source is `coder`; the fold keys on the tool name |
+| 6 | `tddy-session-lifecycle` `headless_tests::a_headless_{cursor,oz,codex}_*`; `tddy-agent-backend` `argv::tests::codex_is_handed_its_mcp_server_as_config_overrides` | no config is written or carried |
+
+Guards that already pass (they pin what must not change): `cancelling_the_turn_of_a_model_agent_closes_its_conversation_as_before`,
+`ending_a_coding_agent_conversation_stops_its_process`, `codex_never_carries_its_mcp_servers_credential_on_the_argv`,
+`a_parked_request_with_no_tool_kind_reports_other`, the sweep's two edge tests.
+
+Not covered by an automated test: the daemon runtime's call of `sweep_headless_dirs` at start-up, and
+`subagent_end` still sending `keep_conversation: false` once `subagent_cancel` sends `true` (both
+are green's wiring; `subagent_end` today calls `subagent_cancel_tool`, so green splits that path).
+
 ## Green wave
 
 **Wave:** 1 of 1 (the sweep is the stack's last node).

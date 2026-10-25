@@ -261,6 +261,23 @@ pub trait SubagentSession: Send {
     fn permission_answerer(&self) -> Option<std::sync::Arc<dyn PermissionAnswering>> {
         None
     }
+
+    /// The handle this conversation's running turn is cancelled through while the conversation stays
+    /// open, or `None` when a turn cannot be cancelled on its own (a model loop: its cancel closes the
+    /// conversation). Read once when the conversation opens and held beside it, because a running
+    /// turn holds the conversation's own lock.
+    fn turn_canceller(&self) -> Option<std::sync::Arc<dyn TurnCancelling>> {
+        None
+    }
+}
+
+/// Cancels a conversation's running turn and keeps the conversation: a coding agent's ACP
+/// `session/cancel`. A request the turn is parked on is answered as cancelled first.
+#[async_trait]
+pub trait TurnCancelling: Send + Sync {
+    /// Cancel the running turn, if any, and return once it has ended (or the cancel's own bound has
+    /// passed). With no turn running there is nothing to cancel, and that is not an error.
+    async fn cancel_turn(&self) -> Result<(), SubagentError>;
 }
 
 /// Boxed async dispatch fn injected by the caller (`tddy-tools`) for managed codebase access.

@@ -187,6 +187,7 @@ impl ADaemonInTheCommonRoom {
                 session_id: SESSION_ON_THE_CODEBASE_HOST.to_string(),
                 daemon_instance_id: daemon.to_string(),
                 conversation_id: "conversation-under-routing".to_string(),
+                keep_conversation: false,
             }))
             .await
             .map(|_| ())

@@ -25,6 +25,7 @@ pub async fn forward_cancel_agent_conversation(
             session_id: session_id.to_string(),
             daemon_instance_id: daemon_instance_id.to_string(),
             conversation_id: conversation_id.to_string(),
+            keep_conversation: false,
         }
         .encode_to_vec(),
     )

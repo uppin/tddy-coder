@@ -30,6 +30,16 @@ pub fn headless_conversation_dir(tddy_data_dir: &Path, conversation_id: &str) ->
     tddy_data_dir.join(HEADLESS_DIR).join(conversation_id)
 }
 
+/// Remove every conversation's files under `<tddy_data_dir>/headless/`: what a daemon that stopped
+/// without closing its conversations left behind. Called once at start-up, when the daemon holds no
+/// conversation (its conversation table is in memory), so none of them is still in use. A missing
+/// `headless/` is not an error.
+pub fn sweep_headless_dirs(tddy_data_dir: &Path) -> std::io::Result<()> {
+    // TODO(coagents sweep): the sweep is green's; red publishes the signature only.
+    let _ = tddy_data_dir;
+    Ok(())
+}
+
 /// How the ACP driver reaches the agent a launcher started.
 #[derive(Debug)]
 pub enum AgentTransport {

@@ -37,6 +37,10 @@ pub const AWAITING_USER: &str = "awaitingUser";
 /// the user, which no call of the main agent makes. One row per conversation, under [`conversation_row_call_id`].
 pub const CONVERSATION_ROW_TOOL_NAME: &str = "subagent_conversation";
 
+/// The `source` a conversation's status row carries: what marks it as the daemon's status row rather than a call of
+/// the agent's, for every consumer of raw activity — the tool name alone is a name an agent's own tool could have.
+pub const CONVERSATION_ROW_SOURCE: &str = "subagent-status";
+
 /// The `call_id` prefix of a conversation's status row. Its frame is folded into the conversation's entry, but
 /// carries its own id, so a row is told apart from the main agent's calls.
 pub const CONVERSATION_ROW_CALL_PREFIX: &str = "subagent-conversation:";

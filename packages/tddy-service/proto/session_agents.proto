@@ -175,9 +175,16 @@ message CancelAgentConversationRequest {
   // token instead, so a caller cannot record another login; the number and name stay reserved.
   reserved 5;
   reserved "cancelled_by";
+  // Cancel only the running turn, when the conversation's agent can, and keep the conversation open
+  // (ACP `session/cancel`). False closes the conversation, as `subagent_end` and a detach ask.
+  bool keep_conversation = 6;
 }
 
-message CancelAgentConversationResponse {}
+message CancelAgentConversationResponse {
+  // Whether the daemon kept the conversation open: only a `keep_conversation` cancel of an agent that
+  // can cancel its own turn (a coding agent) keeps one. False means it was closed.
+  bool conversation_kept = 1;
+}
 
 message DetachSessionAgentRequest {
   string session_token = 1;

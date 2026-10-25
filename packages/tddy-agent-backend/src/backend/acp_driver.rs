@@ -153,6 +153,10 @@ pub struct PermissionRequest {
     pub tool_call_id: String,
     pub title: Option<String>,
     pub raw_input: Option<serde_json::Value>,
+    /// ACP's tool kind of the call asking, by its wire name (`edit`, `execute`, `read`, …) — the
+    /// spelling [`PermissionOptionView::kind`] uses for an option's kind. `None` when the agent named
+    /// none.
+    pub kind: Option<String>,
     pub options: Vec<PermissionOptionView>,
 }
 
@@ -471,6 +475,7 @@ mod tests {
             tool_call_id: "call-1".to_string(),
             title: None,
             raw_input: None,
+            kind: None,
             options,
         }
     }

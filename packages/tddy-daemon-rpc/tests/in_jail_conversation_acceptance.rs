@@ -135,6 +135,7 @@ async fn an_in_jail_agent_holds_a_conversation_on_the_new_coordinate() {
                 session_id: daemon.session_id.clone(),
                 daemon_instance_id: String::new(),
                 conversation_id: conversation_id.clone(),
+                keep_conversation: false,
             },
         )
         .await;

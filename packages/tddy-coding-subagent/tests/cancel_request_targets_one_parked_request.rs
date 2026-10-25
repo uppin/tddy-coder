@@ -20,6 +20,7 @@ fn a_request(title: &str) -> PermissionRequest {
         tool_call_id: title.to_string(),
         title: Some(title.to_string()),
         raw_input: None,
+        kind: None,
         options: vec![PermissionOptionView {
             option_id: "allow".to_string(),
             name: "Allow".to_string(),

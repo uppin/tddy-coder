@@ -266,7 +266,7 @@ impl SessionAgentService for PeerRoutedSessionAgents {
             .await?
             .is_some()
         {
-            return Ok(Response::new(CancelAgentConversationResponse {}));
+            return Ok(Response::new(CancelAgentConversationResponse { conversation_kept: false }));
         }
         self.local.cancel_agent_conversation(request).await
     }

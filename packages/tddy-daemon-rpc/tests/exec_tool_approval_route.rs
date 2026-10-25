@@ -67,6 +67,7 @@ fn an_agent_request() -> PermissionRequest {
         tool_call_id: "tool-call-1".to_string(),
         title: Some("Edit".to_string()),
         raw_input: None,
+        kind: None,
         options: vec![
             PermissionOptionView {
                 option_id: "allow".to_string(),

@@ -97,6 +97,8 @@ pub(super) fn permission_request(request: &acp::RequestPermissionRequest) -> Per
         tool_call_id: request.tool_call.tool_call_id.0.to_string(),
         title: request.tool_call.fields.title.clone(),
         raw_input: request.tool_call.fields.raw_input.clone(),
+        // TODO(coagents sweep): the request's `tool_call.fields.kind` — dropped until green.
+        kind: None,
         options: request
             .options
             .iter()
@@ -341,6 +343,41 @@ mod tests {
                 raw_input: Some(serde_json::json!({"path": "a.rs"})),
             })
         );
+    }
+
+    /// A `session/request_permission` for an `edit` tool call, offering one option.
+    fn a_permission_request_for(kind: Option<acp::ToolKind>) -> acp::RequestPermissionRequest {
+        let mut fields = acp::ToolCallUpdateFields::new().title("Edit src/lib.rs".to_string());
+        if let Some(kind) = kind {
+            fields = fields.kind(kind);
+        }
+        acp::RequestPermissionRequest::new(
+            "sess-1",
+            acp::ToolCallUpdate::new("call-edit-1", fields),
+            vec![acp::PermissionOption::new(
+                "allow-once",
+                "Allow once",
+                acp::PermissionOptionKind::AllowOnce,
+            )],
+        )
+    }
+
+    #[test]
+    fn a_permission_request_carries_the_tool_kind_the_agent_named() {
+        // When
+        let request = permission_request(&a_permission_request_for(Some(acp::ToolKind::Edit)));
+
+        // Then
+        assert_eq!(request.kind.as_deref(), Some("edit"));
+    }
+
+    #[test]
+    fn a_permission_request_names_no_kind_when_the_agent_named_none() {
+        // When
+        let request = permission_request(&a_permission_request_for(None));
+
+        // Then
+        assert_eq!(request.kind, None);
     }
 
     #[test]

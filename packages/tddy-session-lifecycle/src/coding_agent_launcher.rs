@@ -426,6 +426,7 @@ impl DaemonCodingAgentLauncher {
             permission_prompt_tool,
             disallowed_tools: Vec::new(),
             profile: None,
+            mcp_server: None,
         })
     }
 

@@ -126,6 +126,8 @@ impl ApprovalRoutes {
             tool_call_id: tool_name.to_string(),
             title: Some(tool_name.to_string()),
             raw_input: Some(input.clone()),
+            // A headless approval names a tool, not an ACP kind.
+            kind: None,
             options: vec![
                 PermissionOptionView {
                     option_id: ALLOW.to_string(),

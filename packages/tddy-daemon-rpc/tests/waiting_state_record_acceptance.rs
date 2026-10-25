@@ -20,12 +20,16 @@ use tddy_core::{AcpAgentCommand, McpServerSpec, SessionMetadata};
 use tddy_daemon_rpc::test_util::{test_service_with_coding_agent_launcher, TestDaemon};
 use tddy_discovery::subagent::SubagentError;
 use tddy_rpc::{Request, Status};
+use tddy_service::proto::activity::{
+    ActivityService as _, StreamMode, StreamSessionActivityRequest,
+};
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, AnswerAgentPermissionRequest, AnswerAgentPermissionResponse,
     AttachSessionAgentRequest, OpenAgentConversationRequest, PromptAgentConversationRequest,
     ResumeAgentConversationRequest, SessionAgentService as _,
 };
+use tddy_service::subagent_conversation_replay::CONVERSATION_ROW_SOURCE;
 use tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
@@ -270,6 +274,25 @@ impl PausedConversation {
             .map(|response| response.into_inner())
     }
 
+    /// The session's live activity, as a web client follows it: records published after this call, no snapshot.
+    async fn follow_live_activity(
+        &self,
+    ) -> tddy_worktree_service::stream::MpscResultStream<
+        tddy_service::proto::activity::AgentActivityRecord,
+    > {
+        self.service
+            .activity_service()
+            .stream_session_activity(Request::direct(StreamSessionActivityRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: SESSION_ID.to_string(),
+                daemon_instance_id: String::new(),
+                mode: StreamMode::LiveOnly as i32,
+            }))
+            .await
+            .expect("following the session's activity succeeds")
+            .into_inner()
+    }
+
     /// Every row the session's activity log holds for the conversation's status row, oldest first, as written.
     fn status_rows(&self) -> Vec<AgentActivityRecord> {
         let call_id = format!("subagent-conversation:{}", self.conversation_id);
@@ -386,4 +409,57 @@ async fn the_status_row_clears_when_the_user_answers_and_completes_when_the_turn
     assert_eq!(rows[2].status, tddy_core::agent_activity::STATUS_COMPLETED);
     let call_id = &rows[0].call_id;
     assert!(rows.iter().all(|row| &row.call_id == call_id));
+}
+
+#[tokio::test]
+#[serial]
+async fn a_live_activity_subscriber_sees_the_conversation_waiting_on_the_user_at_once() {
+    // Given a conversation paused on a request, and a web client following the session's activity live
+    let paused = a_conversation_paused_on_a_permission_request().await;
+    let mut live = paused.follow_live_activity().await;
+    let resume = paused.resume_deferring();
+    tokio::pin!(resume);
+
+    // When the main agent hands the request to the user, and the turn waits on the user
+    let held = tokio::time::timeout(Duration::from_millis(300), &mut resume).await;
+    assert!(held.is_err(), "the deferred resume waits for the user");
+
+    // Then the live stream has already carried the conversation's status row, waiting on the user
+    let call_id = format!("subagent-conversation:{}", paused.conversation_id);
+    let row = tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(record) = live.next().await {
+            let record = record.expect("the live stream must not error");
+            if record.call_id == call_id {
+                return record;
+            }
+        }
+        panic!("the live stream ended before the status row arrived");
+    })
+    .await
+    .expect("the status row is published live, not only at the next snapshot");
+    assert_eq!(row.status, tddy_core::agent_activity::STATUS_RUNNING);
+}
+
+#[tokio::test]
+#[serial]
+async fn every_status_row_is_marked_as_the_daemons_status_row() {
+    // Given a deferred resume waiting on the user, then answered, then ended
+    let paused = a_conversation_paused_on_a_permission_request().await;
+    let resume = paused.resume_deferring();
+    tokio::pin!(resume);
+    let _ = tokio::time::timeout(Duration::from_millis(300), &mut resume).await;
+    paused
+        .answer_as_the_user(&paused.request_id, "allow-once")
+        .await
+        .expect("the user's answer is taken");
+    tokio::time::timeout(Duration::from_secs(10), &mut resume)
+        .await
+        .expect("the turn continued once the user answered");
+
+    // Then every row it wrote carries the status source, so raw activity can tell it from an agent's call
+    let rows = paused.status_rows();
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    for row in &rows {
+        assert_eq!(row.source, CONVERSATION_ROW_SOURCE, "{row:?}");
+    }
 }

@@ -281,6 +281,7 @@ impl AgentConversationLink {
             session_id: self.envelope.session_id.clone(),
             daemon_instance_id: self.envelope.daemon_instance_id.clone(),
             conversation_id: conversation_id.to_string(),
+            keep_conversation: false,
         };
         self.client
             .call_unary(
