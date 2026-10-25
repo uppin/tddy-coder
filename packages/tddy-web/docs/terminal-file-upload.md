@@ -96,7 +96,9 @@ instead (`tddy-tauri-web`'s `NativeFileDropBridge`; positions already in CSS pix
   `webview-ipc`; `null` bridge in a browser) hit-tests each point with `document.elementFromPoint`,
   walking up to the innermost registered element. Hidden and `pointer-events: none` panes are never
   hit. It tells that target it is hovered and the others they are not, delivers the paths on `drop`,
-  and ignores a drag that carries no paths (one started inside the page).
+  and ignores a drag that carries no paths (one started inside the page). A window whose drag events
+  cannot be subscribed to (the bridge's `listen` rejects) is reported with `console.error` and the
+  dashboard keeps running; files dropped on it reach no terminal.
 - **`TerminalFileDropZone`** registers its wrapper through `useNativeFileDropTarget`, shows the same
   `terminal-drop-overlay` while hovered, and on drop:
   - `readsLocalPaths` → `insertInput(joinQuotedPaths(paths))`, nothing read or uploaded;

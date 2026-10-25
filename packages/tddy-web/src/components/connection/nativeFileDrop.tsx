@@ -104,6 +104,14 @@ export function NativeFileDropProvider({ bridge, children }: NativeFileDropProvi
       .then((stop) => {
         if (disposed) stop();
         else unlisten = stop;
+      })
+      // Files dropped on the window then reach no terminal, but the dashboard keeps running — a
+      // failed subscription must not take down every screen with it.
+      .catch((error: unknown) => {
+        console.error(
+          "[NativeFileDropProvider] the window's drag events could not be listened to; files dropped on it will not reach a terminal",
+          error,
+        );
       });
     return () => {
       disposed = true;

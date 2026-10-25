@@ -62,7 +62,9 @@ export const NATIVE_DRAG_EVENT = "tddy://native-file-drop";
  */
 export function thisWindowsNativeFileDrop(): NativeFileDropBridge {
   return {
-    listen: (onEvent) =>
+    // `async`, so a window that cannot be listened to — `getCurrentWebview` throws when the host
+    // injected no webview metadata — rejects the subscription rather than throwing into its caller.
+    listen: async (onEvent) =>
       getCurrentWebview().listen<NativeDragEvent>(NATIVE_DRAG_EVENT, (event) =>
         onEvent(event.payload),
       ),

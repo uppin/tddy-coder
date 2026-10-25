@@ -268,6 +268,20 @@ describe("Terminal native file drop (Tddy Desktop)", () => {
     cy.get("@insertInput-terminal-a").should("not.have.been.called");
   });
 
+  it("keeps the dashboard running when the window's drag events cannot be listened to", () => {
+    // Given a window whose drag events cannot be subscribed to
+    const drop = aDropOf({});
+    drop.bridge.listen = () => Promise.reject(new Error("no webview metadata"));
+    const terminal = aTerminal("terminal-a", true);
+
+    // When the terminals mount under it
+    mountTerminals(drop, anUploadBackend(), [terminal]);
+
+    // Then they render, and no drop overlay is shown
+    cy.get(selector("terminal-a")).should("be.visible");
+    page.dropOverlay({ timeout: 300 }).should("not.exist");
+  });
+
   it("ignores a drop that lands outside every terminal", () => {
     // Given
     const drop = aDropOf({ [A_SCREENSHOT]: SCREENSHOT_BYTES });
