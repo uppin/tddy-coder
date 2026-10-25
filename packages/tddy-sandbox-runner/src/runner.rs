@@ -19,8 +19,8 @@ use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
     EchoRequest, EchoResponse, EchoStreamFrame, EgressRequest, EgressResponse,
-    SandboxTerminalOutput, SessionEnded, SessionFrame, TunnelClose, TunnelData, TunnelOpen,
-    TunnelOpenAck,
+    SandboxTerminalOutput, SandboxTerminalResized, SessionEnded, SessionFrame, TunnelClose,
+    TunnelData, TunnelOpen, TunnelOpenAck,
 };
 use tddy_service::tonic_sandbox::sandbox_service_server::{
     SandboxService as TonicSandboxService, SandboxServiceServer as TonicSandboxServiceServer,
@@ -377,6 +377,12 @@ type OutboundSender = tokio::sync::mpsc::UnboundedSender<Result<SessionFrame, St
 /// `tddy-tools` caller that opened the stream. One per in-flight `request_id`.
 type RpcStreamSender = tokio::sync::mpsc::UnboundedSender<Result<Vec<u8>, tddy_rpc::Status>>;
 
+/// One entry of the terminal backlog: output, or a size change sitting between two outputs.
+enum TerminalBacklogItem {
+    Output(Bytes),
+    Resized { cols: u16, rows: u16 },
+}
+
 /// Host-poll session relay: MCP tool calls and egress requests queue until the host sends `HostPoll`.
 #[derive(Default)]
 pub(crate) struct SandboxSessionRelay {
@@ -386,7 +392,7 @@ pub(crate) struct SandboxSessionRelay {
     awaiting_egress: Mutex<Option<PendingEgressCall>>,
     terminal_subscribed: Mutex<bool>,
     /// PTY bytes produced before the host sends `SubscribeTerminal` (broadcast drops them).
-    terminal_backlog: Mutex<VecDeque<Bytes>>,
+    terminal_backlog: Mutex<VecDeque<TerminalBacklogItem>>,
     /// Set once the pty command exits; delivered on the next `HostPoll`, after the terminal
     /// backlog is drained. See `signal_session_ended`.
     session_ended: Mutex<Option<i32>>,
@@ -678,18 +684,20 @@ impl SandboxSessionRelay {
         if chunk.is_empty() {
             return;
         }
-        self.terminal_backlog.lock().unwrap().push_back(chunk);
+        self.terminal_backlog
+            .lock()
+            .unwrap()
+            .push_back(TerminalBacklogItem::Output(chunk));
     }
 
     /// Report that the jail's PTY is now `cols`×`rows` — after it opens and after every resize the
     /// runner applied. Queued in the terminal backlog behind the output produced before it, so the
     /// host learns of the size at the exact point in the stream where it changed.
-    // TODO(jail-size): called from the PTY threads after `openpty` and after each applied resize;
-    // drop this allow once they call it.
-    #[cfg_attr(not(test), allow(dead_code))]
     fn push_terminal_size(&self, cols: u16, rows: u16) {
-        // TODO(jail-size): implement
-        let _ = (cols, rows);
+        self.terminal_backlog
+            .lock()
+            .unwrap()
+            .push_back(TerminalBacklogItem::Resized { cols, rows });
     }
 
     /// Tell the host the pty command exited, so it stops `HostPoll`-ing and lets the session
@@ -762,17 +770,28 @@ impl SandboxSessionRelay {
             // one has no way to tell it is not another terminal's output.
             let session_id = session_id_from_env();
             loop {
-                let chunk = self.terminal_backlog.lock().unwrap().pop_front();
-                let Some(chunk) = chunk else { break };
-                if chunk.is_empty() {
-                    continue;
-                }
+                let item = self.terminal_backlog.lock().unwrap().pop_front();
+                let Some(item) = item else { break };
+                let payload = match item {
+                    TerminalBacklogItem::Output(chunk) if chunk.is_empty() => continue,
+                    TerminalBacklogItem::Output(chunk) => {
+                        SessionPayload::TerminalOutput(SandboxTerminalOutput {
+                            data: chunk.to_vec(),
+                            session_id: session_id.clone(),
+                            terminal_id: MAIN_TERMINAL_ID.to_string(),
+                        })
+                    }
+                    TerminalBacklogItem::Resized { cols, rows } => {
+                        SessionPayload::TerminalResized(SandboxTerminalResized {
+                            cols: u32::from(cols),
+                            rows: u32::from(rows),
+                            session_id: session_id.clone(),
+                            terminal_id: MAIN_TERMINAL_ID.to_string(),
+                        })
+                    }
+                };
                 let frame = SessionFrame {
-                    payload: Some(SessionPayload::TerminalOutput(SandboxTerminalOutput {
-                        data: chunk.to_vec(),
-                        session_id: session_id.clone(),
-                        terminal_id: MAIN_TERMINAL_ID.to_string(),
-                    })),
+                    payload: Some(payload),
                 };
                 if out_tx.send(Ok(frame)).is_err() {
                     break;
@@ -1095,6 +1114,8 @@ fn run_generic_pty_thread(
             pixel_height: 0,
         })
         .context("openpty")?;
+    // Before the child can write: the host's screen model starts at the grid its output is drawn for.
+    relay.push_terminal_size(initial_cols, initial_rows);
     let mut cmd = CommandBuilder::new(&argv[0]);
     for arg in &argv[1..] {
         cmd.arg(arg);
@@ -1136,6 +1157,7 @@ fn run_generic_pty_thread(
     });
 
     let master_writer = Arc::clone(&master);
+    let relay_resize = Arc::clone(&relay);
     std::thread::spawn(move || {
         let writer = master_writer.lock().unwrap().take_writer();
         let mut w = match writer {
@@ -1148,12 +1170,16 @@ fn run_generic_pty_thread(
         while let Ok(chunk) = stdin_rx.recv() {
             let (resize, remaining) = strip_resize_escape(&chunk);
             if let Some((cols, rows)) = resize {
-                let _ = master_writer.lock().unwrap().resize(PtySize {
+                let applied = master_writer.lock().unwrap().resize(PtySize {
                     rows,
                     cols,
                     pixel_width: 0,
                     pixel_height: 0,
                 });
+                // The applied size only: a resize the PTY refused must not move the host's model.
+                if applied.is_ok() {
+                    relay_resize.push_terminal_size(cols, rows);
+                }
             }
             if remaining.is_empty() {
                 continue;
@@ -1244,6 +1270,8 @@ pub(crate) fn run_claude_pty_thread(
             pixel_height: 0,
         })
         .context("openpty")?;
+    // Before the child can write: the host's screen model starts at the grid its output is drawn for.
+    relay.push_terminal_size(initial_cols, initial_rows);
     let mut cmd = CommandBuilder::new(&binary);
     for arg in &argv[1..] {
         cmd.arg(arg);
@@ -1317,6 +1345,7 @@ pub(crate) fn run_claude_pty_thread(
     });
 
     let master_writer = Arc::clone(&master);
+    let relay_resize = Arc::clone(&relay);
     std::thread::spawn(move || {
         // Take the writer once under the lock, then release it; the write loop must not hold
         // `master` (the reader clone above needs it, and blocking writes would stall output).
@@ -1331,12 +1360,16 @@ pub(crate) fn run_claude_pty_thread(
         while let Ok(chunk) = stdin_rx.recv() {
             let (resize, remaining) = strip_resize_escape(&chunk);
             if let Some((cols, rows)) = resize {
-                let _ = master_writer.lock().unwrap().resize(PtySize {
+                let applied = master_writer.lock().unwrap().resize(PtySize {
                     rows,
                     cols,
                     pixel_width: 0,
                     pixel_height: 0,
                 });
+                // The applied size only: a resize the PTY refused must not move the host's model.
+                if applied.is_ok() {
+                    relay_resize.push_terminal_size(cols, rows);
+                }
             }
             if remaining.is_empty() {
                 continue;

@@ -571,6 +571,7 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
 
     let session_id = config.session_id.clone();
     let terminal_sink = config.terminal_sink;
+    let terminal_events = config.terminal_events;
     // Weak, deliberately: the reader answers the jail over this channel, but it must not be what
     // keeps the channel open. The poller (and the dispatcher, where a caller keeps one) hold the
     // strong senders; once they are gone the host's half of the stream closes, the jail's server
@@ -760,7 +761,27 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
                     }
                     Some(SessionPayload::TerminalOutput(out)) => {
                         if !out.data.is_empty() {
-                            let _ = terminal_sink.send(Bytes::from(out.data));
+                            let data = Bytes::from(out.data);
+                            match &terminal_events {
+                                Some(events) => {
+                                    let _ = events.send(HostTerminalEvent::Output(data));
+                                }
+                                None => {
+                                    let _ = terminal_sink.send(data);
+                                }
+                            }
+                        }
+                    }
+                    Some(SessionPayload::TerminalResized(size)) => {
+                        // Only a consumer that opted into events keeps a screen model to resize;
+                        // a byte-only sink has no use for the size. A grid that does not fit u16
+                        // is not one the jail can have applied, so it is dropped.
+                        if let (Some(events), Ok(cols), Ok(rows)) = (
+                            &terminal_events,
+                            u16::try_from(size.cols),
+                            u16::try_from(size.rows),
+                        ) {
+                            let _ = events.send(HostTerminalEvent::Resized { cols, rows });
                         }
                     }
                     _ => {}
