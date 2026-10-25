@@ -181,7 +181,8 @@ tddy-discovery: --lib 97, subagent_runtime_answer_bypass 2. tddy-session-lifecyc
    request, the daemon writes a completed `permission:<requestId>` record with raw output `{answeredBy, cancelled: true}`,
    then interrupts the turn. A reopened dialog shows "Cancelled by <actor>" with no options, and AnswerAgentPermission
    then returns NOT_FOUND, since the conversation is no longer open.
-   - **(A) Trust: resolved in round 7.** The daemon derives the cancelling actor from the authenticated caller, and
+   - **(A) Trust: resolved in round 7; the `main-agent` label resolved in round 8 by option (a), the agent principal
+     (developer decision).** The daemon derives the cancelling actor from the authenticated caller, and
      `cancelled_by` is removed from the request (proto field 5 reserved, `772bff4c9`). A caller cannot record another
      login. **Blocked, decision needed:** the `main-agent` label. The daemon cannot tell the agent's own token from the
      user's: `SessionClaims` has no principal, and `TokenKind` has only `Access` and `Refresh`. Option (a): add an
@@ -201,6 +202,70 @@ tddy-discovery: --lib 97, subagent_runtime_answer_bypass 2. tddy-session-lifecyc
 6. **awaitingUser lifetime: decision recorded.** `awaitingUser` stays true from registration until the turn ends,
    including the window between the user's answer and the continuation. The developer accepted this.
 7. **github_user: built (D-6).** Required on `AgentSessions`, and its TODO is removed.
+
+**Round 8 (2026-10-25): the agent principal (developer decision, chosen in person).** Committed: `e46a18733` (the
+held web work: the web sends no actor on cancel, a cancel with no signed-in user is refused and sends nothing, and a
+cancelled request reads "Cancelled by <actor>"), `4b8b7e241` (red), `b85d77c6e` (green).
+
+- `SessionClaims.principal: Option<TokenPrincipal>` (`tddy-github`), `TokenPrincipal::Agent` serialised `"agent"`,
+  `#[serde(default, skip_serializing_if = "Option::is_none")]`. A user token is byte-for-byte what it was; a token minted
+  before the claim existed reads as a user's; a verifier that predates the claim ignores it (no `deny_unknown_fields`),
+  so it reads an agent's token as the user's. The signature covers it. An unknown principal value is malformed. No
+  deployed token breaks.
+- `SessionTokenSigner::mint_agent(user, ttl)`. `mint_agent_session_token` uses it, and every agent credential goes
+  through that function: the local coding-agent tool server (`CodingAgentToolHost::tool_server`), the split agent
+  (`split_remote_tool_env`), the sandboxed-codebase and project-home agents (`agent_session_token_for`). The local
+  CLI's `MintLocalToken` and the room poller's per-poll token stay user tokens.
+- `AgentSessions::answerer(token) -> AnsweredBy` (required). The daemon's adapter authenticates with the user resolver
+  as everywhere, then reads the principal off the token its own `SessionTokens` verify: `MainAgent` when it verifies
+  and carries `Agent`, otherwise `User(login)`. A host built without session tokens mints no agent token, so no caller
+  is the agent there. An agent token no trusted key signed is unauthenticated. `cancel_agent_conversation` records
+  `answerer(..).name()`.
+- Test support: `tddy_session_lifecycle::test_util::signing_test_host` and
+  `tddy_daemon_rpc::test_util::signing_test_service_with_coding_agent_launcher` build a host that authenticates real
+  tokens, with `SignedTestCredentials { user_token, agent_token }` for `TEST_USER`.
+- **Open, design question (not built):** `AnswerAgentPermission` over an agent-principal token is accepted as the
+  user's answer and recorded under the login. Should the user route refuse the agent's token?
+
+**Pending existing-test edits after round 8 (the orchestrator applies these; each was checked by compiling and running
+a temporary copy, then removed).** These supersede round 7's for the two files named.
+
+- `packages/tddy-daemon-rpc/tests/cancel_records_refusal_acceptance.rs` (4/4 pass with it): L20
+  `test_service_with_coding_agent_launcher` becomes `signing_test_service_with_coding_agent_launcher`; L36
+  `{TEST_TOKEN, TEST_USER}` becomes `{SignedTestCredentials, TEST_USER}`; after L119 insert
+  `    credentials: SignedTestCredentials,`; L154 `let service = test_service_with_coding_agent_launcher(` becomes
+  `let (service, credentials) = signing_test_service_with_coding_agent_launcher(`; L172, L183, L198
+  `TEST_TOKEN.to_string()` becomes `credentials.user_token.clone()`; after L220 (`        service,`) insert
+  `        credentials,`; L234, L267 `TEST_TOKEN.to_string()` becomes `self.credentials.user_token.clone()`; L317 doc becomes
+  "Cancel the conversation over `session_token`: the daemon derives the actor from it."; L318 becomes
+  `async fn cancel_over(&self, session_token: &str) -> Result<CancelAgentConversationResponse, Status> {` (rustfmt
+  splits it); L322 `TEST_TOKEN.to_string()` becomes `session_token.to_string()`; delete L326; L370, L445, L477
+  `.cancel("main-agent")` become `.cancel_over(&paused.credentials.agent_token)`; L415 `.cancel(TEST_USER)` becomes
+  `.cancel_over(&paused.credentials.user_token)`. The test at L360–404 stays.
+- `packages/tddy-tools/tests/subagent_cancel_actor_acceptance.rs` (1/1 passes with it): L1–2 doc becomes "`subagent_cancel`
+  reaches the daemon running a remote conversation's loop over the main agent's own session token, which is what that
+  daemon derives the cancelling actor from: the token minted for the agent carries the agent principal, so the daemon
+  records `main-agent` for a deferred request the cancel closes."; L118 fn becomes
+  `subagent_cancel_reaches_the_daemon_over_the_main_agents_token`; L146 comment becomes "Then the tool reports it
+  cancelled, and the daemon received it over the main agent's token"; L151 becomes
+  `assert_eq!(cancels[0].session_token, an_envelope().session_token);`.
+- `AgentSessions::answerer` (required, round 8). Insert after the `github_user` method in every
+  `impl AgentSessions for …` fake: `remote_answer_forward_acceptance.rs` after L195 (2/2 pass with it), and, beside the
+  round-7 `github_user` insertions, `agent_conversation_system_prompt.rs`, `conversation_transcript_record.rs` (two
+  fakes) and `clone_placement_reattach_acceptance.rs`:
+  ```
+      fn answerer(
+          &self,
+          _session_token: &str,
+      ) -> Result<tddy_discovery::subagent::AnsweredBy, Status> {
+          Err(Status::internal(
+              "this test cancels no pending request, so it names no answerer",
+          ))
+      }
+  ```
+
+**Code this node grew in round 8, for the [W] sweep:** `packages/tddy-github/src/session_token_v2.rs` 792 → ~900
+lines (mostly tests); `packages/tddy-session-lifecycle/src/test_util.rs` +~80 (the signing host).
 
 **Round 7 (2026-10-25), final pending edits.** These supersede the list below where they differ. The five cancel-literal
 edits in that list are no longer needed: after the field removal those literals compile as they are.
@@ -332,8 +397,10 @@ in an earlier round). Watch CI.
 - **The refusal wording names the holder (developer decision).** "the turn holding it carries on, and its outcome goes
   to the call that deferred the request."
 - **Accepted: `awaitingUser` lasts until the turn ends (developer decision).**
-- **Open, decision needed: the cancel actor's trust rule.** `cancelled_by` is caller-supplied. Proposed: a caller may name
-  only itself. `main-agent` is accepted, an empty value means the caller's own login, and another login is refused.
+- **The daemon derives the cancelling actor from the token (developer decision, rounds 7–8).** `cancelled_by` is gone
+  from the request. A token minted for the session's agent carries `TokenPrincipal::Agent` and its cancel is recorded as
+  `main-agent`; any other authenticated token is recorded under its login. The claim is optional on the wire, so tokens
+  issued before it read as user tokens, and nothing treats an unverifiable token as the agent.
 
 ## Refactoring Needed
 
