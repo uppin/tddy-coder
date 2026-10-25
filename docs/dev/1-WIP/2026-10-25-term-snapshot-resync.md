@@ -5,6 +5,7 @@
 **Type:** Feature
 **Complexity**: 5 — two packages, a proto contract change, ordering semantics (a new sequence point inside a running stream, lagged recovery)
 **Stack:** `#term-snapshot 2/4` — branch `feature/term-snapshot/resync`, base `feature/term-snapshot/host-snapshot` (#760)
+**PR:** [#761](https://github.com/uppin/tddy-coder/pull/761)
 **PRD:** [PRD-2026-10-25-terminal-resync.md](../../ft/daemon/1-WIP/PRD-2026-10-25-terminal-resync.md)
 
 ## Initial Discovery
@@ -21,6 +22,21 @@
 
 - [ ] `tddy-terminal-rpc`: proto field, the bidi input→output resync channel, lagged → snapshot
 - [ ] `tddy-web`: the continuity guard in the host terminal feed
+
+## Contract (pass 2, approved 2026-10-25)
+
+| Test | File | Fails today because |
+|---|---|---|
+| `a_mid_stream_request_yields_a_snapshot_that_renders_the_servers_screen_then_only_later_deltas`, `a_lagged_subscriber_is_resynced_with_a_snapshot_not_a_hole` | `packages/tddy-terminal-rpc/tests/stream_resync_acceptance.rs` | #760's snapshot open is still a stub; once it is green, the resync itself is missing |
+| `tail_streams_keep_their_lagged_behaviour` | same | passes today, as a guard |
+| 6 continuity cases | `packages/tddy-web/src/lib/terminalFrameContinuity.test.ts` | `TerminalFrameContinuity.accept` stub |
+| `does not paint across a gap and asks for a snapshot on the same stream` | `packages/tddy-web/cypress/component/TerminalResyncOnGap.cy.tsx` | no bidi open until #760 is green |
+
+Surface: `SessionTerminalInput.request_snapshot = 11` (17 existing struct literals got
+`request_snapshot: false`), regenerated `terminal_session_pb.ts`, `TerminalFrameContinuity` /
+`ContinuityVerdict` / `OffsetStampedFrame` in `packages/tddy-web/src/lib/terminalFrameContinuity.ts`,
+and test-support helpers `StubTerminal::sized_with_broadcast_capacity` and
+`typing_and_requesting_a_snapshot`.
 
 ## Responsibility
 
@@ -132,10 +148,10 @@ painted screen consistent and asks for a resync on the first gap.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

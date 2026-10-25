@@ -417,6 +417,7 @@ async fn send_terminal_input_is_accepted_for_a_started_terminal() {
         from_offset: 0,
         initial_cols: 0,
         initial_rows: 0,
+        request_snapshot: false,
     };
     let result = call(&entry, "SendTerminalInput", input.encode_to_vec()).await;
 
@@ -499,6 +500,7 @@ async fn stream_terminal_output_streams_a_started_shell_output() {
         from_offset: 0,
         initial_cols: 0,
         initial_rows: 0,
+        request_snapshot: false,
     };
     unary_ok(call(&entry, "SendTerminalInput", input.encode_to_vec()).await);
 
