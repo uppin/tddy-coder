@@ -97,6 +97,7 @@ impl DaemonSessionHost {
             sessions: Arc::new(
                 svc_session_agent_port_adapters::TurnLoopsThisDaemonCanOpen {
                     roster: self.agent_roster(),
+                    session_tokens: self.session_tokens.clone(),
                 },
             ),
             peers: Arc::new(

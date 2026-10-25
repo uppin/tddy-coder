@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_core::SessionAgentRecord;
-use tddy_discovery::subagent::SubagentSession;
+use tddy_discovery::subagent::{AnsweredBy, SubagentSession};
 use tddy_rpc::Status;
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, AnswerAgentPermissionRequest, AnswerAgentPermissionResponse,
@@ -193,13 +193,22 @@ pub trait AgentSessions: Send + Sync {
     /// for a host that keeps nothing per conversation.
     fn conversation_closed(&self, _conversation_id: &str) {}
 
-    /// The GitHub login `session_token` authenticates: the login a permission answer is recorded
-    /// under, and the actor a remote cancel names.
+    /// The GitHub login `session_token` authenticates: the login a user's permission answer is
+    /// recorded under.
     ///
     /// Required rather than defaulted: a default would let a new adapter forget it, and every answer
     /// it served would then be refused by a default nobody chose. The daemon's adapter answers it
     /// from its user mapping.
     fn github_user(&self, session_token: &str) -> Result<String, Status>;
+
+    /// Who a call made over `session_token` acts as when it ends a pending request — the actor a
+    /// cancel records it answered by: [`AnsweredBy::MainAgent`] for a token minted for the
+    /// session's agent, otherwise the user the token authenticates, by login. An unauthenticated
+    /// token is refused.
+    ///
+    /// Required for the reason [`Self::github_user`] is: a default would be a principal nobody chose.
+    /// The daemon's adapter reads the agent principal off the token its own keys verify.
+    fn answerer(&self, session_token: &str) -> Result<AnsweredBy, Status>;
 }
 
 /// Forwarding a conversation to the daemon that owns the agent.

@@ -1021,9 +1021,10 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
     ) -> Result<Response<CancelAgentConversationResponse>, Status> {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
-        // The actor a request the cancel ends is recorded as answered by: the caller the token authenticates,
-        // read before the conversation is removed so a caller that cannot be named removes nothing.
-        let cancelled_by = self.ports.sessions.github_user(&req.session_token)?;
+        // The actor a request the cancel ends is recorded as answered by: the main agent over its own token, otherwise
+        // the user the token authenticates. Read before the conversation is removed, so a caller that cannot be named
+        // removes nothing.
+        let cancelled_by = self.ports.sessions.answerer(&req.session_token)?.name();
         let removed = self.ports.conversations.remove(&req.conversation_id).await;
         if let Some(conversation) = removed.as_ref() {
             // Back to "asked nothing", whichever daemon ran the loop: the conversation is gone, so

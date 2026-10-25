@@ -11,7 +11,7 @@ use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 
 use tddy_session_agents::ports::AgentConversationPeers;
 
-use tddy_discovery::subagent::SubagentSession;
+use tddy_discovery::subagent::{AnsweredBy, SubagentSession};
 
 use tddy_session_agents::ports::AgentSessions;
 
@@ -151,6 +151,9 @@ impl RosterBroadcast for TheSessionsOwnRoom {
 /// against a session's own worktree — and the two refusals that decide whether it should.
 pub(crate) struct TurnLoopsThisDaemonCanOpen {
     pub(crate) roster: AgentRoster,
+    /// The tokens this daemon signs and verifies with — what reads the agent principal off a token.
+    /// `None` on a host built without them, which mints no agent token, so no caller is the agent.
+    pub(crate) session_tokens: Option<tddy_daemon_auth::SessionTokens>,
 }
 
 #[async_trait]
@@ -213,6 +216,24 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
 
     fn github_user(&self, session_token: &str) -> Result<String, Status> {
         self.roster.session_github_user(session_token)
+    }
+
+    /// The main agent when this daemon's keys verify `session_token` and it carries the agent
+    /// principal; otherwise the user the token authenticates. Authentication stays the user
+    /// resolver's, as on every other call: the principal only says whose the authenticated call is.
+    fn answerer(&self, session_token: &str) -> Result<AnsweredBy, Status> {
+        let login = self.roster.session_github_user(session_token)?;
+        let carries_the_agent_principal = self.session_tokens.as_ref().is_some_and(|tokens| {
+            tokens
+                .verifier()
+                .verify_now(session_token)
+                .is_ok_and(|claims| claims.principal == Some(tddy_github::TokenPrincipal::Agent))
+        });
+        Ok(if carries_the_agent_principal {
+            AnsweredBy::MainAgent
+        } else {
+            AnsweredBy::User(login)
+        })
     }
 }
 
