@@ -67,7 +67,7 @@ function inAFixedHeightPane(surface: React.ReactElement) {
 
 function mountActivitiesView(replay: TailReplayBackend) {
   mountWithRpc(
-    inAFixedHeightPane(<SessionActivitiesPane sessionId="s1" sessionToken="tok" />),
+    inAFixedHeightPane(<SessionActivitiesPane sessionId="s1" sessionToken="tok" daemonInstanceId="daemon-a" />),
     replay.backend,
   );
 }
@@ -102,7 +102,7 @@ function ASwitchableActivitiesView() {
       <button data-testid="switch-session-s2" onClick={() => setSessionId("s2")}>
         s2
       </button>
-      <SessionActivitiesPane sessionId={sessionId} sessionToken="tok" />
+      <SessionActivitiesPane sessionId={sessionId} sessionToken="tok" daemonInstanceId="daemon-a" />
     </div>
   );
 }

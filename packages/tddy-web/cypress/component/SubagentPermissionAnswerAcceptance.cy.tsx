@@ -78,6 +78,7 @@ function mountASessionWhoseSubagentAsks(deferredToUser: boolean) {
       <SessionWithActivitySidebar
         session={create(SessionEntrySchema, {
           sessionId: "managed-1",
+          daemonInstanceId: "daemon-a",
           isActive: true,
           status: "active",
           sessionType: "claude-cli",
