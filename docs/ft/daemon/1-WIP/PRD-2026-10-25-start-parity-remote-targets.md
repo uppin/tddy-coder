@@ -28,17 +28,28 @@ New-session options, and could not see what a session it started was waiting on.
 
 ## Proposed Changes
 
-- `ListProjectSessions` asks every eligible daemon (the roster `ListEligibleDaemons` serves)
-  for the project's sessions and merges the answers. Each row carries `daemon_instance_id`, and a
-  host that does not answer is reported in an `unreachable_hosts` list, never silently dropped.
-- Every target tool's arguments gain an optional `daemon_instance_id` (empty = this host). A call
-  naming another host is forwarded to it as an `ExecuteToolRequest`, carrying a **delegated home
-  caller**: the home session id, its project and the home daemon's id.
-- The peer serves a project-home tool for a delegated caller without reading the home session's
-  record. It still checks that the target is in the asserted project and that the caller's token
-  maps to the same OS user, and it applies its own path containment, activity gate and push identity.
-- The delegated caller is accepted **only** on a request that arrived over the common room from the
-  daemon it names. A delegated caller in a request arriving over `/rpc` or IPC is refused.
+- `ListProjectSessions` lists this host's sessions of the project, then asks every other eligible
+  daemon (`ListEligibleDaemons`' roster) for its own, by forwarding the same tool call. It merges
+  the answers into `ListProjectSessionsResult { sessions, unreachable_hosts }`. Each row carries
+  its `daemon_instance_id`. A host that does not answer is named in `unreachable_hosts` with the
+  reason, never silently dropped. A call that arrived from a peer lists only that peer's own
+  sessions, so the fan-out never recurses.
+- Every target tool (read, diff, the seven git tools) takes an optional `daemon_instance_id`
+  argument (`TARGET_DAEMON_INSTANCE_ID`; empty = this host). On a call naming another host, the
+  home session's daemon re-issues the same `ExecuteToolRequest` with
+  `ExecuteToolRequest.daemon_instance_id` set, through the existing `rpc_served_by_peer` forward.
+  The tool runs **on the target's host, unchanged**: that host's path containment, activity gate
+  and push identity apply.
+- **The caller is confirmed where it lives (no proto change).** A project-home tool call naming a
+  `session_id` this daemon does not hold is served only after the daemon that **owns** that session
+  confirms it:
+  - ask each eligible daemon `session.SessionService/ListSessions` with the caller's token, over
+    the common room;
+  - accept only the owner's row, and only with `session_role == "project-home"`;
+  - its `project_id` becomes the caller's project for target resolution.
+
+  An agent cannot forge this: a request it addresses at a peer itself (`ExecuteTool` forwards
+  before authenticating) is confirmed at the owner, which reports its real role.
 
 ### What stays the same
 
@@ -49,7 +60,7 @@ New-session options, and could not see what a session it started was waiting on.
 
 ## Impact
 
-- **Technical:** tddy-service (exec_tools.proto), tddy-daemon-rpc, tddy-tool-engine, tddy-worktree-service.
+- **Technical:** tddy-daemon-rpc, tddy-tool-engine, tddy-worktree-service.
 - **User:** the orchestrator agent gains these abilities; the web UI is unchanged.
 
 ## Acceptance Criteria
@@ -58,4 +69,4 @@ New-session options, and could not see what a session it started was waiting on.
 - [ ] An unreachable host is reported, not silently omitted.
 - [ ] Read, diff and every git tool work on a session on another host.
 - [ ] A target outside the orchestrator's project is refused on whichever host holds it.
-- [ ] A delegated caller is honoured only from a peer daemon over the common room.
+- [ ] A tool call from a session that is not a project-home session is refused on every host; the host that owns the calling session is the one that confirms its role.

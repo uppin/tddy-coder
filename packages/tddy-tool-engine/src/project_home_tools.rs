@@ -88,6 +88,37 @@ pub struct ListedSession {
     /// The agent status name (`idle`, `running`, `waiting_for_input`, …).
     pub agent_status: String,
     pub pending_elicitation: bool,
+    /// The daemon the session runs on, as the eligible-daemon roster names it. A target tool given
+    /// this id reaches the session on that host (`#start-parity` 1/9).
+    #[serde(default)]
+    pub daemon_instance_id: String,
+}
+
+/// What `ListProjectSessions` answers: the project's sessions on every eligible host, and the hosts
+/// that did not answer — named rather than silently left out of the list.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ListProjectSessionsResult {
+    pub sessions: Vec<ListedSession>,
+    pub unreachable_hosts: Vec<UnreachableHost>,
+}
+
+/// An eligible host that did not answer `ListProjectSessions`'s fan-out, and why.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UnreachableHost {
+    pub daemon_instance_id: String,
+    pub reason: String,
+}
+
+/// The argument every project-home target tool takes to name the host its target runs on. Empty or
+/// absent is this host.
+pub const TARGET_DAEMON_INSTANCE_ID: &str = "daemon_instance_id";
+
+/// The host `args_json` names in [`TARGET_DAEMON_INSTANCE_ID`], or `None` for this host (the
+/// argument absent or empty, or `args_json` not an object).
+pub fn target_daemon_instance_id(args_json: &str) -> Option<String> {
+    // TODO(remote-targets): implement
+    let _ = args_json;
+    None
 }
 
 /// `StartProjectSession`'s arguments.

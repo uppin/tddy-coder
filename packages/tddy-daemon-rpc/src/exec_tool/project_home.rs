@@ -290,6 +290,8 @@ impl ProjectHomePort for DaemonProjectHome {
                 worktree: s.repo_path,
                 is_active: s.is_active,
                 pending_elicitation: s.pending_elicitation,
+                // TODO(remote-targets): implement — this host's id, and every peer's rows too
+                daemon_instance_id: String::new(),
             })
             .collect())
     }
