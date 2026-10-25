@@ -15,7 +15,7 @@ path = "src/lib.rs"
 async-trait = "0.1"
 log = "0.4"
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tddy-agent-backend = { path = "../tddy-agent-backend" }
 tddy-discovery = { path = "../tddy-discovery" }
 

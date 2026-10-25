@@ -116,6 +116,10 @@ message AgentConversationChunk {
   // The tool message's id the turn stopped at, when it stopped on "YieldedToCaller" — the id a
   // resume-with-replacement names. Empty for every other stop reason.
   string yielded_message_id = 7;
+  // The permission request a coding agent's turn paused on, when it stopped on
+  // "PermissionRequested" — a JSON {requestId, toolCall, options} object, final frame only. Empty
+  // for every other stop reason.
+  string permission_request_json = 8;
 }
 
 // One message of a conversation's history, as the caller of a turn reads it.
@@ -304,6 +308,10 @@ message ResumeAgentConversationRequest {
   // appended after the original call (keep original + append), never dispatched, recorded as
   // history. Appended after `from_message_id`'s rewind and `correction`, in that order.
   string replacement_json = 9;
+  // The answer to the conversation's pending permission request, as a JSON
+  // {answer: "selected"|"cancelled", requestId, optionId?} object; the coding agent's paused turn
+  // continues with it. Empty when the resume answers no request.
+  string permission_answer_json = 10;
 }
 
 message SessionAgentEntry {

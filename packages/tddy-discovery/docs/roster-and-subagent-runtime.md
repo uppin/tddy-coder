@@ -184,6 +184,16 @@ morePaths }`. The host-side port (`ConversationWorktreeSyncPort`) lives in `tddy
 (`tests/caller_sync_acceptance.rs`) give the reset and sync ports one shared event log, each event
 noting the model requests seen, so the order reset → sync → first model call is asserted directly.
 
+## A coding subagent's turn can pause on a permission request
+
+`StopReason::PermissionRequested` ends a turn whose coding agent asked permission; the outcome's
+`permission_request` (`subagent/permission.rs`, `PermissionRequestView`) names it, and a
+`TurnRequest::with_permission_answer` on the next turn answers it. The parking itself lives in
+`tddy-coding-subagent` (`ParkedPermissions`); this crate owns the types, the outcome JSON's
+`permissionRequest`, the conversation link's frame parse and answer encode, and the model loop's
+refusal of an answer (it never asks). Product rules:
+[managed-codebase subagents](../../../docs/ft/coder/managed-codebase-subagents.md#a-coding-subagents-permission-request-is-the-callers-to-answer).
+
 ## Features
 
 `livekit` is **off by default** and forwards to `tddy-session-tool-client`'s. A jail that reaches its

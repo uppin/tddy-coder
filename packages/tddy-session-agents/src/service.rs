@@ -361,13 +361,14 @@ impl TurnOnAConversation {
                 if let Some(correction) = &req.correction {
                     requested = requested.with_correction(correction.clone());
                 }
-                Ok(within(
+                let requested = crate::permission_wire::with_permission_answer(
                     with_replacement(
                         with_yield_conditions(requested, &req.yield_conditions_json)?,
                         &req.replacement_json,
                     )?,
-                    req.max_turns,
-                ))
+                    &req.permission_answer_json,
+                )?;
+                Ok(within(requested, req.max_turns))
             }
         }
     }
@@ -429,6 +430,7 @@ pub fn agent_stop_reason(reason: tddy_discovery::subagent::StopReason) -> &'stat
         tddy_discovery::subagent::StopReason::ContextExhausted => "ContextExhausted",
         tddy_discovery::subagent::StopReason::MaxTokens => "MaxTokens",
         tddy_discovery::subagent::StopReason::YieldedToCaller => "YieldedToCaller",
+        tddy_discovery::subagent::StopReason::PermissionRequested => "PermissionRequested",
     }
 }
 
@@ -498,6 +500,10 @@ pub fn agent_turn_frames(outcome: &PromptOutcome) -> Vec<AgentConversationChunk>
         .as_ref()
         .map(|id| id.to_string())
         .unwrap_or_default();
+    // The permission request a paused coding-agent turn names rides the final frame too: the turn
+    // paused on it, and the caller answers it with a resume.
+    last.permission_request_json =
+        crate::permission_wire::permission_request_json(outcome.permission_request.as_ref());
     frames
 }
 

@@ -1959,6 +1959,11 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
     };
+    let request = match crate::permission_answer_arg::parse_permission_answer(&args) {
+        Ok(Some(answer)) => request.with_permission_answer(answer),
+        Ok(None) => request,
+        Err(e) => return subagent_error_json(e),
+    };
     take_a_turn(session_id, request, grace).await
 }
 
@@ -2585,6 +2590,7 @@ fn subagent_resume_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
                                 commits were dropped."
             },
             (crate::sync_worktree_choice::SYNC_WORKTREE_ARG): crate::sync_worktree_choice::sync_worktree_property(),
+            (crate::permission_answer_arg::PERMISSION_ARG): crate::permission_answer_arg::permission_property(),
         }
     }))
 }

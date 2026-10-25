@@ -21,7 +21,7 @@ use tddy_discovery::subagent::{StopReason, SubagentSession};
 use tddy_rpc::{RpcClientTransport, Status};
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, CancelAgentConversationRequest, OpenAgentConversationRequest,
-    OpenAgentConversationResponse, PromptAgentConversationRequest,
+    OpenAgentConversationResponse, PromptAgentConversationRequest, ResumeAgentConversationRequest,
 };
 use tddy_tools::session_agents::AgentConversationLink;
 use tddy_tools::session_tool_client::SessionToolEnvelope;
@@ -86,6 +86,7 @@ struct ReceivedCall {
 struct AFakeDaemon {
     open: Mutex<Option<Answer>>,
     prompt: Mutex<Option<Answer>>,
+    resume: Mutex<Option<Answer>>,
     cancel: Mutex<Option<Answer>>,
     received: Mutex<Vec<ReceivedCall>>,
 }
@@ -95,6 +96,7 @@ impl AFakeDaemon {
         Arc::new(Self {
             open: Mutex::new(None),
             prompt: Mutex::new(None),
+            resume: Mutex::new(None),
             cancel: Mutex::new(None),
             received: Mutex::new(Vec::new()),
         })
@@ -116,6 +118,11 @@ impl AFakeDaemon {
 
     fn answering_prompt_with(self: &Arc<Self>, frames: Vec<AgentConversationChunk>) -> Arc<Self> {
         *self.prompt.lock().expect("script the prompt answer") = Some(Answer::Frames(frames));
+        Arc::clone(self)
+    }
+
+    fn answering_resume_with(self: &Arc<Self>, frames: Vec<AgentConversationChunk>) -> Arc<Self> {
+        *self.resume.lock().expect("script the resume answer") = Some(Answer::Frames(frames));
         Arc::clone(self)
     }
 
@@ -175,6 +182,7 @@ impl AFakeDaemon {
         match method {
             "OpenAgentConversation" => self.open.lock().expect("read the open script").take(),
             "PromptAgentConversation" => self.prompt.lock().expect("read the prompt script").take(),
+            "ResumeAgentConversation" => self.resume.lock().expect("read the resume script").take(),
             "CancelAgentConversation" => self.cancel.lock().expect("read the cancel script").take(),
             _ => None,
         }
@@ -586,4 +594,84 @@ async fn a_remote_conversation_reports_the_model_the_roster_named() {
     // When the accounting asks what it talks to
     // Then it is the roster's model, so a remote conversation is not recorded as modelless
     assert_eq!(session.model(), "qwen2.5-coder:7b");
+}
+
+// ---------------------------------------------------------------------------
+// A coding agent's permission request, across the wire
+// ---------------------------------------------------------------------------
+
+fn a_permission_request_frame(request: serde_json::Value) -> AgentConversationChunk {
+    AgentConversationChunk {
+        permission_request_json: request.to_string(),
+        ..a_final_frame("", "PermissionRequested")
+    }
+}
+
+fn a_cargo_test_request() -> serde_json::Value {
+    serde_json::json!({
+        "requestId": "perm-1",
+        "toolCall": { "title": "Run cargo test", "kind": "execute" },
+        "options": [
+            { "optionId": "allow-once", "name": "Allow once", "kind": "allow_once" },
+            { "optionId": "reject-once", "name": "Reject", "kind": "reject_once" },
+        ],
+    })
+}
+
+#[tokio::test]
+async fn a_final_frame_naming_a_permission_request_yields_it_to_the_caller() {
+    // Given a daemon whose coding agent paused on a permission request
+    let daemon = AFakeDaemon::new()
+        .answering_prompt_with(vec![a_permission_request_frame(a_cargo_test_request())]);
+
+    // When the conversation is prompted
+    let outcome = a_link_to(&daemon)
+        .prompt("conv-7", "run the tests")
+        .await
+        .expect("the prompt should have been answered");
+
+    // Then the caller is handed the request, not a plain end
+    assert_eq!(outcome.stop_reason, StopReason::PermissionRequested);
+    let request = outcome
+        .permission_request
+        .expect("the request crossed the wire");
+    assert_eq!(request.request_id, "perm-1");
+    assert_eq!(request.tool_call.title, "Run cargo test");
+    assert_eq!(request.options.len(), 2);
+}
+
+#[tokio::test]
+async fn a_resume_carries_the_callers_permission_answer() {
+    // Given a conversation with a request pending on the daemon
+    let daemon =
+        AFakeDaemon::new().answering_resume_with(vec![a_final_frame("tests pass", "EndTurn")]);
+    let mut session = a_link_to(&daemon).session("conv-7".to_string(), "gpt-5.2");
+
+    // When the main agent answers it
+    let outcome = session
+        .take_turn(
+            tddy_discovery::subagent::TurnRequest::resuming().with_permission_answer(
+                tddy_discovery::subagent::PermissionAnswer::Selected {
+                    request_id: "perm-1".to_string(),
+                    option_id: "allow-once".to_string(),
+                },
+            ),
+        )
+        .await
+        .expect("the resume should have been answered");
+
+    // Then the daemon was sent the answer, and the rest of the turn came back
+    let sent = ResumeAgentConversationRequest::decode(
+        daemon
+            .the_one_request_to("ResumeAgentConversation")
+            .as_slice(),
+    )
+    .expect("the request should decode as ResumeAgentConversationRequest");
+    let answer: serde_json::Value =
+        serde_json::from_str(&sent.permission_answer_json).expect("the answer is JSON");
+    assert_eq!(
+        answer,
+        serde_json::json!({ "answer": "selected", "requestId": "perm-1", "optionId": "allow-once" })
+    );
+    assert_eq!(joined_text(&outcome), "tests pass");
 }

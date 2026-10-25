@@ -12,7 +12,7 @@ use std::time::Duration;
 use serial_test::serial;
 use tddy_agent_backend::{AcpAgentCommand, OpenSession};
 use tddy_coding_subagent::CodingAgentSession;
-use tddy_discovery::subagent::{StopReason, SubagentSession, TurnRequest};
+use tddy_discovery::subagent::{PermissionAnswer, StopReason, SubagentSession, TurnRequest};
 
 const TURN_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -269,7 +269,7 @@ async fn a_replacement_is_refused_naming_it() {
 
 #[tokio::test]
 #[serial]
-async fn a_permission_request_is_denied_and_recorded_in_the_turns_messages() {
+async fn a_permission_request_yields_instead_of_being_auto_answered() {
     // Given
     let mut asking = a_turn();
     asking["permission_requests"] = serde_json::json!([{ "title": "Run cargo test" }]);
@@ -283,17 +283,20 @@ async fn a_permission_request_is_denied_and_recorded_in_the_turns_messages() {
         .expect("the turn succeeds");
 
     // Then
-    let outcome_line = agent.recorded("permission_outcome");
-    assert_eq!(outcome_line.len(), 1);
-    assert_eq!(outcome_line[0]["outcome"], "selected:reject-once");
-    let denial = outcome
-        .messages
+    assert_eq!(outcome.stop_reason, StopReason::PermissionRequested);
+    let request = outcome
+        .permission_request
+        .expect("the turn yields the request to the caller");
+    assert_eq!(request.tool_call.title, "Run cargo test");
+    let options: Vec<&str> = request
+        .options
         .iter()
-        .find(|message| message.preview.contains("Run cargo test"))
-        .expect("the denial is one of the turn's messages");
+        .map(|option| option.option_id.as_str())
+        .collect();
+    assert_eq!(options, ["allow-once", "reject-once"]);
     assert!(
-        denial.is_error,
-        "a denied request reads as an error: {denial:?}"
+        agent.recorded("permission_outcome").is_empty(),
+        "nothing answered the agent on the caller's behalf"
     );
 }
 
@@ -301,17 +304,31 @@ async fn a_permission_request_is_denied_and_recorded_in_the_turns_messages() {
 #[serial]
 async fn cancelling_a_running_turn_returns_cancelled() {
     // Given
-    // The turn asks one permission before it holds: its recorded outcome is the sign the turn is
-    // running inside the agent.
+    // The turn asks one permission before it holds: once it is answered, the agent's recorded
+    // outcome is the sign the turn is running inside the agent.
     let mut held = a_turn();
     held["permission_requests"] = serde_json::json!([{ "title": "Run cargo test" }]);
     held["hold_until_cancel"] = serde_json::json!(true);
     let agent = a_coding_agent().answering(held);
     let mut session = agent.start().await;
     // Taken before the turn, as the conversation table does: `subagent_cancel` arrives while
-    // `subagent_prompt` holds the session.
+    // `subagent_resume` holds the session.
     let cancel = session.cancel_handle();
-    let turn = tokio::spawn(async move { session.prompt("Work").await });
+    let turn = tokio::spawn(async move {
+        let paused = session.prompt("Work").await?;
+        let request_id = paused
+            .permission_request
+            .expect("the turn yielded its permission request")
+            .request_id;
+        session
+            .take_turn(
+                TurnRequest::resuming().with_permission_answer(PermissionAnswer::Selected {
+                    request_id,
+                    option_id: "allow-once".to_string(),
+                }),
+            )
+            .await
+    });
     agent.wait_for("permission_outcome").await;
 
     // When

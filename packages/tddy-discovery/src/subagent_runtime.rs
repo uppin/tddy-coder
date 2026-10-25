@@ -456,6 +456,11 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
     if let (Some(object), Some(sync)) = (body.as_object_mut(), &outcome.worktree_sync) {
         object.insert("worktreeSync".to_string(), serde_json::json!(sync));
     }
+    // Present only when the turn paused on a coding agent's permission request, which the caller
+    // answers with `subagent_resume`'s `permission` argument.
+    if let (Some(object), Some(request)) = (body.as_object_mut(), &outcome.permission_request) {
+        object.insert("permissionRequest".to_string(), serde_json::json!(request));
+    }
     body.to_string()
 }
 
