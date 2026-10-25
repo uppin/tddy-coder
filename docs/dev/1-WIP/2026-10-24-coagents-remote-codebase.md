@@ -138,17 +138,13 @@ laptop: main agent ─MCP─ tddy-tools --mcp ─HTTP─ relay ─LiveKit─ cod
 
 ## Technical Debt & Production Readiness
 
-- **`remote` requests are JSON, which the relay cannot decode (blocks `--agent` end to end).**
-  `connect_post` (`packages/tddy-tools/src/remote_cli.rs`) posts `application/json`.
-  `tddy-connectrpc` hands a unary body to the bridge without transcoding
-  (`packages/tddy-connectrpc/src/router.rs:96`), and generated handlers decode it as protobuf
-  (`packages/tddy-codegen/src/generator.rs:293`). A JSON body is therefore not a request. Test 9 pins
-  the JSON body (`specializedAgents`), so the fix is a developer decision: move `remote` to protobuf
-  (test 9's parse changes), or give the router JSON transcoding (a new dependency or a descriptor
-  transcoder). Every `tddy-tools remote` subcommand and the JSON arms of
-  `dispatch_request_via_daemon_http` and `ask_daemon_over_http`
-  (`packages/tddy-session-tool-client/src/conversation.rs:245`) share this. Not checked against a live
-  daemon.
+- ~~**`remote` requests are JSON, which the relay cannot decode (blocks `--agent` end to end).**~~
+  **Resolved in `c29cfb34a`:** `connect_post` sends `application/proto` with the protobuf body
+  (`packages/tddy-tools/src/remote_cli.rs:125-143`), and the HTTP arms of `ExecuteTool`, `ListExecTools`
+  and `ConversationWorktree` send protobuf too (Decisions). Not checked against a live daemon.
+- **The `remote` output is not pinned by any test.** The printed JSON comes from the `ConnectJson`
+  builders in `packages/tddy-tools/src/remote_cli.rs` (the section "Connect JSON of a decoded response"),
+  and no test compares it with the output the CLI printed before its wire was protobuf.
 - **`ConversationWorktree` over HTTP is still unverified** (`docs/dev/todo/2026-10-01-conversation-worktree-over-http-is-unverified.md`).
   No red test in this node sends it. Prerequisite text "Test 6 exercises it" is stale: test 6 is roster
   admission. The first test that reaches the clone call over the relay is the two-daemon suite below,
@@ -164,7 +160,8 @@ laptop: main agent ─MCP─ tddy-tools --mcp ─HTTP─ relay ─LiveKit─ cod
   Not attempted in this green pass. It needs a workspace project and repo fixture (defined only inside
   `packages/tddy-session-lifecycle/tests/workspace_session_acceptance.rs`) and a coding-agent profile on
   the codebase daemon, plus the `tddy-acp-stub` binary (now built). Its refusal cases depend on the
-  seeding gap above.
+  seeding gap above. **Not run (2026-10-25):** `LIVEKIT_TESTKIT_WS_URL` is unset in this environment, so
+  no LiveKit testkit was started and nothing was faked. The two-daemon suite is recorded as NOT RUN.
 - **Subagent tools over the relay are not exercised by a red test.** Advertisement keys on
   `has_an_agent_to_address()` (`packages/tddy-tools/src/server.rs:404`). The roster-before-tool-list
   test uses `TDDY_REMOTE_DAEMON_SOCKET` (UDS), not the HTTP relay.
@@ -223,6 +220,40 @@ laptop: main agent ─MCP─ tddy-tools --mcp ─HTTP─ relay ─LiveKit─ cod
   per-conversation worktree, and the `(open_owned)` label becomes `open_local`; or (c) peer-owned coding
   agents on workspace sessions, which reverses `workspace_roster_admits` and the roster spec's "not
   supported" — a design change the developer must approve.
+
+- **`remote` output is canonical proto3 JSON, defaults omitted (behaviour change).** `tddy-tools remote`
+  decodes each answer from protobuf and prints it through the `ConnectJson` builders in
+  `packages/tddy-tools/src/remote_cli.rs`, which write camelCase keys and leave proto3 defaults out. The
+  example `{"livekitRoom":"room-x","sessionId":"sess-full"}` is the start-session builder's output for those
+  two fields; no test pins that string. Before, `connect_post` printed the daemon's JSON answer as it
+  arrived (`git show master:packages/tddy-tools/src/remote_cli.rs`, `println!("{}", resp)` at lines 228,
+  258 and 287). Whether the printed keys or defaults differ from that output has not been compared byte for
+  byte.
+- **Protobuf on the `remote`, `ExecuteTool`, `ListExecTools` and conversation HTTP wires (behaviour
+  change).** `remote` requests go as `application/proto` (`remote_cli.rs:142`). `ExecuteTool` and
+  `ListExecTools` over the daemon's HTTP endpoint (`DaemonHttpRpcClient`,
+  `packages/tddy-session-tool-client/src/daemon_http_rpc.rs`) and the conversation HTTP arm
+  (`packages/tddy-session-tool-client/src/conversation.rs`, `ask_daemon_over_http`) send protobuf bodies and
+  decode protobuf answers. The error wording on those paths:
+  - `ListExecTools` now reports `tool rpc call: …` and `decode ListExecToolsResponse: …`
+    (`packages/tddy-session-tool-client/src/exec_catalog.rs:147,149`). Master reported `relay connection
+    error`, `relay answer is not JSON` and `the daemon answered {status}`.
+  - The conversation HTTP arm now reports `conversation worktree rpc call: …` and `conversation worktree rpc
+    decode response: …` (`conversation.rs:237,247`), the wording its RPC arm already used. Master reported
+    `relay answered without a result`.
+  - `ExecuteTool` over HTTP changed its body to protobuf and kept its `relay connection error: …` and
+    `relay parse error: …` wording (`packages/tddy-session-tool-client/src/rpc_transports.rs:147,157`). It
+    does not use the shared `tool rpc call` wording.
+- **An empty `result_json` is an error on all four conversation transports (behaviour change).**
+  `ask_daemon` (`conversation.rs:243-244`) answers `{"error": "the reply carries no result_json",
+  "is_error": true}` when a reply's `result_json` is empty. Every conversation transport goes through it:
+  sandbox IPC, daemon UDS, LiveKit (`ask_daemon_over_livekit`, `conversation.rs:209`) and HTTP
+  (`ask_daemon_over_http`). Before, the RPC arms returned the empty string. The alternative not taken was
+  `optional string result_json` in the proto, a schema change that needs the developer's approval.
+- **Open question, no decision: admission of seeded agents on workspace sessions.** `workspace_roster_admits`
+  has no production caller, so a workspace start's seeded agents are not checked against it (see Technical
+  Debt). Whether seeded agents on a workspace session go through admission, and how a split session is
+  treated, is open. The split question is defined in the orchestrator's brief and is not decided here.
 
 ## Refactoring Needed
 
