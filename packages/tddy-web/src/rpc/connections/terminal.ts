@@ -24,6 +24,18 @@ export interface TerminalFrame {
   readonly data: Uint8Array;
   readonly endOffset: bigint;
   readonly atOldest: boolean;
+  /**
+   * True on a snapshot frame: `data` is one repaint of the screen (it begins with RIS, so it is
+   * written into the live terminal as-is) and `endOffset` is its sequence point — the anchor for
+   * history and the offset the next delta starts at.
+   */
+  readonly snapshot?: boolean;
+  /**
+   * Where `data` starts in the terminal's cumulative output, on every frame of a stream opened
+   * with a snapshot. The first delta starts at the snapshot's `endOffset`, each later one at the
+   * previous frame's `endOffset`.
+   */
+  readonly startOffset?: bigint;
 }
 
 /** The duplex byte pipe a terminal reads and writes. */

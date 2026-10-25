@@ -5,6 +5,7 @@
 **Type:** Bug Fix
 **Complexity**: 5 — six packages, a proto contract change, ordering/concurrency semantics (sequence point), new dependency (`avt`), web transport migration to bidi
 **Stack:** `#term-snapshot 1/4` — branch `feature/term-snapshot/host-snapshot`, base `master`
+**PR:** [#760](https://github.com/uppin/tddy-coder/pull/760)
 **PRD:** [PRD-2026-10-25-terminal-snapshot-host.md](../../ft/daemon/1-WIP/PRD-2026-10-25-terminal-snapshot-host.md)
 
 ## Initial Discovery
@@ -30,7 +31,46 @@
 - [ ] `tddy-coder`: the session participant serves `StreamSessionTerminalIO`; its terminal adapter implements `snapshot_and_subscribe`
 - [ ] `tddy-session-lifecycle`: the CLI and sandbox adapters implement the port (sandbox: `FAILED_PRECONDITION`)
 - [ ] `tddy-daemon-sandbox`: broadcast under the capture lock
-- [ ] `tddy-web`: host terminal feed moves to bidi `StreamSessionTerminalIO` with `SNAPSHOT` on every open ([terminal-session.md](../../../packages/tddy-web/docs/terminal-session.md))
+- [ ] `tddy-web`: **both** host terminal paths move to bidi `StreamSessionTerminalIO` with `SNAPSHOT` on every open: `GrpcSessionTerminal` (the host-served Agent and bash panes, `SessionRuntime.tsx`) and `openDaemonTerminalFeed` ([terminal-session.md](../../../packages/tddy-web/docs/terminal-session.md))
+
+## Contract decisions (pass 2, approved 2026-10-25)
+
+- **`TerminalCapture::snapshot()` returns `Option<ScreenSnapshot>`.** It is `None` until `resize`
+  has told the model the PTY's size. The port default turns `None` into `FAILED_PRECONDITION`, so a
+  jailed terminal refuses with no adapter override, and so does any spawn path that forgets to
+  size its capture. **Every PTY spawner calls `capture.resize(rows, cols)` at spawn.**
+- **`GrpcSessionTerminal` is in scope.** It is the main host-served pane and builds its own
+  split-wire stream (with the input-ACK accounting) beside `openDaemonTerminalFeed`. Both move to
+  bidi. De-duplicating the two stays out of scope.
+- **No "no terminal transport" state.** Every host connection comes from the LiveKit or IPC
+  provider, both bidi-capable, so an HTTP-only host connection does not exist. The planned test is
+  dropped.
+- **The coder's `…refuses_the_bidi_stream_the_coder_does_not_serve` test is replaced** by
+  `both_wirings_open_one_terminal_with_the_same_snapshot_over_the_bidi_stream` (requirements change).
+- **Dev-dependency `vt100 = "0.15"`** in `tddy-task` and `tddy-terminal-rpc`, as the independent
+  reference emulator. It is already in the lockfile through `tddy-tui-testkit`.
+- **Specs the green stage rewrites or deletes** (requirements change, not weakened tests):
+  delete `cypress/component/GrpcSessionTerminalResume.cy.tsx` (developer consent 2026-10-25; move
+  its "onDisconnect is not called on a blip" assertion into `TerminalSnapshotOnReconnect.cy.tsx`);
+  move `TerminalInputAckAcceptance.cy.tsx` part A onto the bidi stream; rewrite the
+  `TAIL`/`FROM_OFFSET` cases in `src/rpc/connections/terminalFeed.test.ts` (`a daemon-served
+  terminal feed`) for the bidi wire.
+- **Pre-existing failure, not this node's:** `tddy-daemon-sandbox` test target
+  `sandbox_stdio_seatbelt_acceptance` does not compile on the base (`SandboxHandle` unresolved).
+
+## Failing tests (the contract)
+
+| Test | File |
+|---|---|
+| 6 snapshot fidelity tests (one, `a_capture_that_was_never_sized_has_no_snapshot`, passes against the stub as a guard) | `packages/tddy-task/tests/terminal_capture_snapshot.rs` |
+| `snapshot_and_subscribe_neither_loses_nor_duplicates_a_byte_under_concurrent_output` | `packages/tddy-task/tests/terminal_capture_sequence_point.rs` |
+| 5 wire tests | `packages/tddy-terminal-rpc/tests/stream_snapshot_acceptance.rs` |
+| `both_wirings_open_one_terminal_with_the_same_snapshot_over_the_bidi_stream` | `packages/tddy-coder/tests/two_server_parity_acceptance.rs` |
+| 3 reconnect specs | `packages/tddy-web/cypress/component/TerminalSnapshotOnReconnect.cy.tsx` |
+| 3 bidi feed tests | `packages/tddy-web/src/rpc/connections/terminalFeed.test.ts` |
+
+The test support stub (`packages/tddy-terminal-rpc/tests/support/mod.rs`) now keeps the producer
+contract: it broadcasts under the capture lock, and its `resize` reaches the screen model.
 
 ## Responsibility
 
@@ -195,7 +235,6 @@ point, no server screen model, and the web terminal on server-stream + unary inp
     asserts the live terminal's visible rows equal B with the grid unchanged and no grid change sent.
     A contiguous delta then updates the screen.
   - `typing travels on the same bidi stream with cumulative input offsets`.
-  - `a host reached only over HTTP shows no terminal transport and opens no stream`.
 - [ ] Rewrite `GrpcSessionTerminalResume.cy.tsx` (it pins `TAIL`→`FROM_OFFSET`) and the specs and unit
   tests driving `streamTerminalOutput`/`sendTerminalInput` fakes for the web feed
   (`TerminalInputAckAcceptance.cy.tsx`, `terminalFeed.test.ts`, …). This is a requirements change,
@@ -228,10 +267,10 @@ point, no server screen model, and the web terminal on server-stream + unary inp
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -48,3 +48,5 @@ tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros", "sync", "time", "test-util"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
+# The reference emulator a snapshot is rendered in — independent of the screen model under test.
+vt100 = "0.15"

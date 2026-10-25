@@ -35,6 +35,9 @@ async fn replays_the_current_last_frame_before_any_live_byte() {
             at_oldest: false,
             session_id: SESSION_ID.to_string(),
             terminal_id: "main".to_string(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }]
     );
 }
@@ -101,6 +104,9 @@ async fn delivers_output_the_terminal_produces_after_the_stream_opened() {
             at_oldest: false,
             session_id: SESSION_ID.to_string(),
             terminal_id: "main".to_string(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }]
     );
 }
@@ -127,6 +133,9 @@ async fn acknowledges_the_applied_input_offset_on_the_output_half() {
             at_oldest: false,
             session_id: SESSION_ID.to_string(),
             terminal_id: "main".to_string(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }]
     );
 }
@@ -155,6 +164,9 @@ async fn resumes_from_the_clients_offset_instead_of_replaying_the_tail() {
             at_oldest: false,
             session_id: SESSION_ID.to_string(),
             terminal_id: "main".to_string(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }]
     );
 }

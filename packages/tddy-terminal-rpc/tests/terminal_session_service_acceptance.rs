@@ -107,6 +107,9 @@ async fn stream_session_terminal_io_answers_at_the_registered_service() {
             at_oldest: false,
             session_id: SESSION_ID.to_string(),
             terminal_id: "main".to_string(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }]
     );
 }
@@ -132,6 +135,9 @@ async fn stream_terminal_output_answers_at_the_registered_service() {
             at_oldest: false,
             session_id: SESSION_ID.to_string(),
             terminal_id: "main".to_string(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }]
     );
 }

@@ -87,6 +87,16 @@ message SessionTerminalOutput {
   // Always the RESOLVED terminal id — an empty `terminal_id` in the request resolves to the reserved
   // main ("claude"/Agent) terminal, and the frame carries that resolved value, never the empty one.
   string terminal_id = 7;
+  // True on a SNAPSHOT frame: `data` is one repaint of the terminal's visible state (it begins with
+  // RIS, so it is written into the terminal as-is), and `end_offset` is its sequence point — every
+  // output byte below it is reflected, none at or above it is. In a stream opened with
+  // `STREAM_REPLAY_MODE_SNAPSHOT`, every data frame after the snapshot carries `start_offset` /
+  // `end_offset`, the first starting at the snapshot's `end_offset` and each at the previous
+  // frame's `end_offset`, so a client can verify there is no gap and no duplicate.
+  bool   snapshot      = 8;
+  // The grid the snapshot was serialized at (the PTY's size). Zero on every other frame.
+  uint32 snapshot_rows = 9;
+  uint32 snapshot_cols = 10;
 }
 
 // Used by StreamTerminalOutput (browser-compatible server-streaming variant).
@@ -125,6 +135,12 @@ enum StreamReplayMode {
   // tip, then live output. No tail chunk, no PTY resize/drain. Used on reconnect so a terminal
   // that already holds state up to `from_offset` receives only the missed bytes — no duplicates.
   STREAM_REPLAY_MODE_FROM_OFFSET = 1;
+  // Snapshot: the first data frame is a snapshot of the current visible state (see
+  // `SessionTerminalOutput.snapshot`), then live output from its sequence point, every frame
+  // offset-stamped. No mode prologue frame, no raw replay, no redraw signal. The PTY is resized to
+  // `initial_cols`/`initial_rows` first only when the open may drive the session and the grid
+  // differs. A terminal whose screen size is unknown refuses with FAILED_PRECONDITION.
+  STREAM_REPLAY_MODE_SNAPSHOT = 2;
 }
 
 // Empty response for SendTerminalInput.

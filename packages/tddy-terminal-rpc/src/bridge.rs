@@ -91,6 +91,9 @@ impl FrameIdentity {
             at_oldest: false,
             session_id: self.session_id.clone(),
             terminal_id: self.terminal_id.clone(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }
     }
 
@@ -112,6 +115,9 @@ impl FrameIdentity {
             at_oldest,
             session_id: self.session_id.clone(),
             terminal_id: self.terminal_id.clone(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }
     }
 
@@ -125,6 +131,9 @@ impl FrameIdentity {
             at_oldest: false,
             session_id: self.session_id.clone(),
             terminal_id: self.terminal_id.clone(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }
     }
 }
@@ -330,6 +339,10 @@ async fn open_replay_ack_live(
             let stdout_rx = session.subscribe_stdout();
             spawn_live_bridge(session, tx, identity, stdout_rx);
         }
+        StreamReplayMode::Snapshot => {
+            // TODO(host-snapshot): implement — a snapshot frame at the sequence point
+            // `snapshot_and_subscribe` takes, then offset-stamped live output.
+        }
     }
 }
 
@@ -398,6 +411,7 @@ fn req_initial_rows_as_u16(r: u32) -> u16 {
 fn replay_mode_from_i32(mode: i32) -> StreamReplayMode {
     match mode {
         x if x == StreamReplayMode::FromOffset as i32 => StreamReplayMode::FromOffset,
+        x if x == StreamReplayMode::Snapshot as i32 => StreamReplayMode::Snapshot,
         _ => StreamReplayMode::Tail,
     }
 }

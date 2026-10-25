@@ -73,6 +73,21 @@ impl TerminalCapture {
         self.end_offset
     }
 
+    /// Resize the screen model to the PTY's grid. Called on every path that resizes the PTY, so the
+    /// model interprets later output at the size the application draws for.
+    pub fn resize(&mut self, rows: u16, cols: u16) {
+        // TODO(host-snapshot): implement
+        let _ = (rows, cols);
+    }
+
+    /// The current visible state as one repaint, taken at the sequence point
+    /// [`Self::end_offset`]. `None` until [`Self::resize`] has told the model the PTY's size: a
+    /// snapshot serialized at a guessed grid would render wrong, and the caller refuses instead.
+    pub fn snapshot(&self) -> Option<ScreenSnapshot> {
+        // TODO(host-snapshot): implement
+        None
+    }
+
     /// Record freshly produced output, updating the mode state and evicting the oldest bytes.
     pub fn append(&mut self, data: &[u8]) {
         self.sniff_mouse_modes(data);
@@ -236,6 +251,25 @@ impl TerminalCapture {
             at_end: chunk_end >= cap,
         }
     }
+}
+
+/// The visible state of a terminal, serialized as escape sequences at a sequence point.
+///
+/// Written into a freshly reset VT of `rows`×`cols`, `data` reproduces the screen: it begins with
+/// RIS, then both screen buffers (the alternate one active or not), cursor position and visibility,
+/// the SGR pen, scroll region, origin/autowrap/insert modes, saved cursor, charsets and tab stops,
+/// then the input modes still in effect (application cursor and keypad, bracketed paste, mouse
+/// tracking and encoding, focus reporting, cursor style).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenSnapshot {
+    /// The repaint.
+    pub data: Vec<u8>,
+    /// The sequence point: every output byte below this absolute offset is reflected in `data`,
+    /// none at or above it is.
+    pub offset: u64,
+    /// The grid `data` was serialized at.
+    pub rows: u16,
+    pub cols: u16,
 }
 
 /// A contiguous slice of the capture ring returned by [`TerminalCapture::replay_last`],

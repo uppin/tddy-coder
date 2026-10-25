@@ -236,6 +236,9 @@ impl SessionUnderBothWirings {
             at_oldest,
             session_id: SESSION_ID.to_string(),
             terminal_id: self.terminal_id.clone(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
         }
     }
 
@@ -249,6 +252,17 @@ impl SessionUnderBothWirings {
             at_oldest: false,
             session_id: SESSION_ID.to_string(),
             terminal_id: self.terminal_id.clone(),
+            snapshot: false,
+            snapshot_rows: 0,
+            snapshot_cols: 0,
+        }
+    }
+
+    /// The opening message of a bidi stream on this session's terminal that asks for a snapshot.
+    fn a_snapshot_open(&self) -> SessionTerminalInput {
+        SessionTerminalInput {
+            mode: StreamReplayMode::Snapshot as i32,
+            ..self.typing(b"", 0)
         }
     }
 
@@ -312,9 +326,42 @@ impl Wiring {
             RpcResult::ServerStream(Ok(rx)) => ServedStream {
                 method: method.to_string(),
                 frames: rx,
+                _client_half: None,
             },
             RpcResult::ServerStream(Err(status)) => panic!("{method} was refused: {status:?}"),
             RpcResult::Unary(_) => panic!("{method} answered without a stream"),
+        }
+    }
+
+    /// `StreamSessionTerminalIO` opened at this wiring's coordinate with its first message, the way
+    /// a bidi transport opens it.
+    async fn open_bidi(&self, opening: SessionTerminalInput) -> ServedStream {
+        let (input, input_rx) = tokio::sync::mpsc::channel(8);
+        input
+            .send(RpcMessage::new(
+                opening.encode_to_vec(),
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+            ))
+            .await
+            .expect("the decoder takes the opening message");
+        let started = self
+            .entry
+            .service
+            .start_bidi_stream(
+                TERMINAL_SERVICE,
+                "StreamSessionTerminalIO",
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                input_rx,
+            )
+            .await
+            .expect("StreamSessionTerminalIO opened");
+        match started.output {
+            tddy_rpc::ResponseBody::Streaming(frames) => ServedStream {
+                method: "StreamSessionTerminalIO".to_string(),
+                frames,
+                _client_half: Some(input),
+            },
+            tddy_rpc::ResponseBody::Complete(_) => panic!("bidi answered without a live stream"),
         }
     }
 
@@ -339,6 +386,8 @@ impl Wiring {
 struct ServedStream {
     method: String,
     frames: tokio::sync::mpsc::Receiver<Result<Vec<u8>, Status>>,
+    /// A bidi stream's input half, held so the stream stays open: dropping it hangs up.
+    _client_half: Option<tokio::sync::mpsc::Sender<RpcMessage>>,
 }
 
 impl ServedStream {
@@ -906,21 +955,30 @@ fn a_terminal_open_request() -> StreamTerminalOutputRequest {
 }
 
 #[tokio::test]
-async fn the_terminal_coordinate_refuses_the_bidi_stream_the_coder_does_not_serve() {
-    // Given — a session served by the coder participant
+async fn both_wirings_open_one_terminal_with_the_same_snapshot_over_the_bidi_stream() {
+    // Given — a session whose terminal holds retained output, registered under both wirings
     let session = SessionUnderBothWirings::with_retained_output(RETAINED_OUTPUT).await;
 
-    // When — a client opens the bidi terminal stream on it
-    let refusal = session
+    // When — a client opens the bidi terminal stream on each, asking for a snapshot
+    let mut over_coder = session
         .coder_participant
-        .refusal("StreamSessionTerminalIO", session.typing(b"", 0))
+        .open_bidi(session.a_snapshot_open())
         .await;
+    let mut over_daemon = session
+        .daemon_constructor
+        .open_bidi(session.a_snapshot_open())
+        .await;
+    let coder_snapshot: SessionTerminalOutput = over_coder.next_frame().await;
+    let daemon_snapshot: SessionTerminalOutput = over_daemon.next_frame().await;
 
-    // Then — it is refused: the coder carries a session's bytes on
-    // `terminal.TerminalService/StreamTerminalIO`, and a second bidi terminal here would be new
-    // behaviour rather than a moved one. See
-    // `docs/dev/todo/2026-09-11-the-coder-terminal-coordinate-serves-seven-of-nine.md`.
-    assert_eq!(refusal.code(), Code::Unimplemented);
+    // Then — the coder serves the stream it used to refuse, and both answer with one snapshot of the
+    // one terminal at the same sequence point
+    assert!(coder_snapshot.snapshot, "the first frame is a snapshot");
+    assert_eq!(coder_snapshot.end_offset, RETAINED_OUTPUT.len() as u64);
+    assert_eq!(
+        coder_snapshot, daemon_snapshot,
+        "a snapshot open must answer identically through both wirings of the coordinate"
+    );
 }
 
 #[tokio::test]

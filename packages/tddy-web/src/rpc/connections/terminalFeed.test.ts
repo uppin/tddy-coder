@@ -479,3 +479,161 @@ describe("a daemon-served terminal feed", () => {
     expect(deliveries).toEqual([null]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The bidi stream: one call carries the output down and the keystrokes up, and every open asks
+// for a snapshot of the current screen (PRD-2026-10-25-terminal-snapshot-host)
+// ---------------------------------------------------------------------------
+
+/** One `StreamSessionTerminalIO` call as the feed makes it: every message it sent up. */
+interface BidiOpen {
+  readonly messages: Array<{
+    mode: StreamReplayMode;
+    initialCols: number;
+    initialRows: number;
+    sessionId: string;
+    terminalId: string;
+    data: Uint8Array;
+    inputOffset: bigint;
+    controlToken: string;
+  }>;
+}
+
+/** A daemon serving the bidi stream: answers each open with `frames`, then holds it open. */
+function aBidiDaemonAnswering(frames: OutputFrame[]) {
+  const opens: BidiOpen[] = [];
+  const client = {
+    async *streamSessionTerminalIO(requests: AsyncIterable<BidiOpen["messages"][number]>) {
+      const open: BidiOpen = { messages: [] };
+      opens.push(open);
+      const reader = requests[Symbol.asyncIterator]();
+      const first = await reader.next();
+      if (!first.done) open.messages.push(first.value);
+      void (async () => {
+        for (let next = await reader.next(); !next.done; next = await reader.next()) {
+          open.messages.push(next.value);
+        }
+      })();
+      for (const frame of frames) yield frame;
+    },
+  };
+  return { client: client as unknown as Client<typeof TerminalSessionService>, opens };
+}
+
+/** A snapshot frame of this session's bash terminal at sequence point `endOffset`. */
+function aSnapshotAt(endOffset: bigint): OutputFrame {
+  return create(SessionTerminalOutputSchema, {
+    data: bytesOf("\x1bc$ "),
+    snapshot: true,
+    endOffset,
+    snapshotRows: A_GRID.rows,
+    snapshotCols: A_GRID.cols,
+    sessionId: A_SESSION,
+    terminalId: A_TERMINAL_ID,
+  });
+}
+
+/** A live delta stamped with the offsets it occupies. */
+function aDeltaFrom(startOffset: bigint, text: string): OutputFrame {
+  return create(SessionTerminalOutputSchema, {
+    data: bytesOf(text),
+    startOffset,
+    endOffset: startOffset + BigInt(text.length),
+    sessionId: A_SESSION,
+    terminalId: A_TERMINAL_ID,
+  });
+}
+
+/** Wait for `condition`, failing after a second — the feed reads its stream on its own schedule. */
+async function eventually(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("condition not met within a second");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+describe("a daemon-served terminal feed over the bidi stream", () => {
+  it("asks for a snapshot on every open, the first and every re-open alike", async () => {
+    // Given a terminal whose first open already painted up to an anchored offset
+    const resume = new TerminalResumePoint();
+    const daemon = aBidiDaemonAnswering([aSnapshotAt(AN_OFFSET_ALREADY_PAINTED)]);
+    openDaemonTerminalFeed({ client: daemon.client, sessionId: A_SESSION, resume, options: terminalOptions() });
+    await eventually(() => daemon.opens.length === 1 && daemon.opens[0].messages.length === 1);
+
+    // When the same terminal is opened again
+    openDaemonTerminalFeed({ client: daemon.client, sessionId: A_SESSION, resume, options: terminalOptions() });
+    await eventually(() => daemon.opens.length === 2 && daemon.opens[1].messages.length === 1);
+
+    // Then both opens asked for the current screen, at the measured grid, for this terminal
+    expect(
+      daemon.opens.map(({ messages: [opening] }) => ({
+        mode: opening.mode,
+        initialCols: opening.initialCols,
+        initialRows: opening.initialRows,
+        terminalId: opening.terminalId,
+      })),
+    ).toEqual([
+      { mode: StreamReplayMode.SNAPSHOT, initialCols: A_GRID.cols, initialRows: A_GRID.rows, terminalId: A_TERMINAL_ID },
+      { mode: StreamReplayMode.SNAPSHOT, initialCols: A_GRID.cols, initialRows: A_GRID.rows, terminalId: A_TERMINAL_ID },
+    ]);
+  });
+
+  it("hands the terminal the snapshot flagged as one, then deltas stamped with their offsets", async () => {
+    // Given a daemon that answers with a snapshot and one delta after its sequence point
+    const daemon = aBidiDaemonAnswering([aSnapshotAt(100n), aDeltaFrom(100n, "ls\r\n")]);
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: terminalOptions(),
+    });
+    const received: Array<{ snapshot?: boolean; startOffset?: bigint; endOffset: bigint; text: string }> = [];
+    feed.stream.onMessage((frame) =>
+      received.push({
+        snapshot: frame.snapshot,
+        startOffset: frame.startOffset,
+        endOffset: frame.endOffset,
+        text: textOf(frame.data),
+      }),
+    );
+
+    // When both frames arrive
+    await eventually(() => received.length === 2);
+
+    // Then the snapshot is marked as one and anchored at its sequence point, and the delta starts there
+    expect(received).toEqual([
+      { snapshot: true, startOffset: 0n, endOffset: 100n, text: "\x1bc$ " },
+      { snapshot: false, startOffset: 100n, endOffset: 104n, text: "ls\r\n" },
+    ]);
+  });
+
+  it("sends keystrokes up the same stream, each carrying the cumulative input offset", async () => {
+    // Given an open feed
+    const daemon = aBidiDaemonAnswering([aSnapshotAt(10n)]);
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: terminalOptions(),
+    });
+
+    // When the user types twice
+    feed.stream.send(bytesOf("ls"));
+    feed.stream.send(bytesOf(" -la\r"));
+
+    // Then both went up the one open stream with the running byte total and the held lease
+    await eventually(() => (daemon.opens[0]?.messages.length ?? 0) >= 3);
+    expect(daemon.opens).toHaveLength(1);
+    expect(
+      daemon.opens[0].messages.slice(1).map((m) => ({
+        text: textOf(m.data),
+        inputOffset: m.inputOffset,
+        controlToken: m.controlToken,
+      })),
+    ).toEqual([
+      { text: "ls", inputOffset: 2n, controlToken: "lease-one" },
+      { text: " -la\r", inputOffset: 7n, controlToken: "lease-one" },
+    ]);
+  });
+});
