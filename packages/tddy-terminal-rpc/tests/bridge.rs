@@ -277,6 +277,7 @@ async fn serve_send_terminal_input_forwards_the_bytes_and_the_cumulative_offset(
             from_offset: 0,
             initial_cols: 0,
             initial_rows: 0,
+            request_snapshot: false,
         },
     )
     .await
@@ -521,6 +522,7 @@ async fn serve_stream_session_terminal_io_tail_emits_the_last_frame_then_forward
         from_offset: 0,
         initial_cols: 0,
         initial_rows: 0,
+        request_snapshot: false,
     };
     let followups = vec![
         SessionTerminalInput {
@@ -534,6 +536,7 @@ async fn serve_stream_session_terminal_io_tail_emits_the_last_frame_then_forward
             from_offset: 0,
             initial_cols: 0,
             initial_rows: 0,
+            request_snapshot: false,
         },
         SessionTerminalInput {
             session_token: String::new(),
@@ -546,6 +549,7 @@ async fn serve_stream_session_terminal_io_tail_emits_the_last_frame_then_forward
             from_offset: 0,
             initial_cols: 0,
             initial_rows: 0,
+            request_snapshot: false,
         },
     ];
     let mut rx = serve_stream_session_terminal_io_with(
@@ -621,6 +625,7 @@ async fn serve_stream_session_terminal_io_from_offset_emits_only_the_catch_up_ga
         from_offset: 3,
         initial_cols: 0,
         initial_rows: 0,
+        request_snapshot: false,
     };
     let rx = serve_stream_session_terminal_io_with(
         session,

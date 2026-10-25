@@ -55,6 +55,14 @@ impl StubTerminal {
         }
     }
 
+    /// A sized stub terminal whose live broadcast holds only `capacity` chunks, so a subscriber
+    /// that stops reading falls behind — lags — after that many.
+    pub fn sized_with_broadcast_capacity(rows: u16, cols: u16, capacity: usize) -> Self {
+        let mut terminal = Self::sized(rows, cols);
+        terminal.stdout_tx = broadcast::channel(capacity).0;
+        terminal
+    }
+
     /// A stub terminal whose screen model knows the PTY's grid, as every real terminal's does once
     /// its spawner has sized it — the precondition for a snapshot.
     pub fn sized(rows: u16, cols: u16) -> Self {
@@ -724,6 +732,16 @@ pub fn an_input() -> SessionTerminalInput {
         from_offset: 0,
         initial_cols: 0,
         initial_rows: 0,
+        request_snapshot: false,
+    }
+}
+
+/// A message on an open bidi stream that types `data` (reaching cumulative `input_offset`) and asks
+/// for a fresh snapshot in the same breath.
+pub fn typing_and_requesting_a_snapshot(data: &[u8], input_offset: u64) -> SessionTerminalInput {
+    SessionTerminalInput {
+        request_snapshot: true,
+        ..typing(data, input_offset)
     }
 }
 

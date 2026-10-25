@@ -514,6 +514,7 @@ async fn forwards_input_into_the_jail_ignoring_an_offset_nothing_there_counts() 
             from_offset: 0,
             initial_cols: 0,
             initial_rows: 0,
+            request_snapshot: false,
         },
     )
     .await
@@ -708,6 +709,7 @@ fn a_jails_input(data: &[u8]) -> SessionTerminalInput {
         from_offset: 0,
         initial_cols: 0,
         initial_rows: 0,
+        request_snapshot: false,
     }
 }
 

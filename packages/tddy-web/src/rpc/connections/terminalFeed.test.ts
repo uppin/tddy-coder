@@ -99,10 +99,15 @@ interface HistoryRequest {
 
 type OutputFrame = ReturnType<typeof create<typeof SessionTerminalOutputSchema>>;
 
-/** A live output frame of this session's bash terminal, stamped as the daemon stamps every frame. */
+/**
+ * An output frame of this session's bash terminal. A snapshot, because the feed opens with
+ * `SNAPSHOT` and its continuity guard paints nothing that does not follow one.
+ */
 function anOutputFrameOf(text: string): OutputFrame {
   return create(SessionTerminalOutputSchema, {
     data: bytesOf(text),
+    snapshot: true,
+    endOffset: BigInt(text.length),
     sessionId: A_SESSION,
     terminalId: A_TERMINAL_ID,
   });
@@ -312,6 +317,42 @@ describe("a daemon-served terminal feed over the bidi stream", () => {
     ]);
   });
 
+  it("drops frames that do not continue the screen and asks once for a snapshot on the same stream", async () => {
+    // Given a daemon whose stream loses bytes after one contiguous delta, then answers with a snapshot
+    const daemon = aBidiDaemonAnswering(
+      [
+        aSnapshotAt(100n),
+        aDeltaFrom(100n, "ls\r\n"),
+        aDeltaFrom(500n, "hole"),
+        aDeltaFrom(504n, "more"),
+        aSnapshotAt(640n),
+        aDeltaFrom(640n, "ok"),
+      ],
+      { staysOpen: true },
+    );
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: terminalOptions(),
+    });
+    const painted: string[] = [];
+    feed.stream.onMessage((frame) => painted.push(textOf(frame.data)));
+
+    // When every frame has been read
+    await eventually(() => painted.includes("ok"));
+    await eventually(() => daemon.opens[0].messages.some((message) => message.requestSnapshot));
+
+    // Then neither gapped delta was painted, and one data-free request went up the open stream
+    expect(painted).toEqual(["\x1bc$ ", "ls\r\n", "\x1bc$ ", "ok"]);
+    expect(daemon.opens).toHaveLength(1);
+    expect(
+      daemon.opens[0].messages
+        .filter((message) => message.requestSnapshot)
+        .map((message) => ({ bytes: message.data?.length ?? 0, controlToken: message.controlToken })),
+    ).toEqual([{ bytes: 0, controlToken: "lease-one" }]);
+  });
+
   it("sends keystrokes up the same stream, each carrying the cumulative input offset", async () => {
     // Given an open feed
     const daemon = aBidiDaemonAnswering([aSnapshotAt(10n)]);
@@ -496,6 +537,8 @@ describe("a daemon-served terminal feed over the bidi stream", () => {
     const daemon = aBidiDaemonAnswering([
       create(SessionTerminalOutputSchema, {
         data: bytesOf("claude> "),
+        snapshot: true,
+        endOffset: 8n,
         sessionId: A_SESSION,
         // The daemon stamps the RESOLVED id back, never the empty one the request carried
         terminalId: MAIN_TERMINAL_ID,

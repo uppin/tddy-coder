@@ -122,6 +122,7 @@ fn an_input(bytes: &str, input_offset: u64) -> SessionTerminalInput {
         from_offset: 0,
         initial_cols: 0,
         initial_rows: 0,
+        request_snapshot: false,
     }
 }
 

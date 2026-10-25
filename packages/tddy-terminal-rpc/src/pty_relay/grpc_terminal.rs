@@ -64,6 +64,7 @@ pub(super) async fn run_grpc_terminal(
                 from_offset: 0,
                 initial_cols: 0,
                 initial_rows: 0,
+                request_snapshot: false,
             };
             let _ = connectrpc_post(
                 &input_client,
@@ -89,6 +90,7 @@ pub(super) async fn run_grpc_terminal(
                 from_offset: 0,
                 initial_cols: 0,
                 initial_rows: 0,
+                request_snapshot: false,
             };
             let _ = connectrpc_post(
                 &input_client,

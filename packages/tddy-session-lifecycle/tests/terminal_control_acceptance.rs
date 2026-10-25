@@ -281,6 +281,7 @@ async fn send_terminal_input_rejected_without_valid_control_token() {
             from_offset: 0,
             initial_cols: 0,
             initial_rows: 0,
+            request_snapshot: false,
         }))
         .await
         .expect_err("SendTerminalInput with invalid control token must be rejected");
@@ -321,6 +322,7 @@ async fn send_terminal_input_succeeds_for_current_controller() {
             from_offset: 0,
             initial_cols: 0,
             initial_rows: 0,
+            request_snapshot: false,
         }))
         .await
         .expect("SendTerminalInput from the current controller must succeed");

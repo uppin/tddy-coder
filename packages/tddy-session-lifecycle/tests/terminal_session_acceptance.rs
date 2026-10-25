@@ -607,6 +607,7 @@ async fn send_terminal_input_targets_identified_terminal() {
             from_offset: 0,
             initial_cols: 0,
             initial_rows: 0,
+            request_snapshot: false,
         }))
         .await
         .expect("SendTerminalInput must succeed");

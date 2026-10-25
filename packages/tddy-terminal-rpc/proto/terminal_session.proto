@@ -59,6 +59,12 @@ message SessionTerminalInput {
   // server resizes the PTY before sending the initial replay frame (TAIL only).
   uint32           initial_cols  = 9;
   uint32           initial_rows  = 10;
+  // Bidi only, valid on ANY message of StreamSessionTerminalIO (not only the first): answer with a
+  // snapshot frame at a new sequence point, then continue live from its `end_offset`. Bytes in
+  // `data` on the same message are applied to the PTY first. Lets a client that suspects its
+  // screen diverged resync without reconnecting. Answered only on a stream opened with SNAPSHOT:
+  // TAIL and FROM_OFFSET streams carry no snapshot frames and ignore it.
+  bool             request_snapshot = 11;
 }
 
 message SessionTerminalOutput {

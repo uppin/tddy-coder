@@ -18,6 +18,7 @@ import type { ConnectedSession } from "./useTerminalControl";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { tddyDebug } from "../../lib/debugMask";
 import { measureTerminalGridFromRect } from "../../lib/terminalGridMeasure";
+import { TerminalFrameContinuity } from "../../lib/terminalFrameContinuity";
 import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { useEnqueuedInput } from "./useEnqueuedInput";
 import { EnqueuedInputOverlay } from "../connection/EnqueuedInputOverlay";
@@ -192,6 +193,10 @@ export function GrpcSessionTerminal({
     const outbound: QueuedInput[] = [];
     let wakeInput: (() => void) | null = null;
     const wake = () => wakeInput?.();
+    // Set when a frame did not continue the screen: the request half sends one `requestSnapshot`
+    // message on this same stream, and the guard drops every delta until the snapshot lands.
+    let snapshotWanted = false;
+    const continuity = new TerminalFrameContinuity();
 
     const terminalStream: TerminalStream = {
       send(data: Uint8Array) {
@@ -253,6 +258,18 @@ export function GrpcSessionTerminal({
         controlToken: connectedRef.current?.controlToken ?? "",
       };
       while (!closed) {
+        if (snapshotWanted) {
+          snapshotWanted = false;
+          // No data: asking is a read, so it needs no lease and is never refused as a write.
+          yield {
+            sessionToken,
+            sessionId,
+            terminalId,
+            requestSnapshot: true,
+            controlToken: connectedRef.current?.controlToken ?? "",
+          };
+          continue;
+        }
         const next = outbound.shift();
         if (next === undefined) {
           await new Promise<void>((resolve) => {
@@ -303,6 +320,18 @@ export function GrpcSessionTerminal({
           // the lazy-history anchor from the snapshot frame and drives the forward fill of the
           // older-history terminal on demand.
           if (output.data.length > 0 || output.endOffset > 0n) {
+            // A frame that does not continue what is painted is dropped, never drawn over a screen
+            // it was not computed against; the first one asks for a fresh snapshot, and the
+            // daemon's answer re-anchors the guard.
+            const action = continuity.route(output);
+            if (action !== "paint") {
+              if (action === "drop-and-ask") {
+                snapshotWanted = true;
+                wake();
+              }
+              dGrpc("gap — dropping frame and asking for a snapshot start=%s end=%s", output.startOffset, output.endOffset);
+              continue;
+            }
             const frame: TerminalFrame = {
               data: output.data,
               endOffset: output.endOffset,

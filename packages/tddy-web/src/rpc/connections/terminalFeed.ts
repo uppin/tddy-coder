@@ -19,6 +19,7 @@ import {
   TerminalSessionService,
 } from "../../gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
+import { TerminalFrameContinuity } from "../../lib/terminalFrameContinuity";
 import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 import { InputRefusalTracker } from "./inputDelivery";
@@ -93,6 +94,10 @@ export function openDaemonTerminalFeed({
   const outbound: QueuedInput[] = [];
   let wakeInput: (() => void) | null = null;
   const wake = () => wakeInput?.();
+  // Set when a frame did not continue the screen: the request half sends one `requestSnapshot`
+  // message on this same stream, and the guard drops every delta until the snapshot lands.
+  let snapshotWanted = false;
+  const continuity = new TerminalFrameContinuity();
 
   const stream: TerminalStream = {
     send(data: Uint8Array): void {
@@ -144,6 +149,18 @@ export function openDaemonTerminalFeed({
       controlToken: options.controlToken(),
     };
     while (!closed) {
+      if (snapshotWanted) {
+        snapshotWanted = false;
+        // No data: asking is a read, so it needs no lease and is never refused as a write.
+        yield {
+          sessionToken: options.sessionToken,
+          sessionId,
+          terminalId,
+          requestSnapshot: true,
+          controlToken: options.controlToken(),
+        };
+        continue;
+      }
       const next = outbound.shift();
       if (next === undefined) {
         await new Promise<void>((resolve) => {
@@ -185,6 +202,18 @@ export function openDaemonTerminalFeed({
         // An ACK frame carries neither bytes nor an anchor. It is the daemon confirming applied
         // input, and there is nowhere on a `TerminalFrame` to put it — see the changeset.
         if (output.data.length === 0 && output.endOffset === 0n) continue;
+        // A frame that does not continue what is painted is dropped, never drawn over a screen it
+        // was not computed against; the first one asks for a fresh snapshot, and the daemon's
+        // answer re-anchors the guard.
+        const action = continuity.route(output);
+        if (action !== "paint") {
+          if (action === "drop-and-ask") {
+            snapshotWanted = true;
+            wake();
+          }
+          dTerm("gap — dropping frame and asking for a snapshot start=%s end=%s", output.startOffset, output.endOffset);
+          continue;
+        }
         resume.record(offsets.accept(output));
         const frame: TerminalFrame = {
           data: output.data,

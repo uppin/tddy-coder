@@ -283,6 +283,7 @@ impl SessionUnderBothWirings {
             from_offset: 0,
             initial_cols: 0,
             initial_rows: 0,
+            request_snapshot: false,
         }
     }
 }
