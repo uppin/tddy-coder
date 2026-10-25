@@ -38,10 +38,16 @@ pub trait TerminalSession: Send + Sync {
     fn snapshot_and_subscribe(
         &self,
     ) -> Result<(ScreenSnapshot, broadcast::Receiver<Bytes>), tddy_rpc::Status> {
-        // TODO(host-snapshot): implement
-        Err(tddy_rpc::Status::unimplemented(
-            "snapshot_and_subscribe is not implemented",
-        ))
+        let capture = self.capture();
+        let capture = capture.lock().unwrap();
+        let snapshot = capture.snapshot().ok_or_else(|| {
+            tddy_rpc::Status::failed_precondition(
+                "the terminal's size is unknown, so its screen cannot be snapshotted",
+            )
+        })?;
+        let live = self.subscribe_stdout();
+        drop(capture);
+        Ok((snapshot, live))
     }
 
     /// Watch for child-process exit; the bridge ends the output stream when this fires.

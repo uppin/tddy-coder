@@ -108,8 +108,8 @@ function aClaimDeniedTransport() {
         context.signal.addEventListener("abort", () => resolve(), { once: true }),
       );
     },
-    streamTerminalOutput: async function* (
-      _req: unknown,
+    streamSessionTerminalIO: async function* (
+      _requests: unknown,
       context: { signal: AbortSignal },
     ) {
       await new Promise<void>((resolve) =>

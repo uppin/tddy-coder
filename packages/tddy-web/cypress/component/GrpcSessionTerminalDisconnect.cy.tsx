@@ -15,16 +15,11 @@
  */
 
 import React, { useMemo, useState } from "react";
-import { create, toBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
-import {
-  TerminalSessionService,
-  SendTerminalInputResponseSchema,
-} from "../../src/gen/terminal_session_pb";
+import { TerminalSessionService } from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import { toArrayBuffer } from "../support/rpc/protoRpc";
+import { aTerminalSessionServiceBackend } from "../support/rpc/terminalSessionServiceBackend";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
@@ -37,35 +32,19 @@ const SESSION_TOKEN = "test-session-token-disconnect";
 /** data-testid for the harness button that unmounts the terminal (simulates a session switch). */
 const SWITCH_AWAY_BTN = "sessions-terminal-switch-away";
 
-const OK_SEND_INPUT = toArrayBuffer(
-  toBinary(SendTerminalInputResponseSchema, create(SendTerminalInputResponseSchema, {})),
-);
-
 // ---------------------------------------------------------------------------
 // Backend doubles
 // ---------------------------------------------------------------------------
 
 /**
- * StreamTerminalOutput that stays open for the lifetime of the test (the reply is
- * delayed far beyond the test) — so the terminal is "connected" and `onDisconnect`
- * can never fire from the stream ending. The only way it can fire is on unmount.
+ * A daemon whose bidi `StreamSessionTerminalIO` stays open for the lifetime of the test (the shared
+ * in-memory terminal fake never drops a stream unless told to) — so the terminal is "connected" and
+ * `onDisconnect` can never fire from the stream ending. The only way it can fire is on unmount.
+ * Input on the stream (the initial resize) is always accepted. In memory because connect-web cannot
+ * carry a bidi call over HTTP.
  */
-function interceptPendingTerminalOutput() {
-  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/StreamTerminalOutput", (req) => {
-    req.reply({
-      delay: 100_000,
-      statusCode: 200,
-      headers: { "Content-Type": "application/proto" },
-      body: new ArrayBuffer(0),
-    });
-  }).as("streamTerminalOutput");
-}
-
-/** SendTerminalInput always succeeds (the initial resize sends one on mount). */
-function interceptTerminalInputOk() {
-  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
-    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_INPUT });
-  }).as("sendTerminalInput");
+function aPendingTerminalDaemon() {
+  return aTerminalSessionServiceBackend();
 }
 
 // ---------------------------------------------------------------------------
@@ -74,11 +53,10 @@ function interceptTerminalInputOk() {
 
 function SessionsTerminalHarness({ onDisconnect }: { onDisconnect: () => void }) {
   const [mounted, setMounted] = useState(true);
-  const transport = useMemo(
-    () => createConnectTransport({ baseUrl: `${window.location.origin}/rpc`, useBinaryFormat: true }),
+  const client = useMemo(
+    () => createClient(TerminalSessionService, aPendingTerminalDaemon().backend.transport()),
     [],
   );
-  const client = useMemo(() => createClient(TerminalSessionService, transport), [transport]);
 
   return (
     <div style={{ width: 800, height: 400, position: "relative" }}>
@@ -144,10 +122,7 @@ function aSessionsScreenTerminal() {
 
 describe("Sessions-screen terminal — no top bar, auto-disconnect on unmount", () => {
   it("renders no terminal top bar or disconnect control", () => {
-    // Given — a connected sessions-screen terminal
-    interceptPendingTerminalOutput();
-    interceptTerminalInputOk();
-
+    // Given — a connected sessions-screen terminal whose output stream stays open
     // When — it mounts
     aSessionsScreenTerminal()
       .mount()
@@ -158,8 +133,6 @@ describe("Sessions-screen terminal — no top bar, auto-disconnect on unmount", 
 
   it("disconnects automatically when the terminal unmounts as the session switches", () => {
     // Given — a connected sessions-screen terminal whose output stream stays open
-    interceptPendingTerminalOutput();
-    interceptTerminalInputOk();
     const terminal = aSessionsScreenTerminal().mount().expectTerminalVisible();
 
     // Given — no disconnect has happened while the terminal is mounted

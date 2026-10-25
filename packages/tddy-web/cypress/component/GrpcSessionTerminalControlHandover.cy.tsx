@@ -5,7 +5,7 @@
  * merely watches (a phone opening a session the desktop drives) must not reflow it. That puts two
  * duties on the terminal:
  *
- * - it presents the lease it holds when it opens the output stream, so the daemon can honour the
+ * - it presents the lease it holds when it opens the terminal stream, so the daemon can honour the
  *   grid it measured when — and only when — this screen is the driver;
  * - it re-sends its grid each time it gains the lease. A grid reported while another screen drove
  *   the session never took effect, and without the re-send the PTY stays at the previous driver's
@@ -14,12 +14,11 @@
  */
 
 import React from "react";
-import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
-  SendTerminalInputResponseSchema,
   TerminalSessionService,
+  type SessionTerminalInput,
 } from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import type { ConnectedSession } from "../../src/components/sessions/useTerminalControl";
@@ -34,18 +33,29 @@ type TerminalClient = ReturnType<typeof createClient<typeof TerminalSessionServi
 
 const RESIZE_OSC = /^\x1b\]resize;\d+;\d+\x07$/;
 
+/**
+ * Records the bidi `StreamSessionTerminalIO` the terminal opens: the lease its opening message
+ * presents (`opens`), and the lease and bytes of every input message after it (`sent`).
+ */
 function aRecordingBackend() {
   const sent: { controlToken: string; text: string }[] = [];
   const opens: { controlToken: string }[] = [];
   const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
-    streamTerminalOutput: async function* (req: { controlToken: string }) {
-      opens.push({ controlToken: req.controlToken });
+    streamSessionTerminalIO: async function* (requests: AsyncIterable<SessionTerminalInput>) {
+      const reader = requests[Symbol.asyncIterator]();
+      const first = await reader.next();
+      if (first.done) return;
+      opens.push({ controlToken: first.value.controlToken });
+      void (async () => {
+        for (let next = await reader.next(); !next.done; next = await reader.next()) {
+          sent.push({
+            controlToken: next.value.controlToken,
+            text: new TextDecoder().decode(next.value.data),
+          });
+        }
+      })();
       // Stay open, like a live terminal: an ended stream would tear the pane down.
       await new Promise<void>(() => undefined);
-    },
-    sendTerminalInput: async (req: { controlToken: string; data: Uint8Array }) => {
-      sent.push({ controlToken: req.controlToken, text: new TextDecoder().decode(req.data) });
-      return create(SendTerminalInputResponseSchema, {});
     },
   });
   return { backend, sent, opens };
@@ -84,7 +94,7 @@ function HandoverPane({
 }
 
 describe("GrpcSessionTerminal — control handover", () => {
-  it("presents the lease it holds when it opens the output stream", () => {
+  it("presents the lease it holds when it opens the terminal stream", () => {
     // Given — a screen that holds the session's lease
     const { backend, opens } = aRecordingBackend();
     const client = createClient(TerminalSessionService, backend.transport());
@@ -94,7 +104,7 @@ describe("GrpcSessionTerminal — control handover", () => {
 
     // Then — the open carries the lease, so the daemon honours the grid it measured
     cy.wrap(opens).should((o) => {
-      expect(o, "one output stream opened").to.have.length(1);
+      expect(o, "one terminal stream opened").to.have.length(1);
       expect(o[0].controlToken).to.equal(FIRST_LEASE);
     });
   });

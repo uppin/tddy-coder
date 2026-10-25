@@ -5,10 +5,11 @@
  *
  * Two behaviors are pinned here:
  *
- *  A. Wire contract — every `SendTerminalInput` the terminal emits carries a cumulative byte
- *     offset: for consecutive calls `offset[i] == offset[i-1] + data[i].length`, and the first
- *     call's offset equals its own byte length. Exercised through the real `GrpcSessionTerminal`
- *     against an in-memory TerminalSessionService backend.
+ *  A. Wire contract — every input message the terminal sends up its bidi
+ *     `StreamSessionTerminalIO` stream carries a cumulative byte offset: for consecutive messages
+ *     `offset[i] == offset[i-1] + data[i].length`, and the first one's offset equals its own byte
+ *     length. Exercised through the real `GrpcSessionTerminal` against an in-memory
+ *     TerminalSessionService backend that answers each message with an ACK frame.
  *
  *  B. Overlay timing / collapse — through the real `useEnqueuedInput` hook: the overlay appears
  *     only after 500ms without an ACK, collapses from the front as prefix offsets are ACKed
@@ -21,8 +22,10 @@ import { create } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
-  SendTerminalInputResponseSchema,
+  SessionTerminalOutputSchema,
   TerminalSessionService,
+  type SessionTerminalInput,
+  type SessionTerminalOutput,
 } from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { useEnqueuedInput } from "../../src/components/sessions/useEnqueuedInput";
@@ -31,33 +34,58 @@ import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
-// A. Wire contract — cumulative byte offset on SendTerminalInput
+// A. Wire contract — cumulative byte offset on every input message of the bidi stream
 // ---------------------------------------------------------------------------
 
-/** Backend that records SendTerminalInput and keeps the output stream open (no ACKs). */
+/**
+ * Backend whose bidi `StreamSessionTerminalIO` records every message the client sends and answers
+ * each input message with the ACK frame the daemon would send once the bytes reached the PTY —
+ * empty data, `ackedInputOffset` = the cumulative offset that message carried.
+ */
 function aRecordingBackend() {
-  return anInMemoryRpcBackend()
-    .onUnary(TerminalSessionService.method.sendTerminalInput, () =>
-      create(SendTerminalInputResponseSchema, {}),
-    )
-    .implement(TerminalSessionService, {
-      // Long-lived, silent output stream — Part A asserts only on what the client sends.
-      // eslint-disable-next-line require-yield
-      async *streamTerminalOutput() {
-        await new Promise<never>(() => {});
-      },
-    });
+  const messages: SessionTerminalInput[] = [];
+  const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
+    async *streamSessionTerminalIO(requests: AsyncIterable<SessionTerminalInput>) {
+      const acks: SessionTerminalOutput[] = [];
+      let wake: (() => void) | null = null;
+      void (async () => {
+        for await (const message of requests) {
+          messages.push(message);
+          if (message.data.length === 0) continue;
+          acks.push(
+            create(SessionTerminalOutputSchema, {
+              ackedInputOffset: message.inputOffset,
+              sessionId: message.sessionId,
+              terminalId: message.terminalId || "main",
+            }),
+          );
+          wake?.();
+        }
+      })();
+      // Long-lived stream that carries only ACKs — Part A asserts on what the client sends.
+      for (;;) {
+        while (acks.length > 0) yield acks.shift() as SessionTerminalOutput;
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+        wake = null;
+      }
+    },
+  });
+  /** The input messages — every message after the opening one, which names the terminal. */
+  const inputs = () => messages.slice(1);
+  return { backend, messages, inputs };
 }
 
 describe("Terminal input offset — wire contract", () => {
-  it("sends a cumulative byte offset on each SendTerminalInput", () => {
+  it("sends a cumulative byte offset on each input message of the terminal stream", () => {
     // Given — a connected terminal on a desktop-sized screen, whose input flows over the in-memory
     // backend. At the default 500px viewport the terminal counts as mobile and makes its input
     // read-only until the on-screen keyboard is asked for, so typing would only land if it raced
     // ahead of the terminal's setup.
     cy.viewport(1280, 800);
-    const backend = aRecordingBackend();
-    const client = createClient(TerminalSessionService, backend.transport());
+    const recording = aRecordingBackend();
+    const client = createClient(TerminalSessionService, recording.backend.transport());
 
     cy.mount(
       <UploadProgressProvider>
@@ -84,14 +112,13 @@ describe("Terminal input offset — wire contract", () => {
     byTestId(TEST_IDS.ghosttyTerminal).click().type("abc");
 
     // Then — offsets are the running byte total of everything sent (keystrokes + any resize OSC)
-    cy.wrap(backend)
-      .should((b) => {
-        const calls = b.callsTo(TerminalSessionService.method.sendTerminalInput);
+    cy.wrap(recording)
+      .should((r) => {
         // wait until the three keystrokes have been recorded
-        expect(calls.length).to.be.greaterThan(2);
+        expect(r.inputs().length).to.be.greaterThan(2);
       })
-      .then((b: ReturnType<typeof aRecordingBackend>) => {
-        const calls = b.callsTo(TerminalSessionService.method.sendTerminalInput);
+      .then((r: ReturnType<typeof aRecordingBackend>) => {
+        const calls = r.inputs();
         expect(Number(calls[0].inputOffset)).to.equal(calls[0].data.length);
         for (let i = 1; i < calls.length; i++) {
           expect(Number(calls[i].inputOffset)).to.equal(

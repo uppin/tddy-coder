@@ -6,42 +6,69 @@
  * already started replaying buffered output drawn at 220 cols — producing garbled output
  * in narrower containers.
  *
- * Fix: GrpcSessionTerminal must pass the container's measured cols×rows in the
- * StreamTerminalOutput request so the daemon can resize the PTY *before* replay starts.
+ * Fix: GrpcSessionTerminal must pass the container's measured cols×rows in the opening message of
+ * the bidi `StreamSessionTerminalIO` call (the one that asks for `mode: SNAPSHOT`) so the daemon can
+ * resize the PTY *before* it serializes the screen.
  *
  * These tests define the expected behavior:
- * - StreamTerminalOutput request includes initial_cols > 0 and initial_rows > 0
+ * - the opening message asks for a SNAPSHOT and carries initial_cols > 0 and initial_rows > 0
  * - The dimensions reflect the actual container size, not the hardcoded 220×24 PTY default
+ *
+ * The browser's connect-web transport cannot carry a bidi call over HTTP, so the daemon is an
+ * in-memory `TerminalSessionService` that records the opening message of every open.
  */
 
-import React, { useMemo } from "react";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
+import React from "react";
+import { createClient, type Client } from "@connectrpc/connect";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
+  StreamReplayMode,
   TerminalSessionService,
-  SendTerminalInputResponseSchema,
-  StreamTerminalOutputRequestSchema,
+  type SessionTerminalInput,
 } from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import { decodeConnectStreamRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
+
+type TerminalClient = Client<typeof TerminalSessionService>;
 
 // ---------------------------------------------------------------------------
-// Test harness — provides a real HTTP client Cypress can intercept
+// Backend double — a daemon whose bidi terminal stream records each open's first message
 // ---------------------------------------------------------------------------
 
-function Harness({ containerWidth = 800, containerHeight = 400 }: { containerWidth?: number; containerHeight?: number }) {
-  const transport = useMemo(
-    () =>
-      createConnectTransport({
-        baseUrl: `${window.location.origin}/rpc`,
-        useBinaryFormat: true,
-      }),
-    [],
-  );
-  const client = useMemo(() => createClient(TerminalSessionService, transport), [transport]);
+function aRecordingTerminalDaemon() {
+  const openingMessages: SessionTerminalInput[] = [];
+  const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
+    async *streamSessionTerminalIO(requests: AsyncIterable<SessionTerminalInput>) {
+      const reader = requests[Symbol.asyncIterator]();
+      const first = await reader.next();
+      if (first.done) return;
+      openingMessages.push(first.value);
+      // Drain later messages (the resize OSC, keystrokes) and stay open: an empty, silent stream.
+      void (async () => {
+        for (let next = await reader.next(); !next.done; next = await reader.next()) {
+          /* accepted */
+        }
+      })();
+      await new Promise<never>(() => undefined);
+    },
+  });
+  const client: TerminalClient = createClient(TerminalSessionService, backend.transport());
+  return { client, openingMessages };
+}
 
+// ---------------------------------------------------------------------------
+// Test harness
+// ---------------------------------------------------------------------------
+
+function Harness({
+  client,
+  containerWidth = 800,
+  containerHeight = 400,
+}: {
+  client: TerminalClient;
+  containerWidth?: number;
+  containerHeight?: number;
+}) {
   return (
     <div style={{ width: containerWidth, height: containerHeight, position: "relative" }}>
       <UploadProgressProvider>
@@ -56,71 +83,48 @@ function Harness({ containerWidth = 800, containerHeight = 400 }: { containerWid
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const OK_SEND_TERMINAL_INPUT_BODY = toArrayBuffer(
-  toBinary(SendTerminalInputResponseSchema, create(SendTerminalInputResponseSchema, {})),
-);
-
-/** Intercept StreamTerminalOutput; accept and return an empty (no-data) stream. */
-function interceptStreamTerminalOutput() {
-  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/StreamTerminalOutput", (req) => {
-    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: new ArrayBuffer(0) });
-  }).as("streamTerminalOutput");
-}
-
-/** Intercept SendTerminalInput (OSC resize sequences, keystrokes). */
-function interceptSendTerminalInput() {
-  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
-    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_TERMINAL_INPUT_BODY });
-  }).as("sendTerminalInput");
+/** Yields the opening message of the first open once it has arrived. */
+function waitForOpeningMessage(daemon: ReturnType<typeof aRecordingTerminalDaemon>) {
+  return cy
+    .wrap(daemon, { timeout: 10000 })
+    .should((d) => {
+      expect(d.openingMessages.length, "the bidi terminal stream was opened").to.be.greaterThan(0);
+    })
+    .then((d) => d.openingMessages[0]);
 }
 
 // ---------------------------------------------------------------------------
-// AC1–AC3: StreamTerminalOutput request must include initial terminal dimensions
+// AC1–AC3: the opening message must include initial terminal dimensions
 // ---------------------------------------------------------------------------
 
-describe("GrpcSessionTerminalResize — initial dimensions in StreamTerminalOutput", () => {
-  beforeEach(() => {
-    interceptStreamTerminalOutput();
-    interceptSendTerminalInput();
-  });
-
+describe("GrpcSessionTerminalResize — initial dimensions in the opening StreamSessionTerminalIO message", () => {
   // -------------------------------------------------------------------------
-  // AC1 — StreamTerminalOutput request includes initial_cols > 0
+  // AC1 — opening message asks for a snapshot and includes initial_cols > 0
   // -------------------------------------------------------------------------
 
-  it("includes initial_cols > 0 in the StreamTerminalOutput request on mount", () => {
+  it("includes initial_cols > 0 in the opening SNAPSHOT message on mount", () => {
     // Given — 800px wide container
-    cy.mount(<Harness containerWidth={800} containerHeight={400} />);
+    const daemon = aRecordingTerminalDaemon();
+    cy.mount(<Harness client={daemon.client} containerWidth={800} containerHeight={400} />);
 
-    // When — component mounts and opens the output stream
-    cy.wait("@streamTerminalOutput").then((interception) => {
-      const decoded = fromBinary(
-        StreamTerminalOutputRequestSchema,
-        decodeConnectStreamRequestBody(interception.request.body),
-      );
-
-      expect((decoded as any).initialCols).to.be.greaterThan(0);
+    // When — component mounts and opens the terminal stream
+    waitForOpeningMessage(daemon).then((opening) => {
+      expect(opening.mode, "the open asks for a snapshot").to.equal(StreamReplayMode.SNAPSHOT);
+      expect(opening.initialCols).to.be.greaterThan(0);
     });
   });
 
   // -------------------------------------------------------------------------
-  // AC2 — StreamTerminalOutput request includes initial_rows > 0
+  // AC2 — opening message includes initial_rows > 0
   // -------------------------------------------------------------------------
 
-  it("includes initial_rows > 0 in the StreamTerminalOutput request on mount", () => {
-    cy.mount(<Harness containerWidth={800} containerHeight={400} />);
+  it("includes initial_rows > 0 in the opening SNAPSHOT message on mount", () => {
+    const daemon = aRecordingTerminalDaemon();
+    cy.mount(<Harness client={daemon.client} containerWidth={800} containerHeight={400} />);
 
-    cy.wait("@streamTerminalOutput").then((interception) => {
-      const decoded = fromBinary(
-        StreamTerminalOutputRequestSchema,
-        decodeConnectStreamRequestBody(interception.request.body),
-      );
-
-      expect((decoded as any).initialRows).to.be.greaterThan(0);
+    waitForOpeningMessage(daemon).then((opening) => {
+      expect(opening.mode, "the open asks for a snapshot").to.equal(StreamReplayMode.SNAPSHOT);
+      expect(opening.initialRows).to.be.greaterThan(0);
     });
   });
 
@@ -131,15 +135,11 @@ describe("GrpcSessionTerminalResize — initial dimensions in StreamTerminalOutp
   it("initial_cols reflects the container width and is not the hardcoded PTY default (220)", () => {
     // Given — 800px wide container. At ~8px/col: ≈100 cols; at ~10px/col: ≈80 cols.
     // In any case, it should not equal 220 (the PTY's hardcoded value).
-    cy.mount(<Harness containerWidth={800} containerHeight={400} />);
+    const daemon = aRecordingTerminalDaemon();
+    cy.mount(<Harness client={daemon.client} containerWidth={800} containerHeight={400} />);
 
-    cy.wait("@streamTerminalOutput").then((interception) => {
-      const decoded = fromBinary(
-        StreamTerminalOutputRequestSchema,
-        decodeConnectStreamRequestBody(interception.request.body),
-      );
-
-      const cols = (decoded as any).initialCols as number | undefined;
+    waitForOpeningMessage(daemon).then((opening) => {
+      const cols = opening.initialCols as number | undefined;
 
       expect(cols).to.be.a("number", "initial_cols must be a number, not undefined");
       expect(cols).to.be.greaterThan(40, "cols should be a reasonable terminal width");

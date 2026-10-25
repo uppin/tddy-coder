@@ -259,7 +259,20 @@ point, no server screen model, and the web terminal on server-stream + unary inp
   shows a message and does not fall back.
 
 ## Technical Debt
-- Measure emulator CPU on a recorded Claude session and record bytes/s here.
+- **Emulator CPU (measured):** `TerminalCapture::append` (avt screen model + mode sniffer + ring) takes
+  ~1 MB of synthetic TUI diff output (4 KiB chunks, 24x80, release build, Apple silicon) in 17.5 ms:
+  ~57 MB/s. A snapshot of that screen serializes in ~0.1 ms (1.6 KB). Not yet measured on a
+  recorded Claude session.
+- **`mode_prologue` does not carry the alternate screen.** `terminal_capture_replay`'s
+  `ignores_private_modes_outside_the_mouse_tracking_family` pins a mouse-only prologue, so the legacy
+  TAIL/FROM_OFFSET replay still lacks it; only `SNAPSHOT` carries it.
+- **avt cannot tell a written blank from an untouched cell.** `screen_dump.rs` skips default-pen
+  blank runs (a lone interior blank stays a space) so the snapshot matches the reference emulator.
+- **Lagged subscribers** keep today's behavior: on `Lagged` the offsets stamped on later frames are
+  wrong until `#term-snapshot 2/4` resyncs.
+- **No per-send input refusal over bidi.** `SessionsDrawerVisibleErrorsAcceptance` "typing into the
+  terminal" (2 tests) asserts a visible indicator from per-send `sendTerminalInput` refusals; the bidi
+  stream has no per-send answer. NEEDS A DEVELOPER DECISION (see PR).
 
 ## TODO
 
@@ -271,7 +284,7 @@ point, no server screen model, and the web terminal on server-stream + unary inp
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [~] TDD Green — implemented; 2 VisibleErrors specs blocked on a decision (see Technical Debt)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

@@ -143,7 +143,7 @@ describe("SessionStartResumeStillDaemonRouted — bootstrap RPCs keep targeting 
     // its client was built for, so this asserts the *terminate specifically* targeted
     // `daemon-local` — independent of the session-scoped client (`daemon-local-<sessionId>`) that
     // the attached terminal legitimately builds for its own session-scoped RPCs (ClaimTerminalControl,
-    // streamTerminalOutput — see docs/ft/web/session-drawer.md § Session-participant RPC routing).
+    // streamSessionTerminalIO — see docs/ft/web/session-drawer.md § Session-participant RPC routing).
     cy.wrap(backend).should((b) => {
       expect(b.signalCalls.map((c) => c.sessionId)).to.include(ACTIVE_SESSION.sessionId);
     });

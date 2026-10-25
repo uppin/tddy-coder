@@ -8,6 +8,7 @@
 
 pub mod idle;
 pub mod registry;
+mod screen_dump;
 pub mod task;
 pub mod terminal_capture;
 

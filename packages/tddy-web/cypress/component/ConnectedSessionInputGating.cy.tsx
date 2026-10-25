@@ -18,9 +18,9 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ClaimTerminalControlResponseSchema,
-  SendTerminalInputResponseSchema,
   TerminalControlEventSchema,
   TerminalSessionService,
+  type SessionTerminalInput,
 } from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { useTerminalControl, type Session } from "../../src/components/sessions/useTerminalControl";
@@ -38,7 +38,7 @@ type TerminalClient = ReturnType<typeof createClient<typeof TerminalSessionServi
 /**
  * In-memory `TerminalSessionService` backend whose `claimTerminalControl` is held pending until the test
  * resolves it, so the `connected === null` window (between attach and grant) is observable and
- * deterministic. `sendTerminalInput` records every call so the test can assert input never reaches
+ * deterministic. The bidi `streamSessionTerminalIO` records every input message so the test can assert input never reaches
  * the daemon before the lease exists, and that the flushed input carries the token.
  */
 function aDeferredClaimBackend() {
@@ -59,14 +59,25 @@ function aDeferredClaimBackend() {
     watchTerminalControl: async function* () {
       yield create(TerminalControlEventSchema, {});
     },
-    // Server-streaming output — record that it opened, yield no data, and end. The terminal's
-    // mount-time resize still fires a `send` independently of output data.
-    streamTerminalOutput: async function* () {
+    // The bidi terminal stream — record that it opened (its opening message names the terminal and
+    // carries no input), then record every input message after it. It yields no data and stays
+    // open: the terminal's mount-time resize still fires a `send` independently of output data, and
+    // an ended stream would leave nothing to carry the flushed input.
+    streamSessionTerminalIO: async function* (requests: AsyncIterable<SessionTerminalInput>) {
+      const reader = requests[Symbol.asyncIterator]();
+      const first = await reader.next();
+      if (first.done) return;
       state.streamOpened = true;
-    },
-    sendTerminalInput: async (req: { sessionId: string; controlToken: string }) => {
-      sendInputCalls.push({ sessionId: req.sessionId, controlToken: req.controlToken });
-      return create(SendTerminalInputResponseSchema, {});
+      void (async () => {
+        for (let next = await reader.next(); !next.done; next = await reader.next()) {
+          if (next.value.data.length === 0) continue;
+          sendInputCalls.push({
+            sessionId: next.value.sessionId,
+            controlToken: next.value.controlToken,
+          });
+        }
+      })();
+      await new Promise<void>(() => undefined);
     },
   });
 
@@ -110,10 +121,10 @@ it("queues input sent before the claim resolves and flushes it once ConnectedSes
 
   // Wait for the output stream to open (mount completed) and give the terminal a frame to fire its
   // mount-time resize — that resize is the input that must be queued.
-  cy.wrap(state).should((s) => expect(s.streamOpened, "streamTerminalOutput opened on mount").to.be.true);
+  cy.wrap(state).should((s) => expect(s.streamOpened, "streamSessionTerminalIO opened on mount").to.be.true);
   cy.wait(120);
 
-  // Then — NO sendTerminalInput has reached the backend: the resize was queued because
+  // Then — NO input message has reached the backend: the resize was queued because
   // `connected` is still null (the claim is pending). Structurally, input cannot go out before the
   // lease exists — this is the race that previously produced "terminal controlled by another
   // screen" rejections for the onReady resize.
@@ -122,7 +133,7 @@ it("queues input sent before the claim resolves and flushes it once ConnectedSes
   // When — the claim resolves and `connected` becomes a ConnectedSession carrying the granted token
   cy.then(() => resolveClaim());
 
-  // Then — the queued input is flushed and reaches sendTerminalInput WITH the granted token (not
+  // Then — the queued input is flushed and reaches the terminal stream WITH the granted token (not
   // an empty string). Every flushed call must carry the lease.
   cy.wrap(sendInputCalls).should("have.length.greaterThan", 0);
   cy.wrap(sendInputCalls).should((calls) => {

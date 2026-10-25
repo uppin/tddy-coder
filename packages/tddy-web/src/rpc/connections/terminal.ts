@@ -145,7 +145,7 @@ export interface TerminalOptions {
   readonly controlToken: () => string;
 
   /**
-   * The terminal's measured grid, so the daemon resizes the PTY *before* it replays.
+   * The terminal's measured grid, so the daemon resizes the PTY *before* it snapshots or replays.
    *
    * Omitted when the pane has not been laid out yet. This is the fix for the 220-column garbling:
    * replaying a buffer at the wrong width re-wraps every line in it.
@@ -157,7 +157,8 @@ export interface TerminalOptions {
    * lease moved, the session ended, the transport is down), `null` once one is delivered again.
    *
    * Input has no reply the terminal renders, so without this a refused keystroke is simply gone. A
-   * feed that cannot tell — one whose input rides a stream with no per-send answer — never calls it.
+   * feed that cannot tell — one whose input rides a stream with no per-send answer, as the room's
+   * `StreamTerminalIO` and the daemon's bidi `StreamSessionTerminalIO` both do — never calls it.
    */
   readonly onInputDelivery?: (failure: string | null) => void;
 }

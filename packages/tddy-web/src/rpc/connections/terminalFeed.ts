@@ -1,46 +1,46 @@
 /**
  * The terminal feed a daemon-served session offers, over `TerminalSessionService`.
  *
- * This is `GrpcSessionTerminal`'s stream construction, moved off the component and onto the
- * connection. Nothing about the wire changes: the same `StreamTerminalOutput` open, the same
- * TAIL-then-`FROM_OFFSET` resume, the same per-frame identity guard, the same
- * `GetTerminalHistory` forward fill. What changes is who owns it — a component that renders bytes
- * has no business choosing a replay mode, and once the connection chooses it the *same* terminal
- * component can be fed by a wire that is not this one.
+ * One bidi `StreamSessionTerminalIO` call carries the output down and the keystrokes up, and every
+ * open asks for `SNAPSHOT`: the daemon answers with the screen as it is now (one repaint that
+ * begins with RIS, so the terminal writes it as-is) and then only what is written after it, each
+ * frame stamped with the offsets it occupies. There is no replay mode to choose and no byte resume
+ * to track — a re-open is a fresh VT that is shown the current screen at once, with no resize and
+ * no wait for the application to repaint.
  *
  * Docs: `packages/tddy-web/docs/terminal-session.md`.
  */
 
+import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
-import { StreamReplayMode, TerminalSessionService } from "../../gen/terminal_session_pb";
+import {
+  type SessionTerminalInputSchema,
+  StreamReplayMode,
+  TerminalSessionService,
+} from "../../gen/terminal_session_pb";
 import { tddyDebug } from "../../lib/debugMask";
 import { isFrameForTerminal } from "../../lib/terminalFrameIdentity";
 import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 import { TerminalStreamOffset } from "../../lib/terminalStreamOffset";
-import { rpcFailureText } from "../rpcFailure";
-import { inputDeliverySequence } from "./inputDelivery";
 import type { TerminalFeed, TerminalFrame, TerminalOptions, TerminalStream } from "./terminal";
 
 const dTerm = tddyDebug("tddy:term:feed");
 
 /**
- * How much of one terminal's output a connection has already handed out, across stream opens.
+ * How far one terminal's output has been handed out, across opens of its feed.
  *
- * The counter `GrpcSessionTerminal` kept in `currentOffsetRef` / `hasSyncedRef`, held by the
- * connection instead of by a component's refs. It is what makes a re-open a *resume*: the second
- * open asks for `FROM_OFFSET` at the byte the first reached, so the daemon sends only the gap and
- * the terminal is not handed a replay it has already painted. Held per terminal, because a session
- * has several and each is at its own offset.
+ * Since every open asks for a snapshot this no longer chooses what an open asks for; it records the
+ * stream offset the last frame reached, held per terminal because a session has several.
  */
 export class TerminalResumePoint {
   private receivedUpTo: bigint | null = null;
 
-  /** Whether an open has already landed its offset-anchored frame. */
+  /** Whether an open has already landed an offset-anchored frame. */
   get synced(): boolean {
     return this.receivedUpTo !== null;
   }
 
-  /** The byte the next open resumes from; `0n` before the first has synced. */
+  /** The stream offset the last open reached; `0n` before the first has synced. */
   get fromOffset(): bigint {
     return this.receivedUpTo ?? 0n;
   }
@@ -61,12 +61,20 @@ export interface DaemonTerminalFeedDeps {
   readonly options: TerminalOptions;
 }
 
+/** One keystroke, paste or resize waiting to go up the stream. */
+interface QueuedInput {
+  readonly data: Uint8Array;
+  /** Cumulative bytes sent on this feed including `data`, which the daemon acks back. */
+  readonly inputOffset: number;
+  /** The lease at the instant of the send: it moves when another screen claims the terminal. */
+  readonly controlToken: string;
+}
+
 /**
  * Open `sessionId`'s terminal on a daemon that serves `TerminalSessionService`.
  *
- * The output stream starts immediately — a caller that had to await it could not register an
- * `onMessage` listener before the first frame, which is the ordering `GrpcSessionTerminal` already
- * relies on.
+ * The call starts immediately — a caller that had to await it could not register an `onMessage`
+ * listener before the first frame, which is the ordering `GrpcSessionTerminal` already relies on.
  */
 export function openDaemonTerminalFeed({
   client,
@@ -81,51 +89,29 @@ export function openDaemonTerminalFeed({
   // here rather than by the caller so that a single feed is the only thing counting: two counters
   // over one stream would ack each other's bytes.
   let inputOffset = 0;
-  // Answers to sends can land out of order; only the newest settled one is reported.
-  const nextDelivery = inputDeliverySequence((failure) => options.onInputDelivery?.(failure));
+  const outbound: QueuedInput[] = [];
+  let wakeInput: (() => void) | null = null;
+  const wake = () => wakeInput?.();
 
   const stream: TerminalStream = {
     send(data: Uint8Array): void {
       if (closed) return;
       inputOffset += data.length;
-      const settle = nextDelivery();
-      void client
-        .sendTerminalInput({
-          sessionToken: options.sessionToken,
-          sessionId,
-          terminalId,
-          data,
-          // Read now, never hoisted: the lease moves when another screen claims this terminal, and
-          // the daemon compares what this call presents against whatever it holds at this instant.
-          controlToken: options.controlToken(),
-          inputOffset: BigInt(inputOffset),
-        })
-        .then(
-          () => settle(null),
-          (err: unknown) => {
-            dTerm(
-              "sendTerminalInput failed sessionId=%s terminalId=%s error=%o",
-              sessionId,
-              terminalId,
-              err instanceof Error ? err.message : err,
-            );
-            settle(rpcFailureText(err));
-          },
-        );
+      // Read now, never hoisted: the lease moves when another screen claims this terminal, and the
+      // daemon compares what each message presents against whatever it holds at that instant.
+      outbound.push({ data, inputOffset, controlToken: options.controlToken() });
+      wake();
     },
     onMessage(fn: (frame: TerminalFrame) => void): void {
       listeners.push(fn);
     },
     close(): void {
       closed = true;
+      wake();
     },
   };
 
-  // Read before the first await: a `FROM_OFFSET` resume is a decision about what this open should
-  // ask for, and the open's own frames start advancing the resume point the moment they land.
-  const mode = resume.synced ? StreamReplayMode.FROM_OFFSET : StreamReplayMode.TAIL;
-  const fromOffset = resume.fromOffset;
-  const offsets = new TerminalStreamOffset(fromOffset);
+  const offsets = new TerminalStreamOffset(0n);
   const { cols: initialCols, rows: initialRows } = options.initialGrid ?? { cols: 0, rows: 0 };
 
   // Settled when the daemon stops sending — `pty_done`, or a transport that gave up. Not settled by
@@ -135,23 +121,48 @@ export function openDaemonTerminalFeed({
     reportEnded = resolve;
   });
 
-  void (async () => {
-    try {
-      // `initialCols`/`initialRows` are sent on every open and honoured by the daemon only on a
-      // TAIL one — the PTY is resized *before* the replay, which is what stopped a buffer captured
-      // at one width being re-wrapped into a terminal of another (the 220-column garbling).
-      for await (const output of client.streamTerminalOutput({
+  /**
+   * The request half: the opening message, then one message per send.
+   *
+   * The opening message names the terminal, the lease and the measured grid, and asks for the
+   * current screen. The daemon resizes the PTY to that grid *before* it snapshots (so the screen is
+   * serialized at the width this pane draws at, never re-wrapped into it) — and only for the screen
+   * driving the session: without a lease that may drive it, the grid is ignored and watching
+   * another screen's session does not reflow it.
+   */
+  async function* requests(): AsyncGenerator<MessageInitShape<typeof SessionTerminalInputSchema>> {
+    yield {
+      sessionToken: options.sessionToken,
+      sessionId,
+      terminalId,
+      initialCols,
+      initialRows,
+      mode: StreamReplayMode.SNAPSHOT,
+      controlToken: options.controlToken(),
+    };
+    while (!closed) {
+      const next = outbound.shift();
+      if (next === undefined) {
+        await new Promise<void>((resolve) => {
+          wakeInput = resolve;
+        });
+        wakeInput = null;
+        continue;
+      }
+      yield {
         sessionToken: options.sessionToken,
         sessionId,
         terminalId,
-        initialCols,
-        initialRows,
-        mode,
-        fromOffset,
-        // Without a lease that may drive the session, the daemon ignores the grid above: watching
-        // another screen's session must not reflow it.
-        controlToken: options.controlToken(),
-      })) {
+        data: next.data,
+        inputOffset: BigInt(next.inputOffset),
+        controlToken: next.controlToken,
+      };
+    }
+  }
+
+  void (async () => {
+    try {
+      for await (const output of client.streamSessionTerminalIO(requests())) {
         if (closed) break;
         // Every frame is stamped with the terminal it came from. One that is not this terminal's is
         // dropped here rather than painted; the stream stays open, since a mis-routed frame says
@@ -175,18 +186,24 @@ export function openDaemonTerminalFeed({
           data: output.data,
           endOffset: output.endOffset,
           atOldest: output.atOldest,
+          snapshot: output.snapshot,
+          startOffset: output.startOffset,
         };
         for (const fn of listeners) fn(frame);
       }
     } catch (err) {
       dTerm(
-        "streamTerminalOutput ended sessionId=%s terminalId=%s error=%o",
+        "streamSessionTerminalIO ended sessionId=%s terminalId=%s error=%o",
         sessionId,
         terminalId,
         err instanceof Error ? err.message : err,
       );
     } finally {
-      if (!closed) reportEnded();
+      // A feed this side closed is not a session that ended — the pane is going away.
+      const closedByCaller = closed;
+      closed = true;
+      wake();
+      if (!closedByCaller) reportEnded();
     }
   })();
 
@@ -194,8 +211,8 @@ export function openDaemonTerminalFeed({
     stream,
     ended,
     // This daemon holds the capture ring, so it can always replay. The fetcher is anchor-neutral —
-    // whether the fill is bounded by the replay frame's `endOffset` or runs to the capture tip is
-    // the loader's decision, not this one's.
+    // whether the fill is bounded by the snapshot's `endOffset` or runs to the capture tip is the
+    // loader's decision, not this one's.
     history: createForwardHistoryFetcher(client, {
       sessionToken: options.sessionToken,
       sessionId,

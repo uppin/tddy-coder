@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use tddy_rpc::Status;
-use tddy_task::CaptureChunk;
+use tddy_task::{CaptureChunk, ScreenSnapshot};
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 
@@ -121,6 +121,19 @@ impl FrameIdentity {
         }
     }
 
+    /// The snapshot frame of a `SNAPSHOT` open: the repaint, spanning `[0, snapshot.offset)` of the
+    /// output stream, with the grid it was serialized at.
+    fn snapshot_frame(&self, snapshot: ScreenSnapshot) -> SessionTerminalOutput {
+        SessionTerminalOutput {
+            data: snapshot.data,
+            end_offset: snapshot.offset,
+            snapshot: true,
+            snapshot_rows: u32::from(snapshot.rows),
+            snapshot_cols: u32::from(snapshot.cols),
+            ..self.data_frame(Vec::new())
+        }
+    }
+
     /// An ACK frame: empty `data` carrying the applied input offset.
     fn ack_frame(&self, acked_input_offset: u64) -> SessionTerminalOutput {
         SessionTerminalOutput {
@@ -186,7 +199,7 @@ pub async fn serve_stream_terminal_output_with(
         },
         initial_frame_bytes,
     )
-    .await;
+    .await?;
     Ok(rx)
 }
 
@@ -212,7 +225,10 @@ async fn open_replay_ack_live(
     identity: FrameIdentity,
     open: OpenSelection,
     initial_frame_bytes: usize,
-) {
+) -> Result<(), Status> {
+    if matches!(open.mode, StreamReplayMode::Snapshot) {
+        return open_snapshot(session, tx, identity, open).await;
+    }
     let OpenSelection {
         mode,
         from_offset,
@@ -287,7 +303,7 @@ async fn open_replay_ack_live(
                     }
                 }
             }
-            spawn_live_bridge(session, tx, identity, stdout_rx);
+            spawn_live_bridge(session, tx, identity, stdout_rx, None);
         }
         StreamReplayMode::FromOffset => {
             // Chunked catch-up: forward-fill from `from_offset` (clamped up to the ring's
@@ -337,24 +353,64 @@ async fn open_replay_ack_live(
             // No tail chunk, no resize/drain on reconnect — the terminal already holds the right
             // dimensions and state up to `from_offset`; we only fill the gap then go live.
             let stdout_rx = session.subscribe_stdout();
-            spawn_live_bridge(session, tx, identity, stdout_rx);
+            spawn_live_bridge(session, tx, identity, stdout_rx, None);
         }
-        StreamReplayMode::Snapshot => {
-            // TODO(host-snapshot): implement — a snapshot frame at the sequence point
-            // `snapshot_and_subscribe` takes, then offset-stamped live output.
-        }
+        // Handled before the prologue, by `open_snapshot`.
+        StreamReplayMode::Snapshot => unreachable!("a snapshot open returns above"),
     }
+    Ok(())
+}
+
+/// The `SNAPSHOT` open: the screen as it is now, then only what is written after it.
+///
+/// Refused with `FAILED_PRECONDITION` — before anything is streamed — while the terminal's screen
+/// model does not know the PTY's size. Otherwise the open resizes first when it asks for a grid
+/// the terminal does not have (an opener without the control lease arrives with its grid zeroed,
+/// see `service.rs`), applying it to the PTY and the model, so the snapshot is taken at the
+/// client's grid. There is no mode prologue, no raw replay and no redraw signal: the snapshot
+/// carries the modes, and the application is never nudged.
+async fn open_snapshot(
+    session: Arc<dyn TerminalSession>,
+    tx: mpsc::Sender<Result<SessionTerminalOutput, Status>>,
+    identity: FrameIdentity,
+    open: OpenSelection,
+) -> Result<(), Status> {
+    let grid = session.capture().lock().ok().and_then(|cap| cap.grid());
+    let Some(grid) = grid else {
+        return Err(Status::failed_precondition(
+            "the terminal's size is unknown, so its screen cannot be snapshotted",
+        ));
+    };
+    let wanted = (
+        req_initial_rows_as_u16(open.initial_rows),
+        req_initial_cols_as_u16(open.initial_cols),
+    );
+    let asks_for_grid = open.initial_rows > 0 && open.initial_cols > 0;
+    if asks_for_grid && session.resizable() && wanted != grid {
+        session.resize(wanted.0, wanted.1).await;
+    }
+    let (snapshot, live) = session.snapshot_and_subscribe()?;
+    let offset = snapshot.offset;
+    let _ = tx.send(Ok(identity.snapshot_frame(snapshot))).await;
+    spawn_live_bridge(session, tx, identity, live, Some(offset));
+    Ok(())
 }
 
 /// Spawn the live broadcast bridge: forward stdout bytes interleaved with input-offset ACK frames
 /// until the child exits. The current applied offset is emitted up front (before any live byte) so
 /// a stream opening after some input was already applied learns the ACK position immediately.
+///
+/// With `stamp_from = Some(offset)` the first live byte sits at that absolute offset, and every
+/// data frame is stamped with its contiguous `[start_offset, end_offset)`. Without it, live frames
+/// carry no offsets.
 fn spawn_live_bridge(
     session: Arc<dyn TerminalSession>,
     tx: mpsc::Sender<Result<SessionTerminalOutput, Status>>,
     identity: FrameIdentity,
     mut stdout_rx: tokio::sync::broadcast::Receiver<Bytes>,
+    stamp_from: Option<u64>,
 ) {
+    let mut stamp = stamp_from;
     let mut acked_rx = session.subscribe_acked_offset();
     let initial_acked = *acked_rx.borrow_and_update();
     let mut pty_done = session.subscribe_pty_done();
@@ -374,7 +430,13 @@ fn spawn_live_bridge(
             tokio::select! {
                 result = stdout_rx.recv() => match result {
                     Ok(bytes) => {
-                        let frame = identity.data_frame(bytes.to_vec());
+                        let mut frame = identity.data_frame(bytes.to_vec());
+                        if let Some(start) = stamp {
+                            let end = start + bytes.len() as u64;
+                            frame.start_offset = start;
+                            frame.end_offset = end;
+                            stamp = Some(end);
+                        }
                         if bridge_tx.send(Ok(frame)).await.is_err() {
                             break;
                         }
@@ -462,7 +524,7 @@ where
         },
         initial_frame_bytes,
     )
-    .await;
+    .await?;
 
     // Forward the first message's data (if any) to stdin.
     if !first.data.is_empty() {

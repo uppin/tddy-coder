@@ -45,6 +45,8 @@ const bytes = (text: string) => new TextEncoder().encode(text);
 interface OpenStream {
   readonly messages: SessionTerminalInput[];
   push(frame: SessionTerminalOutput): void;
+  /** The daemon stops sending on this open — a `pty_done`. */
+  end(): void;
 }
 
 function aBidiTerminalDaemon() {
@@ -53,10 +55,15 @@ function aBidiTerminalDaemon() {
     async *streamSessionTerminalIO(requests: AsyncIterable<SessionTerminalInput>) {
       const queued: SessionTerminalOutput[] = [];
       let wake: (() => void) | null = null;
+      let ended = false;
       const open: OpenStream = {
         messages: [],
         push(frame) {
           queued.push(frame);
+          wake?.();
+        },
+        end() {
+          ended = true;
           wake?.();
         },
       };
@@ -66,6 +73,7 @@ function aBidiTerminalDaemon() {
       })();
       for (;;) {
         while (queued.length > 0) yield queued.shift() as SessionTerminalOutput;
+        if (ended) return;
         await new Promise<void>((resolve) => {
           wake = resolve;
         });
@@ -108,6 +116,7 @@ function aDelta(text: string, startOffset: bigint): SessionTerminalOutput {
 
 function aSessionTerminal() {
   const daemon = aBidiTerminalDaemon();
+  const onDisconnect = cy.stub().as("onDisconnect");
 
   function Harness() {
     const [generation, setGeneration] = useState(0);
@@ -130,6 +139,7 @@ function aSessionTerminal() {
             sessionToken={SESSION_TOKEN}
             client={client}
             connected={{ sessionId: SESSION_ID, controlToken: CONTROL_TOKEN }}
+            onDisconnect={onDisconnect}
           />
         </UploadProgressProvider>
       </div>
@@ -171,6 +181,21 @@ function aSessionTerminal() {
     },
     daemonSends(n: number, frame: SessionTerminalOutput) {
       openNumbered(n - 1).then((open) => open.push(frame));
+      return driver;
+    },
+    /** The daemon ends open `n` (1-based) — what a `pty_done` looks like on the wire. */
+    daemonEndsStream(n: number) {
+      openNumbered(n - 1).then((open) => open.end());
+      return driver;
+    },
+    /** The terminal is still mounted and has not reported the session gone. */
+    expectTerminalSurvived() {
+      byTestId(TEST_IDS.ghosttyTerminal).should("exist");
+      cy.get("@onDisconnect").should("not.have.been.called");
+      return driver;
+    },
+    expectDisconnectReportedOnce() {
+      cy.get("@onDisconnect", { timeout: 10000 }).should("have.been.calledOnce");
       return driver;
     },
     /** The live terminal's parsed screen (its readable mirror; the canvas itself is WebGL). */
@@ -269,6 +294,28 @@ describe("Session terminal — snapshot on (re)connect", () => {
       .expectOpenAsksForASnapshot(2)
       .daemonSends(2, aSnapshot("\x1b[1;1HSCREEN-C after the blip", 900n))
       .expectScreenShows("SCREEN-C after the blip");
+  });
+
+  it("does not report a disconnect on a transport blip, only when the stream ends with a client", () => {
+    aSessionTerminal()
+      // Given — a terminal showing screen A
+      .mount()
+      .daemonSends(1, aSnapshot("\x1b[1;1HSCREEN-A", 64n))
+      .expectScreenShows("SCREEN-A")
+      // When — the transport drops (the client goes null) and the old stream ends while it is down
+      .blipTheTransport()
+      .daemonEndsStream(1)
+      // Then — the terminal stays mounted and the disconnect does NOT fire: a blip is not pty_done
+      .expectTerminalSurvived()
+      // When — the transport returns
+      .restoreTheTransport()
+      .expectOpenAsksForASnapshot(2)
+      // Then — still no disconnect
+      .expectTerminalSurvived()
+      // When — the daemon ends the stream while the client is valid (a real pty_done)
+      .daemonEndsStream(2)
+      // Then — the disconnect is reported, once
+      .expectDisconnectReportedOnce();
   });
 
   it("sends keystrokes on the same bidi stream with cumulative input offsets", () => {

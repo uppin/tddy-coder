@@ -1,11 +1,12 @@
 /**
  * Unit tests for the terminal feed a daemon-served session offers over `TerminalSessionService`.
  *
- * This is `GrpcSessionTerminal`'s stream construction, moved onto the connection, and these pin the
- * four decisions that moved with it — each of which was a bug the component had already paid for:
+ * The feed is one bidi `StreamSessionTerminalIO` call: the output comes down it and the keystrokes
+ * go up it, and every open asks for a snapshot of the current screen. These pin the decisions that
+ * live in the feed and not in the component that renders it:
  *
- *   • **TAIL once, then FROM_OFFSET.** A re-open that asked for a tail again would be handed a
- *     replay the terminal has already painted.
+ *   • **A snapshot on every open.** A re-open is a fresh VT that saw nothing, so it is never asked
+ *     for a byte resume — the daemon shows it the screen as it is now.
  *   • **The per-frame identity guard.** A frame stamped for another terminal is dropped rather than
  *     painted, and the stream carries on — a mis-routed frame says nothing about the ones after it.
  *   • **ACK frames are not output.** They carry an applied-input offset and no bytes, and there is
@@ -19,7 +20,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { Code, ConnectError, type Client } from "@connectrpc/connect";
+import type { Client } from "@connectrpc/connect";
 import {
   SessionTerminalOutputSchema,
   StreamReplayMode,
@@ -86,28 +87,6 @@ function terminalOptions(lease = aLeaseHeldAs("lease-one")): TerminalOptions {
 // Doubles
 // ---------------------------------------------------------------------------
 
-/** One `StreamTerminalOutput` open as the feed issues it. */
-interface OutputOpen {
-  sessionToken: string;
-  sessionId: string;
-  terminalId: string;
-  initialCols: number;
-  initialRows: number;
-  mode: StreamReplayMode;
-  fromOffset: bigint;
-  controlToken: string;
-}
-
-/** One `SendTerminalInput` as the feed issues it. */
-interface InputSend {
-  sessionToken: string;
-  sessionId: string;
-  terminalId: string;
-  data: Uint8Array;
-  controlToken: string;
-  inputOffset: bigint;
-}
-
 /** One `GetTerminalHistory` as the feed issues it. */
 interface HistoryRequest {
   sessionToken: string;
@@ -124,16 +103,6 @@ type OutputFrame = ReturnType<typeof create<typeof SessionTerminalOutputSchema>>
 function anOutputFrameOf(text: string): OutputFrame {
   return create(SessionTerminalOutputSchema, {
     data: bytesOf(text),
-    sessionId: A_SESSION,
-    terminalId: A_TERMINAL_ID,
-  });
-}
-
-/** The offset-anchored replay frame the daemon sends first on a TAIL open. */
-function aReplayFrameAt(endOffset: bigint): OutputFrame {
-  return create(SessionTerminalOutputSchema, {
-    data: bytesOf("$ "),
-    endOffset,
     sessionId: A_SESSION,
     terminalId: A_TERMINAL_ID,
   });
@@ -160,45 +129,12 @@ function aFrameFromAnotherTerminal(text: string): OutputFrame {
 /** What the daemon's capture ring replays when the terminal pages backwards. */
 const RETAINED_HISTORY = "cargo build --release\r\n";
 
-/**
- * The daemon that owns the session: it replays `frames` on each output stream open and then closes
- * it, recording every request it was handed.
- */
-function aDaemonReplaying(frames: OutputFrame[], refusingInput: () => string | null = () => null) {
-  const opens: OutputOpen[] = [];
-  const sends: InputSend[] = [];
-  const historyRequests: HistoryRequest[] = [];
-  const client = {
-    async *streamTerminalOutput(req: OutputOpen) {
-      opens.push(req);
-      for (const frame of frames) yield frame;
-    },
-    async sendTerminalInput(req: InputSend) {
-      sends.push(req);
-      const refusal = refusingInput();
-      if (refusal !== null) throw new ConnectError(refusal, Code.FailedPrecondition);
-      return {};
-    },
-    async *getTerminalHistory(req: HistoryRequest) {
-      historyRequests.push(req);
-      yield create(TerminalHistoryChunkSchema, {
-        data: bytesOf(RETAINED_HISTORY),
-        startOffset: 0n,
-        endOffset: BigInt(RETAINED_HISTORY.length),
-        atOldest: true,
-        atEnd: true,
-      });
-    },
-  };
-  return { client: client as unknown as Client<typeof TerminalSessionService>, opens, sends, historyRequests };
-}
-
 describe("a terminal resume point", () => {
   it("has received nothing before the first frame lands", () => {
     // Given a terminal nobody has opened yet
     const resume = new TerminalResumePoint();
 
-    // Then there is no offset to resume from, so the next open must ask for a tail
+    // Then there is no offset recorded yet
     expect({ synced: resume.synced, fromOffset: resume.fromOffset }).toEqual({
       synced: false,
       fromOffset: 0n,
@@ -206,277 +142,17 @@ describe("a terminal resume point", () => {
   });
 
   it("resumes from the byte it last recorded", () => {
-    // Given a terminal whose open has landed its offset-anchored frame
+    // Given a terminal whose open has landed an offset-anchored frame
     const resume = new TerminalResumePoint();
 
     // When that offset is recorded
     resume.record(AN_OFFSET_ALREADY_PAINTED);
 
-    // Then the next open resumes from exactly there
+    // Then it reads back exactly that
     expect({ synced: resume.synced, fromOffset: resume.fromOffset }).toEqual({
       synced: true,
       fromOffset: AN_OFFSET_ALREADY_PAINTED,
     });
-  });
-});
-
-describe("a daemon-served terminal feed", () => {
-  it("opens a terminal nothing has painted yet at the live tail", async () => {
-    // Given a daemon and a terminal at no offset
-    const daemon = aDaemonReplaying([anOutputFrameOf("ls -la\r\n")]);
-    const feed = openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: terminalOptions(),
-    });
-
-    // When the stream runs
-    await feed.ended;
-
-    // Then the open asked for a tail of this session's bash terminal, at the measured grid — the
-    // PTY is resized before the replay, which is what stopped a buffer captured at one width being
-    // re-wrapped into a terminal of another — presenting the lease, without which the daemon
-    // ignores the grid (watching another screen's session must not reflow it)
-    expect(daemon.opens).toEqual([
-      {
-        sessionToken: A_SESSION_TOKEN,
-        sessionId: A_SESSION,
-        terminalId: A_TERMINAL_ID,
-        initialCols: A_GRID.cols,
-        initialRows: A_GRID.rows,
-        mode: StreamReplayMode.TAIL,
-        fromOffset: 0n,
-        controlToken: "lease-one",
-      },
-    ]);
-  });
-
-  it("re-opens from the byte the previous open reached", async () => {
-    // Given a terminal whose first open painted up to an anchored frame
-    const resume = new TerminalResumePoint();
-    const daemon = aDaemonReplaying([aReplayFrameAt(AN_OFFSET_ALREADY_PAINTED)]);
-    await openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume,
-      options: terminalOptions(),
-    }).ended;
-
-    // When the same terminal is opened again
-    await openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume,
-      options: terminalOptions(),
-    }).ended;
-
-    // Then the daemon is asked only for the gap, so the replay is not painted twice
-    expect(daemon.opens.map((open) => ({ mode: open.mode, fromOffset: open.fromOffset }))).toEqual([
-      { mode: StreamReplayMode.TAIL, fromOffset: 0n },
-      { mode: StreamReplayMode.FROM_OFFSET, fromOffset: AN_OFFSET_ALREADY_PAINTED },
-    ]);
-  });
-
-  it("drops a frame stamped for another terminal and keeps reading the stream", async () => {
-    // Given a stream carrying one mis-routed frame ahead of this terminal's own
-    const daemon = aDaemonReplaying([
-      aFrameFromAnotherTerminal("another session's output"),
-      anOutputFrameOf("ls -la\r\n"),
-    ]);
-    const feed = openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: terminalOptions(),
-    });
-    const painted: string[] = [];
-    feed.stream.onMessage((frame) => painted.push(textOf(frame.data)));
-
-    // When the stream runs
-    await feed.ended;
-
-    // Then the foreign bytes were never painted, and the frame after it still was
-    expect(painted).toEqual(["ls -la\r\n"]);
-  });
-
-  it("does not deliver the daemon's input acknowledgements as output", async () => {
-    // Given a stream carrying an ACK — this terminal's own, so only its emptiness can exclude it
-    const daemon = aDaemonReplaying([anAckFrameFor(12n), anOutputFrameOf("ls -la\r\n")]);
-    const feed = openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: terminalOptions(),
-    });
-    const painted: string[] = [];
-    feed.stream.onMessage((frame) => painted.push(textOf(frame.data)));
-
-    // When the stream runs
-    await feed.ended;
-
-    // Then only the output frame reached the terminal
-    expect(painted).toEqual(["ls -la\r\n"]);
-  });
-
-  it("presents the lease held at the moment of each send, not the one held at open", async () => {
-    // Given an open terminal whose control lease another screen then claims
-    const lease = aLeaseHeldAs("lease-one");
-    const daemon = aDaemonReplaying([]);
-    const feed = openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: terminalOptions(lease),
-    });
-
-    // When a keystroke is sent on either side of the re-claim
-    feed.stream.send(bytesOf("l"));
-    lease.reclaimedAs("lease-two");
-    feed.stream.send(bytesOf("s"));
-
-    // Then the second keystroke carried the new lease — a token hoisted at open would have been
-    // refused from here on, silently
-    expect(daemon.sends.map((send) => send.controlToken)).toEqual(["lease-one", "lease-two"]);
-  });
-
-  it("counts each send onto the terminal's cumulative input offset", async () => {
-    // Given an open terminal
-    const daemon = aDaemonReplaying([]);
-    const feed = openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: terminalOptions(),
-    });
-
-    // When two keystrokes are typed
-    feed.stream.send(bytesOf("l"));
-    feed.stream.send(bytesOf("s\r"));
-
-    // Then each states the running total the daemon acks against
-    expect(daemon.sends.map((send) => send.inputOffset)).toEqual([1n, 3n]);
-  });
-
-  it("fetches scrollback from the daemon that holds the capture ring", async () => {
-    // Given a feed on a daemon holding retained output
-    const daemon = aDaemonReplaying([]);
-    const feed = openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: terminalOptions(),
-    });
-
-    // When the terminal pages backwards
-    const chunk = await scrollbackOf(feed)(0n, 0n);
-
-    // Then it reads what the ring holds
-    expect(textOfChunk(chunk)).toEqual(RETAINED_HISTORY);
-  });
-
-  it("authorises the history fetch with the caller's session token", async () => {
-    // Given a feed opened with the caller's token. `GetTerminalHistory` is server-streaming, and
-    // the unary-only auth gate does not cover it — an unstated token is refused outright.
-    const daemon = aDaemonReplaying([]);
-    const feed = openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: terminalOptions(),
-    });
-
-    // When the terminal pages backwards
-    await scrollbackOf(feed)(0n, 0n);
-
-    // Then the fetch states it, for this session's own terminal
-    expect(daemon.historyRequests).toEqual([
-      {
-        sessionToken: A_SESSION_TOKEN,
-        sessionId: A_SESSION,
-        terminalId: A_TERMINAL_ID,
-        fromOffset: 0n,
-        untilOffset: 0n,
-        maxBytes: 0,
-      },
-    ]);
-  });
-
-  it("opens the reserved main terminal when the pane names none", async () => {
-    // Given a pane showing the Agent terminal, which asks for the empty terminal id
-    const daemon = aDaemonReplaying([
-      create(SessionTerminalOutputSchema, {
-        data: bytesOf("claude> "),
-        sessionId: A_SESSION,
-        // The daemon stamps the RESOLVED id back, never the empty one the request carried
-        terminalId: MAIN_TERMINAL_ID,
-      }),
-    ]);
-    const feed = openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: { sessionToken: A_SESSION_TOKEN, controlToken: () => "lease-one" },
-    });
-    const painted: string[] = [];
-    feed.stream.onMessage((frame) => painted.push(textOf(frame.data)));
-
-    // When the stream runs
-    await feed.ended;
-
-    // Then the frame stamped `main` is this pane's own, not a foreign one
-    expect(painted).toEqual(["claude> "]);
-  });
-
-  it("says why input was not delivered, and clears it on the next delivery", async () => {
-    // Given a daemon that refuses input until the lease comes back
-    let refusal: string | null = "terminal controlled by another screen";
-    const daemon = aDaemonReplaying([], () => refusal);
-    const deliveries: Array<string | null> = [];
-    const feed = openDaemonTerminalFeed({
-      client: daemon.client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: { ...terminalOptions(), onInputDelivery: (failure) => deliveries.push(failure) },
-    });
-
-    // When one keystroke is refused and the next is delivered
-    feed.stream.send(bytesOf("a"));
-    await Promise.resolve().then(() => new Promise((r) => setTimeout(r, 0)));
-    refusal = null;
-    feed.stream.send(bytesOf("b"));
-    await new Promise((r) => setTimeout(r, 0));
-
-    // Then the pane was told the daemon's reason, then that input flows again
-    expect(deliveries).toEqual(["terminal controlled by another screen", null]);
-  });
-
-  it("never lets a late refusal overwrite a later delivery", async () => {
-    // Given a daemon whose answers to two sends arrive out of order
-    const answers: Array<{ resolve: () => void; reject: (err: unknown) => void }> = [];
-    const client = {
-      async *streamTerminalOutput() {},
-      sendTerminalInput: () =>
-        new Promise<object>((resolve, reject) => answers.push({ resolve: () => resolve({}), reject })),
-    } as unknown as Client<typeof TerminalSessionService>;
-    const deliveries: Array<string | null> = [];
-    const feed = openDaemonTerminalFeed({
-      client,
-      sessionId: A_SESSION,
-      resume: new TerminalResumePoint(),
-      options: { ...terminalOptions(), onInputDelivery: (failure) => deliveries.push(failure) },
-    });
-    feed.stream.send(bytesOf("a"));
-    feed.stream.send(bytesOf("b"));
-
-    // When the second send is delivered first, and the first is refused after it
-    answers[1].resolve();
-    await new Promise((r) => setTimeout(r, 0));
-    answers[0].reject(new ConnectError("terminal controlled by another screen", Code.FailedPrecondition));
-    await new Promise((r) => setTimeout(r, 0));
-
-    // Then the pane still reads the latest send's outcome: delivered
-    expect(deliveries).toEqual([null]);
   });
 });
 
@@ -488,6 +164,7 @@ describe("a daemon-served terminal feed", () => {
 /** One `StreamSessionTerminalIO` call as the feed makes it: every message it sent up. */
 interface BidiOpen {
   readonly messages: Array<{
+    sessionToken: string;
     mode: StreamReplayMode;
     initialCols: number;
     initialRows: number;
@@ -499,10 +176,22 @@ interface BidiOpen {
   }>;
 }
 
-/** A daemon serving the bidi stream: answers each open with `frames`, then holds it open. */
-function aBidiDaemonAnswering(frames: OutputFrame[]) {
+/** A daemon serving the bidi stream: answers each open with `frames`, then ends it (or holds it
+ *  open, for a spec that types into a live terminal). */
+function aBidiDaemonAnswering(frames: OutputFrame[], { staysOpen = false } = {}) {
   const opens: BidiOpen[] = [];
+  const historyRequests: HistoryRequest[] = [];
   const client = {
+    async *getTerminalHistory(req: HistoryRequest) {
+      historyRequests.push(req);
+      yield create(TerminalHistoryChunkSchema, {
+        data: bytesOf(RETAINED_HISTORY),
+        startOffset: 0n,
+        endOffset: BigInt(RETAINED_HISTORY.length),
+        atOldest: true,
+        atEnd: true,
+      });
+    },
     async *streamSessionTerminalIO(requests: AsyncIterable<BidiOpen["messages"][number]>) {
       const open: BidiOpen = { messages: [] };
       opens.push(open);
@@ -515,9 +204,14 @@ function aBidiDaemonAnswering(frames: OutputFrame[]) {
         }
       })();
       for (const frame of frames) yield frame;
+      if (staysOpen) await new Promise<never>(() => undefined);
     },
   };
-  return { client: client as unknown as Client<typeof TerminalSessionService>, opens };
+  return {
+    client: client as unknown as Client<typeof TerminalSessionService>,
+    opens,
+    historyRequests,
+  };
 }
 
 /** A snapshot frame of this session's bash terminal at sequence point `endOffset`. */
@@ -635,5 +329,181 @@ describe("a daemon-served terminal feed over the bidi stream", () => {
       { text: "ls", inputOffset: 2n, controlToken: "lease-one" },
       { text: " -la\r", inputOffset: 7n, controlToken: "lease-one" },
     ]);
+  });
+
+  it("opens a terminal at the measured grid, presenting the lease", async () => {
+    // Given a daemon and a terminal nothing has painted yet
+    const daemon = aBidiDaemonAnswering([aSnapshotAt(10n)]);
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: terminalOptions(),
+    });
+
+    // When the stream runs
+    await feed.ended;
+
+    // Then the opening message asked for this session's bash terminal at the measured grid — the PTY
+    // is resized before the snapshot, so a screen captured at one width is never re-wrapped into a
+    // terminal of another — presenting the lease, without which the daemon ignores the grid
+    // (watching another screen's session must not reflow it)
+    expect(
+      daemon.opens.map(({ messages: [opening] }) => ({
+        sessionToken: opening.sessionToken,
+        sessionId: opening.sessionId,
+        terminalId: opening.terminalId,
+        initialCols: opening.initialCols,
+        initialRows: opening.initialRows,
+        mode: opening.mode,
+        controlToken: opening.controlToken,
+      })),
+    ).toEqual([
+      {
+        sessionToken: A_SESSION_TOKEN,
+        sessionId: A_SESSION,
+        terminalId: A_TERMINAL_ID,
+        initialCols: A_GRID.cols,
+        initialRows: A_GRID.rows,
+        mode: StreamReplayMode.SNAPSHOT,
+        controlToken: "lease-one",
+      },
+    ]);
+  });
+
+  it("drops a frame stamped for another terminal and keeps reading the stream", async () => {
+    // Given a stream carrying one mis-routed frame ahead of this terminal's own
+    const daemon = aBidiDaemonAnswering([
+      aFrameFromAnotherTerminal("another session's output"),
+      anOutputFrameOf("ls -la\r\n"),
+    ]);
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: terminalOptions(),
+    });
+    const painted: string[] = [];
+    feed.stream.onMessage((frame) => painted.push(textOf(frame.data)));
+
+    // When the stream runs
+    await feed.ended;
+
+    // Then the foreign bytes were never painted, and the frame after it still was
+    expect(painted).toEqual(["ls -la\r\n"]);
+  });
+
+  it("does not deliver the daemon's input acknowledgements as output", async () => {
+    // Given a stream carrying an ACK — this terminal's own, so only its emptiness can exclude it
+    const daemon = aBidiDaemonAnswering([anAckFrameFor(12n), anOutputFrameOf("ls -la\r\n")]);
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: terminalOptions(),
+    });
+    const painted: string[] = [];
+    feed.stream.onMessage((frame) => painted.push(textOf(frame.data)));
+
+    // When the stream runs
+    await feed.ended;
+
+    // Then only the output frame reached the terminal
+    expect(painted).toEqual(["ls -la\r\n"]);
+  });
+
+  it("presents the lease held at the moment of each send, not the one held at open", async () => {
+    // Given an open terminal whose control lease another screen then claims
+    const lease = aLeaseHeldAs("lease-one");
+    const daemon = aBidiDaemonAnswering([], { staysOpen: true });
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: terminalOptions(lease),
+    });
+
+    // When a keystroke is sent on either side of the re-claim
+    feed.stream.send(bytesOf("l"));
+    lease.reclaimedAs("lease-two");
+    feed.stream.send(bytesOf("s"));
+
+    // Then the second keystroke carried the new lease — a token hoisted at open would have been
+    // refused from here on, silently
+    await eventually(() => (daemon.opens[0]?.messages.length ?? 0) >= 3);
+    expect(daemon.opens[0].messages.slice(1).map((message) => message.controlToken)).toEqual([
+      "lease-one",
+      "lease-two",
+    ]);
+  });
+
+  it("fetches scrollback from the daemon that holds the capture ring", async () => {
+    // Given a feed on a daemon holding retained output
+    const daemon = aBidiDaemonAnswering([]);
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: terminalOptions(),
+    });
+
+    // When the terminal pages backwards
+    const chunk = await scrollbackOf(feed)(0n, 0n);
+
+    // Then it reads what the ring holds
+    expect(textOfChunk(chunk)).toEqual(RETAINED_HISTORY);
+  });
+
+  it("authorises the history fetch with the caller's session token", async () => {
+    // Given a feed opened with the caller's token. `GetTerminalHistory` is server-streaming, and
+    // the unary-only auth gate does not cover it — an unstated token is refused outright.
+    const daemon = aBidiDaemonAnswering([]);
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: terminalOptions(),
+    });
+
+    // When the terminal pages backwards
+    await scrollbackOf(feed)(0n, 0n);
+
+    // Then the fetch states it, for this session's own terminal
+    expect(daemon.historyRequests).toEqual([
+      {
+        sessionToken: A_SESSION_TOKEN,
+        sessionId: A_SESSION,
+        terminalId: A_TERMINAL_ID,
+        fromOffset: 0n,
+        untilOffset: 0n,
+        maxBytes: 0,
+      },
+    ]);
+  });
+
+  it("opens the reserved main terminal when the pane names none", async () => {
+    // Given a pane showing the Agent terminal, which asks for the empty terminal id
+    const daemon = aBidiDaemonAnswering([
+      create(SessionTerminalOutputSchema, {
+        data: bytesOf("claude> "),
+        sessionId: A_SESSION,
+        // The daemon stamps the RESOLVED id back, never the empty one the request carried
+        terminalId: MAIN_TERMINAL_ID,
+      }),
+    ]);
+    const feed = openDaemonTerminalFeed({
+      client: daemon.client,
+      sessionId: A_SESSION,
+      resume: new TerminalResumePoint(),
+      options: { sessionToken: A_SESSION_TOKEN, controlToken: () => "lease-one" },
+    });
+    const painted: string[] = [];
+    feed.stream.onMessage((frame) => painted.push(textOf(frame.data)));
+
+    // When the stream runs
+    await feed.ended;
+
+    // Then the frame stamped `main` is this pane's own, not a foreign one
+    expect(painted).toEqual(["claude> "]);
   });
 });

@@ -206,10 +206,16 @@ impl TaskChannel {
     }
 
     /// Write bytes to the channel, appending to the replay buffer and broadcasting to subscribers.
+    ///
+    /// The broadcast happens while the capture lock is held: that makes append-then-send one step,
+    /// so a reader that locks the capture, snapshots it and subscribes sees every byte exactly
+    /// once, either in the snapshot or on its subscription (the sequence point).
     pub fn write(&self, data: Bytes) {
-        self.capture.lock().unwrap().append(&data);
+        let mut capture = self.capture.lock().unwrap();
+        capture.append(&data);
         // Broadcast to subscribers — ignore "no receivers" errors (common for fast tasks).
         let _ = self.output_tx.send(data);
+        drop(capture);
     }
 
     /// Send bytes to the stdin receiver (if this channel accepts input).

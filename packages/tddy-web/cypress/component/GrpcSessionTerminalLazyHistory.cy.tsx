@@ -3,35 +3,35 @@
  *
  * PRD: docs/ft/web/terminal-replay-lazy-scroll.md
  *
- * `GrpcSessionTerminal` captures the `endOffset` anchor from the initial `StreamTerminalOutput`
- * frame, builds a forward `historyFetcher`, and passes it (plus full frames carrying the offset
+ * `GrpcSessionTerminal` captures the `endOffset` anchor from the opening frame of its bidi
+ * `StreamSessionTerminalIO` stream, builds a forward `historyFetcher`, and passes it (plus full frames carrying the offset
  * metadata) to `GhosttyTerminalSession`. When the user activates "Load earlier output",
  * `GetTerminalHistory` is called forward from offset 0 bounded by the anchor; a second call chains
  * forward from the previous chunk's `end_offset` until `at_end`. The shared component overlays the
  * page terminal behind the live one, shows a loading indicator while filling, then swaps it to the
  * foreground once `at_end` is reached. This test verifies the wiring (RPC offsets + buffer content);
  * the paging UX is covered by TerminalHistoryPaging.cy.tsx.
+ *
+ * connect-web cannot carry the bidi terminal stream over HTTP, so the daemon is an in-memory
+ * `TerminalSessionService` that records every open and every `GetTerminalHistory` request.
  */
 
-import React, { useMemo } from "react";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
+import React from "react";
+import { create } from "@bufbuild/protobuf";
+import { createClient, type Client } from "@connectrpc/connect";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   TerminalSessionService,
-  GetTerminalHistoryRequestSchema,
-  SendTerminalInputResponseSchema,
+  type GetTerminalHistoryRequest,
+  type SessionTerminalInput,
   SessionTerminalOutputSchema,
   TerminalHistoryChunkSchema,
 } from "../../src/gen/terminal_session_pb";
 import { GrpcSessionTerminal } from "../../src/components/sessions/GrpcSessionTerminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
-import {
-  decodeConnectStreamRequestBody,
-  encodeConnectStreamFrames,
-  toArrayBuffer,
-} from "../support/rpc/protoRpc";
 import { byTestId, TEST_IDS } from "../support/testIds";
+
+type TerminalClient = Client<typeof TerminalSessionService>;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -41,11 +41,7 @@ const SESSION_ID = "history-test-session-aa11";
 const SESSION_TOKEN = "test-token-history";
 const ANCHOR = 1000n;
 
-const OK_SEND_INPUT = toArrayBuffer(
-  toBinary(SendTerminalInputResponseSchema, create(SendTerminalInputResponseSchema, {})),
-);
-
-/** The initial `StreamTerminalOutput` replay frame: last-screen bytes tagged with `endOffset`, and
+/** The opening frame of the terminal stream: last-screen bytes tagged with `endOffset`, and
  *  stamped with the session and resolved terminal it came from as the daemon stamps every frame. */
 const REPLAY_FRAME = create(SessionTerminalOutputSchema, {
   data: new TextEncoder().encode("term:main\r\n"),
@@ -74,48 +70,57 @@ const FINAL_CHUNK = create(TerminalHistoryChunkSchema, {
 });
 
 // ---------------------------------------------------------------------------
-// Backend doubles
+// Backend double
 // ---------------------------------------------------------------------------
 
-function interceptReplayStreamOutput() {
-  const body = encodeConnectStreamFrames([toBinary(SessionTerminalOutputSchema, REPLAY_FRAME)]);
-  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/StreamTerminalOutput", (req) => {
-    req.reply({ statusCode: 200, headers: { "Content-Type": "application/connect+proto" }, body });
-  }).as("streamTerminalOutput");
+/**
+ * The daemon, in memory: its bidi terminal stream answers the opening message with the replay
+ * frame and stays open; `GetTerminalHistory` serves the first chunk, then the final one, recording
+ * each request so the test can assert the anchor chain.
+ */
+function aHistoryServingDaemon() {
+  const opens: SessionTerminalInput[] = [];
+  const historyRequests: GetTerminalHistoryRequest[] = [];
+  const chunks = [FIRST_CHUNK, FINAL_CHUNK];
+  const backend = anInMemoryRpcBackend().implement(TerminalSessionService, {
+    async *streamSessionTerminalIO(requests: AsyncIterable<SessionTerminalInput>) {
+      const reader = requests[Symbol.asyncIterator]();
+      const opening = await reader.next();
+      if (opening.done) return;
+      opens.push(opening.value);
+      void (async () => {
+        for (let next = await reader.next(); !next.done; next = await reader.next()) {
+          /* input accepted */
+        }
+      })();
+      yield REPLAY_FRAME;
+      await new Promise<never>(() => undefined);
+    },
+    async *getTerminalHistory(req: GetTerminalHistoryRequest) {
+      const chunk = chunks[historyRequests.length] ?? chunks[chunks.length - 1];
+      historyRequests.push(req);
+      yield chunk;
+    },
+  });
+  const client: TerminalClient = createClient(TerminalSessionService, backend.transport());
+  return { client, opens, historyRequests };
 }
 
-/** A swappable forward-chunk responder so the test can serve first-then-final chunks in order. */
-function interceptGetTerminalHistory() {
-  const chunks = [toBinary(TerminalHistoryChunkSchema, FIRST_CHUNK), toBinary(TerminalHistoryChunkSchema, FINAL_CHUNK)];
-  let call = 0;
-  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/GetTerminalHistory", (req) => {
-    const body = encodeConnectStreamFrames([chunks[call] ?? chunks[chunks.length - 1]]);
-    call += 1;
-    req.reply({ statusCode: 200, headers: { "Content-Type": "application/connect+proto" }, body });
-  }).as("getTerminalHistory");
-}
-
-function interceptSendTerminalInput() {
-  cy.intercept("POST", "**/rpc/terminal_session.TerminalSessionService/SendTerminalInput", (req) => {
-    req.reply({ statusCode: 200, headers: { "Content-Type": "application/proto" }, body: OK_SEND_INPUT });
-  }).as("sendTerminalInput");
+/** Yields the `n`th (1-based) `GetTerminalHistory` request once it has arrived. */
+function historyRequestNumbered(daemon: ReturnType<typeof aHistoryServingDaemon>, n: number) {
+  return cy
+    .wrap(daemon, { timeout: 10000 })
+    .should((d) => {
+      expect(d.historyRequests.length, `GetTerminalHistory call #${n} was issued`).to.be.at.least(n);
+    })
+    .then((d) => d.historyRequests[n - 1]);
 }
 
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
 
-function Harness() {
-  const transport = useMemo(
-    () =>
-      createConnectTransport({
-        baseUrl: `${window.location.origin}/rpc`,
-        useBinaryFormat: true,
-      }),
-    [],
-  );
-  const client = useMemo(() => createClient(TerminalSessionService, transport), [transport]);
-
+function Harness({ client }: { client: TerminalClient }) {
   return (
     <div style={{ width: 800, height: 400, position: "relative" }}>
       <UploadProgressProvider>
@@ -135,16 +140,13 @@ function Harness() {
 // ---------------------------------------------------------------------------
 
 describe("GrpcSessionTerminalLazyHistory — progressive forward-fill wiring", () => {
-  beforeEach(() => {
-    interceptReplayStreamOutput();
-    interceptGetTerminalHistory();
-    interceptSendTerminalInput();
-  });
-
   it("forwards a forward GetTerminalHistory (from_offset=0, until_offset=anchor) when the user loads earlier output", () => {
     // Given — the terminal mounts and the initial replay frame (endOffset=1000) arrives
-    cy.mount(<Harness />);
-    cy.wait("@streamTerminalOutput");
+    const daemon = aHistoryServingDaemon();
+    cy.mount(<Harness client={daemon.client} />);
+    cy.wrap(daemon, { timeout: 10000 }).should((d) => {
+      expect(d.opens.length, "the terminal stream was opened").to.be.greaterThan(0);
+    });
 
     // Then — the affordance is visible once the anchor has been captured
     byTestId(TEST_IDS.loadEarlierHistory, { timeout: 10000 }).should("exist").and("be.visible");
@@ -153,11 +155,7 @@ describe("GrpcSessionTerminalLazyHistory — progressive forward-fill wiring", (
     byTestId(TEST_IDS.loadEarlierHistory).click();
 
     // Then — GetTerminalHistory is called forward from offset 0 bounded by the anchor
-    cy.wait("@getTerminalHistory").then((interception) => {
-      const decoded = fromBinary(
-        GetTerminalHistoryRequestSchema,
-        decodeConnectStreamRequestBody(interception.request.body),
-      );
+    historyRequestNumbered(daemon, 1).then((decoded) => {
       expect(decoded.fromOffset, "first fetch fromOffset").to.equal(0n);
       expect(decoded.untilOffset, "first fetch untilOffset").to.equal(ANCHOR);
     });
@@ -168,11 +166,7 @@ describe("GrpcSessionTerminalLazyHistory — progressive forward-fill wiring", (
     });
 
     // When — the fill chains: a second GetTerminalHistory is issued forward from 600
-    cy.wait("@getTerminalHistory").then((interception) => {
-      const decoded = fromBinary(
-        GetTerminalHistoryRequestSchema,
-        decodeConnectStreamRequestBody(interception.request.body),
-      );
+    historyRequestNumbered(daemon, 2).then((decoded) => {
       expect(decoded.fromOffset, "second fetch fromOffset").to.equal(600n);
       expect(decoded.untilOffset, "second fetch untilOffset").to.equal(ANCHOR);
     });

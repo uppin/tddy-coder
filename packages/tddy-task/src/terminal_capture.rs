@@ -12,13 +12,24 @@
 
 use std::collections::BTreeSet;
 
+use crate::screen_dump::portable_dump;
+
 /// Private modes that control mouse reporting: normal tracking (1000), button-event tracking
-/// (1002), any-event tracking (1003), and the SGR / urxvt / SGR-pixel encodings (1006, 1015, 1016).
-///
-/// Other sticky private modes (cursor visibility, alternate screen, bracketed paste, …) are
-/// deliberately not replayed: the application redraws them, and re-issuing them out of context
-/// would fight the application's own state.
-const MOUSE_TRACKING_MODES: [u16; 6] = [1000, 1002, 1003, 1006, 1015, 1016];
+/// (1002), any-event tracking (1003), and the UTF-8 / SGR / urxvt / SGR-pixel encodings (1005,
+/// 1006, 1015, 1016). These are replayed in front of the raw ring ([`TerminalCapture::replay`]).
+const MOUSE_TRACKING_MODES: [u16; 7] = [1000, 1002, 1003, 1005, 1006, 1015, 1016];
+
+/// Focus reporting (1004) and bracketed paste (2004): input modes a client needs to drive the
+/// screen, carried by a snapshot but not by the legacy raw replay.
+const OTHER_INPUT_MODES: [u16; 2] = [1004, 2004];
+
+/// Private modes that switch to the alternate screen buffer (`47`, `1047`, `1049`).
+const ALTERNATE_SCREEN_MODES: [u16; 3] = [47, 1047, 1049];
+
+/// Whether a private mode is one the capture tracks as sticky input state.
+fn is_input_mode(mode: u16) -> bool {
+    MOUSE_TRACKING_MODES.contains(&mode) || OTHER_INPUT_MODES.contains(&mode)
+}
 
 /// Rolling window of terminal output plus the mouse-tracking modes currently in effect.
 pub struct TerminalCapture {
@@ -30,8 +41,14 @@ pub struct TerminalCapture {
     /// Absolute byte offset just past `buffer[len-1]` — the total bytes ever appended. Rises
     /// monotonically with every `append`; the live tip a late subscriber attaches to.
     end_offset: u64,
-    /// Mouse-tracking modes the application has enabled and not turned back off.
-    enabled_mouse_modes: BTreeSet<u16>,
+    /// The input modes the application has switched on, as the sniffer saw them.
+    modes: InputModes,
+    /// The screen model, fed every appended byte.
+    screen: avt::Vt,
+    /// Whether [`Self::resize`] has told the model the PTY's grid.
+    sized: bool,
+    /// The head of a UTF-8 code point split across two appended chunks (at most three bytes).
+    pending_utf8: Vec<u8>,
     /// Parses the appended stream to observe DECSET/DECRST across arbitrary chunk boundaries.
     sniffer: EscapeParser,
     /// Parses the evicted prefix so trimming can tell whether it cut an escape sequence in half.
@@ -55,7 +72,10 @@ impl TerminalCapture {
             buffer: Vec::new(),
             start_offset: 0,
             end_offset: 0,
-            enabled_mouse_modes: BTreeSet::new(),
+            modes: InputModes::default(),
+            screen: new_screen(DEFAULT_COLS, DEFAULT_ROWS),
+            sized: false,
+            pending_utf8: Vec::new(),
             sniffer: EscapeParser::new(),
             evicted: EscapeParser::new(),
         }
@@ -76,21 +96,42 @@ impl TerminalCapture {
     /// Resize the screen model to the PTY's grid. Called on every path that resizes the PTY, so the
     /// model interprets later output at the size the application draws for.
     pub fn resize(&mut self, rows: u16, cols: u16) {
-        // TODO(host-snapshot): implement
-        let _ = (rows, cols);
+        let (rows, cols) = (rows.max(1), cols.max(1));
+        self.screen.resize(usize::from(cols), usize::from(rows));
+        self.sized = true;
+    }
+
+    /// The grid the screen model is sized to, as `(rows, cols)`; `None` until [`Self::resize`]
+    /// has told it the PTY's size.
+    pub fn grid(&self) -> Option<(u16, u16)> {
+        let (cols, rows) = self.screen.size();
+        self.sized.then_some((rows as u16, cols as u16))
     }
 
     /// The current visible state as one repaint, taken at the sequence point
     /// [`Self::end_offset`]. `None` until [`Self::resize`] has told the model the PTY's size: a
     /// snapshot serialized at a guessed grid would render wrong, and the caller refuses instead.
     pub fn snapshot(&self) -> Option<ScreenSnapshot> {
-        // TODO(host-snapshot): implement
-        None
+        if !self.sized {
+            return None;
+        }
+        let (cols, rows) = self.screen.size();
+        let mut data = RIS.to_vec();
+        data.extend_from_slice(portable_dump(&self.screen.dump(), cols).as_bytes());
+        data.extend_from_slice(&self.modes.restore_sequences());
+        Some(ScreenSnapshot {
+            data,
+            offset: self.end_offset,
+            rows: rows as u16,
+            cols: cols as u16,
+        })
     }
 
-    /// Record freshly produced output, updating the mode state and evicting the oldest bytes.
+    /// Record freshly produced output, updating the screen model and the mode state and evicting
+    /// the oldest bytes.
     pub fn append(&mut self, data: &[u8]) {
-        self.sniff_mouse_modes(data);
+        self.feed_screen(data);
+        self.sniff_modes(data);
         self.buffer.extend_from_slice(data);
         self.end_offset = self.end_offset.saturating_add(data.len() as u64);
         self.evict_to_limit();
@@ -103,14 +144,37 @@ impl TerminalCapture {
         replay
     }
 
-    /// DECSETs that put a fresh terminal back into the mouse-tracking modes now in effect,
-    /// in ascending mode order.
+    /// DECSETs that put a fresh terminal back into the mouse-tracking modes now in effect, in
+    /// ascending mode order.
     pub fn mode_prologue(&self) -> Vec<u8> {
-        let mut prologue = Vec::new();
-        for mode in &self.enabled_mouse_modes {
-            prologue.extend_from_slice(format!("\x1b[?{mode}h").as_bytes());
+        self.modes.prologue()
+    }
+
+    /// Feed the screen model, holding back a code point split at the end of the chunk until the
+    /// next one completes it. Bytes that are not UTF-8 render as U+FFFD, as a terminal would.
+    fn feed_screen(&mut self, data: &[u8]) {
+        let mut bytes = std::mem::take(&mut self.pending_utf8);
+        bytes.extend_from_slice(data);
+        let mut rest = bytes.as_slice();
+        while !rest.is_empty() {
+            match std::str::from_utf8(rest) {
+                Ok(text) => {
+                    self.screen.feed_str(text);
+                    rest = &[];
+                }
+                Err(error) => {
+                    let (valid, tail) = rest.split_at(error.valid_up_to());
+                    self.screen
+                        .feed_str(std::str::from_utf8(valid).unwrap_or_default());
+                    let Some(bad) = error.error_len() else {
+                        self.pending_utf8 = tail.to_vec();
+                        return;
+                    };
+                    self.screen.feed_str("\u{fffd}");
+                    rest = &tail[bad..];
+                }
+            }
         }
-        prologue
     }
 
     /// Retained output bytes, without the mode prologue.
@@ -118,18 +182,11 @@ impl TerminalCapture {
         &self.buffer
     }
 
-    /// Track the latest DECSET/DECRST for every mouse-tracking mode the application touches, and
-    /// forget them all when the application hard-resets the terminal.
-    fn sniff_mouse_modes(&mut self, data: &[u8]) {
+    /// Track the latest state of every input mode the application touches.
+    fn sniff_modes(&mut self, data: &[u8]) {
         for &byte in data {
-            let Some(event) = self.sniffer.feed(byte) else {
-                continue;
-            };
-            match event {
-                StreamEvent::PrivateMode(update) => {
-                    apply_mouse_modes(&mut self.enabled_mouse_modes, update)
-                }
-                StreamEvent::FullReset => self.enabled_mouse_modes.clear(),
+            if let Some(event) = self.sniffer.feed(byte) {
+                self.modes.apply(event);
             }
         }
     }
@@ -253,6 +310,76 @@ impl TerminalCapture {
     }
 }
 
+/// The sticky input state of the application: what a client must be told to drive the screen the
+/// way the application expects, and that a ring eviction may have trimmed the sequences for.
+#[derive(Default)]
+struct InputModes {
+    /// Input modes (mouse tracking and encoding, focus reporting, bracketed paste) switched on.
+    enabled: BTreeSet<u16>,
+    /// Whether the application is on the alternate screen buffer.
+    alternate_screen: bool,
+    /// Whether the application keypad (`ESC =`) is in effect.
+    application_keypad: bool,
+    /// The last non-default DECSCUSR cursor style the application set.
+    cursor_style: Option<u16>,
+}
+
+impl InputModes {
+    /// Fold one completed mode-changing sequence into the state.
+    fn apply(&mut self, event: StreamEvent<'_>) {
+        match event {
+            StreamEvent::PrivateMode(update) => self.apply_private_modes(update),
+            StreamEvent::Keypad(application) => self.application_keypad = application,
+            StreamEvent::CursorStyle(style) => self.cursor_style = (style != 0).then_some(style),
+            // RIS turns every tracked mode back off.
+            StreamEvent::FullReset => *self = Self::default(),
+        }
+    }
+
+    /// Fold a completed DECSET/DECRST in, ignoring modes that are not tracked.
+    fn apply_private_modes(&mut self, update: PrivateModeUpdate<'_>) {
+        for &mode in update.modes {
+            if ALTERNATE_SCREEN_MODES.contains(&mode) {
+                self.alternate_screen = update.enabled;
+            } else if !is_input_mode(mode) {
+                continue;
+            } else if update.enabled {
+                self.enabled.insert(mode);
+            } else {
+                self.enabled.remove(&mode);
+            }
+        }
+    }
+
+    /// The mouse-tracking modes, for the raw-ring replay.
+    fn prologue(&self) -> Vec<u8> {
+        let mut prologue = Vec::new();
+        let mouse = self
+            .enabled
+            .iter()
+            .filter(|mode| MOUSE_TRACKING_MODES.contains(mode));
+        for mode in mouse {
+            prologue.extend_from_slice(format!("\x1b[?{mode}h").as_bytes());
+        }
+        prologue
+    }
+
+    /// Every input mode in effect, as the sequences that restore it after a reset.
+    fn restore_sequences(&self) -> Vec<u8> {
+        let mut modes = Vec::new();
+        if self.application_keypad {
+            modes.extend_from_slice(b"\x1b=");
+        }
+        if let Some(style) = self.cursor_style {
+            modes.extend_from_slice(format!("\x1b[{style} q").as_bytes());
+        }
+        for mode in &self.enabled {
+            modes.extend_from_slice(format!("\x1b[?{mode}h").as_bytes());
+        }
+        modes
+    }
+}
+
 /// The visible state of a terminal, serialized as escape sequences at a sequence point.
 ///
 /// Written into a freshly reset VT of `rows`×`cols`, `data` reproduces the screen: it begins with
@@ -309,27 +436,16 @@ enum StreamEvent<'a> {
     PrivateMode(PrivateModeUpdate<'a>),
     /// RIS (`ESC c`) — a hard terminal reset, which turns every private mode back off.
     FullReset,
+    /// DECKPAM (`ESC =`, application keypad) or DECKPNM (`ESC >`, numeric keypad).
+    Keypad(bool),
+    /// DECSCUSR (`ESC[<n> q`) — the cursor style; `0` is the terminal's default.
+    CursorStyle(u16),
 }
 
 /// A completed DECSET (`ESC[?<modes>h`) or DECRST (`ESC[?<modes>l`).
 struct PrivateModeUpdate<'a> {
     modes: &'a [u16],
     enabled: bool,
-}
-
-/// Fold a completed private-mode change into the sticky set, ignoring non-mouse modes.
-fn apply_mouse_modes(enabled_modes: &mut BTreeSet<u16>, update: PrivateModeUpdate<'_>) {
-    let mouse_modes = update
-        .modes
-        .iter()
-        .filter(|mode| MOUSE_TRACKING_MODES.contains(mode));
-    for mode in mouse_modes {
-        if update.enabled {
-            enabled_modes.insert(*mode);
-        } else {
-            enabled_modes.remove(mode);
-        }
-    }
 }
 
 /// Where in an escape sequence the byte stream currently is.
@@ -364,6 +480,8 @@ struct EscapeParser {
     reading_param: bool,
     /// Whether the CSI sequence carried the `?` private-mode marker.
     private: bool,
+    /// Whether the CSI sequence carried a space intermediate (DECSCUSR's `ESC[<n> q`).
+    space_intermediate: bool,
 }
 
 impl EscapeParser {
@@ -374,6 +492,7 @@ impl EscapeParser {
             current_param: 0,
             reading_param: false,
             private: false,
+            space_intermediate: false,
         }
     }
 
@@ -392,9 +511,9 @@ impl EscapeParser {
                 None
             }
             ParserState::Escape => {
-                if byte == RIS_FINAL {
+                if let Some(event) = self.escape_event(byte) {
                     self.state = ParserState::Ground;
-                    return Some(StreamEvent::FullReset);
+                    return Some(event);
                 }
                 self.state = match byte {
                     b'[' => {
@@ -438,11 +557,22 @@ impl EscapeParser {
         }
     }
 
+    /// The two-byte escape sequences that change tracked state: RIS and the keypad modes.
+    fn escape_event(&self, byte: u8) -> Option<StreamEvent<'static>> {
+        match byte {
+            RIS_FINAL => Some(StreamEvent::FullReset),
+            b'=' => Some(StreamEvent::Keypad(true)),
+            b'>' => Some(StreamEvent::Keypad(false)),
+            _ => None,
+        }
+    }
+
     fn begin_csi(&mut self) {
         self.params.clear();
         self.current_param = 0;
         self.reading_param = false;
         self.private = false;
+        self.space_intermediate = false;
     }
 
     /// Parameter bytes accumulate until a final byte (`0x40..=0x7e`) closes the sequence.
@@ -464,27 +594,34 @@ impl EscapeParser {
                 self.private = true;
                 None
             }
+            b' ' => {
+                self.space_intermediate = true;
+                None
+            }
             ESC => {
                 self.state = ParserState::Escape;
                 None
             }
             b if CSI_FINAL_BYTES.contains(&b) => {
                 self.state = ParserState::Ground;
-                let enabled = match byte {
-                    b'h' => true,
-                    b'l' => false,
-                    _ => return None,
-                };
-                if !self.private {
-                    return None;
-                }
-                self.finish_param();
-                Some(StreamEvent::PrivateMode(PrivateModeUpdate {
-                    modes: &self.params,
-                    enabled,
-                }))
+                self.finish_csi(byte)
             }
             // Private markers, intermediates and in-sequence control bytes leave the state alone.
+            _ => None,
+        }
+    }
+
+    /// The tracked-state change a completed CSI sequence makes, if it makes one.
+    fn finish_csi(&mut self, final_byte: u8) -> Option<StreamEvent<'_>> {
+        self.finish_param();
+        match final_byte {
+            b'h' | b'l' if self.private => Some(StreamEvent::PrivateMode(PrivateModeUpdate {
+                modes: &self.params,
+                enabled: final_byte == b'h',
+            })),
+            b'q' if self.space_intermediate && !self.private => Some(StreamEvent::CursorStyle(
+                self.params.first().copied().unwrap_or(0),
+            )),
             _ => None,
         }
     }
@@ -500,6 +637,21 @@ impl EscapeParser {
         self.current_param = 0;
         self.reading_param = false;
     }
+}
+
+/// The grid the screen model has until [`TerminalCapture::resize`] reports the PTY's.
+const DEFAULT_COLS: usize = 80;
+const DEFAULT_ROWS: usize = 24;
+/// RIS — the hard reset a snapshot starts with.
+const RIS: &[u8] = b"\x1bc";
+
+/// A screen model without scrollback: a snapshot carries the visible grid only, and the ring
+/// already holds the raw history.
+fn new_screen(cols: usize, rows: usize) -> avt::Vt {
+    avt::Vt::builder()
+        .size(cols, rows)
+        .scrollback_limit(0)
+        .build()
 }
 
 /// `ESC` — introduces every escape sequence.

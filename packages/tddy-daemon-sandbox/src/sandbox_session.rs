@@ -430,10 +430,12 @@ pub async fn dial_and_bridge(
     let capture_out = Arc::clone(&capture);
     tokio::spawn(async move {
         while let Some(chunk) = term_rx.recv().await {
+            // Append and broadcast under one capture lock: the sequence point a snapshot taken
+            // by `snapshot_and_subscribe` depends on.
             if let Ok(mut cap) = capture_out.lock() {
                 cap.append(&chunk);
+                let _ = stdout_out.send(chunk);
             }
-            let _ = stdout_out.send(chunk);
         }
     });
 
