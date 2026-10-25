@@ -54,26 +54,29 @@ pub trait ConversationSpawnHandler: Send + Sync {
     /// (`args_json`, the `tddy_tool_engine::start_session_args::StartSessionArgs` shape), linked to
     /// the calling session as its orchestrator. Returns the start's handle as JSON
     /// (`{start_id, task_id, daemon_instance_id}`) once it is under way (`#start-parity` 9/9).
+    ///
+    /// A handler that cannot start conversations refuses, naming that.
     async fn start_conversation(&self, args_json: &str) -> Result<String, String> {
-        // TODO(spawn-conversation): implement in the grill-me handler
         let _ = args_json;
-        Err("TODO(spawn-conversation): start_conversation".to_string())
+        Err(UNIVERSAL_START_UNSUPPORTED.to_string())
     }
 
     /// The start ledger's record of `start_id`, as JSON.
     async fn conversation_start_status(&self, start_id: &str) -> Result<String, String> {
-        // TODO(spawn-conversation): implement in the grill-me handler
         let _ = start_id;
-        Err("TODO(spawn-conversation): conversation_start_status".to_string())
+        Err(UNIVERSAL_START_UNSUPPORTED.to_string())
     }
 
     /// Cancel `start_id` on whichever host runs it.
     async fn cancel_conversation_start(&self, start_id: &str) -> Result<(), String> {
-        // TODO(spawn-conversation): implement in the grill-me handler
         let _ = start_id;
-        Err("TODO(spawn-conversation): cancel_conversation_start".to_string())
+        Err(UNIVERSAL_START_UNSUPPORTED.to_string())
     }
 }
+
+/// The refusal of a [`ConversationSpawnHandler`] that does not implement the universal start.
+const UNIVERSAL_START_UNSUPPORTED: &str =
+    "this session's conversation handler does not start conversations through the universal start";
 
 /// A handler's JSON answer as the wire response, or its refusal.
 fn json_answer(answer: Result<String, String>) -> ToolCallResponse {

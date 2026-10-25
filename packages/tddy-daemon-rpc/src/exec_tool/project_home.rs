@@ -197,8 +197,9 @@ impl ExecToolRpcHandler {
     }
 }
 
-/// Refuse `tool_name` unless `session_id` is a project-home session, and name that session's
-/// project. The role is the session's own record, not anything the request claims.
+/// Refuse `tool_name` unless `session_id` is a project-home session — or a session that spawns
+/// conversations calling one of the four start tools — and name that session's project. The role is
+/// the session's own record, not anything the request claims.
 fn project_home_caller(
     sessions_base: &Path,
     session_id: &str,
@@ -264,7 +265,6 @@ pub(super) struct DaemonProjectHome {
     identity: SessionAccountAccess,
     /// This host, as the eligible-daemon roster names it; every session it lists carries it.
     daemon_instance_id: String,
-    /// Reaches the other hosts: a start's record and its cancel are forwarded to the host running it.
     /// The other hosts' listings, for a caller held here; `None` for one held elsewhere, whose own
     /// host fans out.
     peers: Option<PeerSessionLists>,

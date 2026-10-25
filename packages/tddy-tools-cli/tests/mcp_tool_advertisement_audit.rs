@@ -4,7 +4,7 @@
 //! Changeset: docs/dev/1-WIP/2026-09-09-unbundle-tools-thinning.md § Testing Plan.
 //!
 //! The tools this server advertises are now assembled from six crates — `tddy-tools` itself
-//! (`approval_prompt`, the 14 `pr_*` and 2 `github_*` tools, `spawn_conversation`, the six
+//! (`approval_prompt`, the 14 `pr_*` and 2 `github_*` tools, `spawn_conversation` with its `_status` and `_cancel`, the six
 //! `subagent_*` tools), `tddy-tool-engine` (the ten exec tools), `tddy-lsp-executor` (the five
 //! `Lsp*` tools) and `tddy-core` (the action surface's gate). An omission in any one of them
 //! would otherwise surface as a capability an agent silently no longer has, at that agent's
@@ -17,7 +17,7 @@
 //! merged only where the host claims to serve them, with
 //! `tddy_core::session_actions::SESSION_ACTION_TOOLS_ENV`, which `tddy-sandbox-app`'s spawn path
 //! sets and the daemon path does not. The surface is therefore **49** where they are served and
-//! **44** where they are not, differing in exactly those three.
+//! **46** where they are not, differing in exactly those three.
 
 #[path = "support/exec_catalog.rs"]
 mod exec_catalog;
@@ -271,9 +271,10 @@ async fn initialize_mcp_session(stdin: &mut ChildStdin, stdout: &mut BufReader<C
 
 /// The headline number of the `tddy-tools` thinning: with the tool bodies now living in six
 /// crates, a session that has every optional surface still advertises the same 44 names it did
-/// when they all lived in one, plus `subagent_end`, `subagent_diff` and `subagent_pull`.
+/// when they all lived in one, plus `subagent_end`, `subagent_diff` and `subagent_pull`, and
+/// `spawn_conversation_status` and `spawn_conversation_cancel` (`#start-parity` 9/9).
 #[tokio::test]
-async fn advertises_all_forty_seven_tool_names_where_the_host_serves_the_action_tools() {
+async fn advertises_all_forty_nine_tool_names_where_the_host_serves_the_action_tools() {
     // Given
     let session = a_fully_configured_session().whose_host_serves_the_action_tools();
 
@@ -288,11 +289,11 @@ async fn advertises_all_forty_seven_tool_names_where_the_host_serves_the_action_
     );
 }
 
-/// The daemon path advertises 44, and the audit records that rather than reconciling it: the
+/// The daemon path advertises 46, and the audit records that rather than reconciling it: the
 /// daemon's tool handler has no arm for any of the three action tools, so advertising them there
 /// was a false advertisement an agent could only discover by calling one.
 #[tokio::test]
-async fn advertises_forty_four_tool_names_on_the_daemon_path_which_serves_no_action_tool() {
+async fn advertises_forty_six_tool_names_on_the_daemon_path_which_serves_no_action_tool() {
     // Given
     let session = a_fully_configured_session();
 
