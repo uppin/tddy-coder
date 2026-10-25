@@ -29,6 +29,26 @@ pub const SESSION_ACTIVITY_TOPIC: &str = "session.activity";
 /// `not_found` at runtime, one caller at a time.
 pub const ACTIVITY_SERVICE: &str = "activity.ActivityService";
 
+/// The environment a daemon-launched claude-cli or cursor-cli session's agent is given so that
+/// `tddy-tools notify` can call `ReportOperatorNotification` (`#home-inbox` 1/8).
+///
+/// Named here, beside [`ACTIVITY_SERVICE`], for the reason the module gives for its topic: the
+/// launch that exports these and the CLI that reads them are different crates, and a name each
+/// spelled for itself would fail as silence — a notify that finds no session environment.
+pub mod notify_env {
+    /// The daemon session id the agent runs in.
+    pub const SESSION_ID: &str = "TDDY_SESSION_ID";
+    /// The OS user whose sessions directory holds that session.
+    pub const OS_USER: &str = "TDDY_OS_USER";
+    /// The session's per-session hook token — the same credential its hooks present.
+    pub const HOOK_TOKEN: &str = "TDDY_HOOK_TOKEN";
+    /// The daemon's HTTP base URL. Exported by a daemon that serves HTTP RPC.
+    pub const DAEMON_URL: &str = "TDDY_DAEMON_URL";
+    /// The embedded daemon's agent-tool socket. Exported instead of [`DAEMON_URL`] by a daemon
+    /// embedded in an application, which serves no HTTP RPC.
+    pub const DAEMON_SOCKET: &str = "TDDY_DAEMON_SOCKET";
+}
+
 /// The wire's "no tick yet" value.
 pub const NO_TICK: u64 = 0;
 

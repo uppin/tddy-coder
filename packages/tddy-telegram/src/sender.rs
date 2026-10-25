@@ -57,6 +57,14 @@ pub trait TelegramSender: Send + Sync {
         text: &str,
         inline_keyboard: InlineKeyboardRows,
     ) -> anyhow::Result<()>;
+
+    /// Send `html` in Telegram's HTML parse mode. `silent` sets `disable_notification`, so the chat
+    /// receives the message without a sound.
+    ///
+    /// The caller owns the markup: `html` must already be within Telegram's tag subset and its
+    /// 4,096-byte limit, because the Bot API rejects the whole message otherwise.
+    async fn send_html_message(&self, chat_id: i64, html: &str, silent: bool)
+        -> anyhow::Result<()>;
 }
 
 /// Production [`TelegramSender`] using teloxide [`Bot`].
@@ -89,6 +97,18 @@ impl TelegramSender for TeloxideSender {
         inline_keyboard: InlineKeyboardRows,
     ) -> anyhow::Result<()> {
         send_telegram_with_inline_keyboard(&self.bot, ChatId(chat_id), text, inline_keyboard).await
+    }
+
+    async fn send_html_message(
+        &self,
+        chat_id: i64,
+        html: &str,
+        silent: bool,
+    ) -> anyhow::Result<()> {
+        // TODO(agent-notify): implement — `send_message` with `ParseMode::Html` and
+        // `disable_notification(silent)`.
+        let _ = (&self.bot, chat_id, html, silent);
+        anyhow::bail!("TODO(agent-notify): send_html_message is not implemented")
     }
 }
 
@@ -125,12 +145,22 @@ pub async fn send_telegram_with_inline_keyboard(
 /// `(chat_id, text, inline_keyboard: label + callback_data per button)` — one recorded outbound Telegram message.
 type RecordedMessage = (i64, String, InlineKeyboardRows);
 
+/// One message [`InMemoryTelegramSender`] was asked to send in HTML parse mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedHtmlMessage {
+    pub chat_id: i64,
+    pub html: String,
+    /// Whether it was sent with `disable_notification`.
+    pub silent: bool,
+}
+
 /// Test-only sender that records `(chat_id, text)` for assertions (no network I/O).
 ///
 /// Optional inline keyboard labels per row are stored for session-control harness tests.
 #[derive(Clone)]
 pub struct InMemoryTelegramSender {
     messages: Arc<StdMutex<Vec<RecordedMessage>>>,
+    html_messages: Arc<StdMutex<Vec<RecordedHtmlMessage>>>,
 }
 
 impl Default for InMemoryTelegramSender {
@@ -143,6 +173,7 @@ impl InMemoryTelegramSender {
     pub fn new() -> Self {
         Self {
             messages: Arc::new(StdMutex::new(Vec::new())),
+            html_messages: Arc::new(StdMutex::new(Vec::new())),
         }
     }
 
@@ -159,6 +190,16 @@ impl InMemoryTelegramSender {
     /// Full recording including inline keyboard (row-major: label + callback_data per button).
     pub fn recorded_with_keyboards(&self) -> Vec<RecordedMessage> {
         self.messages
+            .lock()
+            .expect("InMemoryTelegramSender mutex")
+            .clone()
+    }
+
+    /// Every message sent in HTML parse mode, in send order. Kept apart from [`Self::recorded`],
+    /// which is plain text: a test asserting on markup must not match a plain message that happens
+    /// to contain the same characters.
+    pub fn recorded_html(&self) -> Vec<RecordedHtmlMessage> {
+        self.html_messages
             .lock()
             .expect("InMemoryTelegramSender mutex")
             .clone()
@@ -203,6 +244,23 @@ impl TelegramSender for InMemoryTelegramSender {
             .lock()
             .expect("InMemoryTelegramSender mutex")
             .push((chat_id, text.to_string(), inline_keyboard));
+        Ok(())
+    }
+
+    async fn send_html_message(
+        &self,
+        chat_id: i64,
+        html: &str,
+        silent: bool,
+    ) -> anyhow::Result<()> {
+        self.html_messages
+            .lock()
+            .expect("InMemoryTelegramSender mutex")
+            .push(RecordedHtmlMessage {
+                chat_id,
+                html: html.to_string(),
+                silent,
+            });
         Ok(())
     }
 }

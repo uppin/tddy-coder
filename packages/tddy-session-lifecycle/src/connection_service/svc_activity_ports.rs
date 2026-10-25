@@ -22,7 +22,8 @@ use tddy_service::proto::activity::{
     AcpReplayFrame, ActivityService, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
     AgentActivityRecord, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
     GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, ReportAgentActivityRequest,
-    ReportAgentActivityResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
+    ReportAgentActivityResponse, ReportOperatorNotificationRequest,
+    ReportOperatorNotificationResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
     SessionNotificationEvent, StreamAcpReplayRequest, StreamSessionActivityRequest,
     StreamSessionNotificationsRequest,
 };
@@ -94,6 +95,11 @@ impl DaemonSessionHost {
             session_labels: Arc::new(SessionsNamedAsListSessionsNamesThem),
             deltas: Arc::clone(&self.session_delta_stores),
             notifications: self.session_notification_bus.clone(),
+            // The routing id, as `svc_session_files_ports` hands it: the one a web client names in
+            // `?host=` to reach a session on this daemon.
+            daemon_instance_id: tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(
+                &self.config,
+            ),
         }
     }
 }
@@ -218,6 +224,15 @@ impl ActivityService for PeerRoutedActivity {
         request: Request<ReportAgentActivityRequest>,
     ) -> Result<Response<ReportAgentActivityResponse>, Status> {
         self.local.report_agent_activity(request).await
+    }
+
+    /// Not routed, for the reason `report_session_status` is not: `tddy-tools notify` runs inside
+    /// the session it notifies about, on the host that holds it.
+    async fn report_operator_notification(
+        &self,
+        request: Request<ReportOperatorNotificationRequest>,
+    ) -> Result<Response<ReportOperatorNotificationResponse>, Status> {
+        self.local.report_operator_notification(request).await
     }
 
     type StreamSessionActivityStream = MpscResultStream<AgentActivityRecord>;

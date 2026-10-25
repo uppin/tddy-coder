@@ -33,6 +33,8 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 - [ ] [`tddy-agent-launch`](../../../packages/tddy-agent-launch/README.md): notify env + guidance fragment on claude-cli/cursor-cli spawn and resume
 - [ ] [`tddy-telegram`](../../../packages/tddy-telegram/README.md): `TelegramSender::send_html_message`
 - [ ] [`tddy-telegram-control`](../../../packages/tddy-telegram-control/README.md): agent-notification delivery
+- [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): `PeerRoutedActivity` delegates the new RPC (unrouted, like `ReportSessionStatus`); `ActivityPorts.daemon_instance_id` wired from `local_instance_id_for_config` (pass 2)
+- [ ] [`tddy-tools-cli`](../../../packages/tddy-tools-cli/README.md): the `notify` subcommand in the `tddy-tools` binary, and its process-level suite (pass 2)
 
 ## Responsibility
 
@@ -48,6 +50,32 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 - `tddy_agent_launch::notify_env::{notify_env_pairs(session_id, os_user, hook_token, daemon_url, daemon_socket)}` and the guidance fragment `agent_notify_guidance.md`, applied in claude-cli start/resume (and the env in cursor-cli start/resume).
 - `tddy_telegram::sender::TelegramSender::send_html_message(chat_id, html, silent)`.
 - `tddy_telegram_control::agent_notification_telegram::AgentNotificationTelegram` — renders and chunks (4,096 B) an agent notification; `TelegramDaemonHooks::wants_notification` admits `source == Agent` and skips the per-session dedupe for it.
+
+**Published in pass 2 — deviations from the list above**, each because the real code needed it:
+
+1. **Two more packages.** `tddy-session-lifecycle`: `PeerRoutedActivity` implements the generated
+   `ActivityService` trait, which has no default methods, so it gains `report_operator_notification`
+   (delegated to local, unrouted). `tddy-tools-cli`: the `tddy-tools` binary is built there —
+   `Subcommand::Notify(notify_cli::NotifyArgs)` → `notify_cli::run_notify`.
+2. **`tddy_session_activity::ActivityPorts.daemon_instance_id: String`.** The link
+   `#/sessions/<id>?host=<instance>` needs the host id and no port carried it; wired as
+   `svc_session_files_ports` wires its own.
+3. **The CLI suite lives in `tddy-tools-cli`**, not `tddy-tools` — see Testing Strategy.
+4. **`tddy_service::session_activity::notify_env::{SESSION_ID, OS_USER, HOOK_TOKEN, DAEMON_URL, DAEMON_SOCKET}`** —
+   the variable names, shared by the launch that exports them and the CLI that reads them.
+5. **Surface not named above:** `ReportOperatorNotificationResponse { ok }`; proto
+   `enum NotificationLevel { UNSPECIFIED, INFO, SUCCESS, WARNING, ERROR }` (request field 6, event
+   field 9); `agent_notification_limits::{MAX_TITLE_CHARS, MAX_BODY_CHARS}`;
+   `tddy_tools::notify_cli::{NotifyArgs, NotifyLevel, run_notify}`;
+   `tddy_agent_launch::claude_cli_spawn_steps::{AgentNotifyLaunch, AgentNotifyWiring, agent_notify_launch, resumed_agent_notify_launch}`
+   (the seam the launch tests drive — spawning a real `claude` is not one);
+   `tddy_telegram::sender::RecordedHtmlMessage` + `InMemoryTelegramSender::recorded_html()`;
+   `AgentNotificationTelegram::{messages, silent}` and `TELEGRAM_HTML_MESSAGE_MAX_BYTES`.
+6. **Not published:** a `notification_for_agent` builder (internal to green). The start, resume and
+   cursor-cli call sites are not wired yet — the step functions are `pub`, so nothing is dead code.
+7. **Proto fields are Rust-only for now.** `activity_pb.ts` is regenerated
+   (`scripts/generated-code.sh write packages/tddy-web packages/tddy-rust-typescript-tests`); the
+   web reads none of the new fields, per Boundaries.
 
 ## Boundaries
 
@@ -124,31 +152,42 @@ Real dependency edges, as opposed to the branch line:
 ### Acceptance tests
 
 **`tddy-session-activity`**: `packages/tddy-session-activity/tests/operator_notification_acceptance.rs`
-- [ ] `an_agent_notification_from_a_claude_cli_session_is_published_with_its_title_body_level_sound_and_link`
-- [ ] `a_title_empty_after_trimming_or_over_200_chars_or_a_body_over_2000_chars_is_refused_and_publishes_nothing`
-- [ ] `a_wrong_hook_token_is_refused_as_permission_denied`
-- [ ] `a_session_that_is_not_claude_cli_or_cursor_cli_is_refused`
+- [x] `an_agent_notification_from_a_claude_cli_session_is_published_with_its_title_body_level_sound_and_link`
+- [x] `a_title_empty_after_trimming_or_over_200_chars_or_a_body_over_2000_chars_is_refused_and_publishes_nothing`
+- [x] `a_wrong_hook_token_is_refused_as_permission_denied`
+- [x] `a_session_that_is_not_claude_cli_or_cursor_cli_is_refused`
 
 **`tddy-telegram-control`**: `packages/tddy-telegram-control/tests/agent_notification_telegram_acceptance.rs`
-- [ ] `an_agent_notification_reaches_its_chats_as_html_with_the_title_bold_and_the_link_last`
-- [ ] `a_body_over_4096_bytes_arrives_in_several_html_messages_each_well_formed`
-- [ ] `without_sound_the_message_is_sent_silently`
-- [ ] `two_identical_agent_notifications_are_both_delivered`
+- [x] `an_agent_notification_reaches_its_chats_as_html_with_the_title_bold_and_the_link_last`
+- [x] `a_body_over_4096_bytes_arrives_in_several_html_messages_each_well_formed`
+- [x] `without_sound_the_message_is_sent_silently`
+- [x] `two_identical_agent_notifications_are_both_delivered`
 
-**`tddy-tools`**: `packages/tddy-tools/tests/notify_cli_acceptance.rs`
-- [ ] `notify_reads_its_credentials_from_the_environment_and_reports_success` (fake ActivityService on a socket)
-- [ ] `notify_exits_non_zero_naming_the_reason_when_the_daemon_refuses`
-- [ ] `notify_exits_non_zero_when_no_session_environment_is_present`
+**`tddy-tools-cli`**: `packages/tddy-tools-cli/tests/notify_cli_acceptance.rs` — process-level
+against the real binary, which `tddy-tools-cli` builds (`tddy-tools` is a library); it reuses the
+agent-tool-socket harness of `session_hook_cli.rs` beside it
+- [x] `notify_reads_its_credentials_from_the_environment_and_reports_success` (fake ActivityService on a socket)
+- [x] `notify_exits_non_zero_naming_the_reason_when_the_daemon_refuses`
+- [x] `notify_exits_non_zero_when_no_session_environment_is_present`
 
 **`tddy-agent-launch`**: `packages/tddy-agent-launch/src/claude_cli_spawn_steps/claude_cli_spawn_steps_tests.rs`
-- [ ] `a_claude_cli_session_is_launched_with_the_notify_environment_and_the_guidance_fragment`
-- [ ] `a_resumed_claude_cli_session_carries_the_notify_environment_again`
-- [ ] `an_embedded_host_exports_the_daemon_socket_not_the_url`
+- [x] `a_claude_cli_session_is_launched_with_the_notify_environment_and_the_guidance_fragment`
+- [x] `a_resumed_claude_cli_session_carries_the_notify_environment_again`
+- [x] `an_embedded_host_exports_the_daemon_socket_not_the_url`
 
 ### Unit tests
 
-- [ ] `tddy-daemon-kernel` `notification_markdown`: bold/italic/code/pre/link render; `<script>`, raw HTML and `&` are escaped; nested lists flatten to text; `to_plain_text` strips markup and cuts at a char boundary with `…`.
-- [ ] `agent_notification_limits` boundaries (0, 1, 200, 201 chars; 2,000 / 2,001).
+- [x] `tddy-daemon-kernel` `notification_markdown`: bold/italic/code/pre/link render; `<script>`, raw HTML and `&` are escaped; nested lists flatten to text; `to_plain_text` strips markup and cuts at a char boundary with `…`.
+- [x] `agent_notification_limits` boundaries (0, 1, 200, 201 chars; 2,000 / 2,001).
+- [x] `tddy-agent-launch` `notify_env_pairs`: URL host vs socket host (socket replaces the URL);
+  the guidance and a managed recipe's prompt composed into the one appended file.
+- [x] `tddy-telegram-control` `AgentNotificationTelegram::render`: fixed layout, title-only, title
+  and label escaped, `silent == !sound`.
+
+Files: `packages/tddy-daemon-kernel/tests/{notification_markdown_unit,agent_notification_limits_unit}.rs`,
+`packages/tddy-agent-launch/src/notify_env_unit_tests.rs`, the last test of
+`claude_cli_spawn_steps_tests.rs`, `packages/tddy-telegram-control/tests/agent_notification_telegram_unit.rs`.
+`validate_agent_notification`'s stub returns an `Err` so its accepting cases fail too.
 
 ### Test level decisions
 | Aspect | Level | Rationale |
@@ -172,10 +211,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
@@ -192,6 +231,17 @@ Real dependency edges, as opposed to the branch line:
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
+
+## Pre-existing failures
+
+Not this node's red — `/green` must not count them:
+
+- `tddy-agent-launch --test clone_askpass_acceptance` panics "target/debug/tddy-askpass is not
+  built" under a bare `cargo test`; a harness note, not a failure — `./test` (or
+  `cargo build -p tddy-askpass` first) builds the helper.
+- `tddy-agent-launch --lib session_acting_identity_tests::a_local_gh_project_yields_the_gh_logins_four_pairs_and_its_github_source`
+  is flaky under a parallel package run (seen once: only `TDDY_GITHUB_SOURCE` came back); it passed
+  on the baseline and passes alone. Untouched by this node.
 
 ## Technical Debt & Production Readiness
 

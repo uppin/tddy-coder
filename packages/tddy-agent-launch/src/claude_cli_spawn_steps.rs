@@ -183,6 +183,63 @@ pub(super) fn install_claude_cli_hooks(
     (tddy_tools_path, hook_token)
 }
 
+/// What a claude-cli agent is given so it can notify its operator (`#home-inbox` 1/8).
+pub struct AgentNotifyLaunch<'a> {
+    pub config: &'a DaemonConfig,
+    /// The data dir the daemon resolved — an embedded daemon's agent-tool socket is digested from
+    /// it, as [`install_claude_cli_hooks`] reads it.
+    pub tddy_data_dir: &'a Path,
+    pub os_user: &'a str,
+    pub session_id: &'a str,
+    /// The token [`install_claude_cli_hooks`] minted for this session.
+    pub hook_token: &'a str,
+    /// Where the composed system-prompt file is written.
+    pub session_dir: &'a Path,
+    /// A managed recipe's orchestration prompt, when the session has one: the guidance is
+    /// composed with it, because `claude` takes one `--append-system-prompt-file`.
+    pub managed_prompt_file: Option<&'a Path>,
+}
+
+/// The notify environment and the system-prompt file a claude-cli agent is launched with.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct AgentNotifyWiring {
+    /// [`crate::notify_env::notify_env_pairs`] for this session.
+    pub env: Vec<(String, String)>,
+    /// The file `claude` appends to its system prompt: the notify guidance, followed by the
+    /// managed recipe's prompt when there is one.
+    pub append_system_prompt_file: Option<PathBuf>,
+}
+
+/// What a starting claude-cli agent is given so it can notify its operator.
+pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyWiring, Status> {
+    // TODO(agent-notify): implement
+    let _ = launch;
+    Ok(AgentNotifyWiring::default())
+}
+
+/// What a resumed claude-cli agent is given again: the same wiring as at its start, built from the
+/// hook token its `.session.yaml` recorded. A session that recorded none — a sandboxed one has no
+/// hooks — is given nothing.
+pub fn resumed_agent_notify_launch(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    os_user: &str,
+    session_dir: &Path,
+    meta: &tddy_core::SessionMetadata,
+    managed_prompt_file: Option<&Path>,
+) -> Result<AgentNotifyWiring, Status> {
+    // TODO(agent-notify): implement
+    let _ = (
+        config,
+        tddy_data_dir,
+        os_user,
+        session_dir,
+        meta,
+        managed_prompt_file,
+    );
+    Ok(AgentNotifyWiring::default())
+}
+
 /// What wiring a claude-cli session's managed workflow and semantic index reads.
 pub(super) struct ManagedClaudeCliLaunch<'a> {
     pub(super) tddy_data_dir: &'a Path,

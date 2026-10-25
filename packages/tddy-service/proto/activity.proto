@@ -68,6 +68,13 @@ service ActivityService {
   // daemon_instance_id exactly as GetAcpToolCallDetail does. See
   // docs/ft/web/agent-activity-pane.md § Read-only ACP transcript.
   rpc GetAcpReplayPage(GetAcpReplayPageRequest) returns (GetAcpReplayPageResponse);
+  // An agent notifying its operator in its own words — `tddy-tools notify` from a claude-cli or
+  // cursor-cli session (docs/ft/daemon/session-notifications.md). Authenticated exactly like
+  // ReportSessionStatus: the session must be claude-cli or cursor-cli, and `hook_token` must match
+  // its .session.yaml. Publishes one ATTENTION_REQUIRED notification with source AGENT. Unlike the
+  // hooks this refuses loudly: a title or body over its limit is INVALID_ARGUMENT, never truncated
+  // (`#home-inbox` 1/8).
+  rpc ReportOperatorNotification(ReportOperatorNotificationRequest) returns (ReportOperatorNotificationResponse);
 }
 
 // One replay frame: a service-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
@@ -262,6 +269,25 @@ message ReportSessionStatusResponse {
   bool ok = 1;
 }
 
+/// Sent by `tddy-tools notify`; bearer is the per-session hook_token, read from the agent's
+/// environment (TDDY_HOOK_TOKEN).
+message ReportOperatorNotificationRequest {
+  string            session_id    = 1;
+  string            hook_token    = 2;
+  string            os_user       = 3;
+  // One line; 1–200 characters after trimming.
+  string            title         = 4;
+  // Markdown; at most 2,000 characters. Empty for a title-only notification.
+  string            body_markdown = 5;
+  NotificationLevel level         = 6;
+  // Whether the operator should be alerted audibly. False sends silently where a surface can.
+  bool              sound         = 7;
+}
+
+message ReportOperatorNotificationResponse {
+  bool ok = 1;
+}
+
 // One thing that happened in one session.
 message SessionNotificationEvent {
   string                    session_id = 1;
@@ -276,6 +302,14 @@ message SessionNotificationEvent {
   // Unix milliseconds, stamped when the event happened. The web ages activity out of its blink
   // window against this, so a 0 here would leave a dot blinking for as long as the tab stayed open.
   uint64                    at_unix_ms = 6;
+  // Set only for source AGENT: what the agent wrote (`#home-inbox` 1/8). Every other source leaves
+  // these empty and says everything in `text`.
+  string                    title         = 7;
+  string                    body_markdown = 8;
+  NotificationLevel         level         = 9;
+  bool                      sound         = 10;
+  // The session's web route, `#/sessions/<id>?host=<daemon instance>`.
+  string                    link          = 11;
 }
 
 // Whether a notification asks the operator for something, or merely reports progress.
@@ -298,6 +332,17 @@ enum SessionNotificationSource {
   SESSION_NOTIFICATION_SOURCE_AGENT_TOOL_CALL = 2;
   // PresenterObserver.ObserveEvents — a tddy-coder workflow session's presenter.
   SESSION_NOTIFICATION_SOURCE_PRESENTER = 3;
+  // ReportOperatorNotification — the agent's own words (`tddy-tools notify`).
+  SESSION_NOTIFICATION_SOURCE_AGENT = 4;
+}
+
+// How an agent grades what it is telling its operator.
+enum NotificationLevel {
+  NOTIFICATION_LEVEL_UNSPECIFIED = 0;
+  NOTIFICATION_LEVEL_INFO = 1;
+  NOTIFICATION_LEVEL_SUCCESS = 2;
+  NOTIFICATION_LEVEL_WARNING = 3;
+  NOTIFICATION_LEVEL_ERROR = 4;
 }
 
 // Request for the read-only ACP transcript replay. Mirrors StreamSessionActivityRequest — same

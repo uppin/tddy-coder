@@ -119,6 +119,16 @@ impl<S: TelegramSender> TelegramSender for ReportingSender<S> {
             .await;
         self.reported(outcome)
     }
+
+    async fn send_html_message(
+        &self,
+        chat_id: i64,
+        html: &str,
+        silent: bool,
+    ) -> anyhow::Result<()> {
+        let outcome = self.inner.send_html_message(chat_id, html, silent).await;
+        self.reported(outcome)
+    }
 }
 
 /// Asks Telegram who the bot is — the check that tells a working token from a revoked one before

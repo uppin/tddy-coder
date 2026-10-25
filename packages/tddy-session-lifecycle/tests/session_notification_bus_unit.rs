@@ -37,6 +37,7 @@ fn a_notification() -> SessionNotification {
         kind: SessionNotificationKind::Activity,
         source: SessionNotificationSource::ActivityStatus,
         text: format!("Session {LABEL}: agent is working"),
+        agent: None,
         at_unix_ms: AT,
     }
 }

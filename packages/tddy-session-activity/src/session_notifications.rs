@@ -273,6 +273,7 @@ pub fn notification_for_activity_status(
         kind,
         source: SessionNotificationSource::ActivityStatus,
         text,
+        agent: None,
         at_unix_ms,
     })
 }
@@ -293,6 +294,7 @@ pub fn notification_for_agent_tool_call(
         kind: SessionNotificationKind::Activity,
         source: SessionNotificationSource::AgentToolCall,
         text: format!("Session {label}: {tool_name}"),
+        agent: None,
         at_unix_ms,
     }
 }
@@ -351,6 +353,7 @@ pub fn notification_for_presenter_event(
         kind,
         source: SessionNotificationSource::Presenter,
         text,
+        agent: None,
         at_unix_ms,
     })
 }

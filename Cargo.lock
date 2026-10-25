@@ -12698,6 +12698,7 @@ dependencies = [
  "log",
  "pretty_assertions",
  "prost 0.13.5",
+ "pulldown-cmark",
  "rstest 0.24.0",
  "serde",
  "serde_json",

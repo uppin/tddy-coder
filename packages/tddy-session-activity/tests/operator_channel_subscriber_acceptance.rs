@@ -36,6 +36,7 @@ fn an_attention_notification() -> SessionNotification {
         kind: SessionNotificationKind::AttentionRequired,
         source: SessionNotificationSource::ActivityStatus,
         text: format!("🔔 Session {LABEL}: Claude Code needs your input."),
+        agent: None,
         at_unix_ms: AT,
     }
 }

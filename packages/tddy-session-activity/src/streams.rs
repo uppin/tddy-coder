@@ -51,9 +51,13 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
                 ProtoSessionNotificationSource::AgentToolCall
             }
             SessionNotificationSource::Presenter => ProtoSessionNotificationSource::Presenter,
+            SessionNotificationSource::Agent => ProtoSessionNotificationSource::Agent,
         } as i32,
         text: notification.text,
         at_unix_ms: notification.at_unix_ms,
+        // TODO(agent-notify): implement — map `notification.agent` onto title, body_markdown,
+        // level, sound and link.
+        ..Default::default()
     }
 }
 

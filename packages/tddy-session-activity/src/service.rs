@@ -24,6 +24,7 @@
 
 mod conversation_replay;
 mod hook_reports;
+mod operator_notifications;
 pub(crate) mod ports;
 mod rpc;
 

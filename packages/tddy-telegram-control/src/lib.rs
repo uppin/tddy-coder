@@ -17,6 +17,7 @@
 //!
 //! [`TelegramDaemonHooks`]: telegram_session_subscriber::TelegramDaemonHooks
 
+pub mod agent_notification_telegram;
 pub mod telegram_bot;
 pub mod telegram_multi_select_shortcuts;
 pub mod telegram_notifier;

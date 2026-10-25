@@ -1291,6 +1291,16 @@ mod acceptance_unit_tests {
             *self.calls.lock().unwrap() += 1;
             Ok(())
         }
+
+        async fn send_html_message(
+            &self,
+            _chat_id: i64,
+            _html: &str,
+            _silent: bool,
+        ) -> anyhow::Result<()> {
+            *self.calls.lock().unwrap() += 1;
+            Ok(())
+        }
     }
 
     #[test]

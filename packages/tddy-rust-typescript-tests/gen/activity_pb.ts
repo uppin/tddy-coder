@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file activity.proto.
  */
 export const file_activity: GenFile = /*@__PURE__*/
-  fileDesc("Cg5hY3Rpdml0eS5wcm90bxIIYWN0aXZpdHkiUAoOQWNwUmVwbGF5RnJhbWUSGQoRYWNwX2FnZW50X21lc3NhZ2UYASABKAwSFgoOYWN0aXZpdHlfY291bnQYAiABKAQSCwoDc2VxGAMgASgEIpEBChdBZ2VudEFjdGl2aXR5RGVsdGFDaHVuaxINCgVwYXRjaBgBIAEoDBILCgNzZXEYAiABKAQSEAoIcHJldl9zZXEYAyABKAQSEwoLYmFzZV9jb21taXQYBCABKAkSFwoPdG90YWxfYnl0ZV9zaXplGAYgASgEEhQKDHNjb3BlZF9wYXRocxgHIAMoCUoECAUQBiKYAQoZQWdlbnRBY3Rpdml0eURlbHRhUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEg8KB2NhbGxfaWQYBCABKAkSIwoFc2NvcGUYBSABKA4yFC5hY3Rpdml0eS5EZWx0YVNjb3BlIrUCChNBZ2VudEFjdGl2aXR5UmVjb3JkEg8KB2NhbGxfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEiUKBWlucHV0GAMgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlEg4KBnN0YXR1cxgEIAEoCRImCgZyZXN1bHQYBSABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWUSFQoNZXJyb3JfbWVzc2FnZRgGIAEoCRIXCg9zdGFydGVkX3VuaXhfbXMYByABKAQSGQoRY29tcGxldGVkX3VuaXhfbXMYCCABKAQSDgoGc291cmNlGAkgASgJEhMKC2hlYWRfY29tbWl0GAogASgJEhQKDGFjdGl2aXR5X3NlcRgLIAEoBBIVCg1jaGFuZ2VkX3BhdGhzGAwgAygJIqABChdHZXRBY3BSZXBsYXlQYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhIKCmJlZm9yZV9zZXEYBCABKAQSEQoJcGFnZV9zaXplGAUgASgNEhcKD2NvbnZlcnNhdGlvbl9pZBgGIAEoCSJQChhHZXRBY3BSZXBsYXlQYWdlUmVzcG9uc2USDgoGZnJhbWVzGAEgAygMEhEKCWZpcnN0X3NlcRgCIAEoBBIRCglhdF9vbGRlc3QYAyABKAgikwEKG0dldEFjcFRvb2xDYWxsRGV0YWlsUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhQKDHRvb2xfY2FsbF9pZBgEIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBSABKAkibAocR2V0QWNwVG9vbENhbGxEZXRhaWxSZXNwb25zZRIWCglyYXdfaW5wdXQYASABKAlIAIgBARIXCgpyYXdfb3V0cHV0GAIgASgJSAGIAQFCDAoKX3Jhd19pbnB1dEINCgtfcmF3X291dHB1dCLJAQoaUmVwb3J0QWdlbnRBY3Rpdml0eVJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpob29rX3Rva2VuGAIgASgJEg8KB29zX3VzZXIYAyABKAkSDQoFZXZlbnQYBCABKAkSEQoJdG9vbF9uYW1lGAUgASgJEhIKCmlucHV0X2pzb24YBiABKAkSEwoLcmVzdWx0X2pzb24YByABKAkSEAoIaXNfZXJyb3IYCCABKAgSFQoNZXJyb3JfbWVzc2FnZRgJIAEoCSIpChtSZXBvcnRBZ2VudEFjdGl2aXR5UmVzcG9uc2USCgoCb2sYASABKAgidgoaUmVwb3J0U2Vzc2lvblN0YXR1c1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpob29rX3Rva2VuGAIgASgJEg8KB29zX3VzZXIYAyABKAkSDgoGc3RhdHVzGAQgASgJEg8KB21lc3NhZ2UYBSABKAkiKQobUmVwb3J0U2Vzc2lvblN0YXR1c1Jlc3BvbnNlEgoKAm9rGAEgASgIIsUBChhTZXNzaW9uTm90aWZpY2F0aW9uRXZlbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIvCgRraW5kGAMgASgOMiEuYWN0aXZpdHkuU2Vzc2lvbk5vdGlmaWNhdGlvbktpbmQSMwoGc291cmNlGAQgASgOMiMuYWN0aXZpdHkuU2Vzc2lvbk5vdGlmaWNhdGlvblNvdXJjZRIMCgR0ZXh0GAUgASgJEhIKCmF0X3VuaXhfbXMYBiABKAQirwEKFlN0cmVhbUFjcFJlcGxheVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIiCgRtb2RlGAQgASgOMhQuYWN0aXZpdHkuU3RyZWFtTW9kZRIRCglwYWdlX3NpemUYBSABKA0SFwoPY29udmVyc2F0aW9uX2lkGAYgASgJIokBChxTdHJlYW1TZXNzaW9uQWN0aXZpdHlSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSIgoEbW9kZRgEIAEoDjIULmFjdGl2aXR5LlN0cmVhbU1vZGUiOgohU3RyZWFtU2Vzc2lvbk5vdGlmaWNhdGlvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkqUgoKRGVsdGFTY29wZRIUChBERUxUQV9TQ09QRV9DQUxMEAASGAoUREVMVEFfU0NPUEVfUkVTSURVQUwQARIUChBERUxUQV9TQ09QRV9USUNLEAIqngEKF1Nlc3Npb25Ob3RpZmljYXRpb25LaW5kEikKJVNFU1NJT05fTk9USUZJQ0FUSU9OX0tJTkRfVU5TUEVDSUZJRUQQABImCiJTRVNTSU9OX05PVElGSUNBVElPTl9LSU5EX0FDVElWSVRZEAESMAosU0VTU0lPTl9OT1RJRklDQVRJT05fS0lORF9BVFRFTlRJT05fUkVRVUlSRUQQAirVAQoZU2Vzc2lvbk5vdGlmaWNhdGlvblNvdXJjZRIrCidTRVNTSU9OX05PVElGSUNBVElPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIvCitTRVNTSU9OX05PVElGSUNBVElPTl9TT1VSQ0VfQUNUSVZJVFlfU1RBVFVTEAESLworU0VTU0lPTl9OT1RJRklDQVRJT05fU09VUkNFX0FHRU5UX1RPT0xfQ0FMTBACEikKJVNFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9QUkVTRU5URVIQAypcCgpTdHJlYW1Nb2RlEhYKElNOQVBTSE9UX1RIRU5fTElWRRAAEg0KCUxJVkVfT05MWRABEhMKD0NPVU5UX1RIRU5fTElWRRACEhIKDlRBSUxfVEhFTl9MSVZFEAMypQYKD0FjdGl2aXR5U2VydmljZRJiChNSZXBvcnRTZXNzaW9uU3RhdHVzEiQuYWN0aXZpdHkuUmVwb3J0U2Vzc2lvblN0YXR1c1JlcXVlc3QaJS5hY3Rpdml0eS5SZXBvcnRTZXNzaW9uU3RhdHVzUmVzcG9uc2USYAoVU3RyZWFtU2Vzc2lvbkFjdGl2aXR5EiYuYWN0aXZpdHkuU3RyZWFtU2Vzc2lvbkFjdGl2aXR5UmVxdWVzdBodLmFjdGl2aXR5LkFnZW50QWN0aXZpdHlSZWNvcmQwARJiChNSZXBvcnRBZ2VudEFjdGl2aXR5EiQuYWN0aXZpdHkuUmVwb3J0QWdlbnRBY3Rpdml0eVJlcXVlc3QaJS5hY3Rpdml0eS5SZXBvcnRBZ2VudEFjdGl2aXR5UmVzcG9uc2USbwoaU3RyZWFtU2Vzc2lvbk5vdGlmaWNhdGlvbnMSKy5hY3Rpdml0eS5TdHJlYW1TZXNzaW9uTm90aWZpY2F0aW9uc1JlcXVlc3QaIi5hY3Rpdml0eS5TZXNzaW9uTm90aWZpY2F0aW9uRXZlbnQwARJkChhTdHJlYW1BZ2VudEFjdGl2aXR5RGVsdGESIy5hY3Rpdml0eS5BZ2VudEFjdGl2aXR5RGVsdGFSZXF1ZXN0GiEuYWN0aXZpdHkuQWdlbnRBY3Rpdml0eURlbHRhQ2h1bmswARJPCg9TdHJlYW1BY3BSZXBsYXkSIC5hY3Rpdml0eS5TdHJlYW1BY3BSZXBsYXlSZXF1ZXN0GhguYWN0aXZpdHkuQWNwUmVwbGF5RnJhbWUwARJlChRHZXRBY3BUb29sQ2FsbERldGFpbBIlLmFjdGl2aXR5LkdldEFjcFRvb2xDYWxsRGV0YWlsUmVxdWVzdBomLmFjdGl2aXR5LkdldEFjcFRvb2xDYWxsRGV0YWlsUmVzcG9uc2USWQoQR2V0QWNwUmVwbGF5UGFnZRIhLmFjdGl2aXR5LkdldEFjcFJlcGxheVBhZ2VSZXF1ZXN0GiIuYWN0aXZpdHkuR2V0QWNwUmVwbGF5UGFnZVJlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_struct]);
+  fileDesc("Cg5hY3Rpdml0eS5wcm90bxIIYWN0aXZpdHkiUAoOQWNwUmVwbGF5RnJhbWUSGQoRYWNwX2FnZW50X21lc3NhZ2UYASABKAwSFgoOYWN0aXZpdHlfY291bnQYAiABKAQSCwoDc2VxGAMgASgEIpEBChdBZ2VudEFjdGl2aXR5RGVsdGFDaHVuaxINCgVwYXRjaBgBIAEoDBILCgNzZXEYAiABKAQSEAoIcHJldl9zZXEYAyABKAQSEwoLYmFzZV9jb21taXQYBCABKAkSFwoPdG90YWxfYnl0ZV9zaXplGAYgASgEEhQKDHNjb3BlZF9wYXRocxgHIAMoCUoECAUQBiKYAQoZQWdlbnRBY3Rpdml0eURlbHRhUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEg8KB2NhbGxfaWQYBCABKAkSIwoFc2NvcGUYBSABKA4yFC5hY3Rpdml0eS5EZWx0YVNjb3BlIrUCChNBZ2VudEFjdGl2aXR5UmVjb3JkEg8KB2NhbGxfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEiUKBWlucHV0GAMgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlEg4KBnN0YXR1cxgEIAEoCRImCgZyZXN1bHQYBSABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWUSFQoNZXJyb3JfbWVzc2FnZRgGIAEoCRIXCg9zdGFydGVkX3VuaXhfbXMYByABKAQSGQoRY29tcGxldGVkX3VuaXhfbXMYCCABKAQSDgoGc291cmNlGAkgASgJEhMKC2hlYWRfY29tbWl0GAogASgJEhQKDGFjdGl2aXR5X3NlcRgLIAEoBBIVCg1jaGFuZ2VkX3BhdGhzGAwgAygJIqABChdHZXRBY3BSZXBsYXlQYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhIKCmJlZm9yZV9zZXEYBCABKAQSEQoJcGFnZV9zaXplGAUgASgNEhcKD2NvbnZlcnNhdGlvbl9pZBgGIAEoCSJQChhHZXRBY3BSZXBsYXlQYWdlUmVzcG9uc2USDgoGZnJhbWVzGAEgAygMEhEKCWZpcnN0X3NlcRgCIAEoBBIRCglhdF9vbGRlc3QYAyABKAgikwEKG0dldEFjcFRvb2xDYWxsRGV0YWlsUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhQKDHRvb2xfY2FsbF9pZBgEIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBSABKAkibAocR2V0QWNwVG9vbENhbGxEZXRhaWxSZXNwb25zZRIWCglyYXdfaW5wdXQYASABKAlIAIgBARIXCgpyYXdfb3V0cHV0GAIgASgJSAGIAQFCDAoKX3Jhd19pbnB1dEINCgtfcmF3X291dHB1dCLJAQoaUmVwb3J0QWdlbnRBY3Rpdml0eVJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpob29rX3Rva2VuGAIgASgJEg8KB29zX3VzZXIYAyABKAkSDQoFZXZlbnQYBCABKAkSEQoJdG9vbF9uYW1lGAUgASgJEhIKCmlucHV0X2pzb24YBiABKAkSEwoLcmVzdWx0X2pzb24YByABKAkSEAoIaXNfZXJyb3IYCCABKAgSFQoNZXJyb3JfbWVzc2FnZRgJIAEoCSIpChtSZXBvcnRBZ2VudEFjdGl2aXR5UmVzcG9uc2USCgoCb2sYASABKAgidgoaUmVwb3J0U2Vzc2lvblN0YXR1c1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpob29rX3Rva2VuGAIgASgJEg8KB29zX3VzZXIYAyABKAkSDgoGc3RhdHVzGAQgASgJEg8KB21lc3NhZ2UYBSABKAkiKQobUmVwb3J0U2Vzc2lvblN0YXR1c1Jlc3BvbnNlEgoKAm9rGAEgASgIIr0BCiFSZXBvcnRPcGVyYXRvck5vdGlmaWNhdGlvblJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpob29rX3Rva2VuGAIgASgJEg8KB29zX3VzZXIYAyABKAkSDQoFdGl0bGUYBCABKAkSFQoNYm9keV9tYXJrZG93bhgFIAEoCRIqCgVsZXZlbBgGIAEoDjIbLmFjdGl2aXR5Lk5vdGlmaWNhdGlvbkxldmVsEg0KBXNvdW5kGAcgASgIIjAKIlJlcG9ydE9wZXJhdG9yTm90aWZpY2F0aW9uUmVzcG9uc2USCgoCb2sYASABKAgitAIKGFNlc3Npb25Ob3RpZmljYXRpb25FdmVudBISCgpzZXNzaW9uX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEi8KBGtpbmQYAyABKA4yIS5hY3Rpdml0eS5TZXNzaW9uTm90aWZpY2F0aW9uS2luZBIzCgZzb3VyY2UYBCABKA4yIy5hY3Rpdml0eS5TZXNzaW9uTm90aWZpY2F0aW9uU291cmNlEgwKBHRleHQYBSABKAkSEgoKYXRfdW5peF9tcxgGIAEoBBINCgV0aXRsZRgHIAEoCRIVCg1ib2R5X21hcmtkb3duGAggASgJEioKBWxldmVsGAkgASgOMhsuYWN0aXZpdHkuTm90aWZpY2F0aW9uTGV2ZWwSDQoFc291bmQYCiABKAgSDAoEbGluaxgLIAEoCSKvAQoWU3RyZWFtQWNwUmVwbGF5UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEiIKBG1vZGUYBCABKA4yFC5hY3Rpdml0eS5TdHJlYW1Nb2RlEhEKCXBhZ2Vfc2l6ZRgFIAEoDRIXCg9jb252ZXJzYXRpb25faWQYBiABKAkiiQEKHFN0cmVhbVNlc3Npb25BY3Rpdml0eVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIiCgRtb2RlGAQgASgOMhQuYWN0aXZpdHkuU3RyZWFtTW9kZSI6CiFTdHJlYW1TZXNzaW9uTm90aWZpY2F0aW9uc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSpSCgpEZWx0YVNjb3BlEhQKEERFTFRBX1NDT1BFX0NBTEwQABIYChRERUxUQV9TQ09QRV9SRVNJRFVBTBABEhQKEERFTFRBX1NDT1BFX1RJQ0sQAiqeAQoXU2Vzc2lvbk5vdGlmaWNhdGlvbktpbmQSKQolU0VTU0lPTl9OT1RJRklDQVRJT05fS0lORF9VTlNQRUNJRklFRBAAEiYKIlNFU1NJT05fTk9USUZJQ0FUSU9OX0tJTkRfQUNUSVZJVFkQARIwCixTRVNTSU9OX05PVElGSUNBVElPTl9LSU5EX0FUVEVOVElPTl9SRVFVSVJFRBACKvwBChlTZXNzaW9uTm90aWZpY2F0aW9uU291cmNlEisKJ1NFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9VTlNQRUNJRklFRBAAEi8KK1NFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9BQ1RJVklUWV9TVEFUVVMQARIvCitTRVNTSU9OX05PVElGSUNBVElPTl9TT1VSQ0VfQUdFTlRfVE9PTF9DQUxMEAISKQolU0VTU0lPTl9OT1RJRklDQVRJT05fU09VUkNFX1BSRVNFTlRFUhADEiUKIVNFU1NJT05fTk9USUZJQ0FUSU9OX1NPVVJDRV9BR0VOVBAEKrIBChFOb3RpZmljYXRpb25MZXZlbBIiCh5OT1RJRklDQVRJT05fTEVWRUxfVU5TUEVDSUZJRUQQABIbChdOT1RJRklDQVRJT05fTEVWRUxfSU5GTxABEh4KGk5PVElGSUNBVElPTl9MRVZFTF9TVUNDRVNTEAISHgoaTk9USUZJQ0FUSU9OX0xFVkVMX1dBUk5JTkcQAxIcChhOT1RJRklDQVRJT05fTEVWRUxfRVJST1IQBCpcCgpTdHJlYW1Nb2RlEhYKElNOQVBTSE9UX1RIRU5fTElWRRAAEg0KCUxJVkVfT05MWRABEhMKD0NPVU5UX1RIRU5fTElWRRACEhIKDlRBSUxfVEhFTl9MSVZFEAMyngcKD0FjdGl2aXR5U2VydmljZRJiChNSZXBvcnRTZXNzaW9uU3RhdHVzEiQuYWN0aXZpdHkuUmVwb3J0U2Vzc2lvblN0YXR1c1JlcXVlc3QaJS5hY3Rpdml0eS5SZXBvcnRTZXNzaW9uU3RhdHVzUmVzcG9uc2USYAoVU3RyZWFtU2Vzc2lvbkFjdGl2aXR5EiYuYWN0aXZpdHkuU3RyZWFtU2Vzc2lvbkFjdGl2aXR5UmVxdWVzdBodLmFjdGl2aXR5LkFnZW50QWN0aXZpdHlSZWNvcmQwARJiChNSZXBvcnRBZ2VudEFjdGl2aXR5EiQuYWN0aXZpdHkuUmVwb3J0QWdlbnRBY3Rpdml0eVJlcXVlc3QaJS5hY3Rpdml0eS5SZXBvcnRBZ2VudEFjdGl2aXR5UmVzcG9uc2USbwoaU3RyZWFtU2Vzc2lvbk5vdGlmaWNhdGlvbnMSKy5hY3Rpdml0eS5TdHJlYW1TZXNzaW9uTm90aWZpY2F0aW9uc1JlcXVlc3QaIi5hY3Rpdml0eS5TZXNzaW9uTm90aWZpY2F0aW9uRXZlbnQwARJkChhTdHJlYW1BZ2VudEFjdGl2aXR5RGVsdGESIy5hY3Rpdml0eS5BZ2VudEFjdGl2aXR5RGVsdGFSZXF1ZXN0GiEuYWN0aXZpdHkuQWdlbnRBY3Rpdml0eURlbHRhQ2h1bmswARJPCg9TdHJlYW1BY3BSZXBsYXkSIC5hY3Rpdml0eS5TdHJlYW1BY3BSZXBsYXlSZXF1ZXN0GhguYWN0aXZpdHkuQWNwUmVwbGF5RnJhbWUwARJlChRHZXRBY3BUb29sQ2FsbERldGFpbBIlLmFjdGl2aXR5LkdldEFjcFRvb2xDYWxsRGV0YWlsUmVxdWVzdBomLmFjdGl2aXR5LkdldEFjcFRvb2xDYWxsRGV0YWlsUmVzcG9uc2USWQoQR2V0QWNwUmVwbGF5UGFnZRIhLmFjdGl2aXR5LkdldEFjcFJlcGxheVBhZ2VSZXF1ZXN0GiIuYWN0aXZpdHkuR2V0QWNwUmVwbGF5UGFnZVJlc3BvbnNlEncKGlJlcG9ydE9wZXJhdG9yTm90aWZpY2F0aW9uEisuYWN0aXZpdHkuUmVwb3J0T3BlcmF0b3JOb3RpZmljYXRpb25SZXF1ZXN0GiwuYWN0aXZpdHkuUmVwb3J0T3BlcmF0b3JOb3RpZmljYXRpb25SZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_struct]);
 
 /**
  * One replay frame: a service-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
@@ -580,6 +580,79 @@ export const ReportSessionStatusResponseSchema: GenMessage<ReportSessionStatusRe
   messageDesc(file_activity, 11);
 
 /**
+ * / Sent by `tddy-tools notify`; bearer is the per-session hook_token, read from the agent's
+ * / environment (TDDY_HOOK_TOKEN).
+ *
+ * @generated from message activity.ReportOperatorNotificationRequest
+ */
+export type ReportOperatorNotificationRequest = Message<"activity.ReportOperatorNotificationRequest"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string hook_token = 2;
+   */
+  hookToken: string;
+
+  /**
+   * @generated from field: string os_user = 3;
+   */
+  osUser: string;
+
+  /**
+   * One line; 1–200 characters after trimming.
+   *
+   * @generated from field: string title = 4;
+   */
+  title: string;
+
+  /**
+   * Markdown; at most 2,000 characters. Empty for a title-only notification.
+   *
+   * @generated from field: string body_markdown = 5;
+   */
+  bodyMarkdown: string;
+
+  /**
+   * @generated from field: activity.NotificationLevel level = 6;
+   */
+  level: NotificationLevel;
+
+  /**
+   * Whether the operator should be alerted audibly. False sends silently where a surface can.
+   *
+   * @generated from field: bool sound = 7;
+   */
+  sound: boolean;
+};
+
+/**
+ * Describes the message activity.ReportOperatorNotificationRequest.
+ * Use `create(ReportOperatorNotificationRequestSchema)` to create a new message.
+ */
+export const ReportOperatorNotificationRequestSchema: GenMessage<ReportOperatorNotificationRequest> = /*@__PURE__*/
+  messageDesc(file_activity, 12);
+
+/**
+ * @generated from message activity.ReportOperatorNotificationResponse
+ */
+export type ReportOperatorNotificationResponse = Message<"activity.ReportOperatorNotificationResponse"> & {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+};
+
+/**
+ * Describes the message activity.ReportOperatorNotificationResponse.
+ * Use `create(ReportOperatorNotificationResponseSchema)` to create a new message.
+ */
+export const ReportOperatorNotificationResponseSchema: GenMessage<ReportOperatorNotificationResponse> = /*@__PURE__*/
+  messageDesc(file_activity, 13);
+
+/**
  * One thing that happened in one session.
  *
  * @generated from message activity.SessionNotificationEvent
@@ -623,6 +696,36 @@ export type SessionNotificationEvent = Message<"activity.SessionNotificationEven
    * @generated from field: uint64 at_unix_ms = 6;
    */
   atUnixMs: bigint;
+
+  /**
+   * Set only for source AGENT: what the agent wrote (`#home-inbox` 1/8). Every other source leaves
+   * these empty and says everything in `text`.
+   *
+   * @generated from field: string title = 7;
+   */
+  title: string;
+
+  /**
+   * @generated from field: string body_markdown = 8;
+   */
+  bodyMarkdown: string;
+
+  /**
+   * @generated from field: activity.NotificationLevel level = 9;
+   */
+  level: NotificationLevel;
+
+  /**
+   * @generated from field: bool sound = 10;
+   */
+  sound: boolean;
+
+  /**
+   * The session's web route, `#/sessions/<id>?host=<daemon instance>`.
+   *
+   * @generated from field: string link = 11;
+   */
+  link: string;
 };
 
 /**
@@ -630,7 +733,7 @@ export type SessionNotificationEvent = Message<"activity.SessionNotificationEven
  * Use `create(SessionNotificationEventSchema)` to create a new message.
  */
 export const SessionNotificationEventSchema: GenMessage<SessionNotificationEvent> = /*@__PURE__*/
-  messageDesc(file_activity, 12);
+  messageDesc(file_activity, 14);
 
 /**
  * Request for the read-only ACP transcript replay. Mirrors StreamSessionActivityRequest — same
@@ -683,7 +786,7 @@ export type StreamAcpReplayRequest = Message<"activity.StreamAcpReplayRequest"> 
  * Use `create(StreamAcpReplayRequestSchema)` to create a new message.
  */
 export const StreamAcpReplayRequestSchema: GenMessage<StreamAcpReplayRequest> = /*@__PURE__*/
-  messageDesc(file_activity, 13);
+  messageDesc(file_activity, 15);
 
 /**
  * @generated from message activity.StreamSessionActivityRequest
@@ -717,7 +820,7 @@ export type StreamSessionActivityRequest = Message<"activity.StreamSessionActivi
  * Use `create(StreamSessionActivityRequestSchema)` to create a new message.
  */
 export const StreamSessionActivityRequestSchema: GenMessage<StreamSessionActivityRequest> = /*@__PURE__*/
-  messageDesc(file_activity, 14);
+  messageDesc(file_activity, 16);
 
 /**
  * @generated from message activity.StreamSessionNotificationsRequest
@@ -736,7 +839,7 @@ export type StreamSessionNotificationsRequest = Message<"activity.StreamSessionN
  * Use `create(StreamSessionNotificationsRequestSchema)` to create a new message.
  */
 export const StreamSessionNotificationsRequestSchema: GenMessage<StreamSessionNotificationsRequest> = /*@__PURE__*/
-  messageDesc(file_activity, 15);
+  messageDesc(file_activity, 17);
 
 /**
  * Which slice of a tick's diff to serve.
@@ -842,6 +945,13 @@ export enum SessionNotificationSource {
    * @generated from enum value: SESSION_NOTIFICATION_SOURCE_PRESENTER = 3;
    */
   PRESENTER = 3,
+
+  /**
+   * ReportOperatorNotification — the agent's own words (`tddy-tools notify`).
+   *
+   * @generated from enum value: SESSION_NOTIFICATION_SOURCE_AGENT = 4;
+   */
+  AGENT = 4,
 }
 
 /**
@@ -849,6 +959,44 @@ export enum SessionNotificationSource {
  */
 export const SessionNotificationSourceSchema: GenEnum<SessionNotificationSource> = /*@__PURE__*/
   enumDesc(file_activity, 2);
+
+/**
+ * How an agent grades what it is telling its operator.
+ *
+ * @generated from enum activity.NotificationLevel
+ */
+export enum NotificationLevel {
+  /**
+   * @generated from enum value: NOTIFICATION_LEVEL_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: NOTIFICATION_LEVEL_INFO = 1;
+   */
+  INFO = 1,
+
+  /**
+   * @generated from enum value: NOTIFICATION_LEVEL_SUCCESS = 2;
+   */
+  SUCCESS = 2,
+
+  /**
+   * @generated from enum value: NOTIFICATION_LEVEL_WARNING = 3;
+   */
+  WARNING = 3,
+
+  /**
+   * @generated from enum value: NOTIFICATION_LEVEL_ERROR = 4;
+   */
+  ERROR = 4,
+}
+
+/**
+ * Describes the enum activity.NotificationLevel.
+ */
+export const NotificationLevelSchema: GenEnum<NotificationLevel> = /*@__PURE__*/
+  enumDesc(file_activity, 3);
 
 /**
  * Whether the stream replays the persisted history before tailing live records.
@@ -893,7 +1041,7 @@ export enum StreamMode {
  * Describes the enum activity.StreamMode.
  */
 export const StreamModeSchema: GenEnum<StreamMode> = /*@__PURE__*/
-  enumDesc(file_activity, 3);
+  enumDesc(file_activity, 4);
 
 /**
  * @generated from service activity.ActivityService
@@ -1006,6 +1154,21 @@ export const ActivityService: GenService<{
     methodKind: "unary";
     input: typeof GetAcpReplayPageRequestSchema;
     output: typeof GetAcpReplayPageResponseSchema;
+  },
+  /**
+   * An agent notifying its operator in its own words — `tddy-tools notify` from a claude-cli or
+   * cursor-cli session (docs/ft/daemon/session-notifications.md). Authenticated exactly like
+   * ReportSessionStatus: the session must be claude-cli or cursor-cli, and `hook_token` must match
+   * its .session.yaml. Publishes one ATTENTION_REQUIRED notification with source AGENT. Unlike the
+   * hooks this refuses loudly: a title or body over its limit is INVALID_ARGUMENT, never truncated
+   * (`#home-inbox` 1/8).
+   *
+   * @generated from rpc activity.ActivityService.ReportOperatorNotification
+   */
+  reportOperatorNotification: {
+    methodKind: "unary";
+    input: typeof ReportOperatorNotificationRequestSchema;
+    output: typeof ReportOperatorNotificationResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_activity, 0);
