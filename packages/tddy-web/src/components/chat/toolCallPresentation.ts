@@ -32,15 +32,11 @@ export function toolStatusOf(status: ToolCallStatus | undefined): "running" | "c
 
 /**
  * Map an ACP `ToolCallStatus` onto a subagent conversation's bubble. The session transcript folds a
- * conversation's `subagent_*` calls into one entry, and a conversation whose turn paused on a
- * permission request folds to `pending` (docs/ft/web/agent-activity-pane.md § A subagent conversation
- * is one bubble). Such a bubble reads as awaiting the user; every other status reads as it does for a
- * tool call.
- *
- * TODO(web-approvals): the fold marks every permission-requested stop pending, including one the main
- * agent answers itself, so those read "waiting for you" too. The fold has to tell a request deferred
- * to the user apart before this mapping is exact (`entry_status` in tddy-service's
- * `subagent_conversation_replay.rs`).
+ * conversation's `subagent_*` calls into one entry (docs/ft/web/agent-activity-pane.md § A subagent
+ * conversation is one bubble). Its turn waiting on a permission request held for the user folds to
+ * `pending`, and such a bubble reads as awaiting the user. A turn that paused on a request the main
+ * agent answers itself is not awaiting the user, so it folds to in progress. Every other status reads
+ * as it does for a tool call.
  */
 export function subagentStatusOf(status: ToolCallStatus | undefined): TranscriptStatus {
   return status === ToolCallStatus.PENDING ? "awaiting_user" : toolStatusOf(status);
