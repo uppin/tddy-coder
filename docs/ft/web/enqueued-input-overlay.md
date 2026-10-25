@@ -17,8 +17,8 @@ This feature makes terminal input **accountable end-to-end**:
 1. Every byte the client sends is assigned a **cumulative input offset**. The offset of a chunk is
    the running total number of input bytes sent through this terminal **including** that chunk.
 2. The daemon, after writing those bytes to the PTY master, **acknowledges the applied offset** by
-   streaming it back on the existing `StreamTerminalOutput` stream (a new
-   `acked_input_offset` field on `SessionTerminalOutput`).
+   streaming it back on the terminal's output stream (the `acked_input_offset` field on
+   `SessionTerminalOutput`).
 3. The client keeps an **input queue** of un-acknowledged chunks. If the oldest un-acked byte is
    not acknowledged within **500 ms**, the client shows an **enqueued-input overlay** — a single
    line reflecting exactly what has been typed but not yet confirmed by the server.
@@ -56,8 +56,9 @@ where the ACK originates.
 1. `GrpcSessionTerminal` maintains a **monotonic cumulative byte counter** for the terminal, starting
    at 0. Each `send(data)` advances it by `data.length`; the value **after** advancing is the chunk's
    **input offset**.
-2. `SendTerminalInput` carries this offset in a new field `input_offset` (proto `uint64`; generated
-   TS `bigint`). Every send — keyboard, mouse, resize OSC, file-drop path insertion, mobile
+2. Each stdin message on the bidi `StreamSessionTerminalIO` stream the web terminal opens (and each
+   `SendTerminalInput` call from a non-web client) carries this offset in `input_offset` (proto
+   `uint64`; generated TS `bigint`). Every send — keyboard, mouse, resize OSC, file-drop path insertion, mobile
    shortcut — participates in the same counter, so the offset is a faithful byte count of the
    input stream.
 3. The counter is **per terminal** (`terminal_id`); Agent and bash terminals count independently.
@@ -131,7 +132,7 @@ Server ACKs offset **3** (`HEL` applied) → overlay collapses to `LO WORLD`. Se
   (`uint64`) exist and are regenerated for Rust and TS.
 
 ### Input offset (web)
-- [x] Consecutive `SendTerminalInput` calls carry `input_offset` equal to the running byte total:
+- [x] Consecutive input messages on the bidi stream carry `input_offset` equal to the running byte total:
   for every pair, `offset[i] == offset[i-1] + data[i].length`, and `offset[0] == data[0].length`.
   (`TerminalInputAckAcceptance.cy.tsx` Part A — a real-ghostty integration test; runs on a
   WebGL-capable CI runner. The cumulative-offset logic itself is unit-covered in
@@ -158,8 +159,7 @@ Server ACKs offset **3** (`HEL` applied) → overlay collapses to `LO WORLD`. Se
 ## Future Considerations (Not In Scope)
 
 - Rich control-key glyphs in the overlay (render Enter/arrows/Ctrl-combos instead of omitting them).
-- Applying the same offset/ACK protocol to the LiveKit bidi `StreamSessionTerminalIO` path and to
-  `TerminalService` (VirtualTui).
+- Applying the same offset/ACK protocol to `TerminalService` (VirtualTui).
 - Client-side **resend** of un-acked input after a reconnect using the last acked offset as the
   resume point.
 - Per-chunk latency surfaced as a small RTT indicator.

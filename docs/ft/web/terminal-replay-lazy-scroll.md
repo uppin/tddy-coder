@@ -21,11 +21,12 @@
 > theme plus a grayscale filter that also desaturates the replayed output's own colors), so
 > history never reads as the live terminal.
 >
-> **Reconnect resume by offset:** `StreamTerminalOutput` gains a `StreamReplayMode`
-> (`TAIL` default / `FROM_OFFSET`). A reconnecting terminal resumes by offset instead of
-> re-replaying the whole retained buffer (no duplicate content), and a transient transport blip
-> (null client) no longer evicts the runtime — the terminal stays mounted and resumes with
-> `FROM_OFFSET` when a non-null client returns.
+> **Reconnect shows the current screen:** every host terminal stream — first connect, reconnect,
+> remount — opens bidi `StreamSessionTerminalIO` with `mode = SNAPSHOT`. The host answers with one
+> repaint of the visible screen, then only later output with contiguous offsets, so the web terminal
+> does not resume by byte offset (`TAIL` / `FROM_OFFSET` remain for non-web clients). The snapshot's
+> `endOffset` is the history anchor. A transient transport blip (null client) does not evict the
+> runtime — the terminal stays mounted and re-opens with a snapshot when a non-null client returns.
 >
 > **Scrollback is offered on every wire.** The terminal asks its feed
 > (`feedSupportsHistory`), not the transport, so a session carried over its own LiveKit room
@@ -43,8 +44,8 @@
 >
 > **Related docs:**
 > - [web-terminal.md](web-terminal.md) — the Ghostty terminal surface this builds on.
-> - [enqueued-input-overlay.md](enqueued-input-overlay.md) — the other `StreamTerminalOutput`
->   consumer (ACK frames); unchanged by this work.
+> - [enqueued-input-overlay.md](enqueued-input-overlay.md) — the other consumer of the terminal
+>   stream's frames (ACK frames).
 > - [terminal-sessions.md (daemon)](../daemon/terminal-sessions.md#lazy-replay--scroll-up-history-added-2026-07-28)
 >   — the wire contract this consumes.
 
@@ -128,8 +129,8 @@ user sees a single seamless terminal surface rather than a split pane.
 - `GhosttyTerminalSession` (the one terminal component) **owns the scroll-up history flow**: it renders
   **two overlaid ghostty-web terminals** sharing one rect — a live terminal (`scrollback: 0`,
   the active screen, always pinned to the live tip) and an older-history "page" terminal
-  (`scrollback > 0`, read-only). It captures the absolute `endOffset` anchor from the initial
-  `StreamTerminalOutput` replay frame (its `atOldest` flag gates the affordance), detects the
+  (`scrollback > 0`, read-only). It captures the absolute `endOffset` anchor from the
+  snapshot frame that opens the stream (its `atOldest` flag gates the affordance), detects the
   user's request for earlier output, and **progressively fills the page terminal forward in the
   background** from offset `0` toward the **current live tip** via a `historyFetcher` prop (one
   `GetTerminalHistory`-shaped call per chunk, advancing `fromOffset` to each chunk's `endOffset`,
@@ -168,27 +169,24 @@ user sees a single seamless terminal surface rather than a split pane.
   (DEC `1000` / `1002` / `1003`). Such a TUI (the Claude CLI's fullscreen renderer, a pager) scrolls
   its own output, and its alternate-screen repaints never become scrollback, so the history replay
   would hold frames rather than a transcript. The offer returns once the program gives both up.
-  Mouse tracking counts on its own because a reattach learns it from the daemon's replayed mode
-  prologue, which does not carry the alternate screen. "Back to live" is never withheld.
+  Mouse tracking counts on its own because a legacy-replay reattach learns it from the replayed mode
+  prologue, which does not carry the alternate screen (a snapshot carries both). "Back to live" is
+  never withheld.
 - The **page pane renders in a greyish history color scheme** (`data-color-scheme="history"`): a
   grey theme on the page terminal plus a `grayscale` CSS filter on the pane, which also
   desaturates SGR-palette and truecolor output that a theme alone cannot reach.
 - `GrpcSessionTerminal` builds the `historyFetcher` from its `Client<TerminalSessionService>` +
   session ids and passes it (plus the full `SessionTerminalOutput` frames carrying the offset
   metadata) into the `TerminalFeed` the component reads. There is no `onRegisterLoadOlderHistory` prop.
-- **Reconnect resume by offset (`StreamReplayMode`):** `StreamTerminalOutputRequest` (and the bidi
-  `StreamSessionTerminalIO` open frame) gain a `mode` (`StreamReplayMode`) + `from_offset`.
-  `TAIL` (default, first connect) sends the mode prologue + current last-frame tail chunk, resizes
-  the PTY to the client's dimensions, drains the pre-resize broadcast, then bridges live output.
-  `FROM_OFFSET` (reconnect) sends the mode prologue + chunked catch-up via `replay_from(from_offset,
-  tip, …)` until `at_end`, then live output — no tail chunk, no PTY resize/drain — so a terminal
-  that already holds state up to `from_offset` receives only the bytes it missed, with no duplicate
-  replay. `GrpcSessionTerminal.client` widens to `TerminalClient | null`: a **null client** (a
-  transient transport blip) **pauses** the terminal — it stays mounted (its scrollback and the
-  ghostty instance survive), input is queued — and resumes with `FROM_OFFSET` when a non-null client
-  returns. Only a stream-end with a **valid** client (a real `pty_done`) evicts the runtime. The
-  client tracks the cumulative output offset and sends `FROM_OFFSET` with the tracked offset on
-  reconnect.
+- **Snapshot on every open:** `GrpcSessionTerminal` and `openDaemonTerminalFeed` open bidi
+  `StreamSessionTerminalIO` with `mode = SNAPSHOT` on every open. The first frame is a snapshot
+  (`snapshot = true`, one repaint beginning with RIS, `endOffset` = its sequence point) written into
+  the live terminal as-is; every later frame carries `startOffset` / `endOffset`, the first starting
+  at the snapshot's `endOffset`. There is no byte resume: a re-open is shown the current screen.
+  `GrpcSessionTerminal.client` is `TerminalClient | null`: a **null client** (a transient transport
+  blip) **pauses** the terminal — it stays mounted (its scrollback and the ghostty instance survive),
+  input is queued — and re-opens with a snapshot when a non-null client returns. Only a stream-end with a **valid**
+  client (a real `pty_done`) evicts the runtime.
 
 ### Out of scope
 
@@ -241,24 +239,25 @@ independent.
 **and** a "View history" affordance appears; activating it (or scrolling up again) swaps back to
 the page terminal instantly, with no new fetch.
 
-### Story 5 — A transport blip does not evict the terminal, and a reconnect does not re-replay
+### Story 5 — A transport blip does not evict the terminal, and a reconnect shows the current screen
 
-**Given** I am viewing a live terminal that has already synced its state up to offset `N`,
+**Given** I am viewing a live terminal running a full-screen TUI,
 **when** the transport blips (the daemon client goes `null`) and then returns,
 **then** the terminal stays mounted throughout (its scrollback and the ghostty instance survive;
-input is queued and flushed on reconnect),
-**and** the reconnect opens the stream with `mode = FROM_OFFSET` and `from_offset = N`,
-**and** the server sends only the catch-up bytes from `N` to the current tip (no tail chunk, no PTY
-resize/drain) then live output — so the live terminal receives only the bytes it missed, with no
-duplicate content,
+input is queued and flushed once the stream re-opens),
+**and** the reconnect opens the stream with `mode = SNAPSHOT`,
+**and** the host sends one snapshot of the screen as it is now, then only output written after it,
+with contiguous offsets — so the terminal shows the current screen immediately, without a resize and
+without waiting for the TUI to repaint,
 **and** only a real stream-end with a valid client (a `pty_done`) evicts the runtime.
 
 ## Wire contract (recap)
 
 Consumed from the unification changeset (forward-chunk shape):
 
-- `SessionTerminalOutput` initial replay frame carries `end_offset` (the anchor) and
-  `at_oldest`. Live tail frames carry `0` for the offsets.
+- The snapshot frame that opens a host terminal stream carries `end_offset` (the anchor) and
+  `at_oldest`; every later frame carries its `start_offset` / `end_offset`. (On a legacy `TAIL`
+  open, the initial replay frame carries the anchor and live tail frames carry `0`.)
 - `GetTerminalHistory(session_token, session_id, terminal_id, from_offset, until_offset,
   max_bytes)` — server-streaming; yields one
   `TerminalHistoryChunk{data, start_offset, end_offset, at_oldest, at_end}` starting at
@@ -341,8 +340,10 @@ Consumed from the unification changeset (forward-chunk shape):
 
 - Builds `historyFetcher = createForwardHistoryFetcher(client, { sessionToken, sessionId,
   terminalId })` (memoized) and offers it as the feed's `history`.
-- Forwards the full `SessionTerminalOutput` frame (data + offsets) through the `GrpcStream`
-  instead of just `output.data`.
+- Opens bidi `StreamSessionTerminalIO` with `mode = SNAPSHOT` on every open and forwards the full
+  `SessionTerminalOutput` frame (data, offsets, `snapshot`) through the `GrpcStream`. Keystrokes go
+  up the same stream with cumulative input offsets; refusal frames feed `InputRefusalTracker`
+  ("Input not delivered").
 - Removes the `onRegisterLoadOlderHistory` prop and the `historyLoaderRef` ownership (now lives
   in `GhosttyTerminalSession`). ACK handling (`ackedInputOffset`) stays in `GrpcSessionTerminal`, which
   is why that call site still builds its own stream rather than opening one on the connection: a
@@ -381,14 +382,13 @@ Consumed from the unification changeset (forward-chunk shape):
     anchor (or any fill whose fetch returns no bytes or errors), the page terminal does NOT swap
     to a blank foreground; the live pane stays foreground, the loading indicator clears, and the
     affordance remains available for a later retry.
-11. **Reconnect resumes by offset, not by re-replay.** After the initial sync, a reconnect opens
-    `StreamTerminalOutput` with `mode = FROM_OFFSET` and `from_offset` = the tracked cumulative
-    output offset; the server sends only the catch-up bytes from `from_offset` to the current tip
-    (no tail chunk, no PTY resize/drain) then live output. The live terminal receives no duplicate
-    content.
+11. **Every open asks for a snapshot.** First connect and every reconnect open
+    `StreamSessionTerminalIO` with `mode = SNAPSHOT`; the snapshot renders the host's current screen
+    in the live terminal with the grid unchanged and no grid change sent, and a contiguous delta then
+    updates it.
 12. **A transient transport blip does not evict the runtime.** While the daemon client is `null`
     (transport blip), the terminal stays mounted, input is queued, and a stream-end does NOT evict.
-    When a non-null client returns, the stream resumes with `FROM_OFFSET`. Only a stream-end with a
+    When a non-null client returns, the stream re-opens with `SNAPSHOT`. Only a stream-end with a
     valid client (a real `pty_done`) evicts the runtime.
 13. **History renders in a greyish color scheme.** While the page pane is foreground it carries
     `data-color-scheme="history"` and a `grayscale` filter; the live pane has no filter.
@@ -441,8 +441,9 @@ Consumed from the unification changeset (forward-chunk shape):
 
 ## Future scope
 
-- Carry offset metadata on a room-carried session's terminal frames, so its fill can be anchored and
-  resume from a byte the way the daemon path does. Scrollback itself already works there, unanchored.
+- Carry offset metadata and a snapshot on a room-carried session's terminal frames, so its fill can be
+  anchored and its reconnect shown the current screen the way the host path is (`#term-snapshot` 4/4,
+  [#763](https://github.com/uppin/tddy-coder/pull/763)). Scrollback itself already works there, unanchored.
 - Persisted scroll position across reconnects.
 - A unified single-terminal surface if a future ghostty-web release adds a prepend/insert-at-top
   API that does not require a live-terminal reset, or a daemon-side PageList emulator that holds

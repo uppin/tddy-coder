@@ -168,7 +168,7 @@ describe("a terminal resume point", () => {
 
 // ---------------------------------------------------------------------------
 // The bidi stream: one call carries the output down and the keystrokes up, and every open asks
-// for a snapshot of the current screen (PRD-2026-10-25-terminal-snapshot-host)
+// for a snapshot of the current screen (docs/ft/daemon/terminal-sessions.md § Snapshot on (re)connect)
 // ---------------------------------------------------------------------------
 
 /** One `StreamSessionTerminalIO` call as the feed makes it: every message it sent up. */

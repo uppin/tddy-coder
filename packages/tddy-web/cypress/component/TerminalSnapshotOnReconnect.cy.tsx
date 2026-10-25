@@ -2,7 +2,7 @@
  * Acceptance: a session terminal that (re)connects asks for a snapshot of the current screen and
  * shows it at once — no resize, no waiting for the application to repaint.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-25-terminal-snapshot-host.md
+ * Feature: docs/ft/daemon/terminal-sessions.md § Snapshot on (re)connect
  *
  * Driven through the real `GrpcSessionTerminal` (the host-served Agent and bash panes) over an
  * in-memory `TerminalSessionService` whose bidi `streamSessionTerminalIO` records every message of
