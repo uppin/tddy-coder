@@ -273,15 +273,14 @@ impl AgentConversationLink {
         }))
     }
 
-    /// Close `conversation_id` on the daemon holding it. The cancel names the main agent as its actor, so a
-    /// permission request the conversation still holds is recorded as the main agent's.
+    /// Close `conversation_id` on the daemon holding it. The daemon records a permission request the conversation
+    /// still holds as answered by the login this session's token authenticates.
     pub async fn cancel(&self, conversation_id: &str) -> Result<(), String> {
         let request = CancelAgentConversationRequest {
             session_token: self.envelope.session_token.clone(),
             session_id: self.envelope.session_id.clone(),
             daemon_instance_id: self.envelope.daemon_instance_id.clone(),
             conversation_id: conversation_id.to_string(),
-            cancelled_by: crate::subagent::MAIN_AGENT_NAME.to_string(),
         };
         self.client
             .call_unary(

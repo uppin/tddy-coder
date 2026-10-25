@@ -70,8 +70,7 @@ pub fn permission_tool_call_id(request_id: &str) -> String {
     format!("permission:{request_id}")
 }
 
-/// The name the main agent answers, and cancels, under: the `answeredBy` a record names it by, and the
-/// `cancelled_by` a `subagent_cancel` sends.
+/// The name the main agent answers under: the `answeredBy` a record names it by.
 pub const MAIN_AGENT_NAME: &str = "main-agent";
 
 /// The title a request's transcript entry carries, naming the tool the request asks to run.

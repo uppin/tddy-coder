@@ -1021,6 +1021,9 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
     ) -> Result<Response<CancelAgentConversationResponse>, Status> {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
+        // The actor a request the cancel ends is recorded as answered by: the caller the token authenticates,
+        // read before the conversation is removed so a caller that cannot be named removes nothing.
+        let cancelled_by = self.ports.sessions.github_user(&req.session_token)?;
         let removed = self.ports.conversations.remove(&req.conversation_id).await;
         if let Some(conversation) = removed.as_ref() {
             // Back to "asked nothing", whichever daemon ran the loop: the conversation is gone, so
@@ -1048,7 +1051,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                 // the turn is interrupted: nothing else records a request whose turn the cancel ends.
                 let recorded = match answering.as_deref() {
                     Some(answering) => {
-                        record_cancelled_request(&recorder, answering, &req.cancelled_by).await
+                        record_cancelled_request(&recorder, answering, &cancelled_by).await
                     }
                     None => Ok(()),
                 };
@@ -1071,14 +1074,14 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             Some(AgentConversation::Remote {
                 daemon_instance_id, ..
             }) => {
+                // The owner authenticates the same token and records the actor from it, so none is sent.
                 self.ports
                     .peers
-                    .cancel_naming_actor(
+                    .cancel(
                         &req.session_token,
                         &req.session_id,
                         &daemon_instance_id,
                         &req.conversation_id,
-                        &req.cancelled_by,
                     )
                     .await?;
                 Ok(Response::new(CancelAgentConversationResponse {}))
@@ -1370,28 +1373,19 @@ impl SessionAgentServiceImpl {
         if closed.remote.is_empty() {
             return;
         }
-        // A detach is the caller's own action, so each remote cancel names the login that made it.
-        let actor = self
-            .ports
-            .sessions
-            .github_user(session_token)
-            .map_err(|e| e.message().to_string());
+        // A detach is the caller's own action: the owner records the actor from the token each cancel carries.
         for (daemon_instance_id, conversation_id) in closed.remote {
-            let cancelled = match &actor {
-                Ok(actor) => self
-                    .ports
-                    .peers
-                    .cancel_naming_actor(
-                        session_token,
-                        session_id,
-                        &daemon_instance_id,
-                        &conversation_id,
-                        actor,
-                    )
-                    .await
-                    .map_err(|e| e.message().to_string()),
-                Err(e) => Err(e.clone()),
-            };
+            let cancelled = self
+                .ports
+                .peers
+                .cancel(
+                    session_token,
+                    session_id,
+                    &daemon_instance_id,
+                    &conversation_id,
+                )
+                .await
+                .map_err(|e| e.message().to_string());
             if let Err(e) = cancelled {
                 log::error!(
                     target: "tddy_daemon::connection_service",
@@ -1405,7 +1399,7 @@ impl SessionAgentServiceImpl {
 
 /// Record the permission request a cancelled conversation still holds as answered by `cancelled_by`, the way a
 /// request answered while its turn runs is recorded, and complete the conversation's status row when the request was
-/// held for the user. `Err` names what was not recorded; a cancel that names no actor records nothing, so it refuses.
+/// held for the user. `Err` names what was not recorded; a cancel whose caller has no login records nothing, so it refuses.
 async fn record_cancelled_request(
     recorder: &ConversationRecorder,
     answering: &dyn PermissionAnswering,
@@ -1416,7 +1410,7 @@ async fn record_cancelled_request(
     };
     if cancelled_by.trim().is_empty() {
         return Err(format!(
-            "permission request '{}' is pending, and the cancel names no actor to record it as answered by",
+            "permission request '{}' is pending, and the cancel's caller has no login to record it as answered by",
             request.request_id
         ));
     }
