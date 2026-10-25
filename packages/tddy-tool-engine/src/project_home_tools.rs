@@ -186,6 +186,17 @@ pub trait ProjectHomePort: Send + Sync {
     /// The git environment `target`'s own commits and pushes run under, from its project's
     /// identity (`#project-home` 7/7). Empty when that identity does not resolve.
     async fn push_identity(&self, target: &SessionTarget) -> anyhow::Result<PushIdentity>;
+
+    /// Every worktree of `project_id` on this host, as the Worktrees screen's snapshot has them
+    /// (`#start-parity` 3/9).
+    async fn list_worktrees(
+        &self,
+        project_id: &str,
+    ) -> anyhow::Result<Vec<crate::project_home_worktree_tools::WorktreeEntry>> {
+        // TODO(worktree-list): implement in the daemon's port
+        let _ = project_id;
+        anyhow::bail!("TODO(worktree-list): list_worktrees")
+    }
 }
 
 /// The four tools' definitions, as a client registers them before the daemon is asked:

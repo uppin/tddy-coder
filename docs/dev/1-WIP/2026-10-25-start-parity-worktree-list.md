@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — tddy-tool-engine + tddy-daemon-rpc + a tddy-web parity spec, an I/O seam (the worktree service and size calculator)
+**PR**: [#752](https://github.com/uppin/tddy-coder/pull/752)
 **Stack**: `#start-parity` 3/9 — branch `feature/start-parity/worktree-list`, base `n2` `start-tool` (`feature/start-parity/start-tool`)
 **PRD**: [PRD-2026-10-25-start-parity-worktree-list.md](../../ft/daemon/1-WIP/PRD-2026-10-25-start-parity-worktree-list.md)
 
@@ -37,12 +38,18 @@ implementing one here collides with the PR that owns it.
 
 The **first push of this PR**, not its deliverable — this PR goes on to implement all of it:
 
-- `LIST_WORKTREES` and `GET_WORKTREE` defs.
-- `ProjectHomePort::{list_worktrees, get_worktree}`.
-- `WorktreeListing` and `sort_worktrees_by_size`.
-- Fixtures `packages/tddy-web/cypress/fixtures/worktree-tool-fields.json` and
-  `worktree-sort-order.json`.
-- Failing tests.
+- `tddy-tool-engine::project_home_worktree_tools`:
+  - `LIST_WORKTREES` and `GET_WORKTREE`;
+  - `WorktreeEntry`, carrying `WorktreeRow`'s fields; `disk_bytes` is `None` when the worktree was
+    never sized;
+  - `SizingProgress` and `WorktreeListing {worktrees, total, next_cursor, has_more, clamped_to,
+    sizing}`;
+  - `WORKTREE_PAGE_DEFAULT` = 50 and `WORKTREE_PAGE_MAX` = 200;
+  - `sort_worktrees_by_size`, `page_worktrees` and `worktree_tool_defs`, all `TODO(worktree-list)`.
+- `ProjectHomePort::list_worktrees(project_id)`, with a default body that bails
+  `TODO(worktree-list)`, so the daemon's port implements it at green.
+- Shared fixture `packages/tddy-web/cypress/support/fixtures/worktree-sort-order.json`, whose
+  mixed-case names pin the screen's `localeCompare` tie-break.
 
 ## Green wave
 
@@ -113,15 +120,26 @@ first), and **`GetWorktree`**, one worktree's detail as the screen's detail view
 
 ### Acceptance Tests
 
-- [ ] **Unit** `packages/tddy-tool-engine/tests/worktree_tools_parity.rs` — `list_worktrees_returns_every_worktree_row_field`: Every `tddy.v1.WorktreeRow` field in the descriptor is in the tool's row schema.
-- [ ] **Cypress component** `packages/tddy-web/cypress/component/worktreeToolParity.cy.ts` — `the tool sorts worktrees exactly as the Worktrees screen does`: `sortWorktreesBySize` on the fixture input equals the fixture's Rust-produced order.
-- [ ] **Integration** `packages/tddy-daemon-rpc/tests/worktree_tools_acceptance.rs` — `list_worktrees_pages_largest_first_with_a_total`: Three worktrees and `limit` 2: page 1 holds the two largest, `has_more`, total 3; page 2 holds the third.
-- [ ] **Integration** `same file` — `a_limit_above_the_maximum_returns_at_most_the_maximum`: `limit` 10000 returns ≤ 200.
-- [ ] **Integration** `same file` — `get_worktree_returns_the_detail_the_screen_shows`: branch_label, disk_bytes, changed_files, size_status and size_calculated_at equal the stream's row for that path.
-- [ ] **Integration** `packages/tddy-daemon/tests/project_home_remote_targets_acceptance.rs` — `list_worktrees_lists_another_hosts_worktrees`: With `daemon_instance_id` = the peer, the peer's worktrees are returned.
+- [ ] **Unit** `packages/tddy-tool-engine/tests/worktree_tools_parity.rs`:
+  - `a_listed_worktree_carries_every_field_the_screens_row_has` — descriptor; already a passing guard
+  - `worktrees_are_ordered_exactly_as_the_worktrees_screen_orders_them` — the shared fixture
+  - `a_page_holds_the_largest_first_with_the_total_and_a_cursor_to_the_rest`
+  - `the_next_cursor_continues_without_repeats_or_gaps`
+  - `no_limit_is_the_default_page_and_a_limit_above_the_maximum_is_clamped_and_says_so`
+  - `a_cursor_the_tool_did_not_issue_is_refused`
+  - `sizing_progress_counts_the_worktrees_not_being_sized_of_all_of_them`
+  - `both_tools_are_defined_with_their_arguments_described`
+- [ ] **Cypress component** `packages/tddy-web/cypress/component/worktreeToolParity.cy.ts` — the
+  screen's own `sortWorktreesBySize` over the shared fixture gives the fixture's order. Passes;
+  this pins the fixture to the screen.
+- [ ] **Integration** `packages/tddy-daemon-rpc/tests/worktree_tools_acceptance.rs` (the two-host
+  world from `tests/support/mod.rs`):
+  - `list_worktrees_lists_the_projects_worktrees_on_this_host_with_their_branch`
+  - `get_worktree_returns_the_row_the_list_holds_for_it`
+  - `an_unknown_worktree_is_refused_naming_it`
+  - `list_worktrees_lists_another_hosts_worktrees`
 
-Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests use the
-in-memory peer forwarder if it exists on the base, and the LiveKit testkit otherwise.
+Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests run in the two-host world of `tests/support/mod.rs`.
 
 ## Technical Debt & Production Readiness
 
@@ -152,10 +170,10 @@ in-memory peer forwarder if it exists on the base, and the LiveKit testkit other
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
