@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
+use tddy_agent_launch::svc_signal_delete_session::signal_session_dir;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
@@ -33,7 +34,7 @@ use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_host_service::HostServiceImpl;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
-use tddy_service::proto::session::{ListSessionsRequest, ListSessionsResponse};
+use tddy_service::proto::session::{ListSessionsRequest, ListSessionsResponse, Signal};
 use tddy_service::proto::tasks::CancelTaskRequest;
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
@@ -626,6 +627,21 @@ impl ProjectHomePort for DaemonProjectHome {
     ) -> anyhow::Result<Option<ToolCallBodies>> {
         project_home_session_follow::session_tool_call(&self.sessions_base, target, tool_call_id)
             .await
+    }
+
+    /// SIGTERM to `target`'s process, delivered as `SignalSession` delivers it, on the sessions
+    /// directory this port reads the target from (`#start-parity` 7/9). The record, worktree and
+    /// branch are left as they are.
+    async fn terminate_session(&self, target: &SessionTarget) -> anyhow::Result<()> {
+        let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
+        let session_id = target.session_id.clone();
+        tokio::task::spawn_blocking(move || {
+            signal_session_dir(&session_dir, &session_id, Signal::Sigterm as i32)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("terminating the session failed: {e}"))?
+        .map_err(status_error)?;
+        Ok(())
     }
 
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>> {

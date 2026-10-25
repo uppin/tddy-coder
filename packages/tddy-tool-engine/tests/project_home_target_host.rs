@@ -5,6 +5,7 @@
 
 use serde_json::Value;
 use tddy_tool_engine::project_home_git_tools::project_home_git_tool_defs;
+use tddy_tool_engine::project_home_terminate::TERMINATE_SESSION;
 use tddy_tool_engine::project_home_tools::{
     project_home_tool_defs, target_daemon_instance_id, DIFF_SESSION_WORKTREE,
     READ_SESSION_WORKTREE, TARGET_DAEMON_INSTANCE_ID,
@@ -14,7 +15,8 @@ use tddy_tool_engine::session_follow::{READ_SESSION_ACTIVITY, READ_SESSION_TRANS
 use tddy_tool_engine::start_options::DESCRIBE_SESSION_START_OPTIONS;
 
 /// The tools that act on a target session: read, diff, the two worktree tools, the two follow
-/// tools, the seven git tools, and the start-options describe, which names the host it describes.
+/// tools, terminate, the seven git tools, and the start-options describe, which names the host it
+/// describes.
 fn target_tool_schemas() -> Vec<(String, Value)> {
     project_home_tool_defs()
         .into_iter()
@@ -27,6 +29,7 @@ fn target_tool_schemas() -> Vec<(String, Value)> {
                 DESCRIBE_SESSION_START_OPTIONS,
                 READ_SESSION_ACTIVITY,
                 READ_SESSION_TRANSCRIPT,
+                TERMINATE_SESSION,
             ]
             .contains(&tool.name.as_str())
         })
@@ -44,8 +47,8 @@ fn every_target_tool_offers_the_targets_host_as_an_optional_described_string() {
     let schemas = target_tool_schemas();
     assert_eq!(
         schemas.len(),
-        14,
-        "read, diff, the two worktree tools, the two follow tools, the seven git tools and the start-options describe"
+        15,
+        "read, diff, the two worktree tools, the two follow tools, terminate, the seven git tools and the start-options describe"
     );
 
     for (name, schema) in schemas {

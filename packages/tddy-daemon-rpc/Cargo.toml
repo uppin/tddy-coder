@@ -19,6 +19,7 @@ tddy-coding-subagent = { path = "../tddy-coding-subagent" }
 # The project-home tools resolve targets from the same `.session.yaml` store the ListSessions RPC reads
 # (`#project-home` 5/7).
 tddy-session-activity = { path = "../tddy-session-activity" }
+tddy-agent-launch = { path = "../tddy-agent-launch" }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
