@@ -596,7 +596,7 @@ async fn an_ensured_main_is_told_it_is_the_projects_main() {
 
     // Then it names the tools a main sees and starts the project's sessions with
     assert!(prompt.contains("ListProjectSessions"), "prompt: {prompt}");
-    assert!(prompt.contains("StartProjectSession"), "prompt: {prompt}");
+    assert!(prompt.contains("StartSession"), "prompt: {prompt}");
     // And tells it that it has no shell
     assert!(prompt.contains("no shell"), "prompt: {prompt}");
 }

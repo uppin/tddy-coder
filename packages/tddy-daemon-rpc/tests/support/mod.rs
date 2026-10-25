@@ -3,8 +3,9 @@
 //!
 //! `host-a` and `host-b` each hold the same two projects, in their own sessions directory, and see
 //! every host on the roster; `host-c` is on the roster with no daemon behind it, so it never
-//! answers. A forwarded call is decoded and handed to the addressed daemon's own service, stamped as
-//! arriving over LiveKit — the transport a real peer's call arrives on.
+//! answers. A forwarded call — unary, or a start's event stream — is decoded and handed to the
+//! addressed daemon's own service, stamped as arriving over LiveKit — the transport a real peer's
+//! call arrives on.
 
 #![allow(dead_code)] // each suite uses the part of the world it needs
 
@@ -12,6 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use futures_util::StreamExt;
 use prost::Message;
 use tddy_daemon_extensions::PeerForwarder;
 use tddy_daemon_kernel::peer_forwarding::CommonRoom;
@@ -123,14 +125,35 @@ impl PeerForwarder for InProcessPeers {
 
     async fn call_server_stream(
         &self,
-        _peer_id: &str,
+        peer_id: &str,
         service: &str,
         method: &str,
-        _body: Vec<u8>,
+        body: Vec<u8>,
     ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
-        Err(Status::unimplemented(format!(
-            "the in-process peers serve no stream ({service}/{method})"
-        )))
+        let daemon = self.daemon(peer_id)?;
+        match (service, method) {
+            // A start addressed at another host: the peer runs it and streams its events back.
+            (SESSION_SERVICE, "StreamStartSession") => {
+                let req = StartSessionRequest::decode(body.as_slice()).unwrap();
+                let mut events = daemon
+                    .stream_start_session(arriving_from_a_peer(req))
+                    .await?
+                    .into_inner();
+                let (tx, rx) = mpsc::channel(16);
+                tokio::spawn(async move {
+                    while let Some(event) = events.next().await {
+                        let frame = event.map(|e| e.encode_to_vec());
+                        if tx.send(frame).await.is_err() {
+                            return;
+                        }
+                    }
+                });
+                Ok(rx)
+            }
+            other => Err(Status::unimplemented(format!(
+                "the in-process peers serve no stream {other:?}"
+            ))),
+        }
     }
 }
 

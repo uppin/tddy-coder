@@ -279,7 +279,7 @@ async fn a_project_home_session_starts_a_session_tagged_with_itself_as_orchestra
     // When
     let started = world
         .call_as_home(
-            "StartProjectSession",
+            "StartSession",
             serde_json::json!({ "session_type": "workspace" }),
         )
         .await;
@@ -310,8 +310,8 @@ async fn a_project_home_session_starts_a_session_tagged_with_itself_as_orchestra
 
 /// A project-home session starts a claude-cli session on the model it names in the tool call.
 ///
-/// The buggy behavior: `StartProjectSession`'s arguments carried no `model` and its schema
-/// advertised none, so a home session's `model` was dropped before the daemon's start, and every
+/// The buggy behavior: the start tool's arguments (then `StartProjectSession`) carried no `model`,
+/// its schema advertised none, so a home session's `model` was dropped before the daemon's start, and every
 /// `session_type = "claude-cli"` start through this tool was refused with "model is required for
 /// claude-cli sessions" — however the caller spelled the arguments.
 #[tokio::test]
@@ -322,11 +322,12 @@ async fn a_project_home_session_starts_a_claude_cli_session_on_the_model_it_name
     // When
     let started = world
         .call_as_home(
-            "StartProjectSession",
+            "StartSession",
             serde_json::json!({
                 "session_type": "claude-cli",
                 "model": TEST_MODEL,
-                "prompt": "print the current branch and stop",
+                "initial_prompt": "print the current branch and stop",
+                "branch_worktree_intent": "new_branch_from_base",
                 "new_branch_name": "home-started-claude-cli"
             }),
         )
@@ -504,7 +505,7 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "ReadLints",
             "SemanticSearch",
             "ListProjectSessions",
-            "StartProjectSession",
+            "StartSession",
             "ReadSessionWorktree",
             "DiffSessionWorktree",
             "CommitSessionWorktree",

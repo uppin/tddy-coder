@@ -8,18 +8,42 @@
 use crate::connection_service::daemon_rpc_handler::BoundJailSession;
 use prost::Message as _;
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
+use tddy_host_service::peer_routing::PeerRouting;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ListExecToolsRequest, ListExecToolsResponse, ToolDef};
 use tddy_tool_engine::project_home_tools::session_offered_catalog;
+use tddy_tool_engine::start_session_args::{HostChoice, StartChoices};
+
+/// What `StartSession`'s schema offers on this daemon: every eligible host on `routing`'s roster,
+/// and every workflow recipe this daemon supports.
+pub fn start_choices(routing: &PeerRouting) -> StartChoices {
+    StartChoices {
+        hosts: routing
+            .eligible_daemon_source()
+            .list_eligible_daemons()
+            .into_iter()
+            .map(|daemon| HostChoice {
+                daemon_instance_id: daemon.instance_id.0,
+                label: daemon.label,
+            })
+            .collect(),
+        recipes: tddy_workflow_recipes::approval_policy::supported_workflow_recipe_cli_names()
+            .iter()
+            .map(|recipe| recipe.to_string())
+            .collect(),
+    }
+}
 
 /// Serve a `ListExecTools` request relayed out of the jail built for `bound`.
 ///
 /// A request naming any other session is refused (`PermissionDenied`): the runner rewrites every
 /// request to its own session, so one that names another did not come through the runner. The role is
 /// read from the session's own record under the session directory the daemon resolved for the jail.
+/// A project-home session's `StartSession` offers `choices` ([`start_choices`]).
 pub(crate) fn list_exec_tools_from_jail(
     bound: &BoundJailSession,
     payload: &[u8],
+    choices: &StartChoices,
 ) -> Result<Vec<u8>, Status> {
     let req = ListExecToolsRequest::decode(payload)
         .map_err(|e| Status::invalid_argument(format!("decode ListExecToolsRequest: {e}")))?;
@@ -40,15 +64,17 @@ pub(crate) fn list_exec_tools_from_jail(
             bound.session_id
         ))
     })?;
-    let tools =
-        session_offered_catalog(metadata.session_role.as_deref() == Some(PROJECT_HOME_ROLE))
-            .into_iter()
-            .map(|tool| ToolDef {
-                name: tool.name,
-                description: tool.description,
-                input_schema_json: tool.input_schema_json,
-            })
-            .collect();
+    let tools = session_offered_catalog(
+        metadata.session_role.as_deref() == Some(PROJECT_HOME_ROLE),
+        choices,
+    )
+    .into_iter()
+    .map(|tool| ToolDef {
+        name: tool.name,
+        description: tool.description,
+        input_schema_json: tool.input_schema_json,
+    })
+    .collect();
     Ok(ListExecToolsResponse { tools }.encode_to_vec())
 }
 
@@ -79,7 +105,11 @@ mod tests {
             session_id: asked_as.to_string(),
             ..Default::default()
         };
-        list_exec_tools_from_jail(bound, &request.encode_to_vec()).map(|bytes| {
+        let choices = StartChoices {
+            hosts: Vec::new(),
+            recipes: Vec::new(),
+        };
+        list_exec_tools_from_jail(bound, &request.encode_to_vec(), &choices).map(|bytes| {
             ListExecToolsResponse::decode(bytes.as_slice())
                 .expect("a ListExecToolsResponse")
                 .tools

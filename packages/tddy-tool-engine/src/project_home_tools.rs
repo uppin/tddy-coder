@@ -4,7 +4,7 @@
 //! | Tool | Does |
 //! |---|---|
 //! | `ListProjectSessions` | every other session of the project on every host, with its host, status and worktree |
-//! | `StartProjectSession` | starts a session in the project, tagged with the caller as orchestrator |
+//! | `StartSession` | starts a session in the project with any New-session option, on any eligible host, linked to the caller as its orchestrator ([`crate::start_session_args`]) |
 //! | `ReadSessionWorktree` | reads a file or lists a directory in a target session's worktree |
 //! | `DiffSessionWorktree` | a target worktree's diff against its base |
 //!
@@ -24,7 +24,6 @@ use std::path::{Component, Path};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tddy_core::cli_harness::{cli_harness_requires_model, cli_harnesses};
 use tddy_worktree_service::session_git_ops::PushIdentity;
 use tddy_worktree_service::session_target::{
     resolve_session_target, HomeCaller, SessionTarget, TargetRecord,
@@ -39,10 +38,13 @@ use crate::project_home_git_tools::{
     execute_project_home_git_tool, is_project_home_git_tool, project_home_git_tool_defs,
 };
 use crate::read_only::is_project_home_allowed_tool;
+use crate::start_session_args::{
+    start_session_schema, start_session_schema_without_choices, StartChoices, StartSessionArgs,
+    START_SESSION,
+};
 use crate::ToolOutcome;
 
 pub const LIST_PROJECT_SESSIONS: &str = "ListProjectSessions";
-pub const START_PROJECT_SESSION: &str = "StartProjectSession";
 pub const READ_SESSION_WORKTREE: &str = "ReadSessionWorktree";
 pub const DIFF_SESSION_WORKTREE: &str = "DiffSessionWorktree";
 
@@ -50,10 +52,7 @@ pub const DIFF_SESSION_WORKTREE: &str = "DiffSessionWorktree";
 pub fn is_project_home_tool(name: &str) -> bool {
     matches!(
         name,
-        LIST_PROJECT_SESSIONS
-            | START_PROJECT_SESSION
-            | READ_SESSION_WORKTREE
-            | DIFF_SESSION_WORKTREE
+        LIST_PROJECT_SESSIONS | START_SESSION | READ_SESSION_WORKTREE | DIFF_SESSION_WORKTREE
     )
 }
 
@@ -62,24 +61,34 @@ pub fn is_project_home_tool(name: &str) -> bool {
 /// then the seven project-home git tools (`#project-home` 7/7).
 /// The same predicate the daemon's role guard applies at call time, so what is advertised and what
 /// is executed cannot disagree.
+///
+/// `StartSession`'s schema here names no host or recipe choices
+/// ([`start_session_schema_without_choices`]); [`session_offered_catalog`] is the daemon's answer,
+/// with them.
 pub fn project_home_offered_catalog() -> Vec<ToolDef> {
-    tool_catalog()
-        .into_iter()
-        .filter(|tool| is_project_home_allowed_tool(&tool.name))
-        .chain(project_home_tool_defs())
-        .chain(project_home_git_tool_defs())
-        .collect()
+    project_home_catalog_with(start_session_schema_without_choices())
 }
 
 /// The exec tools a session's agent is offered, by whether it is a project-home session: the
-/// project-home catalog for one, the daemon-wide catalog for any other. The one place that answer is
-/// decided, for every host that answers `ListExecTools` (the token route and the jail's bridge).
-pub fn session_offered_catalog(is_project_home: bool) -> Vec<ToolDef> {
+/// project-home catalog for one, with `StartSession`'s schema offering `choices` — the daemon's
+/// eligible hosts and supported recipes — and the daemon-wide catalog for any other. The one place
+/// that answer is decided, for every host that answers `ListExecTools` (the token route and the
+/// jail's bridge).
+pub fn session_offered_catalog(is_project_home: bool, choices: &StartChoices) -> Vec<ToolDef> {
     if is_project_home {
-        project_home_offered_catalog()
+        project_home_catalog_with(start_session_schema(choices))
     } else {
         tool_catalog()
     }
+}
+
+fn project_home_catalog_with(start_schema: Value) -> Vec<ToolDef> {
+    tool_catalog()
+        .into_iter()
+        .filter(|tool| is_project_home_allowed_tool(&tool.name))
+        .chain(project_home_tool_defs_with(start_schema))
+        .chain(project_home_git_tool_defs())
+        .collect()
 }
 
 /// One session as `ListProjectSessions` reports it.
@@ -139,23 +148,6 @@ pub(crate) fn target_host_property() -> Value {
     })
 }
 
-/// `StartProjectSession`'s arguments.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct StartProjectSessionArgs {
-    /// The session type to start (`claude-cli`, `workspace`, …).
-    pub session_type: String,
-    #[serde(default)]
-    pub prompt: String,
-    #[serde(default)]
-    pub agent: String,
-    /// Branch to create for the session; empty lets the start path name one.
-    #[serde(default)]
-    pub new_branch_name: String,
-    /// Model id for claude-cli sessions; empty is fine for a workspace start.
-    #[serde(default)]
-    pub model: String,
-}
-
 /// What the tools need from the daemon.
 ///
 /// Async because the daemon's answers read the session store and start a session on disk. The
@@ -179,12 +171,13 @@ pub trait ProjectHomePort: Send + Sync {
         home_session_id: &str,
     ) -> ListProjectSessionsResult;
 
-    /// Start a session in `project_id` with `home_session_id` as its orchestrator; its id.
+    /// Start the session `args` ask for in `project_id`, on the host they name, with
+    /// `home_session_id` as its orchestrator; its id.
     async fn start_session(
         &self,
         project_id: &str,
         home_session_id: &str,
-        args: StartProjectSessionArgs,
+        args: StartSessionArgs,
     ) -> anyhow::Result<String>;
 
     /// Every session on this daemon, as [`tddy_worktree_service::session_target`] resolves them.
@@ -195,8 +188,14 @@ pub trait ProjectHomePort: Send + Sync {
     async fn push_identity(&self, target: &SessionTarget) -> anyhow::Result<PushIdentity>;
 }
 
-/// The four tools' definitions, as advertised to a project-home session.
+/// The four tools' definitions, as a client registers them before the daemon is asked:
+/// `StartSession`'s schema names no host or recipe choices
+/// ([`start_session_schema_without_choices`]).
 pub fn project_home_tool_defs() -> Vec<ToolDef> {
+    project_home_tool_defs_with(start_session_schema_without_choices())
+}
+
+fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     vec![
         tool_def(
             LIST_PROJECT_SESSIONS,
@@ -204,9 +203,9 @@ pub fn project_home_tool_defs() -> Vec<ToolDef> {
             json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         ),
         tool_def(
-            START_PROJECT_SESSION,
-            "Start a session in this project. It is recorded as started by this project-home session.",
-            start_project_session_schema(),
+            START_SESSION,
+            "Start a session in this project, with any option the New-session form offers, on this host or another eligible one. It is recorded as started by this project-home session on the host that holds it. A branch another session owns is refused, naming the branch.",
+            start_schema,
         ),
         tool_def(
             READ_SESSION_WORKTREE,
@@ -234,64 +233,6 @@ pub fn project_home_tool_defs() -> Vec<ToolDef> {
             }),
         ),
     ]
-}
-
-/// `StartProjectSession`'s arguments as the calling agent is told them. The session types and the
-/// ones that need a model are read from the CLI harness registry, so a new harness is offered here
-/// without an edit.
-fn start_project_session_schema() -> Value {
-    let harnesses = cli_harnesses();
-    let session_types: Vec<&str> = ["tool", "workspace"]
-        .into_iter()
-        .chain(harnesses.iter().map(|harness| harness.session_type))
-        .collect();
-    let harness_list = harnesses
-        .iter()
-        .map(|harness| format!("`{}` ({})", harness.session_type, harness.label))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let needing_a_model = harnesses
-        .iter()
-        .map(|harness| harness.session_type)
-        .filter(|session_type| cli_harness_requires_model(session_type))
-        .map(|session_type| format!("`{session_type}`"))
-        .collect::<Vec<_>>()
-        .join(" and ");
-    json!({
-        "type": "object",
-        "properties": {
-            "session_type": {
-                "type": "string",
-                "enum": session_types,
-                "description": format!(
-                    "What to start. `tool`: a tddy-coder workflow session run by `agent`. \
-                     `workspace`: a worktree with no agent. Any other value runs that coding agent \
-                     interactively in a terminal: {harness_list}."
-                )
-            },
-            "prompt": {
-                "type": "string",
-                "description": "The first turn sent to the session's agent; empty starts it idle. Ignored for `workspace`."
-            },
-            "agent": {
-                "type": "string",
-                "description": "An agent id: a coding backend from the daemon's `allowed_agents`, an assistant in its registry, or a harness profile under `<tddyhome>/agents/` (which supplies its own session settings). Empty uses the session type's default."
-            },
-            "new_branch_name": {
-                "type": "string",
-                "description": "Branch to create from the project's base for the session; empty lets the start path name one. A branch another session owns is refused."
-            },
-            "model": {
-                "type": "string",
-                "description": format!(
-                    "Model id or alias for the session's agent (for `claude-cli`: `opus`, `sonnet`, …). \
-                     Required for {needing_a_model}: a start of those without one is refused. \
-                     Other session types pick their own when empty."
-                )
-            }
-        },
-        "required": ["session_type"]
-    })
 }
 
 fn tool_def(name: &str, description: &str, schema: Value) -> ToolDef {
@@ -322,7 +263,7 @@ pub async fn execute_project_home_tool(
     };
     match tool_name {
         LIST_PROJECT_SESSIONS => list_project_sessions(port, home).await,
-        START_PROJECT_SESSION => start_project_session(port, home, args).await,
+        START_SESSION => start_session(port, home, args).await,
         READ_SESSION_WORKTREE => read_session_worktree(port, home, args).await,
         DIFF_SESSION_WORKTREE => diff_session_worktree(port, home, args).await,
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
@@ -349,23 +290,17 @@ async fn list_project_sessions(port: &dyn ProjectHomePort, home: &HomeCaller) ->
     }
 }
 
-async fn start_project_session(
-    port: &dyn ProjectHomePort,
-    home: &HomeCaller,
-    args: Value,
-) -> ToolOutcome {
-    let args: StartProjectSessionArgs = match serde_json::from_value(args) {
+async fn start_session(port: &dyn ProjectHomePort, home: &HomeCaller, args: Value) -> ToolOutcome {
+    let args: StartSessionArgs = match serde_json::from_value(args) {
         Ok(a) => a,
-        Err(e) => {
-            return ToolOutcome::err(format!("{START_PROJECT_SESSION}: invalid arguments: {e}"))
-        }
+        Err(e) => return ToolOutcome::err(format!("{START_SESSION}: invalid arguments: {e}")),
     };
     match port
         .start_session(&home.project_id, &home.session_id, args)
         .await
     {
         Ok(session_id) => ToolOutcome::ok(json!({ "session_id": session_id }).to_string()),
-        Err(e) => ToolOutcome::err(format!("{START_PROJECT_SESSION}: {e:#}")),
+        Err(e) => ToolOutcome::err(format!("{START_SESSION}: {e:#}")),
     }
 }
 

@@ -20,7 +20,9 @@ use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
 use crate::placement::classify_placement;
 use crate::placement::PlacementRequest;
-use crate::start_request_checks::refuse_a_cli_start_without_a_model;
+use crate::start_request_checks::{
+    refuse_a_cli_start_without_a_model, refuse_an_orchestrated_tool_start,
+};
 
 use tddy_rpc::Response;
 use tddy_rpc::Status;
@@ -126,7 +128,30 @@ impl LaunchSessions {
         // before the project is provisioned — a session whose codebase host is wrong should not
         // leave a clone behind on the way to being rejected.
         let placement = classify_start_placement(&req, local_id, eligible_ids)?;
+        refuse_an_orchestrated_tool_start(&req)?;
 
+        // The orchestrator is recorded by this daemon — the one that created the session — so a
+        // start forwarded from the orchestrator's host links the session here, where it lives.
+        let orchestrator = trim_to_option(&req.orchestrator_session_id);
+        let started = self
+            .start_here(req, os_user, agent_def, placement, progress, cancel)
+            .await?;
+        if let Some(orchestrator) = orchestrator {
+            self.record_orchestrator(os_user, started.get_ref(), &orchestrator)?;
+        }
+        Ok(started)
+    }
+
+    /// Start `req` on this daemon, the route and the placement already decided.
+    async fn start_here(
+        &self,
+        req: StartSessionRequest,
+        os_user: &str,
+        agent_def: Option<tddy_discovery::agent_def::SpecializedAgentDef>,
+        placement: CodebasePlacement,
+        progress: &AttachmentProgressSink,
+        cancel: &CancellationToken,
+    ) -> Result<Response<StartSessionResponse>, Status> {
         // Checked here, alongside the other request-shape decisions, so a session type that does not
         // honour a caller-chosen id refuses it before anything is created rather than generating one
         // and leaving the caller pointing at a session that does not exist.
@@ -460,6 +485,46 @@ impl LaunchSessions {
             livekit_server_identity: result.livekit_server_identity,
             branch_conflict: None,
         }))
+    }
+
+    /// Record `orchestrator` in the changeset of the session `started` names. A start that created
+    /// nothing (a reported branch conflict) records nothing.
+    ///
+    /// TODO(start-parity): written once the start has returned, after the session's agent is
+    /// running, rather than in the changeset each session type first writes
+    /// (`write_initial_changeset`, the workspace start). Threading it there removes the
+    /// read-modify-write.
+    fn record_orchestrator(
+        &self,
+        os_user: &str,
+        started: &StartSessionResponse,
+        orchestrator: &str,
+    ) -> Result<(), Status> {
+        if started.session_id.is_empty() {
+            return Ok(());
+        }
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &started.session_id);
+        let recorded = tddy_core::read_changeset(&session_dir).and_then(|mut changeset| {
+            changeset.orchestrator_session_id = Some(orchestrator.to_string());
+            tddy_core::write_changeset(&session_dir, &changeset)
+        });
+        recorded.map_err(|e| {
+            Status::internal(format!(
+                "session {} was started, but its orchestrator {orchestrator} could not be recorded \
+                 in its changeset: {e}",
+                started.session_id
+            ))
+        })?;
+        log::info!(
+            "StartSession: session {} recorded with orchestrator {orchestrator}",
+            started.session_id
+        );
+        Ok(())
     }
 }
 

@@ -39,14 +39,18 @@ uses it to refuse every other tool for a read-only (project-home) session in `Ex
 
 ## Project-home tools
 
-`project_home_tools` defines `ListProjectSessions`, `StartProjectSession`, `ReadSessionWorktree` and
+`project_home_tools` defines `ListProjectSessions`, `StartSession`, `ReadSessionWorktree` and
 `DiffSessionWorktree` (`project_home_tool_defs`) and runs them (`execute_project_home_tool`) over a
 `ProjectHomePort` the daemon implements: `list_sessions`, `start_session` and `target_records` (every
 session's project, worktree, branch, base ref and activity, which
 `tddy_worktree_service::session_target` resolves). Target and path refusals are `is_error` outcomes
-naming the reason; the role gate is the daemon's. `session_offered_catalog(is_project_home)` is the
-one answer to "which exec tools is this session offered" (`project_home_offered_catalog()` for a
-project-home session, `tool_catalog()` otherwise). `project_home_diff` takes the worktree's diff
+naming the reason; the role gate is the daemon's. `session_offered_catalog(is_project_home, choices)`
+is the one answer to "which exec tools is this session offered" (the project-home catalog for a
+project-home session, its `StartSession` schema offering the daemon's eligible hosts and recipes;
+`tool_catalog()` otherwise). `start_session_args` holds `StartSession`'s arguments — every
+`StartSessionRequest` field the New-session form can send, under its proto name — the generated schema
+(`start_session_schema`), the mapping onto the request (`StartSessionArgs::into_request`), and the
+tables of fields the caller's context fills or the tool withholds. `project_home_diff` takes the worktree's diff
 against its base over a temporary `GIT_INDEX_FILE` (`read-tree HEAD`, `add -A`, `diff --cached`), so
 untracked files appear and the worktree's own index is never written; an option-shaped base ref is
 refused. `ListExecTools` is in `IN_JAIL_RELAYABLE_EXEC_TOOLS`. See

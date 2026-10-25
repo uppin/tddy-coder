@@ -25,17 +25,19 @@ use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
-use tddy_service::proto::session::{ListSessionsRequest, StartSessionRequest};
+use tddy_service::proto::session::ListSessionsRequest;
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
+use tddy_session_lifecycle::connection_service::start_choices;
 use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 use tddy_tool_engine::catalog::ToolDef;
 use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
 use tddy_tool_engine::project_home_tools::{
     execute_project_home_tool, is_project_home_tool, session_offered_catalog,
-    ListProjectSessionsResult, ListedSession, ProjectHomePort, StartProjectSessionArgs,
+    ListProjectSessionsResult, ListedSession, ProjectHomePort,
 };
+use tddy_tool_engine::start_session_args::{StartContext, StartSessionArgs};
 use tddy_worktree_service::session_git_ops::PushIdentity;
 use tddy_worktree_service::session_target::{HomeCaller, SessionTarget, TargetRecord};
 
@@ -129,8 +131,9 @@ impl ExecToolRpcHandler {
     }
 
     /// The exec tools `session_id`'s agent is offered. The role is read from the session's own record:
-    /// a project-home session is offered the project-home catalog, and any other session the daemon-wide
-    /// catalog without the project-home tools.
+    /// a project-home session is offered the project-home catalog, its `StartSession` offering this
+    /// daemon's eligible hosts and recipes, and any other session the daemon-wide catalog without the
+    /// project-home tools.
     fn session_tool_catalog(
         &self,
         os_user: &str,
@@ -148,6 +151,7 @@ impl ExecToolRpcHandler {
         })?;
         Ok(session_offered_catalog(
             metadata.session_role.as_deref() == Some(PROJECT_HOME_ROLE),
+            &start_choices(&self.peer_routing),
         ))
     }
 
@@ -354,36 +358,36 @@ impl ProjectHomePort for DaemonProjectHome {
         }
     }
 
+    /// The start runs on this daemon's start path, which forwards it to the host the arguments
+    /// name; the daemon that creates the session records `home_session_id` as its orchestrator.
     async fn start_session(
         &self,
         project_id: &str,
         home_session_id: &str,
-        args: StartProjectSessionArgs,
+        args: StartSessionArgs,
     ) -> anyhow::Result<String> {
+        let request = args.into_request(StartContext {
+            session_token: self.session_token.clone(),
+            project_id: project_id.to_string(),
+            orchestrator_session_id: home_session_id.to_string(),
+            orchestrator_daemon_instance_id: self.daemon_instance_id.clone(),
+        });
         let started = self
             .launch
-            .start_session_at_session_coordinate(Request::direct(StartSessionRequest {
-                session_token: self.session_token.clone(),
-                project_id: project_id.to_string(),
-                session_type: args.session_type,
-                agent: args.agent,
-                initial_prompt: args.prompt,
-                branch_worktree_intent: if args.new_branch_name.trim().is_empty() {
-                    String::new()
-                } else {
-                    "new_branch_from_base".to_string()
-                },
-                new_branch_name: args.new_branch_name,
-                model: args.model,
-                ..Default::default()
-            }))
+            .start_session_at_session_coordinate(Request::direct(request))
             .await
             .map_err(|status| anyhow::anyhow!(status.message().to_string()))?
             .into_inner();
-        if started.branch_conflict.is_some() {
-            anyhow::bail!("the session was not started: its branch is owned by another session");
+        if let Some(conflict) = started.branch_conflict {
+            let owner = conflict
+                .owner
+                .map(|owner| format!(" by session {}", owner.session_id))
+                .unwrap_or_default();
+            anyhow::bail!(
+                "the session was not started: branch {} is owned{owner}",
+                conflict.branch
+            );
         }
-        tag_orchestrator(&self.sessions_base, &started.session_id, home_session_id)?;
         Ok(started.session_id)
     }
 
@@ -431,19 +435,6 @@ impl ProjectHomePort for DaemonProjectHome {
             })
             .collect())
     }
-}
-
-/// Record on the new session's changeset that `home_session_id` started it.
-fn tag_orchestrator(
-    sessions_base: &Path,
-    session_id: &str,
-    home_session_id: &str,
-) -> anyhow::Result<()> {
-    let session_dir = unified_session_dir_path(sessions_base, session_id);
-    let mut changeset = tddy_core::read_changeset(&session_dir)?;
-    changeset.orchestrator_session_id = Some(home_session_id.to_string());
-    tddy_core::write_changeset(&session_dir, &changeset)?;
-    Ok(())
 }
 
 /// The project `project_id` registered for `os_user`, or why it could not be read.
