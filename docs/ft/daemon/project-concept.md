@@ -234,7 +234,9 @@ an ordinary, still read-only session, and main is set up once more.
 
 The exec tools below give the read-only main its reach over **its own project's** sessions. Only a
 session whose record carries the `project-home` role may run them; any other caller is refused with
-`PERMISSION_DENIED` naming the role.
+`PERMISSION_DENIED` naming the role — except that a session that can spawn conversations is offered
+and served the four start tools, for its own project (see
+[Conversation spawners](#conversation-spawners)).
 
 | Tool | Arguments | Answers |
 |---|---|---|
@@ -332,6 +334,34 @@ owns, an invalid option) is the tool's `is_error` result naming why, not a handl
   (`docs/dev/todo/2026-10-03-start-phases-and-code-index-warm-skip-sandboxed-tool-and-split-starts.md`).
 - A cancelled start removes what it created, including the branch it cut; see
   [Background tasks § Session starts run as tasks](background-tasks.md#session-starts-run-as-tasks).
+
+### Conversation spawners
+
+A session whose recipe gives it the conversation-spawn capability (today `grill-me`) is an
+orchestrator too, limited to starting sessions:
+
+- **Offered the four start tools.** `StartSession`, `GetSessionStart`, `CancelSessionStart` and
+  `DescribeSessionStartOptions` are added to its `ListExecTools` set (`SessionToolRole::ConversationSpawner`)
+  and served to it, with `project_id` fixed to its own project and itself as the orchestrator. The
+  other project-home tools are still refused to it; an ordinary session is offered none of them.
+- **`spawn_conversation` is the same start.** The agent's `spawn_conversation` tool (MCP and
+  `tddy-tools spawn-conversation`) takes `StartSession`'s arguments and runs the very start
+  `StartSession` runs: it begins on the streamed start path (forwarded to the host the arguments
+  name), is recorded in the orchestrator's own start ledger, and answers at once with
+  `{"start_id", "task_id", "daemon_instance_id"}`. `spawn_conversation_status` /
+  `tddy-tools spawn-conversation-status` read the ledger record (`GetSessionStart`'s answer) and
+  `spawn_conversation_cancel` / `tddy-tools spawn-conversation-cancel` cancel it
+  (`CancelSessionStart`'s). A start the form would refuse (a CLI session without a model, a branch
+  another session owns) is refused in place of a handle.
+- **Authentication.** The start authenticates as the orchestrator's own session token — the one its
+  start recorded — so a start on another host and its cancel carry it. A session holding no token
+  starts nothing.
+- **No defaults inherited.** A `claude-cli` conversation names its own `model`; the orchestrator link
+  is `orchestrator_session_id`, not `stack_parent`.
+- **Known limitation.** A spawner's tool call forwarded from a host that does not hold the session is
+  refused: the owning daemon's `ListSessions` row carries the role, not the recipe, so the capability
+  cannot be confirmed there
+  ([TODO](../../dev/todo/2026-10-26-forwarded-conversation-spawner-is-refused-the-start-tools.md)).
 
 ### Start options
 

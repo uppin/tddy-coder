@@ -8,7 +8,7 @@ subagent turn-control changeset
 **5.4× over**
 **Thresholds breached:** length 2,677 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
-**Status:** Open — regressed 2026-10-23 (+24 in #700, `#project-home` 5/7) — unclaimed
+**Status:** Open — regressed 2026-10-26 (+48 in #758, `#start-parity` 9/9) — unclaimed
 
 ## Measurement history
 
@@ -27,6 +27,7 @@ subagent turn-control changeset
 | 2026-10-08 | — | **worse** by 23 in #516 (`#keyring` 9/9): 2,808 → 2,831 production lines by the inline-test-block rule on `origin/master` and on the branch (the earlier rows were taken by other counts and are not comparable). The `github-token` request in the two PR tools and `real_gh` / `pr_search_impl`; the client itself is its own module (`github_credential.rs`). Deferred with consent — the file is the subject of the split already deferred above |
 | 2026-10-23 | 2,832 → 2,856 | **worse** by 24 in #700 (`#project-home` 5/7), by the inline-test-block rule on `origin/feature/project-home/home-session` and HEAD: the project-home tool defs chained into the registered catalog, `advertised_tools_admitting`, and `list_tools` asking the daemon per listing (refusing on a failed ask). The admission logic is its own module (`exec_tool_admission.rs`, 77 production lines). Not split: stack-shared |
 | 2026-10-24 | +6 (wc 3,922 → 3,928) | **worse** by 6 in PR #722 (`#coagents` 3/8): `subagent_resume_tool` parses the `permission` argument and the schema registers it; the parse and the schema property live in the new `permission_answer_arg.rs`. Not split: stack-shared |
+| 2026-10-26 | 3,037 → 3,085 | **worse** by 48 in #758 (`#start-parity` 9/9), by the inline-test-block rule on `origin/feature/start-parity/disk-refresh` and HEAD: `spawn_conversation` takes `StartSession`'s arguments (`SpawnConversationInput` advertised under `StartSession`'s schema), the new `spawn_conversation_status` / `spawn_conversation_cancel` tools and their dispatch arms, and the shared `relay_to_daemon`. Split deferred by developer instruction (code issues recorded, not solved, in the `#start-parity` stack) |
 
 ## What the tool found
 

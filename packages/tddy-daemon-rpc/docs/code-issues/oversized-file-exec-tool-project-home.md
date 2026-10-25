@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon-rpc/src/exec_tool/project_home.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-25 — `/pr-wrap` step 3.5 file-length gate on #753 (`#start-parity` 4/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **788 production lines** · budget 500 · 1.5× over
-**Thresholds breached:** length 788 > 500
+**Metrics:** **641 production lines** (2026-10-26) · budget 500 · 1.3× over
+**Thresholds breached:** length 641 > 500
 **Restructure:** not designed
-**Status:** Open — split deferred: the file is stack-shared (every `#start-parity` node implements its project-home port methods here), and a split mid-stack would conflict in every later node; the follow-up is after the stack lands — **unclaimed**
+**Status:** Open — partially fixed (641 > 500: seams B and C remain); split deferred: the file is stack-shared, the follow-up is after the stack lands — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seams are a first reading
 
 ## Measurement history
@@ -18,11 +18,11 @@
 | 2026-10-25 | 730 | **regressed.** `#start-parity` 6/9 (#755): 708 → 730 (+22) — `DaemonProjectHome`'s `session_activity`, `session_transcript` and `session_tool_call` port methods, each delegating; the reads themselves are the new `exec_tool/project_home_session_follow.rs` (121). **Split deferred by developer instruction** (stack-shared) |
 | 2026-10-25 | 746 | **regressed.** `#start-parity` 7/9 (#756): 730 → 746 (+16) — `DaemonProjectHome::terminate_session`, delegating to `tddy_agent_launch::svc_signal_delete_session::signal_session_dir` (the `SignalSession` body, now shared). **Split deferred by developer instruction** (stack-shared) |
 | 2026-10-26 | 788 | **regressed.** `#start-parity` 8/9 (#757): 746 → 788 (+42) — `DaemonProjectHome::refresh_worktree_disk_usage` (membership check, enqueue through `WorktreeSizeCalculator`) and its imports. **Split deferred by developer instruction** (stack-shared) |
+| 2026-10-26 | 641 | **better, not clean.** `#start-parity` 9/9 (#758): 788 at its base (`#start-parity` 8/9 tip) → 641 (−147) — the start's begin-and-record, its cancel and `StartedSessionListings` moved to `tddy-agent-launch/src/conversation_start.rs` (`LaunchSessions::begin_recorded_start` / `cancel_recorded_start`, shared with the conversation-spawn handler), and the ledger's once-per-process recovery to `StartLedger::recovered_in_session_dir`; `project_home_caller` admits a conversation spawner for the four start tools. Seam A is done. **Split deferred by developer instruction** (stack-shared) |
 
 ## What would close it — candidate seams (not proven)
 
 | Seam | Items |
 |---|---|
-| A | the start methods and `StartedSessionListings` → `exec_tool/project_home_start.rs` |
 | B | the session listing (`rows`, `session_rows`, `list_sessions`, `list_peer_sessions`) |
 | C | the caller resolution and tool-call log (`project_home_caller`, `record_call`) |

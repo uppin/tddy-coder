@@ -11,14 +11,18 @@ Code: `src/host_session_service.rs`. Where the socket is bound and who registers
 ## Wire
 
 JSON over `tddy-stdio` as `tddy.host.HostSessionService`, with the service and method names
-(`HOST_SESSION_SERVICE`, `SPAWN_CONVERSATION_METHOD`, `GITHUB_TOKEN_METHOD`) defined in
+(`HOST_SESSION_SERVICE`, `SPAWN_CONVERSATION_METHOD`, `START_CONVERSATION_METHOD`,
+`CONVERSATION_START_STATUS_METHOD`, `CONVERSATION_START_CANCEL_METHOD`, `GITHUB_TOKEN_METHOD`) defined in
 `tddy-toolcall` so the coder-side client and this crate agree without depending on each other. It is
 not a `.proto` service: there is nothing to regenerate, and nothing in the `unbundle_service_split`
 closed-world RPC list.
 
 | Method | Answers from | Returns |
 |---|---|---|
-| `SpawnConversation` | the session's conversation handler (grill-me only) | the spawned conversation |
+| `SpawnConversation` | the session's conversation handler (grill-me only) | the spawned conversation (legacy prompt-only shape) |
+| `StartConversation` | the conversation handler's `start_conversation`, from `StartSession`'s arguments | the start's handle `{start_id, task_id, daemon_instance_id}` |
+| `ConversationStartStatus` | the conversation handler's `conversation_start_status` | the orchestrator's start-ledger record |
+| `ConversationStartCancel` | the conversation handler's `cancel_conversation_start` | `{start_id, cancel_requested: true}` |
 | `GithubToken` | the session's `GithubCredentialHandler` | the pinned account's token, or the refusal verbatim |
 
 A host that predates a method answers `unimplemented`, so a new method is additive. Every request

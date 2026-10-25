@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-tool-engine/src/project_home_tools.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-25 — `/pr-wrap` step 3.5 file-length gate on #750 (`#start-parity` 1/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **660 production lines** · budget 500 · 1.3× over
-**Thresholds breached:** length 660 > 500
+**Metrics:** **699 production lines** (2026-10-26) · budget 500 · 1.4× over
+**Thresholds breached:** length 699 > 500
 **Restructure:** not designed
 **Status:** Open — split deferred: the file is stack-shared (later `#start-parity` nodes add tools to it), and a split mid-stack would conflict in every one; the follow-up is after the stack lands — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seams are a first reading
@@ -20,6 +20,7 @@
 | 2026-10-25 | 632 | **regressed.** `#start-parity` 6/9 (#755): 601 → 632 (+31) — `ReadSessionActivity` / `ReadSessionTranscript` in the module table, `is_project_home_tool` and `is_project_home_target_tool`, `ProjectHomePort::{session_activity, session_transcript, session_tool_call}` and the dispatch arm; the tools themselves are the new `session_follow.rs` (376). **Split deferred by developer instruction** (stack-shared) |
 | 2026-10-25 | 643 | **regressed.** `#start-parity` 7/9 (#756): 632 → 643 (+11) — `TerminateSession` in the module table, `is_project_home_tool` and `is_project_home_target_tool`, `ProjectHomePort::terminate_session`, the catalogue entry and the dispatch arm; the tool itself is the new `project_home_terminate.rs` (62). **Split deferred by developer instruction** (stack-shared) |
 | 2026-10-26 | 660 | **regressed.** `#start-parity` 8/9 (#757): 643 → 660 (+17) — `RefreshWorktreeDiskUsage` in the module table, `is_project_home_tool` and `is_project_home_target_tool`, `ProjectHomePort::refresh_worktree_disk_usage`, the catalogue entry and the dispatch arm; the tool itself is the new `project_home_disk_refresh.rs` (80). **Split deferred by developer instruction** (stack-shared) |
+| 2026-10-26 | 699 | **regressed.** `#start-parity` 9/9 (#758): 660 at its base (`#start-parity` 8/9 tip) → 699 (+39) — `SessionToolRole`, `is_conversation_spawner_tool` and `session_offered_catalog_for` (a conversation spawner's catalogue: the daemon-wide one plus the four start tools). **Split deferred by developer instruction** (stack-shared) |
 
 ## What would close it — candidate seams (not proven)
 
