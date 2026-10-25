@@ -13,9 +13,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use tddy_agent_backend::{
-    PermissionDecision, PermissionHandler, PermissionOptionView, PermissionRequest,
-};
+use tddy_agent_backend::{PermissionDecision, PermissionOptionView, PermissionRequest};
 
 use crate::parked_permissions::ParkedPermissions;
 
@@ -141,16 +139,31 @@ impl ApprovalRoutes {
                 },
             ],
         };
+        let (request_id, answered) = permissions.park(request);
+        // Until the request is answered, dropping this approval cancels that request alone. A
+        // client that disconnects drops the call in flight, and the agent must not be left waiting
+        // on an answer nobody is waiting to give.
+        let mut parking = Parking {
+            permissions: Arc::clone(&permissions),
+            request_id,
+            armed: true,
+        };
         let timeout = self.timeout;
-        match tokio::time::timeout(timeout, permissions.decide(request)).await {
-            Ok(PermissionDecision::Selected { option_id }) => Ok(option_id == ALLOW),
-            Ok(PermissionDecision::Cancelled) => Ok(false),
+        match tokio::time::timeout(timeout, answered).await {
+            Ok(Ok(PermissionDecision::Selected { option_id })) => {
+                parking.disarm();
+                Ok(option_id == ALLOW)
+            }
+            Ok(Ok(PermissionDecision::Cancelled)) | Ok(Err(_)) => {
+                parking.disarm();
+                Ok(false)
+            }
             Err(_elapsed) => {
+                // Still armed: returning drops `parking`, which cancels this request alone.
                 log::info!(
                     "a permission for tool {tool_name} on conversation {conversation_id} was not \
                      answered within {timeout:?}; it is denied"
                 );
-                permissions.cancel_pending();
                 Ok(false)
             }
         }
@@ -181,6 +194,29 @@ impl ApprovalRoutes {
             ));
         }
         Ok(Arc::clone(permissions))
+    }
+}
+
+/// A request parked for an approval that is still waiting on it. Dropped while still armed, it
+/// cancels exactly that request; disarmed once the request has been answered, when there is nothing
+/// left to cancel.
+struct Parking {
+    permissions: Arc<ParkedPermissions>,
+    request_id: String,
+    armed: bool,
+}
+
+impl Parking {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for Parking {
+    fn drop(&mut self) {
+        if self.armed {
+            self.permissions.cancel_request(&self.request_id);
+        }
     }
 }
 
