@@ -3,10 +3,12 @@
 
 use pretty_assertions::assert_eq;
 use tddy_coder::session_participant::pending_question::{
-    pending_question_for_mode, record_pending_question,
+    pending_question_for_mode, record_pending_question, spawn_pending_question_recorder,
 };
 use tddy_core::pending_question::{read_pending_question, PendingQuestion};
-use tddy_core::{AppMode, ClarificationQuestion, QuestionOption};
+use tddy_core::{
+    AppMode, ClarificationQuestion, ModeChangedDetails, PresenterEvent, QuestionOption,
+};
 
 fn a_clarification(multi_select: bool) -> ClarificationQuestion {
     ClarificationQuestion {
@@ -106,4 +108,59 @@ fn the_question_is_recorded_while_asked_and_cleared_after() {
 
     // Then it is cleared
     assert_eq!(read_pending_question(session_dir.path()).unwrap(), None);
+}
+
+fn mode_changed(mode: AppMode) -> PresenterEvent {
+    PresenterEvent::ModeChanged(ModeChangedDetails {
+        mode,
+        plan_refinement_pending: false,
+        skills_project_root: None,
+        awaiting_open_answer: false,
+    })
+}
+
+#[tokio::test]
+async fn the_recorder_follows_the_presenters_mode_until_its_events_end() {
+    // Given a recorder on a session's presenter events
+    let session_dir = tempfile::tempdir().unwrap();
+    let (events, rx) = tokio::sync::broadcast::channel(8);
+    let recorder = spawn_pending_question_recorder(rx, session_dir.path().to_path_buf());
+
+    // When the workflow asks, then runs on, and the presenter goes away
+    events
+        .send(mode_changed(AppMode::TextInput {
+            prompt: "Name the branch".to_string(),
+        }))
+        .unwrap();
+    events.send(mode_changed(AppMode::Running)).unwrap();
+    drop(events);
+    recorder.await.unwrap();
+
+    // Then the question was cleared once the workflow ran on, and the recorder stopped
+    assert_eq!(read_pending_question(session_dir.path()).unwrap(), None);
+}
+
+#[tokio::test]
+async fn the_recorder_keeps_the_question_while_it_is_asked() {
+    // Given
+    let session_dir = tempfile::tempdir().unwrap();
+    let (events, rx) = tokio::sync::broadcast::channel(8);
+    let recorder = spawn_pending_question_recorder(rx, session_dir.path().to_path_buf());
+
+    // When
+    events
+        .send(mode_changed(AppMode::TextInput {
+            prompt: "Name the branch".to_string(),
+        }))
+        .unwrap();
+    drop(events);
+    recorder.await.unwrap();
+
+    // Then
+    assert_eq!(
+        read_pending_question(session_dir.path())
+            .unwrap()
+            .map(|q| q.question),
+        Some("Name the branch".to_string())
+    );
 }

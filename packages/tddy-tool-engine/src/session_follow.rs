@@ -63,7 +63,8 @@ pub struct ActivityPage {
 pub struct TranscriptItem {
     /// The frame's position from the oldest; what the cursor counts in.
     pub seq: u64,
-    /// `agent_message`, `user_message`, `agent_thought` or `tool_call`.
+    /// `agent_message`, `user_message`, `agent_thought`, `tool_call` (its text is the call's title),
+    /// `plan` or `other`.
     pub kind: String,
     pub text: String,
     /// Set on a tool call; ask with it for the call's whole input and output.

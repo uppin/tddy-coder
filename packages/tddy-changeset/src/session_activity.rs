@@ -114,6 +114,10 @@ pub struct HookEvent {
     /// elicitation_dialog / idle_prompt / etc.
     #[serde(default)]
     pub notification_type: Option<String>,
+    /// The agent's own words, when the event carries them — on a `Notification`, what it is
+    /// waiting on.
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 impl HookEvent {

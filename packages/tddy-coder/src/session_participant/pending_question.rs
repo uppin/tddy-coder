@@ -66,6 +66,8 @@ pub fn spawn_pending_question_recorder(
                         );
                     }
                 }
+                // A lagged receiver skipped events it cannot recover; the last recorded question
+                // stands until the next `ModeChanged` replaces or clears it.
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }

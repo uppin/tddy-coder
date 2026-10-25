@@ -32,9 +32,6 @@ use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_host_service::HostServiceImpl;
 use tddy_rpc::{Request, Status};
-use tddy_service::proto::acp::{
-    acp_agent_message, content_block, session_update, AcpAgentMessage, ContentChunk,
-};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{ListSessionsRequest, ListSessionsResponse};
 use tddy_service::proto::tasks::CancelTaskRequest;
@@ -64,6 +61,7 @@ use tddy_worktree_service::session_target::{HomeCaller, SessionTarget, TargetRec
 use tddy_worktree_service::worktrees::{project_worktree_snapshot, WorktreeSizeCalculator};
 
 use super::project_home_remote::PeerSessionLists;
+use super::project_home_session_follow;
 use super::project_home_start_options::{describe_start_options, StartOptionsSources};
 use super::ExecToolRpcHandler;
 use crate::families::ProviderAccountsPort;
@@ -611,33 +609,14 @@ impl ProjectHomePort for DaemonProjectHome {
     }
 
     async fn session_activity(&self, target: &SessionTarget) -> anyhow::Result<SessionActivity> {
-        let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
-        tokio::task::spawn_blocking(move || {
-            Ok(SessionActivity {
-                records: tddy_core::agent_activity::read_all_agent_activity(&session_dir)?,
-                pending_question: tddy_core::pending_question::read_pending_question(&session_dir)?,
-            })
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("reading the session's activity failed: {e}"))?
+        project_home_session_follow::session_activity(&self.sessions_base, target).await
     }
 
-    /// The frames `GetAcpReplayPage` pages, bodies stripped the way it strips them, one item each.
     async fn session_transcript(
         &self,
         target: &SessionTarget,
     ) -> anyhow::Result<Vec<TranscriptItem>> {
-        let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
-        tokio::task::spawn_blocking(move || {
-            let frames = tddy_service::acp_replay::read_session_transcript(&session_dir)?;
-            Ok(frames
-                .iter()
-                .enumerate()
-                .map(|(seq, frame)| transcript_item(seq as u64, frame))
-                .collect())
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("reading the session's transcript failed: {e}"))?
+        project_home_session_follow::session_transcript(&self.sessions_base, target).await
     }
 
     async fn session_tool_call(
@@ -645,20 +624,8 @@ impl ProjectHomePort for DaemonProjectHome {
         target: &SessionTarget,
         tool_call_id: &str,
     ) -> anyhow::Result<Option<ToolCallBodies>> {
-        let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
-        let tool_call_id = tool_call_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            Ok(
-                tddy_service::acp_replay::tool_call_detail(&session_dir, &tool_call_id)?.map(
-                    |detail| ToolCallBodies {
-                        raw_input: detail.raw_input,
-                        raw_output: detail.raw_output,
-                    },
-                ),
-            )
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("reading the tool call failed: {e}"))?
+        project_home_session_follow::session_tool_call(&self.sessions_base, target, tool_call_id)
+            .await
     }
 
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>> {
@@ -677,50 +644,6 @@ impl ProjectHomePort for DaemonProjectHome {
                 is_active: row.entry.is_active,
             })
             .collect())
-    }
-}
-
-/// One ACP frame as a transcript item: its kind, and the text it carries (a tool call's title).
-fn transcript_item(seq: u64, frame: &AcpAgentMessage) -> TranscriptItem {
-    let update = match &frame.msg {
-        Some(acp_agent_message::Msg::SessionUpdate(n)) => {
-            n.update.as_ref().and_then(|u| u.update.as_ref())
-        }
-        _ => None,
-    };
-    let (kind, text, tool_call_id) = match update {
-        Some(session_update::Update::UserMessageChunk(c)) => ("user_message", chunk_text(c), ""),
-        Some(session_update::Update::AgentMessageChunk(c)) => ("agent_message", chunk_text(c), ""),
-        Some(session_update::Update::AgentThoughtChunk(c)) => ("agent_thought", chunk_text(c), ""),
-        Some(session_update::Update::ToolCall(tc)) => (
-            "tool_call",
-            tc.title.clone(),
-            tc.tool_call_id.as_ref().map_or("", |id| id.value.as_str()),
-        ),
-        Some(session_update::Update::ToolCallUpdate(tc)) => (
-            "tool_call",
-            tc.fields
-                .as_ref()
-                .and_then(|f| f.title.clone())
-                .unwrap_or_default(),
-            tc.tool_call_id.as_ref().map_or("", |id| id.value.as_str()),
-        ),
-        Some(session_update::Update::Plan(_)) => ("plan", String::new(), ""),
-        _ => ("other", String::new(), ""),
-    };
-    TranscriptItem {
-        seq,
-        kind: kind.to_string(),
-        text,
-        tool_call_id: tool_call_id.to_string(),
-        truncated: false,
-    }
-}
-
-fn chunk_text(chunk: &ContentChunk) -> String {
-    match chunk.content.as_ref().and_then(|c| c.block.as_ref()) {
-        Some(content_block::Block::Text(t)) => t.text.clone(),
-        _ => String::new(),
     }
 }
 

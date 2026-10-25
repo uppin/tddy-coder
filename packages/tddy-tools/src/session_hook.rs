@@ -79,17 +79,11 @@ pub fn session_status_request(
         .filter(|s| !s.is_empty())
         .unwrap_or(args.event.as_str());
     let status = activity_status_from_hook(hook_event_name, notification_type.as_deref())?;
-    let message = if status == SessionActivityStatus::WaitingForInput {
-        serde_json::from_str::<serde_json::Value>(stdin_json)
-            .ok()
-            .and_then(|v| {
-                v.get("message")
-                    .and_then(|m| m.as_str().map(str::to_string))
-            })
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
+    let message = match status {
+        SessionActivityStatus::WaitingForInput => parsed.as_ref().and_then(|ev| ev.message.clone()),
+        _ => None,
+    }
+    .unwrap_or_default();
     Some(ReportSessionStatusRequest {
         session_id: args.session.clone(),
         hook_token: args.hook_token.clone(),
