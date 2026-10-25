@@ -31,6 +31,7 @@
 pub mod account_linking_provider;
 pub mod auth;
 pub mod codex_oauth_relay;
+pub mod dev_vault;
 pub mod first_login_admission;
 pub mod github_pr_credentials;
 mod local_token;

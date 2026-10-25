@@ -181,6 +181,7 @@ pub fn build_auth_entries_admitting(
         return Ok(AuthBuildResult::unauthenticated());
     };
     let lifetimes = crate::vault_lifetimes::VaultLifetimes::of(github)?; // refused past its ceiling
+    crate::dev_vault::vaults_without_passphrase(github)?; // refused without a stub provider
 
     // Where each operator's credential vault lives — the GitHub access token a real login granted,
     // sealed under a key the operator's vault passphrase derives, so the daemon can later read that
@@ -501,17 +502,26 @@ impl LiveKitTokenServiceTrait for LiveKitTokenServiceImpl {
 ///
 /// `credential_vaults`, when present, is where each real login's GitHub access token is sealed. A
 /// stub provider stores nothing regardless — its token is synthetic (PRD D12).
+///
+/// `vaults_without_passphrase` is the development exclusion (`crate::dev_vault`), already refused
+/// at startup for any provider but the stub.
 fn auth_service_entry<P: GitHubOAuthProvider>(
     provider: P,
     tokens: &SessionTokens,
     credential_vaults: Option<Arc<SessionVaults>>,
     admission: Option<Arc<dyn LoginAdmission>>,
+    vaults_without_passphrase: bool,
 ) -> ServiceEntry {
     let service = AuthServiceImpl::new_signed(
         provider,
         tokens.signer().clone(),
         Arc::clone(tokens.verifier()) as Arc<dyn tddy_github::SessionTokenAuthority>,
     );
+    let service = if vaults_without_passphrase {
+        service.with_vaults_without_passphrase()
+    } else {
+        service
+    };
     let service = match admission {
         Some(admission) => service.with_login_admission(admission),
         None => service,
