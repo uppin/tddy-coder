@@ -118,7 +118,7 @@ mod tests {
         // When the advertised exec tools are read
         let advertised = advertised_exec_names(&admitted);
 
-        // Then exactly the read-only tools, the six project-home tools and the seven git tools, and
+        // Then exactly the read-only tools, the project-home tools and the seven git tools, and
         // no write or shell tool
         assert_eq!(
             advertised,
@@ -130,6 +130,8 @@ mod tests {
                 "SemanticSearch",
                 "ListProjectSessions",
                 "StartSession",
+                "GetSessionStart",
+                "CancelSessionStart",
                 "ReadSessionWorktree",
                 "DiffSessionWorktree",
                 "ListWorktrees",

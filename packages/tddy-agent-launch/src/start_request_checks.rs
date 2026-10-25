@@ -12,7 +12,7 @@ use tddy_session_split::service_util;
 
 use tddy_rpc::Status;
 
-use tddy_service::proto::session::StartSessionResponse;
+use tddy_service::proto::session::{BranchConflict, StartSessionResponse};
 
 use tddy_service::proto::session::{GithubSource, StartSessionRequest};
 
@@ -110,6 +110,29 @@ pub(crate) fn refuse_an_orchestrated_tool_start(req: &StartSessionRequest) -> Re
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 impl LaunchSessions {
+    /// The refusals a start the caller is about to begin meets before it creates anything: a CLI
+    /// session without a model, a `tool` session with an orchestrator, and a requested branch another
+    /// session owns (`Some`, naming the owner). The start core makes the same checks once its task
+    /// has named itself, which is too late for the caller to be told by refusal, so a caller that
+    /// answers with a handle asks these first (`#start-parity` 4/9).
+    pub async fn refuse_a_start_before_it_begins(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+    ) -> Result<Option<BranchConflict>, Status> {
+        refuse_a_cli_start_without_a_model(req)?;
+        refuse_an_orchestrated_tool_start(req)?;
+        self.owned_branch_conflict(os_user, req).await
+    }
+
+    /// Signal the task `task_id` this host runs, as a `CancelTask` does; whether it is registered
+    /// here (`#start-parity` 4/9).
+    pub async fn cancel_local_task(&self, task_id: &str) -> bool {
+        self.task_registry
+            .cancel_task(&tddy_task::TaskId(task_id.to_string()))
+            .await
+    }
+
     pub(super) fn eligible_daemon_ids(&self) -> (String, Vec<String>) {
         let local_id = local_instance_id_for_config(&self.config);
         let eligible_rows = self
