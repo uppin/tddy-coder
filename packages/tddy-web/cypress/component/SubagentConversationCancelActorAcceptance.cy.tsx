@@ -89,6 +89,8 @@ describe("Agent conversation cancel — the daemon attributes it, the web names 
         sessionId: SESSION_ID,
         daemonInstanceId: HOST,
         conversationId: CONVERSATION_ID,
+        // closing the pane ends the conversation; only a main agent's `subagent_cancel` keeps one
+        keepConversation: false,
       });
     });
   });
