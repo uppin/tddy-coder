@@ -245,6 +245,8 @@ session whose record carries the `project-home` role may run them; any other cal
 | `DiffSessionWorktree` | `session_id`, `daemon_instance_id?` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
 | `ListWorktrees` | `cursor?`, `limit?` (50 by default, at most 200), `daemon_instance_id?` | `{worktrees, total, next_cursor, has_more, clamped_to?, sizing: {done, total}}`: the project's worktrees on that host as the **Worktrees screen** shows them — each row carries the screen's `WorktreeRow` fields (`disk_bytes` absent when never sized) — in the screen's order: largest first, never-sized last, then by name. Pages resume after the last row by sort position, so a size that changes between pages neither repeats nor skips a row; a cursor the tool did not issue is refused, and a larger `limit` is clamped with `clamped_to` saying so. `sizing` counts the rows not being sized, of all of them. Starts no size calculation |
 | `GetWorktree` | `path` (as `ListWorktrees` lists it), `daemon_instance_id?` | `{worktree, session_id}`: that row, and the session on that host whose worktree it is (`null` when none). A path that is not one of the project's worktrees is refused naming it |
+| `ReadSessionActivity` | `session_id`, `daemon_instance_id?`, `cursor?`, `limit?`, `statuses?` (`running`, `completed`, `error`; all when empty) | `{items, next_cursor, has_more, clamped_to?, pending_question}`: the session's tool calls (`agent-activity.jsonl` records, each with its `activity_seq`), oldest first, after `cursor`, and the question it waits on, or `null`. See [Following a session](#following-a-session) |
+| `ReadSessionTranscript` | `session_id`, `daemon_instance_id?`, `cursor?`, `limit?`, `direction?` (`newest_first` (default) or `from_cursor`), `tool_call_id?` | `{items: [{seq, kind, text, tool_call_id, truncated}], next_cursor, has_more, clamped_to?}`: the frames the web's Activities view pages (`GetAcpReplayPage`), each text cut at 4096 bytes and marked `truncated`; with `tool_call_id`, `{tool_call_id, raw_input, raw_output}` whole instead (`GetAcpToolCallDetail`). See [Following a session](#following-a-session) |
 
 - **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
   optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
@@ -261,7 +263,7 @@ session whose record carries the `project-home` role may run them; any other cal
   limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
   lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
   names it is an approximation and may order equal-sized worktrees differently from the screen.
-- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, every git tool) naming another host is
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
@@ -363,6 +365,38 @@ answers them on demand, each from the RPC the form calls, on the host `daemon_in
   (`packages/tddy-tool-engine/src/start_options.rs`) and run, with the form's own TypeScript
   functions, over one shared fixture
   (`packages/tddy-web/cypress/support/fixtures/stack-parent-candidates.json`).
+
+### Following a session
+
+`ReadSessionActivity` and `ReadSessionTranscript` let an orchestrator follow a session of its project
+the way a person follows it in the web UI, on any eligible host.
+
+- **One paging contract, and no unpaged call.** Both take `cursor` (empty for the start) and `limit`
+  (default 50, at most 200; a larger value is clamped, and `clamped_to` says so) and answer `items`,
+  `next_cursor` and `has_more`. A cursor no page returned is refused as an `is_error` result naming
+  `invalid cursor`.
+- **Activity pages forward** by `activity_seq`, so polling with the last `next_cursor` returns
+  exactly what happened since; on an empty page `next_cursor` is the cursor passed. It reads every
+  call of the session, not the 500-call tail the session view shows. `statuses` filters by call state
+  and still pages by sequence: `agent-activity.jsonl` records only tool calls, so state is the kind
+  there is.
+- **The transcript pages newest first** by default: an empty cursor is the newest page, each page is
+  oldest first, and `next_cursor` is the page's first `seq` (pass it back for the page before).
+  `from_cursor` reads forward instead, and its `next_cursor` is the position after the page. An
+  item's `seq` is its position in the transcript `GetAcpReplayPage` pages, and its `kind` is
+  `user_message`, `agent_message`, `agent_thought`, `tool_call` (its text is the call's title),
+  `plan` or `other`. A claude-cli session's transcript holds tool calls only: its user and
+  assistant text is not kept on the server
+  ([TODO](../../dev/todo/2026-10-25-claude-cli-transcript-has-no-conversation-text.md)).
+- **The pending question.** Every activity page carries `pending_question`, `{kind, header, question,
+  options, allow_other}` or `null`. It is kept in the session directory as `pending-question.json`,
+  beside the `pending_elicitation` flag, by two writers:
+  - a **tool session's** own process, from its presenter's mode: a select (`kind: select`, with the
+    clarification's header, options and `allow_other`), a multi-select (`multi_select`) or a
+    free-text prompt (`text`). Any other mode clears it.
+  - the **daemon**, for a **claude-cli session**: the session hook sends the agent's own `message`
+    with the `WaitingForInput` status (`ReportSessionStatusRequest.message`), recorded as
+    `kind: permission`. The next status — or a wait reported with no message — clears it.
 
 ### Git tools
 

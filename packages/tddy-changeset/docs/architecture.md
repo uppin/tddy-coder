@@ -33,6 +33,7 @@ budget.
 | `session_provider_account` | the provider account a session runs on: `SessionProviderAccount { account_id, model }`, `write_session_provider_account`, `read_session_provider_account` (`Ok(None)` when the session runs on its vendor) |
 | `session_metadata`, `session_agent`, `session_activity`, `session_label`, `session_participant_metadata`, `session_context` | the per-session files beside the changeset |
 | `agent_activity` | the agent tool-call activity log |
+| `pending_question` | the question a session is waiting on: `PendingQuestion`, `write_pending_question`, `clear_pending_question`, `read_pending_question` |
 | `elapsed_format`, `source_path` | small formatting and path helpers |
 
 ## Session GitHub source (`session_github_source`)
@@ -84,7 +85,23 @@ in `session_metadata.rs`: `a_session_without_a_resume_token_writes_no_resume_tok
 - **`StackNode.display_order: Option<u32>`**: the operator-visible row position, persisted so it is independent of the DAG. A merge, a repoint or a re-parenting rewrites `parents` and therefore the topology, and rows must not move under the operator when they do. Additive and omitted when unset.
 - **Stack::display_order() -> Vec\<String\>**: the render order, beside `topo_order`. Sort key `(display_order.unwrap_or(u32::MAX), topological index, node_id)`. **Never fails** — it is on a render path, so a cycle degrades the tie-break to declaration order rather than erroring, and no node is ever dropped. Numbering happens on *write* (`pr_stack::assign_missing_display_order`), never on read: backfilling inside `read_changeset` would make the value returned differ from the bytes on disk.
 
+## Pending question (`pending_question`)
+
+- **`pending-question.json`** (`PENDING_QUESTION_FILE`) in the session directory holds the one
+  question the session waits on: `PendingQuestion {kind, header, question, options, allow_other}`,
+  `kind` being `select`, `multi_select`, `text` or `permission`. `.session.yaml`'s
+  `pending_elicitation` says *that* the session waits; this file says *on what*. It is its own file
+  rather than a `SessionMetadata` field, which would have touched every exhaustive metadata literal.
+- **write_pending_question** replaces any earlier question by writing a sibling temp file and
+  renaming it over the real one, so a reader sees the whole old or the whole new question.
+  **clear_pending_question** removes it and is idempotent. **read_pending_question** answers
+  `Ok(None)` when the file is absent.
+- Two writers keep it: a `tool` session's own process from its presenter's mode
+  (`tddy-coder` `session_participant::pending_question`), and the daemon's `ReportSessionStatus`
+  for a claude-cli session (`tddy-session-activity` `service/hook_reports.rs`). The reader is
+  `ReadSessionActivity` (`tddy-tool-engine` `session_follow`).
+
 ## Agent activity (`agent_activity`)
 
 - **AgentActivityRecord**: the shared, single cross-crate shape for one agent tool call — `call_id` (correlates the `running` and terminal rows), `tool_name`, `input` (structured `serde_json::Value`), `status` (`running`/`completed`/`error`), `result` (structured `serde_json::Value`; `Null` until terminal), `error_message`, `started_unix_ms`, `completed_unix_ms`, `source` (`coder`/`cursor-cli`/`claude-cli`/`sandbox`). `input`/`result` cross the wire as `google.protobuf.Value` (via `tddy_service::agent_activity_to_proto`). Modeled on `tddy-daemon/src/tool_call_log.rs` but placed in this crate, beneath every host, so every host writes the same record.
-- **append_agent_activity / read_agent_activity**: append-only JSONL writer + reader for the per-session `agent-activity.jsonl` log (sibling of `tool-calls.jsonl`). The read side **coalesces by `call_id`** (later row supersedes, first-seen order preserved) then applies a 500-record tail cap; malformed lines are skipped. This is the agent's own tool loop, distinct from the human-triggered `ExecuteTool` web-invoke log. **parse_activity_json** turns a hook-supplied JSON string into the structured `Value` field (empty → `Null`, else parse-or-`Value::String`), shared by every capture seam.
+- **append_agent_activity / read_agent_activity**: append-only JSONL writer + reader for the per-session `agent-activity.jsonl` log (sibling of `tool-calls.jsonl`). The read side **coalesces by `call_id`** (later row supersedes, first-seen order preserved) then applies a 500-record tail cap; malformed lines are skipped. **read_all_agent_activity** is the same read without the cap, for a reader that pages through the whole history (`ReadSessionActivity`). This is the agent's own tool loop, distinct from the human-triggered `ExecuteTool` web-invoke log. **parse_activity_json** turns a hook-supplied JSON string into the structured `Value` field (empty → `Null`, else parse-or-`Value::String`), shared by every capture seam.

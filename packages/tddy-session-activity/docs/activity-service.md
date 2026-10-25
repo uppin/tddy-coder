@@ -9,7 +9,7 @@ along with the notification bus.
 
 | Method | Kind | Answers from |
 |---|---|---|
-| `ReportSessionStatus` | unary | a hook's per-session `hook_token`, not a session token |
+| `ReportSessionStatus` | unary | a hook's per-session `hook_token`, not a session token; a `WaitingForInput` report's `message` is recorded as the session's `pending-question.json` (`kind: permission`), and any other report — or a wait with no message — clears it |
 | `ReportAgentActivity` | unary | the same hook token; mints the `call_id` pairing a PreToolUse row to its PostToolUse row |
 | `StreamSessionActivity` | server-stream | the persisted activity log, then the live hub |
 | `StreamSessionNotifications` | server-stream | this host's notification bus, scoped to the caller's OS user |
