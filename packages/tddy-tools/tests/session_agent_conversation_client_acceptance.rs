@@ -536,7 +536,7 @@ async fn a_cancel_closes_the_conversation_on_the_daemon() {
 
     // When the conversation is cancelled
     a_link_to(&daemon)
-        .cancel("conv-7")
+        .cancel("conv-7", false)
         .await
         .expect("the cancel should have been accepted");
 
@@ -548,6 +548,10 @@ async fn a_cancel_closes_the_conversation_on_the_daemon() {
     )
     .expect("the request should decode as CancelAgentConversationRequest");
     assert_eq!(request.conversation_id, "conv-7");
+    assert!(
+        !request.keep_conversation,
+        "a close asks for no turn cancel"
+    );
 }
 
 // ---------------------------------------------------------------------------

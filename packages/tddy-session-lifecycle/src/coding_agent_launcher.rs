@@ -51,6 +51,7 @@ use tddy_core::{AcpAgentCommand, HeadlessCommand, HeadlessHarness, McpServerSpec
 use tddy_daemon_kernel::config::{
     resolve_claude_binary_path, resolve_cursor_binary_path, DaemonConfig,
 };
+use tddy_daemon_kernel::daemon_identity::local_base_instance_id_for_config;
 use tddy_discovery::subagent::SubagentError;
 use tddy_subagent_worktree::ConversationId;
 
@@ -117,6 +118,36 @@ pub struct DaemonLauncherDeps {
 struct HeadlessWiring {
     config: Arc<DaemonConfig>,
     data_dir: PathBuf,
+    /// This daemon's durable instance id, which every conversation directory it creates is tagged
+    /// with, so its start-up sweep removes only its own.
+    owner: String,
+}
+
+/// A headless conversation's directory, created for a plan still in progress: removed when dropped,
+/// unless the plan kept it.
+struct ClaimedFiles {
+    dir: PathBuf,
+    kept: bool,
+}
+
+impl ClaimedFiles {
+    fn keep(mut self) {
+        self.kept = true;
+    }
+}
+
+impl Drop for ClaimedFiles {
+    fn drop(&mut self) {
+        if self.kept {
+            return;
+        }
+        if let Err(e) = std::fs::remove_dir_all(&self.dir) {
+            log::warn!(
+                "could not remove the files of a headless launch that failed, at {}: {e}",
+                self.dir.display()
+            );
+        }
+    }
 }
 
 /// Starts the harness a launch names, as the session's OS user, on the session's worktree.
@@ -154,9 +185,11 @@ impl DaemonCodingAgentLauncher {
     /// conversation keeps its MCP config under `data_dir`.
     #[must_use]
     pub fn with_headless_wiring(mut self, config: DaemonConfig, data_dir: PathBuf) -> Self {
+        let owner = local_base_instance_id_for_config(&config);
         self.headless = Some(HeadlessWiring {
             config: Arc::new(config),
             data_dir,
+            owner,
         });
         self
     }
@@ -405,29 +438,82 @@ impl DaemonCodingAgentLauncher {
             }
             None => Vec::new(),
         };
-        let (mcp_config, permission_prompt_tool) = match harness {
-            HeadlessHarness::Claude => {
-                let server = self.tool_server_spec(launch)?;
-                self.bind_approvals(launch, conversation.as_str(), &server)?;
-                let path = write_mcp_config(&wiring.data_dir.join(conversation.as_str()), &server)
-                    .map_err(|e| {
-                        Self::refuse(launch, &format!("its MCP config could not be written: {e}"))
-                    })?;
-                (Some(path), Some(APPROVAL_PROMPT_TOOL.to_string()))
-            }
-            HeadlessHarness::Cursor | HeadlessHarness::Codex | HeadlessHarness::Oz => (None, None),
-        };
-        Ok(HeadlessCommand {
+        let server = self.tool_server_spec(launch)?;
+        let mut command = HeadlessCommand {
             program: PathBuf::from(program),
             env,
             cwd: Some(launch.worktree.clone()),
             model: Some(launch.def.model.clone()),
-            mcp_config,
-            permission_prompt_tool,
+            mcp_config: None,
+            permission_prompt_tool: None,
             disallowed_tools: Vec::new(),
             profile: None,
             mcp_server: None,
-        })
+        };
+        let refused_config = |e: io::Error| {
+            Self::refuse(launch, &format!("its MCP config could not be written: {e}"))
+        };
+        match harness {
+            HeadlessHarness::Claude => {
+                let files = self.claim_conversation_files(launch, wiring, conversation.as_str())?;
+                let path = write_owner_only_json(
+                    &files.dir.join(MCP_CONFIG_FILE),
+                    &mcp_servers_wrapped(&server),
+                )
+                .map_err(refused_config)?;
+                // Bound only once everything the plan writes is written, so a plan that fails part-way
+                // leaves no route holding the agent's credential.
+                self.bind_approvals(launch, conversation.as_str(), &server)?;
+                files.keep();
+                command.mcp_config = Some(path);
+                command.permission_prompt_tool = Some(APPROVAL_PROMPT_TOOL.to_string());
+            }
+            HeadlessHarness::Oz => {
+                let files = self.claim_conversation_files(launch, wiring, conversation.as_str())?;
+                let path = write_owner_only_json(
+                    &files.dir.join(MCP_CONFIG_FILE),
+                    &mcp_servers_by_name(&server),
+                )
+                .map_err(refused_config)?;
+                files.keep();
+                command.mcp_config = Some(path);
+            }
+            HeadlessHarness::Cursor => {
+                command.mcp_config = Some(
+                    write_cursor_project_mcp_config(&launch.worktree, &server)
+                        .map_err(|reason| Self::refuse(launch, &reason))?,
+                );
+            }
+            HeadlessHarness::Codex => {
+                // Its variables reach the CLI's own environment, which codex forwards to the server by
+                // name: no credential is put on the argv.
+                command.env.extend(server.env.iter().cloned());
+                command.mcp_server = Some(server);
+            }
+        }
+        Ok(command)
+    }
+
+    /// Create the directory conversation `conversation`'s files are kept in, tagged with this daemon,
+    /// removed again unless the plan [`ClaimedFiles::keep`]s it.
+    fn claim_conversation_files(
+        &self,
+        launch: &CodingAgentLaunch,
+        wiring: &HeadlessWiring,
+        conversation: &str,
+    ) -> Result<ClaimedFiles, SubagentError> {
+        let dir = wiring.data_dir.join(conversation);
+        tddy_coding_subagent::launcher::claim_headless_conversation_dir(&dir, &wiring.owner)
+            .map_err(|e| {
+                Self::refuse(
+                    launch,
+                    &format!(
+                        "its conversation's files could not be written under {}: {e}",
+                        dir.display()
+                    ),
+                )
+            })?;
+        Ok(ClaimedFiles { dir, kept: false })
     }
 
     /// Binds the permission approvals of conversation `conversation` to the session `launch` runs for
@@ -486,6 +572,21 @@ impl DaemonCodingAgentLauncher {
     }
 }
 
+/// Remove the files the headless conversations of this daemon's previous run left under
+/// `<tddy_data_dir>/headless/` — each holds its agent's tool credential. Run once at start-up, before
+/// the daemon serves: it holds no conversation then. The daemon is named by its durable instance id
+/// (the one that survives a restart), so a daemon sharing the data directory under another id keeps
+/// its own. Returns the conversations whose files were removed.
+pub fn sweep_headless_files_left_by_this_daemon(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+) -> io::Result<Vec<String>> {
+    tddy_coding_subagent::launcher::sweep_headless_dirs(
+        tddy_data_dir,
+        &local_base_instance_id_for_config(config),
+    )
+}
+
 /// The program a headless harness's CLI runs. Claude and Cursor run the binary a daemon's own session
 /// of that CLI resolves; Codex and Oz have no such resolver, so they run by name from `PATH`.
 fn headless_program(config: &DaemonConfig, harness: HeadlessHarness) -> String {
@@ -532,28 +633,103 @@ fn headless_route_env(
     Ok(env)
 }
 
-/// Writes the MCP config a headless CLI reads, registering `server` under its name, to `mcp.json` in
-/// `dir`, owner only: the config carries the agent's tool credential. Returns the file's path. Its
-/// contents are never logged.
-fn write_mcp_config(dir: &Path, server: &McpServerSpec) -> io::Result<PathBuf> {
+/// `server` as an MCP config entry: its command, arguments and environment.
+fn mcp_server_entry(server: &McpServerSpec) -> serde_json::Value {
     let env: serde_json::Map<String, serde_json::Value> = server
         .env
         .iter()
         .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
         .collect();
+    serde_json::json!({
+        "command": server.command.display().to_string(),
+        "args": server.args,
+        "env": env,
+    })
+}
+
+/// The MCP config claude and cursor read: servers by name under `mcpServers`.
+fn mcp_servers_wrapped(server: &McpServerSpec) -> serde_json::Value {
+    serde_json::json!({ "mcpServers": mcp_servers_by_name(server) })
+}
+
+/// The MCP config `oz --mcp` reads: servers by name at the top level.
+fn mcp_servers_by_name(server: &McpServerSpec) -> serde_json::Value {
     let mut servers = serde_json::Map::new();
-    servers.insert(
-        server.name.clone(),
-        serde_json::json!({
-            "command": server.command.display().to_string(),
-            "args": server.args,
-            "env": env,
-        }),
-    );
-    let config = serde_json::json!({ "mcpServers": servers });
-    let path = dir.join(MCP_CONFIG_FILE);
-    tddy_core::atomic_file::write_atomic_with_mode(&path, config.to_string(), MCP_CONFIG_MODE)?;
-    Ok(path)
+    servers.insert(server.name.clone(), mcp_server_entry(server));
+    serde_json::Value::Object(servers)
+}
+
+/// Write `config` to `path`, owner only: an MCP config carries the agent's tool credential. Returns
+/// the path. Its contents are never logged.
+fn write_owner_only_json(path: &Path, config: &serde_json::Value) -> io::Result<PathBuf> {
+    tddy_core::atomic_file::write_atomic_with_mode(path, config.to_string(), MCP_CONFIG_MODE)?;
+    Ok(path.to_path_buf())
+}
+
+/// The project MCP config cursor reads from the worktree it runs in.
+const CURSOR_PROJECT_MCP_CONFIG: &str = ".cursor/mcp.json";
+
+/// Write cursor's project MCP config into `worktree`, owner only and ignored by git there, so the
+/// agent's credential it carries is never committed. An existing one is refused, never overwritten:
+/// it may be the repository's own, and tracked. Returns its path.
+fn write_cursor_project_mcp_config(
+    worktree: &Path,
+    server: &McpServerSpec,
+) -> Result<PathBuf, String> {
+    let path = worktree.join(CURSOR_PROJECT_MCP_CONFIG);
+    if path.symlink_metadata().is_ok() {
+        return Err(format!(
+            "its worktree already has a {CURSOR_PROJECT_MCP_CONFIG}, which is not overwritten"
+        ));
+    }
+    // Ignored before it is written, so the credential is never an untracked file git would offer.
+    exclude_from_git(worktree, &format!("/{CURSOR_PROJECT_MCP_CONFIG}"))?;
+    write_owner_only_json(&path, &mcp_servers_wrapped(server))
+        .map_err(|e| format!("its {CURSOR_PROJECT_MCP_CONFIG} could not be written: {e}"))
+}
+
+/// Add `pattern` to the `info/exclude` of the repository `worktree` is a checkout of, unless it is
+/// there already. Refused when `worktree` is not a git checkout: nothing would keep the file out of a
+/// commit.
+fn exclude_from_git(worktree: &Path, pattern: &str) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .map_err(|e| format!("git could not be run to keep its MCP config out of commits: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "its worktree {} is not a git checkout, so nothing would keep its MCP config out of a commit: {}",
+            worktree.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let common_dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let exclude = common_dir.join("info").join("exclude");
+    let existing = match std::fs::read_to_string(&exclude) {
+        Ok(existing) => existing,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{} could not be read: {e}", exclude.display())),
+    };
+    if existing.lines().any(|line| line.trim() == pattern) {
+        return Ok(());
+    }
+    let separator = if existing.is_empty() || existing.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    std::fs::create_dir_all(common_dir.join("info"))
+        .and_then(|()| {
+            use std::io::Write as _;
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&exclude)?
+                .write_all(format!("{separator}{pattern}\n").as_bytes())
+        })
+        .map_err(|e| format!("{} could not be written: {e}", exclude.display()))
 }
 
 /// The program and arguments `claude-acp` runs as: the `claude-agent-acp` binary `override_cli`

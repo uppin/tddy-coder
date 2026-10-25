@@ -188,6 +188,9 @@ impl BuildContext {
         let model_registry = &shared.model_registry;
         let session_notification_bus = Arc::clone(&shared.session_notification_bus);
         let session_tokens = &mount.session_tokens;
+        // Before the host serves, so no conversation of this run is among them: what this daemon's last
+        // run left of its headless conversations — their MCP configs carry agent credentials.
+        sweep_headless_files(config, tddy_data_dir);
         // One registry for the whole host: the launcher binds each headless conversation's approvals
         // into it, and the host answers those approvals through it.
         let approval_routes = Arc::default();
@@ -328,5 +331,28 @@ impl BuildContext {
                 Arc::new(lsp_executor),
             ),
         );
+    }
+}
+
+/// Remove the headless conversation files this daemon's previous run left behind. A failure is
+/// logged, not fatal: the files are a previous run's, and nothing this run serves depends on them.
+fn sweep_headless_files(
+    config: &tddy_daemon_kernel::config::DaemonConfig,
+    tddy_data_dir: &std::path::Path,
+) {
+    match tddy_session_lifecycle::coding_agent_launcher::sweep_headless_files_left_by_this_daemon(
+        config,
+        tddy_data_dir,
+    ) {
+        Ok(swept) if swept.is_empty() => {}
+        Ok(swept) => log::info!(
+            "removed the headless files of {} conversation(s) a previous run left: {}",
+            swept.len(),
+            swept.join(", ")
+        ),
+        Err(e) => log::warn!(
+            "could not sweep the headless conversation files under {}: {e}",
+            tddy_data_dir.display()
+        ),
     }
 }

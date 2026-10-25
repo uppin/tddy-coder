@@ -103,6 +103,18 @@ impl ScriptedAgent {
         .await
         .unwrap_or_else(|_| panic!("the agent recorded `{event}` in time"));
     }
+
+    /// Wait until the agent has written `file` in its working directory, failing past [`TURN_DEADLINE`].
+    async fn wait_for_file(&self, file: &str) {
+        let path = self.dir.path().join(file);
+        tokio::time::timeout(TURN_DEADLINE, async {
+            while !path.exists() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("the agent wrote `{file}` in time"));
+    }
 }
 
 fn recorded_events(path: &Path, event: &str) -> Vec<serde_json::Value> {
@@ -342,6 +354,70 @@ async fn cancelling_a_running_turn_returns_cancelled() {
         .expect("a cancelled turn is an outcome, not an error");
     assert_eq!(outcome.stop_reason, StopReason::Cancelled);
     assert_eq!(agent.recorded("cancel").len(), 1);
+}
+
+#[tokio::test]
+#[serial]
+async fn a_conversation_takes_a_new_prompt_after_its_running_turn_was_cancelled() {
+    // Given a turn held until it is cancelled, then a turn that answers
+    let mut held = a_turn();
+    held["write_files"] = serde_json::json!([{ "path": "turn-started", "content": "1" }]);
+    held["hold_until_cancel"] = serde_json::json!(true);
+    let agent = a_coding_agent()
+        .answering(held)
+        .answering(serde_json::json!({ "chunks": ["again"] }));
+    let mut session = agent.start().await;
+    let cancel = session.cancel_handle();
+    let turn = tokio::spawn(async move {
+        let outcome = session.prompt("Work").await;
+        (session, outcome)
+    });
+    agent.wait_for_file("turn-started").await;
+    cancel.cancel().await.expect("cancel is sent");
+    let (mut session, outcome) = tokio::time::timeout(TURN_DEADLINE, turn)
+        .await
+        .expect("the turn ended after cancel")
+        .expect("turn task");
+    assert_eq!(
+        outcome.expect("an outcome").stop_reason,
+        StopReason::Cancelled
+    );
+
+    // When
+    let next = tokio::time::timeout(TURN_DEADLINE, session.prompt("Again"))
+        .await
+        .expect("the next turn ends in time")
+        .expect("the next turn answers");
+
+    // Then
+    assert_eq!(next.stop_reason, StopReason::EndTurn);
+    assert_eq!(text_of(&next.content), "again");
+}
+
+#[tokio::test]
+#[serial]
+async fn a_conversation_takes_a_new_prompt_after_its_paused_turn_was_cancelled() {
+    // Given a turn paused on a permission request, then a turn that answers
+    let mut paused = a_turn();
+    paused["permission_requests"] = serde_json::json!([{ "title": "Run cargo test" }]);
+    let agent = a_coding_agent()
+        .answering(paused)
+        .answering(serde_json::json!({ "chunks": ["again"] }));
+    let mut session = agent.start().await;
+    let cancel = session.cancel_handle();
+    let first = session.prompt("Work").await.expect("the turn pauses");
+    assert_eq!(first.stop_reason, StopReason::PermissionRequested);
+    cancel.cancel().await.expect("cancel is sent");
+
+    // When
+    let next = tokio::time::timeout(TURN_DEADLINE, session.prompt("Again"))
+        .await
+        .expect("the next turn ends in time")
+        .expect("the next turn answers");
+
+    // Then
+    assert_eq!(next.stop_reason, StopReason::EndTurn);
+    assert_eq!(text_of(&next.content), "again");
 }
 
 #[tokio::test]

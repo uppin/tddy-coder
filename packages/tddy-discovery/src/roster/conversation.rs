@@ -31,8 +31,9 @@ use crate::subagent::{
 use prost::Message;
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, AgentMessageDescriptor, CancelAgentConversationRequest,
-    OpenAgentConversationRequest, OpenAgentConversationResponse, PromptAgentConversationRequest,
-    ReportAgentConversationStateRequest, ResumeAgentConversationRequest,
+    CancelAgentConversationResponse, OpenAgentConversationRequest, OpenAgentConversationResponse,
+    PromptAgentConversationRequest, ReportAgentConversationStateRequest,
+    ResumeAgentConversationRequest,
 };
 use tddy_service::proto::types::SessionAgentStatus;
 
@@ -273,17 +274,23 @@ impl AgentConversationLink {
         }))
     }
 
-    /// Close `conversation_id` on the daemon holding it. The daemon records a permission request the conversation
-    /// still holds as answered by the login this session's token authenticates.
-    pub async fn cancel(&self, conversation_id: &str) -> Result<(), String> {
+    /// Cancel `conversation_id` on the daemon holding it — only its running turn when `keep_conversation` asks for
+    /// that — and hand back whether the daemon kept the conversation open. The daemon records a permission request
+    /// the conversation still holds as answered by the login this session's token authenticates.
+    pub async fn cancel(
+        &self,
+        conversation_id: &str,
+        keep_conversation: bool,
+    ) -> Result<bool, String> {
         let request = CancelAgentConversationRequest {
             session_token: self.envelope.session_token.clone(),
             session_id: self.envelope.session_id.clone(),
             daemon_instance_id: self.envelope.daemon_instance_id.clone(),
             conversation_id: conversation_id.to_string(),
-            keep_conversation: false,
+            keep_conversation,
         };
-        self.client
+        let answer = self
+            .client
             .call_unary(
                 SESSION_AGENT_SERVICE,
                 "CancelAgentConversation",
@@ -291,7 +298,9 @@ impl AgentConversationLink {
             )
             .await
             .map_err(|e| format!("CancelAgentConversation: {e}"))?;
-        Ok(())
+        CancelAgentConversationResponse::decode(answer.as_slice())
+            .map(|answer| answer.conversation_kept)
+            .map_err(|e| format!("CancelAgentConversation answered something undecodable: {e}"))
     }
 
     /// Tell the facilitating daemon what a turn loop running **here** is doing.
@@ -379,7 +388,17 @@ impl RemoteConversationHandle {
 
     /// Close the conversation on the daemon holding it.
     pub async fn cancel(&self) -> Result<(), String> {
-        self.link.cancel(&self.conversation_id).await
+        self.link
+            .cancel(&self.conversation_id, false)
+            .await
+            .map(|_| ())
+    }
+
+    /// Cancel only the conversation's running turn on the daemon holding it, handing back whether the
+    /// daemon kept the conversation open. Only an agent that can cancel a turn on its own (a coding
+    /// agent) keeps it; any other conversation the daemon closes.
+    pub async fn cancel_turn(&self) -> Result<bool, String> {
+        self.link.cancel(&self.conversation_id, true).await
     }
 }
 

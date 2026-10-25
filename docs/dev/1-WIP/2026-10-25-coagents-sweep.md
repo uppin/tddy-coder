@@ -100,18 +100,24 @@ only `AgentRoster::conversation_closed` removes either.
 - After the plan: the open path disarms a guard only when the conversation is in the table. Any
   failure between the plan and the insert (the session start, the transcript the recorder opens)
   runs the same cleanup `conversation_closed` runs — the route and `headless/<conversation>/`.
-- At start-up the daemon holds no conversation (the table is in memory), so the sweep removes every
-  conversation directory under `<tddy_data_dir>/headless/`:
-  `tddy_coding_subagent::launcher::sweep_headless_dirs(tddy_data_dir)`, called once by the daemon's
-  runtime before it serves.
+- At start-up the daemon holds no conversation (the table is in memory), but two daemons can share a
+  data directory (Desktop beside a dev daemon). So each conversation directory is tagged with the
+  creating daemon's **durable** instance id (`local_base_instance_id_for_config` — the configured
+  `daemon_instance_id`, else the hostname; not the per-run routing id, which a restart changes) in
+  `headless/<conversation>/daemon-instance`, and the sweep removes only directories tagged with its
+  own id: `tddy_coding_subagent::launcher::sweep_headless_dirs(tddy_data_dir, instance_id)`, called
+  through `sweep_headless_files_left_by_this_daemon(config, tddy_data_dir)` by the daemon runtime's
+  `build_session_host`, before the host serves. An untagged directory is left alone.
+  *(Developer decision, green: the first draft swept the whole of `headless/`.)*
 
 **Acceptance criteria**
 1. A headless plan whose MCP config cannot be written leaves no route registered for the
    conversation (an approval for it is refused as *not open on this daemon*).
 2. An open that fails after the plan (its transcript cannot be opened) leaves no route and no
    `headless/<conversation>/` directory.
-3. `sweep_headless_dirs` removes every conversation directory under `headless/` and leaves the rest
-   of the data directory alone; a missing `headless/` is not an error.
+3. `sweep_headless_dirs` removes every conversation directory this daemon tagged, and leaves another
+   daemon's, an untagged one and the rest of the data directory alone; a missing `headless/` is not
+   an error. A plan tags with the durable id, not the per-run routing id.
 
 ### 5. A conversation's status row is published live and marked as a status row
 
@@ -222,9 +228,38 @@ Guards that already pass (they pin what must not change): `cancelling_the_turn_o
 `ending_a_coding_agent_conversation_stops_its_process`, `codex_never_carries_its_mcp_servers_credential_on_the_argv`,
 `a_parked_request_with_no_tool_kind_reports_other`, the sweep's two edge tests.
 
-Not covered by an automated test: the daemon runtime's call of `sweep_headless_dirs` at start-up, and
-`subagent_end` still sending `keep_conversation: false` once `subagent_cancel` sends `true` (both
-are green's wiring; `subagent_end` today calls `subagent_cancel_tool`, so green splits that path).
+Not covered by an automated test: the daemon runtime's call of the start-up sweep in
+`build_session_host` (the runtime is not constructible in a unit test; the function it calls is
+covered by `headless_tests::the_start_up_sweep_removes_what_this_daemon_planned_and_leaves_another_daemons_files`).
+
+### Green notes
+
+- **Item 1, paused turn.** A cancel of a turn paused on a permission request drives that ACP prompt to
+  its end and parks the result for "the next turn to take" (#722). With the conversation now kept, a
+  *new prompt* after that would have been refused as "the previous turn is still open". A turn a
+  cancel ended is over: `take_turn` closes it into the history and starts the new prompt; a resume
+  still takes the parked result, as before.
+- **Item 1, tools.** `subagent_cancel` asks the daemon without holding the tool's conversation table
+  (the daemon answers once the turn has ended). A daemon that cannot be asked leaves the conversation
+  open on both sides and the error is the answer — nothing is closed in its place.
+  `subagent_end` calls `subagent_close_tool` (always `keep_conversation: false`), pinned by
+  `subagent_end::tests::subagent_end_closes_the_conversation_on_the_daemon_rather_than_cancelling_its_turn`.
+- **Item 1, peers.** `AgentConversationPeers::cancel` carries `keep_conversation` and returns whether
+  the owner kept the conversation; the peer-routed handler now returns the owner's answer instead of
+  a fixed `conversation_kept: false`. A remote routing record is dropped exactly when the owner did
+  not keep the conversation.
+- **Item 4, guard.** `OpeningConversation` in the service is armed before the open (unless the id is
+  already open, so a failed second open cannot strip a live conversation's route) and disarmed when
+  the conversation is in the table; dropped otherwise — including a caller that goes away mid-open —
+  it runs `conversation_closed`. The launcher's own `ClaimedFiles` removes a conversation directory a
+  failing plan created, and the approval route is bound last.
+- **Item 6, cursor.** `/.cursor/mcp.json` is added to the repository's `info/exclude` (via
+  `git rev-parse --git-common-dir`) before the file is written; a worktree that is not a git checkout
+  is refused. The file is not removed when the conversation closes: it lives in the conversation's
+  worktree, which `conversation_closed` does not know. It is owner-only and git-ignored meanwhile.
+- **Base repairs.** The cascade rebase of #727 onto master left four test `DaemonSessionHost::new`
+  calls without master's new `spawn_backend` argument, so `tddy-session-lifecycle` and
+  `tddy-daemon-rpc` did not compile on the base. Fixed here in three separate `fix(...)` commits.
 
 ## Green wave
 

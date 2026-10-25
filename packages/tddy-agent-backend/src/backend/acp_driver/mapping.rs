@@ -97,8 +97,11 @@ pub(super) fn permission_request(request: &acp::RequestPermissionRequest) -> Per
         tool_call_id: request.tool_call.tool_call_id.0.to_string(),
         title: request.tool_call.fields.title.clone(),
         raw_input: request.tool_call.fields.raw_input.clone(),
-        // TODO(coagents sweep): the request's `tool_call.fields.kind` — dropped until green.
-        kind: None,
+        kind: request
+            .tool_call
+            .fields
+            .kind
+            .map(|kind| tool_kind_name(kind).to_string()),
         options: request
             .options
             .iter()

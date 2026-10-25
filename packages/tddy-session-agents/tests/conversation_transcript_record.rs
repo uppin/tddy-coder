@@ -337,7 +337,8 @@ impl AgentConversationPeers for NoOtherPort {
         _session_id: &str,
         owner: &str,
         _conversation_id: &str,
-    ) -> Result<(), Status> {
+        _keep_conversation: bool,
+    ) -> Result<bool, Status> {
         Err(Status::internal(format!(
             "this host runs the conversation itself; nothing is cancelled on '{owner}'"
         )))
@@ -382,6 +383,7 @@ fn a_daemon_serving_with(
         conversation_frames: Arc::new(
             tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
         ),
+        activity: Arc::default(),
         admission: Arc::new(NoOtherPort),
         catalog: Arc::new(NoOtherPort),
         broadcast: Arc::new(NoOtherPort),

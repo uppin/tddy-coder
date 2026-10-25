@@ -330,7 +330,8 @@ impl AgentConversationPeers for PortsAnOpenDoesNotUse {
         _session_id: &str,
         owner: &str,
         _conversation_id: &str,
-    ) -> Result<(), Status> {
+        _keep_conversation: bool,
+    ) -> Result<bool, Status> {
         Err(Status::internal(format!(
             "these tests cancel nothing on '{owner}'"
         )))
@@ -372,6 +373,7 @@ fn a_daemon_serving(
         conversation_frames: Arc::new(
             tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
         ),
+        activity: Arc::default(),
         admission: Arc::new(PortsAnOpenDoesNotUse),
         catalog: Arc::new(PortsAnOpenDoesNotUse),
         broadcast: Arc::new(PortsAnOpenDoesNotUse),

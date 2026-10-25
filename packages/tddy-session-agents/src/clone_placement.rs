@@ -224,6 +224,12 @@ impl SubagentSession for CodingAgentConversationTurns {
     ) -> Option<std::sync::Arc<dyn tddy_discovery::subagent::PermissionAnswering>> {
         self.session.permission_answerer()
     }
+
+    fn turn_canceller(
+        &self,
+    ) -> Option<std::sync::Arc<dyn tddy_discovery::subagent::TurnCancelling>> {
+        self.session.turn_canceller()
+    }
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{
     preview_of, AnsweredBy, ContentBlock, MessageDescriptor, MessageId, MessageRole,
     PermissionAnswering, PermissionRequestView, PromptOutcome, StopReason, SubagentError,
-    SubagentSession, ToolCallDescriptor, TurnRequest,
+    SubagentSession, ToolCallDescriptor, TurnCancelling, TurnRequest,
 };
 use tokio::sync::broadcast;
 use tokio::sync::Mutex as AsyncMutex;
@@ -194,9 +194,8 @@ impl CodingAgentSession {
     }
 
     /// A handle that cancels this session's running turn without holding the session — what the
-    /// conversation table uses when `subagent_cancel` arrives while a prompt holds the session.
-    // TODO(acp-subagent n3): the conversation table holds Box<dyn SubagentSession> and cannot reach
-    // this; n3 permission-yield wires it.
+    /// conversation table holds, as [`SubagentSession::turn_canceller`], so `subagent_cancel` reaches
+    /// a turn that holds the session.
     pub fn cancel_handle(&self) -> CancelHandle {
         CancelHandle {
             conversation: Arc::downgrade(&self.conversation),
@@ -344,6 +343,21 @@ impl CodingAgentSession {
 
     /// The outcome of a prompt that ended: its stop reason, its text, and the messages it appended
     /// across every turn it took.
+    /// Record a turn a cancel ended in the history, as [`Self::finish`] would have, without an
+    /// outcome to hand anyone.
+    fn close_cancelled_turn(&mut self, mut ended: InFlightPrompt) {
+        let updates = std::mem::take(&mut *ended.updates.lock().unwrap_or_else(|e| e.into_inner()));
+        match ended.result.take() {
+            Some(Ok(end)) => {
+                if let Err(e) = self.finish(&ended.prompt, updates, end) {
+                    log::warn!("the cancelled coding-agent turn could not be recorded: {e}");
+                }
+            }
+            Some(Err(e)) => log::warn!("the cancelled coding-agent turn ended in an error: {e}"),
+            None => {}
+        }
+    }
+
     fn finish(
         &mut self,
         prompt: &str,
@@ -607,6 +621,13 @@ impl SubagentSession for CodingAgentSession {
             None => in_flight.lock().await,
         };
         let mut flight = match slot.take() {
+            // A turn a cancel drove to its end is over, not open: a new prompt closes it into the
+            // history and starts the next turn. Its cancelled outcome was the cancel's to report.
+            Some(ended) if ended.result.is_some() && answered.is_none() && request.prompt_text().is_some() => {
+                self.close_cancelled_turn(ended);
+                let prompt = new_prompt(&request)?;
+                self.begin_prompt(prompt)
+            }
             Some(flight) => {
                 if answered.is_none() {
                     match self.resume(&request) {
@@ -695,5 +716,16 @@ impl SubagentSession for CodingAgentSession {
 
     fn permission_answerer(&self) -> Option<Arc<dyn PermissionAnswering>> {
         Some(self.permission_answering())
+    }
+
+    fn turn_canceller(&self) -> Option<Arc<dyn TurnCancelling>> {
+        Some(Arc::new(self.cancel_handle()))
+    }
+}
+
+#[async_trait]
+impl TurnCancelling for CancelHandle {
+    async fn cancel_turn(&self) -> Result<(), SubagentError> {
+        self.cancel().await
     }
 }

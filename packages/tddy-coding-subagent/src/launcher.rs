@@ -30,14 +30,53 @@ pub fn headless_conversation_dir(tddy_data_dir: &Path, conversation_id: &str) ->
     tddy_data_dir.join(HEADLESS_DIR).join(conversation_id)
 }
 
-/// Remove every conversation's files under `<tddy_data_dir>/headless/`: what a daemon that stopped
-/// without closing its conversations left behind. Called once at start-up, when the daemon holds no
-/// conversation (its conversation table is in memory), so none of them is still in use. A missing
-/// `headless/` is not an error.
-pub fn sweep_headless_dirs(tddy_data_dir: &Path) -> std::io::Result<()> {
-    // TODO(coagents sweep): the sweep is green's; red publishes the signature only.
-    let _ = tddy_data_dir;
-    Ok(())
+/// The file in a headless conversation's directory naming the daemon that created it, by its durable
+/// instance id. Two daemons can share a data directory (a desktop app beside a dev daemon), so each
+/// sweeps only what it created.
+pub const HEADLESS_OWNER_FILE: &str = "daemon-instance";
+
+/// Create `dir` for a headless conversation of the daemon `daemon_instance_id`, tagged with that
+/// daemon, before anything else is written into it.
+pub fn claim_headless_conversation_dir(
+    dir: &Path,
+    daemon_instance_id: &str,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(dir.join(HEADLESS_OWNER_FILE), daemon_instance_id)
+}
+
+/// Remove the files every headless conversation of the daemon `daemon_instance_id` left under
+/// `<tddy_data_dir>/headless/` — what that daemon left behind when it stopped without closing them.
+/// Called once at start-up, when the daemon holds no conversation (its conversation table is in
+/// memory), so none of them is still in use. Another daemon's conversations, and a directory that
+/// names no daemon, are left alone. A missing `headless/` is not an error. Returns the conversations
+/// whose files were removed.
+pub fn sweep_headless_dirs(
+    tddy_data_dir: &Path,
+    daemon_instance_id: &str,
+) -> std::io::Result<Vec<String>> {
+    let entries = match std::fs::read_dir(tddy_data_dir.join(HEADLESS_DIR)) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut swept = Vec::new();
+    for entry in entries {
+        let dir = entry?.path();
+        let owner = match std::fs::read_to_string(dir.join(HEADLESS_OWNER_FILE)) {
+            Ok(owner) => owner,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        };
+        if owner.trim() != daemon_instance_id {
+            continue;
+        }
+        std::fs::remove_dir_all(&dir)?;
+        if let Some(conversation) = dir.file_name().and_then(|name| name.to_str()) {
+            swept.push(conversation.to_string());
+        }
+    }
+    Ok(swept)
 }
 
 /// How the ACP driver reaches the agent a launcher started.

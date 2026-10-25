@@ -255,18 +255,18 @@ impl SessionAgentService for PeerRoutedSessionAgents {
     ) -> Result<Response<CancelAgentConversationResponse>, Status> {
         self.record_activity();
         let req = request.get_ref();
-        if self
+        // The peer's own answer is the caller's: whether the conversation was kept is the owner's to say.
+        if let Some(answer) = self
             .connection
-            .rpc_served_by_peer::<_, tddy_service::proto::session_agents_svc::CancelAgentConversationResponse>(
+            .rpc_served_by_peer::<_, CancelAgentConversationResponse>(
                 SESSION_AGENT_SERVICE,
                 "CancelAgentConversation",
                 &req.daemon_instance_id,
                 req,
             )
             .await?
-            .is_some()
         {
-            return Ok(Response::new(CancelAgentConversationResponse { conversation_kept: false }));
+            return Ok(Response::new(answer));
         }
         self.local.cancel_agent_conversation(request).await
     }

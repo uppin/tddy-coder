@@ -595,3 +595,75 @@ async fn codex_and_oz_run_by_name_from_the_path() {
     assert_eq!(codex.program, PathBuf::from("codex"));
     assert_eq!(oz.program, PathBuf::from("oz"));
 }
+
+#[tokio::test]
+async fn the_start_up_sweep_removes_what_this_daemon_planned_and_leaves_another_daemons_files() {
+    // Given a data directory where this daemon planned a headless conversation, and another daemon
+    // sharing the directory has one of its own
+    let tddy_data_dir = tempfile::tempdir().expect("data dir");
+    let headless = tddy_data_dir.path().join(HEADLESS_DIR);
+    let worktree = tempfile::tempdir().expect("worktree");
+    a_headless_launcher(&headless, None)
+        .headless_command_for(&a_headless_launch("claude", worktree.path()))
+        .await
+        .expect("the claude CLI is settled");
+    tddy_coding_subagent::launcher::claim_headless_conversation_dir(
+        &headless.join("conv-of-another-daemon"),
+        "another-daemon",
+    )
+    .expect("another daemon's conversation");
+
+    // When this daemon starts again, and sweeps
+    let swept = sweep_headless_files_left_by_this_daemon(&a_daemon_config(), tddy_data_dir.path())
+        .expect("the sweep succeeds");
+
+    // Then its own conversation's files are gone, and the other daemon's are not
+    assert_eq!(swept, vec![CONVERSATION.to_string()]);
+    assert!(!headless.join(CONVERSATION).exists());
+    assert!(headless.join("conv-of-another-daemon").exists());
+}
+
+#[tokio::test]
+async fn a_headless_plan_tags_its_conversations_files_with_this_daemons_durable_id() {
+    // Given a daemon configured with an instance id, and a per-run suffix on its routing id
+    let headless = tempfile::tempdir().expect("headless dir");
+    let worktree = tempfile::tempdir().expect("worktree");
+    let config: DaemonConfig = serde_yaml::from_str(
+        "users:\n  - github_user: u\n    os_user: u\nclaude_cli:\n  binary_path: /opt/tddy/bin/claude\n\
+         daemon_instance_id: dev\ndaemon_instance_id_append_startup_timestamp: true\n",
+    )
+    .expect("daemon config should parse");
+    let launcher = DaemonCodingAgentLauncher::with_identity(
+        the_daemons_own_identity(),
+        Arc::new(|_| Ok(None)),
+        Arc::new(|launch| {
+            Ok((
+                PathBuf::from(TDDY_TOOLS_PATH),
+                vec![
+                    (SESSION_TOKEN_ENV_NAME.to_string(), MINTED_TOKEN.to_string()),
+                    (
+                        "TDDY_REMOTE_SESSION_ID".to_string(),
+                        launch.session_id.clone(),
+                    ),
+                ],
+            ))
+        }),
+    )
+    .with_headless_wiring(config, headless.path().to_path_buf());
+
+    // When
+    launcher
+        .headless_command_for(&a_headless_launch("claude", worktree.path()))
+        .await
+        .expect("the claude CLI is settled");
+
+    // Then the tag is the id that survives a restart, not this run's routing id
+    let owner = std::fs::read_to_string(
+        headless
+            .path()
+            .join(CONVERSATION)
+            .join(tddy_coding_subagent::launcher::HEADLESS_OWNER_FILE),
+    )
+    .expect("the conversation's files are tagged");
+    assert_eq!(owner, "dev");
+}

@@ -298,7 +298,8 @@ pub fn conversation_row_call_id(conversation_id: &str) -> String {
 /// The entry a conversation's own status row stands for. Its frame carries the row's call id, which the fold maps
 /// into the conversation's entry, and its status is the row's own. `None` for any record that is not a status row.
 pub fn conversation_row_entry(record: &AgentActivityRecord) -> Option<SubagentEntry> {
-    if record.tool_name != CONVERSATION_ROW_TOOL_NAME {
+    // Its source marks it, not its tool name: an agent's own tool could be called the same.
+    if record.source != CONVERSATION_ROW_SOURCE {
         return None;
     }
     let conversation_id = conversation_named_by(record)?;

@@ -71,10 +71,10 @@ struct RecordingLauncher {
 const TDDY_TOOLS_PATH: &str = "/opt/tddy/bin/tddy-tools";
 
 impl RecordingLauncher {
-    fn into(dir: &Path, answer: serde_json::Value) -> Arc<Self> {
+    fn into(dir: &Path, answers: Vec<serde_json::Value>) -> Arc<Self> {
         std::fs::write(
             dir.join("scenario.json"),
-            serde_json::json!({ "responses": [answer] }).to_string(),
+            serde_json::json!({ "responses": answers }).to_string(),
         )
         .expect("write scenario");
         let daemons_own = DaemonCodingAgentLauncher::new(
@@ -167,7 +167,7 @@ struct ASession {
     managed: bool,
     profiles: Vec<(&'static str, &'static str)>,
     model_agents: Vec<&'static str>,
-    answer: serde_json::Value,
+    answers: Vec<serde_json::Value>,
     with_launcher: bool,
 }
 
@@ -176,7 +176,7 @@ fn a_session() -> ASession {
         managed: false,
         profiles: vec![("codex-fast", "codex-acp")],
         model_agents: Vec::new(),
-        answer: serde_json::json!({ "chunks": ["done"] }),
+        answers: vec![serde_json::json!({ "chunks": ["done"] })],
         with_launcher: true,
     }
 }
@@ -193,7 +193,13 @@ impl ASession {
     }
 
     fn whose_agent_answers(mut self, answer: serde_json::Value) -> Self {
-        self.answer = answer;
+        self.answers = vec![answer];
+        self
+    }
+
+    /// And answers its next turn with `answer`. The stub has no answer for a turn it was not scripted.
+    fn then_answers(mut self, answer: serde_json::Value) -> Self {
+        self.answers.push(answer);
         self
     }
 
@@ -241,7 +247,7 @@ impl ASession {
         .expect("write session metadata");
         let launcher_dir = sessions.path().join("launcher");
         std::fs::create_dir_all(&launcher_dir).expect("launcher dir");
-        let launcher = RecordingLauncher::into(&launcher_dir, self.answer);
+        let launcher = RecordingLauncher::into(&launcher_dir, self.answers);
         let service = match self.with_launcher {
             true => test_service_with_coding_agent_launcher(
                 sessions.path().to_path_buf(),
@@ -881,6 +887,7 @@ async fn a_coding_agent_conversation_answers_its_next_prompt_after_its_turn_was_
     // Given a coding agent whose first turn is cancelled
     let session = a_session()
         .whose_agent_answers(a_turn_held_until_cancelled())
+        .then_answers(serde_json::json!({ "chunks": ["fixed"] }))
         .build();
     let agent_id = session.attached("codex-fast").await;
     let conversation_id = session.open(&agent_id).await;
@@ -890,10 +897,10 @@ async fn a_coding_agent_conversation_answers_its_next_prompt_after_its_turn_was_
     drop(turn);
 
     // When the conversation is prompted again
-    let (_, stop_reason) = session.prompt(&conversation_id, "Try again").await;
+    let (text, stop_reason) = session.prompt(&conversation_id, "Try again").await;
 
     // Then the same conversation answers, in the same agent process
-    assert_eq!(stop_reason, "EndTurn");
+    assert_eq!((text.as_str(), stop_reason.as_str()), ("fixed", "EndTurn"));
     assert_eq!(
         session.launcher.recorded("started").len(),
         1,
@@ -911,6 +918,7 @@ async fn cancelling_a_turn_paused_on_a_permission_request_answers_it_cancelled_a
             "chunks": ["tests pass"],
             "permission_requests": [{ "title": "Run cargo test" }],
         }))
+        .then_answers(serde_json::json!({ "chunks": ["carried on"] }))
         .build();
     let agent_id = session.attached("codex-fast").await;
     let conversation_id = session.open(&agent_id).await;

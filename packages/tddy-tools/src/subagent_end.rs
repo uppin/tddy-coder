@@ -1,8 +1,8 @@
 //! `subagent_end` — finish a subagent conversation and hand its work to the caller.
 //!
-//! The counterpart of `subagent_cancel`: both close the conversation and delete its worktree, and
+//! The counterpart of `subagent_cancel`: both can close the conversation and delete its worktree, and
 //! only this one first applies what the conversation committed to the caller's worktree as
-//! uncommitted changes. In its own module because `server.rs` is over the file budget
+//! uncommitted changes. It always closes; `subagent_cancel` keeps a coding agent's conversation. In its own module because `server.rs` is over the file budget
 //! (`packages/tddy-tools/docs/code-issues/oversized-file-server.md`).
 
 use crate::mcp_primitives::{schema_object, subagent_access_is_managed};
@@ -43,7 +43,7 @@ pub(crate) fn subagent_end_tool_definition() -> rmcp::model::Tool {
 /// `subagent_end { sessionId, from?, to? }`.
 ///
 /// Pulls what the conversation committed (the range, less what was already pulled) into the
-/// caller's worktree, then closes it exactly as `subagent_cancel` does — retire, then remove its
+/// caller's worktree, then closes it as `subagent_cancel` closes one it does not keep — retire, then remove its
 /// worktree. A pull that fails leaves the conversation open and its worktree in place, so the work
 /// is neither applied nor lost and the caller can retry or cancel.
 pub(crate) async fn subagent_end_tool(args: serde_json::Value) -> String {
@@ -56,8 +56,8 @@ pub(crate) async fn subagent_end_tool(args: serde_json::Value) -> String {
         Ok(pulled) => pulled,
         Err(reason) => return subagent_error_json(reason),
     };
-    // The same close `subagent_cancel` performs, which also removes the worktree.
-    crate::server::subagent_cancel_tool(serde_json::json!({ "sessionId": session_id })).await;
+    // A close, never a turn cancel: the conversation ends, here and on the daemon, and its worktree goes with it.
+    crate::server::subagent_close_tool(serde_json::json!({ "sessionId": session_id })).await;
     serde_json::json!({ "ended": true, "pulled": pulled }).to_string()
 }
 
@@ -125,3 +125,6 @@ pub(crate) async fn discard_conversation_worktree(session_id: &str) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;

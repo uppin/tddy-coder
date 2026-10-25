@@ -199,7 +199,8 @@ impl AgentConversationPeers for NotReachedByAttach {
         _session_id: &str,
         owner: &str,
         _conversation_id: &str,
-    ) -> Result<(), Status> {
+        _keep_conversation: bool,
+    ) -> Result<bool, Status> {
         Err(Status::internal(format!(
             "an attach forwards nothing to '{owner}'"
         )))
@@ -285,6 +286,7 @@ fn a_daemon_with_a_session() -> ADaemonWithASession {
         conversation_frames: Arc::new(
             tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
         ),
+        activity: Arc::default(),
     });
     ADaemonWithASession {
         _sessions: sessions,
