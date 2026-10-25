@@ -7,6 +7,7 @@ mod codex;
 pub mod codex_acp;
 mod context_globs;
 mod cursor;
+pub mod headless_driver;
 mod mock;
 pub mod model_catalog;
 mod opencode_acp;

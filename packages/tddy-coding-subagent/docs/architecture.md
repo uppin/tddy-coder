@@ -18,7 +18,9 @@ the daemon implements (`tddy-session-lifecycle::coding_agent_launcher`).
 | `confinement` | `confinement_for(harness)` — `WithdrawsNativeTools` or `CannotWithdraw`; `refuse_unless_confinable(harness, managed)` is the one refusal both attach and launch use; `withdrawal_session_meta` (claude) and `opencode_withdrawal_config` (opencode) are the withdrawal itself |
 | `launcher` | `CodingAgentLauncher` port and `CodingAgentLaunch` (def, session id/user/token, worktree, managed) |
 | `permissions` | `DenyAndRecord` — the ACP `PermissionHandler` that rejects every request and records it for the turn's messages |
-| `session` | `CodingAgentSession` — one `AcpDriver` (one agent process) per conversation |
+| `session` | `CodingAgentSession` — one `dyn ConversationDriver` per conversation: an `AcpConversation` (one ACP agent process) or a `HeadlessDriver` (one CLI invocation per turn) |
+| `transports` | `HEADLESS_HARNESSES = ["claude", "cursor", "codex", "oz"]`; `transport_of(harness)` (`Acp` / `Headless` / `None` for PTY-only), `permission_policy_of(harness)` (`AsksCaller` / `Fixed(text)`), `transport_and_policy_wire` — the catalog row's `transport` / `permission_policy` spellings, derived from the harness id so `CodingAgentDef` is unchanged |
+| `approval_routes` | `ApprovalRoutes` — the daemon's map of headless conversations to the launch that owns them and the `ParkedPermissions` their approvals park on |
 
 ## The launcher port
 
@@ -27,6 +29,7 @@ trait CodingAgentLauncher {
     async fn command_for(&self, launch) -> Result<AcpAgentCommand, SubagentError>;   // driver spawns it
     async fn launch_transport(&self, launch) -> Result<AgentTransport, SubagentError>; // production path
     async fn mcp_servers_for(&self, launch) -> Result<Vec<McpServerSpec>, SubagentError>;
+    async fn headless_command_for(&self, launch) -> Result<HeadlessCommand, SubagentError>; // default: refused
 }
 enum AgentTransport { Command(AcpAgentCommand), Stream(UnixStream) }
 ```
@@ -65,3 +68,27 @@ Both withdrawal mechanisms follow each adapter's documentation. That the `_meta`
 `cancel_handle()` returns a `CancelHandle` that sends `session/cancel` (the turn ends `cancelled`).
 The daemon's conversation table holds `Box<dyn SubagentSession>` and does not reach it yet; its
 `subagent_cancel` closes the conversation, which drops the session and stops the process.
+
+## Headless sessions
+
+`CodingAgentSession::start_headless(harness, command, model)` holds a `HeadlessDriver`; it is asked
+for when `transport_of(def.harness)` is `Headless` (`tddy-session-agents` calls the launcher's
+`headless_command_for`). Turns, outcome mapping and transcript recording are the ACP session's.
+`permissions()` returns the session's `ParkedPermissions`, which the opener registers in
+`ApprovalRoutes` (`register_permissions`) so a headless claude's approval parks where the yield
+machinery of `#coagents` 3/8 reads it.
+
+## Approval routes
+
+`ApprovalRoutes` (shared `Arc` between the launcher, the conversation open/close paths and the
+exec-tool handler) keys a route by conversation id:
+
+- `register_launch(conversation, session_id, session_token)` — at launch, the session and the
+  credential minted for the agent's `tddy-tools` (`SESSION_TOKEN_ENV`). The minted token carries no
+  conversation claim, so the binding is made here.
+- `register_permissions(conversation, permissions)` — once the session is open.
+- `request(conversation, session_id, session_token, tool, input)` — refused (`Err`) unless the route
+  has both halves and both credentials match (constant-time); otherwise parks an `allow` / `reject`
+  request and waits up to 60 s (`with_timeout`). A timeout, a cancel or a dropped caller (a `Parking`
+  guard, `ParkedPermissions::cancel_request`) is `Ok(false)`.
+- `remove(conversation)` — on close; cancels anything still parked.

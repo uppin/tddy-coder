@@ -1,8 +1,8 @@
 //! The port the daemon implements to start a coding agent for one conversation.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use tddy_agent_backend::{AcpAgentCommand, McpServerSpec};
+use tddy_agent_backend::{AcpAgentCommand, HeadlessCommand, McpServerSpec};
 use tddy_discovery::subagent::SubagentError;
 
 use crate::catalog::CodingAgentDef;
@@ -16,6 +16,19 @@ pub const TDDY_TOOLS_MCP_ARG: &str = "--mcp";
 /// exec calls for. Set only for a conversation that has a worktree of its own; read by `tddy-tools`,
 /// which then runs its exec calls in that worktree rather than the session's.
 pub const CONVERSATION_ID_ENV: &str = "TDDY_CONVERSATION_ID";
+/// The environment variable a managed agent's `tddy-tools --mcp` is handed its minted credential in.
+/// A headless conversation's permission approvals are bound to the credential the launch hands out
+/// under this name.
+pub const SESSION_TOKEN_ENV: &str = "TDDY_REMOTE_SESSION_TOKEN";
+/// The directory under a daemon's data directory a headless conversation keeps its files in: one
+/// subdirectory per conversation, named by the conversation's id, holding the MCP config its CLI reads.
+pub const HEADLESS_DIR: &str = "headless";
+
+/// The directory a headless conversation `conversation_id` keeps its files in, under `tddy_data_dir`.
+#[must_use]
+pub fn headless_conversation_dir(tddy_data_dir: &Path, conversation_id: &str) -> PathBuf {
+    tddy_data_dir.join(HEADLESS_DIR).join(conversation_id)
+}
 
 /// How the ACP driver reaches the agent a launcher started.
 #[derive(Debug)]
@@ -94,4 +107,20 @@ pub trait CodingAgentLauncher: Send + Sync {
         &self,
         launch: &CodingAgentLaunch,
     ) -> Result<Vec<McpServerSpec>, SubagentError>;
+
+    /// The command a headless coding agent's CLI runs for every turn of `launch`'s conversation: the
+    /// program, the environment it adds, its working directory and any MCP config it reads. Asked
+    /// only for a headless harness ([`crate::transports::transport_of`]). The session sets the
+    /// model itself, so the CLI runs the model the session reports.
+    ///
+    /// By default refused: a launcher that starts only ACP agents has no headless command to give.
+    async fn headless_command_for(
+        &self,
+        launch: &CodingAgentLaunch,
+    ) -> Result<HeadlessCommand, SubagentError> {
+        Err(SubagentError::from(format!(
+            "this launcher starts only ACP coding agents, so '{}' ({}) cannot be opened headless",
+            launch.def.name, launch.def.harness
+        )))
+    }
 }

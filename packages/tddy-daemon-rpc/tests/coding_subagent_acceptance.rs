@@ -472,17 +472,17 @@ async fn an_acp_allowed_agent_is_listed_as_a_coding_agent_with_its_default_model
 
 #[tokio::test]
 #[serial]
-async fn a_headless_harness_profile_is_not_listed_yet() {
+async fn a_pty_only_harness_profile_is_not_listed() {
     // Given
-    let session = a_session().offering("plain-claude", "claude").build();
+    let session = a_session().offering("tui-claude", "claude-cli").build();
 
     // When
     let rows = session.listed_rows().await;
 
     // Then
     assert!(
-        rows.iter().all(|row| row.name != "plain-claude"),
-        "a headless harness is not offered yet: {rows:?}"
+        rows.iter().all(|row| row.name != "tui-claude"),
+        "a PTY-only harness is not offered: {rows:?}"
     );
 }
 

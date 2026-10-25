@@ -37,18 +37,18 @@ fn an_acp_harness_profile_is_a_coding_agent() {
 }
 
 #[test]
-fn a_headless_or_pty_harness_profile_is_not_offered_yet() {
+fn a_pty_only_harness_profile_is_not_offered() {
     // Given
-    let profiles = [
-        a_profile("plain-claude", "claude", "opus"),
-        a_profile("tui-claude", "claude-cli", "opus"),
-    ];
+    let profiles = [a_profile("tui-claude", "claude-cli", "opus")];
 
     // When
     let defs = coding_agent_defs(&profiles, &[]);
 
     // Then
-    assert!(defs.is_empty(), "only ACP harnesses are offered: {defs:?}");
+    assert!(
+        defs.is_empty(),
+        "a PTY-only harness is not offered: {defs:?}"
+    );
 }
 
 #[test]

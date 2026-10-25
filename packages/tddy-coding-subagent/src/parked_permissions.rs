@@ -159,17 +159,60 @@ fn view_of(ordinal: u64, request: &PermissionRequest) -> PermissionRequestView {
     }
 }
 
-#[async_trait::async_trait]
-impl PermissionHandler for ParkedPermissions {
-    async fn decide(&self, request: PermissionRequest) -> PermissionDecision {
+impl ParkedPermissions {
+    /// Park `request` at the back of the queue. Returns the id it is named by, and the receiver its
+    /// answer arrives on, so a caller can cancel this request alone (see [`Self::cancel_request`])
+    /// before it has been answered.
+    pub(crate) fn park(
+        &self,
+        request: PermissionRequest,
+    ) -> (String, oneshot::Receiver<PermissionDecision>) {
         let (decided, answered) = oneshot::channel();
-        {
+        let request_id = {
             let mut state = self.state();
             state.issued += 1;
             let view = view_of(state.issued, &request);
+            let request_id = view.request_id.clone();
             state.queue.push_back(Parked { view, decided });
-        }
+            request_id
+        };
         self.parked.notify_one();
+        (request_id, answered)
+    }
+
+    /// Answer the one parked request named `request_id` as cancelled, and leave every other parked
+    /// request as it is. Returns whether that request was parked: a request already answered or
+    /// cancelled is not, and is left alone.
+    pub fn cancel_request(&self, request_id: &str) -> bool {
+        let removed = {
+            let mut state = self.state();
+            let position = state
+                .queue
+                .iter()
+                .position(|parked| parked.view.request_id == request_id);
+            position.and_then(|position| state.queue.remove(position))
+        };
+        match removed {
+            Some(parked) => {
+                // A closed receiver means the approval that parked it is already gone, so no agent is
+                // left waiting on this answer.
+                if parked.decided.send(PermissionDecision::Cancelled).is_err() {
+                    log::debug!(
+                        "permission request '{}' had no waiting agent to cancel",
+                        parked.view.request_id
+                    );
+                }
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl PermissionHandler for ParkedPermissions {
+    async fn decide(&self, request: PermissionRequest) -> PermissionDecision {
+        let (_, answered) = self.park(request);
         // The sender waits in the queue until `answer` or `cancel_pending` takes it. The queue
         // lives as long as this handler, which this call borrows, so the sender is not dropped
         // unsent; cancelling is the protocol's answer should that ever change.

@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file exec_tools.proto.
  */
 export const file_exec_tools: GenFile = /*@__PURE__*/
-  fileDesc("ChBleGVjX3Rvb2xzLnByb3RvEgpleGVjX3Rvb2xzIoQBChBFeGVjdXRlVG9vbENodW5rEhQKDHJlc3VsdF9jaHVuaxgBIAEoDBIQCghpc19lcnJvchgCIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAMgASgJEg4KBmpvYl9pZBgEIAEoCRITCgtqb2JfcnVubmluZxgFIAEoCBIMCgRsYXN0GAYgASgIIpoBChJFeGVjdXRlVG9vbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRvb2xfbmFtZRgDIAEoCRIRCglhcmdzX2pzb24YBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD2NvbnZlcnNhdGlvbl9pZBgGIAEoCSLsAgobQ29udmVyc2F0aW9uV29ya3RyZWVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSFwoPY29udmVyc2F0aW9uX2lkGAQgASgJEiIKBHB1bGwYCiABKAsyEi5leGVjX3Rvb2xzLlB1bGxPcEgAEiYKBnJlbW92ZRgLIAEoCzIULmV4ZWNfdG9vbHMuUmVtb3ZlT3BIABIkCgVyZXNldBgMIAEoCzITLmV4ZWNfdG9vbHMuUmVzZXRPcEgAEiIKBGRpZmYYDSABKAsyEi5leGVjX3Rvb2xzLkRpZmZPcEgAEi0KCnB1bGxfcmFuZ2UYDiABKAsyFy5leGVjX3Rvb2xzLlB1bGxSYW5nZU9wSAASIgoEc3luYxgPIAEoCzISLmV4ZWNfdG9vbHMuU3luY09wSABCBAoCb3AiCAoGU3luY09wIj8KC1B1bGxSYW5nZU9wEgwKBGZyb20YASABKAkSCgoCdG8YAiABKAkSFgoOYWxyZWFkeV9wdWxsZWQYAyADKAkiIgoGRGlmZk9wEgwKBGZyb20YASABKAkSCgoCdG8YAiABKAkiGQoHUmVzZXRPcBIOCgZjb21taXQYASABKAkiCAoGUHVsbE9wIgoKCFJlbW92ZU9wIjMKHENvbnZlcnNhdGlvbldvcmt0cmVlUmVzcG9uc2USEwoLcmVzdWx0X2pzb24YASABKAkieAoTRXhlY3V0ZVRvb2xSZXNwb25zZRITCgtyZXN1bHRfanNvbhgBIAEoCRIQCghpc19lcnJvchgCIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAMgASgJEg4KBmpvYl9pZBgEIAEoCRITCgtqb2JfcnVubmluZxgFIAEoCCJdChRMaXN0RXhlY1Rvb2xzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjsKFUxpc3RFeGVjVG9vbHNSZXNwb25zZRIiCgV0b29scxgBIAMoCzITLmV4ZWNfdG9vbHMuVG9vbERlZiJkChtMaXN0U2Vzc2lvblRvb2xDYWxsc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSJMChxMaXN0U2Vzc2lvblRvb2xDYWxsc1Jlc3BvbnNlEiwKCnRvb2xfY2FsbHMYASADKAsyGC5leGVjX3Rvb2xzLlRvb2xDYWxsSW5mbyKxAQoMVG9vbENhbGxJbmZvEg8KB3Rhc2tfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhEKCWFyZ3NfanNvbhgDIAEoCRITCgtyZXN1bHRfanNvbhgEIAEoCRIQCghpc19lcnJvchgFIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAYgASgJEhMKC2pvYl9ydW5uaW5nGAcgASgIEhcKD2NyZWF0ZWRfdW5peF9tcxgIIAEoBCJHCgdUb29sRGVmEgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSGQoRaW5wdXRfc2NoZW1hX2pzb24YAyABKAky4gMKD0V4ZWNUb29sU2VydmljZRJOCgtFeGVjdXRlVG9vbBIeLmV4ZWNfdG9vbHMuRXhlY3V0ZVRvb2xSZXF1ZXN0Gh8uZXhlY190b29scy5FeGVjdXRlVG9vbFJlc3BvbnNlElMKEVN0cmVhbUV4ZWN1dGVUb29sEh4uZXhlY190b29scy5FeGVjdXRlVG9vbFJlcXVlc3QaHC5leGVjX3Rvb2xzLkV4ZWN1dGVUb29sQ2h1bmswARJUCg1MaXN0RXhlY1Rvb2xzEiAuZXhlY190b29scy5MaXN0RXhlY1Rvb2xzUmVxdWVzdBohLmV4ZWNfdG9vbHMuTGlzdEV4ZWNUb29sc1Jlc3BvbnNlEmkKFExpc3RTZXNzaW9uVG9vbENhbGxzEicuZXhlY190b29scy5MaXN0U2Vzc2lvblRvb2xDYWxsc1JlcXVlc3QaKC5leGVjX3Rvb2xzLkxpc3RTZXNzaW9uVG9vbENhbGxzUmVzcG9uc2USaQoUQ29udmVyc2F0aW9uV29ya3RyZWUSJy5leGVjX3Rvb2xzLkNvbnZlcnNhdGlvbldvcmt0cmVlUmVxdWVzdBooLmV4ZWNfdG9vbHMuQ29udmVyc2F0aW9uV29ya3RyZWVSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("ChBleGVjX3Rvb2xzLnByb3RvEgpleGVjX3Rvb2xzIoQBChBFeGVjdXRlVG9vbENodW5rEhQKDHJlc3VsdF9jaHVuaxgBIAEoDBIQCghpc19lcnJvchgCIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAMgASgJEg4KBmpvYl9pZBgEIAEoCRITCgtqb2JfcnVubmluZxgFIAEoCBIMCgRsYXN0GAYgASgIIpoBChJFeGVjdXRlVG9vbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRvb2xfbmFtZRgDIAEoCRIRCglhcmdzX2pzb24YBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD2NvbnZlcnNhdGlvbl9pZBgGIAEoCSLsAgobQ29udmVyc2F0aW9uV29ya3RyZWVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSFwoPY29udmVyc2F0aW9uX2lkGAQgASgJEiIKBHB1bGwYCiABKAsyEi5leGVjX3Rvb2xzLlB1bGxPcEgAEiYKBnJlbW92ZRgLIAEoCzIULmV4ZWNfdG9vbHMuUmVtb3ZlT3BIABIkCgVyZXNldBgMIAEoCzITLmV4ZWNfdG9vbHMuUmVzZXRPcEgAEiIKBGRpZmYYDSABKAsyEi5leGVjX3Rvb2xzLkRpZmZPcEgAEi0KCnB1bGxfcmFuZ2UYDiABKAsyFy5leGVjX3Rvb2xzLlB1bGxSYW5nZU9wSAASIgoEc3luYxgPIAEoCzISLmV4ZWNfdG9vbHMuU3luY09wSABCBAoCb3AiCAoGU3luY09wIj8KC1B1bGxSYW5nZU9wEgwKBGZyb20YASABKAkSCgoCdG8YAiABKAkSFgoOYWxyZWFkeV9wdWxsZWQYAyADKAkiIgoGRGlmZk9wEgwKBGZyb20YASABKAkSCgoCdG8YAiABKAkiGQoHUmVzZXRPcBIOCgZjb21taXQYASABKAkiCAoGUHVsbE9wIgoKCFJlbW92ZU9wIjMKHENvbnZlcnNhdGlvbldvcmt0cmVlUmVzcG9uc2USEwoLcmVzdWx0X2pzb24YASABKAkieAoTRXhlY3V0ZVRvb2xSZXNwb25zZRITCgtyZXN1bHRfanNvbhgBIAEoCRIQCghpc19lcnJvchgCIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAMgASgJEg4KBmpvYl9pZBgEIAEoCRITCgtqb2JfcnVubmluZxgFIAEoCCJdChRMaXN0RXhlY1Rvb2xzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjsKFUxpc3RFeGVjVG9vbHNSZXNwb25zZRIiCgV0b29scxgBIAMoCzITLmV4ZWNfdG9vbHMuVG9vbERlZiJkChtMaXN0U2Vzc2lvblRvb2xDYWxsc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSJMChxMaXN0U2Vzc2lvblRvb2xDYWxsc1Jlc3BvbnNlEiwKCnRvb2xfY2FsbHMYASADKAsyGC5leGVjX3Rvb2xzLlRvb2xDYWxsSW5mbyKxAQoMVG9vbENhbGxJbmZvEg8KB3Rhc2tfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhEKCWFyZ3NfanNvbhgDIAEoCRITCgtyZXN1bHRfanNvbhgEIAEoCRIQCghpc19lcnJvchgFIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAYgASgJEhMKC2pvYl9ydW5uaW5nGAcgASgIEhcKD2NyZWF0ZWRfdW5peF9tcxgIIAEoBCJHCgdUb29sRGVmEgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSGQoRaW5wdXRfc2NoZW1hX2pzb24YAyABKAkimAEKD0FwcHJvdmFsUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD2NvbnZlcnNhdGlvbl9pZBgGIAEoCRIRCgl0b29sX25hbWUYByABKAkSEgoKaW5wdXRfanNvbhgIIAEoCSIyChBBcHByb3ZhbFJlc3BvbnNlEg0KBWFsbG93GAEgASgIEg8KB21lc3NhZ2UYAiABKAkysAQKD0V4ZWNUb29sU2VydmljZRJOCgtFeGVjdXRlVG9vbBIeLmV4ZWNfdG9vbHMuRXhlY3V0ZVRvb2xSZXF1ZXN0Gh8uZXhlY190b29scy5FeGVjdXRlVG9vbFJlc3BvbnNlElMKEVN0cmVhbUV4ZWN1dGVUb29sEh4uZXhlY190b29scy5FeGVjdXRlVG9vbFJlcXVlc3QaHC5leGVjX3Rvb2xzLkV4ZWN1dGVUb29sQ2h1bmswARJUCg1MaXN0RXhlY1Rvb2xzEiAuZXhlY190b29scy5MaXN0RXhlY1Rvb2xzUmVxdWVzdBohLmV4ZWNfdG9vbHMuTGlzdEV4ZWNUb29sc1Jlc3BvbnNlEmkKFExpc3RTZXNzaW9uVG9vbENhbGxzEicuZXhlY190b29scy5MaXN0U2Vzc2lvblRvb2xDYWxsc1JlcXVlc3QaKC5leGVjX3Rvb2xzLkxpc3RTZXNzaW9uVG9vbENhbGxzUmVzcG9uc2USaQoUQ29udmVyc2F0aW9uV29ya3RyZWUSJy5leGVjX3Rvb2xzLkNvbnZlcnNhdGlvbldvcmt0cmVlUmVxdWVzdBooLmV4ZWNfdG9vbHMuQ29udmVyc2F0aW9uV29ya3RyZWVSZXNwb25zZRJMCg9SZXF1ZXN0QXBwcm92YWwSGy5leGVjX3Rvb2xzLkFwcHJvdmFsUmVxdWVzdBocLmV4ZWNfdG9vbHMuQXBwcm92YWxSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * One frame of a StreamExecuteTool response. The result is the concatenation of every frame's
@@ -548,6 +548,79 @@ export const ToolDefSchema: GenMessage<ToolDef> = /*@__PURE__*/
   messageDesc(file_exec_tools, 16);
 
 /**
+ * One permission request a headless coding agent asks its conversation's caller to decide.
+ *
+ * @generated from message exec_tools.ApprovalRequest
+ */
+export type ApprovalRequest = Message<"exec_tools.ApprovalRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 5;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * The conversation the agent runs in: the approval is answered by that conversation's parked
+   * permission, and only when the caller is the session that launched it.
+   *
+   * @generated from field: string conversation_id = 6;
+   */
+  conversationId: string;
+
+  /**
+   * @generated from field: string tool_name = 7;
+   */
+  toolName: string;
+
+  /**
+   * The tool call's input, as the agent sent it.
+   *
+   * @generated from field: string input_json = 8;
+   */
+  inputJson: string;
+};
+
+/**
+ * Describes the message exec_tools.ApprovalRequest.
+ * Use `create(ApprovalRequestSchema)` to create a new message.
+ */
+export const ApprovalRequestSchema: GenMessage<ApprovalRequest> = /*@__PURE__*/
+  messageDesc(file_exec_tools, 17);
+
+/**
+ * @generated from message exec_tools.ApprovalResponse
+ */
+export type ApprovalResponse = Message<"exec_tools.ApprovalResponse"> & {
+  /**
+   * @generated from field: bool allow = 1;
+   */
+  allow: boolean;
+
+  /**
+   * Why the approval was not granted; empty when it was.
+   *
+   * @generated from field: string message = 2;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message exec_tools.ApprovalResponse.
+ * Use `create(ApprovalResponseSchema)` to create a new message.
+ */
+export const ApprovalResponseSchema: GenMessage<ApprovalResponse> = /*@__PURE__*/
+  messageDesc(file_exec_tools, 18);
+
+/**
  * @generated from service exec_tools.ExecToolService
  */
 export const ExecToolService: GenService<{
@@ -603,6 +676,19 @@ export const ExecToolService: GenService<{
     methodKind: "unary";
     input: typeof ConversationWorktreeRequestSchema;
     output: typeof ConversationWorktreeResponseSchema;
+  },
+  /**
+   * A headless coding agent's permission request, answered by its conversation's caller. The daemon
+   * holds the call open until the conversation's parked request is answered or cancelled; a timeout
+   * is a denial. Only the session that launched the conversation may ask: the launch binds the
+   * conversation to that session and to the credential its agent was minted with.
+   *
+   * @generated from rpc exec_tools.ExecToolService.RequestApproval
+   */
+  requestApproval: {
+    methodKind: "unary";
+    input: typeof ApprovalRequestSchema;
+    output: typeof ApprovalResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_exec_tools, 0);

@@ -380,6 +380,8 @@ fn roster_entry(
     // Both live signals, read together: the checkout decides whether the agent can serve a prompt
     // at all, and only once it can does what the conversation is doing mean anything.
     let activity = sources.activity.get(session_id, &record.agent_id);
+    let (transport, permission_policy) =
+        tddy_coding_subagent::transport_and_policy_wire(record.harness.as_deref().unwrap_or(""));
     SessionAgentEntry {
         agent_id: record.agent_id.clone(),
         name: record.name.clone(),
@@ -398,6 +400,8 @@ fn roster_entry(
         kind: crate::coding_agent::agent_kind_to_wire(record.kind) as i32,
         harness: record.harness.clone().unwrap_or_default(),
         placement: crate::agent_placement::placement_to_wire(record.placement) as i32,
+        transport,
+        permission_policy,
     }
 }
 

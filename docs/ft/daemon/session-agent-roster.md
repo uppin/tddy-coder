@@ -208,9 +208,29 @@ daemon launches and talks to over ACP. `SubagentInfo` (the `ListSubagents` row) 
   account ([Harness profiles](harness-profiles.md));
 - every `allowed_agents` entry whose id is one of those harnesses, on that harness's default model.
 
+- every harness profile whose harness runs **headless** — `claude` (`claude -p`), `cursor`
+  (`cursor agent -p`), `codex` (`codex exec --json`) and `oz` (Warp's `oz agent run`, labelled
+  "Warp (oz)") — under its label. A bare `allowed_agents` id of a headless harness is **not** offered:
+  only a profile names the model a headless CLI runs.
+
 A profile shadows an `allowed_agents` entry of the same name, and a coding agent named like a model
-row is not offered. Headless (`claude`, `cursor`, `codex`) and PTY harnesses are not offered, and a
-coding agent's `replaces` is always empty.
+row is not offered. PTY-only harnesses (`warp-cli` among them) are not offered, and a coding agent's
+`replaces` is always empty. An agent offered both ways (`claude` and `claude-acp`) is listed once per
+transport.
+
+**Transport and permission policy.** Every coding-agent row says how its turns run and who answers
+its permission prompts: `SubagentInfo.transport` (10) / `.permission_policy` (11), snapshotted at
+attach into `SessionAgentEntry.transport` (16) / `.permission_policy` (17); both empty on a model row.
+
+| Harness | `transport` | `permission_policy` |
+|---|---|---|
+| `claude-acp`, `codex-acp`, `opencode` | `acp` | `asks_caller` |
+| `claude` | `headless` | `asks_caller` — its prompts go through `tddy-tools`' `approval_prompt` |
+| `cursor` | `headless` | `fixed: read-only; the CLI cannot ask mid-turn` |
+| `codex` | `headless` | `fixed: workspace-write sandbox; the CLI cannot ask mid-turn` |
+| `oz` | `headless` | `fixed: the agent profile decides; its default profile auto-approves commands and edits` |
+
+The create-session and Add-agent pickers show both under the row's harness badge.
 
 **Attaching one** works like any other row: `name@daemon`, revisioned and streamed. In a
 managed-codebase session a harness whose native tools cannot be withdrawn is refused with
@@ -246,6 +266,39 @@ descriptor per tool call the turn made). Options that act on an OpenAI-loop tran
 A permission request from the agent is **denied**, and the denial appears in the turn's `messages`.
 `subagent_cancel` closes the conversation as it does for every agent — the running turn is
 interrupted and the process stopped — and `subagent_end` and a detach stop the process too.
+
+**A headless conversation** runs one CLI invocation per turn, resuming the CLI's own session
+(`--resume <id>`, `exec resume <thread>`, `--conversation <id>`), and maps its stream to the same
+updates, outcome and transcript as an ACP turn. Cancel kills the CLI's process group; the turn ends
+`cancelled`. It opens only when:
+
+- the entry is **`clone`**-placed — a headless CLI names its tool calls and approvals by the
+  conversation id, which a shared-placement attach does not have;
+- the session runs as **the daemon's own OS user** — the CLI is spawned directly, with no `setpriv`
+  wrap or supervisor relay, so a privileged daemon refuses another user's session;
+- the session is **not managed** — no headless CLI's native tools can be withdrawn yet, so a managed
+  session refuses all four at attach.
+
+A `claude` conversation is handed `tddy-tools --mcp` through an owner-only
+`<tddy_data_dir>/headless/<conversation>/mcp.json` (removed when the conversation closes) and runs
+with `--permission-prompt-tool mcp__tddy-tools__approval_prompt`. Its prompt reaches the daemon as
+`ExecToolService.RequestApproval { conversation_id, tool_name, input_json }` on the tool route, which
+the daemon accepts only from the credential and session the launch registered, parks on the
+conversation, and holds open until the caller answers through `subagent_resume { permission }` — or
+denies after 60 s, on cancel, or when the asking client disconnects. Every tool but tddy-tools' own
+goes through it; nothing is pre-allowed locally.
+
+Known gaps of the headless transport:
+
+- `cursor`, `codex` and `oz` get no MCP config, so they have no tddy-tools tools and no approval
+  route — [`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md`](../../dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md).
+- `cursor`'s tool calls are not surfaced; `codex`'s arrive when the turn ends; assistant prose
+  reaches the transcript only as the turn's final text.
+- A failed open leaves an inert approval-route entry, and `mcp.json` lives until close —
+  [`docs/dev/todo/2026-10-25-headless-approval-route-residuals.md`](../../dev/todo/2026-10-25-headless-approval-route-residuals.md).
+- A turn ends on stdout EOF; a grandchild that keeps stdout open stalls it (cancel still ends it).
+- Proven against fake CLIs that replay recorded streams (the `oz` fixtures are real captures); no
+  live `claude`, `cursor` or `codex` run is recorded.
 
 **At rest**, `SessionAgentRecord` carries `kind` (`model` / `coding_agent`, omitted for a model) and
 `harness`; a record written without them loads as a model entry.
@@ -1106,7 +1159,14 @@ says why on its row. An unreadable roster is not an empty one, at any depth.
 ### Coding agents
 
 - [x] `ListSubagents` lists ACP harness profiles and ACP `allowed_agents` as `CODING_AGENT` rows with
-  their harness; headless harness profiles are not listed.
+  their harness, and headless (`claude`, `cursor`, `codex`, `oz`) harness profiles beside them; a
+  PTY-only harness is not listed.
+- [x] Every coding-agent row carries its `transport` and `permission_policy`; an agent offered both
+  ways is listed once per transport.
+- [x] A headless turn returns the CLI's final text and the next turn resumes the same CLI session;
+  cancel ends it `cancelled`; tool calls reach the transcript (codex at turn end).
+- [x] A headless `claude`'s permission prompt yields to the caller over `RequestApproval`, and only
+  the launch's own credential and session may ask it.
 - [x] Attaching a coding agent puts a `CODING_AGENT` entry on the roster stream.
 - [x] A managed session refuses to attach a harness that cannot withdraw its native tools, naming it.
 - [x] A coding-agent conversation's turn returns the agent's text with `stopReason: end_turn`.

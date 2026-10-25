@@ -56,6 +56,12 @@ fn permission_relay_socket_path() -> Option<PathBuf> {
     }
 }
 
+/// The conversation a headless coding agent's permission prompts belong to: `TDDY_CONVERSATION_ID`,
+/// the variable the exec tools read too.
+fn permission_conversation_id() -> Option<String> {
+    crate::mcp_primitives::exec_conversation_from_env()
+}
+
 /// Parameters for the approval_prompt tool (Claude Code permission-prompt-tool format).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ApprovalPromptInput {
@@ -301,11 +307,14 @@ pub const UNKNOWN_TOOL_REJECTION: &str = "unknown MCP tool";
 pub struct PermissionServer {
     tool_router: ToolRouter<Self>,
     socket_path: Option<PathBuf>,
+    /// The conversation this server answers for, when a managed conversation launched it.
+    conversation_id: Option<String>,
 }
 
 impl PermissionServer {
     pub fn new() -> Self {
         let socket_path = permission_relay_socket_path();
+        let conversation_id = permission_conversation_id();
         let mut tool_router = Self::tool_router();
         let seed_defs = seed_subagents_or_report();
         // Session-tool transport (sandbox IPC or daemon HTTP) present => forward the
@@ -360,6 +369,7 @@ impl PermissionServer {
         Self {
             tool_router,
             socket_path,
+            conversation_id,
         }
     }
 
@@ -606,13 +616,24 @@ impl PermissionServer {
         }
     }
 
+    /// Decide a permission prompt exactly as the `approval_prompt` tool does. Plain delegation to
+    /// [`decide`](Self::decide), for callers outside this module.
+    pub fn decide_for_approval(&self, tool_name: &str, input: &Value) -> String {
+        self.decide(tool_name, input)
+    }
+
     /// Decide allow/deny. Bash(tddy-tools *) and mcp__tddy-tools__* are always allowed.
     /// Bash commands that only reference paths under TDDY_SESSION_DIR or TDDY_REPO_DIR are pre-allowed.
     /// For other tools: route through TDDY_SOCKET to TUI if available, else deny.
+    /// A server answering for a conversation (`TDDY_CONVERSATION_ID`) hands the prompt to that
+    /// conversation instead; see [`Self::decide_for_conversation`].
     ///
     /// Claude Code permission-prompt-tool expects allow responses to include `updatedInput` (the
     /// original or modified tool input). Deny responses use `behavior: "deny"` and optional `message`.
     fn decide(&self, tool_name: &str, input: &Value) -> String {
+        if let Some(conversation_id) = self.conversation_id.as_deref() {
+            return self.decide_for_conversation(conversation_id, tool_name, input);
+        }
         let allow_response = || serde_json::json!({ "behavior": "allow", "updatedInput": input });
         if tool_name == "Bash" {
             let command = input.get("command").and_then(|c| c.as_str()).unwrap_or("");
@@ -651,6 +672,79 @@ impl PermissionServer {
             "message": format!("Permission denied for {} (no TUI socket)", tool_name)
         })
         .to_string()
+    }
+
+    /// Decide a prompt raised by the conversation `conversation_id`. The conversation's own decision
+    /// point answers, over the tool route (`RequestApproval`), and no local pre-allow applies: a
+    /// headless conversation yields every prompt to its conversation. tddy-tools' own MCP tools are
+    /// the one exception.
+    ///
+    /// Fails closed: only an explicit allow from the daemon is an allow. A refusal, a missing route, a
+    /// call that fails and a daemon that does not answer in time are denials, each carrying its reason.
+    fn decide_for_conversation(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+        input: &Value,
+    ) -> String {
+        let allow_response = || serde_json::json!({ "behavior": "allow", "updatedInput": input });
+        if tool_name.starts_with("mcp__tddy-tools__") {
+            return allow_response().to_string();
+        }
+        let deny = |message: String| {
+            serde_json::json!({ "behavior": "deny", "message": message }).to_string()
+        };
+        match Self::request_conversation_approval(conversation_id, tool_name, input) {
+            Ok(true) => allow_response().to_string(),
+            Ok(false) => deny(format!("Permission denied for {tool_name}")),
+            Err(reason) => deny(reason),
+        }
+    }
+
+    /// One conversation-tagged approval over the tool route, asked through the session tool client.
+    /// The round trip runs on a thread with a runtime of its own, so no runtime is entered from inside
+    /// the caller's, and it is bounded by the client's approval bound: a route that never answers
+    /// denies the prompt.
+    ///
+    /// `Ok(allow)` is the daemon's decision; `Err` carries the text a denial reports.
+    fn request_conversation_approval(
+        conversation_id: &str,
+        tool_name: &str,
+        input: &Value,
+    ) -> Result<bool, String> {
+        let round_trip = std::thread::scope(|scope| {
+            scope
+                .spawn(move || -> Result<bool, String> {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| format!("could not start the approval runtime: {e}"))?;
+                    runtime.block_on(async {
+                        match tokio::time::timeout(
+                            crate::session_tool_client::APPROVAL_CLIENT_BOUND,
+                            crate::session_tool_client::request_approval(
+                                conversation_id,
+                                tool_name,
+                                input,
+                            ),
+                        )
+                        .await
+                        {
+                            Ok(decision) => decision,
+                            Err(_elapsed) => Err(format!(
+                                "the approval from conversation {conversation_id} timed out"
+                            )),
+                        }
+                    })
+                })
+                .join()
+        });
+        match round_trip {
+            Ok(decision) => decision,
+            Err(_panicked) => Err(format!(
+                "the approval from conversation {conversation_id} failed unexpectedly"
+            )),
+        }
     }
 
     #[cfg(unix)]
@@ -3875,6 +3969,8 @@ mod tests {
                     kind: 0,
                     harness: String::new(),
                     placement: 0,
+                    transport: String::new(),
+                    permission_policy: String::new(),
                 }],
             },
         );

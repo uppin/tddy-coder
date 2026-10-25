@@ -2,13 +2,16 @@
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md § Coding agents
 
+pub mod approval_routes;
 pub mod catalog;
 pub mod confinement;
 pub mod launcher;
 pub mod parked_permissions;
 pub mod permissions;
 pub mod session;
+pub mod transports;
 
+pub use approval_routes::ApprovalRoutes;
 pub use catalog::{
     coding_agent_defs, coding_agent_defs_in, CodingAgentDef, ACP_HARNESSES, CLAUDE_ACP, CODEX_ACP,
     OPENCODE,
@@ -24,3 +27,7 @@ pub use launcher::{
 pub use parked_permissions::ParkedPermissions;
 pub use permissions::DenyAndRecord;
 pub use session::{CancelHandle, CodingAgentSession};
+pub use transports::{
+    permission_policy_of, transport_and_policy_wire, transport_of, PermissionPolicy, Transport,
+    HEADLESS_HARNESSES,
+};

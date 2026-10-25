@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { CatalogService } from "../../gen/catalog_pb";
+import { AgentKind } from "../../gen/types_pb";
 import { safeTestIdPart } from "../../lib/testId";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHttpClient } from "../../rpc/transportProvider";
@@ -45,6 +46,16 @@ export interface AgentPickerProps {
   ) => Promise<string | null>;
   /** Dismiss the picker, attaching nothing. */
   readonly onClose: () => void;
+}
+
+/**
+ * `acp · asks_caller` on a coding agent's row: how its turns are taken, then what it may do without
+ * asking, so the policy is stated rather than implied by the row being a coding agent. A model row
+ * has neither, and a coding agent with neither described renders nothing rather than a bare separator.
+ */
+function transportAndPolicyLine(agent: AvailableAgent): string {
+  if (agent.kind !== AgentKind.CODING_AGENT) return "";
+  return [agent.transport, agent.permissionPolicy].filter((part) => part !== "").join(" · ");
 }
 
 export function AgentPicker({ testIdPrefix, errorTestId, onAttach, onClose }: AgentPickerProps) {
@@ -125,7 +136,17 @@ export function AgentPicker({ testIdPrefix, errorTestId, onAttach, onClose }: Ag
                     : "border-transparent hover:border-border"
                 }`}
               >
-                <span className="truncate">{agent.label || agent.name}</span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate">{agent.label || agent.name}</span>
+                  {transportAndPolicyLine(agent) !== "" && (
+                    <span
+                      data-testid={`${optionTestId(agent.agentId)}-transport-policy`}
+                      className="truncate text-[10px] text-muted-foreground"
+                    >
+                      {transportAndPolicyLine(agent)}
+                    </span>
+                  )}
+                </span>
                 <span
                   data-testid={`${optionTestId(agent.agentId)}-host`}
                   className="text-muted-foreground"

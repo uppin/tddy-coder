@@ -188,6 +188,9 @@ impl BuildContext {
         let model_registry = &shared.model_registry;
         let session_notification_bus = Arc::clone(&shared.session_notification_bus);
         let session_tokens = &mount.session_tokens;
+        // One registry for the whole host: the launcher binds each headless conversation's approvals
+        // into it, and the host answers those approvals through it.
+        let approval_routes = Arc::default();
         let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver.clone(),
@@ -222,11 +225,13 @@ impl BuildContext {
                     user_resolver,
                     tokens: Some(session_tokens.clone()),
                 },
-            ),
+            )
+            .with_approval_routes(Arc::clone(&approval_routes)),
         ))
         .with_session_notification_bus(session_notification_bus)
         .with_session_tokens(session_tokens.clone())
         .with_askpass_endpoint(askpass_endpoint)
+        .with_approval_routes(approval_routes)
         // Read here, before the local socket server is spawned: adopting its own listener
         // clears the `LISTEN_*` variables the host sockets are announced in.
         .with_inherited_host_session_sockets(

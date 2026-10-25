@@ -55,6 +55,10 @@ impl AgentHostCallbacks for DaemonSessionHost {
         self.local_exec_tools().hosted_clone_for(session_id)
     }
 
+    fn approval_routes(&self) -> Option<Arc<tddy_coding_subagent::ApprovalRoutes>> {
+        self.approval_routes.clone()
+    }
+
     async fn run_hosted_clone_tool(
         &self,
         req: &ExecuteToolRequest,

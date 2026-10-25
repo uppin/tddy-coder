@@ -328,6 +328,12 @@ subagent is paused, not finished — its ACP prompt stays in flight, waiting on 
   (`permission_answer_json`), so a conversation another daemon serves behaves the same.
 - **`model` agents never ask.** A resume carrying a `permission` to an OpenAI-loop agent is refused
   before the model is called.
+- **Headless `claude -p` asks the same way.** Its `--permission-prompt-tool` is tddy-tools'
+  `approval_prompt`, which asks the daemon (`ExecToolService.RequestApproval`); the daemon parks the
+  request on the conversation, and the caller sees the same `permission_requested` turn and answers
+  it with `subagent_resume`. A timeout (60 s), a cancel or a refused route is a denial. Headless
+  `cursor`, `codex` and `oz` cannot ask mid-turn and run under the fixed policy their row names
+  ([Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents)).
 - **Known gap:** `toolCall.kind` is always `other` — the ACP driver drops the agent's tool kind
   ([`docs/dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md`](../../dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md)).
 
@@ -669,6 +675,9 @@ the clone the owning daemon holds.
 - A background job the subagent started does not take the worktree's lock, so a write it makes while
   a caller sync runs can be lost, or committed as a later turn's work — backlog entry *A background
   job can race the caller sync*.
+- A headless coding agent opens only `clone`-placed, only as the daemon's own OS user, and only in an
+  unmanaged session; `cursor`, `codex` and `oz` get no MCP config —
+  [`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md`](../../dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md).
 - Every merge on the branch's first-parent line is read as a caller sync, so a merge a host-run
   subagent made itself with `git merge` would be left out of every pull and taken as the last caller
   state; a jailed subagent cannot make one — backlog entry *A merge the subagent makes itself is read

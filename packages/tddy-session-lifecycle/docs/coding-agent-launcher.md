@@ -66,3 +66,30 @@ spawns the agent itself.
 On a supervised host the program sent is what `allowed_relay_tool_paths` must list. Its arguments are
 not allowlisted, so allowlisting `bunx` lets the daemon run any npm package as the session user; set
 `TDDY_CLAUDE_AGENT_ACP_CLI` and allowlist that binary instead.
+
+## A headless conversation
+
+`headless_command_for` (`headless_plan`) builds the `HeadlessCommand` for `claude`, `cursor`, `codex`
+or `oz`, refusing rather than starting anything weaker:
+
+- the launcher must be wired (`with_headless_wiring(config, <tddy_data_dir>/headless)`, which
+  `for_daemon` does), the harness confinable for the session (`refuse_unless_confinable` — no
+  headless CLI is, so a managed session refuses), and the launch must carry a plain conversation id;
+- the program is the binary the daemon's own sessions of that CLI resolve (`resolve_claude_binary_path`,
+  `resolve_cursor_binary_path`), `codex` or `oz` from `PATH`, on the launch's worktree with the
+  session's model;
+- the CLI runs as the daemon's own user: `refuse_unless_daemon_user` probes `run_as_session_user`, and
+  any wrap (`setpriv`, a relay) is a refusal;
+- a provider route contributes its `env` and `secret_env`; a route that writes a file or passes
+  arguments other than `--model <the session's model>` is refused;
+- `claude` only: the `tddy-tools --mcp` spec (`tool_server_spec`, with `TDDY_CONVERSATION_ID`) is
+  written to `<tddy_data_dir>/headless/<conversation>/mcp.json` (`0600`, atomic) and the prompt tool
+  is `mcp__tddy-tools__approval_prompt`. `bind_approvals` registers (conversation, session, the spec's
+  `TDDY_REMOTE_SESSION_TOKEN`) in `ApprovalRoutes` (`with_approval_routes`); a spec with no token is
+  refused. `tddy-session-agents`' `AgentRoster::conversation_closed` removes the route and the
+  directory.
+
+`cursor`, `codex` and `oz` get no MCP config
+([`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md`](../../../docs/dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md));
+a route registered for a launch whose open then fails stays inert until close
+([`docs/dev/todo/2026-10-25-headless-approval-route-residuals.md`](../../../docs/dev/todo/2026-10-25-headless-approval-route-residuals.md)).

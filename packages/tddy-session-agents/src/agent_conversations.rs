@@ -82,6 +82,15 @@ pub enum PromptRouting {
     Remote(String),
 }
 
+/// What closing a roster agent's conversations left for its caller to finish.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ClosedConversations {
+    /// The conversations whose turn loops ran here, now closed.
+    pub local: Vec<String>,
+    /// The `(owning daemon, conversation id)` pairs whose loops run on another daemon, to cancel there.
+    pub remote: Vec<(String, String)>,
+}
+
 /// Every conversation open on this host, keyed by conversation id.
 ///
 /// One map for the whole host rather than one per session: a conversation id is what a caller names
@@ -151,27 +160,33 @@ impl OpenAgentConversations {
     /// running against a clone the detach is about to delete, with nothing left on this side able
     /// to name it.
     ///
-    /// Returns the `(owning daemon, conversation id)` pairs the caller still has to cancel
-    /// remotely, because delivering them needs the common room and this map has no transport.
+    /// Returns the conversations that were closed here, and the `(owning daemon, conversation id)`
+    /// pairs the caller still has to cancel remotely, because delivering them needs the common room
+    /// and this map has no transport.
     pub async fn close_every_conversation_with(
         &self,
         session_id: &str,
         agent_id: &str,
-    ) -> Vec<(String, String)> {
-        let mut cancelled_remotely: Vec<(String, String)> = Vec::new();
+    ) -> ClosedConversations {
+        let mut closed = ClosedConversations::default();
         let mut open = self.open.lock().await;
         open.retain(|conversation_id, conversation| {
             if !conversation.is_with(session_id, agent_id) {
                 return true;
             }
             match conversation {
-                AgentConversation::Local { closed, .. } => closed.notify_one(),
+                AgentConversation::Local { closed: stop, .. } => {
+                    stop.notify_one();
+                    closed.local.push(conversation_id.clone());
+                }
                 AgentConversation::Remote {
                     daemon_instance_id, ..
-                } => cancelled_remotely.push((daemon_instance_id.clone(), conversation_id.clone())),
+                } => closed
+                    .remote
+                    .push((daemon_instance_id.clone(), conversation_id.clone())),
             }
             false
         });
-        cancelled_remotely
+        closed
     }
 }

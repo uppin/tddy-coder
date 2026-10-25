@@ -18,9 +18,9 @@ use tddy_rpc::{
     MultiRpcService, Request, Response, RpcBridge, RpcService, ServiceEntry, Status, Streaming,
 };
 use tddy_service::proto::exec_tools::{
-    ConversationWorktreeRequest, ConversationWorktreeResponse, ExecToolService,
-    ExecToolServiceServer, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ApprovalRequest, ApprovalResponse, ConversationWorktreeRequest, ConversationWorktreeResponse,
+    ExecToolService, ExecToolServiceServer, ExecuteToolChunk, ExecuteToolRequest,
+    ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse, ToolDef,
 };
 
@@ -140,6 +140,13 @@ impl ExecToolService for ExecToolsDaemon {
             .expect("recorded conversations")
             .push(request.into_inner());
         Ok(Response::new(self.conversation_answer.clone()))
+    }
+
+    async fn request_approval(
+        &self,
+        _request: Request<ApprovalRequest>,
+    ) -> Result<Response<ApprovalResponse>, Status> {
+        Err(Status::unimplemented("not served by this fixture"))
     }
 }
 

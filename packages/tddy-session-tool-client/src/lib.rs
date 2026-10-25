@@ -15,12 +15,17 @@
 //! `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` reach the daemon through this crate
 //! and no longer depend on `tddy-tools` at all.
 
+mod approval;
 mod conversation;
 pub mod daemon_http_rpc;
 mod exec_catalog;
 mod room_transport;
 mod rpc_transports;
 
+pub use approval::{
+    request_approval, request_approval_via_rpc_transport, request_approval_within,
+    APPROVAL_CLIENT_BOUND,
+};
 pub use conversation::{
     conversation_worktree, diff_conversation_worktree, dispatch_conversation_tool,
     pull_conversation_range, reset_conversation_worktree, sync_conversation_worktree,
@@ -352,9 +357,13 @@ pub(crate) fn incomplete_livekit_reason(missing: &[&str]) -> String {
     )
 }
 
+/// What a tool call or an approval reports when no remote route is configured.
+pub(crate) const NOT_CONFIGURED_REASON: &str =
+    "remote toolset not configured: TDDY_REMOTE_SESSION_ID and TDDY_REMOTE_DAEMON_URL must be set";
+
 fn not_configured_error() -> String {
     serde_json::json!({
-        "error": "remote toolset not configured: TDDY_REMOTE_SESSION_ID and TDDY_REMOTE_DAEMON_URL must be set",
+        "error": NOT_CONFIGURED_REASON,
         "is_error": true
     })
     .to_string()

@@ -178,6 +178,9 @@ pub struct DaemonSessionHost {
     /// What starts a coding-agent subagent for a conversation; `None` until
     /// [`Self::with_coding_agent_launcher`].
     coding_agent_launcher: Option<Arc<dyn tddy_coding_subagent::CodingAgentLauncher>>,
+    /// The routes a headless coding agent's permission approvals are answered through; `None` until
+    /// [`Self::with_approval_routes`], which refuses every approval.
+    approval_routes: Option<Arc<tddy_coding_subagent::ApprovalRoutes>>,
     /// This daemon's model registry, whose assistants are selectable agents alongside the
     /// `allowed_agents` config entries. `None` means no registry is wired (a test fixture), in
     /// which case `ListAgents` reports the config entries alone.

@@ -43,7 +43,7 @@ export const sessionAgentConversationPage = {
    */
   assertPickerOffers(agentIds: readonly string[]) {
     cy.get(`[data-testid^="${TEST_IDS.sessionAgentPicker}-option-"]`)
-      .not(`[data-testid$="-host"]`)
+      .not(`[data-testid$="-host"], [data-testid$="-kind"], [data-testid$="-transport-policy"]`)
       .should(($options) => {
         const rendered = $options.toArray().map((el) => el.getAttribute("data-testid"));
         expect(rendered).to.deep.equal(agentIds.map(sessionAgentPickerOption));

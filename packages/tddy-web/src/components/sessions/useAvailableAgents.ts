@@ -33,6 +33,10 @@ export interface AvailableAgent {
   readonly kind: AgentKind;
   /** The harness of a coding agent; empty for a model. */
   readonly harness: string;
+  /** How a coding agent's turns are taken: `acp` or `headless`; empty for a model. */
+  readonly transport: string;
+  /** What a coding agent may do without asking: `asks_caller` or `fixed: <text>`; empty for a model. */
+  readonly permissionPolicy: string;
 }
 
 export interface AvailableAgents {
@@ -51,6 +55,8 @@ function availableAgentOf(info: SubagentInfo): AvailableAgent {
     replaces: info.replaces,
     kind: info.kind,
     harness: info.harness,
+    transport: info.transport,
+    permissionPolicy: info.permissionPolicy,
   };
 }
 
