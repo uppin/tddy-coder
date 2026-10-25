@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use prost::Message as _;
 use pretty_assertions::assert_eq;
+use prost::Message as _;
 use serde_json::json;
 use serial_test::serial;
 use tddy_coding_subagent::{CodingAgentLaunch, CodingAgentLauncher};
@@ -46,9 +46,9 @@ use tddy_service::proto::exec_tools::{
     ExecuteToolRequest,
 };
 use tddy_service::proto::session_agents_svc::{
-    AttachSessionAgentRequest, OpenAgentConversationRequest, SessionAgentService as _,
+    AgentPlacement, AttachSessionAgentRequest, OpenAgentConversationRequest,
+    SessionAgentService as _,
 };
-use tddy_service::proto::types::AgentPlacement;
 use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::peer_routing::PeerRouting;
