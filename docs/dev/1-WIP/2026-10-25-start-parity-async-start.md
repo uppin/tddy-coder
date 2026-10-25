@@ -1,0 +1,186 @@
+# Changeset: StartSession returns at once; poll or cancel the start
+
+**Date**: 2026-10-25
+**Status**: 🚧 In Progress
+**Type**: Feature
+**Complexity**: 4 — concurrency (a background stream consumer), a persisted ledger, multi-daemon cancel; two crates
+**Stack**: `#start-parity` 4/9 — branch `feature/start-parity/async-start`, base `n3` `worktree-list` (`feature/start-parity/worktree-list`)
+**PRD**: [PRD-2026-10-25-start-parity-async-start.md](../../ft/daemon/1-WIP/PRD-2026-10-25-start-parity-async-start.md)
+
+## Initial Discovery
+
+See [./2026-10-25-start-parity-async-start-initial-discovery.md](./2026-10-25-start-parity-async-start-initial-discovery.md).
+
+## Prerequisites
+
+- ⚠ [2026-10-03-start-phases-and-code-index-warm-skip-sandboxed-tool-and-split-starts.md](../todo/2026-10-03-start-phases-and-code-index-warm-skip-sandboxed-tool-and-split-starts.md) — some start types emit no phases; recorded in the tool description, not fixed here.
+- ⚠ [2026-10-24-cancelled-start-waits-out-an-in-flight-worktree-cut.md](../todo/2026-10-24-cancelled-start-waits-out-an-in-flight-worktree-cut.md) — `CancelSessionStart` inherits the delay.
+- ⚠ [2026-10-24-streamed-start-keepalive-through-a-slow-worktree-step-untested.md](../todo/2026-10-24-streamed-start-keepalive-through-a-slow-worktree-step-untested.md) — the blocking-hook seam built here is the one that entry asks for. Reference only; not claimed.
+
+## Responsibility
+
+- The ledger: its record type, the stream consumer, and persistence.
+- `StartSession` returning a handle.
+- `GetSessionStart` and `CancelSessionStart`.
+
+## Boundaries
+
+- Does not change the start core, the task registry or `TaskService`.
+- Does not add start phases to starts that emit none: tool, sandboxed and stack-child starts
+  (TODO 2026-10-03). For those starts the ledger reads `running` until the outcome, and the tool
+  description says so.
+- Does not touch `spawn_conversation` (that is `spawn-conversation`).
+
+## Dependencies
+
+What each parent PR delivers that this PR consumes. These surfaces are **theirs to create**;
+implementing one here collides with the PR that owns it.
+
+| Parent node | What it delivers | How this PR consumes it | This PR does NOT |
+|---|---|---|---|
+| `n2` `start-tool` (`feature/start-parity/start-tool`) | `StartSessionArgs`, the `StartSession` tool, its schema, and the orchestrator fields 44/45 | builds on `StartSessionArgs` and the `StartSession` tool | change the args model, the schema generator, or the proto fields |
+
+## Draft PR contract
+
+The **first push of this PR**, not its deliverable — this PR goes on to implement all of it:
+
+- `StartLedgerRecord` and `StartLedger::{open, record, read}` in
+  `tddy-daemon-rpc/src/exec_tool/start_ledger.rs`.
+- `GET_SESSION_START` and `CANCEL_SESSION_START` defs.
+- `ProjectHomePort::{start_session → StartHandle, session_start, cancel_session_start}`.
+- Failing tests.
+
+## Green wave
+
+**Wave:** 2 of 3
+**Greenable independently:** no — its tests exercise `n2` `start-tool` (`feature/start-parity/start-tool`)'s behaviour, which must be green first
+**Concurrent with:** `n3` `worktree-list` (`feature/start-parity/worktree-list`), `n5` `start-options` (`feature/start-parity/start-options`), `n6` `session-follow` (`feature/start-parity/session-follow`), `n7` `terminate` (`feature/start-parity/terminate`)
+**Blocks:** `n9` `spawn-conversation` (`feature/start-parity/spawn-conversation`)
+
+Real dependency edges (the branch line is only their linear flattening):
+
+    n1 → n3, n5, n6, n7      n2 → n4, n9      n3 → n8      n4 → n9
+
+Line: `n1 remote-targets · n2 start-tool | n3 worktree-list · n4 async-start · n5 start-options ·
+n6 session-follow · n7 terminate | n8 disk-refresh · n9 spawn-conversation`, waves `1 1 2 2 2 2 2 3 3`.
+
+## Successor PRs
+
+`n5` `start-options` (`feature/start-parity/start-options`), `n6` `session-follow` (`feature/start-parity/session-follow`), `n7` `terminate` (`feature/start-parity/terminate`), `n8` `disk-refresh` (`feature/start-parity/disk-refresh`), `n9` `spawn-conversation` (`feature/start-parity/spawn-conversation`)
+
+## Affected Packages
+
+- [ ] `tddy-tool-engine`
+- [ ] `tddy-daemon-rpc`
+
+## Related Feature Documentation
+
+- PRD: [PRD-2026-10-25-start-parity-async-start.md](../../ft/daemon/1-WIP/PRD-2026-10-25-start-parity-async-start.md)
+- [docs/ft/daemon/project-concept.md § Project-home tools](../../ft/daemon/project-concept.md)
+
+## Summary
+
+`StartSession` blocks until the clone, the worktree and the agent are done, and gives back only a
+session id. This node makes it return a handle at once. A ledger records the start's phases
+and its outcome, `GetSessionStart` reads it, and `CancelSessionStart` stops it on whichever host it
+runs.
+
+## Scope
+
+- [ ] `StartSession` returns before the start finishes, with a handle.
+- [ ] The orchestrator can read the start's current phase and its outcome: the session, branch and worktree, or the reason it failed.
+- [ ] The orchestrator can cancel a start on any host.
+- [ ] The record can still be read after the daemon's task list has dropped the start.
+
+## Technical Changes
+
+### State A
+
+- `StartSession` (the tool from `start-tool`) awaits the unary `StartSession`. That call is not a
+  task, sends its progress to a discarding sink, and cannot be cancelled.
+- `StreamStartSession` runs as a `start_session` task, and its first event is
+  `StartTaskStarted{task_id, daemon_instance_id}`, for a forwarded start too. But phases and clone
+  progress live only in the stream, `result_json` is never set, `GetTask` is local only, and a
+  terminal task is evicted after 5 minutes (`tddy-task/src/registry.rs:12-14`).
+- `CancelTask` forwards to a peer (`tddy-daemon-sandbox/src/task_service.rs:269-296`).
+
+### State B
+
+- `StartSession` opens `StreamStartSession`. It waits for `StartTaskStarted` (or an immediate
+  failure) and returns `{start_id, task_id, daemon_instance_id}`.
+- A background consumer on the caller's host drains the stream into the **start ledger**:
+  - `{start_id, state: running|succeeded|failed|cancelled, phase: {step, status}, clone_progress?,
+    session_id?, branch?, worktree?, error?, updated_at}`;
+  - persisted at `<home session dir>/artifacts/session-starts/<start_id>.json`, so it outlives the
+    task registry's eviction.
+- `GetSessionStart {start_id}` reads the ledger record.
+- `CancelSessionStart {start_id}` sends `CancelTask{task_id, daemon_instance_id}` and returns at
+  once. The ledger then reads `cancelled` once the stream ends with CANCELLED.
+
+## Testing Plan
+
+### Acceptance Tests
+
+- [ ] **Integration** `packages/tddy-daemon-rpc/tests/async_start_acceptance.rs` — `start_session_returns_a_handle_before_the_worktree_is_cut`: A post-checkout hook blocks until released. The tool returns `start_id` while the hook still blocks.
+- [ ] **Integration** `same file` — `get_session_start_reports_the_running_phase_then_the_session`: Poll until: `running` with the worktree step, then (after release) `succeeded` with session_id, branch and worktree that exist on disk.
+- [ ] **Integration** `same file` — `cancel_session_start_cancels_and_leaves_no_session`: Cancel during the blocked hook. The ledger reads `cancelled`; no session dir and no branch remain.
+- [ ] **Integration** `same file` — `a_failed_start_reads_failed_with_the_start_paths_reason`: claude-cli without a model: `failed`, and the error equals the start path's message.
+- [ ] **Integration** `same file` — `the_ledger_answers_after_the_task_is_evicted`: After registry eviction (an injected clock or a TTL seam), `GetSessionStart` still returns `succeeded`.
+- [ ] **Integration** `packages/tddy-daemon/tests/project_home_start_remote_acceptance.rs` — `a_start_on_another_host_is_polled_and_cancelled_from_the_orchestrator`: The ledger reports the peer's `daemon_instance_id`; a cancel stops the peer's start.
+
+Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests use the
+in-memory peer forwarder if it exists on the base, and the LiveKit testkit otherwise.
+
+## Technical Debt & Production Readiness
+
+## Decisions & Trade-offs
+
+- **The ledger sits on the caller's host and is fed by the stream.** The alternative was
+  forwarding `GetTask` plus a phase store on `TaskHandle`. A forwarded stream already relays the
+  peer's events, so one consumer covers local and remote starts, and nothing in `tddy-task`
+  changes.
+- **If the consumer outlives the daemon,** a restart leaves a `running` record behind. On load,
+  the record is marked `failed: "daemon restarted during the start"` — that is a recorded fact,
+  not a fallback.
+
+## Refactoring Needed
+### From /red (TDD red phase)
+### From /validate-changes
+### From /validate-tests
+### From /validate-prod-ready
+### From /analyze-clean-code
+
+## Validation Results
+| Validation | Last Run | Status |
+|------------|----------|--------|
+| /validate-changes | Not yet run | Pending |
+| /validate-tests | Not yet run | Pending |
+| /validate-prod-ready | Not yet run | Pending |
+| /analyze-clean-code | Not yet run | Pending |
+
+## TODO
+
+- [x] Record initial discovery (`2026-10-25-start-parity-async-start-initial-discovery.md`)
+- [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
+- [x] Create/update PRD documentation
+- [x] Create changeset (this document)
+- [ ] Create failing acceptance tests
+- [ ] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests
+- [ ] TDD Red — write failing unit/integration tests
+- [ ] TDD Green — implement with quality code
+- [ ] Update documentation with progress
+- [ ] Repeat Red→Green→Update cycle until feature complete
+- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [ ] Validate changes (/validate-changes)
+- [ ] Refactor issues from change validation
+- [ ] USER REVIEW — development complete
+- [ ] Validate tests (/validate-tests)
+- [ ] Refactor test issues
+- [ ] Validate production readiness (/validate-prod-ready)
+- [ ] Refactor production readiness issues
+- [ ] Analyze code quality (/analyze-clean-code)
+- [ ] Refactor code quality issues
+- [ ] Final validation (/validate-changes)
+- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
