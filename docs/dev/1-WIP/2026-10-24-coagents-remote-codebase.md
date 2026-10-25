@@ -32,6 +32,7 @@ entry gets fixed here rather than worked around.
 - Relay: `tddy-daemon --relay` forwards `session_agents.SessionAgentService` (stream + unary) to the addressed peer.
 - `tddy-session-tool-client`: the relay (`DaemonHttp` to the relay) transport is accepted by `connect_facilitating_daemon` for the roster stream and conversation RPCs when the relay is the endpoint.
 - `tddy-tools`: subagent tools advertised in remote-codebase mode once the workspace roster is non-empty.
+- Remote placement (developer definition, hand-off cited under Decisions): a subagent attached in remote-codebase mode runs on the codebase host's daemon, on a clone that daemon owns (`open_owned`), with results reported back over the hop. **Blocked — the definition does not reconcile with `open_owned`, the roster's no-clone rule or the workspace admission rule; not implemented.**
 
 ## Boundaries
 
@@ -49,6 +50,12 @@ entry gets fixed here rather than worked around.
 
 The `--agent` flag, the workspace admission rule's signature, the relay forward entry, the transport
 acceptance — bodies `TODO(remote-codebase)` — and the failing tests below.
+
+**Remote placement — no failing tests written.** The definition is blocked on a developer decision
+(Decisions: *Remote placement is blocked*). The surfaces it names are `open_owned`
+(`packages/tddy-session-agents/src/ports.rs:158`, called at `packages/tddy-session-agents/src/service.rs:857`)
+and the workspace admission (`packages/tddy-session-agents/src/workspace_roster.rs:11`). No surface is
+changed for it, and no test is proposed until the decision is made.
 
 ## Green wave
 
@@ -177,6 +184,45 @@ laptop: main agent ─MCP─ tddy-tools --mcp ─HTTP─ relay ─LiveKit─ cod
 - **`DaemonHttpRpcClient` error mapping.** A non-200 body that is not a Connect error is `Unknown`,
   with the HTTP status and body. No code is guessed from the status. A stream that ends without its
   end-of-stream envelope is `Unavailable`. An envelope with an unrecognised flags byte is `Internal`.
+- **The removed roster TODO is kept removed, pinned by a test.** `TODO(session-agent-roster)` in
+  `packages/tddy-discovery/src/roster/stream.rs` is removed: the daemon-HTTP arm now carries the roster
+  stream. `packages/tddy-daemon-rpc/tests/roster_stream_over_daemon_http_integration.rs` opens it over
+  `DaemonHttp` against the daemon's real `/rpc` mount and asserts the roster the daemon holds is the one
+  applied. The test fails with the old refusal restored (checked by a temporary mutation, reverted).
+- **Remote placement is blocked: the developer's definition contradicts the code and the docs
+  (2026-10-25).** The hand-off is [`2026-10-24-coagents-clone-placement.md`](./2026-10-24-coagents-clone-placement.md):
+  its Decisions ("`open_owned` (peer-owned) and remote placement belong to n8 `remote-codebase`"), its
+  Scope ("No remote placement — n8") and its TODO ("Carry to n8 `remote-codebase`: `open_owned`
+  (peer-owned) and remote placement"). The definition for this node is: a subagent attached in
+  remote-codebase mode runs on the codebase host's daemon, on a clone that daemon owns (`open_owned`),
+  with results reported back over the hop. It does not reconcile with the branch or the docs:
+  1. `open_owned` runs an agent this daemon owns **reading the clone it holds for another daemon's
+     session** (`packages/tddy-session-agents/src/ports.rs:152-153`;
+     `packages/tddy-session-agents/src/svc_start_hosted_agent_clone.rs:236-237`). A workspace session
+     belongs to the codebase daemon, so that daemon holds no such clone. `open_owned` returns `None`
+     (`packages/tddy-session-agents/src/service.rs:857`), and the codebase daemon's own agent takes the
+     local branch (`service.rs:878`), which reads the authoritative worktree.
+  2. An agent owned by the codebase host "is co-located and gets no clone"
+     (`docs/ft/daemon/session-agent-roster.md:487-488`), and AC55 says it "succeeds with **no clone**:
+     that agent reads the authoritative worktree directly" (`session-agent-roster.md:1105`).
+  3. Workspace admission refuses any coding agent another daemon owns
+     (`packages/tddy-session-agents/src/workspace_roster.rs:21-27`; this changeset's test 8), and the
+     roster spec says "A coding agent owned by another daemon is not supported"
+     (`session-agent-roster.md:218`). Remote placement of a coding agent has no workspace-session case
+     to run in.
+  4. The PRD says "this agent works on the authoritative worktree, not on a clone of someone else's"
+     (`docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md:53-54`).
+
+  The PRD's other use of "clone" is "its own clone with `clone` placement"
+  (`docs/ft/daemon/1-WIP/PRD-2026-10-24-coagents-remote-codebase.md:44-45`). That is the
+  per-conversation worktree of `AgentPlacement::Clone`, which the open path serves through `open_local`
+  with the conversation id (`packages/tddy-session-agents/src/ports.rs:165-166`), not through
+  `open_owned`. So "clone" and "(open_owned)" in the definition name different things. Not implemented;
+  no failing tests written. **Developer decision needed:** (a) co-located only, which the code already
+  does, with remote placement moved to a node that changes the admission rule; (b) "clone" means the
+  per-conversation worktree, and the `(open_owned)` label becomes `open_local`; or (c) peer-owned coding
+  agents on workspace sessions, which reverses `workspace_roster_admits` and the roster spec's "not
+  supported" — a design change the developer must approve.
 
 ## Refactoring Needed
 
