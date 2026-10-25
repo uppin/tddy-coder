@@ -63,23 +63,6 @@ pub trait GithubCredentialHandler: Send + Sync {
     async fn github_token(&self) -> Result<String, String>;
 }
 
-/// Per-instance capability to decide a tool-use approval for one coding-agent conversation.
-///
-/// Bound per instance on a self-hosted listener. A conversation-tagged `approve` (one carrying a
-/// `conversation_id`, as a headless `claude` conversation's `--permission-prompt-tool` sends) is
-/// answered here and never reaches the workflow presenter. `approve` returns `Ok(true)` to allow,
-/// `Ok(false)` to deny, or `Err(message)` to refuse the request, with `message` surfaced to the
-/// agent.
-#[async_trait]
-pub trait ConversationApprovalHandler: Send + Sync {
-    async fn approve(
-        &self,
-        conversation_id: &str,
-        tool_name: &str,
-        input: &serde_json::Value,
-    ) -> Result<bool, String>;
-}
-
 static TOOLCALL_LOG_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 fn toolcall_log(msg: &str) {
@@ -136,9 +119,6 @@ pub struct ListenerHandlers {
     pub conversation_spawn: Option<Arc<dyn ConversationSpawnHandler>>,
     /// Answers `github-token`; absent, the verb is refused — there is no environment fallback.
     pub github_credential: Option<Arc<dyn GithubCredentialHandler>>,
-    /// Answers a conversation-tagged `approve`; absent, such an approve is refused — it is never
-    /// relayed to the workflow presenter.
-    pub conversation_approval: Option<Arc<dyn ConversationApprovalHandler>>,
 }
 
 /// Like [`start_toolcall_listener`], but binds a per-instance [`ConversationSpawnHandler`] onto
@@ -166,7 +146,6 @@ pub fn start_toolcall_listener_with_conversation_handler(
         ListenerHandlers {
             conversation_spawn: conversation_spawn_handler,
             github_credential: None,
-            conversation_approval: None,
         },
     )
 }
@@ -262,8 +241,7 @@ async fn accept_loop(
             Arc::clone(&tddy_data_dir),
         )
         .with_conversation_spawn_handler(handlers.conversation_spawn.clone())
-        .with_github_credential_handler(handlers.github_credential.clone())
-        .with_conversation_approval_handler(handlers.conversation_approval.clone());
+        .with_github_credential_handler(handlers.github_credential.clone());
         let (reader, writer) = stream.into_split();
         let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
             reader,
@@ -297,9 +275,6 @@ pub struct ToolcallRpcService {
     /// Per-instance `github-token` handler. Present only where the session's project account can
     /// be resolved.
     github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
-    /// Per-instance conversation-tagged `approve` handler. Present only where a conversation's
-    /// approvals are decided by the session itself rather than by the workflow presenter.
-    conversation_approval_handler: Option<Arc<dyn ConversationApprovalHandler>>,
 }
 
 impl ToolcallRpcService {
@@ -330,7 +305,6 @@ impl ToolcallRpcService {
             child_spawn_handler: None,
             conversation_spawn_handler: None,
             github_credential_handler: None,
-            conversation_approval_handler: None,
         }
     }
 
@@ -359,15 +333,6 @@ impl ToolcallRpcService {
         github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
     ) -> Self {
         self.github_credential_handler = github_credential_handler;
-        self
-    }
-
-    /// Bind a per-instance conversation-tagged `approve` handler (builder-style).
-    pub fn with_conversation_approval_handler(
-        mut self,
-        conversation_approval_handler: Option<Arc<dyn ConversationApprovalHandler>>,
-    ) -> Self {
-        self.conversation_approval_handler = conversation_approval_handler;
         self
     }
 
@@ -699,23 +664,14 @@ impl ToolcallRpcService {
             .await
     }
 
-    /// approve: a conversation-tagged request is decided by the session's own
-    /// [`ConversationApprovalHandler`] and never reaches the presenter. An untagged request is the
-    /// workflow's own approval and goes to the presenter, as it always has.
     async fn handle_approve(&self, request: serde_json::Value) -> Result<ToolCallResponse, Status> {
         let wire: ApproveRequestWire = serde_json::from_value(request)
             .map_err(|e| Status::invalid_argument(format!("invalid approve request: {}", e)))?;
         toolcall_log(&format!(
-            "[approve] tool={} input_len={} conversation={}",
+            "[approve] tool={} input_len={}",
             wire.tool_name,
-            wire.input.to_string().len(),
-            wire.conversation_id.as_deref().unwrap_or("none")
+            wire.input.to_string().len()
         ));
-        if let Some(conversation_id) = wire.conversation_id.as_deref() {
-            return Ok(self
-                .decide_conversation_approval(conversation_id, &wire.tool_name, &wire.input)
-                .await);
-        }
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let tool_request = ToolCallRequest::Approve {
             tool_name: wire.tool_name,
@@ -724,35 +680,6 @@ impl ToolcallRpcService {
         };
         self.await_presenter_response(tool_request, response_rx)
             .await
-    }
-
-    /// The conversation-tagged branch of `approve`: the per-instance [`ConversationApprovalHandler`]
-    /// decides. Without a bound handler the request is refused — it is never handed to the presenter,
-    /// so an unbound listener cannot grant an approval by falling through.
-    async fn decide_conversation_approval(
-        &self,
-        conversation_id: &str,
-        tool_name: &str,
-        input: &serde_json::Value,
-    ) -> ToolCallResponse {
-        let Some(handler) = self.conversation_approval_handler.clone() else {
-            toolcall_log(&format!(
-                "[approve] refused conversation={conversation_id} tool={tool_name}: no handler bound"
-            ));
-            return ToolCallResponse::Error {
-                message: "no conversation approval handler is bound to this listener; the approval is refused"
-                    .to_string(),
-            };
-        };
-        match handler.approve(conversation_id, tool_name, input).await {
-            Ok(allow) => ToolCallResponse::ApproveResult { allow },
-            Err(message) => {
-                toolcall_log(&format!(
-                    "[approve] conversation={conversation_id} tool={tool_name} refused by handler"
-                ));
-                ToolCallResponse::Error { message }
-            }
-        }
     }
 
     /// `ask`/`approve` block until the presenter responds via the oneshot channel carried on

@@ -79,7 +79,6 @@ impl ToolHostHandlers {
         ListenerHandlers {
             conversation_spawn: self.conversation_spawn,
             github_credential: self.github_credential,
-            conversation_approval: None,
         }
     }
 }
