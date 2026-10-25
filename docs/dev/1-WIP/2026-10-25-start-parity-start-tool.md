@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 5 — proto change (session.proto), four packages including tddy-web, parity against the proto descriptor and the UI builder, orchestrator tag moved into the start core
+**PR**: [#751](https://github.com/uppin/tddy-coder/pull/751)
 **Stack**: `#start-parity` 2/9 — branch `feature/start-parity/start-tool`, base `n1` `remote-targets` (`feature/start-parity/remote-targets`)
 **PRD**: [PRD-2026-10-25-start-parity-start-tool.md](../../ft/daemon/1-WIP/PRD-2026-10-25-start-parity-start-tool.md)
 
@@ -39,12 +40,26 @@ None — this node is a root of the dependency graph. It still sits on its line 
 
 The **first push of this PR**, not its deliverable — this PR goes on to implement all of it:
 
-- `StartSessionArgs`, `INTERNAL_START_FIELDS`, `start_session_schema(hosts: &[HostChoice]) -> Value`.
-- `START_SESSION` replaces `START_PROJECT_SESSION`.
-- `session.proto` fields 44 and 45.
-- Fixture `packages/tddy-web/cypress/fixtures/start-session-tool-fields.json`, written by
-  `cargo test -p tddy-tool-engine` and checked for staleness by it.
-- Failing tests (below).
+- `session.proto`: `StartSessionRequest.orchestrator_session_id = 44` and
+  `orchestrator_daemon_instance_id = 45`. No literal in the workspace lists every field, so
+  nothing else changes.
+- `tddy-tool-engine::start_session_args`:
+  - `START_SESSION`, `StartSessionArgs` (`deny_unknown_fields`) and `HostDocumentAttachment`;
+  - `CONTEXT_FILLED_FIELDS` and `INTERNAL_START_FIELDS`, each entry with its reason;
+  - `HostChoice`, `StartChoices { hosts, recipes }` and `StartContext`;
+  - `start_session_schema(&StartChoices)` and `StartSessionArgs::into_request(StartContext)`,
+    both `TODO(start-tool)`;
+  - `offered_start_fields`, which is derived from the schema.
+- The recipe list is passed in by the daemon (`StartChoices.recipes`). That keeps
+  `tddy-workflow-recipes` and its tree (tddy-github, tddy-pr-stack, tddy-workflow) out of the tool
+  engine.
+- Fixture `packages/tddy-web/cypress/support/fixtures/start-session-tool-fields.json`
+  (`{offered, context_filled}`), committed with the **target** list. The Rust test keeps it equal
+  to the schema.
+- `packages/tddy-daemon-rpc/tests/support/mod.rs`: the two-host in-process world, shared with later
+  nodes' cross-host tests.
+- New dev-dependencies of `tddy-tool-engine`: `prost` and `prost-types`. Both are already in the
+  workspace; they decode the compiled-in descriptor.
 
 ## Green wave
 
@@ -132,19 +147,35 @@ the daemon that creates the session records it, on any host.
 
 ### Acceptance Tests
 
-- [ ] **Unit** `packages/tddy-tool-engine/tests/start_session_args_parity.rs` — `every_start_session_request_field_is_offered_or_named_internal_with_a_reason`: Decode `SERVICE_DESCRIPTOR_BYTES`. The fields of `session.StartSessionRequest` equal (schema properties ∪ internal table ∪ context-filled fields) exactly. The failure message names the missing field.
-- [ ] **Unit** `same file` — `the_internal_table_names_only_real_fields`: Every internal-table key is a proto field.
-- [ ] **Unit** `same file` — `the_web_fixture_lists_exactly_the_offered_fields`: The fixture JSON equals the schema's property list (regen hint on failure).
-- [ ] **Unit** `packages/tddy-tool-engine/tests/start_session_schema.rs` — `recipe_enum_is_the_servers_supported_recipes`: Equals `supported_workflow_recipe_cli_names()`.
-- [ ] **Unit** `same file` — `model_is_required_exactly_for_harnesses_that_need_one`: The `if/then` covers exactly the `cli_harness_requires_model` types.
-- [ ] **Unit** `same file` — `every_property_is_described`: Each property has a non-empty description.
-- [ ] **Cypress component** `packages/tddy-web/cypress/component/createSessionRequestParity.cy.ts` — `every request field the New-session form can send is offered by the StartSession tool`: Run `buildStartSessionRequest` for all six session types with every flag on. Every set key (camelCase → proto name) is in the fixture.
-- [ ] **Integration** `packages/tddy-daemon-rpc/tests/start_session_tool_mapping.rs` — `start_session_passes_every_offered_field_to_the_start_path`: Recording launch port: each field arrives with the value sent.
-- [ ] **Integration** `packages/tddy-daemon/tests/project_home_start_remote_acceptance.rs` — `start_session_on_another_host_creates_the_session_there_tagged_with_the_orchestrator`: The peer's session dir exists. The peer's changeset has `orchestrator_session_id` = the home id. Nothing is created locally.
-- [ ] **Integration** `packages/tddy-daemon-rpc/tests/start_session_tool_mapping.rs` — `the_host_enum_offered_is_the_eligible_daemon_roster`: The `ListExecTools` schema's `daemon_instance_id` enum equals the roster plus `""`.
+- [ ] **Unit** `packages/tddy-tool-engine/tests/start_session_args_parity.rs`:
+  - `every_start_session_request_field_is_offered_context_filled_or_withheld`
+  - `the_tool_offers_no_argument_the_proto_does_not_have`
+  - `the_context_and_withheld_tables_name_only_real_fields_and_never_an_offered_one`
+  - `the_web_fixture_lists_exactly_the_offered_and_context_filled_fields`
+- [ ] **Unit** `packages/tddy-tool-engine/tests/start_session_schema.rs`:
+  - `session_type_offers_tool_workspace_and_every_registered_cli_harness`
+  - `the_host_is_this_host_or_any_eligible_host`
+  - `the_recipe_is_one_the_daemon_supports_or_none`
+  - `permission_mode_and_branch_intent_are_their_closed_lists`
+  - `model_is_required_exactly_for_the_harnesses_that_need_one`
+  - `working_on_a_selected_branch_requires_naming_it`
+  - `every_argument_is_described_and_only_session_type_is_always_required`
+  - `every_argument_reaches_the_request_under_its_own_name`
+  - `a_host_document_attachment_reaches_the_request_as_one`
+  - `an_argument_the_tool_does_not_offer_is_refused_by_name`
+- [ ] **Cypress component**
+  `packages/tddy-web/cypress/component/createSessionRequestParity.cy.ts` — "offers every request
+  field the New-session form can send". It runs every session type × the three codebase
+  placements with every option set and a host-document attachment.
+- [ ] **Integration** `packages/tddy-daemon-rpc/tests/start_session_tool_acceptance.rs` (two
+  in-process daemons):
+  - `start_session_is_offered_with_every_eligible_host_and_the_daemons_recipes`
+  - `start_session_starts_on_the_branch_it_names_linked_to_the_orchestrator`
+  - `start_session_on_another_host_creates_the_session_there_linked_to_the_orchestrator`
+  - `a_branch_another_session_owns_is_reported_not_suffixed`
+  - `an_argument_the_form_does_not_offer_is_refused_by_name`
 
-Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests use the
-in-memory peer forwarder if it exists on the base, and the LiveKit testkit otherwise.
+Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests run in the two-host world of `tests/support/mod.rs`.
 
 ## Technical Debt & Production Readiness
 
@@ -159,6 +190,8 @@ in-memory peer forwarder if it exists on the base, and the LiveKit testkit other
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
+- [ ] `#750`'s `project_home_remote_targets_acceptance.rs` carries its own copy of the two-host world that `tests/support/mod.rs` now holds. Switch it to `mod support;` when that node greens; this node does not edit #750's file.
+- [ ] The #749 test `tests/start_project_session_schema.rs` and the `StartProjectSession` cases in `project_home_session_tools_acceptance.rs` move to `StartSession` with the rename.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
@@ -178,10 +211,10 @@ in-memory peer forwarder if it exists on the base, and the LiveKit testkit other
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

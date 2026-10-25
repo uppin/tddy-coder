@@ -687,6 +687,14 @@ message StartSessionRequest {
   // the daemon's own `EnsureProjectHomeSession`: a `StartSession` or `StreamStartSession` that names
   // a role is refused with PERMISSION_DENIED, since the role reaches the project's other sessions.
   string session_role = 43;
+  // The session that started this one as its orchestrator, recorded in the new session's changeset
+  // (`Changeset.orchestrator_session_id`) by the daemon that creates it — so a session an
+  // orchestrator starts on another host is linked to it there, not on the orchestrator's host.
+  // Empty = no orchestrator. Unlike `stack_parent`, it resolves no stack base and records no stack
+  // node. Set by the `StartSession` exec tool from its caller (`#start-parity` 2/9).
+  string orchestrator_session_id = 44;
+  // The daemon running `orchestrator_session_id`. Empty or the creating daemon = that daemon.
+  string orchestrator_daemon_instance_id = 45;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

@@ -1,0 +1,39 @@
+{
+  "context_filled": [
+    "on_branch_conflict",
+    "orchestrator_daemon_instance_id",
+    "orchestrator_session_id",
+    "project_id",
+    "session_token"
+  ],
+  "offered": [
+    "agent",
+    "attachments",
+    "branch_worktree_intent",
+    "codebase_daemon_instance_id",
+    "create_remote_branch",
+    "daemon_instance_id",
+    "dangerously_skip_permissions",
+    "initial_prompt",
+    "managed_codebase",
+    "model",
+    "new_branch_name",
+    "permission_mode",
+    "pr_stack_base_session_id",
+    "provider_account_id",
+    "provider_built_in",
+    "recipe",
+    "sandbox",
+    "sandboxed_codebase",
+    "selected_branch_to_work_on",
+    "selected_integration_base_ref",
+    "semantic_index",
+    "session_type",
+    "specialized_agents",
+    "ssh_config_host",
+    "stack_node_id",
+    "stack_parent",
+    "stack_parent_daemon_instance_id",
+    "tool_path"
+  ]
+}
