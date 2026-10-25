@@ -194,17 +194,12 @@ pub trait AgentSessions: Send + Sync {
     fn conversation_closed(&self, _conversation_id: &str) {}
 
     /// The GitHub login `session_token` authenticates: the login a permission answer is recorded
-    /// under.
+    /// under, and the actor a remote cancel names.
     ///
-    /// Refuses by default rather than recording an answer under a login this host cannot name. The
-    /// daemon's adapter answers it from its user mapping.
-    // TODO(web-approvals): make this required once the test fakes of `AgentSessions` implement it,
-    // so a new adapter cannot forget it and refuse every answer.
-    fn github_user(&self, _session_token: &str) -> Result<String, Status> {
-        Err(Status::unimplemented(
-            "this host cannot name the GitHub user of a session, so it cannot record a permission answer",
-        ))
-    }
+    /// Required rather than defaulted: a default would let a new adapter forget it, and every answer
+    /// it served would then be refused by a default nobody chose. The daemon's adapter answers it
+    /// from its user mapping.
+    fn github_user(&self, session_token: &str) -> Result<String, Status>;
 }
 
 /// Forwarding a conversation to the daemon that owns the agent.
