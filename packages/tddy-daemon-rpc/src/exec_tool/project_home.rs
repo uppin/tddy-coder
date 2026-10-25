@@ -98,14 +98,14 @@ impl ExecToolRpcHandler {
             sessions_base: sessions_base.to_path_buf(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             identity: SessionAccountAccess::new(
-                self.credential_vaults.clone(),
+                self.project_home_host.credential_vaults.clone(),
                 self.user_resolver.clone(),
                 &req.session_token,
             )
-            .with_github_cli(self.github_cli.clone()),
+            .with_github_cli(self.project_home_host.github_cli.clone()),
             daemon_instance_id: local_instance_id_for_config(&self.config),
             peers,
-            worktree_sizes: Arc::clone(&self.worktree_sizes),
+            worktree_sizes: Arc::clone(&self.project_home_host.worktree_sizes),
         })
     }
 
