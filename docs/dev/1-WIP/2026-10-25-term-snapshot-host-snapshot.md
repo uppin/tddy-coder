@@ -1,7 +1,7 @@
 # Changeset: Terminal snapshot on (re)connect over the bidi terminal stream
 
 **Created:** 2026-10-25
-**Status:** 🚧 In Progress
+**Status:** 🚧 In Progress — 🔴 one open gap from /validate-changes (watcher open), needs a developer decision
 **Type:** Bug Fix
 **Complexity**: 5 — six packages, a proto contract change, ordering/concurrency semantics (sequence point), new dependency (`avt`), web transport migration to bidi
 **Stack:** `#term-snapshot 1/4` — branch `feature/term-snapshot/host-snapshot`, base `master`
@@ -24,14 +24,14 @@
 
 ## Affected Packages
 
-- [ ] `tddy-task`: screen model, `ScreenSnapshot`, sequence point, input-mode sniffer ([terminal-capture.md](../../../packages/tddy-task/docs/terminal-capture.md))
-- [ ] `tddy-terminal-rpc`: proto, `snapshot_and_subscribe` port, bridge `SNAPSHOT` branch ([terminal-session-service.md](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md))
-- [ ] `tddy-cli-sessions`: `PtyHandle::resize` keeps the model's size
-- [ ] `tddy-pty`: registry `resize` keeps the model's size
-- [ ] `tddy-coder`: the session participant serves `StreamSessionTerminalIO`; its terminal adapter implements `snapshot_and_subscribe`
-- [ ] `tddy-session-lifecycle`: the CLI and sandbox adapters implement the port (sandbox: `FAILED_PRECONDITION`)
-- [ ] `tddy-daemon-sandbox`: broadcast under the capture lock
-- [ ] `tddy-web`: **both** host terminal paths move to bidi `StreamSessionTerminalIO` with `SNAPSHOT` on every open: `GrpcSessionTerminal` (the host-served Agent and bash panes, `SessionRuntime.tsx`) and `openDaemonTerminalFeed` ([terminal-session.md](../../../packages/tddy-web/docs/terminal-session.md))
+- [x] `tddy-task`: screen model, `ScreenSnapshot`, sequence point, input-mode sniffer ([terminal-capture.md](../../../packages/tddy-task/docs/terminal-capture.md))
+- [x] `tddy-terminal-rpc`: proto, `snapshot_and_subscribe` port, bridge `SNAPSHOT` branch ([terminal-session-service.md](../../../packages/tddy-terminal-rpc/docs/terminal-session-service.md))
+- [x] `tddy-cli-sessions`: `PtyHandle::resize` keeps the model's size
+- [x] `tddy-pty`: registry `resize` keeps the model's size
+- [x] `tddy-coder`: the session participant serves `StreamSessionTerminalIO`; its terminal adapter implements `snapshot_and_subscribe`
+- [x] `tddy-session-lifecycle`: the CLI and sandbox adapters implement the port (sandbox: `FAILED_PRECONDITION`)
+- [x] `tddy-daemon-sandbox`: broadcast under the capture lock
+- [x] `tddy-web`: **both** host terminal paths move to bidi `StreamSessionTerminalIO` with `SNAPSHOT` on every open: `GrpcSessionTerminal` (the host-served Agent and bash panes, `SessionRuntime.tsx`) and `openDaemonTerminalFeed` ([terminal-session.md](../../../packages/tddy-web/docs/terminal-session.md))
 
 ## Contract decisions (pass 2, approved 2026-10-25)
 
@@ -103,8 +103,7 @@ contract: it broadcasts under the capture lock, and its `resize` reaches the scr
 - Web: `openDaemonTerminalFeed` → bidi `streamSessionTerminalIO` (open message: identity, control
   token, grid, `mode = SNAPSHOT`; then stdin chunks with cumulative `input_offset`); `TerminalFrame`
   gains `snapshot` and `startOffset`; `TerminalStreamOffset` takes absolute offsets from every
-  frame; an HTTP-only host connection yields a feed that reports "no terminal transport" and opens
-  nothing.
+  frame. (No HTTP-only "no terminal transport" state: dropped by the contract decision above.)
 
 ## Boundaries
 
@@ -165,11 +164,11 @@ point, no server screen model, and the web terminal on server-stream + unary inp
 4. **Coder.** `build_terminal_session_entry` registers `StreamSessionTerminalIO` for the coder too.
    The participant's store and adapter supply the port.
 5. **Web.** `openDaemonTerminalFeed` opens one bidi call per feed. Input is queued into the
-   request iterator, using the same 20 ms drain batching as the room feed. ACK frames are handled as
+   request iterator, one message per send (see the contract decisions). ACK frames are handled as
    today. Every open is `SNAPSHOT`. `TerminalResumePoint` no longer chooses a mode for the web.
    `GhosttyTerminalSession` writes the snapshot into the live terminal as-is, and the snapshot's
-   `endOffset` anchors history. A host connection whose transport is Connect-HTTP produces a feed
-   whose `ended` settles at once with a "no terminal transport" reason that the pane renders.
+   `endOffset` anchors history. (No Connect-HTTP host connection exists, so there is no
+   "no terminal transport" state.)
 
 ## Delta
 
@@ -177,7 +176,7 @@ point, no server screen model, and the web terminal on server-stream + unary inp
 - `ScreenSnapshot`, `TerminalCapture::{snapshot, resize}`, incremental UTF-8 feed (`tddy-task`)
 - `TerminalSession::snapshot_and_subscribe` (`tddy-terminal-rpc/src/session.rs`)
 - `StreamReplayMode::Snapshot`, `SessionTerminalOutput.{snapshot, snapshot_rows, snapshot_cols}`
-- `TerminalFrame.{snapshot, startOffset}`; the "no terminal transport" feed state (tddy-web)
+- `TerminalFrame.{snapshot, startOffset}`; `InputRefusalTracker` and the refusal frame (`SessionTerminalOutput.refused_input_offset`, `input_refusal`)
 - Dependency: `avt = "0.18"` in `tddy-task`
 
 ### Modified
@@ -192,16 +191,16 @@ point, no server screen model, and the web terminal on server-stream + unary inp
 
 ## Milestones
 
-- [ ] M1: screen model + sequence point (`tddy-task`)
-- [ ] M2: `SNAPSHOT` on the bridge (both RPCs), coder bidi, adapters
-- [ ] M3: web host feed on bidi with `SNAPSHOT` on every open; HTTP-only state
+- [x] M1: screen model + sequence point (`tddy-task`)
+- [x] M2: `SNAPSHOT` on the bridge (both RPCs), coder bidi, adapters
+- [x] M3: web host feed on bidi with `SNAPSHOT` on every open; HTTP-only state
 
 ## Testing Strategy
 
 ### Acceptance tests
 
 **`tddy-task`**
-- [ ] **Integration** `packages/tddy-task/tests/terminal_capture_snapshot.rs`
+- [x] **Integration** `packages/tddy-task/tests/terminal_capture_snapshot.rs`
   - `a_snapshot_renders_identically_to_the_screen_it_was_taken_from`: a scripted alternate-screen TUI
     (DECSTBM region, saved cursor, SGR truecolor, hidden cursor, bracketed paste on, mouse 1002+1006),
     more than 64 KiB of diffs. `snapshot().data` is written into a fresh **reference** `vt100` parser
@@ -214,14 +213,14 @@ point, no server screen model, and the web terminal on server-stream + unary inp
     split at every byte of a CSI and of a 4-byte UTF-8 character.
   - `a_resize_reserializes_the_snapshot_at_the_new_grid`: asserts `rows`/`cols` and the reference
     render after the resize.
-- [ ] **Integration** `packages/tddy-task/tests/terminal_capture_sequence_point.rs`
+- [x] **Integration** `packages/tddy-task/tests/terminal_capture_sequence_point.rs`
   - `snapshot_and_subscribe_neither_loses_nor_duplicates_a_byte_under_concurrent_output`: a producer
     thread writes 10 000 numbered chunks through `TaskChannel::write`, and a reader takes the
     snapshot and subscription mid-run. The assertion: the received bytes are exactly the producer's
     stream from `snapshot.offset` on. 200 iterations.
 
 **`tddy-terminal-rpc`**
-- [ ] **Integration** `packages/tddy-terminal-rpc/tests/stream_snapshot_acceptance.rs`
+- [x] **Integration** `packages/tddy-terminal-rpc/tests/stream_snapshot_acceptance.rs`
   - `a_snapshot_open_renders_the_servers_screen_then_only_later_deltas`: a fake `TerminalSession` over
     a real `TaskChannel`. A bidi `StreamSessionTerminalIO` opens with `SNAPSHOT` mid-TUI, and output
     is written into a reference emulator. Assertions: the first data frame is `snapshot = true` with
@@ -233,11 +232,11 @@ point, no server screen model, and the web terminal on server-stream + unary inp
     test asserts 0 calls and that frame 1 is the snapshot.
   - `stream_terminal_output_honours_snapshot_mode_too`.
   - `a_jailed_terminal_refuses_snapshot_with_failed_precondition`: an adapter overriding the port.
-- [ ] **Integration** `packages/tddy-coder/tests/two_server_parity_acceptance.rs`:
+- [x] **Integration** `packages/tddy-coder/tests/two_server_parity_acceptance.rs`:
   `both_servers_answer_a_bidi_snapshot_open_identically`.
 
 **`tddy-web`** (Cypress component; only these specs run locally, unsandboxed)
-- [ ] **Component** `packages/tddy-web/cypress/component/TerminalSnapshotOnReconnect.cy.tsx`
+- [x] **Component** `packages/tddy-web/cypress/component/TerminalSnapshotOnReconnect.cy.tsx`
   - `every open asks for a snapshot and the screen renders without a resize`: an in-memory
     `TerminalSessionService` client implements bidi `streamSessionTerminalIO` and records each
     open's messages. Screen A is drawn, then a blip (null client) remounts the terminal. The test
@@ -245,7 +244,7 @@ point, no server screen model, and the web terminal on server-stream + unary inp
     asserts the live terminal's visible rows equal B with the grid unchanged and no grid change sent.
     A contiguous delta then updates the screen.
   - `typing travels on the same bidi stream with cumulative input offsets`.
-- [ ] Rewrite `GrpcSessionTerminalResume.cy.tsx` (it pins `TAIL`→`FROM_OFFSET`) and the specs and unit
+- [x] Rewrite `GrpcSessionTerminalResume.cy.tsx` (it pins `TAIL`→`FROM_OFFSET`) and the specs and unit
   tests driving `streamTerminalOutput`/`sendTerminalInput` fakes for the web feed
   (`TerminalInputAckAcceptance.cy.tsx`, `terminalFeed.test.ts`, …). This is a requirements change,
   not a weakened test.
@@ -295,32 +294,51 @@ point, no server screen model, and the web terminal on server-stream + unary inp
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
 - [x] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
+- [x] Repeat Red→Green→Update cycle until feature complete
 - [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] USER REVIEW — development complete
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
 - [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
 
 ## Refactoring Needed
-### From /red (TDD red phase)
 ### From /validate-changes
+- 🔴 **OPEN — a screen without the lease can no longer open the terminal.** `stream_session_terminal_io`
+  (`tddy-terminal-rpc/src/service.rs`) gates the *open* through `controlled_terminal` →
+  `require_control`, and `verify_control` accepts an empty token only when nobody holds the lease.
+  Leases are never released on disconnect. Before this PR the web watched on `StreamTerminalOutput`,
+  which is served without a lease (the grid is zeroed instead, `may_resize_on_open`). Now both web
+  host paths open bidi, so a displaced screen re-opening after a blip/remount, or any open presenting
+  an empty token while some screen holds the lease, gets `FAILED_PRECONDITION` and the pane reports a
+  disconnect. The PRD says watchers keep today's behaviour. The fix (serve the bidi open to watchers
+  with the grid zeroed, gate the first message's data and every later chunk per chunk, as the refusal
+  frame already does) flips `terminal_session_bidi_acceptance.rs`'s
+  `refuses_to_open_for_a_screen_that_does_not_hold_the_control_lease` (pinned on master since #475),
+  a test-expectation change outside the approved rewrites, so it waits for the developer.
+- Reverted an unrelated `tddy-workflow-recipes/generated/schema-manifest.json` key reorder (a build-script side effect that leaked into the green commit).
+- One shared `unsized_screen_refusal()` (`session.rs`) for the bridge pre-check and the port default.
+- Stale docs: `TerminalOptions.onInputDelivery` (the bidi feed does report, via refusal frames), `GhosttyTerminalSession.onOffsetUpdate`, `TerminalStreamOffset` (SNAPSHOT streams).
 ### From /validate-tests
+- No findings: the new Rust tests compare against an independent reference emulator (`vt100`), the sequence-point test is concurrent (200 iterations), the Cypress specs drive an in-memory bidi backend.
 ### From /validate-prod-ready
-### From /analyze-clean-code
+- No mock or test-only branches in production code; no new `TODO`/`FIXME`. `classify_escape` dropped a `let _ = params;` placeholder.
+### From /analyze-clean-code (deferred, developer consent: code issues may be deferred in this stack; files shared with #761–#763)
+- `bridge.rs` 561 → 670 production lines, `terminal_capture.rs` 482 → 668, `sandbox_session.rs` 922 → 924: recorded as `oversized-file` code issues, not split.
+- `open_replay_ack_live` 135 → 141 lines, `spawn_live_bridge` 47 → 55 (nesting 6), `serve_stream_session_terminal_io_with` 61 → 74 (nesting 5 → 6): recorded as `complexity` code issues.
+- Web leftovers of the byte resume (`TerminalResumePoint`, `onOffsetUpdate`, the duplicated bidi request queue): `docs/dev/todo/2026-10-25-web-host-terminal-feed-leftovers-after-snapshot.md`.
 
 ## Validation Results
 | Validation | Last Run | Status |
 |------------|----------|--------|
-| /validate-changes | Not yet run | Pending |
-| /validate-tests | Not yet run | Pending |
-| /validate-prod-ready | Not yet run | Pending |
-| /analyze-clean-code | Not yet run | Pending |
+| /validate-changes | 2026-10-25 | 🔴 1 open gap (below). Stack gate clean (rebased onto `origin/master` b9c849c83, 4 own commits); no boundary trespass; one leaked generated file reverted |
+| /validate-tests | 2026-10-25 | ✅ |
+| /validate-prod-ready | 2026-10-25 | ✅ |
+| /analyze-clean-code | 2026-10-25 | ⚠ 3 oversized files + 3 complex functions recorded as code issues (stack-shared, deferred with consent) |

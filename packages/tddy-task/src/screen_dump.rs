@@ -93,8 +93,7 @@ fn classify_escape(sequence: String) -> Item {
     let Some(body) = sequence.strip_prefix("\x1b[") else {
         return Item::Other(sequence);
     };
-    if let Some(params) = body.strip_suffix('m') {
-        let _ = params;
+    if body.ends_with('m') {
         return Item::Pen(sequence);
     }
     match body.strip_suffix('b').map(str::parse::<usize>) {

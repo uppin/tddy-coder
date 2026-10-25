@@ -14,6 +14,13 @@ use bytes::Bytes;
 use tddy_task::{ScreenSnapshot, TerminalCapture};
 use tokio::sync::{broadcast, watch};
 
+/// Why a `SNAPSHOT` open is refused while the terminal's screen model does not know the PTY's size.
+pub(crate) fn unsized_screen_refusal() -> tddy_rpc::Status {
+    tddy_rpc::Status::failed_precondition(
+        "the terminal's size is unknown, so its screen cannot be snapshotted",
+    )
+}
+
 /// A live terminal a streaming RPC attaches to: the broadcast fan-out of stdout bytes, the rolling
 /// replay ring, the process-exit watch, and the resize / input / ACK controls.
 ///
@@ -40,11 +47,7 @@ pub trait TerminalSession: Send + Sync {
     ) -> Result<(ScreenSnapshot, broadcast::Receiver<Bytes>), tddy_rpc::Status> {
         let capture = self.capture();
         let capture = capture.lock().unwrap();
-        let snapshot = capture.snapshot().ok_or_else(|| {
-            tddy_rpc::Status::failed_precondition(
-                "the terminal's size is unknown, so its screen cannot be snapshotted",
-            )
-        })?;
+        let snapshot = capture.snapshot().ok_or_else(unsized_screen_refusal)?;
         let live = self.subscribe_stdout();
         drop(capture);
         Ok((snapshot, live))

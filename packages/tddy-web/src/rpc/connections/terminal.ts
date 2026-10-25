@@ -156,9 +156,10 @@ export interface TerminalOptions {
    * Told after each send whether it reached the PTY: the daemon's reason when it was refused (the
    * lease moved, the session ended, the transport is down), `null` once one is delivered again.
    *
-   * Input has no reply the terminal renders, so without this a refused keystroke is simply gone. A
-   * feed that cannot tell — one whose input rides a stream with no per-send answer, as the room's
-   * `StreamTerminalIO` and the daemon's bidi `StreamSessionTerminalIO` both do — never calls it.
+   * Input has no reply the terminal renders, so without this a refused keystroke is simply gone. The
+   * daemon's bidi `StreamSessionTerminalIO` has no per-send answer either, so it reports a refusal
+   * on its output half instead (a refusal frame, cleared by an ACK past the refused chunk). A feed
+   * that cannot tell at all — the room's `StreamTerminalIO` — never calls it.
    */
   readonly onInputDelivery?: (failure: string | null) => void;
 }

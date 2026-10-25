@@ -397,9 +397,7 @@ async fn open_snapshot(
 ) -> Result<(), Status> {
     let grid = session.capture().lock().ok().and_then(|cap| cap.grid());
     let Some(grid) = grid else {
-        return Err(Status::failed_precondition(
-            "the terminal's size is unknown, so its screen cannot be snapshotted",
-        ));
+        return Err(crate::session::unsized_screen_refusal());
     };
     let wanted = (
         req_initial_rows_as_u16(open.initial_rows),
