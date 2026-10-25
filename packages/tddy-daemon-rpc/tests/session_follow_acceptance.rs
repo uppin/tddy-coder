@@ -251,6 +251,7 @@ async fn the_transcript_is_the_page_the_activities_view_reads() {
             session_token: TEST_TOKEN.to_string(),
             session_id: world.on_a.clone(),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
             before_seq: u64::MAX,
             page_size: 5,
         }))
@@ -292,6 +293,7 @@ async fn a_tool_call_is_read_whole_by_its_id() {
             session_id: world.on_a.clone(),
             daemon_instance_id: String::new(),
             tool_call_id: "call-1".to_string(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("the Activities view's detail")
