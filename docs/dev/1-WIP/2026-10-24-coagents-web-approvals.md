@@ -136,46 +136,126 @@ tests of this node pass: the Rust targets listed under Verification, and the web
 `SubagentPermissionDeliveryAcceptance.cy.tsx`. The web spec `SubagentPermissionAnswerAcceptance.cy.tsx`
 is red until the fixture edit below is applied.
 
-**Open. Each needs a developer decision before wrap:**
+**Committed in rounds 5–6 (new commits, nothing amended).** Rust: `bd8582958` (D-1, the conversation-status row),
+`cabe51772` (D-2, cancel records the pending request, proto field 5, TypeScript regenerated), `d6c0fb838` (D-5 wording),
+`dbbc14952` (a cancel test added after green, not red-first, disclosed by its author), `86db79f7d` (TODO markers for
+the two live gaps), `d18dd8eb8` (D-3, remote answers forwarded to the owner), `617a52283` (D-6, `github_user` required).
+Web: `6c9623f31` (the owner is the roster half). **Held, uncommitted in the worktree:** the cancelled-record wording
+(W-2) and the cancel-actor login fix. Both need the decisions in the open items below.
 
-1. **No writer makes a conversation "awaiting the user".** The fold reads `running` plus
-   `awaitingUser: true` as Pending, but nothing writes that. The daemon's `SessionAgentService` turns write
-   roster state, not `AgentActivityRecord` rows. Under claude-cli, a deferred resume's PostToolUse record is
-   `completed` with `awaitingUser`, which folds to Completed. So "waiting for you" does not show in practice.
-   Options: (a) the daemon writes a dedicated conversation-status record: running with `awaitingUser` on
-   defer, cleared on answer, completed at turn end, with a stable call id per conversation. (b) Fold a
-   completed `subagent_*` record with `awaitingUser: true` as Pending, and carry `sessionId` on the
-   resume/await PostToolUse. Recommend (a). Option (b) leaves a stale Pending between the answer and the
-   await's return, unless (a)'s clear exists.
-2. **Cancelling a deferred request is not recorded.** `cancel_pending` answers a deferred request as
-   cancelled with no answerer. No answered record is written, so the transcript keeps a pending deferred
-   entry, the web re-offers buttons after a reopen, and `AnswerAgentPermission` is refused. Needs the
-   cancelling actor: `subagent_cancel` would carry who cancelled, and the cancel would record it.
-3. **Remote conversations cannot be answered.** `answering_for` returns `None` for a remote conversation,
-   so `AnswerAgentPermission` refuses with FAILED_PRECONDITION rather than forwarding to the owner.
-   Recommend forwarding through `AgentConversationPeers`, as prompts already are.
-4. **Split sessions may name the wrong daemon.** The web sends `session.daemonInstanceId`, paired with the
-   session id. `rosterHalfOf` may name the daemon that holds the conversation, and then the daemon answers
-   NOT_FOUND. Decide which id the entry carries.
-5. **A held answer is delivered whether or not its request is deferred.** The window is narrow, before a
-   non-deferred request settles. The wording "the turn that deferred it" is slightly loose there. Recommend
-   rewording to "the turn holding it".
-6. **`awaitingUser` stays `true` from registration until the turn ends.** That includes the window after the
-   user's answer and before the continuation arrives.
-7. **`AgentSessions::github_user` has a refusing default** (`packages/tddy-session-agents/src/ports.rs:197`,
-   TODO(web-approvals)). Make it required when the test fakes are next touched.
+**Verified on HEAD `617a52283` (scoped, all passed):** tddy-coding-subagent: permission_defer 2, permission_yield 7,
+coding_agent_session 10, main_agent_answer 2, permission_frames 4, permission_wording 2. tddy-tools: permission_deferral_arg
+3, permission_deferral_withdrawal 2, session_agent_conversation_client 18, subagent_cancel_actor 1, subagent_resume_defer 2,
+subagent_resume_withdrawal 2. tddy-session-agents: --lib 56, permission_transcript_frames 1, remote_answer_forward 2.
+tddy-service: awaiting_user_fold 5, conversation_row_fold 4, subagent_conversation_replay 8. tddy-daemon-rpc:
+answer_agent_permission 2, cancel_records_refusal 4, defer_permission_wire 3, main_agent_withdrawal 2, waiting_state_record 2.
+tddy-discovery: --lib 97, subagent_runtime_answer_bypass 2. tddy-session-lifecycle: --lib 165.
 
-**Pending existing-test edits (the developer's rule: no existing test is edited by an implementer; the
-orchestrator applies these):**
+**Code this node grew, for the [W] sweep (recorded now, not refactored in [G], per the developer's scope change):**
 
-- `packages/tddy-daemon-rpc/tests/session_agent_conversation_acceptance.rs`: after line 474
-  (`            permission_answer_json: String::new(),`) insert `            defer_permission_to_user: None,`. The
-  target does not compile until this is applied.
-- `packages/tddy-web/cypress/component/SubagentPermissionAnswerAcceptance.cy.tsx`: after line 80
-  (`sessionId: "managed-1",`) insert `daemonInstanceId: "daemon-a",`. Tests 1 and 3 are red until this is applied.
-- `packages/tddy-web/cypress/component/ActivitiesTailScrollAcceptance.cy.tsx`: lines 70 and 105, add
-  `daemonInstanceId="daemon-a"` to each `<SessionActivitiesPane />`. This is a tsc error only, and the runtime
-  is unaffected.
+- `packages/tddy-session-agents/src/service.rs`: 1,432 lines, grown by +254 / -39. Oversized. The growth is in
+  `answer_agent_permission`, `claim_for_answer`, the resume path's status-row writes, and `cancel_agent_conversation`
+  (cancel recording).
+- `packages/tddy-discovery/src/subagent_runtime.rs`: 1,167 lines, grown by +82. Oversized. `run_turn` grew with the
+  answer bypass.
+- `packages/tddy-coding-subagent/src/session.rs`: 654 lines, grown by +145. `take_turn` and `resume` grew (the ordering,
+  the deferral wait, the streamed records).
+- `packages/tddy-service/src/subagent_conversation_replay.rs`: 397 lines, grown by +184. `entry_status` and the row
+  precedence grew.
+- `packages/tddy-session-agents/src/conversation_recorder.rs`: 502 lines, grown by +69. `ports.rs` +43,
+  `agent_conversations.rs` +52.
+- Already oversized, grown only slightly: `packages/tddy-tools/src/server.rs` (3,959 lines, +18) and
+  `packages/tddy-discovery/src/subagent.rs` (2,096 lines, +10).
+
+**Status after rounds 5–6 (2026-10-25).** Each open item says whether it is built.
+
+1. **Waiting state: built (D-1), with two open gaps.** The daemon writes one conversation-status row per deferred
+   turn: call id `subagent-conversation:<conversation_id>`, tool name `subagent_conversation`. The row is running with
+   `awaitingUser: true` when the deferral is accepted, is cleared when the answer is delivered, and is completed at turn
+   end. The fold lets a running row decide the entry's status. Once the row is completed, the newest row by time decides.
+   Open: the row is durable only. It is not published on the activity hub, so a live subscriber sees it at the next
+   snapshot, and the raw `StreamAgentActivity` snapshot returns it as a `subagent_conversation` tool call. Both are
+   `TODO(web-approvals)` in `conversation_status.rs`. A refused deferral shows running-with-awaiting briefly, then completed.
+2. **Cancel: built, with two open gaps (D-2).** `CancelAgentConversationRequest.cancelled_by` (proto field 5) carries the
+   cancelling actor: `main-agent` from `subagent_cancel`, and the signed-in login from the web. For a pending permission
+   request, the daemon writes a completed `permission:<requestId>` record with raw output `{answeredBy, cancelled: true}`,
+   then interrupts the turn. A reopened dialog shows "Cancelled by <actor>" with no options, and AnswerAgentPermission
+   then returns NOT_FOUND, since the conversation is no longer open.
+   - **(A) Trust, decision needed.** `cancelled_by` is caller-supplied, so a user can name another login. Proposed rule:
+     a caller may name only itself. `main-agent` is accepted, an empty value means the caller's own login, and any other
+     login is refused.
+   - **(B) Web cancel while a deferred request is pending, decision needed.** The committed web code sends no actor, so
+     that cancel returns an internal error after the conversation has been cancelled. The fix (send the signed-in login)
+     is written but held uncommitted, because it breaks `SessionAgentAttachTabAcceptance` AC10, which mounts with no
+     signed-in user. Decision: consent to an AC10 fixture edit, or a different null-login policy.
+3. **Remote answers: built (D-3).** A remote conversation's answer is forwarded to its owner through
+   `AgentConversationPeers::answer_permission`. The owner's response or refusal is returned as it is.
+4. **Owner id: built.** The entry addresses its answer to the roster half (`rosterHalfOf(session)`), which holds the
+   conversation, and pairs it with that half's session id. A co-located session uses its own daemon, which the existing
+   fixtures express. Committed in `6c9623f31`.
+5. **Wording: built (D-5).** The refusal reads "the turn holding it carries on, and its outcome goes to the call that
+   deferred the request."
+6. **awaitingUser lifetime: decision recorded.** `awaitingUser` stays true from registration until the turn ends,
+   including the window between the user's answer and the continuation. The developer accepted this.
+7. **github_user: built (D-6).** Required on `AgentSessions`, and its TODO is removed.
+
+**Pending existing-test edits (the orchestrator applies these; no implementer edits existing tests):**
+
+Rust. Each cancel literal needs one field line, and each fake needs one method. Apply bottom-up within a file.
+- `packages/tddy-daemon-rpc/tests/session_agent_conversation_acceptance.rs`: after line 88
+  (`conversation_id: conversation_id.to_string(),`, the cancel literal at line 84), insert `cancelled_by: String::new(),`.
+  The resume literal at line 474 was already fixed in `efe7639fd`.
+- `packages/tddy-daemon/tests/session_agent_remote_acceptance.rs`: after line 1135 (the literal at 1131), insert
+  `cancelled_by: String::new(),`.
+- `packages/tddy-session-lifecycle/tests/split_session_roster_routing_acceptance.rs`: after line 189 (the literal at
+  185), insert `cancelled_by: String::new(),`.
+- `packages/tddy-daemon-rpc/tests/coding_subagent_acceptance.rs`: after line 371 (the literal at 367), insert
+  `cancelled_by: String::new(),`.
+- `packages/tddy-daemon-rpc/tests/in_jail_conversation_acceptance.rs`: after line 137 (the literal at 133), insert
+  `cancelled_by: "main-agent".to_string(),`.
+- `AgentConversationPeers::answer_permission` (required, D-3). Insert into the fake in each file below, after the given
+  line. The body is the same in each:
+  ```
+      async fn answer_permission(
+          &self,
+          _session_token: &str,
+          _session_id: &str,
+          owner: &str,
+          _request: &tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest,
+      ) -> Result<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse, Status> {
+          Err(Status::internal(format!(
+              "this test answers no permission, so none is forwarded to '{owner}'"
+          )))
+      }
+  ```
+  - `packages/tddy-session-agents/tests/agent_conversation_system_prompt.rs`: after line 322 (the end of `cancel`, in the
+    fake starting at 280).
+  - `packages/tddy-session-agents/tests/conversation_transcript_record.rs`: after line 329 (the fake starting at 287).
+  - `packages/tddy-session-agents/tests/clone_placement_reattach_acceptance.rs`: after line 191 (the fake starting at 139).
+- `AgentSessions::github_user` (required, D-6). Insert after the given line, in each fake:
+  ```
+      fn github_user(&self, _session_token: &str) -> Result<String, Status> {
+          Err(Status::internal("this test takes no permission answer, so it names no GitHub user"))
+      }
+  ```
+  - `packages/tddy-session-agents/tests/agent_conversation_system_prompt.rs`: after line 222 (the fake at 175).
+  - `packages/tddy-session-agents/tests/conversation_transcript_record.rs`: after line 236 (the fake at 198), and after
+    line 553 (the fake at 515).
+  - `packages/tddy-session-agents/tests/clone_placement_reattach_acceptance.rs`: after line 135 (the fake at 99).
+
+Web:
+- `packages/tddy-web/cypress/component/SubagentPermissionDeliveryAcceptance.cy.tsx` line 242: `"Answered by alice"`
+  becomes `"Cancelled by alice"`. This is needed for the held W-2 wording.
+- `packages/tddy-web/cypress/component/ActivitiesTailScrollAcceptance.cy.tsx`: line 70 `daemonInstanceId="daemon-a"` becomes
+  `rosterHalf={{ sessionId: "s1", daemonInstanceId: "daemon-a" }}`; line 105 becomes
+  `rosterHalf={{ sessionId, daemonInstanceId: "daemon-a" }}`. This is tsc only, since `SessionActivitiesPane` now takes
+  `rosterHalf`.
+- `packages/tddy-web/cypress/component/SessionAgentAttachTabAcceptance.cy.tsx` AC10: the consent decision in item 2(B).
+
+**Not verified at HEAD, blocked by the pending edits above:** `conversation_transcript_record`,
+`agent_conversation_system_prompt`, and `clone_placement_reattach_acceptance` (session-agents), and `--all-targets`
+clippy on `tddy-daemon-rpc` and `tddy-session-lifecycle`.
+
 
 **Pre-existing reds outside this node, left untouched:** `transports_acceptance` (4, headless-driver's
 TODO stubs), `workspace_roster_admission` (3, remote-codebase's TODO stub), and
@@ -219,6 +299,23 @@ in an earlier round). Watch CI.
   `tool_call_update`, so the answered record is a completed `ToolCallRecord` under the same
   `permission:<requestId>` id, carrying `{answeredBy, optionId}` or `{answeredBy, cancelled: true}`.
   `answeredBy` is the login for a user and `main-agent` for the main agent.
+
+- **Cancelled deferred requests are recorded (developer decision).** `subagent_cancel` carries the cancelling actor
+  (`cancelled_by`). The daemon writes a completed `permission:<requestId>` record with `{answeredBy, cancelled: true}`
+  before it interrupts the turn. A reopened dialog shows "Cancelled by <actor>" and offers no options.
+- **The waiting state is a daemon-written row (developer decision).** One conversation-status row per deferred turn,
+  under the stable call id `subagent-conversation:<conversation_id>`. It is running with `awaitingUser` on defer, cleared
+  on answer, and completed at turn end. The fold lets a running row decide the entry's status. Once it is completed, the
+  newest row by time decides.
+- **Remote answers forward to the owner (developer decision).** Through `AgentConversationPeers::answer_permission`, and
+  the owner's response or refusal is returned as it is. The local route lookup is one `AnswerRoute` (`answer_route_for`),
+  which replaced `answering_for` and `is_open_on`.
+- **`github_user` is required on `AgentSessions` (developer decision).** Its default and its TODO are removed.
+- **The refusal wording names the holder (developer decision).** "the turn holding it carries on, and its outcome goes
+  to the call that deferred the request."
+- **Accepted: `awaitingUser` lasts until the turn ends (developer decision).**
+- **Open, decision needed: the cancel actor's trust rule.** `cancelled_by` is caller-supplied. Proposed: a caller may name
+  only itself. `main-agent` is accepted, an empty value means the caller's own login, and another login is refused.
 
 ## Refactoring Needed
 
