@@ -3,6 +3,7 @@
 mod path_guard;
 mod ports;
 mod project_home;
+mod project_home_remote;
 mod result_frames;
 mod role_guard;
 

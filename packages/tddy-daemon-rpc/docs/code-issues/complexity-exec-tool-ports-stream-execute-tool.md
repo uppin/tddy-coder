@@ -7,7 +7,7 @@
 **Metrics:** **73 lines** · **nesting depth 5** · 1 parameters · 6 branch/match lines · 8 early exits
 **Thresholds breached:** length 73 > 60; nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-10-25 (80 → 86 lines, nesting +1, by `#start-parity` 1/9, #750) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -20,6 +20,7 @@
 | 2026-10-23 | 81 | 4 | — | — | touched by #699 (`#project-home` 4/7), **unchanged in length**: the project-home read-only refusal joined the path-traversal check in one call (`role_guard::reject_refused_local_exec_tool`), so the call site stayed one line. Measured by the brace-depth structural scan (fn span 81 lines, body nesting 4 — this scan counts depth from the fn body, one less than the 2026-09-18 tool) |
 | 2026-10-23 | 80 | 4 | — | — | touched by #700 (`#project-home` 5/7): the local call became `self.run_locally(..).await?` (the project-home tools are answered there), one line shorter. 81 → 80 by structural scan, fn line to closing brace on `origin/feature/project-home/home-session` (08cfc2a28) and HEAD; no coverage run |
 | 2026-10-24 | 80 | — | — | — | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): 80 at both, fn line to closing brace (`exec_tool/ports.rs:100`). `/analyze-code-issues` re-run on `tddy-daemon-rpc` (287 tests across 85 files, join 66.8%): entered, CRAP < 6 |
+| 2026-10-25 | 86 | 5 | — | — | **Regressed** by `#start-parity` 1/9 (#750): the local arm became a `match` on `serve_project_home_for_caller_held_elsewhere` (a caller another host holds), one level deeper. fn line to closing brace (`exec_tool/ports.rs:112`–`197`), structural scan. Fix deferred by developer instruction for this stack |
 
 ## What the tool found
 

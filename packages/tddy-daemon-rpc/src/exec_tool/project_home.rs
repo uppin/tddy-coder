@@ -10,6 +10,9 @@
 //! RPC families are installed on the host (see `DaemonRpcFamilies::attach_session_start`), so a
 //! project-home start is the same start any other caller gets, for every session type.
 //!
+//! A call naming a target on another host, a listing of every host, and a caller held on another
+//! host are `project_home_remote`'s (`#start-parity` 1/9).
+//!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
 use std::collections::HashMap;
@@ -18,6 +21,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
@@ -29,12 +33,13 @@ use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 use tddy_tool_engine::catalog::ToolDef;
 use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
 use tddy_tool_engine::project_home_tools::{
-    execute_project_home_tool, is_project_home_tool, session_offered_catalog, ListedSession,
-    ProjectHomePort, StartProjectSessionArgs,
+    execute_project_home_tool, is_project_home_tool, session_offered_catalog,
+    ListProjectSessionsResult, ListedSession, ProjectHomePort, StartProjectSessionArgs,
 };
 use tddy_worktree_service::session_git_ops::PushIdentity;
 use tddy_worktree_service::session_target::{HomeCaller, SessionTarget, TargetRecord};
 
+use super::project_home_remote::PeerSessionLists;
 use super::ExecToolRpcHandler;
 
 impl ExecToolRpcHandler {
@@ -53,10 +58,37 @@ impl ExecToolRpcHandler {
                 .await);
         }
         let home = project_home_caller(sessions_base, &req.session_id, &req.tool_name)?;
-        let port = DaemonProjectHome {
+        let response = match self.served_on_target_host(req).await? {
+            Some(answered) => answered,
+            None => {
+                let peers = PeerSessionLists {
+                    routing: self.peer_routing.clone(),
+                    local_id: local_instance_id_for_config(&self.config),
+                    request: req.clone(),
+                };
+                let os_user = self.os_user_of(&req.session_token)?;
+                self.project_home_port(req, os_user, sessions_base, Some(peers))?
+                    .execute(&home, req)
+                    .await
+            }
+        };
+        record_call(sessions_base, req, &response);
+        Ok(response)
+    }
+
+    /// [`ProjectHomePort`] over this host for `req`'s caller, whose sessions are `os_user`'s in
+    /// `sessions_base`. `peers` lists the other hosts' sessions; `None` lists this host's alone.
+    pub(super) fn project_home_port(
+        &self,
+        req: &ExecuteToolRequest,
+        os_user: String,
+        sessions_base: &Path,
+        peers: Option<PeerSessionLists>,
+    ) -> Result<DaemonProjectHome, Status> {
+        Ok(DaemonProjectHome {
             launch: self.attached_launch(&req.tool_name)?,
             session_token: req.session_token.clone(),
-            os_user: self.os_user_of(&req.session_token)?,
+            os_user,
             sessions_base: sessions_base.to_path_buf(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             identity: SessionAccountAccess::new(
@@ -65,17 +97,9 @@ impl ExecToolRpcHandler {
                 &req.session_token,
             )
             .with_github_cli(self.github_cli.clone()),
-        };
-        let outcome = execute_project_home_tool(&port, &home, &req.tool_name, &req.args_json).await;
-        let response = ExecuteToolResponse {
-            result_json: outcome.result_json,
-            is_error: outcome.is_error,
-            error_message: outcome.error_message,
-            job_id: outcome.job_id,
-            job_running: outcome.job_running,
-        };
-        record_call(sessions_base, req, &response);
-        Ok(response)
+            daemon_instance_id: local_instance_id_for_config(&self.config),
+            peers,
+        })
     }
 
     /// The host's launch snapshot, or a refusal naming the missing wiring when the families were
@@ -128,7 +152,7 @@ impl ExecToolRpcHandler {
     }
 
     /// The OS user `session_token` maps to, as the start path resolves it.
-    fn os_user_of(&self, session_token: &str) -> Result<String, Status> {
+    pub(super) fn os_user_of(&self, session_token: &str) -> Result<String, Status> {
         let github_user = (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         self.config
@@ -189,7 +213,7 @@ fn record_call(sessions_base: &Path, req: &ExecuteToolRequest, response: &Execut
 
 /// [`ProjectHomePort`] over this host, for one caller: the host's session list and start run as the
 /// caller's token, and the session store is read for the worktrees the resolver needs.
-struct DaemonProjectHome {
+pub(super) struct DaemonProjectHome {
     launch: LaunchSessions,
     session_token: String,
     os_user: String,
@@ -197,6 +221,11 @@ struct DaemonProjectHome {
     tddy_data_dir: PathBuf,
     /// Reads the signed-in person's vault for a target's GitHub identity, as a session start does.
     identity: SessionAccountAccess,
+    /// This host, as the eligible-daemon roster names it; every session it lists carries it.
+    daemon_instance_id: String,
+    /// The other hosts' listings, for a caller held here; `None` for one held elsewhere, whose own
+    /// host fans out.
+    peers: Option<PeerSessionLists>,
 }
 
 /// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the
@@ -208,6 +237,22 @@ struct SessionRow {
 }
 
 impl DaemonProjectHome {
+    /// Run `req`'s project-home tool for `home`.
+    pub(super) async fn execute(
+        &self,
+        home: &HomeCaller,
+        req: &ExecuteToolRequest,
+    ) -> ExecuteToolResponse {
+        let outcome = execute_project_home_tool(self, home, &req.tool_name, &req.args_json).await;
+        ExecuteToolResponse {
+            result_json: outcome.result_json,
+            is_error: outcome.is_error,
+            error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
+        }
+    }
+
     async fn rows(&self) -> anyhow::Result<Vec<SessionRow>> {
         let sessions_base = self.sessions_base.clone();
         let tddy_data_dir = self.tddy_data_dir.clone();
@@ -290,8 +335,23 @@ impl ProjectHomePort for DaemonProjectHome {
                 worktree: s.repo_path,
                 is_active: s.is_active,
                 pending_elicitation: s.pending_elicitation,
+                daemon_instance_id: self.daemon_instance_id.clone(),
             })
             .collect())
+    }
+
+    async fn list_peer_sessions(
+        &self,
+        _project_id: &str,
+        _home_session_id: &str,
+    ) -> ListProjectSessionsResult {
+        match &self.peers {
+            Some(peers) => peers.list().await,
+            None => ListProjectSessionsResult {
+                sessions: Vec::new(),
+                unreachable_hosts: Vec::new(),
+            },
+        }
     }
 
     async fn start_session(
