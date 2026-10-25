@@ -656,12 +656,23 @@ fn turn_summary(request: &TurnRequest) -> String {
 /// At the end it takes the table lock once — for the conversation's accounting, the accounting
 /// file, and the publication of the result — so no awaiter can read a turn as done before what it
 /// spent has been recorded.
+///
+/// The exception is a permission answer to a remote conversation a turn is holding: the turn holding
+/// the lock may be the one waiting on that answer, so the answer is not queued behind it. See
+/// [`answer_past_the_held_turn`].
 pub async fn run_turn(turn: DeferredTurn) {
-    // FIXME(web-approvals): this lock is held until the turn ends, which for a turn deferring a
-    // permission request to the user is when the user answers it. A main-agent `subagent_resume`
-    // with an answer queues here behind that turn, so its answer is refused only then, as already
-    // answered. Routing the answer around this lock is the open decision on the deferral design.
-    let mut session = turn.session.lock().await;
+    let shared = std::sync::Arc::clone(&turn.session);
+    let mut session = match shared.try_lock() {
+        Ok(session) => session,
+        Err(_) => {
+            if turn.request.permission_answer().is_some() {
+                if let Some(remote) = remote_of(&turn.conversation_id).await {
+                    return answer_past_the_held_turn(turn, &remote).await;
+                }
+            }
+            shared.lock().await
+        }
+    };
     if let Some(agent_id) = turn.reported_agent.as_deref() {
         report_local_conversation_state(
             agent_id,
@@ -699,6 +710,45 @@ pub async fn run_turn(turn: DeferredTurn) {
         // says what happened.
         report_local_conversation_state(agent_id, SessionAgentStatus::Idle, &ended.summary).await;
     }
+}
+
+/// The daemon handle of `conversation_id`, when the conversation's turn loop runs on another daemon.
+async fn remote_of(conversation_id: &str) -> Option<crate::roster::RemoteConversationHandle> {
+    subagent_sessions()
+        .lock()
+        .await
+        .open
+        .get(conversation_id)
+        .and_then(|conv| conv.remote.clone())
+}
+
+/// Deliver a permission answer to a remote conversation whose turn holds the session, by asking the
+/// daemon that runs its loop.
+///
+/// The daemon takes the answer as the main agent's, and refuses it at once while the request it names
+/// is held: the turn holding the request carries on and returns its outcome to the call that deferred
+/// it. So this call returns that refusal, rather than waiting for a turn that cannot end until the
+/// answer lands. Turn accounting follows what the daemon did: a turn it ran is counted, and a refused
+/// answer ran none. A remote conversation's roster row is reported by its daemon, so none is reported
+/// here.
+async fn answer_past_the_held_turn(
+    turn: DeferredTurn,
+    remote: &crate::roster::RemoteConversationHandle,
+) {
+    let outcome = remote
+        .take_turn(&turn.request)
+        .await
+        .map_err(SubagentError::from);
+    let answered = outcome.is_ok();
+    let ended = TurnEnd::from(outcome);
+    let mut sessions = subagent_sessions().lock().await;
+    if answered {
+        if let Some(conv) = sessions.open.get_mut(&turn.conversation_id) {
+            conv.turns += 1;
+        }
+    }
+    write_accounting_file(&sessions);
+    sessions.pending.resolve(&turn.response_id, ended.result);
 }
 
 /// How a turn ended, in the two forms its end is recorded in: the result its caller collects and

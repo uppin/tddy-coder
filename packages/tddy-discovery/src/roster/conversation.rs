@@ -368,6 +368,13 @@ impl RemoteConversationHandle {
         &self.conversation_id
     }
 
+    /// Run one turn of this conversation on the daemon holding it, without the session the turn would
+    /// otherwise take. The call [`RemoteAgentSession::take_turn`] makes, so the answer is the same. Used
+    /// where the session is held by a turn that is waiting on the answer this turn carries.
+    pub async fn take_turn(&self, request: &TurnRequest) -> Result<PromptOutcome, String> {
+        self.link.take_turn(&self.conversation_id, request).await
+    }
+
     /// Close the conversation on the daemon holding it.
     pub async fn cancel(&self) -> Result<(), String> {
         self.link.cancel(&self.conversation_id).await
