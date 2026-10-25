@@ -184,7 +184,10 @@ async fn start_session_on_another_host_creates_the_session_there_linked_to_the_o
         Some(world.home.as_str())
     );
     // And that record names host-a as the orchestrator's host
-    assert_eq!(changeset.orchestrator_daemon_instance_id.as_deref(), Some(HOST_A));
+    assert_eq!(
+        changeset.orchestrator_daemon_instance_id.as_deref(),
+        Some(HOST_A)
+    );
 }
 
 #[tokio::test]

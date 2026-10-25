@@ -5,7 +5,7 @@ use tddy_core::cli_harness::{cli_harness_requires_model, cli_harnesses};
 use tddy_service::proto::types::HostDocumentScope;
 
 /// The permission modes a claude-cli session takes; empty is the daemon's default (`auto`).
-pub(super) const PERMISSION_MODES: [&str; 6] = [
+const PERMISSION_MODES: [&str; 6] = [
     "",
     "auto",
     "default",
@@ -14,8 +14,8 @@ pub(super) const PERMISSION_MODES: [&str; 6] = [
     "bypassPermissions",
 ];
 
-pub(super) const NEW_BRANCH_FROM_BASE: &str = "new_branch_from_base";
-pub(super) const WORK_ON_SELECTED_BRANCH: &str = "work_on_selected_branch";
+const NEW_BRANCH_FROM_BASE: &str = "new_branch_from_base";
+const WORK_ON_SELECTED_BRANCH: &str = "work_on_selected_branch";
 
 /// `StartSession`'s JSON schema: every argument described, the closed lists as enums, and what
 /// each session type and branch intent requires stated with `if`/`then`.
@@ -42,7 +42,7 @@ pub fn offered_start_fields(choices: &StartChoices) -> Vec<String> {
     names
 }
 
-pub(super) fn schema_offering(choices: Option<&StartChoices>) -> Value {
+fn schema_offering(choices: Option<&StartChoices>) -> Value {
     let harnesses = cli_harnesses();
     let session_types: Vec<&str> = ["tool", "workspace"]
         .into_iter()
@@ -221,15 +221,15 @@ pub(super) fn schema_offering(choices: Option<&StartChoices>) -> Value {
     })
 }
 
-pub(super) fn string(description: &str) -> Value {
+fn string(description: &str) -> Value {
     json!({ "type": "string", "description": description })
 }
 
-pub(super) fn boolean(description: &str) -> Value {
+fn boolean(description: &str) -> Value {
     json!({ "type": "boolean", "description": description })
 }
 
-pub(super) fn host_property(choices: Option<&StartChoices>) -> Value {
+fn host_property(choices: Option<&StartChoices>) -> Value {
     let mut property = string(
         "The host to start the session on, as the eligible-daemon roster names it; empty for this host.",
     );
@@ -251,7 +251,7 @@ pub(super) fn host_property(choices: Option<&StartChoices>) -> Value {
     property
 }
 
-pub(super) fn recipe_property(choices: Option<&StartChoices>) -> Value {
+fn recipe_property(choices: Option<&StartChoices>) -> Value {
     let mut property = string(
         "The workflow recipe a `tool` session (or a managed claude-cli / cursor-cli session) runs; empty is the default.",
     );
@@ -263,7 +263,7 @@ pub(super) fn recipe_property(choices: Option<&StartChoices>) -> Value {
     property
 }
 
-pub(super) fn attachments_property() -> Value {
+fn attachments_property() -> Value {
     let scopes: Vec<&str> = ATTACHMENT_SCOPES
         .iter()
         .map(HostDocumentScope::as_str_name)
