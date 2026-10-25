@@ -3,6 +3,7 @@
 **Category:** Deferred from `#term-snapshot` 1/4 (#760)
 **Source:** `/pr-wrap` of #760 — every web host terminal opens with `SNAPSHOT` now, so the byte
 resume (`TAIL` then `FROM_OFFSET`) the web used to track has no reader left.
+**Consent:** the developer deferred it at the `#term-snapshot` completion gate, 2026-10-25 — "Defer it" (no sweep node; pick up after the stack lands)
 
 Four leftovers in `packages/tddy-web`, none a defect:
 
