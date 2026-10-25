@@ -75,6 +75,11 @@ service SessionAgentService {
   // This is that agent's own report, and the only possible source for it
   // (docs/ft/daemon/session-agent-roster.md § What an agent is doing).
   rpc ReportAgentConversationState(ReportAgentConversationStateRequest) returns (ReportAgentConversationStateResponse);
+  // Answer a coding subagent's permission request the main agent deferred to the user
+  // (`subagent_resume { permission: { requestId, deferToUser: true } }`). The session's owner only;
+  // the conversation must belong to the named session. The first answer wins: one arriving after
+  // the main agent's, or after another user's, is refused naming who answered.
+  rpc AnswerAgentPermission(AnswerAgentPermissionRequest) returns (AnswerAgentPermissionResponse);
 }
 
 enum AgentCloneState {
@@ -116,6 +121,10 @@ message AgentConversationChunk {
   // The tool message's id the turn stopped at, when it stopped on "YieldedToCaller" — the id a
   // resume-with-replacement names. Empty for every other stop reason.
   string yielded_message_id = 7;
+  // The permission request a coding agent's turn paused on, when it stopped on
+  // "PermissionRequested" — a JSON {requestId, toolCall, options} object, final frame only. Empty
+  // for every other stop reason.
+  string permission_request_json = 8;
 }
 
 // One message of a conversation's history, as the caller of a turn reads it.
@@ -153,6 +162,8 @@ message AttachSessionAgentRequest {
   // INVALID_ARGUMENT; there is no "assume the local daemon" reading, because that reading silently
   // picks the wrong host once two daemons offer the same name.
   string agent_id = 4;
+  // Where the agent's conversations work; SHARED (the default) is the session's own worktree.
+  AgentPlacement placement = 5;
 }
 
 message CancelAgentConversationRequest {
@@ -160,6 +171,10 @@ message CancelAgentConversationRequest {
   string session_id = 2;
   string daemon_instance_id = 3;
   string conversation_id = 4;
+  // Field 5 named the actor that cancelled the conversation. The daemon reads the actor from the session
+  // token instead, so a caller cannot record another login; the number and name stay reserved.
+  reserved 5;
+  reserved "cancelled_by";
 }
 
 message CancelAgentConversationResponse {}
@@ -304,6 +319,15 @@ message ResumeAgentConversationRequest {
   // appended after the original call (keep original + append), never dispatched, recorded as
   // history. Appended after `from_message_id`'s rewind and `correction`, in that order.
   string replacement_json = 9;
+  // The answer to the conversation's pending permission request, as a JSON
+  // {answer: "selected"|"cancelled", requestId, optionId?} object; the coding agent's paused turn
+  // continues with it. Empty when the resume answers no request.
+  string permission_answer_json = 10;
+  // The request id of the conversation's pending permission request to hand to the user instead of
+  // answering it here: the turn holds until the user answers it from the conversation view, or this
+  // caller answers it. Empty or absent = none. Refused with `permission_answer_json` set, since a
+  // request is either answered by the caller or handed to the user.
+  optional string defer_permission_to_user = 11;
 }
 
 message SessionAgentEntry {
@@ -344,6 +368,15 @@ message SessionAgentEntry {
   // status is what the agent is doing *now*, and this is the last thing it was seen doing — which is
   // the only useful thing to show for an agent that is idle.
   types.SessionAgentActivity last_activity = 12;
+  // Snapshotted at attach, from the catalog row: what runs this agent's turns.
+  types.AgentKind kind = 13;
+  // The harness of a CODING_AGENT entry; empty for MODEL entries.
+  string harness = 14;
+  // Where the agent's conversations work, as attached.
+  AgentPlacement placement = 15;
+  // As on `catalog.SubagentInfo`, snapshotted at attach.
+  string transport = 16;
+  string permission_policy = 17;
 }
 
 // Every roster read is a WHOLE snapshot. A consumer rebuilds its registry from it and never applies
@@ -364,4 +397,32 @@ message StreamSessionAgentsRequest {
   string session_token = 1;
   string session_id = 2;
   string daemon_instance_id = 3;
+}
+
+// Where a roster agent's conversations work.
+//
+// SHARED is the session's own worktree — the agent edits the main agent's checkout, as a teammate
+// in the same tree would. CLONE gives each conversation a worktree and branch of its own, synced
+// with the main agent's files before every turn, whose work is read and taken with `subagent_diff`,
+// `subagent_pull` and `subagent_end`. An entry written before this field existed reads as SHARED.
+enum AgentPlacement {
+  AGENT_PLACEMENT_SHARED = 0;
+  AGENT_PLACEMENT_CLONE = 1;
+}
+
+message AnswerAgentPermissionRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+  string daemon_instance_id = 3;
+  string conversation_id = 4;
+  string request_id = 5;
+  // One of the request's option ids; empty with `cancelled` set.
+  string option_id = 6;
+  bool cancelled = 7;
+}
+
+message AnswerAgentPermissionResponse {
+  // Who the answer was recorded as: the answering user's login.
+  string answered_by = 1;
 }

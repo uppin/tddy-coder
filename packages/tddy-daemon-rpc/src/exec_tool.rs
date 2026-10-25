@@ -11,6 +11,7 @@ pub use result_frames::EXEC_TOOL_FRAME_BYTES;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
+use tddy_coding_subagent::ApprovalRoutes;
 use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
@@ -20,7 +21,7 @@ use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecToo
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;
 
-/// The four exec-tool RPCs: the caller's identity, the peer a split session's tools are forwarded
+/// The exec-tool RPCs: the caller's identity, the peer a split session's tools are forwarded
 /// to, and the three places a tool actually runs — this host's task registry, a workspace sandbox,
 /// or a hosted agent clone.
 pub struct ExecToolRpcHandler {
@@ -37,6 +38,9 @@ pub struct ExecToolRpcHandler {
     /// The vaults a project-home git tool reads a target's GitHub identity from (`#project-home` 7/7).
     credential_vaults: Option<Arc<SessionVaults>>,
     github_cli: GithubCli,
+    /// The routes a headless conversation's permission approval is answered through. `None` on a
+    /// host with none wired, which refuses every approval.
+    approval_routes: Option<Arc<ApprovalRoutes>>,
 }
 
 impl ExecToolRpcHandler {
@@ -54,7 +58,15 @@ impl ExecToolRpcHandler {
             session_launch: Arc::new(OnceLock::new()),
             credential_vaults: host.credential_vaults(),
             github_cli: host.github_cli(),
+            approval_routes: host.approval_routes(),
         }
+    }
+
+    /// Answer approvals through `routes` (builder). Without it every approval is refused.
+    #[must_use]
+    pub fn with_approval_routes(mut self, routes: Arc<ApprovalRoutes>) -> Self {
+        self.approval_routes = Some(routes);
+        self
     }
 
     /// The late-bound launch cell, shared with the families that attach it.

@@ -6,10 +6,16 @@ import { AgentChatView, TRANSCRIPT_ROOT_STYLE } from "../chat/AgentChat";
 import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpReplay } from "../chat/useAcpReplay";
 import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
+import { SubagentConversationDialog } from "./SubagentConversationDialog";
+import type { RosterHalf } from "./sessionRosterHalf";
 
 interface SessionActivitiesPaneProps {
   sessionId: string;
   sessionToken: string;
+  /** The roster half of the session (`rosterHalfOf`): the daemon that holds a subagent
+   *  conversation, and the session it is held under. A permission request opened from this pane is
+   *  answered to it. */
+  rosterHalf: RosterHalf;
   /** Explicit client override — session-scoped routing where available. Falls back to the shared
    *  HTTP client from the transport context. A dormant session has no LiveKit room of its own, so
    *  in practice this is the owning daemon's client and the replay comes off disk. */
@@ -32,6 +38,7 @@ interface SessionActivitiesPaneProps {
 export function SessionActivitiesPane({
   sessionId,
   sessionToken,
+  rosterHalf,
   client,
 }: SessionActivitiesPaneProps) {
   // `useHttpClient` is called unconditionally (hook rules); the explicit prop wins when present.
@@ -43,6 +50,10 @@ export function SessionActivitiesPane({
   const { atOldest, loadingOlder, loadOlder } = chat;
 
   const [detail, setDetail] = useState<ChatMessage | null>(null);
+  // The subagent conversation whose bubble was clicked, opened over the pane. Its title is the bubble's.
+  const [conversation, setConversation] = useState<{ conversationId: string; title: string } | null>(
+    null,
+  );
 
   // Pull the transcript as soon as the view mounts, and keep the unread baseline level with what is
   // on screen — entries arriving while the operator is reading them are not unread, and the overlay
@@ -55,6 +66,7 @@ export function SessionActivitiesPane({
   // Switching to another session drops a detail dialog carried over from the previous one.
   useEffect(() => {
     setDetail(null);
+    setConversation(null);
   }, [sessionId]);
 
   return (
@@ -83,6 +95,11 @@ export function SessionActivitiesPane({
           readOnly
           chat={chat}
           onToolClick={setDetail}
+          onSubagentClick={(message) => {
+            if (message.conversationId) {
+              setConversation({ conversationId: message.conversationId, title: message.text });
+            }
+          }}
           onLoadOlder={loadOlder}
           hasOlder={!atOldest}
           loadingOlder={loadingOlder}
@@ -103,6 +120,17 @@ export function SessionActivitiesPane({
           sessionToken={sessionToken}
           client={resolvedClient}
           onClose={() => setDetail(null)}
+        />
+      )}
+      {conversation && (
+        <SubagentConversationDialog
+          sessionId={sessionId}
+          conversationId={conversation.conversationId}
+          title={conversation.title}
+          sessionToken={sessionToken}
+          rosterHalf={rosterHalf}
+          client={resolvedClient}
+          onClose={() => setConversation(null)}
         />
       )}
     </div>

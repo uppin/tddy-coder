@@ -25,6 +25,9 @@ export interface SessionAgentConversationPaneProps {
   readonly agentId: string;
   /** The id the tab is keyed by, and the id the conversation is opened and cancelled under. */
   readonly conversationId: string;
+  /** The signed-in user's login, which the tab needs in order to cancel the conversation when it is
+   *  closed. `null` when none is signed in, and the cancel is then refused. */
+  readonly callerLogin: string | null;
   /** Explicit client override — session-scoped routing where available. Falls back to the shared
    *  HTTP client from the transport context. */
   readonly client?: Client<typeof SessionAgentService>;
@@ -41,6 +44,7 @@ export function SessionAgentConversationPane({
   daemonInstanceId,
   agentId,
   conversationId,
+  callerLogin,
   client,
 }: SessionAgentConversationPaneProps) {
   // `useHttpClient` is called unconditionally (hook rules); the explicit prop wins when present.
@@ -54,6 +58,7 @@ export function SessionAgentConversationPane({
     daemonInstanceId,
     agentId,
     conversationId,
+    callerLogin,
   });
 
   const [draft, setDraft] = useState("");

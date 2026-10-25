@@ -78,6 +78,20 @@ shutdown_grace_secs: 20
 #   allowed_tool_paths:                          # tools a session may exec
 #     - __INSTALL_BIN_DIR__/tddy-coder
 #     - __INSTALL_BIN_DIR__/tddy-tools
+#   # Coding-agent subagents (SpawnRelayed): the harness binaries the daemon may start AS THE SESSION
+#   # USER with their stdio relayed back to it — a list of its own, EMPTY = coding agents cannot run
+#   # as another user on this host. Not implied by allowed_tool_paths. List the absolute path the
+#   # daemon resolves on its PATH (`which <name>` as the daemon user); matching is verbatim.
+#   allowed_relay_tool_paths:
+#     - __INSTALL_BIN_DIR__/codex-acp            # codex-acp harness (bundled by ./install)
+#     - /usr/local/bin/opencode                  # opencode harness (`opencode acp`)
+#     - /usr/local/bin/claude-agent-acp          # claude-acp harness, with daemon.yaml's environment
+#     #                                          # setting TDDY_CLAUDE_AGENT_ACP_CLI to this path.
+#     #   Without that variable claude-acp runs as `bunx claude-agent-acp`, which needs bunx listed
+#     #   here — and arguments are not allowlisted, so listing bunx lets the daemon run ANY package
+#     #   bunx can fetch as the session user. Prefer the binary.
+#   # A coding agent's launch also sets its provider route's variables (per provider account) and,
+#   # for opencode, OPENCODE_CONFIG_CONTENT — list those in allowed_env_keys too, or it is refused.
 #   allowed_mount_roots: [/home, /srv/repos]     # roots a sandbox bind-mount source must fall under
 #   allowed_env_keys: [RUST_LOG, TZ]             # env keys a caller may set on a session
 #   # A clone the daemon runs over SSH (as an OS user, through this supervisor) is spawned with

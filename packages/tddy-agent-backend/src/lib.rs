@@ -22,15 +22,25 @@ pub mod token_accounting;
 use tddy_session_store::{atomic_file, error};
 use tddy_toolcall::toolcall;
 
+pub use backend::acp_driver::{
+    AcpAgentCommand, AcpAgentHooks, AcpDriver, AcpSession, AcpStopReason, AcpToolStatus,
+    AcpTurnEnd, AcpUpdate, AcpUpdateSink, AllowOnce, McpServerSpec, NoHooks, OpenSession,
+    PermissionDecision, PermissionHandler, PermissionOptionView, PermissionRequest,
+    SessionErrorVerdict,
+};
+pub use backend::headless_driver::{
+    AcpConversation, ConversationDriver, HeadlessCommand, HeadlessDriver, HeadlessHarness,
+};
 pub use backend::{
     backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
-    default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,
-    recipe_cli_name_from_selection_label, set_child_pid, workflow_recipe_selection_question,
-    AgentOutputSink, AnyBackend, ClarificationQuestion, ClaudeAcpBackend, ClaudeCodeBackend,
-    ClaudeInvokeConfig, CodexAcpBackend, CodexBackend, CodingBackend, CursorBackend,
-    InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend, OpenCodeAcpBackend,
-    PermissionMode, ProcessToolExecutor, QuestionOption, RemoteToolEnv, SessionMode, SharedBackend,
-    StubBackend, ToolExecutor, CODEX_OAUTH_AUTHORIZE_URL_FILENAME, CODEX_THREAD_ID_FILENAME,
+    codex_acp_route_args, default_model_for_agent, get_child_pid, kill_child_process,
+    preselected_index_for_agent, recipe_cli_name_from_selection_label, set_child_pid,
+    workflow_recipe_selection_question, AgentOutputSink, AnyBackend, ClarificationQuestion,
+    ClaudeAcpBackend, ClaudeCodeBackend, ClaudeInvokeConfig, CodexAcpBackend, CodexBackend,
+    CodingBackend, CursorBackend, InMemoryToolExecutor, InvokeRequest, InvokeResponse, MockBackend,
+    OpenCodeAcpBackend, PermissionMode, ProcessToolExecutor, QuestionOption, RemoteToolEnv,
+    SessionMode, SharedBackend, StubBackend, ToolExecutor, CODEX_OAUTH_AUTHORIZE_URL_FILENAME,
+    CODEX_THREAD_ID_FILENAME,
 };
 pub use claude_hooks::{build_claude_hooks_settings, HookCommandParams};
 pub use cursor_hooks::build_cursor_hooks_settings;

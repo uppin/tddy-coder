@@ -70,6 +70,11 @@ fn an_agent(agent_id: &str) -> AgentBuilder {
         clone_error: String::new(),
         status: SessionAgentStatus::Idle as i32,
         last_activity: None,
+        kind: 0,
+        harness: String::new(),
+        placement: 0,
+        transport: String::new(),
+        permission_policy: String::new(),
     })
 }
 

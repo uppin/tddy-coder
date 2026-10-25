@@ -188,11 +188,14 @@ impl BuildContext {
         let model_registry = &shared.model_registry;
         let session_notification_bus = Arc::clone(&shared.session_notification_bus);
         let session_tokens = &mount.session_tokens;
+        // One registry for the whole host: the launcher binds each headless conversation's approvals
+        // into it, and the host answers those approvals through it.
+        let approval_routes = Arc::default();
         let connection_impl = tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver.clone(),
             tddy_data_dir.clone(),
-            user_resolver,
+            user_resolver.clone(),
             options.spawn_client.clone(),
             options.spawn_backend.clone(),
             tddy_daemon_livekit::peer_routing::peer_routing_over(config, livekit_discovery),
@@ -212,9 +215,23 @@ impl BuildContext {
         .with_terminal_exposure(Arc::clone(terminal_exposure))
         .with_split_rooms(split_rooms)
         .with_model_registry(Arc::clone(model_registry))
+        .with_coding_agent_launcher(Arc::new(
+            tddy_session_lifecycle::coding_agent_launcher::DaemonCodingAgentLauncher::for_daemon(
+                tddy_session_lifecycle::coding_agent_launcher::DaemonLauncherDeps {
+                    config: config.clone(),
+                    tddy_data_dir: tddy_data_dir.clone(),
+                    spawn_backend: options.spawn_backend.clone(),
+                    vaults: self.identity.credential_vaults.clone(),
+                    user_resolver,
+                    tokens: Some(session_tokens.clone()),
+                },
+            )
+            .with_approval_routes(Arc::clone(&approval_routes)),
+        ))
         .with_session_notification_bus(session_notification_bus)
         .with_session_tokens(session_tokens.clone())
         .with_askpass_endpoint(askpass_endpoint)
+        .with_approval_routes(approval_routes)
         // Read here, before the local socket server is spawned: adopting its own listener
         // clears the `LISTEN_*` variables the host sockets are announced in.
         .with_inherited_host_session_sockets(

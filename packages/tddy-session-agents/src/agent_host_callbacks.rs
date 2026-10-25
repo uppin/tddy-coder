@@ -65,6 +65,12 @@ pub trait AgentHostCallbacks: Send + Sync {
     /// `LocalExecTools::hosted_clone_for`).
     fn hosted_clone_for(&self, session_id: &str) -> Option<Arc<HostedClone>>;
 
+    /// The routes a headless conversation's permission approvals are answered through, when this
+    /// host has them. `None` refuses every approval, so a host that wires none is never granting one.
+    fn approval_routes(&self) -> Option<Arc<tddy_coding_subagent::ApprovalRoutes>> {
+        None
+    }
+
     /// Serve one exec tool for a session whose checkout this daemon holds as an agent clone: the
     /// read/write split (see `LocalExecTools::run_hosted_clone_tool`).
     async fn run_hosted_clone_tool(
@@ -105,6 +111,9 @@ pub struct AgentRoster {
     pub roster_keepalive_interval: Duration,
     pub session_admissions: Arc<dyn RoomAdmission>,
     pub model_registry: Option<Arc<ModelRegistryStore>>,
+    /// What starts a coding agent for a conversation. `None` on a daemon with no launcher wired —
+    /// a coding-agent conversation is then refused naming that, never started some other way.
+    pub coding_agent_launcher: Option<Arc<dyn tddy_coding_subagent::CodingAgentLauncher>>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn AgentHostCallbacks>,
 }

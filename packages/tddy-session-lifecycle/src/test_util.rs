@@ -39,9 +39,13 @@ users:
 
 /// Build a minimal [`DaemonConfig`] suitable for unit/acceptance tests.
 pub fn test_config() -> DaemonConfig {
+    config_from(CONFIG_YAML)
+}
+
+fn config_from(yaml: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
-    std::fs::write(&path, CONFIG_YAML).expect("write test config");
+    std::fs::write(&path, yaml).expect("write test config");
     DaemonConfig::load(&path).expect("load test config")
 }
 
@@ -79,6 +83,84 @@ pub fn test_host(sessions_base: PathBuf) -> DaemonSessionHost {
         Arc::new(CliSessionManager::new()),
     )
 }
+
+/// The credentials a [`signing_test_host`] accepts for [`TEST_USER`], each minted with that host's
+/// own signing key — real `v2` tokens, unlike [`TEST_TOKEN`].
+pub struct SignedTestCredentials {
+    /// The operator's own access token, as a signed-in browser holds it.
+    pub user_token: String,
+    /// The token a session's main agent is given: an access token under the operator's identity
+    /// that carries the agent principal, as `mint_agent_session_token` mints it.
+    pub agent_token: String,
+    /// Owns the host's signing key on disk.
+    _key_home: tempfile::TempDir,
+}
+
+/// A host wired to `sessions_base` that authenticates **real** session tokens: its user resolver is
+/// the one the daemon's auth wiring builds, over a signing key of its own, and it holds those
+/// tokens (`with_session_tokens`) as the daemon does — so it can tell the main agent's token from
+/// the operator's. [`TEST_TOKEN`] is not accepted; [`SignedTestCredentials`] are.
+#[must_use]
+pub fn signing_test_host(sessions_base: PathBuf) -> (DaemonSessionHost, SignedTestCredentials) {
+    let key_home = tempfile::tempdir().expect("create temp dir for the host's signing key");
+    let key = tddy_daemon_auth::DaemonSigningKey::load_or_generate(
+        &key_home.path().join(tddy_daemon_auth::SIGNING_KEY_FILE),
+    )
+    .expect("the host generates its signing key");
+    let tokens = tddy_daemon_auth::SessionTokens::new(
+        &key,
+        Arc::new(tddy_daemon_auth::StandaloneKeyDirectory),
+    );
+    let config = config_from(SIGNING_CONFIG_YAML);
+    let user_resolver = crate::auth::build_auth_entries_with(
+        &config,
+        "127.0.0.1",
+        0,
+        &tokens,
+        Arc::new(tddy_daemon_extensions::room_tokens::NoRoomTokens),
+    )
+    .expect("the auth wiring builds")
+    .user_resolver
+    .expect("the auth wiring resolves session tokens");
+    let operator = tddy_github::GitHubUser {
+        id: 7,
+        login: TEST_USER.to_string(),
+        avatar_url: String::new(),
+        name: TEST_USER.to_string(),
+    };
+    let credentials = SignedTestCredentials {
+        user_token: tokens.signer().mint_access(&operator),
+        agent_token: tokens
+            .signer()
+            .mint_agent(&operator, std::time::Duration::from_secs(600)),
+        _key_home: key_home,
+    };
+    let tddy_data_dir = sessions_base.clone();
+    let sessions_base_resolver: SessionsBaseResolver =
+        Arc::new(move |_| Some(sessions_base.clone()));
+    let host = DaemonSessionHost::new(
+        config.clone(),
+        sessions_base_resolver,
+        tddy_data_dir,
+        user_resolver,
+        None,
+        tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+        PeerRouting::local_only(&config),
+        Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+        Arc::new(CliSessionManager::new()),
+    )
+    .with_session_tokens(tokens);
+    (host, credentials)
+}
+
+/// [`CONFIG_YAML`] with a (stub) GitHub provider, which is what gives a daemon its token wiring.
+const SIGNING_CONFIG_YAML: &str = r#"
+users:
+  - github_user: "testuser"
+    os_user: "testdev"
+github:
+  stub: true
+"#;
 
 /// Daemon under test: the connection service and its session family. The catalogue, exec-tool,
 /// project and PR-stack families are served by `tddy-daemon-rpc`, whose own `test_util::TestDaemon`

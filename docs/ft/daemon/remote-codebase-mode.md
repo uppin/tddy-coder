@@ -250,6 +250,89 @@ Split placement (`codebase_daemon_instance_id` together with `sandbox`) is still
 [remote-managed-worktree.md](remote-managed-worktree.md) § What a split session cannot also ask
 for. This section is the primitive that refusal is waiting on, not its removal.
 
+## Coding subagents on the codebase host
+
+A main agent in remote-codebase mode can hand work to **coding subagents that run on the codebase
+host**, against the workspace session's worktree — where the files, the toolchain and the build cache
+are — rather than on the main agent's machine, which has no checkout.
+
+```
+laptop: main agent ─MCP─ tddy-tools --mcp ─HTTP─ relay ─LiveKit─ codebase daemon
+                                                     SessionAgentService ─► workspace roster ─► coding agent
+                                                                                           (workspace worktree, session user)
+```
+
+### Opting in
+
+`tddy-tools remote start-session --agent <name@codebase-daemon>` (repeatable) sends each agent as a
+`StartSessionRequest.specialized_agents` entry on the `workspace` session. A workspace session started
+without any has no roster and no `subagent_*` tools.
+
+### Who may be on a workspace roster
+
+A workspace session's roster holds `coding_agent` entries **owned by the daemon serving it**, and no
+others. A `model` agent, or a coding agent another daemon owns, is refused with `invalid_argument`
+naming the entry (`tddy_session_agents::workspace_roster::workspace_roster_admits`). The seed is
+resolved and admitted **before** anything of the session is written, so a refused entry leaves no
+session behind.
+
+Admission applies when the start carries no `split_agent`. A split start (remote-managed worktree) and
+the jailed-codebase start that carries the same placement are exempt: their roster already lives on the
+agent daemon ([Remote Managed Worktree](remote-managed-worktree.md)). A clone start
+(`agent_clone`) seeds no roster.
+
+### The relay carries the roster and conversations
+
+`tddy-tools --mcp` in this mode reaches the relay over the `DaemonHttp` transport
+(`TDDY_REMOTE_DAEMON_URL`). That transport is a full Connect client of the relay's `/rpc` mount
+(`tddy_session_tool_client::daemon_http_rpc::DaemonHttpRpcClient`): unary calls as `application/proto`,
+server streams as enveloped `application/connect+proto`. Over it ride:
+
+- `StreamSessionAgents` — the roster stream, so the `subagent_*` tools are advertised once the roster
+  is not empty;
+- the conversation RPCs (open, prompt, resume, await, cancel) through `AgentConversationLink`;
+- `ConversationWorktree` (diff, pull, reset, …) for `clone` placement;
+- `ExecuteTool` and `ListExecTools`.
+
+The relay needs no forward of its own for these: it is an ordinary daemon whose peer routing forwards
+each request to the daemon its `daemon_instance_id` names.
+
+Every request on this wire, and every `tddy-tools remote` subcommand's request, is **protobuf** — the
+encoding the daemon's `/rpc` mount decodes with the method's generated request type. A
+`ConversationWorktree` reply whose `result_json` is empty is an error (`the reply carries no
+result_json`) on every conversation transport, since the daemon always answers with a non-empty JSON
+document.
+
+`tddy-tools remote` prints each answer as canonical proto3 JSON: camelCase keys, proto3 defaults
+omitted.
+
+### Where the agent runs
+
+The codebase daemon launches the coding agent exactly as for a local session: as the workspace
+session's OS user, under managed confinement, on the workspace worktree. With `clone` placement it
+runs on the per-conversation worktree the codebase daemon serves for the conversation
+(`<worktree>/tmp/subagent-worktrees/<conversation_id>`), opened locally on that daemon; diff and pull
+travel back over the hop.
+
+### Verification and known gaps
+
+| What | Proven by |
+|---|---|
+| `--agent` reaches `StartSession` as `specialized_agents` on a `workspace` session | `packages/tddy-tools-cli/tests/remote_wire_protobuf_acceptance.rs`, `remote_cli_subcommand_acceptance.rs` |
+| Workspace roster admission, refusal naming the entry, no session left behind | `packages/tddy-session-agents/tests/workspace_roster_admission.rs`, `packages/tddy-session-lifecycle/tests/workspace_seed_admission_integration.rs` |
+| `DaemonHttpRpcClient` framing and error mapping | `packages/tddy-session-tool-client/tests/daemon_http_rpc_acceptance.rs` |
+| `ExecuteTool`, `ListExecTools` and `ConversationWorktree` speak protobuf to the daemon's `/rpc` mount (`connect_router` over the generated handlers, a recording service behind them) | `packages/tddy-session-tool-client/tests/{execute_tool,list_exec_tools,conversation_reply}_protobuf_acceptance.rs` |
+| The roster stream opens over `DaemonHttp` against the daemon's `/rpc` mount | `packages/tddy-daemon-rpc/tests/roster_stream_over_daemon_http_integration.rs` |
+| The conversation link opens over the relay transport | `packages/tddy-tools/tests/relay_conversation_link_acceptance.rs` |
+| `clone` placement on a workspace session; diff and pull through the relay's HTTP endpoint reach the codebase host | `packages/tddy-daemon-rpc/tests/remote_codebase_clone_placement_acceptance.rs` — relay and codebase host in **one process**, an in-process forwarder standing in for the LiveKit hop |
+
+**Known gap — the two-daemon LiveKit suite is NOT RUN.** No test joins a relay and a codebase daemon
+through a real LiveKit room. The real hop, the two-daemon handshake, and prompt / await / permission
+resume / cancel of a conversation through the relay end to end are therefore unverified, as is the
+`subagent_*` tool advertisement over the HTTP relay (the roster-before-tool-list test uses the UDS
+transport). Recorded in
+[`docs/dev/todo/2026-10-25-remote-codebase-two-daemon-suite-not-run.md`](../../dev/todo/2026-10-25-remote-codebase-two-daemon-suite-not-run.md).
+
 ## Extension: placing the codebase on another daemon
 
 This document assumes the worktree lives on whichever daemon the caller addressed.

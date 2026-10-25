@@ -63,6 +63,12 @@ fn seed_entry(
         // IDLE would have the registry show a reachable agent before anything had reached it.
         status: SessionAgentStatus::Unspecified as i32,
         last_activity: None,
+        // A seed is always a def: coding agents are never seeded into the jail.
+        kind: tddy_service::proto::types::AgentKind::Model as i32,
+        harness: String::new(),
+        placement: 0,
+        transport: String::new(),
+        permission_policy: String::new(),
     }
 }
 

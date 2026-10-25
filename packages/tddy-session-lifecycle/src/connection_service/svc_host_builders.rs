@@ -78,6 +78,9 @@ impl DaemonSessionHost {
             demo_vm_state,
             host_session_sockets,
             agent_activity_hub: Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
+            agent_conversation_frames: Arc::new(
+                tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
+            ),
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
             ),
@@ -86,6 +89,8 @@ impl DaemonSessionHost {
             session_tokens: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(NoSessionRooms),
+            coding_agent_launcher: None,
+            approval_routes: None,
             model_registry: None,
             session_agent_rosters: Arc::new(
                 crate::session_agent_roster::SessionAgentRosterStore::new(
@@ -169,6 +174,36 @@ impl DaemonSessionHost {
     pub fn with_session_rooms(mut self, rooms: Arc<dyn SessionRooms>) -> Self {
         self.session_rooms = rooms;
         self
+    }
+
+    /// Install what starts a coding-agent subagent for a conversation (builder). Without it a
+    /// coding-agent conversation is refused.
+    #[must_use]
+    pub fn with_coding_agent_launcher(
+        mut self,
+        launcher: Arc<dyn tddy_coding_subagent::CodingAgentLauncher>,
+    ) -> Self {
+        self.coding_agent_launcher = Some(launcher);
+        self
+    }
+
+    /// Install the routes a headless coding agent's permission approvals are answered through
+    /// (builder). Without them every approval is refused, and the exec-tool handler built from this
+    /// host answers none. Apply it before the RPC families are installed.
+    #[must_use]
+    pub fn with_approval_routes(
+        mut self,
+        routes: Arc<tddy_coding_subagent::ApprovalRoutes>,
+    ) -> Self {
+        self.debug_assert_rpc_families_not_installed("with_approval_routes");
+        self.approval_routes = Some(routes);
+        self
+    }
+
+    /// The routes approvals are answered through, when this host has them.
+    #[must_use]
+    pub fn approval_routes(&self) -> Option<Arc<tddy_coding_subagent::ApprovalRoutes>> {
+        self.approval_routes.clone()
     }
 
     /// Install which owning daemons are admitted to the rooms this daemon hosts (builder). Without
@@ -303,6 +338,14 @@ impl DaemonSessionHost {
     /// `StreamSessionActivity` subscribers read.
     pub fn agent_activity_hub(&self) -> Arc<tddy_daemon_kernel::AgentActivityHub> {
         Arc::clone(&self.agent_activity_hub)
+    }
+
+    /// The live frames of every daemon-run subagent conversation, shared by the recorder that publishes
+    /// into them and the replay that tails them.
+    pub fn conversation_frames(
+        &self,
+    ) -> Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames> {
+        Arc::clone(&self.agent_conversation_frames)
     }
 
     /// Return the shared `TaskRegistry` so `main.rs` can pass it to other services.

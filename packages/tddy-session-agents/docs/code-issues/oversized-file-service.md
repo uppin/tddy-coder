@@ -17,6 +17,7 @@
 | 2026-09-26 | 1,055 | +178 in PR #545: `ResumeAgentConversation`, the shared `take_a_turn`, `TurnOnAConversation`, and the message-descriptor frame builders |
 
 | 2026-09-27 | 1,062 | **regressed** by 7. The `MaxTokens` stop reason gained its wire spelling, with a `TODO` noting that `AgentMessageDescriptor.tool_calls` still carries tool *names* only — so a turn run on a remote daemon reports empty tool-call arguments |
+
 ## What the tool found
 
 `wc -l` to the module-level `#[cfg(test)]`, which is how the `oversized-file` category is defined.
@@ -55,3 +56,8 @@ instead of 2,488). Confirmed the ten RPCs and that the conversation four are con
 | 2026-09-28 | 1,076 | +7 in PR #553: the `message_descriptor` frame builder maps one more field (`result_summary_json`) |
 | 2026-09-28 | 1,122 | +46 in PR #556 (`#subagent-control` 4/5): the `yield_conditions_json` request parsing (now erroring on an unparseable payload as documented) and the `fired_condition_json` chunk framing |
 | 2026-09-28 | 1,149 | +27 more in PR #557 (`#subagent-control` 5/5): `turn_request()`'s replacement parsing composed with the yield-conditions parse, and the resume framing |
+| 2026-10-24 | 1,149 → 1,155 | **worse** by 6 in PR #722 (`#coagents` 3/8): the resume's `permission_answer_json` composed into `turn_request()`, the `PermissionRequested` stop-reason spelling and the final frame's `permission_request_json`. The JSON codec lives in the new `permission_wire.rs`. Not split: stack-shared (later `#coagents` nodes modify it) — after the stack lands |
+| 2026-10-24 | 1,155 → 1,191 | **worse** by 36 in PR #723 (`#coagents` 4/8): `local_conversation` (opens the recorder before the conversation is reachable) and the recorded-turn call; the failed-turn replies moved to `TurnError::into_reply`. The recorder itself lives in the new `conversation_recorder.rs` (406) and `conversation_transcript.rs` (172). Not split: stack-shared — after the stack lands |
+| 2026-10-25 | 1,189 → 1,203 | **worse** by 14 in PR #724 (`#coagents` 5/8): `attach_session_agent` refuses a re-attach under the other placement before admission, and the open path passes the conversation id. The placement logic lives in the new `agent_placement.rs` and `clone_placement.rs`. Not split: stack-shared (#723 and later `#coagents` nodes modify it) — after the stack lands |
+| 2026-10-25 | 1,203 → 1,209 | **worse** by 6 in PR #726 (`#coagents` 7/8): `close_agent_conversation` and the session-close path tell `sessions.conversation_closed` about each local conversation, so its approval route is removed. Not split: stack-shared; deferred to the `#coagents` sweep node by the developer (2026-10-25) |
+| 2026-10-25 | 1,209 → 1,436 | **worse** by 227 in PR #727 (`#coagents` 8/8): `answer_agent_permission` and `claim_for_answer` (the user's answer route, its deferred-only gate and the remote forward), the resume path's status-row writes, and `cancel_agent_conversation`'s cancel recording (`record_cancelled_request`). The status row, the answer forward and the permission wire have their own modules (`conversation_status.rs`, `conversation_answer_forward.rs`, `permission_wire.rs`). Not split: deferred to the `#coagents` sweep node by the developer (2026-10-25) |

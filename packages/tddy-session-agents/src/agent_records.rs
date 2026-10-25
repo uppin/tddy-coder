@@ -32,6 +32,9 @@ pub fn roster_record(
         tools: def_tool_names(def),
         // A local agent works the facilitating daemon's real worktree, so there is no clone to name.
         codebase_session_id: None,
+        kind: tddy_core::AgentKindRecord::Model,
+        harness: None,
+        placement: Default::default(),
     })
 }
 

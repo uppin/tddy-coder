@@ -526,4 +526,53 @@ function* transcriptFrames(frames: AcpAgentMessage[]) {
   }
 }
 
+/**
+ * A session whose replay serves its own transcript **and** its subagent conversations' — each
+ * `StreamAcpReplay` / `GetAcpToolCallDetail` routed by the request's `conversationId` (empty ⇒ the
+ * session). A conversation mapped to `"notRecorded"` answers `NOT_FOUND`, as the host does for an
+ * in-jail loop. A conversation's `held` frames stream only after `releaseConversation()`, so a spec
+ * can watch a frame arrive in an open dialog.
+ */
+export function aConversationReplayBackend(config: {
+  session: AcpReplayScenario;
+  conversations: Record<string, (AcpReplayScenario & { held?: AcpAgentMessage[] }) | "notRecorded">;
+}) {
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const conversationOf = (conversationId: string) => {
+    const conversation = config.conversations[conversationId];
+    if (conversation === undefined || conversation === "notRecorded") {
+      throw new ConnectError(`conversation ${conversationId} recorded nothing`, Code.NotFound);
+    }
+    return conversation;
+  };
+  const sessionHandlers = acpReplayHandlers(config.session);
+  const backend = anInMemoryRpcBackend().implement(ActivityService, {
+    async *streamAcpReplay(req: { mode: StreamMode; conversationId: string }) {
+      if (!req.conversationId) {
+        yield* sessionHandlers.streamAcpReplay(req);
+        return;
+      }
+      const conversation = conversationOf(req.conversationId);
+      if (req.mode === StreamMode.COUNT_THEN_LIVE) {
+        yield* countFrames(conversation.counts);
+      } else {
+        yield* transcriptFrames(conversation.snapshot ?? []);
+        if (conversation.held) {
+          await released;
+          yield* transcriptFrames(conversation.held);
+        }
+      }
+      await new Promise<void>(() => {});
+    },
+    getAcpToolCallDetail: (req: { toolCallId: string; conversationId: string }) =>
+      req.conversationId
+        ? detailOrNotFound(conversationOf(req.conversationId).details, req)
+        : detailOrNotFound(config.session.details, req),
+  });
+  return { backend, releaseConversation: () => release() };
+}
+
 export { Code, StreamMode, ToolCallStatus, ToolKind };

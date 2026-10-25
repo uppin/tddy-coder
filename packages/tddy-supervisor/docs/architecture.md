@@ -17,7 +17,9 @@ systemd ── tddy-supervisor.service (User=root, Delegate=yes)
              │    └─ SupervisorClient ──────► the socket above
              │
              ├─ session process                       [alice]  SpawnSession
-             └─ jailed sandbox                        [bob]    SpawnSandbox
+             ├─ jailed sandbox                        [bob]    SpawnSandbox
+             └─ coding-agent harness                  [alice]  SpawnRelayed — stdio relayed to
+                                                              a socket the daemon listens on
 ```
 
 Everything network-facing — the axum server, LiveKit, GitHub OAuth, Telegram, LSP, BSP, the VM
@@ -117,7 +119,7 @@ or reach the supervisor and everything under it.
 
 `fork` copies only the calling thread, so a lock another thread held at fork time stays locked forever
 in the child. Two things keep that safe: **every** fork happens on `ForkBroker`'s one dedicated
-thread, never a runtime worker; and the `pre_exec` closure allocates nothing and takes no lock —
+thread (`spawn_broker::fork_broker`), never a runtime worker; and the `pre_exec` closure allocates nothing and takes no lock —
 every string is a `CString` built pre-fork, and pids are formatted into stack buffers.
 
 `ForkBroker` is a thread rather than `spawn_blocking` for a second reason: `PR_SET_PDEATHSIG` is keyed
@@ -207,6 +209,39 @@ attached is consequently never swept; it stays the caller's to destroy.
 `EBUSY` (descendants outliving the session leader) gets a bounded retry off the reaper, because every
 other exit on the host queues behind `reap`, and those descendants are the supervisor's
 *grand*children so their exits raise no `SIGCHLD` here at all.
+
+## Relayed spawns: the one child with stdio
+
+`SpawnRelayed` exists because the ACP driver talks to a coding agent over stdin/stdout, and an
+unprivileged daemon cannot start that agent as another user itself. It is `SpawnSession` with piped
+stdio carried over a unix socket the **caller** listens on — a path crosses a process boundary, a file
+descriptor does not.
+
+**Gates.** The authorizer, then the program against **`allowed_relay_tool_paths`** — a list of its
+own, empty by default, so a host that allowlisted session tools has not enabled relaying, and a
+relay-only harness cannot be run through `SpawnSession` either. Each spawn method resolves its program
+against its own allowlist before the shared gate (`resolve_spawn`: session user, environment, working
+directory). Then the socket — the one new action of a root process, connecting to a path the caller
+names, which is a confused-deputy edge closed twice (`relay::connect_to_callers_socket`):
+
+1. before connecting, the path is absolute with no `..`, and `lstat` says it is a socket — not a
+   symlink to one — **owned by the caller's uid**;
+2. after connecting, the listener's `SO_PEERCRED` uid is the caller's uid again, which closes the
+   window between the check and the connect.
+
+Either failure is the opaque `Denied`, and the socket is connected **before** the fork, so a refusal
+forks nothing.
+
+**The relay.** `ForkBroker` forks the child with all three streams piped (`StdioMode::Piped`) and
+returns the supervisor's ends (`ChildStdio`); `relay::pump` copies the socket into the child's stdin
+and its stdout out to the socket (`tokio::io::copy`), and logs stderr at debug — the protocol rides
+stdout. End of input from the caller is a stop: the session is stopped with the host's
+`shutdown_grace_secs`, so a daemon that goes away leaves no agent running as somebody else's user.
+Exit status and explicit stops travel over the existing `SessionStatus` / `StopSession`, keyed by the
+returned pid. A relayed spawn takes no cgroup scope, as no caller's `SpawnSession` does today.
+
+The daemon side is `tddy-session-lifecycle`'s
+[coding-agent launcher](../../tddy-session-lifecycle/docs/coding-agent-launcher.md).
 
 ## Session lifecycle
 

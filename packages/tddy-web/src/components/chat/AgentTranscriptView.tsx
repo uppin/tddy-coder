@@ -1,6 +1,11 @@
 import React from "react";
 import { Button } from "../ui/button";
-import { bubbleClass, elapsedBadge, toolStatusClass } from "./chatEntryPresentation";
+import {
+  bubbleClass,
+  elapsedBadge,
+  toolStatusClass,
+  toolStatusLabel,
+} from "./chatEntryPresentation";
 import { useTailFollow } from "./useTailFollow";
 import type { ChatMessage } from "./useAgentChat";
 
@@ -41,6 +46,9 @@ export interface AgentTranscriptViewProps {
   /** Invoked when a `from: "tool"` entry is clicked, so the host can open its detail dialog. Non-tool
    *  entries stay inert. Unset ⇒ no entry is interactive. */
   onToolClick?: (message: ChatMessage) => void;
+  /** Invoked when a `from: "subagent"` entry is clicked, so the host can open that conversation.
+   *  Unset ⇒ subagent entries stay inert. */
+  onSubagentClick?: (message: ChatMessage) => void;
   /** Invoked when the reader reaches the start of the loaded range, so the host can page in the
    *  history before it. Unset ⇒ the range never grows backwards. */
   onLoadOlder?: () => void;
@@ -60,11 +68,18 @@ export interface AgentTranscriptViewProps {
 export function AgentTranscriptView({
   messages,
   onToolClick,
+  onSubagentClick,
   onLoadOlder,
   hasOlder = false,
   loadingOlder = false,
 }: AgentTranscriptViewProps) {
   const follow = useTailFollow({ messages, hasOlder, loadingOlder, onLoadOlder });
+  // The host handler for an entry's kind, when that kind is interactive; `undefined` leaves it inert.
+  const openerOf = (m: ChatMessage) => {
+    if (m.from === "tool") return onToolClick;
+    if (m.from === "subagent") return onSubagentClick;
+    return undefined;
+  };
 
   return (
     <div
@@ -90,38 +105,45 @@ export function AgentTranscriptView({
         ref={follow.scrollRef}
         onScroll={follow.handleScroll}
       >
-        {messages.map((m, i) => (
-          <div key={m.key} className="flex items-start justify-between gap-2">
-            <div
-              data-testid={`agent-chat-message-${i}`}
-              data-message-kind={m.from}
-              className={
-                m.from === "tool" && onToolClick
-                  ? `${bubbleClass(m.from)} cursor-pointer hover:bg-muted`
-                  : bubbleClass(m.from)
-              }
-              onClick={m.from === "tool" && onToolClick ? () => onToolClick(m) : undefined}
+        {messages.map((m, i) => {
+          const open = openerOf(m);
+          // A subagent bubble carries its status inside it, beside its label, because the bubble is what
+          // reads "waiting for you". A tool call's marker stays beside the entry, as it always has.
+          const statusMarker = m.toolStatus && (
+            <span
+              data-testid={`agent-chat-tool-status-${i}`}
+              className={toolStatusClass(m.toolStatus)}
             >
-              {m.from === "goal" ? `Goal: ${m.text}` : m.text}
-            </div>
-            <div className="flex flex-shrink-0 items-center gap-1.5 pt-1">
-              {m.from === "tool" && m.toolStatus && (
-                <span
-                  data-testid={`agent-chat-tool-status-${i}`}
-                  className={toolStatusClass(m.toolStatus)}
-                >
-                  {m.toolStatus}
-                </span>
-              )}
-              <span
-                data-testid={`agent-chat-elapsed-${i}`}
-                className="font-mono text-[10px] leading-none text-muted-foreground"
+              {toolStatusLabel(m.toolStatus)}
+            </span>
+          );
+          return (
+            <div key={m.key} className="flex items-start justify-between gap-2">
+              <div
+                data-testid={`agent-chat-message-${i}`}
+                data-message-kind={m.from}
+                className={
+                  open ? `${bubbleClass(m.from)} cursor-pointer hover:bg-muted` : bubbleClass(m.from)
+                }
+                onClick={open ? () => open(m) : undefined}
               >
-                {elapsedBadge(messages, i)}
-              </span>
+                {m.from === "goal" ? `Goal: ${m.text}` : m.text}
+                {m.from === "subagent" && statusMarker && (
+                  <div className="mt-1">{statusMarker}</div>
+                )}
+              </div>
+              <div className="flex flex-shrink-0 items-center gap-1.5 pt-1">
+                {m.from === "tool" && statusMarker}
+                <span
+                  data-testid={`agent-chat-elapsed-${i}`}
+                  className="font-mono text-[10px] leading-none text-muted-foreground"
+                >
+                  {elapsedBadge(messages, i)}
+                </span>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {follow.arrivedWhileDetached > 0 && (
         <div className="flex flex-shrink-0 justify-center py-1">

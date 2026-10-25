@@ -1,0 +1,7 @@
+{"type":"system","event_type":"run_started","run_id":"run-0001","run_url":"https://oz.warp.dev/runs/run-0001"}
+{"type":"system","event_type":"conversation_started","conversation_id":"conv-0001"}
+{"type":"tool_call","tool":"run_command","command":"ls -la"}
+{"type":"tool_result","tool":"run_command","status":"complete","exit_code":0,"output":"total 8\ndrwxr-xr-x@ 3 dev  wheel   96 Oct 24 18:09 .\ndrwxr-xr-x@ 9 dev  wheel  288 Oct 24 18:09 ..\n-rw-r--r--@ 1 dev  wheel    6 Oct 24 18:09 note.txt"}
+{"type":"tool_call","tool":"edit_files","title":"Create the requested text file.","file_paths":["/work/tree/created.txt"]}
+{"type":"tool_result","tool":"edit_files","diff":"--- /work/tree/created.txt\n+++ /work/tree/created.txt\n@@ -0,0 +1 @@\n+done\n"}
+{"type":"agent","text":"Ran `ls -la` in the current directory, which contained `note.txt`, then created `created.txt` containing `done`.\n"}

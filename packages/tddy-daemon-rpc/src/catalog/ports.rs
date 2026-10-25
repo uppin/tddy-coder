@@ -13,7 +13,7 @@ use super::agent_models::{
     agent_models_cache, list_models_probe_args, parse_agent_models_json, AGENT_MODELS_CACHE_TTL,
 };
 use super::agent_rows::listed_agents;
-use super::subagent_row::subagent_info;
+use super::subagent_row::{coding_agent_rows, subagent_info};
 use super::CatalogRpcHandler;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_session_lifecycle::connection_service::{
@@ -173,7 +173,7 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
         let defs =
             resolvable_agent_defs(&self.tddy_data_dir, self.model_registry.as_deref()).await?;
         let resolved = defs.len();
-        let subagents: Vec<CatalogSubagentInfo> = defs
+        let mut subagents: Vec<CatalogSubagentInfo> = defs
             .into_iter()
             .filter_map(|def| match subagent_info(&def, &daemon_instance_id) {
                 Ok(info) => wire_same(&info).ok(),
@@ -183,6 +183,12 @@ impl tddy_discovery::catalog_service::CatalogHandler for CatalogRpcHandler {
                 }
             })
             .collect();
+        subagents.extend(coding_agent_rows(
+            &self.tddy_data_dir,
+            &self.config,
+            &daemon_instance_id,
+            &subagents,
+        ));
         // An empty answer has three very different causes — this daemon has no defs, its registry
         // was never wired in, or a def was dropped on the way out — and "returning 0" told them
         // apart in none of them. Naming the sources is what makes an empty picker diagnosable from

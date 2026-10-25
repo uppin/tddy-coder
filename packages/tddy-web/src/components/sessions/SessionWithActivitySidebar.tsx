@@ -9,7 +9,9 @@ import type { ChatMessage } from "../chat/useAgentChat";
 import { Button } from "../ui/button";
 import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
 import { SessionActivitySidebar } from "./SessionActivitySidebar";
+import { SubagentConversationDialog } from "./SubagentConversationDialog";
 import { defaultActivitySidebarOpen } from "./activitySidebarState";
+import { rosterHalfOf } from "./sessionRosterHalf";
 
 /** Inline layout (PRD § Inline layout contract): the docked column and the content beside it are
  *  measured against each other, so their flex structure is not left to a stylesheet. */
@@ -85,8 +87,13 @@ export function SessionWithActivitySidebar(props: {
   const shown = open && !suppressed && hasActivity;
 
   const [detail, setDetail] = useState<ChatMessage | null>(null);
+  // The subagent conversation whose bubble was clicked, opened over the session. Its title is the bubble's.
+  const [conversation, setConversation] = useState<{ conversationId: string; title: string } | null>(
+    null,
+  );
   useEffect(() => {
     setDetail(null);
+    setConversation(null);
   }, [sessionId]);
 
   // Showing the transcript pulls its lazy, once-per-session snapshot and marks what arrived seen.
@@ -149,6 +156,11 @@ export function SessionWithActivitySidebar(props: {
             mobile={mobile}
             onClose={() => setOverride({ sessionId, open: false })}
             onToolClick={setDetail}
+            onSubagentClick={(message) => {
+              if (message.conversationId) {
+                setConversation({ conversationId: message.conversationId, title: message.text });
+              }
+            }}
           />
         )}
       </div>
@@ -159,6 +171,17 @@ export function SessionWithActivitySidebar(props: {
           sessionToken={sessionToken}
           client={client}
           onClose={() => setDetail(null)}
+        />
+      )}
+      {conversation && (
+        <SubagentConversationDialog
+          sessionId={sessionId}
+          conversationId={conversation.conversationId}
+          title={conversation.title}
+          sessionToken={sessionToken}
+          rosterHalf={rosterHalfOf(session)}
+          client={client}
+          onClose={() => setConversation(null)}
         />
       )}
     </div>

@@ -553,6 +553,7 @@ async fn a_daemon_with_one_agent_attached(model_base_url: &str) -> DaemonServing
             session_id: session_id.clone(),
             daemon_instance_id: String::new(),
             agent_id: agent_id.clone(),
+            placement: 0,
         }))
         .await
         .expect("attaching a local agent must succeed");

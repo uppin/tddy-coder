@@ -45,6 +45,12 @@ pub struct TurnRequest {
     /// The caller asked that this turn run on the conversation worktree as it stands, without taking
     /// in the caller's current files (`syncWorktree: false`).
     skip_sync: bool,
+    /// The answer to the conversation's pending permission request — a coding agent's turn
+    /// continues with it. Refused by a model-loop session, which never asks.
+    permission_answer: Option<super::permission::PermissionAnswer>,
+    /// The pending permission request the caller handed to the user: the turn waits for the user's
+    /// answer (or the caller's own, whichever comes first) instead of answering it.
+    permission_deferred_to_user: Option<String>,
 }
 
 impl TurnRequest {
@@ -56,12 +62,45 @@ impl TurnRequest {
         }
     }
 
+    /// Put `preface` ahead of the new question this request asks, after a blank line. A request that
+    /// asks no new question is returned as it is: there is no prompt for the preface to ride on.
+    #[must_use]
+    pub fn with_prompt_preface(mut self, preface: &str) -> Self {
+        if let Some(prompt) = self.prompt.take() {
+            self.prompt = Some(format!("{preface}\n\n{prompt}"));
+        }
+        self
+    }
+
     /// Carry on from what the conversation already holds, sending no new user message.
     ///
     /// The plain case is a chain cut short by its budget: re-asking would make the agent re-read
     /// everything it has already read, which is the cost the resume exists to avoid.
     pub fn resuming() -> Self {
         Self::default()
+    }
+
+    /// Answer the conversation's pending permission request, continuing the turn it paused.
+    pub fn with_permission_answer(mut self, answer: super::permission::PermissionAnswer) -> Self {
+        self.permission_answer = Some(answer);
+        self
+    }
+
+    /// Hand the pending permission request `request_id` to the user: the turn continues once the
+    /// user answers it from the web, or the caller answers it after all.
+    pub fn deferring_permission_to_user(mut self, request_id: impl Into<String>) -> Self {
+        self.permission_deferred_to_user = Some(request_id.into());
+        self
+    }
+
+    /// The request this turn hands to the user, if any.
+    pub fn permission_deferred_to_user(&self) -> Option<&str> {
+        self.permission_deferred_to_user.as_deref()
+    }
+
+    /// The permission answer this turn carries, if any.
+    pub fn permission_answer(&self) -> Option<&super::permission::PermissionAnswer> {
+        self.permission_answer.as_ref()
     }
 
     /// Go back to `id` first, discarding everything the conversation appended after it.

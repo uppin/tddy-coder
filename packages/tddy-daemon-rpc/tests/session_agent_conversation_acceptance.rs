@@ -124,6 +124,7 @@ async fn a_session_conversing_with_a_local_agent(model: StubModel) -> Conversing
             session_id: session_id.clone(),
             daemon_instance_id: String::new(),
             agent_id: agent_id.clone(),
+            placement: 0,
         }))
         .await
         .expect("attaching a local agent must succeed");
@@ -470,6 +471,8 @@ async fn resume_with_a_replacement_round_trips_the_rpc_wire() {
                 "result": "{\"replaced\": true, \"matchedOccurrences\": 1, \"bytes_written\": 128}"
             })
             .to_string(),
+            permission_answer_json: String::new(),
+            defer_permission_to_user: None,
         }))
         .await
         .expect("resuming an open conversation must succeed")

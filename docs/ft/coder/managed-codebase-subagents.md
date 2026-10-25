@@ -18,6 +18,11 @@ feature does not change that proxying — it adds a second, independent MCP surf
 same `session/new` → `session/prompt` shape the codebase already uses for `ClaudeAcpBackend` /
 `CodexAcpBackend` ([codex-acp-backend.md](codex-acp-backend.md)).
 
+A subagent can also be a **coding agent** — Claude Code, Codex or OpenCode over ACP, launched by the
+daemon as the session's user on the session's worktree. The same `subagent_*` tools reach it; in a
+managed session it is managed too (native tools withdrawn, `tddy-tools --mcp` its only tool server).
+See [Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents).
+
 ## ACP → MCP tool mapping
 
 | ACP concept (`agent-client-protocol` crate)      | MCP tool on `tddy-tools --mcp`                                     |
@@ -25,7 +30,7 @@ same `session/new` → `session/prompt` shape the codebase already uses for `Cla
 | `session/new` (`NewSessionRequest`)               | `subagent_new_session` — input `{ agent?, sessionId?, cwd? }` → `{ sessionId }` |
 | Client-chosen `SessionId`                         | `sessionId` input — the **main agent** decides the conversation id; a fresh id is generated only when omitted |
 | `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock], graceMs?, maxTurns?, syncWorktree? }` → the turn's outcome, or `{ responseId, pending: true }` once `graceMs` elapses |
-| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, replacement?, resetWorktree?, syncWorktree?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that resumes a yielded conversation with the caller's replacement call and result |
+| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, replacement?, permission?, deferPermissionToUser?, resetWorktree?, syncWorktree?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that resumes a yielded conversation with the caller's replacement call and result |
 | *(no ACP counterpart)*                            | `subagent_await` — input `{ responseId, timeoutMs? }` → the same outcome, or `{ responseId, pending: true }` again |
 | `PromptResponse.stopReason`                       | output field `stopReason`: `"end_turn"` \| `"max_turn_requests"` \| `"cancelled"` \| `"context_exhausted"` |
 | Response `content` (`ContentBlock[]`)             | output field `content`: `[{ "type": "text", "text": "..." }]` |
@@ -297,6 +302,47 @@ on an open conversation and **sends no new prompt turn**.
 - A resume queues exactly as a prompt does — a conversation runs one turn at a time — and reports
   `queuePosition` / `queueSize`, `graceMs` and `responseId` identically.
 
+### A coding subagent's permission request is the caller's to answer
+
+A coding subagent (Claude Code, Codex or OpenCode over ACP) asks before it edits or runs something
+its policy does not pre-approve. That question goes to **the agent that invoked it**: the turn ends
+with `stopReason: "permission_requested"` and a `permissionRequest`
+`{ requestId, toolCall: { title, kind, rawInput? }, options: [{ optionId, name, kind }] }`. The
+subagent is paused, not finished — its ACP prompt stays in flight, waiting on the answer.
+
+- **The caller answers with `subagent_resume`.** `permission: { requestId, optionId }` delivers one
+  of the request's options; `permission: { requestId, cancelled: true }` answers it as cancelled.
+  The call returns the rest of that same turn — the same outcome shape, which may be another
+  `permission_requested` with a fresh `requestId` — under the grace period and `responseId` /
+  `subagent_await` like any turn. The decision is the caller's: it may decide on its own or ask the
+  user first; `subagent_resume`'s description says so.
+- **Or hands it to the user.** `subagent_resume { sessionId, deferPermissionToUser: "<requestId>" }`
+  shows the request with its options in the subagent's conversation dialog on the web and returns
+  `{ responseId, pending: true, awaitingUser: true }`; `subagent_await` returns the continuation once
+  the user answers. The caller may still answer it itself meanwhile — the first answer wins, and the
+  other is refused naming who answered. Combined with `permission` in one call it is refused. See
+  [Agent activity pane § The user answers a deferred permission request](../web/agent-activity-pane.md#the-user-answers-a-deferred-permission-request-added-2026-10-25).
+- **Always yield.** There is no per-entry auto-allow list.
+- **One question at a time.** Requests the agent raises while one is pending queue behind it, oldest
+  first. While one is pending, `subagent_prompt` is refused naming its `requestId`; so is a resume
+  with no `permission`, or one naming another request, or an `optionId` the request did not offer —
+  and the request stays pending. An answer with nothing pending is refused too.
+- **Cancelling while one is pending** answers every parked request as cancelled, sends
+  `session/cancel`, and waits (bounded, 10 s) for the turn to end as `cancelled`.
+- **Across daemons.** The request rides the final `AgentConversationChunk`
+  (`permission_request_json`) and the answer rides `ResumeAgentConversationRequest`
+  (`permission_answer_json`), so a conversation another daemon serves behaves the same.
+- **`model` agents never ask.** A resume carrying a `permission` to an OpenAI-loop agent is refused
+  before the model is called.
+- **Headless `claude -p` asks the same way.** Its `--permission-prompt-tool` is tddy-tools'
+  `approval_prompt`, which asks the daemon (`ExecToolService.RequestApproval`); the daemon parks the
+  request on the conversation, and the caller sees the same `permission_requested` turn and answers
+  it with `subagent_resume`. A timeout (60 s), a cancel or a refused route is a denial. Headless
+  `cursor`, `codex` and `oz` cannot ask mid-turn and run under the fixed policy their row names
+  ([Session agent roster § Coding agents](../daemon/session-agent-roster.md#coding-agents)).
+- **Known gap:** `toolCall.kind` is always `other` — the ACP driver drops the agent's tool kind
+  ([`docs/dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md`](../../dev/todo/2026-10-24-acp-permission-request-drops-tool-kind.md)).
+
 ### A turn in which no tool call succeeded is an error
 
 When a call's whole budget goes on tool calls of which **none ran**, the turn returns an error
@@ -338,8 +384,8 @@ and a long one can overflow the chunk-framing threshold —
 A subagent whose definition binds mutation tools (`WRITE`, `STR_REPLACE`, `DELETE`, `SHELL`) does
 not write its caller's worktree. Its edits land in a worktree of the **conversation's** own, one
 commit per mutating call, and come back to the caller when the conversation ends. This covers the
-in-process loop in `tddy-tools` running with Managed access; conversations whose loop the daemon
-runs are a [non-goal](#non-goals-out-of-scope-for-v1).
+in-process loop in `tddy-tools` running with Managed access, and a conversation the daemon runs for
+an agent attached with [`clone` placement](#a-daemon-run-conversation-of-a-clone-placed-agent).
 
 - **Created lazily.** The conversation's first *mutating* call cuts branch
   `tddy/subagent/<session id>/<conversation id>` and worktree
@@ -587,13 +633,47 @@ applied commit by commit and a failure part-way leaves the commits applied so fa
 worktree without recording them in the ledger. Mechanics:
 [`tddy-subagent-worktree`](../../../packages/tddy-subagent-worktree/docs/conversation-worktree.md).
 
+### A daemon-run conversation of a `clone`-placed agent
+
+An agent is attached with a **placement** (`session_agents.AgentPlacement`): `shared` (the default) or
+`clone` — see [session agent roster § Placement](../daemon/session-agent-roster.md#placement--shared-or-clone).
+A `shared` agent's conversations the daemon runs work the session worktree directly, as a teammate
+in the same checkout. A `clone`-placed agent's conversations each work on a conversation worktree of
+their own, the same branch and directory an in-process conversation gets:
+
+- **Cut at open.** The daemon creates the conversation worktree when the conversation opens, not on
+  its first write, because a coding agent's working directory has to exist before it starts.
+- **Every turn takes in the caller's current files first**, exactly as an in-process turn does; a
+  conflict refuses the turn before the agent sees it, and `syncWorktree: false` skips the sync.
+- **A model agent** runs its exec calls in the conversation worktree (`ExecuteTool{conversation_id}`
+  through `run_in_conversation`), one commit per mutating call, and its loop announces a merged sync
+  to its model.
+- **A coding agent** launches with the conversation worktree as its working directory, and its
+  `tddy-tools --mcp` server is handed `TDDY_CONVERSATION_ID`, so its exec calls run there too.
+  Whatever a turn changed is **one commit** on the conversation branch when the turn ends, failed
+  turns included. A merged sync's notice is prefixed to the next prompt the agent is sent; a turn
+  with no prompt (answering a permission request) carries none, and the notice waits for the next
+  prompt-bearing turn. A prompt-bearing turn that fails keeps its notice for the next one.
+- **`subagent_diff`, `subagent_pull` and `subagent_end`** read and take a `clone` conversation's
+  branch through the daemon's `ConversationWorktree` operations (`Diff`, `PullRange`, `Remove`).
+  For a `shared` conversation there is nothing of its own to take: `subagent_diff` is refused,
+  `subagent_pull` and `subagent_end` answer `pulled: null`, and the tool descriptions say so.
+
+A peer-owned conversation (`open_owned`) and a remote agent's placement are not covered: they work
+the clone the owning daemon holds.
+
 ### Known gaps
 
 - A `tddy-tools` process that dies without ending or cancelling its conversations leaves the branch
   behind —
   [`docs/dev/todo/2026-09-30-an-abandoned-subagent-conversation-leaves-its-branch.md`](../../dev/todo/2026-09-30-an-abandoned-subagent-conversation-leaves-its-branch.md).
-- Daemon-run conversations still write the session worktree —
+- A peer-owned daemon-run conversation still writes its owner's clone directly —
   [`docs/dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md`](../../dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md).
+- A `clone` coding agent's permission-answer turn carries no sync notice; the notice rides on the
+  next prompt instead, because an ACP permission answer has no text to carry it.
+- No test runs the `tddy-tools` MCP process end to end against a real daemon for a `clone`
+  conversation; the dispatch choice and the daemon's `ConversationWorktree` operations are each
+  tested on their own.
 - `subagent_end` can race a prompt arriving between its pending check and the retire —
   [`docs/dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md`](../../dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md).
 - A range pull that fails part-way (a git error after some commits applied) reports the error and
@@ -601,6 +681,9 @@ worktree without recording them in the ledger. Mechanics:
 - A background job the subagent started does not take the worktree's lock, so a write it makes while
   a caller sync runs can be lost, or committed as a later turn's work — backlog entry *A background
   job can race the caller sync*.
+- A headless coding agent opens only `clone`-placed, only as the daemon's own OS user, and only in an
+  unmanaged session; `cursor`, `codex` and `oz` get no MCP config —
+  [`docs/dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md`](../../dev/todo/2026-10-25-headless-cursor-codex-oz-get-no-mcp-config.md).
 - Every merge on the branch's first-parent line is read as a caller sync, so a merge a host-run
   subagent made itself with `git merge` would be left out of every pull and taken as the last caller
   state; a jailed subagent cannot make one — backlog entry *A merge the subagent makes itself is read
@@ -899,6 +982,20 @@ fully migrated onto the array model.
 Verified at the request seams and against real git repositories; **no test runs a real jail end to
 end** (this needs a sandbox the development host cannot start).
 
+### Coding-subagent permission requests (`tddy-discovery`, `tddy-coding-subagent`, `tddy-session-agents`, `tddy-tools`)
+
+- [x] A subagent permission request ends the call with `permission_requested` and the request's tool call and options.
+- [x] `subagent_resume` with an option continues the same subagent turn, and the agent receives that option.
+- [x] A cancelled answer reaches the agent as cancelled.
+- [x] A continuation longer than the grace period returns a `responseId` and is awaitable (the generic resume path; no permission-specific test).
+- [x] A prompt while a request is pending is refused naming the request.
+- [x] A resume naming another request id, or with no permission, is refused naming the pending one.
+- [x] `subagent_cancel` while pending returns `cancelled` and the agent sees the request cancelled.
+- [x] The same holds when the conversation is served by another daemon — proven in two halves: the in-jail client's frame parse and resume encode, and the daemon's frames.
+- [x] `deferPermissionToUser` returns a pending outcome marked `awaitingUser`, and `subagent_await` returns the continuation once the user answers.
+- [x] A deferral combined with `permission` is refused naming both.
+- [x] The caller may still answer a deferred request; its answer is delivered at once and its call refused as delivered; the first answer wins and a later one is refused naming who answered.
+
 ## Non-goals (out of scope for v1)
 
 - Live catalog fetch of subagent tool schemas over the transport (mirrors the existing
@@ -920,8 +1017,8 @@ end** (this needs a sandbox the development host cannot start).
   subagents at all today — see `docs/dev/TODO.md`).
 - Per-tool replacement policies beyond a flat replaced-set (e.g. partial replacement of `Grep` for
   some file types only).
-- **Daemon-run conversations** (`open_local`, `open_owned`, a peer's `RemoteAgentSession`) have no
-  conversation worktree; their calls still run on the session worktree, and nothing is synced.
+- **Peer-owned daemon-run conversations** (`open_owned`, a peer's `RemoteAgentSession`) have no
+  conversation worktree; their calls run on the owning daemon's clone, and nothing is synced.
 - Syncing **during** a turn — a caller editing while a turn runs is picked up by the next turn.
 - Resolving a caller-sync conflict automatically.
 - **Sweeping orphaned conversation worktrees and branches.**

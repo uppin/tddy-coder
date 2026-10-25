@@ -12,6 +12,7 @@ description = "The daemon's RPC-family handlers, above the session lifecycle the
 
 [dependencies]
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
+tddy-coding-subagent = { path = "../tddy-coding-subagent" }
 # The project-home tools resolve targets from the same `.session.yaml` store the ListSessions RPC reads
 # (`#project-home` 5/7).
 tddy-session-activity = { path = "../tddy-session-activity" }
@@ -87,3 +88,7 @@ tddy-task = { path = "../tddy-task" }
 # own (`DaemonSigningKey`, `SessionTokens`). An existing workspace crate the lifecycle crate
 # already depends on.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
+# The roster-stream suite serves the daemon's `/rpc` mount on a loopback port: `connect_router`
+# mounts it and `axum` serves it, as the daemon does. Both are existing workspace crates.
+tddy-connectrpc = { path = "../tddy-connectrpc" }
+axum = "0.8"

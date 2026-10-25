@@ -12458,6 +12458,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-coding-subagent"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "serde_json",
+ "serial_test",
+ "tddy-agent-backend",
+ "tddy-discovery",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-connectrpc"
 version = "0.1.0"
 dependencies = [
@@ -12735,6 +12749,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum 0.8.9",
  "futures-util",
  "libc",
  "livekit",
@@ -12746,6 +12761,8 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-code-restructuring",
+ "tddy-coding-subagent",
+ "tddy-connectrpc",
  "tddy-core",
  "tddy-credentials",
  "tddy-daemon-auth",
@@ -12905,6 +12922,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tddy-agent-backend",
  "tddy-core",
  "tddy-rpc",
  "tddy-service",
@@ -13738,6 +13756,8 @@ dependencies = [
  "prost 0.13.5",
  "rstest 0.24.0",
  "serde_json",
+ "tddy-agent-backend",
+ "tddy-coding-subagent",
  "tddy-core",
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",
@@ -13825,6 +13845,7 @@ dependencies = [
  "tddy-agent-launch",
  "tddy-cli-sessions",
  "tddy-coder",
+ "tddy-coding-subagent",
  "tddy-connectrpc",
  "tddy-core",
  "tddy-credentials",
@@ -13971,12 +13992,14 @@ name = "tddy-session-tool-client"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum 0.8.9",
  "log",
  "pretty_assertions",
  "prost 0.13.5",
  "reqwest 0.12.28",
  "serde_json",
  "serial_test",
+ "tddy-connectrpc",
  "tddy-core",
  "tddy-room-client",
  "tddy-rpc",

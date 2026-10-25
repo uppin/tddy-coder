@@ -19,7 +19,7 @@ import {
   type ToolCall,
 } from "../../gen/tddy/acp/v1/acp_pb";
 import { createAgentChunkMerger } from "./acpAgentMerge";
-import { toolStatusOf } from "./toolCallPresentation";
+import { subagentStatusOf, toolStatusOf } from "./toolCallPresentation";
 import type { ChatMessage } from "./useAgentChat";
 
 /**
@@ -56,8 +56,20 @@ function appendAgentMessageChunk(
   ctx.merger.finalize(entries, at);
 }
 
+/** The `tool_call_id` prefix of a session transcript's subagent-conversation entry
+ *  (`tddy_service::subagent_conversation_replay::SUBAGENT_TOOL_CALL_PREFIX`). */
+export const SUBAGENT_TOOL_CALL_PREFIX = "subagent:";
+
+/** The conversation a `tool_call_id` names, when it is a subagent-conversation entry's; else `null`. */
+export function subagentConversationIdOf(toolCallId: string): string | null {
+  if (!toolCallId.startsWith(SUBAGENT_TOOL_CALL_PREFIX)) return null;
+  const conversationId = toolCallId.slice(SUBAGENT_TOOL_CALL_PREFIX.length);
+  return conversationId === "" ? null : conversationId;
+}
+
 /** `tool_call`: a tool entry carrying the server-enriched `title` and a coarse status, coalesced by
- *  `tool_call_id` so a call refined from running to completed keeps one row. */
+ *  `tool_call_id` so a call refined from running to completed keeps one row. A subagent-conversation
+ *  entry is a `from: "subagent"` bubble instead, which opens the conversation rather than a call. */
 function appendToolCall(
   ctx: ProjectionContext,
   entries: ChatMessage[],
@@ -69,26 +81,45 @@ function appendToolCall(
   // id instead of reading them off the message. It is written only when non-empty — an id-less
   // frame leaves `toolCallId` `undefined` (as its optionality states) rather than carrying `""`,
   // which would send the dialog looking up the empty id and have the host answer `NOT_FOUND`.
+  // A subagent bubble carries its conversation id instead: its bodies are not what it opens.
   const id = call.toolCallId?.value ?? "";
-  const idField = id ? { toolCallId: id } : {};
+  const conversationId = subagentConversationIdOf(id);
+  const idField = id && conversationId === null ? { toolCallId: id } : {};
+  // A subagent bubble reads its status as the conversation's turn does (see `subagentStatusOf`).
+  const toolStatus =
+    conversationId === null ? toolStatusOf(call.status) : subagentStatusOf(call.status);
   const existingIndex = id ? ctx.toolIndexById.get(id) : undefined;
   if (existingIndex !== undefined) {
+    const existing = entries[existingIndex];
     entries[existingIndex] = {
-      ...entries[existingIndex],
-      text: call.title,
+      ...existing,
+      // A subagent bubble keeps the title it was first shown with: the folded entry names the agent
+      // and the first prompt, which a later call on the same conversation does not restate.
+      text: existing.from === "subagent" ? existing.text : call.title,
       at,
-      toolStatus: toolStatusOf(call.status),
+      toolStatus,
       ...idField,
     };
     return;
   }
   if (id) ctx.toolIndexById.set(id, entries.length);
+  if (conversationId !== null) {
+    entries.push({
+      key: `subagent-${ctx.firstSeq}-${ctx.toolKey++}`,
+      text: call.title,
+      from: "subagent",
+      conversationId,
+      at,
+      toolStatus,
+    });
+    return;
+  }
   entries.push({
     key: `tool-${ctx.firstSeq}-${ctx.toolKey++}`,
     text: call.title,
     from: "tool",
     at,
-    toolStatus: toolStatusOf(call.status),
+    toolStatus,
     ...idField,
   });
 }

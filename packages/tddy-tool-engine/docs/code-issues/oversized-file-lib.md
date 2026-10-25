@@ -23,6 +23,7 @@ subagent turn-control changeset
 | 2026-10-23 | 874 | **touched by #699** (`#project-home` 4/7): 873 → 874 (+1) — the `pub mod read_only;` declaration; the read-only filter lives in the new `read_only.rs` (25 production lines). Not split: `#project-home` 5/7 also edits this crate's module list, and a split mid-stack conflicts every later node |
 | 2026-10-23 | 876 | **touched by #700** (`#project-home` 5/7): 874 → 876 (+2) — `pub mod project_home_tools;` and `mod project_home_diff;`; the tools live in those modules (359 and 60 production lines). Not split: stack-shared with `#project-home` 6/7 and 7/7 |
 | 2026-10-23 | 877 | **touched by #702** (`#project-home` 7/7): 876 → 877 (+1) — the `pub mod project_home_git_tools;` declaration; the tools live in the new `project_home_git_tools.rs` (238 production lines). Not split: stack-shared (`#project-home` 4/7 and 5/7 edit this module list) |
+| 2026-10-25 | 877 | **unchanged** by PR #726 (`#coagents` 7/8): touched only inside `#[cfg(test)] mod unbundle_exec_tool_entry_tests` (the test double answers `request_approval`) |
 
 ## What the tool found
 

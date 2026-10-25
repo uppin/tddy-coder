@@ -77,6 +77,10 @@ pub struct SubagentConversation {
     /// Ending it here has to close it there too: the owning daemon otherwise keeps the loop, and
     /// its own registration of it, for the life of its process.
     pub remote: Option<crate::roster::RemoteConversationHandle>,
+    /// Whether the agent is `clone`-placed: a conversation the daemon runs then works on a worktree
+    /// of its own, which `subagent_diff`, `subagent_pull` and `subagent_end` read and take. Read off
+    /// the roster entry by the caller that opened the conversation; `false` until it says otherwise.
+    pub clone_placed: bool,
 }
 
 impl SubagentConversation {
@@ -98,6 +102,7 @@ impl SubagentConversation {
             context_tokens: session.context_tokens(),
             session: std::sync::Arc::new(tokio::sync::Mutex::new(session)),
             remote,
+            clone_placed: false,
         }
     }
 
@@ -191,6 +196,9 @@ struct PendingTurn {
     arrived: u64,
     publish: tokio::sync::watch::Sender<TurnState>,
     abort: tokio::task::AbortHandle,
+    /// Whether the turn handed a permission request to the user and is waiting for its answer. Set by
+    /// [`PendingTurns::mark_awaiting_user`]; reported as `awaitingUser` while the turn is pending.
+    awaiting_user: bool,
 }
 
 impl PendingTurn {
@@ -239,8 +247,25 @@ impl PendingTurns {
                 arrived,
                 publish,
                 abort,
+                awaiting_user: false,
             },
         );
+    }
+
+    /// Record that the turn registered under `response_id` handed a permission request to the user
+    /// and is waiting for its answer. Ignored for an id this table never registered.
+    pub fn mark_awaiting_user(&mut self, response_id: &str) {
+        if let Some(turn) = self.turns.get_mut(response_id) {
+            turn.awaiting_user = true;
+        }
+    }
+
+    /// Whether the turn under `response_id` is waiting on the user's answer to a permission request
+    /// it handed them.
+    pub fn awaiting_user(&self, response_id: &str) -> bool {
+        self.turns
+            .get(response_id)
+            .is_some_and(|turn| turn.awaiting_user)
     }
 
     /// How many turns on the same conversation were accepted before `response_id` and have not
@@ -456,6 +481,11 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
     if let (Some(object), Some(sync)) = (body.as_object_mut(), &outcome.worktree_sync) {
         object.insert("worktreeSync".to_string(), serde_json::json!(sync));
     }
+    // Present only when the turn paused on a coding agent's permission request, which the caller
+    // answers with `subagent_resume`'s `permission` argument.
+    if let (Some(object), Some(request)) = (body.as_object_mut(), &outcome.permission_request) {
+        object.insert("permissionRequest".to_string(), serde_json::json!(request));
+    }
     body.to_string()
 }
 
@@ -483,7 +513,7 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
 /// for a conversation another daemon runs, whose endpoint this process cannot see.
 pub fn pending_turn_json(pending: &PendingTurns, response_id: &str) -> String {
     let provider = pending.provider_of(response_id);
-    serde_json::json!({
+    let mut reply = serde_json::json!({
         "responseId": response_id,
         "pending": true,
         "queuePosition": pending.queue_position(response_id),
@@ -493,8 +523,12 @@ pub fn pending_turn_json(pending: &PendingTurns, response_id: &str) -> String {
         "provider": provider,
         "providerQueuePosition": pending.provider_queue_position(response_id),
         "providerQueueSize": provider.map(|provider| pending.provider_queue_size(provider)),
-    })
-    .to_string()
+    });
+    // Present only while the turn waits on the user: a turn the main agent keeps reports nothing new.
+    if pending.awaiting_user(response_id) {
+        reply["awaitingUser"] = serde_json::json!(true);
+    }
+    reply.to_string()
 }
 
 /// One conversation as the shared [`tddy_core::token_accounting::ConversationRecord`] shape used by
@@ -622,8 +656,23 @@ fn turn_summary(request: &TurnRequest) -> String {
 /// At the end it takes the table lock once — for the conversation's accounting, the accounting
 /// file, and the publication of the result — so no awaiter can read a turn as done before what it
 /// spent has been recorded.
+///
+/// The exception is a permission answer to a remote conversation a turn is holding: the turn holding
+/// the lock may be the one waiting on that answer, so the answer is not queued behind it. See
+/// [`answer_past_the_held_turn`].
 pub async fn run_turn(turn: DeferredTurn) {
-    let mut session = turn.session.lock().await;
+    let shared = std::sync::Arc::clone(&turn.session);
+    let mut session = match shared.try_lock() {
+        Ok(session) => session,
+        Err(_) => {
+            if turn.request.permission_answer().is_some() {
+                if let Some(remote) = remote_of(&turn.conversation_id).await {
+                    return answer_past_the_held_turn(turn, &remote).await;
+                }
+            }
+            shared.lock().await
+        }
+    };
     if let Some(agent_id) = turn.reported_agent.as_deref() {
         report_local_conversation_state(
             agent_id,
@@ -661,6 +710,45 @@ pub async fn run_turn(turn: DeferredTurn) {
         // says what happened.
         report_local_conversation_state(agent_id, SessionAgentStatus::Idle, &ended.summary).await;
     }
+}
+
+/// The daemon handle of `conversation_id`, when the conversation's turn loop runs on another daemon.
+async fn remote_of(conversation_id: &str) -> Option<crate::roster::RemoteConversationHandle> {
+    subagent_sessions()
+        .lock()
+        .await
+        .open
+        .get(conversation_id)
+        .and_then(|conv| conv.remote.clone())
+}
+
+/// Deliver a permission answer to a remote conversation whose turn holds the session, by asking the
+/// daemon that runs its loop.
+///
+/// The daemon takes the answer as the main agent's, and refuses it at once while the request it names
+/// is held: the turn holding the request carries on and returns its outcome to the call that deferred
+/// it. So this call returns that refusal, rather than waiting for a turn that cannot end until the
+/// answer lands. Turn accounting follows what the daemon did: a turn it ran is counted, and a refused
+/// answer ran none. A remote conversation's roster row is reported by its daemon, so none is reported
+/// here.
+async fn answer_past_the_held_turn(
+    turn: DeferredTurn,
+    remote: &crate::roster::RemoteConversationHandle,
+) {
+    let outcome = remote
+        .take_turn(&turn.request)
+        .await
+        .map_err(SubagentError::from);
+    let answered = outcome.is_ok();
+    let ended = TurnEnd::from(outcome);
+    let mut sessions = subagent_sessions().lock().await;
+    if answered {
+        if let Some(conv) = sessions.open.get_mut(&turn.conversation_id) {
+            conv.turns += 1;
+        }
+    }
+    write_accounting_file(&sessions);
+    sessions.pending.resolve(&turn.response_id, ended.result);
 }
 
 /// How a turn ended, in the two forms its end is recorded in: the result its caller collects and

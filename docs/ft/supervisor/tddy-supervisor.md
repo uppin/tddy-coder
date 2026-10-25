@@ -52,6 +52,7 @@ services:
 spawn_policy:                      # absent = no privilege granted at all
   allowed_session_users: [alice, bob]
   allowed_tool_paths: [/usr/local/bin/tddy-coder, /usr/bin/git]
+  allowed_relay_tool_paths: []      # harness binaries a coding agent may run as, with relayed stdio; empty = off
   allowed_mount_roots: [/srv/tddy/repos]
   allowed_env_keys: [RUST_LOG]
 
@@ -63,12 +64,33 @@ cgroup:                            # absent = nothing is clamped
 Nothing is granted by default. An operator who writes no `spawn_policy` has a supervisor that supervises
 the daemon and refuses every spawn request — which is the correct reading of an absent policy.
 
+### Relayed spawns (coding agents)
+
+`SpawnRelayed` starts an allowlisted harness binary (`opencode`, `codex-acp`, `claude-agent-acp`) as an allowed session
+user with its stdin/stdout relayed over a unix socket the **daemon** listens on — the one request that gives
+a child stdio, because the ACP driver talks to its agent over stdio and an unprivileged daemon cannot become
+another user itself. It passes every gate `SpawnSession` does (peer authorization, `allowed_session_users`,
+`allowed_env_keys`) **and** its own: `allowed_relay_tool_paths`, **empty by default**, so enabling session
+tools never enables it. The supervisor connects to the daemon's socket only if the path is absolute, is a
+socket (not a symlink to one) owned by the calling uid, and the listener's `SO_PEERCRED` uid is that uid; any
+failure is the opaque denial and nothing is forked. The child's exit status and a stop travel over
+`SessionStatus` / `StopSession`; a daemon that closes the connection stops the child.
+
 ### The prerequisites that bite
 
 - **`allowed_tool_paths` must include git's absolute path** or repo cloning is denied, because cloning
   goes through the supervisor too. The supervisor finds git as the first executable `git` on **its own**
   `PATH` (the unit's environment, never the caller's), so the value is `which git` in the supervisor's
   environment; matching is verbatim, with no symlink resolution.
+- **A coding agent runs as the session user only if its harness is in `allowed_relay_tool_paths`.** The
+  list is empty in the shipped template, so a supervised install starts no coding-agent subagent as
+  another user until the operator lists each harness binary by the absolute path the daemon resolves
+  (`codex-acp` in the install's bin directory, `opencode`, and for `claude-acp` the `claude-agent-acp`
+  binary the daemon's `TDDY_CLAUDE_AGENT_ACP_CLI` names). Without that variable `claude-acp` runs as
+  `bunx claude-agent-acp`; arguments are not allowlisted, so listing `bunx` admits any package `bunx`
+  can fetch, run as the session user. The
+  launch's provider-route variables and `OPENCODE_CONFIG_CONTENT` must be in `allowed_env_keys` too. The
+  daemon turns the supervisor's opaque denial into an error naming these three lists.
 - **`allowed_env_keys` is a deny, not a filter.** A request naming an unlisted key is refused outright.
   An ordinary session spawn sends no environment, so the shipped empty policy works — but a user whose
   `~/.tddy/config.yaml` sets `spawn_path_extra` makes the daemon send `PATH`, which must then be listed.

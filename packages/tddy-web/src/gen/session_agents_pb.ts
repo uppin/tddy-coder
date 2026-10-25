@@ -4,7 +4,7 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { SessionAgentActivity, SessionAgentStatus } from "./types_pb";
+import type { AgentKind, SessionAgentActivity, SessionAgentStatus } from "./types_pb";
 import { file_types } from "./types_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file session_agents.proto.
  */
 export const file_session_agents: GenFile = /*@__PURE__*/
-  fileDesc("ChRzZXNzaW9uX2FnZW50cy5wcm90bxIOc2Vzc2lvbl9hZ2VudHMi/AEKFkFnZW50Q29udmVyc2F0aW9uQ2h1bmsSFQoNY29udGVudF9jaHVuaxgBIAEoCRITCgtzdG9wX3JlYXNvbhgCIAEoCRIMCgRsYXN0GAMgASgIEjgKCG1lc3NhZ2VzGAQgAygLMiYuc2Vzc2lvbl9hZ2VudHMuQWdlbnRNZXNzYWdlRGVzY3JpcHRvchIeChFjbGFtcGVkX21heF90dXJucxgFIAEoDUgAiAEBEhwKFGZpcmVkX2NvbmRpdGlvbl9qc29uGAYgASgJEhoKEnlpZWxkZWRfbWVzc2FnZV9pZBgHIAEoCUIUChJfY2xhbXBlZF9tYXhfdHVybnMilAEKFkFnZW50TWVzc2FnZURlc2NyaXB0b3ISCgoCaWQYASABKAkSDAoEcm9sZRgCIAEoCRIMCgR0b29sGAMgASgJEhIKCnRvb2xfY2FsbHMYBCADKAkSEAoIaXNfZXJyb3IYBSABKAgSDwoHcHJldmlldxgGIAEoCRIbChNyZXN1bHRfc3VtbWFyeV9qc29uGAcgASgJInQKGUF0dGFjaFNlc3Npb25BZ2VudFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIQCghhZ2VudF9pZBgEIAEoCSKAAQoeQ2FuY2VsQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSFwoPY29udmVyc2F0aW9uX2lkGAQgASgJIiEKH0NhbmNlbEFnZW50Q29udmVyc2F0aW9uUmVzcG9uc2UidAoZRGV0YWNoU2Vzc2lvbkFnZW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhAKCGFnZW50X2lkGAQgASgJImEKGExpc3RTZXNzaW9uQWdlbnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIqcBChxPcGVuQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSFwoPY29udmVyc2F0aW9uX2lkGAUgASgJEhUKDXN5c3RlbV9wcm9tcHQYBiABKAkiOAodT3BlbkFnZW50Q29udmVyc2F0aW9uUmVzcG9uc2USFwoPY29udmVyc2F0aW9uX2lkGAEgASgJItUBCh5Qcm9tcHRBZ2VudENvbnZlcnNhdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBCABKAkSDgoGcHJvbXB0GAUgASgJEhYKCW1heF90dXJucxgGIAEoDUgAiAEBEh0KFXlpZWxkX2NvbmRpdGlvbnNfanNvbhgHIAEoCUIMCgpfbWF4X3R1cm5zIvkBChxSZXBvcnRBZ2VudENsb25lU3RhdGVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSGwoTY29kZWJhc2Vfc2Vzc2lvbl9pZBgEIAEoCRI0CgtjbG9uZV9zdGF0ZRgFIAEoDjIfLnNlc3Npb25fYWdlbnRzLkFnZW50Q2xvbmVTdGF0ZRITCgtjbG9uZV9lcnJvchgGIAEoCRIVCg13b3JrdHJlZV9wYXRoGAcgASgJEhMKC2RpdmVyZ2VuY2VzGAggAygJIh8KHVJlcG9ydEFnZW50Q2xvbmVTdGF0ZVJlc3BvbnNlIroBCiNSZXBvcnRBZ2VudENvbnZlcnNhdGlvblN0YXRlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhAKCGFnZW50X2lkGAQgASgJEikKBnN0YXR1cxgFIAEoDjIZLnR5cGVzLlNlc3Npb25BZ2VudFN0YXR1cxIPCgdzdW1tYXJ5GAYgASgJIiYKJFJlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGVSZXNwb25zZSK5AgoeUmVzdW1lQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSFwoPY29udmVyc2F0aW9uX2lkGAQgASgJEhwKD2Zyb21fbWVzc2FnZV9pZBgFIAEoCUgAiAEBEhcKCmNvcnJlY3Rpb24YBiABKAlIAYgBARIWCgltYXhfdHVybnMYByABKA1IAogBARIdChV5aWVsZF9jb25kaXRpb25zX2pzb24YCCABKAkSGAoQcmVwbGFjZW1lbnRfanNvbhgJIAEoCUISChBfZnJvbV9tZXNzYWdlX2lkQg0KC19jb3JyZWN0aW9uQgwKCl9tYXhfdHVybnMi1QIKEVNlc3Npb25BZ2VudEVudHJ5EhAKCGFnZW50X2lkGAEgASgJEgwKBG5hbWUYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEg0KBWxhYmVsGAQgASgJEg0KBW1vZGVsGAUgASgJEhAKCHJlcGxhY2VzGAYgAygJEg0KBXRvb2xzGAcgAygJEhsKE2NvZGViYXNlX3Nlc3Npb25faWQYCCABKAkSNAoLY2xvbmVfc3RhdGUYCSABKA4yHy5zZXNzaW9uX2FnZW50cy5BZ2VudENsb25lU3RhdGUSEwoLY2xvbmVfZXJyb3IYCiABKAkSKQoGc3RhdHVzGAsgASgOMhkudHlwZXMuU2Vzc2lvbkFnZW50U3RhdHVzEjIKDWxhc3RfYWN0aXZpdHkYDCABKAsyGy50eXBlcy5TZXNzaW9uQWdlbnRBY3Rpdml0eSJoChJTZXNzaW9uQWdlbnRSb3N0ZXISEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNyZXYYAiABKAQSMQoGYWdlbnRzGAMgAygLMiEuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50RW50cnkiYwoaU3RyZWFtU2Vzc2lvbkFnZW50c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSqvAQoPQWdlbnRDbG9uZVN0YXRlEiEKHUFHRU5UX0NMT05FX1NUQVRFX1VOU1BFQ0lGSUVEEAASGwoXQUdFTlRfQ0xPTkVfU1RBVEVfTE9DQUwQARIiCh5BR0VOVF9DTE9ORV9TVEFURV9QUk9WSVNJT05JTkcQAhIbChdBR0VOVF9DTE9ORV9TVEFURV9SRUFEWRADEhsKF0FHRU5UX0NMT05FX1NUQVRFX0VSUk9SEAQyiQkKE1Nlc3Npb25BZ2VudFNlcnZpY2USYwoSQXR0YWNoU2Vzc2lvbkFnZW50Eikuc2Vzc2lvbl9hZ2VudHMuQXR0YWNoU2Vzc2lvbkFnZW50UmVxdWVzdBoiLnNlc3Npb25fYWdlbnRzLlNlc3Npb25BZ2VudFJvc3RlchJjChJEZXRhY2hTZXNzaW9uQWdlbnQSKS5zZXNzaW9uX2FnZW50cy5EZXRhY2hTZXNzaW9uQWdlbnRSZXF1ZXN0GiIuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50Um9zdGVyEmEKEUxpc3RTZXNzaW9uQWdlbnRzEiguc2Vzc2lvbl9hZ2VudHMuTGlzdFNlc3Npb25BZ2VudHNSZXF1ZXN0GiIuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50Um9zdGVyEmcKE1N0cmVhbVNlc3Npb25BZ2VudHMSKi5zZXNzaW9uX2FnZW50cy5TdHJlYW1TZXNzaW9uQWdlbnRzUmVxdWVzdBoiLnNlc3Npb25fYWdlbnRzLlNlc3Npb25BZ2VudFJvc3RlcjABEnQKFU9wZW5BZ2VudENvbnZlcnNhdGlvbhIsLnNlc3Npb25fYWdlbnRzLk9wZW5BZ2VudENvbnZlcnNhdGlvblJlcXVlc3QaLS5zZXNzaW9uX2FnZW50cy5PcGVuQWdlbnRDb252ZXJzYXRpb25SZXNwb25zZRJzChdQcm9tcHRBZ2VudENvbnZlcnNhdGlvbhIuLnNlc3Npb25fYWdlbnRzLlByb21wdEFnZW50Q29udmVyc2F0aW9uUmVxdWVzdBomLnNlc3Npb25fYWdlbnRzLkFnZW50Q29udmVyc2F0aW9uQ2h1bmswARJzChdSZXN1bWVBZ2VudENvbnZlcnNhdGlvbhIuLnNlc3Npb25fYWdlbnRzLlJlc3VtZUFnZW50Q29udmVyc2F0aW9uUmVxdWVzdBomLnNlc3Npb25fYWdlbnRzLkFnZW50Q29udmVyc2F0aW9uQ2h1bmswARJ6ChdDYW5jZWxBZ2VudENvbnZlcnNhdGlvbhIuLnNlc3Npb25fYWdlbnRzLkNhbmNlbEFnZW50Q29udmVyc2F0aW9uUmVxdWVzdBovLnNlc3Npb25fYWdlbnRzLkNhbmNlbEFnZW50Q29udmVyc2F0aW9uUmVzcG9uc2USdAoVUmVwb3J0QWdlbnRDbG9uZVN0YXRlEiwuc2Vzc2lvbl9hZ2VudHMuUmVwb3J0QWdlbnRDbG9uZVN0YXRlUmVxdWVzdBotLnNlc3Npb25fYWdlbnRzLlJlcG9ydEFnZW50Q2xvbmVTdGF0ZVJlc3BvbnNlEokBChxSZXBvcnRBZ2VudENvbnZlcnNhdGlvblN0YXRlEjMuc2Vzc2lvbl9hZ2VudHMuUmVwb3J0QWdlbnRDb252ZXJzYXRpb25TdGF0ZVJlcXVlc3QaNC5zZXNzaW9uX2FnZW50cy5SZXBvcnRBZ2VudENvbnZlcnNhdGlvblN0YXRlUmVzcG9uc2ViBnByb3RvMw", [file_types]);
+  fileDesc("ChRzZXNzaW9uX2FnZW50cy5wcm90bxIOc2Vzc2lvbl9hZ2VudHMinQIKFkFnZW50Q29udmVyc2F0aW9uQ2h1bmsSFQoNY29udGVudF9jaHVuaxgBIAEoCRITCgtzdG9wX3JlYXNvbhgCIAEoCRIMCgRsYXN0GAMgASgIEjgKCG1lc3NhZ2VzGAQgAygLMiYuc2Vzc2lvbl9hZ2VudHMuQWdlbnRNZXNzYWdlRGVzY3JpcHRvchIeChFjbGFtcGVkX21heF90dXJucxgFIAEoDUgAiAEBEhwKFGZpcmVkX2NvbmRpdGlvbl9qc29uGAYgASgJEhoKEnlpZWxkZWRfbWVzc2FnZV9pZBgHIAEoCRIfChdwZXJtaXNzaW9uX3JlcXVlc3RfanNvbhgIIAEoCUIUChJfY2xhbXBlZF9tYXhfdHVybnMilAEKFkFnZW50TWVzc2FnZURlc2NyaXB0b3ISCgoCaWQYASABKAkSDAoEcm9sZRgCIAEoCRIMCgR0b29sGAMgASgJEhIKCnRvb2xfY2FsbHMYBCADKAkSEAoIaXNfZXJyb3IYBSABKAgSDwoHcHJldmlldxgGIAEoCRIbChNyZXN1bHRfc3VtbWFyeV9qc29uGAcgASgJIqcBChlBdHRhY2hTZXNzaW9uQWdlbnRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSMQoJcGxhY2VtZW50GAUgASgOMh4uc2Vzc2lvbl9hZ2VudHMuQWdlbnRQbGFjZW1lbnQilAEKHkNhbmNlbEFnZW50Q29udmVyc2F0aW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhcKD2NvbnZlcnNhdGlvbl9pZBgEIAEoCUoECAUQBlIMY2FuY2VsbGVkX2J5IiEKH0NhbmNlbEFnZW50Q29udmVyc2F0aW9uUmVzcG9uc2UidAoZRGV0YWNoU2Vzc2lvbkFnZW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhAKCGFnZW50X2lkGAQgASgJImEKGExpc3RTZXNzaW9uQWdlbnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIqcBChxPcGVuQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSFwoPY29udmVyc2F0aW9uX2lkGAUgASgJEhUKDXN5c3RlbV9wcm9tcHQYBiABKAkiOAodT3BlbkFnZW50Q29udmVyc2F0aW9uUmVzcG9uc2USFwoPY29udmVyc2F0aW9uX2lkGAEgASgJItUBCh5Qcm9tcHRBZ2VudENvbnZlcnNhdGlvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIXCg9jb252ZXJzYXRpb25faWQYBCABKAkSDgoGcHJvbXB0GAUgASgJEhYKCW1heF90dXJucxgGIAEoDUgAiAEBEh0KFXlpZWxkX2NvbmRpdGlvbnNfanNvbhgHIAEoCUIMCgpfbWF4X3R1cm5zIvkBChxSZXBvcnRBZ2VudENsb25lU3RhdGVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSGwoTY29kZWJhc2Vfc2Vzc2lvbl9pZBgEIAEoCRI0CgtjbG9uZV9zdGF0ZRgFIAEoDjIfLnNlc3Npb25fYWdlbnRzLkFnZW50Q2xvbmVTdGF0ZRITCgtjbG9uZV9lcnJvchgGIAEoCRIVCg13b3JrdHJlZV9wYXRoGAcgASgJEhMKC2RpdmVyZ2VuY2VzGAggAygJIh8KHVJlcG9ydEFnZW50Q2xvbmVTdGF0ZVJlc3BvbnNlIroBCiNSZXBvcnRBZ2VudENvbnZlcnNhdGlvblN0YXRlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhAKCGFnZW50X2lkGAQgASgJEikKBnN0YXR1cxgFIAEoDjIZLnR5cGVzLlNlc3Npb25BZ2VudFN0YXR1cxIPCgdzdW1tYXJ5GAYgASgJIiYKJFJlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGVSZXNwb25zZSKdAwoeUmVzdW1lQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSFwoPY29udmVyc2F0aW9uX2lkGAQgASgJEhwKD2Zyb21fbWVzc2FnZV9pZBgFIAEoCUgAiAEBEhcKCmNvcnJlY3Rpb24YBiABKAlIAYgBARIWCgltYXhfdHVybnMYByABKA1IAogBARIdChV5aWVsZF9jb25kaXRpb25zX2pzb24YCCABKAkSGAoQcmVwbGFjZW1lbnRfanNvbhgJIAEoCRIeChZwZXJtaXNzaW9uX2Fuc3dlcl9qc29uGAogASgJEiUKGGRlZmVyX3Blcm1pc3Npb25fdG9fdXNlchgLIAEoCUgDiAEBQhIKEF9mcm9tX21lc3NhZ2VfaWRCDQoLX2NvcnJlY3Rpb25CDAoKX21heF90dXJuc0IbChlfZGVmZXJfcGVybWlzc2lvbl90b191c2VyIucDChFTZXNzaW9uQWdlbnRFbnRyeRIQCghhZ2VudF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRINCgVsYWJlbBgEIAEoCRINCgVtb2RlbBgFIAEoCRIQCghyZXBsYWNlcxgGIAMoCRINCgV0b29scxgHIAMoCRIbChNjb2RlYmFzZV9zZXNzaW9uX2lkGAggASgJEjQKC2Nsb25lX3N0YXRlGAkgASgOMh8uc2Vzc2lvbl9hZ2VudHMuQWdlbnRDbG9uZVN0YXRlEhMKC2Nsb25lX2Vycm9yGAogASgJEikKBnN0YXR1cxgLIAEoDjIZLnR5cGVzLlNlc3Npb25BZ2VudFN0YXR1cxIyCg1sYXN0X2FjdGl2aXR5GAwgASgLMhsudHlwZXMuU2Vzc2lvbkFnZW50QWN0aXZpdHkSHgoEa2luZBgNIAEoDjIQLnR5cGVzLkFnZW50S2luZBIPCgdoYXJuZXNzGA4gASgJEjEKCXBsYWNlbWVudBgPIAEoDjIeLnNlc3Npb25fYWdlbnRzLkFnZW50UGxhY2VtZW50EhEKCXRyYW5zcG9ydBgQIAEoCRIZChFwZXJtaXNzaW9uX3BvbGljeRgRIAEoCSJoChJTZXNzaW9uQWdlbnRSb3N0ZXISEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNyZXYYAiABKAQSMQoGYWdlbnRzGAMgAygLMiEuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50RW50cnkiYwoaU3RyZWFtU2Vzc2lvbkFnZW50c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSK4AQocQW5zd2VyQWdlbnRQZXJtaXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJEhcKD2NvbnZlcnNhdGlvbl9pZBgEIAEoCRISCgpyZXF1ZXN0X2lkGAUgASgJEhEKCW9wdGlvbl9pZBgGIAEoCRIRCgljYW5jZWxsZWQYByABKAgiNAodQW5zd2VyQWdlbnRQZXJtaXNzaW9uUmVzcG9uc2USEwoLYW5zd2VyZWRfYnkYASABKAkqrwEKD0FnZW50Q2xvbmVTdGF0ZRIhCh1BR0VOVF9DTE9ORV9TVEFURV9VTlNQRUNJRklFRBAAEhsKF0FHRU5UX0NMT05FX1NUQVRFX0xPQ0FMEAESIgoeQUdFTlRfQ0xPTkVfU1RBVEVfUFJPVklTSU9OSU5HEAISGwoXQUdFTlRfQ0xPTkVfU1RBVEVfUkVBRFkQAxIbChdBR0VOVF9DTE9ORV9TVEFURV9FUlJPUhAEKkcKDkFnZW50UGxhY2VtZW50EhoKFkFHRU5UX1BMQUNFTUVOVF9TSEFSRUQQABIZChVBR0VOVF9QTEFDRU1FTlRfQ0xPTkUQATL/CQoTU2Vzc2lvbkFnZW50U2VydmljZRJjChJBdHRhY2hTZXNzaW9uQWdlbnQSKS5zZXNzaW9uX2FnZW50cy5BdHRhY2hTZXNzaW9uQWdlbnRSZXF1ZXN0GiIuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50Um9zdGVyEmMKEkRldGFjaFNlc3Npb25BZ2VudBIpLnNlc3Npb25fYWdlbnRzLkRldGFjaFNlc3Npb25BZ2VudFJlcXVlc3QaIi5zZXNzaW9uX2FnZW50cy5TZXNzaW9uQWdlbnRSb3N0ZXISYQoRTGlzdFNlc3Npb25BZ2VudHMSKC5zZXNzaW9uX2FnZW50cy5MaXN0U2Vzc2lvbkFnZW50c1JlcXVlc3QaIi5zZXNzaW9uX2FnZW50cy5TZXNzaW9uQWdlbnRSb3N0ZXISZwoTU3RyZWFtU2Vzc2lvbkFnZW50cxIqLnNlc3Npb25fYWdlbnRzLlN0cmVhbVNlc3Npb25BZ2VudHNSZXF1ZXN0GiIuc2Vzc2lvbl9hZ2VudHMuU2Vzc2lvbkFnZW50Um9zdGVyMAESdAoVT3BlbkFnZW50Q29udmVyc2F0aW9uEiwuc2Vzc2lvbl9hZ2VudHMuT3BlbkFnZW50Q29udmVyc2F0aW9uUmVxdWVzdBotLnNlc3Npb25fYWdlbnRzLk9wZW5BZ2VudENvbnZlcnNhdGlvblJlc3BvbnNlEnMKF1Byb21wdEFnZW50Q29udmVyc2F0aW9uEi4uc2Vzc2lvbl9hZ2VudHMuUHJvbXB0QWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0GiYuc2Vzc2lvbl9hZ2VudHMuQWdlbnRDb252ZXJzYXRpb25DaHVuazABEnMKF1Jlc3VtZUFnZW50Q29udmVyc2F0aW9uEi4uc2Vzc2lvbl9hZ2VudHMuUmVzdW1lQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0GiYuc2Vzc2lvbl9hZ2VudHMuQWdlbnRDb252ZXJzYXRpb25DaHVuazABEnoKF0NhbmNlbEFnZW50Q29udmVyc2F0aW9uEi4uc2Vzc2lvbl9hZ2VudHMuQ2FuY2VsQWdlbnRDb252ZXJzYXRpb25SZXF1ZXN0Gi8uc2Vzc2lvbl9hZ2VudHMuQ2FuY2VsQWdlbnRDb252ZXJzYXRpb25SZXNwb25zZRJ0ChVSZXBvcnRBZ2VudENsb25lU3RhdGUSLC5zZXNzaW9uX2FnZW50cy5SZXBvcnRBZ2VudENsb25lU3RhdGVSZXF1ZXN0Gi0uc2Vzc2lvbl9hZ2VudHMuUmVwb3J0QWdlbnRDbG9uZVN0YXRlUmVzcG9uc2USiQEKHFJlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGUSMy5zZXNzaW9uX2FnZW50cy5SZXBvcnRBZ2VudENvbnZlcnNhdGlvblN0YXRlUmVxdWVzdBo0LnNlc3Npb25fYWdlbnRzLlJlcG9ydEFnZW50Q29udmVyc2F0aW9uU3RhdGVSZXNwb25zZRJ0ChVBbnN3ZXJBZ2VudFBlcm1pc3Npb24SLC5zZXNzaW9uX2FnZW50cy5BbnN3ZXJBZ2VudFBlcm1pc3Npb25SZXF1ZXN0Gi0uc2Vzc2lvbl9hZ2VudHMuQW5zd2VyQWdlbnRQZXJtaXNzaW9uUmVzcG9uc2ViBnByb3RvMw", [file_types]);
 
 /**
  * @generated from message session_agents.AgentConversationChunk
@@ -80,6 +80,15 @@ export type AgentConversationChunk = Message<"session_agents.AgentConversationCh
    * @generated from field: string yielded_message_id = 7;
    */
   yieldedMessageId: string;
+
+  /**
+   * The permission request a coding agent's turn paused on, when it stopped on
+   * "PermissionRequested" — a JSON {requestId, toolCall, options} object, final frame only. Empty
+   * for every other stop reason.
+   *
+   * @generated from field: string permission_request_json = 8;
+   */
+  permissionRequestJson: string;
 };
 
 /**
@@ -189,6 +198,13 @@ export type AttachSessionAgentRequest = Message<"session_agents.AttachSessionAge
    * @generated from field: string agent_id = 4;
    */
   agentId: string;
+
+  /**
+   * Where the agent's conversations work; SHARED (the default) is the session's own worktree.
+   *
+   * @generated from field: session_agents.AgentPlacement placement = 5;
+   */
+  placement: AgentPlacement;
 };
 
 /**
@@ -668,6 +684,25 @@ export type ResumeAgentConversationRequest = Message<"session_agents.ResumeAgent
    * @generated from field: string replacement_json = 9;
    */
   replacementJson: string;
+
+  /**
+   * The answer to the conversation's pending permission request, as a JSON
+   * {answer: "selected"|"cancelled", requestId, optionId?} object; the coding agent's paused turn
+   * continues with it. Empty when the resume answers no request.
+   *
+   * @generated from field: string permission_answer_json = 10;
+   */
+  permissionAnswerJson: string;
+
+  /**
+   * The request id of the conversation's pending permission request to hand to the user instead of
+   * answering it here: the turn holds until the user answers it from the conversation view, or this
+   * caller answers it. Empty or absent = none. Refused with `permission_answer_json` set, since a
+   * request is either answered by the caller or handed to the user.
+   *
+   * @generated from field: optional string defer_permission_to_user = 11;
+   */
+  deferPermissionToUser?: string;
 };
 
 /**
@@ -775,6 +810,39 @@ export type SessionAgentEntry = Message<"session_agents.SessionAgentEntry"> & {
    * @generated from field: types.SessionAgentActivity last_activity = 12;
    */
   lastActivity?: SessionAgentActivity;
+
+  /**
+   * Snapshotted at attach, from the catalog row: what runs this agent's turns.
+   *
+   * @generated from field: types.AgentKind kind = 13;
+   */
+  kind: AgentKind;
+
+  /**
+   * The harness of a CODING_AGENT entry; empty for MODEL entries.
+   *
+   * @generated from field: string harness = 14;
+   */
+  harness: string;
+
+  /**
+   * Where the agent's conversations work, as attached.
+   *
+   * @generated from field: session_agents.AgentPlacement placement = 15;
+   */
+  placement: AgentPlacement;
+
+  /**
+   * As on `catalog.SubagentInfo`, snapshotted at attach.
+   *
+   * @generated from field: string transport = 16;
+   */
+  transport: string;
+
+  /**
+   * @generated from field: string permission_policy = 17;
+   */
+  permissionPolicy: string;
 };
 
 /**
@@ -850,6 +918,76 @@ export const StreamSessionAgentsRequestSchema: GenMessage<StreamSessionAgentsReq
   messageDesc(file_session_agents, 17);
 
 /**
+ * @generated from message session_agents.AnswerAgentPermissionRequest
+ */
+export type AnswerAgentPermissionRequest = Message<"session_agents.AnswerAgentPermissionRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+   *
+   * @generated from field: string daemon_instance_id = 3;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * @generated from field: string conversation_id = 4;
+   */
+  conversationId: string;
+
+  /**
+   * @generated from field: string request_id = 5;
+   */
+  requestId: string;
+
+  /**
+   * One of the request's option ids; empty with `cancelled` set.
+   *
+   * @generated from field: string option_id = 6;
+   */
+  optionId: string;
+
+  /**
+   * @generated from field: bool cancelled = 7;
+   */
+  cancelled: boolean;
+};
+
+/**
+ * Describes the message session_agents.AnswerAgentPermissionRequest.
+ * Use `create(AnswerAgentPermissionRequestSchema)` to create a new message.
+ */
+export const AnswerAgentPermissionRequestSchema: GenMessage<AnswerAgentPermissionRequest> = /*@__PURE__*/
+  messageDesc(file_session_agents, 18);
+
+/**
+ * @generated from message session_agents.AnswerAgentPermissionResponse
+ */
+export type AnswerAgentPermissionResponse = Message<"session_agents.AnswerAgentPermissionResponse"> & {
+  /**
+   * Who the answer was recorded as: the answering user's login.
+   *
+   * @generated from field: string answered_by = 1;
+   */
+  answeredBy: string;
+};
+
+/**
+ * Describes the message session_agents.AnswerAgentPermissionResponse.
+ * Use `create(AnswerAgentPermissionResponseSchema)` to create a new message.
+ */
+export const AnswerAgentPermissionResponseSchema: GenMessage<AnswerAgentPermissionResponse> = /*@__PURE__*/
+  messageDesc(file_session_agents, 19);
+
+/**
  * @generated from enum session_agents.AgentCloneState
  */
 export enum AgentCloneState {
@@ -887,6 +1025,34 @@ export enum AgentCloneState {
  */
 export const AgentCloneStateSchema: GenEnum<AgentCloneState> = /*@__PURE__*/
   enumDesc(file_session_agents, 0);
+
+/**
+ * Where a roster agent's conversations work.
+ *
+ * SHARED is the session's own worktree — the agent edits the main agent's checkout, as a teammate
+ * in the same tree would. CLONE gives each conversation a worktree and branch of its own, synced
+ * with the main agent's files before every turn, whose work is read and taken with `subagent_diff`,
+ * `subagent_pull` and `subagent_end`. An entry written before this field existed reads as SHARED.
+ *
+ * @generated from enum session_agents.AgentPlacement
+ */
+export enum AgentPlacement {
+  /**
+   * @generated from enum value: AGENT_PLACEMENT_SHARED = 0;
+   */
+  SHARED = 0,
+
+  /**
+   * @generated from enum value: AGENT_PLACEMENT_CLONE = 1;
+   */
+  CLONE = 1,
+}
+
+/**
+ * Describes the enum session_agents.AgentPlacement.
+ */
+export const AgentPlacementSchema: GenEnum<AgentPlacement> = /*@__PURE__*/
+  enumDesc(file_session_agents, 1);
 
 /**
  * @generated from service session_agents.SessionAgentService
@@ -1022,6 +1188,19 @@ export const SessionAgentService: GenService<{
     methodKind: "unary";
     input: typeof ReportAgentConversationStateRequestSchema;
     output: typeof ReportAgentConversationStateResponseSchema;
+  },
+  /**
+   * Answer a coding subagent's permission request the main agent deferred to the user
+   * (`subagent_resume { permission: { requestId, deferToUser: true } }`). The session's owner only;
+   * the conversation must belong to the named session. The first answer wins: one arriving after
+   * the main agent's, or after another user's, is refused naming who answered.
+   *
+   * @generated from rpc session_agents.SessionAgentService.AnswerAgentPermission
+   */
+  answerAgentPermission: {
+    methodKind: "unary";
+    input: typeof AnswerAgentPermissionRequestSchema;
+    output: typeof AnswerAgentPermissionResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_session_agents, 0);

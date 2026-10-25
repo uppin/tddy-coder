@@ -24,6 +24,9 @@ tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `LiveAgentRoster`, node 5's — the roster as a *client* process sees it.
 tddy-discovery = { path = "../tddy-discovery" }
+tddy-coding-subagent = { path = "../tddy-coding-subagent" }
+# `AcpUpdate`: the stream a streaming conversation's recorder writes from as it arrives.
+tddy-agent-backend = { path = "../tddy-agent-backend" }
 # `ModelRegistryStore` and `registry_agent_def_with_credential`: a registry assistant is an agent def
 # like a `<tddyhome>/agents` one, and `spawn_agent_def` resolves a session's agent against both.
 tddy-model-registry = { path = "../tddy-model-registry" }

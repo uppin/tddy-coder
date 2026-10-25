@@ -230,6 +230,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const zoomVerbose = debugLogging || isTerminalZoomDebugEnabled();
     const containerRef = useRef<HTMLDivElement>(null);
     const termRef = useRef<Terminal | null>(null);
+    // Bumped on every write and clear: the buffer's content changes only through those (and a
+    // resize, which `getBufferText` keys on separately). Callers poll `getBufferText` several
+    // times a second, and serializing a 50 000-line scrollback cell by cell on every poll pinned
+    // the WebView at a full core even with no output arriving.
+    const contentRevisionRef = useRef(0);
+    const bufferTextCacheRef = useRef<{
+      term: Terminal;
+      revision: number;
+      cols: number;
+      rows: number;
+      text: string;
+    } | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
     const [ready, setReady] = useState(false);
     const [displayFontSize, setDisplayFontSize] = useState(fontSize);
@@ -383,6 +395,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         onReady?.();
 
         if (initialContent) {
+          contentRevisionRef.current++;
           term.write(initialContent);
         }
       }
@@ -404,6 +417,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     useEffect(() => {
       if (ready && initialContent && termRef.current) {
+        contentRevisionRef.current++;
         termRef.current.write(initialContent);
       }
     }, [initialContent, ready]);
@@ -1272,9 +1286,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
               : Array.from(data.slice(0, 24), (b) => b.toString(16).padStart(2, "0")).join(" ");
           logWrite("write %d %s %s", data.length, typeof data === "string" ? "chars" : "bytes", preview);
         }
+        contentRevisionRef.current++;
         termRef.current?.write(data);
       },
       clear() {
+        contentRevisionRef.current++;
         termRef.current?.clear();
       },
       focus() {
@@ -1296,13 +1312,26 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getBufferText() {
         const term = termRef.current;
         if (!term || !term.buffer?.active) return "";
+        const revision = contentRevisionRef.current;
+        const cached = bufferTextCacheRef.current;
+        if (
+          cached &&
+          cached.term === term &&
+          cached.revision === revision &&
+          cached.cols === term.cols &&
+          cached.rows === term.rows
+        ) {
+          return cached.text;
+        }
         try {
           const buffer = term.buffer.active;
-          let text = "";
+          const lines: string[] = [];
           for (let y = 0; y < buffer.length; y++) {
             const line = buffer.getLine(y);
-            if (line) text += line.translateToString();
+            if (line) lines.push(line.translateToString());
           }
+          const text = lines.join("");
+          bufferTextCacheRef.current = { term, revision, cols: term.cols, rows: term.rows, text };
           return text;
         } catch {
           return "";

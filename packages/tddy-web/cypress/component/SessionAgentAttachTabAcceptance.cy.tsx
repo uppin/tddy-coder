@@ -33,6 +33,9 @@ import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { sessionTerminalTabsPage as tabs } from "../support/pages/sessionTerminalTabsPage";
 import { sessionAgentConversationPage as page } from "../support/pages/sessionAgentConversationPage";
 
+/** The token a signed-in operator's browser holds; a cancel names who cancelled it. */
+const A_SIGNED_IN_SESSION_TOKEN = "signed-in-token";
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -311,8 +314,11 @@ describe("Add agent — attach a roster agent and open a conversation with it", 
   // -------------------------------------------------------------------------
 
   it("cancels the conversation and returns focus to the Agent tab when its tab is closed", () => {
-    // Given an open conversation
+    // Given an open conversation, opened by a signed-in user — a cancel names who cancelled it
     const backend = aBackendOffering([anAvailableAgent("explorer", HOST)]);
+    cy.then(() => {
+      window.localStorage.setItem("tddy_session_token", A_SIGNED_IN_SESSION_TOKEN);
+    });
     attachSession(backend);
     page.attachAgent(EXPLORER);
     page.tabs().should("have.length", 1);

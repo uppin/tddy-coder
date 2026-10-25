@@ -52,6 +52,7 @@ export function SessionRuntime({
   runtime,
   focused,
   sessionToken,
+  callerLogin = null,
   client,
   terminalClient,
   host = null,
@@ -397,6 +398,7 @@ export function SessionRuntime({
               daemonInstanceId={conversation.daemonInstanceId}
               agentId={conversation.agentId}
               conversationId={conversation.conversationId}
+              callerLogin={callerLogin}
               client={client ?? undefined}
             />
           </div>

@@ -1,0 +1,3 @@
+{"type":"system","event_type":"run_started","run_id":"run-0001","run_url":"https://oz.warp.dev/runs/run-0001"}
+{"type":"system","event_type":"conversation_started","conversation_id":"conv-0001"}
+{"type":"agent","text":"ok\n"}

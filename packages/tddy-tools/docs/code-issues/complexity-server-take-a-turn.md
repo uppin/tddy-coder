@@ -41,3 +41,4 @@ coincidence rather than a decision, and it makes logs and stack traces ambiguous
 
 2026-09-26 — Counted from the diff; confirmed the teardown block is contiguous and touches only
 the session table.
+| 2026-10-25 | 80 → 84 | — | — | **worse** by 4 in PR #727 (`#coagents` 8/8): the pending receipt says `awaitingUser`. Deferred to the `#coagents` sweep node by the developer (2026-10-25) |

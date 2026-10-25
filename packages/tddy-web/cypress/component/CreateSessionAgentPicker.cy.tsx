@@ -28,6 +28,7 @@ import {
   aDaemonOfferingAgents,
   aDaemonThatCannotBeReached,
   anAvailableAgent,
+  anAvailableCodingAgent,
 } from "../support/rpc/sessionAgentRosterBackend";
 import {
   TEST_IDS,
@@ -35,6 +36,7 @@ import {
   createSessionAgentHostError,
   createSessionAgentOption,
   createSessionAgentOptionHost,
+  createSessionAgentOptionKind,
 } from "../support/testIds";
 import { recordedFields } from "../support/rpc/recordedRequests";
 
@@ -275,6 +277,85 @@ describe("CreateSession specialized-agent picker across hosts", () => {
     // Then
     cy.wrap(null).should(() => {
       expect(startedSessionAgentLists(hostA)).to.deep.equal([[EXPLORER_ON_A]]);
+    });
+  });
+});
+
+describe("CreateSession agent picker — coding agents", () => {
+  const CODEX_ON_B = "codex-fast@server-2";
+
+  beforeEach(() => {
+    cy.viewport(1280, 900);
+  });
+
+  it("a coding agent row shows its coding-agent badge and harness", () => {
+    // Given
+    mountPicker(aDaemonOfferingAgents([anAvailableCodingAgent("codex-fast", HOST_B.instanceId, "codex-acp")]));
+
+    // When
+    openTheAgentPicker();
+
+    // Then
+    byTestId(createSessionAgentOptionKind(CODEX_ON_B)).should(
+      "have.text",
+      "coding agent · codex-acp",
+    );
+  });
+
+  it("a model row shows no coding-agent badge", () => {
+    // Given
+    mountPicker(aDaemonOfferingAgents([anAvailableAgent("linter", HOST_B.instanceId)]));
+
+    // When
+    openTheAgentPicker();
+
+    // Then
+    theAgentIsOfferedUnpicked(LINTER_ON_B);
+    byTestId(createSessionAgentOptionKind(LINTER_ON_B)).should("not.exist");
+  });
+});
+
+describe("CreateSession agent picker — placement", () => {
+  beforeEach(() => {
+    cy.viewport(1280, 900);
+  });
+
+  it("an agent can be attached with clone placement", () => {
+    // Given
+    const hostA = mountPicker(aDaemonOfferingAgents([]));
+    openTheAgentPicker();
+    pickTheAgent(EXPLORER_ON_A);
+
+    // When
+    byTestId(`${createSessionAgentOption(EXPLORER_ON_A)}-placement`).select("clone");
+    startTheSession();
+
+    // Then
+    cy.wrap(null).should(() => {
+      const starts = recordedFields(hostA.callsTo(SessionService.method.startSession)) as {
+        specializedAgents: string[];
+        clonePlacedAgents: string[];
+      }[];
+      expect(starts.map((req) => req.clonePlacedAgents)).to.deep.equal([[EXPLORER_ON_A]]);
+      expect(starts.map((req) => req.specializedAgents)).to.deep.equal([[EXPLORER_ON_A]]);
+    });
+  });
+
+  it("an agent picked without choosing a placement works on the session's worktree", () => {
+    // Given
+    const hostA = mountPicker(aDaemonOfferingAgents([]));
+    openTheAgentPicker();
+
+    // When
+    pickTheAgent(EXPLORER_ON_A);
+    startTheSession();
+
+    // Then
+    cy.wrap(null).should(() => {
+      const starts = recordedFields(hostA.callsTo(SessionService.method.startSession)) as {
+        clonePlacedAgents: string[];
+      }[];
+      expect(starts.map((req) => req.clonePlacedAgents)).to.deep.equal([[]]);
     });
   });
 });

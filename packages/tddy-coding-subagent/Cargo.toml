@@ -1,0 +1,25 @@
+[package]
+name = "tddy-coding-subagent"
+version = "0.1.0"
+edition = "2021"
+description = "A coding agent (Claude Code, Codex, OpenCode, …) as a session subagent: its catalog rows, its confinement, the launcher port and the SubagentSession over the ACP driver"
+
+[lib]
+name = "tddy_coding_subagent"
+path = "src/lib.rs"
+
+# Depends on `tddy-discovery` only for the `SubagentSession` trait and its outcome types, and on
+# `tddy-agent-backend` for the ACP driver. New subagent code does not go into `tddy-discovery`
+# (docs/dev/todo/2026-10-08-drain-tddy-discovery-into-purpose-named-crates-and-remove-it.md).
+[dependencies]
+async-trait = "0.1"
+log = "0.4"
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tddy-agent-backend = { path = "../tddy-agent-backend" }
+tddy-discovery = { path = "../tddy-discovery" }
+
+[dev-dependencies]
+serial_test = "3"
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }

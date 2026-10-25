@@ -56,6 +56,9 @@ fn an_agent_this_daemon_runs() -> SessionAgentRecord {
         replaces: Vec::new(),
         tools: vec!["Read".to_string(), "Grep".to_string()],
         codebase_session_id: None,
+        kind: Default::default(),
+        harness: None,
+        placement: Default::default(),
     }
 }
 
@@ -193,6 +196,7 @@ impl AgentSessions for TheTurnLoopsThisHostOpened {
     async fn open_local(
         &self,
         _session_id: &str,
+        _conversation_id: &str,
         _session_dir: &Path,
         _record: &SessionAgentRecord,
         _session_token: &str,
@@ -215,6 +219,21 @@ impl AgentSessions for TheTurnLoopsThisHostOpened {
 
     async fn refuse_departed_owner(&self, _daemon_instance_id: &str) -> Result<(), Status> {
         Ok(())
+    }
+
+    fn github_user(&self, _session_token: &str) -> Result<String, Status> {
+        Err(Status::internal(
+            "this test takes no permission answer, so it names no GitHub user",
+        ))
+    }
+
+    fn answerer(
+        &self,
+        _session_token: &str,
+    ) -> Result<tddy_discovery::subagent::AnsweredBy, Status> {
+        Err(Status::internal(
+            "this test cancels no pending request, so it names no answerer",
+        ))
     }
 }
 
@@ -316,6 +335,19 @@ impl AgentConversationPeers for PortsAnOpenDoesNotUse {
             "these tests cancel nothing on '{owner}'"
         )))
     }
+
+    async fn answer_permission(
+        &self,
+        _session_token: &str,
+        _session_id: &str,
+        owner: &str,
+        _request: &tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest,
+    ) -> Result<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse, Status>
+    {
+        Err(Status::internal(format!(
+            "this test answers no permission, so none is forwarded to '{owner}'"
+        )))
+    }
 }
 
 // ─── the service under test ─────────────────────────────────────────────────────────────────────
@@ -337,6 +369,9 @@ fn a_daemon_serving(
         )),
         clones,
         conversations: Arc::new(OpenAgentConversations::new()),
+        conversation_frames: Arc::new(
+            tddy_daemon_kernel::conversation_frames::ConversationFrames::default(),
+        ),
         admission: Arc::new(PortsAnOpenDoesNotUse),
         catalog: Arc::new(PortsAnOpenDoesNotUse),
         broadcast: Arc::new(PortsAnOpenDoesNotUse),

@@ -56,6 +56,12 @@ fn permission_relay_socket_path() -> Option<PathBuf> {
     }
 }
 
+/// The conversation a headless coding agent's permission prompts belong to: `TDDY_CONVERSATION_ID`,
+/// the variable the exec tools read too.
+fn permission_conversation_id() -> Option<String> {
+    crate::mcp_primitives::exec_conversation_from_env()
+}
+
 /// Parameters for the approval_prompt tool (Claude Code permission-prompt-tool format).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ApprovalPromptInput {
@@ -301,11 +307,14 @@ pub const UNKNOWN_TOOL_REJECTION: &str = "unknown MCP tool";
 pub struct PermissionServer {
     tool_router: ToolRouter<Self>,
     socket_path: Option<PathBuf>,
+    /// The conversation this server answers for, when a managed conversation launched it.
+    conversation_id: Option<String>,
 }
 
 impl PermissionServer {
     pub fn new() -> Self {
         let socket_path = permission_relay_socket_path();
+        let conversation_id = permission_conversation_id();
         let mut tool_router = Self::tool_router();
         let seed_defs = seed_subagents_or_report();
         // Session-tool transport (sandbox IPC or daemon HTTP) present => forward the
@@ -360,6 +369,7 @@ impl PermissionServer {
         Self {
             tool_router,
             socket_path,
+            conversation_id,
         }
     }
 
@@ -606,13 +616,24 @@ impl PermissionServer {
         }
     }
 
+    /// Decide a permission prompt exactly as the `approval_prompt` tool does. Plain delegation to
+    /// [`decide`](Self::decide), for callers outside this module.
+    pub fn decide_for_approval(&self, tool_name: &str, input: &Value) -> String {
+        self.decide(tool_name, input)
+    }
+
     /// Decide allow/deny. Bash(tddy-tools *) and mcp__tddy-tools__* are always allowed.
     /// Bash commands that only reference paths under TDDY_SESSION_DIR or TDDY_REPO_DIR are pre-allowed.
     /// For other tools: route through TDDY_SOCKET to TUI if available, else deny.
+    /// A server answering for a conversation (`TDDY_CONVERSATION_ID`) hands the prompt to that
+    /// conversation instead; see [`Self::decide_for_conversation`].
     ///
     /// Claude Code permission-prompt-tool expects allow responses to include `updatedInput` (the
     /// original or modified tool input). Deny responses use `behavior: "deny"` and optional `message`.
     fn decide(&self, tool_name: &str, input: &Value) -> String {
+        if let Some(conversation_id) = self.conversation_id.as_deref() {
+            return self.decide_for_conversation(conversation_id, tool_name, input);
+        }
         let allow_response = || serde_json::json!({ "behavior": "allow", "updatedInput": input });
         if tool_name == "Bash" {
             let command = input.get("command").and_then(|c| c.as_str()).unwrap_or("");
@@ -651,6 +672,79 @@ impl PermissionServer {
             "message": format!("Permission denied for {} (no TUI socket)", tool_name)
         })
         .to_string()
+    }
+
+    /// Decide a prompt raised by the conversation `conversation_id`. The conversation's own decision
+    /// point answers, over the tool route (`RequestApproval`), and no local pre-allow applies: a
+    /// headless conversation yields every prompt to its conversation. tddy-tools' own MCP tools are
+    /// the one exception.
+    ///
+    /// Fails closed: only an explicit allow from the daemon is an allow. A refusal, a missing route, a
+    /// call that fails and a daemon that does not answer in time are denials, each carrying its reason.
+    fn decide_for_conversation(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+        input: &Value,
+    ) -> String {
+        let allow_response = || serde_json::json!({ "behavior": "allow", "updatedInput": input });
+        if tool_name.starts_with("mcp__tddy-tools__") {
+            return allow_response().to_string();
+        }
+        let deny = |message: String| {
+            serde_json::json!({ "behavior": "deny", "message": message }).to_string()
+        };
+        match Self::request_conversation_approval(conversation_id, tool_name, input) {
+            Ok(true) => allow_response().to_string(),
+            Ok(false) => deny(format!("Permission denied for {tool_name}")),
+            Err(reason) => deny(reason),
+        }
+    }
+
+    /// One conversation-tagged approval over the tool route, asked through the session tool client.
+    /// The round trip runs on a thread with a runtime of its own, so no runtime is entered from inside
+    /// the caller's, and it is bounded by the client's approval bound: a route that never answers
+    /// denies the prompt.
+    ///
+    /// `Ok(allow)` is the daemon's decision; `Err` carries the text a denial reports.
+    fn request_conversation_approval(
+        conversation_id: &str,
+        tool_name: &str,
+        input: &Value,
+    ) -> Result<bool, String> {
+        let round_trip = std::thread::scope(|scope| {
+            scope
+                .spawn(move || -> Result<bool, String> {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| format!("could not start the approval runtime: {e}"))?;
+                    runtime.block_on(async {
+                        match tokio::time::timeout(
+                            crate::session_tool_client::APPROVAL_CLIENT_BOUND,
+                            crate::session_tool_client::request_approval(
+                                conversation_id,
+                                tool_name,
+                                input,
+                            ),
+                        )
+                        .await
+                        {
+                            Ok(decision) => decision,
+                            Err(_elapsed) => Err(format!(
+                                "the approval from conversation {conversation_id} timed out"
+                            )),
+                        }
+                    })
+                })
+                .join()
+        });
+        match round_trip {
+            Ok(decision) => decision,
+            Err(_panicked) => Err(format!(
+                "the approval from conversation {conversation_id} failed unexpectedly"
+            )),
+        }
     }
 
     #[cfg(unix)]
@@ -1602,7 +1696,10 @@ pub async fn build_dynamic_tool_list(
 /// Dispatch a call to a dynamic (non-static) tool via the session daemon.
 ///
 /// Uses [`crate::session_tool_client::dispatch_session_tool`] — sandbox IPC when
-/// `TDDY_SANDBOX_TOOL_IPC` is set, otherwise HTTP to `TDDY_REMOTE_DAEMON_URL`.
+/// `TDDY_SANDBOX_TOOL_IPC` is set, otherwise HTTP to `TDDY_REMOTE_DAEMON_URL`. When
+/// `TDDY_CONVERSATION_ID` names the conversation a managed coding agent runs on,
+/// [`crate::session_tool_client::dispatch_conversation_tool`] instead, so the daemon runs the call
+/// in that conversation's worktree.
 ///
 /// A tool the session's **live** roster has withdrawn is refused here rather than run. This is the
 /// second of the two enforcement layers in docs/ft/daemon/session-agent-roster.md § Enforced at two
@@ -1615,7 +1712,13 @@ pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> 
         log::info!(target: "tddy_tools::server", "refusing {tool_name}: {refusal}");
         return serde_json::json!({"error": refusal.to_string(), "is_error": true}).to_string();
     }
-    crate::session_tool_client::dispatch_session_tool(tool_name, args).await
+    match crate::mcp_primitives::exec_conversation_from_env() {
+        Some(conversation) => {
+            crate::session_tool_client::dispatch_conversation_tool(&conversation, tool_name, args)
+                .await
+        }
+        None => crate::session_tool_client::dispatch_session_tool(tool_name, args).await,
+    }
 }
 
 /// The exec tools forwarded to Claude Code when a session-tool transport (sandbox IPC or daemon
@@ -1804,12 +1907,17 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
                     // No provider: the loop runs on the facilitating daemon, against an
                     // endpoint this process cannot see. Naming one here would report a queue
                     // the turn is not standing in.
-                    SubagentConversation::opened(
-                        opened.agent_id,
-                        None,
-                        opened.session,
-                        opened.remote,
-                    ),
+                    {
+                        let mut conversation = SubagentConversation::opened(
+                            opened.agent_id,
+                            None,
+                            opened.session,
+                            opened.remote,
+                        );
+                        conversation.clone_placed =
+                            crate::worktree_route::is_clone_placement(entry.placement);
+                        conversation
+                    },
                 );
                 serde_json::json!({ "sessionId": session_id }).to_string()
             }
@@ -1907,7 +2015,7 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
 ///
 /// Queues exactly as a prompt does: a conversation runs one turn at a time, so a resume accepted
 /// while a turn is in flight waits behind it and reports `queuePosition` / `queueSize`.
-async fn subagent_resume_tool(args: serde_json::Value) -> String {
+pub async fn subagent_resume_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
     };
@@ -1957,6 +2065,19 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
     };
     let request = match replacement_of(&args, request) {
         Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
+    // A deferral hands the pending request to the user: the daemon holds the turn until the user
+    // answers it, and the call returns pending with `awaitingUser` (see `take_a_turn`). Combined
+    // with an answer it is refused, naming both, by the parser.
+    let request = match crate::permission_deferral_arg::parse_permission_deferral(&args) {
+        Ok(Some(request_id)) => request.deferring_permission_to_user(request_id),
+        Ok(None) => request,
+        Err(e) => return subagent_error_json(e),
+    };
+    let request = match crate::permission_answer_arg::parse_permission_answer(&args) {
+        Ok(Some(answer)) => request.with_permission_answer(answer),
+        Ok(None) => request,
         Err(e) => return subagent_error_json(e),
     };
     take_a_turn(session_id, request, grace).await
@@ -2042,6 +2163,7 @@ async fn take_a_turn(session_id: &str, request: TurnRequest, grace: std::time::D
     let Some(conv) = sessions.open.get(session_id) else {
         return subagent_error_json(format!("unknown subagent session: {session_id}"));
     };
+    let awaiting_user = request.permission_deferred_to_user().is_some();
     let turn = DeferredTurn {
         response_id: uuid::Uuid::new_v4().to_string(),
         conversation_id: session_id.to_string(),
@@ -2064,6 +2186,9 @@ async fn take_a_turn(session_id: &str, request: TurnRequest, grace: std::time::D
         provider.as_deref(),
         running.abort_handle(),
     );
+    if awaiting_user {
+        sessions.pending.mark_awaiting_user(&response_id);
+    }
     let mut watched = sessions
         .pending
         .watch(&response_id)
@@ -2096,7 +2221,7 @@ async fn take_a_turn(session_id: &str, request: TurnRequest, grace: std::time::D
 /// An unknown id is refused naming it rather than waited on — an await that blocked out its timeout
 /// on an id nothing was ever stored under is indistinguishable from a slow turn, and would have the
 /// agent poll forever for an answer that is not coming (criterion 29).
-async fn subagent_await_tool(args: serde_json::Value) -> String {
+pub async fn subagent_await_tool(args: serde_json::Value) -> String {
     let Some(response_id) = args.get("responseId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: responseId");
     };
@@ -2133,7 +2258,7 @@ async fn subagent_await_tool(args: serde_json::Value) -> String {
 }
 
 /// `subagent_cancel` (ACP `session/cancel`-shaped): closes an open session, if any.
-pub(crate) async fn subagent_cancel_tool(args: serde_json::Value) -> String {
+pub async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
     };
@@ -2585,6 +2710,8 @@ fn subagent_resume_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
                                 commits were dropped."
             },
             (crate::sync_worktree_choice::SYNC_WORKTREE_ARG): crate::sync_worktree_choice::sync_worktree_property(),
+            (crate::permission_answer_arg::PERMISSION_ARG): crate::permission_answer_arg::permission_property(),
+            (crate::permission_deferral_arg::DEFER_ARG): crate::permission_deferral_arg::defer_property(),
         }
     }))
 }
@@ -2751,8 +2878,9 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
          A conversation runs one turn at a time, so a turn with a `queuePosition` above 0 has not \
          started: that many turns accepted before it on the same conversation are still \
          outstanding, and the number falls as they end. `queueSize` is every turn still \
-         outstanding on that conversation, this one included. Collecting an outcome does not \
-         consume it: the same responseId can be awaited again.",
+         outstanding on that conversation, this one included. A turn that handed a permission \
+         request to the user reports `awaitingUser: true` while the user has not answered it. \
+         Collecting an outcome does not consume it: the same responseId can be awaited again.",
         subagent_await_schema(),
     );
     router.add_route(subagent_route(await_tool, |args| {
@@ -3852,6 +3980,11 @@ mod tests {
                     clone_error: String::new(),
                     status: 0, // SESSION_AGENT_STATUS_UNSPECIFIED
                     last_activity: None,
+                    kind: 0,
+                    harness: String::new(),
+                    placement: 0,
+                    transport: String::new(),
+                    permission_policy: String::new(),
                 }],
             },
         );

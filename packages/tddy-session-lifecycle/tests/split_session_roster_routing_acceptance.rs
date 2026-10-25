@@ -125,6 +125,7 @@ impl ADaemonInTheCommonRoom {
                 session_id: SESSION_ON_THE_CODEBASE_HOST.to_string(),
                 daemon_instance_id: daemon.to_string(),
                 agent_id: agent_id.to_string(),
+                placement: 0,
             }))
             .await
             .map(|_| ())
@@ -260,6 +261,9 @@ fn an_attached_explorer() -> SessionAgentRecord {
         replaces: Vec::new(),
         tools: Vec::new(),
         codebase_session_id: None,
+        kind: Default::default(),
+        harness: None,
+        placement: Default::default(),
     }
 }
 

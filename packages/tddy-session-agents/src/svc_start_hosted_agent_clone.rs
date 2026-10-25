@@ -74,10 +74,7 @@ impl AgentRoster {
         let projects_dir = projects_path_for_user(
             &self
                 .config
-                .os_user_for_github(
-                    &(self.user_resolver)(session_token)
-                        .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?,
-                )
+                .os_user_for_github(&self.session_github_user(session_token)?)
                 .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?,
             Some(&self.tddy_data_dir),
         )
@@ -146,20 +143,34 @@ impl AgentRoster {
         .await
     }
 
-    /// A turn loop for an agent this daemon resolves and serves from the session's own worktree.
+    /// A turn loop for an agent this daemon resolves and serves from the session's own worktree —
+    /// or, for a `clone`-placed agent, from the conversation's own worktree (see
+    /// [`crate::clone_placement`]).
     ///
     /// `system_prompt` replaces the def's own for this conversation alone — see
     /// [`conversation_system_prompt`]; `None` leaves the def's in place.
     pub async fn open_local_agent_session(
         &self,
         session_id: &str,
+        conversation_id: &str,
         session_dir: &Path,
         record: &tddy_core::SessionAgentRecord,
         session_token: &str,
         system_prompt: Option<&str>,
     ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
-        let github_user = (self.user_resolver)(session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        if record.kind == tddy_core::AgentKindRecord::CodingAgent {
+            return self
+                .open_coding_agent_session(
+                    session_id,
+                    conversation_id,
+                    session_dir,
+                    record,
+                    session_token,
+                    system_prompt,
+                )
+                .await;
+        }
+        let github_user = self.session_github_user(session_token)?;
         // Through the spawn resolver rather than the listing one: a registry assistant's def comes
         // back carrying its provider's credential there, and a session opened without one comes up
         // "successfully" and 401s on every model call.
@@ -172,22 +183,54 @@ impl AgentRoster {
                     record.agent_id
                 ))
             })?;
-        Ok(Box::new(
-            tddy_discovery::subagent::SpecializedSubagentSession::new(
-                def.base_url.clone(),
-                def.model.clone(),
-                def.api_key.clone(),
-                def.max_turns,
-                self.local_agent_codebase_access(
+        let system_prompt = conversation_system_prompt(system_prompt, &def.system_prompt)?;
+        // A clone's conversation gets its worktree now, and its exec tools run there; a shared one
+        // works on the session worktree directly, as it always has.
+        let clone = match record.placement {
+            tddy_core::AgentPlacementRecord::Shared => None,
+            tddy_core::AgentPlacementRecord::Clone => Some(
+                crate::clone_placement::open_session_clone(
                     session_id,
+                    conversation_id,
                     session_dir,
                     &record.agent_id,
-                    session_token,
-                ),
-                conversation_system_prompt(system_prompt, &def.system_prompt)?,
-                def.tools.clone(),
+                )
+                .await?,
             ),
-        ))
+        };
+        let codebase = match clone {
+            Some(_) => self.local_agent_codebase_access_in(
+                session_id,
+                session_dir,
+                &record.agent_id,
+                session_token,
+                conversation_id,
+            ),
+            None => self.local_agent_codebase_access(
+                session_id,
+                session_dir,
+                &record.agent_id,
+                session_token,
+            ),
+        };
+        let session = tddy_discovery::subagent::SpecializedSubagentSession::new(
+            def.base_url.clone(),
+            def.model.clone(),
+            def.api_key.clone(),
+            def.max_turns,
+            codebase,
+            system_prompt,
+            def.tools.clone(),
+        );
+        // The turn-start sync goes through the port the loop asks before every turn, so the caller's
+        // files come in and the model is told what changed.
+        let turns: Box<dyn tddy_discovery::subagent::SubagentSession> = match clone {
+            None => Box::new(session),
+            Some(worktree) => Box::new(session.syncing_worktree_through(Arc::new(
+                crate::clone_placement::ConversationWorktreeSync::new(worktree),
+            ))),
+        };
+        Ok(turns)
     }
 
     /// A turn loop for an agent **this** daemon owns, reading the clone it holds for another
@@ -273,17 +316,33 @@ impl AgentRoster {
         agent_id: &str,
         session_token: &str,
     ) -> tddy_discovery::subagent::CodebaseAccess {
+        self.local_agent_codebase_access_in(session_id, session_dir, agent_id, session_token, "")
+    }
+
+    /// [`Self::local_agent_codebase_access`] for a conversation that works on a worktree of its own:
+    /// the tool engine runs its mutating calls there and commits each one (`run_in_conversation`),
+    /// which the empty `conversation_id` of the session's own worktree never does.
+    pub(crate) fn local_agent_codebase_access_in(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
+        session_token: &str,
+        conversation_id: &str,
+    ) -> tddy_discovery::subagent::CodebaseAccess {
         let service = self.clone();
         let session_token = session_token.to_string();
         let session_id = session_id.to_string();
         let session_dir = session_dir.to_path_buf();
         let agent_id = agent_id.to_string();
+        let conversation_id = conversation_id.to_string();
         tddy_discovery::subagent::CodebaseAccess::managed(move |tool_name, args| {
             let service = service.clone();
             let session_token = session_token.clone();
             let session_id = session_id.clone();
             let session_dir = session_dir.clone();
             let agent_id = agent_id.clone();
+            let conversation_id = conversation_id.clone();
             Box::pin(async move {
                 // This dispatch is the only place this daemon sees the agent's own loop enter a
                 // tool call, so it is the only place EXECUTING_TOOL can be told from RUNNING.
@@ -300,7 +359,7 @@ impl AgentRoster {
                     daemon_instance_id: String::new(),
                     tool_name,
                     args_json: args.to_string(),
-                    conversation_id: String::new(),
+                    conversation_id,
                 };
                 let answer = match peer_session_answer::resolve_exec_tool_worktree(
                     &service.config,

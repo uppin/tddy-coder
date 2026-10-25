@@ -15,6 +15,6 @@ pub use provider::{GitHubOAuthProvider, GitHubUser};
 pub use real::RealGitHubProvider;
 pub use session_token_v2::{
     KeyId, SessionClaims, SessionTokenAuthority, SessionTokenError, SessionTokenSigner,
-    SessionTokenVerifier, TokenKind, REFRESH_TOKEN_TTL, SESSION_TOKEN_TTL,
+    SessionTokenVerifier, TokenKind, TokenPrincipal, REFRESH_TOKEN_TTL, SESSION_TOKEN_TTL,
 };
 pub use stub::StubGitHubProvider;

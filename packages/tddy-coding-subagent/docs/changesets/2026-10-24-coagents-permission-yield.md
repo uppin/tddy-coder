@@ -1,0 +1,4 @@
+# 2026-10-24 — A coding agent's permission request parks until the caller answers
+**Type:** Feature
+
+`ParkedPermissions` replaces `DenyAndRecord` as the handler `CodingAgentSession` installs: a request parks (FIFO, one shown at a time), the turn ends `PermissionRequested`, and the ACP prompt stays in flight in the session's in-flight slot until a resume's answer resolves it. Cancel answers parked requests as cancelled, sends `session/cancel` and waits up to `CANCEL_SETTLE_DEADLINE` (10 s). `session.rs` crossed the file budget (323 → 501) — recorded in `code-issues/oversized-file-session.md`, not split (stack-shared). See [managed-codebase subagents](../../../../docs/ft/coder/managed-codebase-subagents.md#a-coding-subagents-permission-request-is-the-callers-to-answer) (#722, `#coagents` 3/8).

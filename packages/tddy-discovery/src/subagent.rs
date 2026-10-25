@@ -22,6 +22,7 @@ use crate::openai::{
 };
 
 mod grep_context;
+mod permission;
 mod repeated_calls;
 mod replacement;
 mod result_summary;
@@ -37,13 +38,19 @@ mod yield_condition;
 use transcript::Transcript;
 
 pub use grep_context::{ContextLine, GrepContext, GREP_CONTEXT_LINE_CEILING};
+pub use permission::{
+    answer_delivered_while_held, answered_output, permission_title, permission_tool_call_id,
+    request_input_json, AnsweredBy, PermissionAnswer, PermissionAnswering, PermissionChoice,
+    PermissionRequestView, PermissionToolCall, MAIN_AGENT_NAME,
+};
 pub use repeated_calls::{RepeatedCall, RepeatedCalls, IDENTICAL_CALL_LIMIT};
 pub use replacement::{validate_replacement, Replacement, REPLACEMENT_RESULT_LIMIT};
 pub use result_summary::{summarize, ResultSummary, SUMMARY_FIRST_LINE_CHARS};
 pub use tddy_subagent_worktree::{FileCounts, LineCounts, WorktreeChange};
 pub use tool_arguments::{validate_tool_arguments, ArgumentProblem, ArgumentViolation};
 pub use transcript::{
-    MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor, MESSAGE_PREVIEW_CHARS,
+    preview_of, MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor,
+    MESSAGE_PREVIEW_CHARS,
 };
 pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
 pub use worktree_reset::{ResetTarget, WorktreeReset, WorktreeResetPort};
@@ -104,6 +111,11 @@ pub enum StopReason {
     /// including the yielded call is the answer. The outcome names the fired condition and the
     /// yielded tool message's id, which is the id a resume-with-replacement consumes.
     YieldedToCaller,
+    /// A coding agent asked permission for a tool call, and the turn yielded the request to the
+    /// caller. The agent's own turn is still running, paused on the question: the caller answers
+    /// with a resume carrying a [`PermissionAnswer`], which continues that turn. The outcome's
+    /// [`PromptOutcome::permission_request`] names the request.
+    PermissionRequested,
 }
 
 /// Result of one [`SubagentSession::take_turn`] call — the loop's yield point.
@@ -138,6 +150,9 @@ pub struct PromptOutcome {
     /// What the turn's sync merged from the caller before it ran — `None` when nothing was merged
     /// (no worktree, an unchanged caller, or `syncWorktree: false`).
     pub worktree_sync: Option<WorktreeSync>,
+    /// The request the turn yielded on, when it stopped on [`StopReason::PermissionRequested`];
+    /// `None` for every other stop reason.
+    pub permission_request: Option<PermissionRequestView>,
 }
 
 impl PromptOutcome {
@@ -154,6 +169,7 @@ impl PromptOutcome {
             yielded_message_id: None,
             worktree_reset: None,
             worktree_sync: None,
+            permission_request: None,
         }
     }
 }
@@ -169,6 +185,17 @@ impl std::fmt::Display for SubagentError {
 }
 
 impl std::error::Error for SubagentError {}
+
+impl SubagentError {
+    /// A request option that acts on an OpenAI-loop transcript, sent to a coding agent — which
+    /// keeps its own history and exposes none of it to rewind, correct or condition on.
+    pub fn unsupported_by_coding_agent(option: &str) -> Self {
+        SubagentError(format!(
+            "`{option}` is not supported by a coding agent: it acts on a model-loop transcript, and a \
+             coding agent keeps its own"
+        ))
+    }
+}
 
 impl From<String> for SubagentError {
     fn from(message: String) -> Self {
@@ -218,6 +245,22 @@ pub trait SubagentSession: Send {
     /// Bounded per message so that reading the tail of one full context cannot fill the reader's
     /// own.
     fn tail(&self, max_messages: usize) -> Vec<String>;
+
+    /// The updates this conversation streams as its turns run, or `None` when it does not stream: a
+    /// model loop answers each turn whole, when the turn ends.
+    ///
+    /// The receiver carries only what is sent after it is created, so a caller takes it before the
+    /// first turn runs. Every call returns a receiver of the same stream.
+    fn updates(&self) -> Option<tokio::sync::broadcast::Receiver<tddy_agent_backend::AcpUpdate>> {
+        None
+    }
+
+    /// The handle a permission request this conversation parks is answered through, or `None` when
+    /// the conversation parks none. The daemon's `AnswerAgentPermission` reaches a conversation's
+    /// parked requests through it, without holding the conversation's own lock.
+    fn permission_answerer(&self) -> Option<std::sync::Arc<dyn PermissionAnswering>> {
+        None
+    }
 }
 
 /// Boxed async dispatch fn injected by the caller (`tddy-tools`) for managed codebase access.
@@ -1941,6 +1984,13 @@ impl SubagentSession for SpecializedSubagentSession {
         // malformed request costs no model turn (AC5). The replacement is refused on the same
         // discipline, for the same reason.
         validate_yield_conditions(request.yield_conditions()).map_err(SubagentError)?;
+        // A model loop never asks permission, so an answer has nothing to answer.
+        if let Some(answer) = request.permission_answer() {
+            return Err(SubagentError(format!(
+                "this subagent is a model loop, which never asks permission: the answer to '{}' has nothing to answer",
+                answer.request_id()
+            )));
+        }
         if let Some(replacement) = request.replacement() {
             validate_replacement(replacement).map_err(SubagentError)?;
         }

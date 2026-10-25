@@ -21,7 +21,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema } from "../../src/gen/session_pb";
-import { SessionAgentStatus } from "../../src/gen/types_pb";
+import { AgentKind, SessionAgentStatus } from "../../src/gen/types_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import {
@@ -323,5 +323,34 @@ describe("Agent roster — what each agent is doing", () => {
 
     // Then
     page.rowLastActivity(EXPLORER).should("contain.text", "5m ago");
+  });
+});
+
+describe("Agent roster — coding agents", () => {
+  const CODEX = "codex-fast@workstation-1";
+
+  beforeEach(() => {
+    cy.viewport(1280, 800);
+    cy.clock(NOW_MS);
+  });
+
+  it("a roster row for a coding agent shows its badge", () => {
+    // Given
+    const roster = aSessionAgentRosterBackend({
+      sessionId: SESSION_ID,
+      rev: 1,
+      initial: [
+        anAttachedAgent(CODEX, { kind: AgentKind.CODING_AGENT, harness: "codex-acp", tools: [] }),
+        anAttachedAgent(EXPLORER),
+      ],
+    });
+
+    // When
+    mountPane(roster);
+
+    // Then
+    page.rowKind(CODEX).should("have.text", "coding agent · codex-acp");
+    page.row(EXPLORER).should("exist");
+    page.rowKind(EXPLORER).should("not.exist");
   });
 });

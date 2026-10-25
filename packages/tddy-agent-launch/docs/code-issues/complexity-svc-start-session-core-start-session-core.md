@@ -88,3 +88,13 @@ profile). So even a cross-crate run that instruments only `tddy_agent_launch` re
 outer fn's count) but **0 regions of the body**. The 25% above comes from a capture with every
 `tddy_*` crate instrumented.
 
+
+## Measurement update 2026-10-25 — workspace seed admission
+
+**Regressed by eight lines:** 384 → 392 by brace matching (fn line to closing brace) against
+`origin/feature/coagents/clone-placement` (`5a2c1ecf2`), by `#coagents` 6/8 (#725). The workspace
+branch resolves and admits its roster seed before anything of the session is written: one
+`if req.agent_clone.is_none()` choosing between `self.admitted_workspace_seed(&req).await?` and an empty
+seed, plus its comment. The admission itself lives in `workspace_branch_start.rs`
+(`LaunchSessions::admitted_workspace_seed`). One branch and one early exit added; nesting not re-derived.
+Not split: the remaining seams are the early-return guards the engine refuses (E4). Not claimed by any PR.

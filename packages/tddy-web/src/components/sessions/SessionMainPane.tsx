@@ -6,6 +6,7 @@ import { SessionActivitiesPane } from "./SessionActivitiesPane";
 import { PARAM_CODE } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
+import { rosterHalfOf } from "./sessionRosterHalf";
 import { Button } from "../ui/button";
 import { CreateSessionPane } from "./CreateSessionPane";
 import { AgentPicker } from "./AgentPicker";
@@ -45,6 +46,7 @@ export function SessionMainPane({
   prStackClient,
   host,
   sessionToken = "",
+  callerLogin = null,
   onCancelCreate,
   onSessionCreated,
   room = null,
@@ -175,6 +177,7 @@ export function SessionMainPane({
           }
           focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
+          callerLogin={callerLogin}
           client={sessionAgentClient}
           terminalClient={terminalClient}
           mobileShortcuts={mobileShortcuts}
@@ -199,6 +202,7 @@ export function SessionMainPane({
       <SessionActivitiesPane
         sessionId={selectedSession.sessionId}
         sessionToken={sessionToken}
+        rosterHalf={rosterHalfOf(selectedSession)}
         client={buildSessionActivityClient?.() ?? activityClient}
       />
     ) : null);

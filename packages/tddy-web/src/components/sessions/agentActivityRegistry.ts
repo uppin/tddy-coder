@@ -3,7 +3,8 @@
  * overlay. It holds the streamed activity `count`, the lazily-pulled transcript `messages`, the
  * `seenCount` baseline (for the unread badge), whether the heavy snapshot has already
  * `snapshotLoaded`, and the tool bodies fetched on demand by the detail dialog (`toolDetails`), keyed
- * by `sessionId`.
+ * by replay key — the session's own transcript, or one of its subagent conversations' (see
+ * {@link replayKeyOf}).
  *
  * It mirrors {@link SessionRuntimeRegistry}: an observable store (subscribe/notify with an
  * immutably-replaced per-session snapshot) consumed via `useSyncExternalStore`. Because a session's
@@ -62,14 +63,26 @@ export interface AgentActivityState {
    *  cached — a still-running call's output can still arrive, so caching its partial body would keep
    *  it stale for the rest of the session. */
   readonly toolDetails: ReadonlyMap<string, ToolCallDetail>;
+  /** True once a replay of this key was answered `NOT_FOUND`: a subagent conversation that recorded
+   *  nothing (an in-jail loop, or an id this session never ran). Set by either feed, never cleared. */
+  readonly notRecorded: boolean;
 }
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 const EMPTY_TOOL_DETAILS: ReadonlyMap<string, ToolCallDetail> = new Map();
 
-function freshState(sessionId: string): AgentActivityState {
+/**
+ * The registry key of one replay: the session's own transcript (`conversationId` absent or empty), or
+ * one of its subagent conversations' transcripts. A session id is a single path segment, so a
+ * conversation key cannot collide with another session's key.
+ */
+export function replayKeyOf(sessionId: string, conversationId?: string): string {
+  return conversationId ? `${sessionId}/conversations/${conversationId}` : sessionId;
+}
+
+function freshState(key: string): AgentActivityState {
   return {
-    sessionId,
+    sessionId: key,
     count: 0,
     countLoaded: false,
     messages: EMPTY_MESSAGES,
@@ -80,6 +93,7 @@ function freshState(sessionId: string): AgentActivityState {
     seenCount: 0,
     snapshotLoaded: false,
     toolDetails: EMPTY_TOOL_DETAILS,
+    notRecorded: false,
   };
 }
 
@@ -169,6 +183,13 @@ export class AgentActivityRegistry {
     const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
     if (prev.snapshotLoaded) return;
     this.write(sessionId, { ...prev, snapshotLoaded: true });
+  }
+
+  /** Mark that a replay of this key was answered `NOT_FOUND`. No-op (no notify) when already marked. */
+  markNotRecorded(sessionId: string): void {
+    const prev = this.bySessionId.get(sessionId) ?? freshState(sessionId);
+    if (prev.notRecorded) return;
+    this.write(sessionId, { ...prev, notRecorded: true });
   }
 
   /** Cache one tool call's fetched bodies under its `tool_call_id`. The map is replaced (never

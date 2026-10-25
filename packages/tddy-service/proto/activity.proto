@@ -193,6 +193,7 @@ message GetAcpReplayPageRequest {
   string daemon_instance_id = 3;
   uint64 before_seq         = 4;   // exclusive upper bound; frames with seq < before_seq
   uint32 page_size          = 5;   // 0 ⇒ the server's default page size
+  string conversation_id    = 6;   // as on StreamAcpReplay: a subagent conversation's transcript
 }
 
 // One page of the resolved transcript, oldest-first. `at_oldest` is an explicit field rather than
@@ -213,6 +214,7 @@ message GetAcpToolCallDetailRequest {
   string session_id         = 2;
   string daemon_instance_id = 3;   // same peer-forward routing as StreamAcpReplay
   string tool_call_id       = 4;   // the ToolCall.tool_call_id from a streamed frame
+  string conversation_id    = 5;   // as on StreamAcpReplay: a call of a subagent conversation
 }
 
 // One tool call's stripped-out bodies: the exact JSON strings the stream used to inline. Either may
@@ -303,6 +305,10 @@ message StreamAcpReplayRequest {
   StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
   // TAIL_THEN_LIVE only: how many newest frames to replay. 0 ⇒ the server's default page size.
   uint32     page_size          = 5;
+  // A subagent conversation of the session, by id: replay that conversation's own transcript
+  // instead of the session's. Empty ⇒ the session's. A conversation with no recorded transcript
+  // (an in-jail loop, or an unknown id) is NOT_FOUND naming it.
+  string     conversation_id    = 6;
 }
 
 // Whether the stream replays the persisted history before tailing live records.

@@ -146,6 +146,9 @@ pub struct DaemonSessionHost {
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
     agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
+    /// The live frames of every daemon-run subagent conversation. One channel per conversation, shared
+    /// by the session-agents recorder that publishes into it and the activity replay that tails it.
+    agent_conversation_frames: Arc<tddy_daemon_kernel::conversation_frames::ConversationFrames>,
     /// What each agent session's own conversation says its agent is doing
     /// (`docs/ft/daemon/agent-session-status.md`), which `ListSessions` reports. Beside the hub it
     /// subscribes to, and shared across clones so the seed a listing paid for is not re-read by the
@@ -172,6 +175,12 @@ pub struct DaemonSessionHost {
     /// (`docs/ft/daemon/session-room.md`); `DeleteSession` closes one again.
     /// [`tddy_daemon_extensions::NoSessionRooms`] until [`Self::with_session_rooms`].
     session_rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
+    /// What starts a coding-agent subagent for a conversation; `None` until
+    /// [`Self::with_coding_agent_launcher`].
+    coding_agent_launcher: Option<Arc<dyn tddy_coding_subagent::CodingAgentLauncher>>,
+    /// The routes a headless coding agent's permission approvals are answered through; `None` until
+    /// [`Self::with_approval_routes`], which refuses every approval.
+    approval_routes: Option<Arc<tddy_coding_subagent::ApprovalRoutes>>,
     /// This daemon's model registry, whose assistants are selectable agents alongside the
     /// `allowed_agents` config entries. `None` means no registry is wired (a test fixture), in
     /// which case `ListAgents` reports the config entries alone.
@@ -283,6 +292,10 @@ mod svc_split_delegators;
 pub(crate) use agent_roster::*;
 /// Shared with `tddy-daemon-rpc`'s `ListSubagents`, whose rows name agents the way the roster does.
 pub use agent_roster::{def_tool_names, qualified_agent_id};
+/// Shared with `tddy-daemon-rpc`'s `ListSubagents`: the coding agents a daemon offers.
+pub use tddy_session_agents::coding_agent::{
+    agent_kind_to_wire, coding_agent_defs_for, coding_agent_record,
+};
 
 pub use svc_resolve_listed_worktree::resolvable_agent_defs;
 
@@ -429,6 +442,9 @@ mod report_session_status_unit_tests;
 
 #[cfg(test)]
 mod agent_activity_unit_tests;
+
+#[cfg(test)]
+mod conversation_replay_unit_tests;
 
 /// Resuming a session must relaunch its child with the *same* coding agent and workflow recipe it
 /// was originally started with — read back from the persisted `.session.yaml`. Before this,

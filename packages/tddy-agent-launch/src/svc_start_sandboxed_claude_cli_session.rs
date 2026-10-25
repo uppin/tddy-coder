@@ -138,6 +138,7 @@ impl LaunchSessions {
         // (model, base_url, max_turns, replaces) comes exclusively from the resolved def.
         managed_codebase: bool,
         specialized_agents: &[String],
+        clone_placed_agents: &[String],
         // When `Some`, launch workflow-aware: inject the recipe's orchestration prompt and route the
         // agent's host-side `tddy-tools transition` to a per-session `WorkflowController`.
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
@@ -161,8 +162,9 @@ impl LaunchSessions {
         // what the withdrawal is computed from and what `.session.yaml` persists, and a reference
         // naming no agent must fail the start rather than leave the main agent holding tools it was
         // told it had given away.
-        let (mut started_agents, specialized_defs) =
-            self.warm_up_jail_agents(specialized_agents).await?;
+        let (mut started_agents, specialized_defs) = self
+            .warm_up_jail_agents(specialized_agents, clone_placed_agents)
+            .await?;
 
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)

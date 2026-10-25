@@ -143,8 +143,9 @@ impl SessionAgentRosterStore {
 
     /// Add one agent, or report the roster unchanged when it is already attached.
     ///
-    /// Idempotent on `agent_id`: a second attach of the same id returns the current roster, does
-    /// not bump `rev`, and publishes nothing.
+    /// Idempotent on `agent_id`: a second attach of the same id under the same placement returns the
+    /// current roster, does not bump `rev`, and publishes nothing. Under a different placement it is
+    /// refused, naming the placement the entry holds.
     pub fn attach(
         &self,
         session_id: &str,
@@ -152,7 +153,12 @@ impl SessionAgentRosterStore {
         record: SessionAgentRecord,
     ) -> Result<SessionAgentRoster, Status> {
         self.with_session(session_id, session_dir, |state, sources| {
-            if state.agents.iter().any(|a| a.agent_id == record.agent_id) {
+            if let Some(attached) = state.agents.iter().find(|a| a.agent_id == record.agent_id) {
+                crate::agent_placement::refuse_placement_change(
+                    session_id,
+                    Some(attached),
+                    record.placement,
+                )?;
                 return Ok(state.snapshot(session_id, sources));
             }
             let mut next = state.agents.clone();
@@ -374,6 +380,8 @@ fn roster_entry(
     // Both live signals, read together: the checkout decides whether the agent can serve a prompt
     // at all, and only once it can does what the conversation is doing mean anything.
     let activity = sources.activity.get(session_id, &record.agent_id);
+    let (transport, permission_policy) =
+        tddy_coding_subagent::transport_and_policy_wire(record.harness.as_deref().unwrap_or(""));
     SessionAgentEntry {
         agent_id: record.agent_id.clone(),
         name: record.name.clone(),
@@ -389,6 +397,11 @@ fn roster_entry(
         // The last activity survives a state change rather than being cleared with it: what an idle
         // agent was last seen doing is the only useful thing to show on its row.
         last_activity: activity.as_ref().and_then(AgentActivity::to_proto),
+        kind: crate::coding_agent::agent_kind_to_wire(record.kind) as i32,
+        harness: record.harness.clone().unwrap_or_default(),
+        placement: crate::agent_placement::placement_to_wire(record.placement) as i32,
+        transport,
+        permission_policy,
     }
 }
 
@@ -431,6 +444,9 @@ mod tests {
             replaces: Vec::new(),
             tools: Vec::new(),
             codebase_session_id: None,
+            kind: Default::default(),
+            harness: None,
+            placement: Default::default(),
         }
     }
 
@@ -455,6 +471,8 @@ mod tests {
     fn a_remote_record(agent_id: &str, codebase_session_id: &str) -> SessionAgentRecord {
         SessionAgentRecord {
             codebase_session_id: Some(codebase_session_id.to_string()),
+            kind: Default::default(),
+            harness: None,
             ..a_record(agent_id)
         }
     }

@@ -33,3 +33,7 @@ pretty_assertions = { workspace = true }
 tddy-room-client = { path = "../tddy-room-client", features = ["test-support"] }
 serial_test = "3"
 tokio = { version = "1", features = ["rt-multi-thread"] }
+# The wire tests serve the daemon's real `/rpc` router: `connect_router` mounts it, `axum` serves it.
+# Both are already in the workspace tree, so no new crate is fetched.
+tddy-connectrpc = { path = "../tddy-connectrpc" }
+axum = "0.8"

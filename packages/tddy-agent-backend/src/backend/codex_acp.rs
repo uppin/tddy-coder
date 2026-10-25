@@ -1,366 +1,117 @@
-//! ACP backend for OpenAI Codex via the **`codex-acp`** subprocess (Agent Client Protocol).
+//! ACP backend for OpenAI Codex via the **`codex-acp`** subprocess (Agent Client Protocol), on the
+//! shared [`AcpDriver`].
 //!
 //! Spawns `codex-acp` on stdio (or **`tddy-acp-stub`** in tests). Resume uses ACP **`load_session`**
 //! with the Codex thread id stored as **`codex_thread_id`**. When the agent reports an auth-related
 //! error and [`InvokeRequest::session_dir`] is set, runs **`codex login`** with the same
 //! **`BROWSER`** / **`TDDY_CODEX_OAUTH_OUT`** path as [`super::CodexBackend`] so tddy-web can poll
-//! [`super::CODEX_OAUTH_AUTHORIZE_URL_FILENAME`].
+//! [`super::CODEX_OAUTH_AUTHORIZE_URL_FILENAME`]. That one login retry is this backend's hook on the
+//! driver.
 
-use super::acp_updates::{allow_once, record_session_update};
-use super::routed::{codex_acp_route_args, route_child_env};
-use super::{InvokeRequest, InvokeResponse, ProgressSink, SessionMode};
+use super::acp_driver::{
+    self, AcpAgentCommand, AcpAgentHooks, AcpDriver, AcpSession, AllowOnce, DriverSlot,
+    OpenSession, SessionErrorVerdict,
+};
+use super::codex::merge_codex_prompt;
+use super::routed::codex_acp_route_args;
+use super::{InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use crate::provider_route::HarnessRoute;
-use agent_client_protocol::{self as acp, Agent as _, Client};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
-use tokio::sync::{mpsc, oneshot};
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 mod oauth;
 use oauth::{acp_error_suggests_retry_oauth, run_oauth_login_via_codex_cli};
 
-#[derive(Debug, Default)]
-struct CodexAcpAccumulator {
-    output: String,
-    session_id: Option<String>,
-    questions: Vec<super::ClarificationQuestion>,
-    progress_sink: Option<ProgressSink>,
-}
-
-#[allow(clippy::large_enum_variant)]
-enum CodexAcpCommand {
-    Prompt {
-        request: InvokeRequest,
-        response_tx: oneshot::Sender<Result<InvokeResponse, BackendError>>,
-    },
-    ListModels {
-        response_tx: oneshot::Sender<Result<super::BackendModels, BackendError>>,
-    },
-    #[allow(dead_code)]
-    Shutdown,
-}
-
-struct TddyCodexAcpClient {
-    accumulator: Arc<Mutex<CodexAcpAccumulator>>,
-    auto_approve: Arc<Mutex<bool>>,
-}
-
-#[async_trait::async_trait(?Send)]
-impl Client for TddyCodexAcpClient {
-    async fn session_notification(&self, args: acp::SessionNotification) -> acp::Result<()> {
-        if let Ok(mut acc) = self.accumulator.lock() {
-            acc.session_id
-                .get_or_insert_with(|| args.session_id.0.to_string());
-            let acc = &mut *acc;
-            record_session_update(&mut acc.output, acc.progress_sink.as_ref(), args.update);
-        }
-        Ok(())
-    }
-
-    async fn request_permission(
-        &self,
-        _args: acp::RequestPermissionRequest,
-    ) -> acp::Result<acp::RequestPermissionResponse> {
-        let approve = self.auto_approve.lock().map(|g| *g).unwrap_or(true);
-        if approve {
-            Ok(allow_once())
-        } else {
-            Err(acp::Error::method_not_found())
-        }
-    }
-}
-
-/// Runs the Codex ACP worker on a dedicated thread with `LocalSet`.
-fn run_codex_acp_worker(
-    agent_path: PathBuf,
-    agent_args: Vec<String>,
-    codex_cli_path: PathBuf,
-    route: Option<HarnessRoute>,
-    mut cmd_rx: mpsc::Receiver<CodexAcpCommand>,
-) {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("codex acp worker runtime");
-    let local_set = tokio::task::LocalSet::new();
-    rt.block_on(local_set.run_until(async move {
-        let mut child = match spawn_codex_acp_agent(&agent_path, &agent_args, route.as_ref()).await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                while let Some(cmd) = cmd_rx.recv().await {
-                    match cmd {
-                        CodexAcpCommand::Prompt { response_tx, .. } => {
-                            let _ = response_tx.send(Err(e.clone()));
-                        }
-                        CodexAcpCommand::ListModels { response_tx } => {
-                            let _ = response_tx.send(Err(e.clone()));
-                        }
-                        CodexAcpCommand::Shutdown => {}
-                    }
-                }
-                return;
-            }
-        };
-
-        let stdout = child.stdout.take().expect("stdout");
-        let stdin = child.stdin.take().expect("stdin");
-        let outgoing = stdin.compat_write();
-        let incoming = stdout.compat();
-
-        let accumulator = Arc::new(Mutex::new(CodexAcpAccumulator::default()));
-        let auto_approve_flag = Arc::new(Mutex::new(true));
-        let client = TddyCodexAcpClient {
-            accumulator: accumulator.clone(),
-            auto_approve: auto_approve_flag.clone(),
-        };
-
-        let (conn, handle_io) = acp::ClientSideConnection::new(client, outgoing, incoming, |fut| {
-            tokio::task::spawn_local(fut);
-        });
-
-        tokio::task::spawn_local(handle_io);
-
-        let mut initialized = false;
-
-        'cmd_loop: while let Some(cmd) = cmd_rx.recv().await {
-            match cmd {
-                CodexAcpCommand::Prompt {
-                    request,
-                    response_tx,
-                } => {
-                    let auto_approve = true;
-                    if let Ok(mut acc) = accumulator.lock() {
-                        *acc = CodexAcpAccumulator {
-                            output: String::new(),
-                            session_id: None,
-                            questions: vec![],
-                            progress_sink: request.progress_sink.clone(),
-                        };
-                    }
-                    if let Ok(mut ap) = auto_approve_flag.lock() {
-                        *ap = auto_approve;
-                    }
-
-                    let merged_prompt = match super::codex::merge_codex_prompt(&request) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            let _ = response_tx.send(Err(e));
-                            continue;
-                        }
-                    };
-
-                    if !initialized {
-                        let init_req = acp::InitializeRequest::new(acp::ProtocolVersion::V1)
-                            .client_info(
-                                acp::Implementation::new("tddy-coder", env!("CARGO_PKG_VERSION"))
-                                    .title("TDDY Coder"),
-                            );
-                        if let Err(e) = conn.initialize(init_req).await {
-                            let _ = response_tx.send(Err(BackendError::InvocationFailed(format!(
-                                "ACP initialize failed: {e}"
-                            ))));
-                            continue;
-                        }
-                        initialized = true;
-                    }
-
-                    let cwd = request
-                        .working_dir
-                        .clone()
-                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-                    let session_dir = request.session_dir.clone();
-                    let codex_cli = codex_cli_path.clone();
-
-                    let acp_session_id: acp::SessionId = match &request.session {
-                        Some(SessionMode::Resume(thread_id)) => {
-                            let load_req = || {
-                                acp::LoadSessionRequest::new(
-                                    acp::SessionId::new(thread_id.clone()),
-                                    cwd.clone(),
-                                )
-                            };
-                            let mut oauth_tried = false;
-                            loop {
-                                match conn.load_session(load_req()).await {
-                                    Ok(_) => break acp::SessionId::new(thread_id.clone()),
-                                    Err(e) => {
-                                        let msg = e.to_string();
-                                        if !oauth_tried
-                                            && session_dir.is_some()
-                                            && acp_error_suggests_retry_oauth(&msg)
-                                        {
-                                            if let Some(ref sd) = session_dir {
-                                                if let Err(err) = run_oauth_login_via_codex_cli(
-                                                    codex_cli.clone(),
-                                                    sd.clone(),
-                                                )
-                                                .await
-                                                {
-                                                    let _ = response_tx.send(Err(err));
-                                                    continue 'cmd_loop;
-                                                }
-                                            }
-                                            oauth_tried = true;
-                                            continue;
-                                        }
-                                        let _ =
-                                            response_tx.send(Err(BackendError::InvocationFailed(
-                                                format!("ACP load_session failed: {e}"),
-                                            )));
-                                        continue 'cmd_loop;
-                                    }
-                                }
-                            }
-                        }
-                        _ => {
-                            let new_req = || acp::NewSessionRequest::new(cwd.clone());
-                            let mut oauth_tried = false;
-                            loop {
-                                match conn.new_session(new_req()).await {
-                                    Ok(r) => break r.session_id,
-                                    Err(e) => {
-                                        let msg = e.to_string();
-                                        if !oauth_tried
-                                            && session_dir.is_some()
-                                            && acp_error_suggests_retry_oauth(&msg)
-                                        {
-                                            if let Some(ref sd) = session_dir {
-                                                if let Err(err) = run_oauth_login_via_codex_cli(
-                                                    codex_cli.clone(),
-                                                    sd.clone(),
-                                                )
-                                                .await
-                                                {
-                                                    let _ = response_tx.send(Err(err));
-                                                    continue 'cmd_loop;
-                                                }
-                                            }
-                                            oauth_tried = true;
-                                            continue;
-                                        }
-                                        let _ =
-                                            response_tx.send(Err(BackendError::InvocationFailed(
-                                                format!("ACP new_session failed: {e}"),
-                                            )));
-                                        continue 'cmd_loop;
-                                    }
-                                }
-                            }
-                        }
-                    };
-
-                    let acp_session_id_str = acp_session_id.0.to_string();
-                    let prompt_req =
-                        acp::PromptRequest::new(acp_session_id, vec![merged_prompt.into()]);
-                    match conn.prompt(prompt_req).await {
-                        Ok(_) => {
-                            let acc = accumulator.lock().map(|a| CodexAcpAccumulator {
-                                output: a.output.clone(),
-                                session_id: a.session_id.clone(),
-                                questions: a.questions.clone(),
-                                progress_sink: None,
-                            });
-                            let (output, session_id, questions) = match acc {
-                                Ok(a) => (
-                                    a.output,
-                                    a.session_id.or_else(|| Some(acp_session_id_str.clone())),
-                                    a.questions,
-                                ),
-                                Err(_) => (String::new(), Some(acp_session_id_str), vec![]),
-                            };
-                            let resp = InvokeResponse {
-                                output,
-                                exit_code: 0,
-                                session_id,
-                                questions,
-                                raw_stream: None,
-                                stderr: None,
-                            };
-                            let _ = response_tx.send(Ok(resp));
-                        }
-                        Err(e) => {
-                            let _ = response_tx.send(Err(BackendError::InvocationFailed(format!(
-                                "ACP prompt failed: {e}"
-                            ))));
-                        }
-                    }
-                }
-                CodexAcpCommand::ListModels { response_tx } => {
-                    if !initialized {
-                        let init_req = acp::InitializeRequest::new(acp::ProtocolVersion::V1)
-                            .client_info(
-                                acp::Implementation::new("tddy-coder", env!("CARGO_PKG_VERSION"))
-                                    .title("TDDY Coder"),
-                            );
-                        if let Err(e) = conn.initialize(init_req).await {
-                            let _ = response_tx.send(Err(BackendError::InvocationFailed(format!(
-                                "ACP initialize failed: {e}"
-                            ))));
-                            continue;
-                        }
-                        initialized = true;
-                    }
-                    let cwd = std::env::current_dir().unwrap_or_default();
-                    let new_req = acp::NewSessionRequest::new(cwd);
-                    let result = match conn.new_session(new_req).await {
-                        Ok(r) => super::acp_models_from_session_state(r.models.as_ref()),
-                        Err(e) => Err(BackendError::InvocationFailed(format!(
-                            "ACP new_session failed: {e}"
-                        ))),
-                    };
-                    let _ = response_tx.send(result);
-                }
-                CodexAcpCommand::Shutdown => break,
-            }
-        }
-    }));
-}
-
-async fn spawn_codex_acp_agent(
-    agent_path: &PathBuf,
-    agent_args: &[String],
-    route: Option<&HarnessRoute>,
-) -> Result<tokio::process::Child, BackendError> {
-    let mut cmd = tokio::process::Command::new(agent_path);
-    for arg in agent_args {
-        cmd.arg(arg);
-    }
-    if let Some(route) = route {
-        cmd.envs(route_child_env(route));
-    }
-    cmd.stdin(std::process::Stdio::piped());
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::null());
-    cmd.spawn().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            let p = agent_path.display();
-            BackendError::BinaryNotFound(format!(
-                "{p} — install the Codex ACP stdio agent on PATH, place `codex-acp` next to your `codex` binary, or set TDDY_CODEX_ACP_CLI / --codex-acp-cli-path / coder-config `codex_acp_cli_path` (see github.com/zed-industries/codex-acp or your Codex CLI distribution)"
-            ))
-        } else {
-            BackendError::InvocationFailed(e.to_string())
-        }
-    })
-}
-
 /// Default `codex-acp` executable name on `PATH` for [`CodexAcpBackend::new`].
 pub const DEFAULT_CODEX_ACP_BINARY: &str = "codex-acp";
 
+/// The one `codex login` retry on an auth-like session error, as the driver's hooks.
+///
+/// The backend sets the session directory of the request it is opening, under its open lock, and
+/// reads back a login that failed: that failure is what the caller is told, since the session error
+/// it followed says only that the agent was not signed in.
+struct CodexLoginHooks {
+    codex_cli_path: PathBuf,
+    session_dir: tokio::sync::Mutex<Option<PathBuf>>,
+    login_failure: tokio::sync::Mutex<Option<BackendError>>,
+}
+
+impl CodexLoginHooks {
+    fn new(codex_cli_path: PathBuf) -> Self {
+        Self {
+            codex_cli_path,
+            session_dir: tokio::sync::Mutex::new(None),
+            login_failure: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    /// Name the session directory a login for the open about to run writes its URL to.
+    async fn begin_open(&self, session_dir: Option<PathBuf>) {
+        *self.session_dir.lock().await = session_dir;
+        *self.login_failure.lock().await = None;
+    }
+
+    /// End the open: clear its session directory, and return a login that failed during it.
+    async fn end_open(&self) -> Option<BackendError> {
+        *self.session_dir.lock().await = None;
+        self.login_failure.lock().await.take()
+    }
+}
+
+#[async_trait::async_trait]
+impl AcpAgentHooks for CodexLoginHooks {
+    async fn on_session_error(&self, message: &str) -> SessionErrorVerdict {
+        let session_dir = self.session_dir.lock().await.clone();
+        let Some(session_dir) = session_dir else {
+            return SessionErrorVerdict::Fail;
+        };
+        if !acp_error_suggests_retry_oauth(message) {
+            return SessionErrorVerdict::Fail;
+        }
+        match run_oauth_login_via_codex_cli(self.codex_cli_path.clone(), session_dir).await {
+            Ok(()) => SessionErrorVerdict::RetryOnce,
+            Err(error) => {
+                *self.login_failure.lock().await = Some(error);
+                SessionErrorVerdict::Fail
+            }
+        }
+    }
+}
+
+fn resolve_codex_cli_for_oauth() -> PathBuf {
+    std::env::var_os("TDDY_CODEX_CLI")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(super::CodexBackend::DEFAULT_CLI_BINARY))
+}
+
+/// A `codex-acp` that cannot be found is reported with where to get one.
+fn missing_codex_acp(error: BackendError, program: &Path) -> BackendError {
+    match error {
+        BackendError::BinaryNotFound(_) => {
+            let p = program.display();
+            BackendError::BinaryNotFound(format!(
+                "{p} — install the Codex ACP stdio agent on PATH, place `codex-acp` next to your `codex` binary, or set TDDY_CODEX_ACP_CLI / --codex-acp-cli-path / coder-config `codex_acp_cli_path` (see github.com/zed-industries/codex-acp or your Codex CLI distribution)"
+            ))
+        }
+        other => other,
+    }
+}
+
 /// Backend that invokes **`codex-acp`** over ACP (stdio JSON-RPC).
 ///
-/// The worker thread spawns the agent once, when it starts, so it starts on the first command
-/// rather than at construction: a route set by [`CodexAcpBackend::with_provider_route`] has to be
-/// known before the agent exists.
+/// The driver spawns the agent when the first request needs it, so it starts on first use rather
+/// than at construction: a route set by [`CodexAcpBackend::with_provider_route`] has to be known
+/// before the agent exists.
 pub struct CodexAcpBackend {
     agent_path: PathBuf,
     agent_args: Vec<String>,
-    codex_cli_path: PathBuf,
     /// The provider route the agent runs on (`with_provider_route`); `None` for the vendor.
     provider_route: Option<HarnessRoute>,
-    worker: OnceLock<mpsc::Sender<CodexAcpCommand>>,
+    driver: DriverSlot,
+    hooks: Arc<CodexLoginHooks>,
+    /// One session is opened at a time: the login hooks serve the request whose session is opening.
+    opening: tokio::sync::Mutex<()>,
 }
 
 impl std::fmt::Debug for CodexAcpBackend {
@@ -370,12 +121,6 @@ impl std::fmt::Debug for CodexAcpBackend {
             .field("agent_args", &self.agent_args)
             .finish()
     }
-}
-
-fn resolve_codex_cli_for_oauth() -> PathBuf {
-    std::env::var_os("TDDY_CODEX_CLI")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(super::CodexBackend::DEFAULT_CLI_BINARY))
 }
 
 impl Default for CodexAcpBackend {
@@ -409,55 +154,68 @@ impl CodexAcpBackend {
         Self {
             agent_path,
             agent_args,
-            codex_cli_path,
             provider_route: None,
-            worker: OnceLock::new(),
+            driver: Mutex::new(None),
+            hooks: Arc::new(CodexLoginHooks::new(codex_cli_path)),
+            opening: tokio::sync::Mutex::new(()),
         }
     }
 
-    /// Run the agent on `route`. A worker started before the route was set runs the vendor:
-    /// dropping its channel ends it, and the next command starts one on the route.
+    /// Run the agent on `route`. A driver started before the route was set runs the vendor: it is
+    /// dropped here, which ends its child, and the next request starts one on the route.
     pub(super) fn set_provider_route(&mut self, route: HarnessRoute) {
         self.provider_route = Some(route);
-        self.worker = OnceLock::new();
+        self.driver = Mutex::new(None);
     }
 
-    /// The worker's command channel, starting the worker on first use. On a route the agent is
-    /// given the route's `-c` overrides, and its environment when it is spawned.
-    fn commands(&self) -> &mpsc::Sender<CodexAcpCommand> {
-        self.worker.get_or_init(|| {
-            let (cmd_tx, cmd_rx) = mpsc::channel(16);
-            let agent_path = self.agent_path.clone();
-            let codex_cli_path = self.codex_cli_path.clone();
-            let route = self.provider_route.clone();
-            let mut agent_args = self.agent_args.clone();
-            if let Some(route) = &route {
-                agent_args.extend(codex_acp_route_args(route));
+    /// The driver, started on first use. On a route the agent is given the route's `-c` overrides,
+    /// and its environment.
+    fn driver(&self) -> Result<Arc<AcpDriver>, BackendError> {
+        acp_driver::started(&self.driver, || {
+            let mut args = self.agent_args.clone();
+            let mut env = Vec::new();
+            if let Some(route) = &self.provider_route {
+                args.extend(codex_acp_route_args(route));
+                env = acp_driver::route_env(route);
             }
-            std::thread::spawn(move || {
-                run_codex_acp_worker(agent_path, agent_args, codex_cli_path, route, cmd_rx)
-            });
-            cmd_tx
+            let command = AcpAgentCommand {
+                program: self.agent_path.clone(),
+                args,
+                env,
+                cwd: None,
+            };
+            AcpDriver::spawn(command, Arc::new(AllowOnce), self.hooks.clone())
+                .map_err(|e| missing_codex_acp(e, &self.agent_path))
         })
+    }
+
+    /// Open a session for a request. A login the hooks ran and that failed is the error reported.
+    async fn open_session(
+        &self,
+        driver: &AcpDriver,
+        open: OpenSession,
+        session_dir: Option<PathBuf>,
+    ) -> Result<AcpSession, BackendError> {
+        let _one_at_a_time = self.opening.lock().await;
+        self.hooks.begin_open(session_dir).await;
+        let opened = driver.open_session(open).await;
+        match (opened, self.hooks.end_open().await) {
+            (Err(_), Some(login_failure)) => Err(login_failure),
+            (opened, _) => opened,
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl super::CodingBackend for CodexAcpBackend {
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.commands()
-            .send(CodexAcpCommand::Prompt {
-                request,
-                response_tx,
-            })
-            .await
-            .map_err(|_| {
-                BackendError::InvocationFailed("Codex ACP worker channel closed".to_string())
-            })?;
-        response_rx.await.map_err(|_| {
-            BackendError::InvocationFailed("Codex ACP worker dropped response".to_string())
-        })?
+        let prompt = merge_codex_prompt(&request)?;
+        let driver = self.driver()?;
+        let open = acp_driver::open_for_request(&request, self.provider_route.is_some())?;
+        let session = self
+            .open_session(&driver, open, request.session_dir.clone())
+            .await?;
+        acp_driver::answer(&driver, session, prompt, request.progress_sink).await
     }
 
     fn name(&self) -> &str {
@@ -465,16 +223,7 @@ impl super::CodingBackend for CodexAcpBackend {
     }
 
     async fn list_models(&self) -> Result<super::BackendModels, BackendError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.commands()
-            .send(CodexAcpCommand::ListModels { response_tx })
-            .await
-            .map_err(|_| {
-                BackendError::InvocationFailed("Codex ACP worker channel closed".to_string())
-            })?;
-        response_rx.await.map_err(|_| {
-            BackendError::InvocationFailed("Codex ACP worker dropped response".to_string())
-        })?
+        self.driver()?.list_models().await
     }
 }
 

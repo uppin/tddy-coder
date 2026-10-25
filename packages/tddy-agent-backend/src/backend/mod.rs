@@ -1,16 +1,18 @@
 //! Coding backend abstraction for LLM-based coders.
 
 mod acp;
-mod acp_updates;
+pub mod acp_driver;
 mod claude;
 mod codex;
 pub mod codex_acp;
 mod context_globs;
 mod cursor;
+pub mod headless_driver;
 mod mock;
 pub mod model_catalog;
 mod opencode_acp;
 mod routed;
+pub use routed::codex_acp_route_args;
 mod stub;
 mod tool_executor;
 

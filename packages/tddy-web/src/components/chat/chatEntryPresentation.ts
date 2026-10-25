@@ -20,6 +20,8 @@ export function bubbleClass(from: ChatMessage["from"]): string {
       return "self-center text-xs text-muted-foreground italic font-medium";
     case "tool":
       return "self-start rounded-md border border-border bg-muted/50 px-3 py-2 font-mono text-xs";
+    case "subagent":
+      return "self-start rounded-md border border-primary/40 bg-muted/50 px-3 py-2 text-xs font-medium";
     default:
       return "self-center text-xs text-muted-foreground italic";
   }
@@ -30,7 +32,12 @@ export function toolStatusClass(status: NonNullable<ChatMessage["toolStatus"]>):
   const base = "rounded px-1.5 py-0.5 text-[10px] font-medium leading-none";
   if (status === "error") return `${base} text-destructive`;
   if (status === "completed") return `${base} text-muted-foreground`;
-  return `${base} text-primary`; // running
+  return `${base} text-primary`; // running, or awaiting the user: both want the operator's eye
+}
+
+/** The words a status marker says. `awaiting_user` is said to the operator, not named as a state. */
+export function toolStatusLabel(status: NonNullable<ChatMessage["toolStatus"]>): string {
+  return status === "awaiting_user" ? "waiting for you" : status;
 }
 
 /** DEBUG-style "+Ns" (or "+Nms" under a second) elapsed badge: the gap from the previous entry.

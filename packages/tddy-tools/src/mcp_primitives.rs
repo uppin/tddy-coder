@@ -44,6 +44,13 @@ pub(crate) fn subagent_access_is_managed() -> bool {
     }
 }
 
+/// The conversation this process's exec calls run in: the one a managed coding agent's launch named
+/// in `TDDY_CONVERSATION_ID` (`tddy_coding_subagent::CONVERSATION_ID_ENV`), which the daemon sets only
+/// for a conversation with a worktree of its own. `None` runs them in the session's worktree.
+pub(crate) fn exec_conversation_from_env() -> Option<String> {
+    env_non_empty("TDDY_CONVERSATION_ID")
+}
+
 /// How a subagent's internal READ/GLOB/GREP calls reach the codebase — see
 /// [`subagent_access_is_managed`].
 ///

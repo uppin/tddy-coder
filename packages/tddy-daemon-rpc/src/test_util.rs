@@ -18,9 +18,10 @@ use tddy_service::proto::catalog::{
     ListToolsResponse,
 };
 use tddy_service::proto::exec_tools::{
-    ConversationWorktreeRequest, ConversationWorktreeResponse, ExecToolService, ExecuteToolChunk,
-    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ApprovalRequest, ApprovalResponse, ConversationWorktreeRequest, ConversationWorktreeResponse,
+    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse,
 };
 use tddy_service::proto::pr_stack::{
     AddPlannedPrRequest, AddPlannedPrResponse, GetPrStatusRequest, GetPrStatusResponse,
@@ -111,6 +112,35 @@ pub fn test_service(sessions_base: PathBuf) -> TestDaemon {
     let daemon = TestDaemon::from_host(tddy_session_lifecycle::test_util::test_host(sessions_base));
     daemon.as_arc().install_sandbox_rpc_bridge();
     daemon
+}
+
+/// [`test_service`] with `launcher` starting every coding-agent subagent — a test injects one that
+/// records each launch and points it at `tddy-acp-stub`.
+pub fn test_service_with_coding_agent_launcher(
+    sessions_base: PathBuf,
+    launcher: Arc<dyn tddy_coding_subagent::CodingAgentLauncher>,
+) -> TestDaemon {
+    let daemon = TestDaemon::from_host(
+        tddy_session_lifecycle::test_util::test_host(sessions_base)
+            .with_coding_agent_launcher(launcher),
+    );
+    daemon.as_arc().install_sandbox_rpc_bridge();
+    daemon
+}
+
+/// [`test_service_with_coding_agent_launcher`] over a host that authenticates real session tokens
+/// ([`tddy_session_lifecycle::test_util::signing_test_host`]), with the credentials it accepts.
+pub fn signing_test_service_with_coding_agent_launcher(
+    sessions_base: PathBuf,
+    launcher: Arc<dyn tddy_coding_subagent::CodingAgentLauncher>,
+) -> (
+    TestDaemon,
+    tddy_session_lifecycle::test_util::SignedTestCredentials,
+) {
+    let (host, credentials) = tddy_session_lifecycle::test_util::signing_test_host(sessions_base);
+    let daemon = TestDaemon::from_host(host.with_coding_agent_launcher(launcher));
+    daemon.as_arc().install_sandbox_rpc_bridge();
+    (daemon, credentials)
 }
 
 impl Deref for TestDaemon {
@@ -269,6 +299,16 @@ impl ExecToolService for TestDaemon {
         self.handlers
             .exec_tool_service()
             .conversation_worktree(request)
+            .await
+    }
+
+    async fn request_approval(
+        &self,
+        request: Request<ApprovalRequest>,
+    ) -> Result<Response<ApprovalResponse>, Status> {
+        self.handlers
+            .exec_tool_service()
+            .request_approval(request)
             .await
     }
 }

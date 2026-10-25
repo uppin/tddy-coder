@@ -19,6 +19,8 @@ pub mod index_client;
 pub mod index_console;
 pub mod list_models;
 pub mod mcp_primitives;
+pub mod permission_answer_arg;
+pub mod permission_deferral_arg;
 pub mod pty_relay;
 mod pull_ledger;
 pub mod remote_cli;
@@ -34,6 +36,7 @@ mod sync_worktree_choice;
 pub mod tool_list_announcer;
 mod worktree_answer;
 mod worktree_reset_port;
+pub mod worktree_route;
 mod worktree_sync_port;
 
 /// The in-session tool client, re-exported at the path it was reached by while it lived here.

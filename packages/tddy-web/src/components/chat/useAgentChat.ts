@@ -14,6 +14,7 @@ import {
   type ClientMessage,
 } from "../../gen/tddy/v1/remote_pb";
 import { tddyDebug } from "../../lib/debugMask";
+import type { TranscriptStatus } from "./toolCallPresentation";
 
 /** Presenter-stream diagnostics. Enable in DevTools: `localStorage.debug = 'tddy:presenter:*'`
  *  (or via the daemon `debug` config). Traces stream open/close, every inbound Presenter event,
@@ -26,14 +27,17 @@ type AppModeCase = AppModeProto["variant"]["case"];
 export interface ChatMessage {
   key: string;
   text: string;
-  from: "user" | "agent" | "goal" | "activity" | "tool";
-  /** Coarse status of a `from: "tool"` entry, rendered as a marker on the read-only transcript.
-   *  Unset for non-tool bubbles. */
-  toolStatus?: "running" | "completed" | "error";
+  from: "user" | "agent" | "goal" | "activity" | "tool" | "subagent";
+  /** Coarse status of a `from: "tool"` or `from: "subagent"` entry, rendered as a marker on the
+   *  read-only transcript. `awaiting_user` only ever marks a subagent bubble. Unset for other bubbles. */
+  toolStatus?: TranscriptStatus;
   /** The ACP `ToolCall.tool_call_id` of a `from: "tool"` entry. The transcript stream carries tool
    *  metadata only, so the detail dialog names the call by this id to fetch its bodies through
    *  `SessionService.GetAcpToolCallDetail`. Unset for non-tool bubbles. */
   toolCallId?: string;
+  /** The subagent conversation a `from: "subagent"` entry stands for — the one bubble the session's
+   *  transcript shows for all of the main agent's `subagent_*` calls on it. Unset otherwise. */
+  conversationId?: string;
   /** Epoch ms when this message was first shown — used for the exported transcript timeline. */
   at: number;
 }

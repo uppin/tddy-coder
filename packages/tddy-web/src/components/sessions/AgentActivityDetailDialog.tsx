@@ -84,6 +84,8 @@ export interface AgentActivityDetailDialogProps {
   sessionToken: string;
   /** The same client the transcript stream uses, so the body lookup is routed identically. */
   client: Client<typeof ActivityService>;
+  /** The subagent conversation the call belongs to; unset ⇒ a call of the session's own transcript. */
+  conversationId?: string;
   onClose: () => void;
 }
 
@@ -107,6 +109,7 @@ export function AgentActivityDetailDialog({
   sessionId,
   sessionToken,
   client,
+  conversationId,
   onClose,
 }: AgentActivityDetailDialogProps) {
   useEffect(() => {
@@ -129,6 +132,7 @@ export function AgentActivityDetailDialog({
     // A running call's output can still arrive, so its bodies are re-fetched on every open instead of
     // being cached partial for the rest of the session.
     cacheable: !isRunning,
+    conversationId,
   });
 
   return (

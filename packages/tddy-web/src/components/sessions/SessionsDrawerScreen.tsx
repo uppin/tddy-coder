@@ -54,8 +54,11 @@ export function SessionsDrawerScreen({
 }: {
   onNavigate?: (path: string) => void;
 }) {
-  const { sessionToken: authSessionToken } = useAuthContext();
+  const { sessionToken: authSessionToken, user } = useAuthContext();
   const sessionToken = authSessionToken ?? "";
+  // The signed-in user's login. An agent-conversation tab needs it to cancel when it is closed; the
+  // daemon attributes the cancel itself. `null` when no one is signed in: the cancel is refused.
+  const callerLogin = user?.login ? user.login : null;
 
   const {
     client,
@@ -471,6 +474,7 @@ export function SessionsDrawerScreen({
               }
               host={activeHost}
               sessionToken={sessionToken}
+              callerLogin={callerLogin}
               onCancelCreate={handleCancelCreate}
               onSessionCreated={handleSessionCreated}
               room={room}

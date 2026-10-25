@@ -31,6 +31,9 @@ fn an_agent_record(agent_id: &str) -> SessionAgentRecord {
         replaces: vec!["Grep".to_string(), "Glob".to_string()],
         tools: vec!["Read".to_string(), "Glob".to_string(), "Grep".to_string()],
         codebase_session_id: None,
+        kind: Default::default(),
+        harness: None,
+        placement: Default::default(),
     }
 }
 

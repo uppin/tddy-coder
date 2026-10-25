@@ -184,6 +184,27 @@ morePaths }`. The host-side port (`ConversationWorktreeSyncPort`) lives in `tddy
 (`tests/caller_sync_acceptance.rs`) give the reset and sync ports one shared event log, each event
 noting the model requests seen, so the order reset → sync → first model call is asserted directly.
 
+## A coding subagent's turn can pause on a permission request
+
+`StopReason::PermissionRequested` ends a turn whose coding agent asked permission; the outcome's
+`permission_request` (`subagent/permission.rs`, `PermissionRequestView`) names it, and a
+`TurnRequest::with_permission_answer` on the next turn answers it. The parking itself lives in
+`tddy-coding-subagent` (`ParkedPermissions`); this crate owns the types, the outcome JSON's
+`permissionRequest`, the conversation link's frame parse and answer encode, and the model loop's
+refusal of an answer (it never asks). Product rules:
+[managed-codebase subagents](../../../docs/ft/coder/managed-codebase-subagents.md#a-coding-subagents-permission-request-is-the-callers-to-answer).
+
+A caller may instead hand the request to the user: `TurnRequest::deferring_permission_to_user`
+(encoded on the link as `defer_permission_to_user`) holds the turn until either side answers, and
+`PendingTurns::mark_awaiting_user` makes the pending JSON say `awaitingUser`. `subagent/permission.rs`
+also owns the second resolver: `PermissionAnswering` (`answer_as`, `answered_by`,
+`deferred_to_user`, `pending_request`) and `AnsweredBy { MainAgent, User(login) }`, plus the
+`permission:<requestId>` transcript id and the answered record's output shape. A session exposes its
+handle through `SubagentSession::permission_answerer` (default `None`). In `subagent_runtime::run_turn`
+a permission answer to a remote conversation whose session a deferred turn holds is sent to the
+daemon without waiting on that lock (`RemoteConversationHandle::take_turn`). Product rules:
+[agent activity pane § The user answers a deferred permission request](../../../docs/ft/web/agent-activity-pane.md#the-user-answers-a-deferred-permission-request-added-2026-10-25).
+
 ## Features
 
 `livekit` is **off by default** and forwards to `tddy-session-tool-client`'s. A jail that reaches its

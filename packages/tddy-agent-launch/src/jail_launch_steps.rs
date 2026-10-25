@@ -67,6 +67,7 @@ impl LaunchSessions {
     pub(super) async fn warm_up_jail_agents(
         &self,
         specialized_agents: &[String],
+        clone_placed_agents: &[String],
     ) -> Result<
         (
             Vec<tddy_core::SessionAgentRecord>,
@@ -76,7 +77,7 @@ impl LaunchSessions {
     > {
         let started_agents = self
             .agent_roster
-            .seeded_roster_records(specialized_agents)
+            .seeded_roster_records_placed(specialized_agents, clone_placed_agents)
             .await?;
         // The defs behind those records, which the jail env can only carry for agents this host
         // holds — the records above are what carries the rest.

@@ -4,13 +4,15 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { AgentKind } from "./types_pb";
+import { file_types } from "./types_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file catalog.proto.
  */
 export const file_catalog: GenFile = /*@__PURE__*/
-  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSJaChZMaXN0QWdlbnRNb2RlbHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDQoFYWdlbnQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIlQKF0xpc3RBZ2VudE1vZGVsc1Jlc3BvbnNlEiIKBm1vZGVscxgBIAMoCzISLmNhdGFsb2cuTW9kZWxJbmZvEhUKDWRlZmF1bHRfbW9kZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOAoSTGlzdEFnZW50c1Jlc3BvbnNlEiIKBmFnZW50cxgBIAMoCzISLmNhdGFsb2cuQWdlbnRJbmZvIhYKFExpc3RTdWJhZ2VudHNSZXF1ZXN0IkEKFUxpc3RTdWJhZ2VudHNSZXNwb25zZRIoCglzdWJhZ2VudHMYASADKAsyFS5jYXRhbG9nLlN1YmFnZW50SW5mbyISChBMaXN0VG9vbHNSZXF1ZXN0IjUKEUxpc3RUb29sc1Jlc3BvbnNlEiAKBXRvb2xzGAEgAygLMhEuY2F0YWxvZy5Ub29sSW5mbyImCglNb2RlbEluZm8SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkiiQEKDFN1YmFnZW50SW5mbxIMCgRuYW1lGAEgASgJEg0KBWxhYmVsGAIgASgJEg0KBW1vZGVsGAMgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCRIQCghhZ2VudF9pZBgFIAEoCRIQCghyZXBsYWNlcxgGIAMoCRINCgV0b29scxgHIAMoCSInCghUb29sSW5mbxIMCgRwYXRoGAEgASgJEg0KBWxhYmVsGAIgASgJMsECCg5DYXRhbG9nU2VydmljZRJCCglMaXN0VG9vbHMSGS5jYXRhbG9nLkxpc3RUb29sc1JlcXVlc3QaGi5jYXRhbG9nLkxpc3RUb29sc1Jlc3BvbnNlEkUKCkxpc3RBZ2VudHMSGi5jYXRhbG9nLkxpc3RBZ2VudHNSZXF1ZXN0GhsuY2F0YWxvZy5MaXN0QWdlbnRzUmVzcG9uc2USVAoPTGlzdEFnZW50TW9kZWxzEh8uY2F0YWxvZy5MaXN0QWdlbnRNb2RlbHNSZXF1ZXN0GiAuY2F0YWxvZy5MaXN0QWdlbnRNb2RlbHNSZXNwb25zZRJOCg1MaXN0U3ViYWdlbnRzEh0uY2F0YWxvZy5MaXN0U3ViYWdlbnRzUmVxdWVzdBoeLmNhdGFsb2cuTGlzdFN1YmFnZW50c1Jlc3BvbnNlYgZwcm90bzM");
+  fileDesc("Cg1jYXRhbG9nLnByb3RvEgdjYXRhbG9nIiYKCUFnZW50SW5mbxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCSJaChZMaXN0QWdlbnRNb2RlbHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDQoFYWdlbnQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIlQKF0xpc3RBZ2VudE1vZGVsc1Jlc3BvbnNlEiIKBm1vZGVscxgBIAMoCzISLmNhdGFsb2cuTW9kZWxJbmZvEhUKDWRlZmF1bHRfbW9kZWwYAiABKAkiEwoRTGlzdEFnZW50c1JlcXVlc3QiOAoSTGlzdEFnZW50c1Jlc3BvbnNlEiIKBmFnZW50cxgBIAMoCzISLmNhdGFsb2cuQWdlbnRJbmZvIhYKFExpc3RTdWJhZ2VudHNSZXF1ZXN0IkEKFUxpc3RTdWJhZ2VudHNSZXNwb25zZRIoCglzdWJhZ2VudHMYASADKAsyFS5jYXRhbG9nLlN1YmFnZW50SW5mbyISChBMaXN0VG9vbHNSZXF1ZXN0IjUKEUxpc3RUb29sc1Jlc3BvbnNlEiAKBXRvb2xzGAEgAygLMhEuY2F0YWxvZy5Ub29sSW5mbyImCglNb2RlbEluZm8SCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAki6AEKDFN1YmFnZW50SW5mbxIMCgRuYW1lGAEgASgJEg0KBWxhYmVsGAIgASgJEg0KBW1vZGVsGAMgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgEIAEoCRIQCghhZ2VudF9pZBgFIAEoCRIQCghyZXBsYWNlcxgGIAMoCRINCgV0b29scxgHIAMoCRIeCgRraW5kGAggASgOMhAudHlwZXMuQWdlbnRLaW5kEg8KB2hhcm5lc3MYCSABKAkSEQoJdHJhbnNwb3J0GAogASgJEhkKEXBlcm1pc3Npb25fcG9saWN5GAsgASgJIicKCFRvb2xJbmZvEgwKBHBhdGgYASABKAkSDQoFbGFiZWwYAiABKAkywQIKDkNhdGFsb2dTZXJ2aWNlEkIKCUxpc3RUb29scxIZLmNhdGFsb2cuTGlzdFRvb2xzUmVxdWVzdBoaLmNhdGFsb2cuTGlzdFRvb2xzUmVzcG9uc2USRQoKTGlzdEFnZW50cxIaLmNhdGFsb2cuTGlzdEFnZW50c1JlcXVlc3QaGy5jYXRhbG9nLkxpc3RBZ2VudHNSZXNwb25zZRJUCg9MaXN0QWdlbnRNb2RlbHMSHy5jYXRhbG9nLkxpc3RBZ2VudE1vZGVsc1JlcXVlc3QaIC5jYXRhbG9nLkxpc3RBZ2VudE1vZGVsc1Jlc3BvbnNlEk4KDUxpc3RTdWJhZ2VudHMSHS5jYXRhbG9nLkxpc3RTdWJhZ2VudHNSZXF1ZXN0Gh4uY2F0YWxvZy5MaXN0U3ViYWdlbnRzUmVzcG9uc2ViBnByb3RvMw", [file_types]);
 
 /**
  * @generated from message catalog.AgentInfo
@@ -256,6 +258,36 @@ export type SubagentInfo = Message<"catalog.SubagentInfo"> & {
    * @generated from field: repeated string tools = 7;
    */
   tools: string[];
+
+  /**
+   * MODEL for a def or registry assistant; CODING_AGENT for a harness the daemon launches.
+   *
+   * @generated from field: types.AgentKind kind = 8;
+   */
+  kind: AgentKind;
+
+  /**
+   * For a CODING_AGENT row, the harness it runs (`claude-acp`, `codex-acp`, `opencode`, …), so a
+   * picker can say what it is. Empty for MODEL rows.
+   *
+   * @generated from field: string harness = 9;
+   */
+  harness: string;
+
+  /**
+   * For a CODING_AGENT row: "acp" or "headless" — how its turns are taken.
+   *
+   * @generated from field: string transport = 10;
+   */
+  transport: string;
+
+  /**
+   * For a CODING_AGENT row: "asks_caller", or "fixed: <what the CLI is allowed>" for a CLI that
+   * cannot ask mid-turn. Shown on the picker row so the policy is never implied.
+   *
+   * @generated from field: string permission_policy = 11;
+   */
+  permissionPolicy: string;
 };
 
 /**

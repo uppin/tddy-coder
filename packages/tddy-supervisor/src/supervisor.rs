@@ -5,25 +5,28 @@
 //! `await`, because the two things that happen under it (reading a spawn plan, recording an exit)
 //! are pure bookkeeping.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::os::unix::net::UnixListener;
+mod service_restart;
+mod service_slot;
+mod session_table;
+
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use crate::cgroup_broker::{self, ScopeRemoval};
-use crate::config::{ManagedService, ServiceSocket, SupervisorConfig};
+use crate::config::SupervisorConfig;
 use crate::error::SupervisorError;
 use crate::host_socket;
 use crate::reaper;
-use crate::request::{SessionState, SessionStatus};
 use crate::service::ServiceStatus;
-use crate::services::{ExitOutcome, ServiceRuntime, STARTUP_GRACE_PERIOD};
-use crate::signals::{signal_process, signal_process_group, KILL, TERMINATE};
-use crate::spawn_broker::{
-    self, ChildOutput, EnvironmentBase, ForkBroker, SocketHandover, SpawnPlan, TargetUser,
-};
+use crate::services::ServiceRuntime;
+use crate::signals::{signal_process, KILL, TERMINATE};
+use crate::spawn_broker::accounts;
+use crate::spawn_broker::fork_broker::ForkBroker;
+use crate::supervisor::service_slot::bind_service_listener;
+use crate::supervisor::service_slot::Slot;
+use crate::supervisor::session_table::SessionTable;
 
 /// How often the shutdown sequence re-checks whether its children are gone.
 const REAP_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -31,15 +34,6 @@ const REAP_POLL_INTERVAL: Duration = Duration::from_millis(25);
 /// How long a `SIGKILL`ed process gets to disappear before the supervisor stops waiting for it.
 /// `SIGKILL` is not refusable, so this only covers the kernel doing the work.
 const KILL_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// How many exited sessions keep their status available for a caller that has not asked yet.
-///
-/// Some bound is mandatory: the supervisor is a process that must not need restarting, so a map of
-/// dead pids that only ever grows is a slow leak with no upper edge. The bound is a capacity rather
-/// than "forget it once somebody has read it" because a caller polls repeatedly — the daemon's
-/// exit-diagnostic loop asks every 50ms and asks again after it has its answer — so a status that
-/// vanished on first read would answer one poll and deny the next.
-const RETAINED_EXITED_SESSIONS: usize = 256;
 
 /// How long a scope's leftover processes get to disappear before its directory is left behind.
 ///
@@ -52,203 +46,6 @@ const SCOPE_REMOVAL_GRACE: Duration = Duration::from_secs(2);
 /// How often a scope that still holds processes is retried within [`SCOPE_REMOVAL_GRACE`].
 const SCOPE_REMOVAL_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
-/// One declared service: its declaration, its resolved account, and its lifecycle state.
-struct Slot {
-    service: ManagedService,
-    target: TargetUser,
-    runtime: ServiceRuntime,
-    started_at: Option<Instant>,
-    /// The listener created for a service that declared a socket, held for as long as the supervisor
-    /// runs so every start — including every restart — is handed the same one.
-    listener: Option<Arc<UnixListener>>,
-    /// The per-OS-user host sockets this service declared, as `(os user, listener)`, created once
-    /// and handed to every start like [`Self::listener`].
-    host_listeners: Vec<(String, Arc<UnixListener>)>,
-}
-
-/// What became of one session the supervisor spawned on a caller's behalf.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionOutcome {
-    Running,
-    /// `None` when the session was killed by a signal rather than exiting with a code.
-    Exited {
-        code: Option<i32>,
-    },
-}
-
-/// Which incarnation of a pid a record belongs to.
-///
-/// A pid is not an identity. `pid_max` is 32768 on a stock host, so a pid freed by one session is
-/// routinely handed to the next one within seconds — well inside the shutdown grace period that
-/// [`Supervisor::stop_session`] arms a `SIGKILL` after. A generation is taken once per spawn and never
-/// reused, so a request made about one session can be recognised as no longer being about the process
-/// that now holds its pid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct SessionGeneration(u64);
-
-/// One session's identity and state, as of the last thing observed about it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SessionRecord {
-    generation: SessionGeneration,
-    outcome: SessionOutcome,
-}
-
-/// Every session the supervisor spawned on a caller's behalf: the live ones, and the most recently
-/// exited ones with the status they exited with.
-///
-/// An exited session's status has to outlive its reap. The supervisor is the only process that can
-/// `waitpid` its own children, and a caller's poll always arrives *after* the child was reaped, so a
-/// status dropped at reap time is one nobody could ever observe. Retention is bounded — see
-/// [`RETAINED_EXITED_SESSIONS`].
-#[derive(Default)]
-struct SessionTable {
-    records: BTreeMap<u32, SessionRecord>,
-    /// Exited pids in reap order, so the oldest retained status is the first one evicted.
-    exited: VecDeque<u32>,
-    /// Generations handed out so far. Monotonic for the life of the process.
-    spawned: u64,
-    /// The cgroup scope directory each session was spawned into, for the sessions that were spawned
-    /// into one at all.
-    ///
-    /// Keyed by generation rather than by pid, which is the same hazard [`SessionGeneration`] exists
-    /// for: a pid is reissued while the previous session's status is still retained, and a scope
-    /// reclaimed on the strength of a pid alone would be the *new* session's live scope.
-    ///
-    /// Only a session the supervisor spawned *into* a scope has an entry here. A scope a caller
-    /// created with `CreateScope` and attached no session to is not in this map and is never swept:
-    /// the association is what makes a scope garbage, and without one the supervisor cannot know
-    /// whether the caller has finished with it.
-    scopes: BTreeMap<SessionGeneration, PathBuf>,
-}
-
-impl SessionTable {
-    /// Record a new session and return the generation that identifies *this* incarnation of its pid.
-    ///
-    /// A caller holding a generation can later be told that the request it is making is about a
-    /// session that no longer exists, rather than being silently applied to whichever process
-    /// inherited the pid.
-    fn record_spawned(&mut self, pid: u32) -> SessionGeneration {
-        // A pid the kernel has recycled must not be evicted later as if it were still the dead
-        // session that used to own it.
-        self.exited.retain(|retained| *retained != pid);
-        self.spawned += 1;
-        let generation = SessionGeneration(self.spawned);
-        if let Some(displaced) = self.records.insert(
-            pid,
-            SessionRecord {
-                generation,
-                outcome: SessionOutcome::Running,
-            },
-        ) {
-            // TODO(supervisor): a caller can only ask about a session by pid (`SessionRef`), so the
-            // status of the displaced session is no longer reachable even though it is the answer a
-            // caller polling for it wants. Closing that needs the generation on the wire — a session
-            // handle in `SpawnedProcess`/`SessionRef` — which is a protocol decision, not something
-            // to add here. Until then the loss is at least visible in the journal.
-            if displaced.outcome != SessionOutcome::Running {
-                log::warn!(
-                    target: "tddy_supervisor::supervisor",
-                    "pid {pid} was reissued to a new session; the exit status of the previous one is \
-                     no longer reportable"
-                );
-            }
-        }
-        generation
-    }
-
-    /// Record that `generation`'s session was spawned into the cgroup scope at `scope`.
-    ///
-    /// This association is the whole reason a scope can be cleaned up without a caller asking for it,
-    /// and it is deliberately made from the spawn itself rather than declared separately: the scope a
-    /// session joins *is* its plan's `cgroup.procs`, so there is nothing for the two to disagree about.
-    fn own_scope(&mut self, generation: SessionGeneration, scope: PathBuf) {
-        self.scopes.insert(generation, scope);
-    }
-
-    /// Record an exit, if `pid` is a session at all, and hand back the cgroup scope that has just
-    /// become garbage. A pid this table does not know is left alone: only the sessions the supervisor
-    /// was asked for are reportable.
-    ///
-    /// The scope and the status have different lifetimes on purpose. The directory is reclaimed now —
-    /// nothing will ever run in it again — while the *status* stays retained for a caller whose poll
-    /// has not arrived yet ([`RETAINED_EXITED_SESSIONS`]). Handing the scope back exactly once is what
-    /// keeps a repeated reap, or a pid the kernel has reissued, from removing a directory that by then
-    /// belongs to a later session.
-    fn record_exit(&mut self, pid: u32, code: Option<i32>) -> Option<PathBuf> {
-        let record = self.records.get_mut(&pid)?;
-        record.outcome = SessionOutcome::Exited { code };
-        let generation = record.generation;
-
-        self.exited.push_back(pid);
-        while self.exited.len() > RETAINED_EXITED_SESSIONS {
-            if let Some(evicted) = self.exited.pop_front() {
-                self.records.remove(&evicted);
-            }
-        }
-        // Taken, not read: the scope of a session that has exited is handed to the caller once, and
-        // the only other entries left are those of sessions that are still running.
-        self.scopes.remove(&generation)
-    }
-
-    /// The state of `pid` together with the incarnation it belongs to, read as one value.
-    fn snapshot(&self, pid: u32) -> Option<(SessionGeneration, SessionStatus)> {
-        let generation = self.records.get(&pid)?.generation;
-        self.status(pid).map(|status| (generation, status))
-    }
-
-    fn status(&self, pid: u32) -> Option<SessionStatus> {
-        self.records.get(&pid).map(|record| match record.outcome {
-            SessionOutcome::Running => SessionStatus {
-                pid,
-                state: SessionState::Running,
-                exit_code: None,
-            },
-            SessionOutcome::Exited { code } => SessionStatus {
-                pid,
-                state: SessionState::Exited,
-                exit_code: code,
-            },
-        })
-    }
-
-    /// Whether `pid` is still the running session that was spawned as `generation`.
-    ///
-    /// Both halves matter: a session that has exited must not be signalled, and a pid that now
-    /// belongs to a *later* session must not be signalled on an earlier one's behalf.
-    fn is_running_generation(&self, pid: u32, generation: SessionGeneration) -> bool {
-        self.records.get(&pid)
-            == Some(&SessionRecord {
-                generation,
-                outcome: SessionOutcome::Running,
-            })
-    }
-
-    fn running_pids(&self) -> Vec<u32> {
-        self.records
-            .iter()
-            .filter(|(_, record)| record.outcome == SessionOutcome::Running)
-            .map(|(pid, _)| *pid)
-            .collect()
-    }
-
-    /// Confirm `pid` is a session this supervisor spawned and has not reaped yet.
-    ///
-    /// An unknown pid is [`SupervisorError::Denied`] rather than reported on, for the same reason
-    /// [`Supervisor::session_status`] refuses one: the privileged surface must not become a way to
-    /// act on, or learn about, processes the supervisor was never asked for.
-    ///
-    /// An *exited* session is refused too, even though its status is still retained for a caller
-    /// that has not polled yet. Once the reap has happened the kernel is free to hand that pid to
-    /// somebody else's process, so a pid that is only known to have been a session is
-    /// indistinguishable from a stranger's.
-    fn require_running(&self, pid: u32) -> Result<(), SupervisorError> {
-        match self.records.get(&pid).map(|record| record.outcome) {
-            Some(SessionOutcome::Running) => Ok(()),
-            Some(SessionOutcome::Exited { .. }) | None => Err(SupervisorError::Denied),
-        }
-    }
-}
-
 /// Starts, reaps, restarts and shuts down the declared services.
 pub struct Supervisor {
     slots: Mutex<Vec<Slot>>,
@@ -258,7 +55,7 @@ pub struct Supervisor {
     sessions: Mutex<SessionTable>,
     forks: Arc<ForkBroker>,
     /// `socket.path` from the config: the privileged socket every managed service is told about,
-    /// through [`EnvironmentBase::Inherited`].
+    /// through [`EnvironmentBase::Inherited`](crate::spawn_broker::EnvironmentBase::Inherited).
     supervisor_socket: PathBuf,
     /// Held while a start is between `fork` and having its pid recorded, so a reap cannot see the
     /// exit of a process nothing has claimed yet. Async, because the fork round-trip is awaited.
@@ -283,7 +80,7 @@ impl Supervisor {
     ) -> anyhow::Result<Arc<Supervisor>> {
         let mut slots = Vec::with_capacity(config.services.len());
         for service in &config.services {
-            let mut target = spawn_broker::resolve_target_user(&service.user).map_err(|error| {
+            let mut target = accounts::resolve_target_user(&service.user).map_err(|error| {
                 anyhow::anyhow!(
                     "service `{}` declares user `{}`: {error}",
                     service.name,
@@ -294,7 +91,7 @@ impl Supervisor {
             // than at spawn time means a typo is a startup failure instead of a service that dies
             // on every restart attempt.
             if let Some(group) = &service.group {
-                target.gid = spawn_broker::resolve_group_gid(group).map_err(|error| {
+                target.gid = accounts::resolve_group_gid(group).map_err(|error| {
                     anyhow::anyhow!(
                         "service `{}` declares group `{group}`: {error}",
                         service.name
@@ -304,7 +101,7 @@ impl Supervisor {
             // Again, because the override just replaced a gid that `resolve_target_user` had already
             // checked: `group: root` is the same escalation as an account aliased to uid 0, reached
             // by a different key.
-            spawn_broker::refuse_root_credentials(&service.user, target.uid, target.gid)
+            accounts::refuse_root_credentials(&service.user, target.uid, target.gid)
                 .map_err(|error| anyhow::anyhow!("service `{}`: {error}", service.name))?;
             // Before the service exists, so a client that races its startup finds a socket that
             // queues rather than a path that is about to work.
@@ -408,139 +205,6 @@ impl Supervisor {
         Ok(self.lock()[index].runtime.status())
     }
 
-    /// Fork a session on a caller's behalf and take ownership of it.
-    ///
-    /// The supervisor, not the privileged surface, owns every fork and every pid it produces: that
-    /// is what lets one gate cover both the services it starts itself and the sessions it is asked
-    /// for, and what makes `shutdown` able to account for all of them.
-    pub async fn spawn_session(&self, plan: SpawnPlan) -> std::io::Result<u32> {
-        let _in_flight = self.spawn_gate.lock().await;
-        // No listener: socket handover is a declared managed service's privilege, never something a
-        // caller can ask for.
-        let (pid, _) = self.fork_session(plan).await?;
-        Ok(pid)
-    }
-
-    /// [`Self::spawn_session`] for a plan whose output is [`ChildOutput::CaptureStderr`]: the pid,
-    /// and the read end of the session's stderr.
-    pub async fn spawn_session_capturing_stderr(
-        &self,
-        plan: SpawnPlan,
-    ) -> std::io::Result<(u32, std::process::ChildStderr)> {
-        let _in_flight = self.spawn_gate.lock().await;
-        let (pid, stderr) = self.fork_session(plan).await?;
-        let stderr = stderr.ok_or_else(|| {
-            std::io::Error::other("the session's plan did not ask for its stderr to be captured")
-        })?;
-        Ok((pid, stderr))
-    }
-
-    /// Fork a session and record it. Called with the spawn gate held.
-    async fn fork_session(
-        &self,
-        plan: SpawnPlan,
-    ) -> std::io::Result<(u32, Option<std::process::ChildStderr>)> {
-        // Read before the plan is handed over. A scope becomes this session's the moment the session
-        // exists, so it can be reclaimed when the session ends without a caller having to ask.
-        let scope = scope_directory_of(plan.scope_procs.as_deref()).map(Path::to_path_buf);
-        let (pid, stderr) = self.forks.spawn_with_output(plan, None).await?;
-        let mut sessions = self.sessions();
-        let generation = sessions.record_spawned(pid);
-        if let Some(scope) = scope {
-            sessions.own_scope(generation, scope);
-        }
-        Ok((pid, stderr))
-    }
-
-    /// Wait until a session this supervisor spawned has exited, and report how.
-    ///
-    /// Woken by the reap that records the exit rather than polling for it. A pid the supervisor
-    /// never spawned is [`SupervisorError::Denied`], exactly as for [`Self::session_status`].
-    pub async fn wait_for_session_exit(&self, pid: u32) -> Result<SessionStatus, SupervisorError> {
-        loop {
-            // Registered before the status is read, so an exit recorded in between wakes this
-            // waiter instead of being missed.
-            let exited = self.session_exited.notified();
-            tokio::pin!(exited);
-            exited.as_mut().enable();
-            let status = self.session_status(pid)?;
-            if status.state == SessionState::Exited {
-                return Ok(status);
-            }
-            exited.await;
-        }
-    }
-
-    /// What became of a session this supervisor spawned.
-    ///
-    /// A pid it never spawned is [`SupervisorError::Denied`], not reported on: answering would make
-    /// the privileged surface a liveness oracle for every process on the host.
-    pub fn session_status(&self, pid: u32) -> Result<SessionStatus, SupervisorError> {
-        self.sessions().status(pid).ok_or(SupervisorError::Denied)
-    }
-
-    /// Confirm a caller may have this supervisor act on `pid` as one of its live sessions.
-    ///
-    /// The gate every pid-bearing request that *does* something has to pass, `AttachPid` above all:
-    /// a scope's `cgroup.procs` accepts any pid the writer has the privilege to move, and the
-    /// supervisor has the privilege to move all of them. Without this, a caller could point a scope
-    /// whose `memory.max` was clamped small at `sshd`, at the daemon, or at the supervisor itself and
-    /// have it throttled or OOM-killed — which makes the clamping that keeps `CreateScope` safe
-    /// beside the point.
-    pub fn require_running_session(&self, pid: u32) -> Result<(), SupervisorError> {
-        self.sessions().require_running(pid)
-    }
-
-    /// Ask a session to stop, and take it out if it does not.
-    ///
-    /// The signal goes to the session's *process group*, which reaches the descendants a session
-    /// spawned for itself. That is safe precisely because every child leads its own group
-    /// ([`crate::spawn_broker::PreExecStep::LeadOwnProcessGroup`]) — a session left in the
-    /// supervisor's group would turn this into a signal to the supervisor and everything under it.
-    ///
-    /// Returns the session's state as of the request rather than waiting for the exit: the escalation
-    /// to `SIGKILL` takes the whole grace period, and no caller should have its RPC held open for
-    /// that long. The exit is observed by polling [`Self::session_status`].
-    pub fn stop_session(
-        self: &Arc<Self>,
-        pid: u32,
-        grace: Duration,
-    ) -> Result<SessionStatus, SupervisorError> {
-        // State and identity are read as one value under one lock. Reading them separately would
-        // leave a window in which the session exits, is reaped, and has its pid reissued between the
-        // two reads, so the kill below would be armed against the wrong incarnation from the start.
-        let (generation, status) = self
-            .sessions()
-            .snapshot(pid)
-            .ok_or(SupervisorError::Denied)?;
-        if status.state == SessionState::Exited {
-            return Ok(status);
-        }
-
-        log::info!(
-            target: "tddy_supervisor::supervisor",
-            "stopping session {pid}, {grace:?} grace"
-        );
-        signal_process_group(pid, TERMINATE);
-
-        let supervisor = Arc::clone(self);
-        tokio::spawn(async move {
-            tokio::time::sleep(grace).await;
-            // Read from the session table, not from the kernel, and match the generation as well as
-            // the pid. A pid alone is not enough: this session can have exited, been reaped, and had
-            // its pid reissued to a different session within the grace period, and `SIGKILL` to a
-            // process *group* would take that session and everything it had spawned with it.
-            if supervisor.sessions().is_running_generation(pid, generation) {
-                log::warn!(
-                    target: "tddy_supervisor::supervisor",
-                    "killing session {pid}, which outlived its grace period"
-                );
-                signal_process_group(pid, KILL);
-            }
-        });
-        Ok(status)
-    }
-
     /// Reap everything that has exited and act on it.
     ///
     /// Called once per `SIGCHLD` (which coalesces, hence the drain inside [`reaper`]) and again
@@ -626,190 +290,6 @@ impl Supervisor {
     // ---------------------------------------------------------------------------------------
     // Internals
     // ---------------------------------------------------------------------------------------
-
-    /// Fork, drop privilege and exec one service, then start its startup-grace timer.
-    async fn start(self: &Arc<Self>, index: usize) {
-        if self.shutting_down.load(Ordering::SeqCst) {
-            return;
-        }
-        let (name, plan, handover) = {
-            let slots = self.lock();
-            let slot = &slots[index];
-            (
-                slot.service.name.clone(),
-                slot.spawn_plan(&self.supervisor_socket),
-                slot.socket_handover(),
-            )
-        };
-
-        // Fork and record the pid without letting a reap in between — see [`Self::reap`].
-        let in_flight = self.spawn_gate.lock().await;
-        let spawned = self.forks.spawn(plan, handover).await;
-        match spawned {
-            Ok(pid) => {
-                {
-                    let mut slots = self.lock();
-                    slots[index].runtime.record_started(pid);
-                    slots[index].started_at = Some(Instant::now());
-                }
-                drop(in_flight);
-                log::info!(
-                    target: "tddy_supervisor::supervisor",
-                    "started service '{name}' as pid {pid}"
-                );
-                self.watch_startup(index, pid);
-            }
-            Err(error) => {
-                drop(in_flight);
-                // A service that cannot be exec'd goes through the same backoff as one that dies
-                // after exec — otherwise a transient failure would never be retried.
-                log::error!(
-                    target: "tddy_supervisor::supervisor",
-                    "could not start service '{name}': {error}"
-                );
-                let outcome = {
-                    let mut slots = self.lock();
-                    slots[index].started_at = None;
-                    slots[index].runtime.record_exit(Duration::ZERO)
-                };
-                self.schedule_restart(index, &name, outcome);
-            }
-        }
-    }
-
-    /// Promote a service to `Running` once it has survived [`STARTUP_GRACE_PERIOD`].
-    fn watch_startup(self: &Arc<Self>, index: usize, pid: u32) {
-        let supervisor = Arc::clone(self);
-        tokio::spawn(async move {
-            tokio::time::sleep(STARTUP_GRACE_PERIOD).await;
-            let mut slots = supervisor.lock();
-            // Only the start this timer belongs to. A service that already died and restarted has
-            // a different pid, and that start must serve its own grace period.
-            if slots[index].runtime.status().pid == Some(pid) {
-                slots[index].runtime.record_survived_startup();
-            }
-        });
-    }
-
-    /// Attribute an exit to a declared service, if it belongs to one.
-    fn record_exit(&self, pid: u32) -> Option<(usize, String, ExitOutcome)> {
-        let mut slots = self.lock();
-        let index = slots
-            .iter()
-            .position(|slot| slot.runtime.status().pid == Some(pid))?;
-        let slot = &mut slots[index];
-        let uptime = slot
-            .started_at
-            .take()
-            .map(|started| started.elapsed())
-            .unwrap_or_default();
-        let outcome = slot.runtime.record_exit(uptime);
-        Some((index, slot.service.name.clone(), outcome))
-    }
-
-    fn react_to_exit(
-        self: &Arc<Self>,
-        index: usize,
-        name: &str,
-        outcome: ExitOutcome,
-        child: &reaper::ReapedChild,
-    ) {
-        log::info!(
-            target: "tddy_supervisor::supervisor",
-            "service '{name}' (pid {}) exited with {}",
-            child.pid,
-            child.describe()
-        );
-        self.schedule_restart(index, name, outcome);
-    }
-
-    fn schedule_restart(self: &Arc<Self>, index: usize, name: &str, outcome: ExitOutcome) {
-        match outcome {
-            ExitOutcome::Restart { after } => {
-                log::info!(
-                    target: "tddy_supervisor::supervisor",
-                    "restarting service '{name}' in {after:?}"
-                );
-                let supervisor = Arc::clone(self);
-                tokio::spawn(async move {
-                    tokio::time::sleep(after).await;
-                    supervisor.start(index).await;
-                });
-            }
-            ExitOutcome::GaveUp => log::error!(
-                target: "tddy_supervisor::supervisor",
-                "service '{name}' exhausted its retry budget and will not be restarted"
-            ),
-            ExitOutcome::StoppedOnRequest => log::info!(
-                target: "tddy_supervisor::supervisor",
-                "service '{name}' stopped on request"
-            ),
-        }
-    }
-
-    /// Remove the cgroup scope a session was spawned into, now that the session is gone.
-    ///
-    /// The first attempt is made here, inline: the common case is a session that left nothing behind,
-    /// and one `rmdir` costs less than a task. `EBUSY` is *not* retried here. The kernel refuses to
-    /// remove a cgroup while any process remains in it, a session's own descendants can outlive the
-    /// session leader, and every other exit on the host — the daemon's restart included — is queued
-    /// behind this reap. So the waiting happens in a task with a bounded grace
-    /// ([`SCOPE_REMOVAL_GRACE`]), and a scope that never empties is reported rather than retried
-    /// forever or forgotten: an operator can then find out what is still living in it.
-    ///
-    /// Not fatal to anything. The session is over either way, the caller already has its exit status,
-    /// and `DestroyScope` remains available for a scope this could not remove. A retry still waiting
-    /// when the supervisor exits goes with the runtime, which is correct: on a real host the delegated
-    /// subtree is torn down with the unit, so there is nothing left to remove.
-    fn reclaim_scope(&self, scope: PathBuf) {
-        match cgroup_broker::remove_scope_dir(&scope) {
-            ScopeRemoval::Removed => log::debug!(
-                target: "tddy_supervisor::supervisor",
-                "removed the scope {} of a session that has exited",
-                scope.display()
-            ),
-            ScopeRemoval::Failed { message } => log::warn!(
-                target: "tddy_supervisor::supervisor",
-                "the scope of a session that has exited is left behind: {message}"
-            ),
-            ScopeRemoval::StillPopulated => {
-                tokio::spawn(async move {
-                    let deadline = Instant::now() + SCOPE_REMOVAL_GRACE;
-                    loop {
-                        tokio::time::sleep(SCOPE_REMOVAL_RETRY_INTERVAL).await;
-                        match cgroup_broker::remove_scope_dir(&scope) {
-                            ScopeRemoval::Removed => {
-                                log::debug!(
-                                    target: "tddy_supervisor::supervisor",
-                                    "removed the scope {} once the last of its processes had gone",
-                                    scope.display()
-                                );
-                                return;
-                            }
-                            ScopeRemoval::Failed { message } => {
-                                log::warn!(
-                                    target: "tddy_supervisor::supervisor",
-                                    "the scope of a session that has exited is left behind: {message}"
-                                );
-                                return;
-                            }
-                            ScopeRemoval::StillPopulated if Instant::now() >= deadline => {
-                                log::warn!(
-                                    target: "tddy_supervisor::supervisor",
-                                    "the scope {} still holds processes {SCOPE_REMOVAL_GRACE:?} after \
-                                     its session exited, so it is left behind; its `cgroup.procs` \
-                                     names what is still running in it",
-                                    scope.display()
-                                );
-                                return;
-                            }
-                            ScopeRemoval::StillPopulated => continue,
-                        }
-                    }
-                });
-            }
-        }
-    }
 
     /// Poll until nothing the supervisor spawned is left, or `budget` runs out.
     async fn await_children_gone(self: &Arc<Self>, budget: Duration) -> bool {
@@ -897,131 +377,22 @@ fn lock_or_recover<'a, T>(lock: &'a Mutex<T>, what: &str) -> MutexGuard<'a, T> {
     })
 }
 
-impl Slot {
-    fn spawn_plan(&self, supervisor_socket: &Path) -> SpawnPlan {
-        SpawnPlan {
-            program: self.service.exec_start.clone(),
-            args: self.service.args.clone(),
-            env: self.service.env.clone(),
-            working_dir: self
-                .service
-                .working_dir
-                .clone()
-                .unwrap_or_else(|| self.target.home.clone()),
-            target: self.target.clone(),
-            // Managed services live in the supervisor's own cgroup: they are the host's services,
-            // not somebody's session, and nothing has asked for them to be limited.
-            scope_procs: None,
-            // So a managed service's output reaches the same journal the supervisor's does.
-            output: ChildOutput::Inherit,
-            // A declared service is root's own decision, and an operator who sets a variable on the
-            // supervisor unit means it for the services under it. It is also the only child told
-            // where the supervisor listens — see [`EnvironmentBase::Inherited`].
-            environment: EnvironmentBase::Inherited {
-                supervisor_socket: supervisor_socket.to_path_buf(),
-            },
-            // A managed service is a host service, not a sandboxed session.
-            sandbox: None,
-        }
-    }
-
-    /// The listener this service's socket declaration created, ready to hand to the next start.
-    fn socket_handover(&self) -> Option<SocketHandover> {
-        let mut handover = SocketHandover::new(self.listener.clone()?);
-        for (user, listener) in &self.host_listeners {
-            handover = handover.with_host_session_socket(user, Arc::clone(listener));
-        }
-        Some(handover)
-    }
-}
-
-/// Create the listening socket a service declared, as root, before the service exists.
-///
-/// This is the job `tddy-daemon.socket` used to do: root binds the socket so it can live in a
-/// directory the service user cannot write, and the service is handed the listener instead of trying
-/// to create one. The service's own account is never the owner — the mode, and the group when one is
-/// declared, are the whole access grant.
-///
-/// Deliberately a second implementation of what `server::bind_privileged_listener` does for the
-/// supervisor's own socket: that one also has to cope with systemd handing over a listener, which a
-/// managed service's socket never involves.
-// TODO(supervisor): fold both into one helper owned by `socket.rs`, so ownership and mode are
-// applied by exactly one piece of code.
-fn bind_service_listener(
-    service: &ManagedService,
-    socket: &ServiceSocket,
-) -> anyhow::Result<UnixListener> {
-    let mode = socket
-        .mode_bits()
-        .map_err(|error| anyhow::anyhow!("service `{}`: {error}", service.name))?;
-
-    if let Some(parent) = socket.path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            anyhow::anyhow!(
-                "service `{}`: create socket directory {}: {error}",
-                service.name,
-                parent.display()
-            )
-        })?;
-    }
-    // A socket left behind by a previous run would make `bind` fail with EADDRINUSE.
-    let _ = std::fs::remove_file(&socket.path);
-    let listener = UnixListener::bind(&socket.path).map_err(|error| {
-        anyhow::anyhow!(
-            "service `{}`: bind {}: {error}",
-            service.name,
-            socket.path.display()
-        )
-    })?;
-    apply_socket_ownership(&socket.path, socket.group.as_deref(), mode)
-        .map_err(|error| anyhow::anyhow!("service `{}`: {error}", service.name))?;
-
-    log::info!(
-        target: "tddy_supervisor::supervisor",
-        "created {} (mode {mode:o}) for service '{}'",
-        socket.path.display(),
-        service.name
-    );
-    Ok(listener)
-}
-
-/// Give a socket the group and mode its declaration asks for.
-///
-/// The socket stays owned by root, so a group that cannot be resolved is an error rather than
-/// something to shrug at: it is the grant.
-fn apply_socket_ownership(
-    path: &std::path::Path,
-    group: Option<&str>,
-    mode: u32,
-) -> anyhow::Result<()> {
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::PermissionsExt;
-
-    if let Some(group) = group {
-        let gid = spawn_broker::resolve_group_gid(group)
-            .map_err(|error| anyhow::anyhow!("socket group `{group}`: {error}"))?;
-        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
-            .map_err(|_| anyhow::anyhow!("socket path contains a nul byte"))?;
-        // SAFETY: `c_path` outlives the call; `-1` leaves the owning uid untouched.
-        let changed = unsafe { libc::chown(c_path.as_ptr(), u32::MAX, gid) };
-        if changed != 0 {
-            return Err(anyhow::anyhow!(
-                "chown {} to group `{group}`: {}",
-                path.display(),
-                std::io::Error::last_os_error()
-            ));
-        }
-    }
-
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-        .map_err(|error| anyhow::anyhow!("chmod {}: {error}", path.display()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{SocketConfig, SpawnPolicy};
+    use crate::config::spawn_policy::SpawnPolicy;
+    use crate::config::{ManagedService, ServiceSocket, SocketConfig};
+    use crate::request::{SessionState, SessionStatus};
+    use std::path::PathBuf;
+    // Only `a_plan_running`, which is Linux-only, builds a plan by hand.
+    #[cfg(target_os = "linux")]
+    use crate::spawn_broker::accounts::TargetUser;
+    #[cfg(target_os = "linux")]
+    use crate::spawn_broker::{ChildOutput, EnvironmentBase, SpawnPlan};
+    use crate::supervisor::session_table::SessionTable;
     use crate::test_util::a_managed_service;
+    #[cfg(target_os = "linux")]
+    use std::collections::BTreeMap;
 
     /// A pid the kernel is free to hand to anybody, used as the pid of a session that exists.
     const SESSION_PID: u32 = 4242;
@@ -1290,7 +661,9 @@ mod tests {
             cgroup: crate::config::CgroupPolicy::default(),
             shutdown_grace_secs: 1,
         };
-        let forks = Arc::new(spawn_broker::ForkBroker::start().expect("start the fork thread"));
+        let forks = Arc::new(
+            crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
+        );
         Supervisor::new(&config, forks).expect("build a supervisor")
     }
 
@@ -1449,7 +822,9 @@ mod tests {
             cgroup: crate::config::CgroupPolicy::default(),
             shutdown_grace_secs: 20,
         };
-        let forks = Arc::new(spawn_broker::ForkBroker::start().expect("start the fork thread"));
+        let forks = Arc::new(
+            crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
+        );
 
         // When
         let started = Supervisor::new(&config, forks);
@@ -1522,7 +897,9 @@ mod tests {
                 path: path.clone(),
             }],
         );
-        let forks = Arc::new(spawn_broker::ForkBroker::start().expect("start the fork thread"));
+        let forks = Arc::new(
+            crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
+        );
 
         // When the supervisor is built
         let _supervisor = Supervisor::new(&config, forks).expect("build the supervisor");
@@ -1542,7 +919,9 @@ mod tests {
                 path: directory.path().join("run/ghost/host.sock"),
             }],
         );
-        let forks = Arc::new(spawn_broker::ForkBroker::start().expect("start the fork thread"));
+        let forks = Arc::new(
+            crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
+        );
 
         // When / Then — a service started without a socket it declared would serve nobody
         let error = Supervisor::new(&config, forks).err().expect("refused");
@@ -1564,7 +943,9 @@ mod tests {
                 path: directory.path().join("run/user/host.sock"),
             }],
         );
-        let forks = Arc::new(spawn_broker::ForkBroker::start().expect("start the fork thread"));
+        let forks = Arc::new(
+            crate::spawn_broker::fork_broker::ForkBroker::start().expect("start the fork thread"),
+        );
         let supervisor = Supervisor::new(&config, forks).expect("build the supervisor");
 
         // When the handover for the service's next start is taken

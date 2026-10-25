@@ -36,6 +36,9 @@ export interface AgentChatProps {
   /** Read-only transcript only: invoked when a `from: "tool"` entry is clicked, so the host can open
    *  its detail dialog. Non-tool entries stay inert. Unset ⇒ no entry is interactive. */
   onToolClick?: (message: ChatMessage) => void;
+  /** Read-only transcript only: invoked when a `from: "subagent"` entry is clicked, so the host can open
+   *  that conversation. Unset ⇒ subagent entries stay inert. */
+  onSubagentClick?: (message: ChatMessage) => void;
   /** Read-only transcript only: invoked when the reader reaches the start of the loaded range, so
    *  the host can page in the history before it. Unset ⇒ the range never grows backwards. */
   onLoadOlder?: () => void;
@@ -78,6 +81,7 @@ export function AgentChatView({
   roomError,
   readOnly = false,
   onToolClick,
+  onSubagentClick,
   onLoadOlder,
   hasOlder,
   loadingOlder,
@@ -88,6 +92,7 @@ export function AgentChatView({
       <AgentTranscriptView
         messages={chat.messages}
         onToolClick={onToolClick}
+        onSubagentClick={onSubagentClick}
         onLoadOlder={onLoadOlder}
         hasOlder={hasOlder}
         loadingOlder={loadingOlder}

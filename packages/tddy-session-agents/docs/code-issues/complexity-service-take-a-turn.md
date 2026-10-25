@@ -15,6 +15,7 @@
 | 2026-09-26 | 120 | 93 | 5 | first detection, in PR #545 |
 
 | 2026-09-27 | 120 | 93 | 5 | **unchanged.** `service.rs` grew by 7 lines in the same change, in the stop-reason mapping only |
+| 2026-10-24 | 124 → 122 raw | — | 5 | **better** by 2 in PR #723 (`#coagents` 4/8): the turn now runs through `take_recorded_turn` and its failed-turn replies through `TurnError::into_reply` (`conversation_recorder.rs`). Hand-counted raw lines at #722's tip (124) and after; code-line column not restated |
 ## What the tool found
 
 The worst single unit in PR #545, breaching both thresholds at once. The nesting path is
@@ -46,3 +47,4 @@ What remains is roughly 35 lines of "resolve, stamp, route".
 2026-09-26 — Counted from the diff and confirmed against master that ~114 of the 120 lines predate
 PR #545. Confirmed the three seams are contiguous and reference no state outside their own
 arguments.
+| 2026-10-25 | 122 → 148 raw | — | 5 | **worse** by 26 in PR #727 (`#coagents` 8/8): a deferred turn writes the conversation's status row (awaiting, running, completed) and records the request it holds for the user. Hand-counted by brace matching. Deferred to the `#coagents` sweep node by the developer (2026-10-25) |

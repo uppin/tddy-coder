@@ -1,0 +1,55 @@
+//! The records a coding subagent's permission request leaves on its update stream: the request, pending while a
+//! turn holds it for the user, and its answer, once one is given.
+//!
+//! Feature: docs/ft/web/agent-activity-pane.md § The user answers a deferred permission request
+
+use tddy_agent_backend::{AcpToolStatus, AcpUpdate, AcpUpdateSink};
+use tddy_discovery::subagent::{
+    answered_output, permission_title, permission_tool_call_id, request_input_json,
+    PermissionRequestView,
+};
+
+use crate::parked_permissions::{Answered, ParkedPermissions};
+
+/// The kind a request's record names. A permission is not a tool the agent ran, so it reads as `other`, as its
+/// transcript entry does.
+const PERMISSION_KIND: &str = "other";
+
+/// The record of a request its turn holds for the user: pending, its input saying it was deferred to the user.
+pub(crate) fn deferred_request_record(request: &PermissionRequestView) -> AcpUpdate {
+    AcpUpdate::ToolCallRecord {
+        id: permission_tool_call_id(&request.request_id),
+        title: permission_title(request),
+        kind: PERMISSION_KIND.to_string(),
+        status: AcpToolStatus::Pending,
+        raw_input: Some(request_input_json(request, true)),
+        raw_output: None,
+    }
+}
+
+/// The record of an answered request: completed, its raw output naming who answered it and with which option, or
+/// that it was cancelled. The request's input is repeated, so the record reads the same request the pending one did.
+pub(crate) fn answer_record(answered: &Answered) -> AcpUpdate {
+    AcpUpdate::ToolCallRecord {
+        id: permission_tool_call_id(answered.answer.request_id()),
+        title: permission_title(&answered.request),
+        kind: PERMISSION_KIND.to_string(),
+        status: AcpToolStatus::Completed,
+        raw_input: Some(request_input_json(
+            &answered.request,
+            answered.deferred_to_user,
+        )),
+        raw_output: Some(answered_output(&answered.by.name(), &answered.answer)),
+    }
+}
+
+/// Send the record of `request_id`'s answer to `sink`, when the request has been answered.
+pub(crate) fn record_answer(
+    sink: &AcpUpdateSink,
+    permissions: &ParkedPermissions,
+    request_id: &str,
+) {
+    if let Some(answered) = permissions.answered(request_id) {
+        sink(answer_record(&answered));
+    }
+}
