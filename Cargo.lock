@@ -12749,6 +12749,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum 0.8.9",
  "futures-util",
  "libc",
  "livekit",
@@ -12761,6 +12762,7 @@ dependencies = [
  "serial_test",
  "tddy-code-restructuring",
  "tddy-coding-subagent",
+ "tddy-connectrpc",
  "tddy-core",
  "tddy-credentials",
  "tddy-daemon-auth",
