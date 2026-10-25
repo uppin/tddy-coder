@@ -280,6 +280,19 @@ pub trait ProjectHomePort: Send + Sync {
 
     /// Send SIGTERM to `target`'s process, as the web UI's Terminate does (`#start-parity` 7/9).
     async fn terminate_session(&self, target: &SessionTarget) -> anyhow::Result<()>;
+
+    /// Queue a size walk for the worktree at `path` of `project_id`, or for every worktree of it
+    /// when `path` is `None`, as the Worktrees screen's Refresh does; how many were queued
+    /// (`#start-parity` 8/9).
+    async fn refresh_worktree_disk_usage(
+        &self,
+        project_id: &str,
+        path: Option<&str>,
+    ) -> anyhow::Result<crate::project_home_disk_refresh::RefreshQueued> {
+        // TODO(disk-refresh): implement in the daemon's port
+        let _ = (project_id, path);
+        anyhow::bail!("TODO(disk-refresh): refresh_worktree_disk_usage")
+    }
 }
 
 /// The project-home tools' definitions, as a client registers them before the daemon is asked:

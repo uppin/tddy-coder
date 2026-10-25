@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 2 — one tool over the existing size calculator; progress read through `worktree-list`'s tools
+**PR**: [#757](https://github.com/uppin/tddy-coder/pull/757)
 **Stack**: `#start-parity` 8/9 — branch `feature/start-parity/disk-refresh`, base `n7` `terminate` (`feature/start-parity/terminate`)
 **PRD**: [PRD-2026-10-25-start-parity-disk-refresh.md](../../ft/daemon/1-WIP/PRD-2026-10-25-start-parity-disk-refresh.md)
 
@@ -32,7 +33,11 @@ implementing one here collides with the PR that owns it.
 
 The **first push of this PR**, not its deliverable — this PR goes on to implement all of it:
 
-`REFRESH_WORKTREE_DISK_USAGE` def, `ProjectHomePort::refresh_worktree_disk_usage`, failing tests.
+- `tddy-tool-engine::project_home_disk_refresh`: `REFRESH_WORKTREE_DISK_USAGE`,
+  `RefreshQueued {queued}`, and `refresh_worktree_disk_usage_tool_def()` (`TODO(disk-refresh)`).
+  It is a module of its own because `project_home_worktree_tools` is #752's.
+- `ProjectHomePort::refresh_worktree_disk_usage(project_id, path: Option<&str>)`, with a default
+  body that bails `TODO(disk-refresh)`.
 
 ## Green wave
 
@@ -93,12 +98,17 @@ calculator's state is the record.
 
 ### Acceptance Tests
 
-- [ ] **Integration** `packages/tddy-daemon-rpc/tests/disk_refresh_acceptance.rs` — `refresh_returns_at_once_and_sizes_arrive_through_list_worktrees`: It returns `queued` N. Poll `ListWorktrees` until `sizing.done == total`; every row is CACHED with the walked byte count.
-- [ ] **Integration** `same file` — `refreshing_one_path_recalculates_only_that_worktree`: The other rows' `size_calculated_at` is unchanged.
-- [ ] **Integration** `same file` — `an_unknown_path_is_refused`: The error names the path (NOT_FOUND from the service).
+- [ ] **Unit** `packages/tddy-tool-engine/tests/disk_refresh_schema.rs`:
+  - `it_refreshes_one_worktree_or_all_and_says_where_progress_is_read`
+- [ ] **Integration** `packages/tddy-daemon-rpc/tests/disk_refresh_acceptance.rs` (two hosts;
+  progress is read through #752's `ListWorktrees`):
+  - `a_refresh_returns_at_once_and_every_size_arrives_through_list_worktrees`
+  - `refreshing_one_worktree_recalculates_only_it` — grows one worktree by 512 KiB and checks
+    that the other's `size_calculated_at` is unchanged
+  - `an_unknown_worktree_is_refused_naming_it`
+  - `another_hosts_worktrees_are_refreshed_there`
 
-Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests use the
-in-memory peer forwarder if it exists on the base, and the LiveKit testkit otherwise.
+Tests are written in the `fluent-tests` style (Given / When / Then). 
 
 ## Technical Debt & Production Readiness
 
@@ -127,10 +137,10 @@ in-memory peer forwarder if it exists on the base, and the LiveKit testkit other
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer: "finish the remaining nodes without stopping", 2026-10-25)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
