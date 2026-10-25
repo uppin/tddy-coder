@@ -137,8 +137,6 @@ export function openRoomTerminalStream({
   // Set when a frame did not continue the screen: the input generator sends one `requestSnapshot`
   // message on this same stream, and the guard drops every delta until the snapshot lands.
   let snapshotWanted = false;
-  // A request is outstanding until a snapshot arrives, so a run of gapped frames asks once.
-  let snapshotAsked = false;
   const continuity = new TerminalFrameContinuity();
 
   const waitingForServer = whenServerJoins(room, serverIdentity);
@@ -206,20 +204,18 @@ export function openRoomTerminalStream({
         // A frame that does not continue what is painted is dropped, never drawn over a screen it
         // was not computed against; the first one asks for a fresh snapshot, and the server's
         // answer re-anchors the guard.
-        if (continuity.accept(output) === "gap") {
-          if (!snapshotAsked) {
-            snapshotAsked = true;
-            snapshotWanted = true;
-          }
+        const action = continuity.route(output);
+        if (action !== "paint") {
+          if (action === "drop-and-ask") snapshotWanted = true;
           dTerm(
-            "gap — dropping frame and asking for a snapshot sessionId=%s start=%s end=%s",
+            "gap (%s) sessionId=%s start=%s end=%s",
+            action,
             sessionId,
             output.startOffset,
             output.endOffset,
           );
           continue;
         }
-        if (output.snapshot) snapshotAsked = false;
         const frame: TerminalFrame = {
           data: output.data,
           endOffset: output.endOffset,
