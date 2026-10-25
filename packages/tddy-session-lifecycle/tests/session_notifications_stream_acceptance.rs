@@ -200,6 +200,7 @@ async fn report_status_owned_by(
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: os_user.to_string(),
             status: status.to_string(),
+            message: String::new(),
         }))
         .await
         .expect("report_session_status must succeed for a valid claude-cli session");

@@ -252,6 +252,10 @@ message ReportSessionStatusRequest {
   string os_user = 3;
   // Wire status string: one of Started, Running, ExecutingTool, WaitingForInput, Done, Ended.
   string status = 4;
+  // The agent's own words for what it is waiting on — the hook event's `message` — sent with
+  // WaitingForInput and recorded as the session's pending question. Empty for every other status
+  // (`#start-parity` 6/9).
+  string message = 5;
 }
 
 message ReportSessionStatusResponse {

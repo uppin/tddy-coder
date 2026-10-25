@@ -8,6 +8,7 @@ pub mod agent_activity;
 pub mod branch_worktree_intent;
 pub mod changeset;
 pub mod elapsed_format;
+pub mod pending_question;
 pub mod session_activity;
 pub mod session_agent;
 pub mod session_context;

@@ -63,6 +63,19 @@ pub struct SessionHookArgs {
     pub event: String,
 }
 
+/// The `ReportSessionStatus` request the hook event in `stdin_json` becomes, or `None` for an
+/// event that maps to no status. A `WaitingForInput` report carries the event's own `message` — the
+/// question the agent is waiting on — which the daemon records as the session's pending question
+/// (`#start-parity` 6/9).
+pub fn session_status_request(
+    args: &SessionHookArgs,
+    stdin_json: &str,
+) -> Option<ReportSessionStatusRequest> {
+    // TODO(session-follow): implement, and send what it builds from `report_session_status`
+    let _ = (args, stdin_json);
+    None
+}
+
 pub async fn run_session_hook(args: SessionHookArgs) {
     if let Err(e) = try_run_session_hook(args).await {
         eprintln!("[session-hook] error (ignored, fail-quiet): {e}");
@@ -119,6 +132,7 @@ async fn report_session_status(
         hook_token: args.hook_token.clone(),
         os_user: args.os_user.clone(),
         status: status.as_wire().to_string(),
+        message: String::new(),
     };
 
     deliver(args, "ReportSessionStatus", req.encode_to_vec()).await

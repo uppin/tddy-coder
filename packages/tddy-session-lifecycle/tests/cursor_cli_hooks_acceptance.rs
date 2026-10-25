@@ -110,6 +110,7 @@ async fn cursor_cli_report_session_status_writes_activity_status() {
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: TEST_OS_USER.to_string(),
             status: "Running".to_string(),
+            message: String::new(),
         }))
         .await
         .expect("ReportSessionStatus must succeed for cursor-cli");
@@ -139,6 +140,7 @@ async fn cursor_cli_report_session_status_rejects_bad_hook_token() {
             hook_token: "wrong-token".to_string(),
             os_user: TEST_OS_USER.to_string(),
             status: "Started".to_string(),
+            message: String::new(),
         }))
         .await
         .expect_err("bad hook_token must be rejected");
@@ -198,6 +200,7 @@ async fn cursor_cli_report_session_status_rejects_tool_session_type() {
             hook_token: TEST_HOOK_TOKEN.to_string(),
             os_user: TEST_OS_USER.to_string(),
             status: "Running".to_string(),
+            message: String::new(),
         }))
         .await
         .expect_err("non-cli session must be rejected");
