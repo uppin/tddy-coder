@@ -59,7 +59,10 @@ use tddy_tool_engine::start_session_args::{StartContext, StartSessionArgs};
 use tddy_worktree_service::service::project_main_repo_on_host;
 use tddy_worktree_service::session_git_ops::PushIdentity;
 use tddy_worktree_service::session_target::{HomeCaller, SessionTarget, TargetRecord};
-use tddy_worktree_service::worktrees::{project_worktree_snapshot, WorktreeSizeCalculator};
+use tddy_worktree_service::worktrees::{
+    list_worktree_diff_rows, project_worktree_snapshot, worktree_path_is_listed,
+    WorktreeSizeCalculator,
+};
 
 use super::project_home_remote::PeerSessionLists;
 use super::project_home_session_follow;
@@ -642,6 +645,45 @@ impl ProjectHomePort for DaemonProjectHome {
         .map_err(|e| anyhow::anyhow!("terminating the session failed: {e}"))?
         .map_err(status_error)?;
         Ok(())
+    }
+
+    /// Enqueue the Worktrees screen's size walk: one worktree (membership-checked on git's own
+    /// worktree list, as `CalculateWorktreeSize` checks it), or every worktree of the project
+    /// (`#start-parity` 8/9). Answers once the walks are queued; the calculator reports the rest.
+    async fn refresh_worktree_disk_usage(
+        &self,
+        project_id: &str,
+        path: Option<&str>,
+    ) -> anyhow::Result<tddy_tool_engine::project_home_disk_refresh::RefreshQueued> {
+        let main_repo = project_main_repo_on_host(
+            &self.tddy_data_dir,
+            &self.os_user,
+            &self.daemon_instance_id,
+            project_id,
+        )
+        .map_err(|status| anyhow::anyhow!(status.message().to_string()))?;
+        let wanted = path.map(PathBuf::from);
+        let targets = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<PathBuf>> {
+            match wanted {
+                None => Ok(list_worktree_diff_rows(&main_repo)
+                    .into_iter()
+                    .map(|row| row.path)
+                    .collect()),
+                Some(path) if worktree_path_is_listed(&main_repo, &path) => Ok(vec![path]),
+                Some(path) => anyhow::bail!(
+                    "worktree path {} is not in git worktree list",
+                    path.display()
+                ),
+            }
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("reading the worktrees failed: {e}"))??;
+        for target in &targets {
+            self.worktree_sizes.enqueue(project_id, target).await;
+        }
+        Ok(tddy_tool_engine::project_home_disk_refresh::RefreshQueued {
+            queued: targets.len(),
+        })
     }
 
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>> {

@@ -15,6 +15,7 @@
 //! | `ReadSessionActivity` | a target session's tool calls, paged, with the question it waits on ([`crate::session_follow`]) |
 //! | `ReadSessionTranscript` | a target session's transcript, paged; one tool call whole by id |
 //! | `TerminateSession` | sends a target session's process SIGTERM, as the UI's Terminate does; the record, worktree and branch stay ([`crate::project_home_terminate`]) |
+//! | `RefreshWorktreeDiskUsage` | queues the Worktrees screen's size walk for one worktree or every one, and answers at once; the progress is read with `ListWorktrees` ([`crate::project_home_disk_refresh`]) |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
@@ -42,6 +43,9 @@ use tddy_worktree_service::worktree_files::{
 
 use crate::catalog::{tool_catalog, ToolDef};
 use crate::project_home_diff::worktree_diff;
+use crate::project_home_disk_refresh::{
+    refresh_worktree_disk_usage, refresh_worktree_disk_usage_tool_def, REFRESH_WORKTREE_DISK_USAGE,
+};
 use crate::project_home_git_tools::{
     execute_project_home_git_tool, is_project_home_git_tool, project_home_git_tool_defs,
 };
@@ -89,6 +93,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | READ_SESSION_ACTIVITY
             | READ_SESSION_TRANSCRIPT
             | TERMINATE_SESSION
+            | REFRESH_WORKTREE_DISK_USAGE
     )
 }
 
@@ -184,6 +189,7 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | READ_SESSION_ACTIVITY
             | READ_SESSION_TRANSCRIPT
             | TERMINATE_SESSION
+            | REFRESH_WORKTREE_DISK_USAGE
     ) || is_project_home_git_tool(name)
 }
 
@@ -283,16 +289,12 @@ pub trait ProjectHomePort: Send + Sync {
 
     /// Queue a size walk for the worktree at `path` of `project_id`, or for every worktree of it
     /// when `path` is `None`, as the Worktrees screen's Refresh does; how many were queued
-    /// (`#start-parity` 8/9).
+    /// (`#start-parity` 8/9). A `path` not in the worktree list is an error naming it.
     async fn refresh_worktree_disk_usage(
         &self,
         project_id: &str,
         path: Option<&str>,
-    ) -> anyhow::Result<crate::project_home_disk_refresh::RefreshQueued> {
-        // TODO(disk-refresh): implement in the daemon's port
-        let _ = (project_id, path);
-        anyhow::bail!("TODO(disk-refresh): refresh_worktree_disk_usage")
-    }
+    ) -> anyhow::Result<crate::project_home_disk_refresh::RefreshQueued>;
 }
 
 /// The project-home tools' definitions, as a client registers them before the daemon is asked:
@@ -362,6 +364,7 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     defs.extend(worktree_tool_defs());
     defs.extend(session_follow_tool_defs());
     defs.extend(terminate_session_tool_def());
+    defs.extend(refresh_worktree_disk_usage_tool_def());
     defs
 }
 
@@ -405,6 +408,7 @@ pub async fn execute_project_home_tool(
             run_session_follow_tool(port, home, tool_name, args).await
         }
         TERMINATE_SESSION => terminate_session(port, home, args).await,
+        REFRESH_WORKTREE_DISK_USAGE => refresh_worktree_disk_usage(port, home, args).await,
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }
 }

@@ -147,6 +147,7 @@ mod tests {
                 "ResetSessionWorktree",
                 "CheckoutSessionWorktree",
                 "CleanSessionWorktree",
+                "RefreshWorktreeDiskUsage",
             ])
         );
     }
