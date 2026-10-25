@@ -64,7 +64,10 @@ root re-exports them from there, so `tddy_terminal_rpc::service::TerminalRoster`
 `build_terminal_session_entry`.
 
 `TerminalSession` also provides **`snapshot_and_subscribe() -> Result<(ScreenSnapshot,
-broadcast::Receiver<Bytes>), Status>`**: it locks `capture()`, takes
+broadcast::Receiver<Bytes>), Status>`**, a call to the free function
+`session::snapshot_and_subscribe(capture, subscribe)` — which `tddy-cli-sessions`'
+`PtyTerminalService` calls directly, since a PTY handle serving the room wire is not a
+`TerminalSession`. It locks `capture()` (a poisoned lock is `INTERNAL`), takes
 [`TerminalCapture::snapshot`](../../tddy-task/docs/terminal-capture.md#screen-snapshots), subscribes
 to `subscribe_stdout()` and unlocks. Every producer appends and broadcasts under that same lock, so the
 receiver yields exactly the bytes from `snapshot.offset` on — the

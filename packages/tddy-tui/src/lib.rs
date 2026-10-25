@@ -29,4 +29,4 @@ pub use mouse_map::{
 pub use raw::{disable_raw_mode, enable_raw_mode_keep_sig};
 pub use tui_view::TuiView;
 pub use view_state::ViewState;
-pub use virtual_tui::{apply_event, run_virtual_tui};
+pub use virtual_tui::{apply_event, run_virtual_tui, VIRTUAL_TUI_REPAINT_REQUEST};

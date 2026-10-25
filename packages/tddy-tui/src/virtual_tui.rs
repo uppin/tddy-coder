@@ -42,6 +42,21 @@ pub fn virtual_tui_cursor_only_frame_min_interval() -> Duration {
     d
 }
 
+/// Written to a VirtualTui's input to make its next render a full repaint of the screen (the
+/// buffers are cleared, so nothing is diffed against what the client already shows). Unlike a
+/// resize it leaves the grid as it is. The terminal service uses it to answer a snapshot request.
+pub const VIRTUAL_TUI_REPAINT_REQUEST: &[u8] = b"\x1b]repaint\x07";
+
+/// Consumes a leading repaint request, reporting whether there was one.
+fn take_repaint_request(buf: &mut Vec<u8>) -> bool {
+    if buf.starts_with(VIRTUAL_TUI_REPAINT_REQUEST) {
+        buf.drain(..VIRTUAL_TUI_REPAINT_REQUEST.len());
+        true
+    } else {
+        false
+    }
+}
+
 /// Strips CSI sequences that only move or toggle cursor visibility, for cursor-vs-content diffs.
 fn strip_cursor_csi_sequences(input: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(input.len());
@@ -217,19 +232,7 @@ pub fn run_virtual_tui(
         );
 
         if mouse {
-            {
-                let mut b = frame_buf.lock().unwrap();
-                b.clear();
-            }
-            if execute!(terminal.backend_mut(), crossterm::event::EnableMouseCapture).is_ok() {
-                let seq = {
-                    let b = frame_buf.lock().unwrap();
-                    b.clone()
-                };
-                if !seq.is_empty() {
-                    let _ = output_tx.blocking_send(seq);
-                }
-            }
+            resend_mouse_capture(&mut terminal, &frame_buf, &output_tx);
         }
 
         let mut input_rx = input_rx;
@@ -244,6 +247,10 @@ pub fn run_virtual_tui(
         let mut total_input_bytes: u64 = 0;
         let mut total_keys_parsed: u64 = 0;
         let mut agent_output_merge = AgentOutputActivityLogMerge::new();
+        // Set when the buffers were cleared (a repaint request or a resize). The render that
+        // follows is a full repaint, which the terminal service sends led by RIS, so it is
+        // followed by the mouse-tracking enable that RIS undid.
+        let mut full_repaint_pending = false;
 
         loop {
             let mut updated = false;
@@ -279,6 +286,7 @@ pub fn run_virtual_tui(
                         process_virtual_tui_input_chunk(
                             &bytes,
                             &mut updated,
+                            &mut full_repaint_pending,
                             &mut recv_chunk_count,
                             &mut total_input_bytes,
                             &mut total_keys_parsed,
@@ -333,6 +341,12 @@ pub fn run_virtual_tui(
                     &mut last_cursor_only_frame_at,
                 );
                 last_render = std::time::Instant::now();
+                if full_repaint_pending {
+                    full_repaint_pending = false;
+                    if mouse {
+                        resend_mouse_capture(&mut terminal, &frame_buf, &output_tx);
+                    }
+                }
             }
 
             thread::sleep(Duration::from_millis(10));
@@ -355,6 +369,7 @@ pub fn run_virtual_tui(
                             process_virtual_tui_input_chunk(
                                 &bytes,
                                 &mut straggler_updated,
+                                &mut full_repaint_pending,
                                 &mut recv_chunk_count,
                                 &mut total_input_bytes,
                                 &mut total_keys_parsed,
@@ -400,10 +415,59 @@ pub fn run_virtual_tui(
     });
 }
 
+/// Send the enable-mouse-tracking sequence to the client.
+fn resend_mouse_capture(
+    terminal: &mut Terminal<CrosstermBackend<CapturingWriter>>,
+    frame_buf: &Arc<Mutex<Vec<u8>>>,
+    output_tx: &mpsc::Sender<Vec<u8>>,
+) {
+    {
+        let mut b = frame_buf.lock().unwrap();
+        b.clear();
+    }
+    if execute!(terminal.backend_mut(), crossterm::event::EnableMouseCapture).is_ok() {
+        let seq = {
+            let b = frame_buf.lock().unwrap();
+            b.clone()
+        };
+        if !seq.is_empty() {
+            let _ = output_tx.blocking_send(seq);
+        }
+    }
+}
+
+/// Consumes the repaint requests and resizes at the front of `input_buf`, clearing the buffers for
+/// each so the next render is a full repaint. Returns whether there was any: the caller then
+/// renders, and re-sends mouse tracking after that repaint.
+fn apply_leading_control_sequences(
+    input_buf: &mut Vec<u8>,
+    terminal: &mut Terminal<CrosstermBackend<CapturingWriter>>,
+    prev_frame: &mut Vec<u8>,
+) -> bool {
+    let mut cleared = false;
+    loop {
+        if take_repaint_request(input_buf) {
+            log::debug!("VirtualTui: repaint requested");
+            if let Err(e) = terminal.clear() {
+                log::debug!("virtual_tui: clear for repaint error: {}", e);
+            }
+            prev_frame.clear();
+        } else if let Some((cols, rows, consumed)) = parse_resize_from_buf(input_buf) {
+            log::debug!("VirtualTui: resize {}x{}", cols, rows);
+            apply_resize(terminal, prev_frame, cols, rows);
+            input_buf.drain(..consumed);
+        } else {
+            return cleared;
+        }
+        cleared = true;
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn process_virtual_tui_input_chunk(
     bytes: &[u8],
     updated: &mut bool,
+    full_repaint_pending: &mut bool,
     recv_chunk_count: &mut u64,
     total_input_bytes: &mut u64,
     total_keys_parsed: &mut u64,
@@ -430,10 +494,8 @@ fn process_virtual_tui_input_chunk(
         );
     }
     input_buf.extend_from_slice(bytes);
-    while let Some((cols, rows, consumed)) = parse_resize_from_buf(input_buf) {
-        log::debug!("VirtualTui: resize {}x{}", cols, rows);
-        apply_resize(terminal, prev_frame, cols, rows);
-        input_buf.drain(..consumed);
+    if apply_leading_control_sequences(input_buf, terminal, prev_frame) {
+        *full_repaint_pending = true;
         *updated = true;
     }
     if mouse {

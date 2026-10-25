@@ -25,6 +25,13 @@ The status bar is a single `Paragraph` line. Text is built by `render::status_ba
 
 `VirtualTui` calls the same `draw()` function so local and remote frames match. Its periodic re-render interval comes from `status_bar_activity::virtual_tui_periodic_render_interval` (short interval for agent-active animation, about one second in clarification waits). Cursor-only frame bytes are throttled against a minimum interval when CSI differencing indicates only cursor motion or visibility toggles.
 
+**Full repaints.** A render after the buffers were cleared — the first one, a resize
+(`\x1b]resize;{cols};{rows}\x07`), or a **repaint request** (`VIRTUAL_TUI_REPAINT_REQUEST`,
+`\x1b]repaint\x07`, at the front of the input buffer) — is sent led by `\x1b[2J\x1b[H`. A repaint
+request clears the buffers without touching the grid: it never resizes. `TerminalServiceVirtualTui`
+sends each such frame as a snapshot, prefixed with RIS, which resets the client's mouse tracking — so
+with `--mouse` the VirtualTui re-sends `EnableMouseCapture` after every full repaint.
+
 ## Markdown viewer (plan tail)
 
 `AppMode::MarkdownViewer` uses a wrapped `Paragraph` for the activity area. Scroll limits derive from `Paragraph::line_count` with the same `Wrap { trim: true }` settings as render (via ratatui `unstable-rendered-line-info`). Approve/Reject labels append to the markdown `Text` only after the view marks end-of-markdown-scroll; they scroll with the document instead of a reserved footer strip.
@@ -43,7 +50,7 @@ The status bar is a single `Paragraph` line. Text is built by `render::status_ba
 | `ui` | Elapsed formatting, status line strings, session segment rules, activity prefix |
 | `render` | Frame layout, `draw`, question/inbox/plan/error sub-renderers |
 | `view_state` | Spinner tick, scroll offsets, selection indices, frozen status anchors |
-| `virtual_tui` | Headless terminal, input parsing, `apply_event`, frame diff + cursor-only throttle |
+| `virtual_tui` | Headless terminal, input parsing, `apply_event`, frame diff + cursor-only throttle; `VIRTUAL_TUI_REPAINT_REQUEST` |
 | `event_loop` | Crossterm loop, optional external intents and byte capture, caret `Show` when editing |
 
 ## Related packages

@@ -61,7 +61,7 @@ export interface TerminalHistoryChunk {
    * Not a duplicate of {@link atOldest}, and the two are read at opposite ends of the fill: the
    * first chunk of a fill from offset 0 is normally `atOldest` and not `atEnd`. This is the field
    * `TerminalHistoryForwardLoader` terminates on, and it is the *only* terminator available to a
-   * fill with no offset anchor — a LiveKit-carried session's, whose frames carry no offsets at all.
+   * fill with no offset anchor.
    */
   readonly atEnd: boolean;
 }

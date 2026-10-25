@@ -14,7 +14,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use tddy_core::ViewConnection;
 use tddy_rpc::{Request, Response, Status, Streaming};
-use tddy_tui::run_virtual_tui;
+use tddy_tui::{run_virtual_tui, VIRTUAL_TUI_REPAINT_REQUEST};
 
 use crate::proto::terminal::{TerminalInput, TerminalOutput, TerminalService};
 
@@ -48,6 +48,68 @@ pub fn start_virtual_tui_session(
         output_rx,
         shutdown,
     })
+}
+
+/// What a VirtualTui prefixes a full repaint with (after a clear it is the first thing it writes).
+const FULL_REPAINT_PREFIX: &[u8] = b"\x1b[2J\x1b[H";
+
+/// Reset to initial state: a snapshot begins with it, so it can be written into a live terminal.
+const RIS: &[u8] = b"\x1bc";
+
+/// Stamps one connection's output with contiguous offsets and flags its full repaints.
+///
+/// A VirtualTui sends a repaint as its first frame and again whenever its buffers were cleared
+/// (a [`VIRTUAL_TUI_REPAINT_REQUEST`], or a resize). Each is led by a clear, which is how it is
+/// told apart from a delta; it is sent with a leading RIS and flagged as a snapshot, so the
+/// client resets its screen model before painting it and re-anchors its continuity guard.
+struct OutputStamper {
+    next_offset: u64,
+    opened: bool,
+}
+
+impl OutputStamper {
+    fn new() -> Self {
+        Self {
+            next_offset: 0,
+            opened: false,
+        }
+    }
+
+    fn frame(&mut self, bytes: Vec<u8>) -> TerminalOutput {
+        let snapshot = !self.opened || bytes.starts_with(FULL_REPAINT_PREFIX);
+        self.opened = true;
+        let data = if snapshot {
+            let mut data = Vec::with_capacity(RIS.len() + bytes.len());
+            data.extend_from_slice(RIS);
+            data.extend_from_slice(&bytes);
+            data
+        } else {
+            bytes
+        };
+        let start_offset = self.next_offset;
+        self.next_offset += data.len() as u64;
+        TerminalOutput {
+            data,
+            snapshot,
+            start_offset,
+            end_offset: self.next_offset,
+        }
+    }
+}
+
+/// What one input message asks of the VirtualTui: bytes to forward, and whether to repaint.
+///
+/// The connection's opening message is answered by the opening repaint, so its `request_snapshot`
+/// asks for nothing more; any later one is applied after the message's own data.
+fn forwarded_input(req: TerminalInput, opening: bool) -> Vec<Vec<u8>> {
+    let mut chunks = Vec::new();
+    if !req.data.is_empty() {
+        chunks.push(req.data);
+    }
+    if req.request_snapshot && !opening {
+        chunks.push(VIRTUAL_TUI_REPAINT_REQUEST.to_vec());
+    }
+    chunks
 }
 
 /// Per-connection VirtualTui terminal service.
@@ -110,23 +172,26 @@ impl TerminalService for TerminalServiceVirtualTui {
             while let Some(item) = futures_util::stream::StreamExt::next(&mut client_stream).await {
                 input_count += 1;
                 match item {
-                    Ok(req) if !req.data.is_empty() => {
-                        let chunk_len = req.data.len() as u64;
-                        cumulative_forwarded_bytes += chunk_len;
-                        if input_count <= 5 || input_count.is_multiple_of(500) || chunk_len != 1 {
-                            log::debug!(
-                                "[BIDI_TRACE] terminal_service: forward msg#{} chunk_len={} cumulative_forwarded_bytes={}",
-                                input_count,
-                                chunk_len,
-                                cumulative_forwarded_bytes
-                            );
-                        }
-                        if let Err(e) = input_tx.send(req.data).await {
-                            log::error!(
-                                "[BIDI_TRACE] terminal_service: input_tx.send FAILED #{}: {}",
-                                input_count,
-                                e
-                            );
+                    Ok(req) => {
+                        for chunk in forwarded_input(req, input_count == 1) {
+                            let chunk_len = chunk.len() as u64;
+                            cumulative_forwarded_bytes += chunk_len;
+                            if input_count <= 5 || input_count.is_multiple_of(500) || chunk_len != 1
+                            {
+                                log::debug!(
+                                    "[BIDI_TRACE] terminal_service: forward msg#{} chunk_len={} cumulative_forwarded_bytes={}",
+                                    input_count,
+                                    chunk_len,
+                                    cumulative_forwarded_bytes
+                                );
+                            }
+                            if let Err(e) = input_tx.send(chunk).await {
+                                log::error!(
+                                    "[BIDI_TRACE] terminal_service: input_tx.send FAILED #{}: {}",
+                                    input_count,
+                                    e
+                                );
+                            }
                         }
                     }
                     Err(e) => {
@@ -136,7 +201,6 @@ impl TerminalService for TerminalServiceVirtualTui {
                             e
                         );
                     }
-                    _ => {}
                 }
             }
             log::debug!(
@@ -151,12 +215,13 @@ impl TerminalService for TerminalServiceVirtualTui {
         let hook = self.output_hook.clone();
         tokio::spawn(async move {
             let mut output_count: u64 = 0;
+            let mut stamper = OutputStamper::new();
             while let Some(bytes) = output_rx.recv().await {
                 output_count += 1;
                 if let Some(ref h) = hook {
                     h(&bytes);
                 }
-                if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
+                if tx.send(Ok(stamper.frame(bytes))).await.is_err() {
                     log::debug!(
                         "[BIDI_TRACE] terminal_service: output consumer gone after {} chunks",
                         output_count,
@@ -200,8 +265,8 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
             let mut cumulative_forwarded_bytes: u64 = 0;
             while let Ok(Some(msg)) = client_stream.message().await {
                 input_count += 1;
-                if !msg.data.is_empty() {
-                    let chunk_len = msg.data.len() as u64;
+                for chunk in forwarded_input(msg, input_count == 1) {
+                    let chunk_len = chunk.len() as u64;
                     cumulative_forwarded_bytes += chunk_len;
                     log::trace!(
                         "tonic: forwarding input #{} ({} bytes)",
@@ -216,7 +281,7 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
                             cumulative_forwarded_bytes
                         );
                     }
-                    if let Err(e) = input_tx.send(msg.data).await {
+                    if let Err(e) = input_tx.send(chunk).await {
                         log::error!("tonic: input_tx.send FAILED #{}: {}", input_count, e);
                     }
                 }
@@ -232,11 +297,12 @@ impl crate::tonic_terminal::terminal_service_server::TerminalService for Termina
         let hook = self.output_hook.clone();
         let (tx, rx) = mpsc::channel(64);
         tokio::spawn(async move {
+            let mut stamper = OutputStamper::new();
             while let Some(bytes) = output_rx.recv().await {
                 if let Some(ref h) = hook {
                     h(&bytes);
                 }
-                if tx.send(Ok(TerminalOutput { data: bytes })).await.is_err() {
+                if tx.send(Ok(stamper.frame(bytes))).await.is_err() {
                     break;
                 }
             }

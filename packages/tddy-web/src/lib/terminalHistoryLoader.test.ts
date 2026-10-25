@@ -31,12 +31,10 @@ function aChunk(
 }
 
 /**
- * The fill a terminal drives when its stream carries no offsets at all.
+ * The fill a terminal drives when no frame has given it an anchor.
  *
- * A LiveKit-carried session's frames are `terminal.TerminalOutput`, which is `bytes data` and
- * nothing else — there is no `end_offset` to anchor against. That is a different fact from an
- * anchor of zero, which a `SessionTerminalOutput` replay frame reports when the terminal has
- * captured nothing, so the two are constructed differently.
+ * That is a different fact from an anchor of zero, which a snapshot frame reports when the
+ * terminal has captured nothing, so the two are constructed differently.
  */
 function anUnanchoredLoader(): TerminalHistoryForwardLoader {
   return new TerminalHistoryForwardLoader(null);

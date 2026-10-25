@@ -302,7 +302,7 @@ fn connect_livekit(
 
         // Send init
         if let Err(e) = sender
-            .send(TerminalInput { data: vec![] }.encode_to_vec(), false)
+            .send(TerminalInput { data: vec![], ..Default::default() }.encode_to_vec(), false)
             .await
         {
             eprintln!("[rpc_demo] send init failed: {}", e);
@@ -316,7 +316,7 @@ fn connect_livekit(
             tokio::select! {
                 // Forward keyboard bytes → LiveKit bidi sender
                 Some(bytes) = key_rx.recv() => {
-                    let payload = TerminalInput { data: bytes }.encode_to_vec();
+                    let payload = TerminalInput { data: bytes, ..Default::default() }.encode_to_vec();
                     if let Err(e) = sender.send(payload, false).await {
                         eprintln!("[rpc_demo] livekit send failed: {}", e);
                         break;

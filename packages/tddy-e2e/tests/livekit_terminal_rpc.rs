@@ -106,7 +106,10 @@ mod livekit_tests {
         let rpc_client = RpcClient::new(client_room, SERVER_IDENTITY.to_string(), rpc_events);
 
         // When — client opens a StreamTerminalIO server-stream with empty init
-        let request = TerminalInput { data: vec![] };
+        let request = TerminalInput {
+            data: vec![],
+            ..Default::default()
+        };
         let request_bytes = request.encode_to_vec();
 
         let mut rx = rpc_client
@@ -245,7 +248,14 @@ mod livekit_tests {
         // LiveKit data channels have higher per-chunk latency than gRPC (5 hops vs 2),
         // so we use longer quiet periods (2s vs 500ms for gRPC).
         sender
-            .send(TerminalInput { data: vec![] }.encode_to_vec(), false)
+            .send(
+                TerminalInput {
+                    data: vec![],
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+                false,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("send init: {}", e))?;
 
@@ -278,7 +288,14 @@ mod livekit_tests {
         for (key, label) in inputs {
             eprintln!("[TEST-INPUT] livekit: sending {}", label);
             sender
-                .send(TerminalInput { data: key.to_vec() }.encode_to_vec(), false)
+                .send(
+                    TerminalInput {
+                        data: key.to_vec(),
+                        ..Default::default()
+                    }
+                    .encode_to_vec(),
+                    false,
+                )
                 .await
                 .map_err(|e| anyhow::anyhow!("send {}: {}", label, e))?;
 
@@ -429,6 +446,7 @@ mod livekit_tests {
             .send(
                 TerminalInput {
                     data: encode_resize(COLS, ROWS),
+                    ..Default::default()
                 }
                 .encode_to_vec(),
                 false,
@@ -438,14 +456,28 @@ mod livekit_tests {
 
         // Send empty init to trigger initial TUI render.
         sender
-            .send(TerminalInput { data: vec![] }.encode_to_vec(), false)
+            .send(
+                TerminalInput {
+                    data: vec![],
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+                false,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("send init: {}", e))?;
 
         // Send expected bytes one by one (char-by-char echo test).
         for byte in expected.as_bytes() {
             sender
-                .send(TerminalInput { data: vec![*byte] }.encode_to_vec(), false)
+                .send(
+                    TerminalInput {
+                        data: vec![*byte],
+                        ..Default::default()
+                    }
+                    .encode_to_vec(),
+                    false,
+                )
                 .await
                 .map_err(|e| anyhow::anyhow!("send byte: {}", e))?;
         }
@@ -468,7 +500,14 @@ mod livekit_tests {
         .await;
 
         sender
-            .send(TerminalInput { data: vec![] }.encode_to_vec(), true)
+            .send(
+                TerminalInput {
+                    data: vec![],
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+                true,
+            )
             .await
             .ok();
         shutdown.store(true, Ordering::Relaxed);
@@ -535,7 +574,14 @@ mod livekit_tests {
 
         // When — Phase 1: send init, drain initial TUI output
         sender
-            .send(TerminalInput { data: vec![] }.encode_to_vec(), false)
+            .send(
+                TerminalInput {
+                    data: vec![],
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+                false,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("send init: {}", e))?;
 
@@ -564,7 +610,14 @@ mod livekit_tests {
         let mut all_raw = initial_output;
         for (key, label) in inputs {
             sender
-                .send(TerminalInput { data: key.to_vec() }.encode_to_vec(), false)
+                .send(
+                    TerminalInput {
+                        data: key.to_vec(),
+                        ..Default::default()
+                    }
+                    .encode_to_vec(),
+                    false,
+                )
                 .await
                 .map_err(|e| anyhow::anyhow!("send {}: {}", label, e))?;
 
