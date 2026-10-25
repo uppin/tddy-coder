@@ -173,9 +173,11 @@ and `tddy-daemon`'s `terminal_session_adapter.rs` binds that capture to
 `tddy_terminal_rpc::bridge` arm as every other attach path — bounded, prologue first, anchored on the
 same absolute offsets.
 
-The daemon does not know a jailed PTY's size, so that capture is never `resize`d: its `snapshot()` is
-`None` and a `SNAPSHOT` open of a jailed terminal is refused with `FAILED_PRECONDITION`. Jail sizing
-is `#term-snapshot` 3/4 ([#762](https://github.com/uppin/tddy-coder/pull/762)).
+The daemon cannot see a jailed PTY's size, so the runner inside the jail reports it: once after the
+PTY opens and again after every resize it applied, in order with the output. The daemon calls
+`resize` on the capture at that point in the stream, under the same lock as the appends. Until the
+first report the capture is unsized, its `snapshot()` is `None`, and a `SNAPSHOT` open of the jailed
+terminal is refused with `FAILED_PRECONDITION`.
 
 ## Known limits
 

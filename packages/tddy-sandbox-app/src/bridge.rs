@@ -182,6 +182,7 @@ pub async fn run_terminal_bridge(
         HostRelayConfig {
             session_id: session_id.to_string(),
             terminal_sink: terminal_tx,
+            terminal_events: None,
             initial_cols: cols as u32,
             initial_rows: rows as u32,
         },

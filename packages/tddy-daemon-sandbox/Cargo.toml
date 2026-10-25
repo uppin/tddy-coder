@@ -48,6 +48,8 @@ tddy-sandbox-cgroups = { path = "../tddy-sandbox-cgroups" }
 libc = "0.2"
 
 [dev-dependencies]
+# The reference emulator a jailed terminal's snapshot is rendered in.
+vt100 = "0.15"
 prost = "0.13"
 # `task_service_peer_cancel.rs` scripts the peer daemon behind a `CommonRoom`.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }

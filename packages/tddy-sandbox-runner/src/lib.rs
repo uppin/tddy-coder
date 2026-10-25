@@ -14,7 +14,7 @@ pub mod runner;
 pub use conversation_root::CONVERSATION_WORKTREES_DIR;
 pub use host_relay::{
     relay_egress_request, run_host_relay, run_host_relay_with_in_jail_tools,
-    run_host_relay_with_rpc, HostRelayConfig, HostRpcHandler, HostToolHandler,
+    run_host_relay_with_rpc, HostRelayConfig, HostRpcHandler, HostTerminalEvent, HostToolHandler,
     InJailToolDispatcher, NullRpcHandler, NullToolHandler, SessionChannelClient,
     StdioSandboxClient, IN_JAIL_TOOL_TIMEOUT,
 };

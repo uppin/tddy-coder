@@ -216,8 +216,8 @@ terminal with its requested kind; `sessionTerminalTabsPage.ts` offers `newTabMen
 - **The continuity guard is wired twice.** Because of the two paths above, the gap handling
   (`TerminalFrameContinuity.route`, the `requestSnapshot` message on the request queue) is repeated
   in `openDaemonTerminalFeed` and `GrpcSessionTerminal`; it goes when the paths are merged.
-- **Jailed terminals refuse the snapshot open** (`FAILED_PRECONDITION`) until `#term-snapshot` 3/4
-  ([#762](https://github.com/uppin/tddy-coder/pull/762)) tells the host their size.
+- **A jailed terminal refuses the snapshot open** (`FAILED_PRECONDITION`) only until its runner has
+  reported the PTY's size to the host, which it does as soon as the PTY opens.
 - **A room-carried session's frames carry no offsets**, so its fill is unanchored and its reconnect
   is not shown a snapshot the way the host path is (`#term-snapshot` 4/4,
   [#763](https://github.com/uppin/tddy-coder/pull/763)). Adding offsets to `terminal.TerminalOutput` would remove

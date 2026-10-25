@@ -249,9 +249,58 @@ pub struct HostRelayConfig {
     /// PTY output bytes from the jail are forwarded here (the daemon fans into broadcast+capture;
     /// tests collect them into a buffer).
     pub terminal_sink: mpsc::UnboundedSender<Bytes>,
+    /// When set, the jail's terminal is reported here **instead of** `terminal_sink`: its output
+    /// and every size change the jail applied, on one channel and in the order they happened. A
+    /// consumer that keeps a screen model needs both in order — a size change read before or after
+    /// the output it sat between would reinterpret that output at the wrong grid.
+    pub terminal_events: Option<mpsc::UnboundedSender<HostTerminalEvent>>,
     /// Initial terminal dimensions sent with `SubscribeTerminal`.
     pub initial_cols: u32,
     pub initial_rows: u32,
+}
+
+/// What the jail's terminal reported, in the order it reported it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostTerminalEvent {
+    /// Bytes the jail's PTY produced.
+    Output(Bytes),
+    /// The jail's PTY was opened at, or resized to, this grid.
+    Resized { cols: u16, rows: u16 },
+}
+
+/// Where the relay delivers the jail's terminal: as events, when the consumer opted into them
+/// ([`HostRelayConfig::with_terminal_events`]), otherwise as bytes alone.
+struct JailTerminalRoute {
+    sink: mpsc::UnboundedSender<Bytes>,
+    events: Option<mpsc::UnboundedSender<HostTerminalEvent>>,
+}
+
+impl JailTerminalRoute {
+    fn output(&self, data: Vec<u8>) {
+        if data.is_empty() {
+            return;
+        }
+        let data = Bytes::from(data);
+        match &self.events {
+            Some(events) => {
+                let _ = events.send(HostTerminalEvent::Output(data));
+            }
+            None => {
+                let _ = self.sink.send(data);
+            }
+        }
+    }
+
+    /// Only a consumer that opted into events keeps a screen model to resize; a byte-only sink has
+    /// no use for the size. A grid that does not fit `u16` is not one the jail can have applied,
+    /// so it is dropped.
+    fn resized(&self, cols: u32, rows: u32) {
+        if let (Some(events), Ok(cols), Ok(rows)) =
+            (&self.events, u16::try_from(cols), u16::try_from(rows))
+        {
+            let _ = events.send(HostTerminalEvent::Resized { cols, rows });
+        }
+    }
 }
 
 impl HostRelayConfig {
@@ -260,9 +309,20 @@ impl HostRelayConfig {
         Self {
             session_id: session_id.into(),
             terminal_sink,
+            terminal_events: None,
             initial_cols: 80,
             initial_rows: 24,
         }
+    }
+
+    /// Report the jail's terminal output and size changes, in order, on `events` rather than its
+    /// bytes alone on `terminal_sink`.
+    pub fn with_terminal_events(
+        mut self,
+        events: mpsc::UnboundedSender<HostTerminalEvent>,
+    ) -> Self {
+        self.terminal_events = Some(events);
+        self
     }
 }
 
@@ -545,7 +605,10 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
         .map_err(|_| "session channel closed before subscribe".to_string())?;
 
     let session_id = config.session_id.clone();
-    let terminal_sink = config.terminal_sink;
+    let terminal = JailTerminalRoute {
+        sink: config.terminal_sink,
+        events: config.terminal_events,
+    };
     // Weak, deliberately: the reader answers the jail over this channel, but it must not be what
     // keeps the channel open. The poller (and the dispatcher, where a caller keeps one) hold the
     // strong senders; once they are gone the host's half of the stream closes, the jail's server
@@ -733,10 +796,9 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
                         // parked on it (see [`InJailToolDispatcher`]).
                         in_jail_tools.answer(resp);
                     }
-                    Some(SessionPayload::TerminalOutput(out)) => {
-                        if !out.data.is_empty() {
-                            let _ = terminal_sink.send(Bytes::from(out.data));
-                        }
+                    Some(SessionPayload::TerminalOutput(out)) => terminal.output(out.data),
+                    Some(SessionPayload::TerminalResized(size)) => {
+                        terminal.resized(size.cols, size.rows)
                     }
                     _ => {}
                 }

@@ -425,19 +425,12 @@ pub async fn dial_and_bridge(
     let (client, _run_handle) = bridge_sandbox_stdio(handle, NoCallbackSandboxService).await?;
     let stdio_client = tddy_sandbox_runner::StdioSandboxClient::new(client);
 
-    let (term_tx, mut term_rx) = mpsc::unbounded_channel::<Bytes>();
-    let stdout_out = stdout_tx.clone();
-    let capture_out = Arc::clone(&capture);
-    tokio::spawn(async move {
-        while let Some(chunk) = term_rx.recv().await {
-            // Append and broadcast under one capture lock: the sequence point a snapshot taken
-            // by `snapshot_and_subscribe` depends on.
-            if let Ok(mut cap) = capture_out.lock() {
-                cap.append(&chunk);
-                let _ = stdout_out.send(chunk);
-            }
-        }
-    });
+    // Output and the jail's size changes arrive on one channel, in order: a size change read apart
+    // from the output around it would reinterpret that output at the wrong grid.
+    let (events_tx, events_rx) = mpsc::unbounded_channel();
+    // `HostRelayConfig::new` requires a byte sink; with events set the relay never writes to it.
+    let (term_tx, _unused_bytes_sink) = mpsc::unbounded_channel::<Bytes>();
+    forward_jail_terminal_events(events_rx, Arc::clone(&capture), stdout_tx.clone());
 
     let handler = DaemonToolHandler {
         worktree: worktree_path,
@@ -450,11 +443,40 @@ pub async fn dial_and_bridge(
         stdio_client,
         handler,
         rpc_handler,
-        tddy_sandbox_runner::HostRelayConfig::new(session_id, term_tx),
+        tddy_sandbox_runner::HostRelayConfig::new(session_id, term_tx)
+            .with_terminal_events(events_tx),
         stdin_rx,
     )
     .await?;
     Ok(())
+}
+
+/// Feed a jailed terminal's reported events into its capture and live broadcast: output is appended
+/// and broadcast under the capture lock (the sequence point a snapshot depends on), and a size
+/// change resizes the capture's screen model at the same point in the stream, so snapshots of a
+/// jailed terminal are serialized at the jail's real grid. Runs until `events` closes.
+pub fn forward_jail_terminal_events(
+    mut events: mpsc::UnboundedReceiver<tddy_sandbox_runner::HostTerminalEvent>,
+    capture: Arc<StdMutex<TerminalCapture>>,
+    stdout_tx: broadcast::Sender<Bytes>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                tddy_sandbox_runner::HostTerminalEvent::Output(chunk) => {
+                    if let Ok(mut cap) = capture.lock() {
+                        cap.append(&chunk);
+                        let _ = stdout_tx.send(chunk);
+                    }
+                }
+                tddy_sandbox_runner::HostTerminalEvent::Resized { cols, rows } => {
+                    if let Ok(mut cap) = capture.lock() {
+                        cap.resize(rows, cols);
+                    }
+                }
+            }
+        }
+    })
 }
 
 /// Map [`SandboxError`] to gRPC status for StartSession failures.

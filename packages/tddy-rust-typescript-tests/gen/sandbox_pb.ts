@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file sandbox.proto.
  */
 export const file_sandbox: GenFile = /*@__PURE__*/
-  fileDesc("Cg1zYW5kYm94LnByb3RvEgdzYW5kYm94IosHCgxTZXNzaW9uRnJhbWUSJgoJaG9zdF9wb2xsGAEgASgLMhEuc2FuZGJveC5Ib3N0UG9sbEgAEjgKEnN1YnNjcmliZV90ZXJtaW5hbBgCIAEoCzIaLnNhbmRib3guU3Vic2NyaWJlVGVybWluYWxIABIvCg50ZXJtaW5hbF9pbnB1dBgDIAEoCzIVLnNhbmRib3guU2FuZGJveElucHV0SAASOAoNdG9vbF9yZXNwb25zZRgEIAEoCzIfLmV4ZWNfdG9vbHMuRXhlY3V0ZVRvb2xSZXNwb25zZUgAEjIKD2VncmVzc19yZXNwb25zZRgHIAEoCzIXLnNhbmRib3guRWdyZXNzUmVzcG9uc2VIABIxCg90dW5uZWxfb3Blbl9hY2sYCSABKAsyFi5zYW5kYm94LlR1bm5lbE9wZW5BY2tIABI2Cgx0b29sX3JlcXVlc3QYBSABKAsyHi5leGVjX3Rvb2xzLkV4ZWN1dGVUb29sUmVxdWVzdEgAEjkKD3Rlcm1pbmFsX291dHB1dBgGIAEoCzIeLnNhbmRib3guU2FuZGJveFRlcm1pbmFsT3V0cHV0SAASMAoOZWdyZXNzX3JlcXVlc3QYCCABKAsyFi5zYW5kYm94LkVncmVzc1JlcXVlc3RIABIqCgt0dW5uZWxfb3BlbhgKIAEoCzITLnNhbmRib3guVHVubmVsT3BlbkgAEioKC3R1bm5lbF9kYXRhGAsgASgLMhMuc2FuZGJveC5UdW5uZWxEYXRhSAASLAoMdHVubmVsX2Nsb3NlGAwgASgLMhQuc2FuZGJveC5UdW5uZWxDbG9zZUgAEi4KDXNlc3Npb25fZW5kZWQYDSABKAsyFS5zYW5kYm94LlNlc3Npb25FbmRlZEgAEioKC3JwY19yZXF1ZXN0GA4gASgLMhMuc2FuZGJveC5ScGNSZXF1ZXN0SAASMwoQcnBjX3N0cmVhbV9mcmFtZRgPIAEoCzIXLnNhbmRib3guUnBjU3RyZWFtRnJhbWVIABI+ChRpbl9qYWlsX3Rvb2xfcmVxdWVzdBgQIAEoCzIeLmV4ZWNfdG9vbHMuRXhlY3V0ZVRvb2xSZXF1ZXN0SAASQAoVaW5famFpbF90b29sX3Jlc3BvbnNlGBEgASgLMh8uZXhlY190b29scy5FeGVjdXRlVG9vbFJlc3BvbnNlSABCCQoHcGF5bG9hZCJSCgpScGNSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSDwoHc2VydmljZRgCIAEoCRIOCgZtZXRob2QYAyABKAkSDwoHcGF5bG9hZBgEIAEoDCJbCg5ScGNTdHJlYW1GcmFtZRISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB3BheWxvYWQYAiABKAwSFQoNZW5kX29mX3N0cmVhbRgDIAEoCBINCgVlcnJvchgEIAEoCSIKCghIb3N0UG9sbCJoChFTdWJzY3JpYmVUZXJtaW5hbBISCgpzZXNzaW9uX2lkGAEgASgJEhMKC3Rlcm1pbmFsX2lkGAIgASgJEhQKDGluaXRpYWxfY29scxgDIAEoDRIUCgxpbml0aWFsX3Jvd3MYBCABKA0iRQoMU2FuZGJveElucHV0EhIKCnNlc3Npb25faWQYASABKAkSEwoLdGVybWluYWxfaWQYAiABKAkSDAoEZGF0YRgDIAEoDCJmChVTYW5kYm94VGVybWluYWxPdXRwdXQSDAoEZGF0YRgBIAEoDBISCgpzZXNzaW9uX2lkGAYgASgJEhMKC3Rlcm1pbmFsX2lkGAcgASgJSgQIAhADSgQIAxAESgQIBBAFSgQIBRAGIh4KC0VjaG9SZXF1ZXN0Eg8KB21lc3NhZ2UYASABKAkiHwoMRWNob1Jlc3BvbnNlEg8KB21lc3NhZ2UYASABKAkiIgoPRWNob1N0cmVhbUZyYW1lEg8KB21lc3NhZ2UYASABKAkidgoNRWdyZXNzUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBm1ldGhvZBgCIAEoCRILCgN1cmwYAyABKAkSJgoHaGVhZGVycxgEIAMoCzIVLnNhbmRib3guRWdyZXNzSGVhZGVyEgwKBGJvZHkYBSABKAwihgEKDkVncmVzc1Jlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSEwoLc3RhdHVzX2NvZGUYAiABKA0SJgoHaGVhZGVycxgDIAMoCzIVLnNhbmRib3guRWdyZXNzSGVhZGVyEgwKBGJvZHkYBCABKAwSFQoNZXJyb3JfbWVzc2FnZRgFIAEoCSIrCgxFZ3Jlc3NIZWFkZXISDAoEbmFtZRgBIAEoCRINCgV2YWx1ZRgCIAEoCSI7CgpUdW5uZWxPcGVuEhEKCXR1bm5lbF9pZBgBIAEoCRIMCgRob3N0GAIgASgJEgwKBHBvcnQYAyABKA0iPQoNVHVubmVsT3BlbkFjaxIRCgl0dW5uZWxfaWQYASABKAkSCgoCb2sYAiABKAgSDQoFZXJyb3IYAyABKAkiLQoKVHVubmVsRGF0YRIRCgl0dW5uZWxfaWQYASABKAkSDAoEZGF0YRgCIAEoDCIvCgtUdW5uZWxDbG9zZRIRCgl0dW5uZWxfaWQYASABKAkSDQoFZXJyb3IYAiABKAkiIQoMU2Vzc2lvbkVuZGVkEhEKCWV4aXRfY29kZRgBIAEoBTLPAQoOU2FuZGJveFNlcnZpY2USQgoOU2Vzc2lvbkNoYW5uZWwSFS5zYW5kYm94LlNlc3Npb25GcmFtZRoVLnNhbmRib3guU2Vzc2lvbkZyYW1lKAEwARIzCgRFY2hvEhQuc2FuZGJveC5FY2hvUmVxdWVzdBoVLnNhbmRib3guRWNob1Jlc3BvbnNlEkQKCkVjaG9TdHJlYW0SGC5zYW5kYm94LkVjaG9TdHJlYW1GcmFtZRoYLnNhbmRib3guRWNob1N0cmVhbUZyYW1lKAEwAWIGcHJvdG8z", [file_exec_tools]);
+  fileDesc("Cg1zYW5kYm94LnByb3RvEgdzYW5kYm94IsgHCgxTZXNzaW9uRnJhbWUSJgoJaG9zdF9wb2xsGAEgASgLMhEuc2FuZGJveC5Ib3N0UG9sbEgAEjgKEnN1YnNjcmliZV90ZXJtaW5hbBgCIAEoCzIaLnNhbmRib3guU3Vic2NyaWJlVGVybWluYWxIABIvCg50ZXJtaW5hbF9pbnB1dBgDIAEoCzIVLnNhbmRib3guU2FuZGJveElucHV0SAASOAoNdG9vbF9yZXNwb25zZRgEIAEoCzIfLmV4ZWNfdG9vbHMuRXhlY3V0ZVRvb2xSZXNwb25zZUgAEjIKD2VncmVzc19yZXNwb25zZRgHIAEoCzIXLnNhbmRib3guRWdyZXNzUmVzcG9uc2VIABIxCg90dW5uZWxfb3Blbl9hY2sYCSABKAsyFi5zYW5kYm94LlR1bm5lbE9wZW5BY2tIABI2Cgx0b29sX3JlcXVlc3QYBSABKAsyHi5leGVjX3Rvb2xzLkV4ZWN1dGVUb29sUmVxdWVzdEgAEjkKD3Rlcm1pbmFsX291dHB1dBgGIAEoCzIeLnNhbmRib3guU2FuZGJveFRlcm1pbmFsT3V0cHV0SAASMAoOZWdyZXNzX3JlcXVlc3QYCCABKAsyFi5zYW5kYm94LkVncmVzc1JlcXVlc3RIABIqCgt0dW5uZWxfb3BlbhgKIAEoCzITLnNhbmRib3guVHVubmVsT3BlbkgAEioKC3R1bm5lbF9kYXRhGAsgASgLMhMuc2FuZGJveC5UdW5uZWxEYXRhSAASLAoMdHVubmVsX2Nsb3NlGAwgASgLMhQuc2FuZGJveC5UdW5uZWxDbG9zZUgAEi4KDXNlc3Npb25fZW5kZWQYDSABKAsyFS5zYW5kYm94LlNlc3Npb25FbmRlZEgAEioKC3JwY19yZXF1ZXN0GA4gASgLMhMuc2FuZGJveC5ScGNSZXF1ZXN0SAASMwoQcnBjX3N0cmVhbV9mcmFtZRgPIAEoCzIXLnNhbmRib3guUnBjU3RyZWFtRnJhbWVIABI+ChRpbl9qYWlsX3Rvb2xfcmVxdWVzdBgQIAEoCzIeLmV4ZWNfdG9vbHMuRXhlY3V0ZVRvb2xSZXF1ZXN0SAASQAoVaW5famFpbF90b29sX3Jlc3BvbnNlGBEgASgLMh8uZXhlY190b29scy5FeGVjdXRlVG9vbFJlc3BvbnNlSAASOwoQdGVybWluYWxfcmVzaXplZBgSIAEoCzIfLnNhbmRib3guU2FuZGJveFRlcm1pbmFsUmVzaXplZEgAQgkKB3BheWxvYWQiXQoWU2FuZGJveFRlcm1pbmFsUmVzaXplZBIMCgRjb2xzGAEgASgNEgwKBHJvd3MYAiABKA0SEgoKc2Vzc2lvbl9pZBgDIAEoCRITCgt0ZXJtaW5hbF9pZBgEIAEoCSJSCgpScGNSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSDwoHc2VydmljZRgCIAEoCRIOCgZtZXRob2QYAyABKAkSDwoHcGF5bG9hZBgEIAEoDCJbCg5ScGNTdHJlYW1GcmFtZRISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB3BheWxvYWQYAiABKAwSFQoNZW5kX29mX3N0cmVhbRgDIAEoCBINCgVlcnJvchgEIAEoCSIKCghIb3N0UG9sbCJoChFTdWJzY3JpYmVUZXJtaW5hbBISCgpzZXNzaW9uX2lkGAEgASgJEhMKC3Rlcm1pbmFsX2lkGAIgASgJEhQKDGluaXRpYWxfY29scxgDIAEoDRIUCgxpbml0aWFsX3Jvd3MYBCABKA0iRQoMU2FuZGJveElucHV0EhIKCnNlc3Npb25faWQYASABKAkSEwoLdGVybWluYWxfaWQYAiABKAkSDAoEZGF0YRgDIAEoDCJmChVTYW5kYm94VGVybWluYWxPdXRwdXQSDAoEZGF0YRgBIAEoDBISCgpzZXNzaW9uX2lkGAYgASgJEhMKC3Rlcm1pbmFsX2lkGAcgASgJSgQIAhADSgQIAxAESgQIBBAFSgQIBRAGIh4KC0VjaG9SZXF1ZXN0Eg8KB21lc3NhZ2UYASABKAkiHwoMRWNob1Jlc3BvbnNlEg8KB21lc3NhZ2UYASABKAkiIgoPRWNob1N0cmVhbUZyYW1lEg8KB21lc3NhZ2UYASABKAkidgoNRWdyZXNzUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBm1ldGhvZBgCIAEoCRILCgN1cmwYAyABKAkSJgoHaGVhZGVycxgEIAMoCzIVLnNhbmRib3guRWdyZXNzSGVhZGVyEgwKBGJvZHkYBSABKAwihgEKDkVncmVzc1Jlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSEwoLc3RhdHVzX2NvZGUYAiABKA0SJgoHaGVhZGVycxgDIAMoCzIVLnNhbmRib3guRWdyZXNzSGVhZGVyEgwKBGJvZHkYBCABKAwSFQoNZXJyb3JfbWVzc2FnZRgFIAEoCSIrCgxFZ3Jlc3NIZWFkZXISDAoEbmFtZRgBIAEoCRINCgV2YWx1ZRgCIAEoCSI7CgpUdW5uZWxPcGVuEhEKCXR1bm5lbF9pZBgBIAEoCRIMCgRob3N0GAIgASgJEgwKBHBvcnQYAyABKA0iPQoNVHVubmVsT3BlbkFjaxIRCgl0dW5uZWxfaWQYASABKAkSCgoCb2sYAiABKAgSDQoFZXJyb3IYAyABKAkiLQoKVHVubmVsRGF0YRIRCgl0dW5uZWxfaWQYASABKAkSDAoEZGF0YRgCIAEoDCIvCgtUdW5uZWxDbG9zZRIRCgl0dW5uZWxfaWQYASABKAkSDQoFZXJyb3IYAiABKAkiIQoMU2Vzc2lvbkVuZGVkEhEKCWV4aXRfY29kZRgBIAEoBTLPAQoOU2FuZGJveFNlcnZpY2USQgoOU2Vzc2lvbkNoYW5uZWwSFS5zYW5kYm94LlNlc3Npb25GcmFtZRoVLnNhbmRib3guU2Vzc2lvbkZyYW1lKAEwARIzCgRFY2hvEhQuc2FuZGJveC5FY2hvUmVxdWVzdBoVLnNhbmRib3guRWNob1Jlc3BvbnNlEkQKCkVjaG9TdHJlYW0SGC5zYW5kYm94LkVjaG9TdHJlYW1GcmFtZRoYLnNhbmRib3guRWNob1N0cmVhbUZyYW1lKAEwAWIGcHJvdG8z", [file_exec_tools]);
 
 /**
  * @generated from message sandbox.SessionFrame
@@ -155,6 +155,17 @@ export type SessionFrame = Message<"sandbox.SessionFrame"> & {
      */
     value: ExecuteToolResponse;
     case: "inJailToolResponse";
+  } | {
+    /**
+     * Sandbox → host: the jail's PTY is now `cols`×`rows` — sent once after the PTY opens and again
+     * after every resize the runner applied. It travels in the same poll-gated backlog as
+     * `terminal_output`, so the host sees it at the exact point in the output stream where the size
+     * changed and can keep its screen model (and therefore its snapshots) at the jail's real size.
+     *
+     * @generated from field: sandbox.SandboxTerminalResized terminal_resized = 18;
+     */
+    value: SandboxTerminalResized;
+    case: "terminalResized";
   } | { case: undefined; value?: undefined };
 };
 
@@ -164,6 +175,40 @@ export type SessionFrame = Message<"sandbox.SessionFrame"> & {
  */
 export const SessionFrameSchema: GenMessage<SessionFrame> = /*@__PURE__*/
   messageDesc(file_sandbox, 0);
+
+/**
+ * / The size the jail's PTY was opened or resized to — the applied size, not a requested one.
+ *
+ * @generated from message sandbox.SandboxTerminalResized
+ */
+export type SandboxTerminalResized = Message<"sandbox.SandboxTerminalResized"> & {
+  /**
+   * @generated from field: uint32 cols = 1;
+   */
+  cols: number;
+
+  /**
+   * @generated from field: uint32 rows = 2;
+   */
+  rows: number;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string terminal_id = 4;
+   */
+  terminalId: string;
+};
+
+/**
+ * Describes the message sandbox.SandboxTerminalResized.
+ * Use `create(SandboxTerminalResizedSchema)` to create a new message.
+ */
+export const SandboxTerminalResizedSchema: GenMessage<SandboxTerminalResized> = /*@__PURE__*/
+  messageDesc(file_sandbox, 1);
 
 /**
  * / An RPC the in-jail agent asked the host to dispatch to its `ConnectionService`. The host is the
@@ -201,7 +246,7 @@ export type RpcRequest = Message<"sandbox.RpcRequest"> & {
  * Use `create(RpcRequestSchema)` to create a new message.
  */
 export const RpcRequestSchema: GenMessage<RpcRequest> = /*@__PURE__*/
-  messageDesc(file_sandbox, 1);
+  messageDesc(file_sandbox, 2);
 
 /**
  * / One frame of an RPC response stream, addressed back to the in-jail caller by `request_id`.
@@ -235,7 +280,7 @@ export type RpcStreamFrame = Message<"sandbox.RpcStreamFrame"> & {
  * Use `create(RpcStreamFrameSchema)` to create a new message.
  */
 export const RpcStreamFrameSchema: GenMessage<RpcStreamFrame> = /*@__PURE__*/
-  messageDesc(file_sandbox, 2);
+  messageDesc(file_sandbox, 3);
 
 /**
  * @generated from message sandbox.HostPoll
@@ -248,7 +293,7 @@ export type HostPoll = Message<"sandbox.HostPoll"> & {
  * Use `create(HostPollSchema)` to create a new message.
  */
 export const HostPollSchema: GenMessage<HostPoll> = /*@__PURE__*/
-  messageDesc(file_sandbox, 3);
+  messageDesc(file_sandbox, 4);
 
 /**
  * @generated from message sandbox.SubscribeTerminal
@@ -280,7 +325,7 @@ export type SubscribeTerminal = Message<"sandbox.SubscribeTerminal"> & {
  * Use `create(SubscribeTerminalSchema)` to create a new message.
  */
 export const SubscribeTerminalSchema: GenMessage<SubscribeTerminal> = /*@__PURE__*/
-  messageDesc(file_sandbox, 4);
+  messageDesc(file_sandbox, 5);
 
 /**
  * @generated from message sandbox.SandboxInput
@@ -307,7 +352,7 @@ export type SandboxInput = Message<"sandbox.SandboxInput"> & {
  * Use `create(SandboxInputSchema)` to create a new message.
  */
 export const SandboxInputSchema: GenMessage<SandboxInput> = /*@__PURE__*/
-  messageDesc(file_sandbox, 5);
+  messageDesc(file_sandbox, 6);
 
 /**
  * Terminal bytes read off the in-jail pty, sandbox -> host. The mirror of `SandboxInput`, which
@@ -349,7 +394,7 @@ export type SandboxTerminalOutput = Message<"sandbox.SandboxTerminalOutput"> & {
  * Use `create(SandboxTerminalOutputSchema)` to create a new message.
  */
 export const SandboxTerminalOutputSchema: GenMessage<SandboxTerminalOutput> = /*@__PURE__*/
-  messageDesc(file_sandbox, 6);
+  messageDesc(file_sandbox, 7);
 
 /**
  * @generated from message sandbox.EchoRequest
@@ -366,7 +411,7 @@ export type EchoRequest = Message<"sandbox.EchoRequest"> & {
  * Use `create(EchoRequestSchema)` to create a new message.
  */
 export const EchoRequestSchema: GenMessage<EchoRequest> = /*@__PURE__*/
-  messageDesc(file_sandbox, 7);
+  messageDesc(file_sandbox, 8);
 
 /**
  * @generated from message sandbox.EchoResponse
@@ -383,7 +428,7 @@ export type EchoResponse = Message<"sandbox.EchoResponse"> & {
  * Use `create(EchoResponseSchema)` to create a new message.
  */
 export const EchoResponseSchema: GenMessage<EchoResponse> = /*@__PURE__*/
-  messageDesc(file_sandbox, 8);
+  messageDesc(file_sandbox, 9);
 
 /**
  * @generated from message sandbox.EchoStreamFrame
@@ -400,7 +445,7 @@ export type EchoStreamFrame = Message<"sandbox.EchoStreamFrame"> & {
  * Use `create(EchoStreamFrameSchema)` to create a new message.
  */
 export const EchoStreamFrameSchema: GenMessage<EchoStreamFrame> = /*@__PURE__*/
-  messageDesc(file_sandbox, 9);
+  messageDesc(file_sandbox, 10);
 
 /**
  * HTTP egress relay: sandbox → host (after HostPoll), host performs outbound fetch.
@@ -439,7 +484,7 @@ export type EgressRequest = Message<"sandbox.EgressRequest"> & {
  * Use `create(EgressRequestSchema)` to create a new message.
  */
 export const EgressRequestSchema: GenMessage<EgressRequest> = /*@__PURE__*/
-  messageDesc(file_sandbox, 10);
+  messageDesc(file_sandbox, 11);
 
 /**
  * @generated from message sandbox.EgressResponse
@@ -476,7 +521,7 @@ export type EgressResponse = Message<"sandbox.EgressResponse"> & {
  * Use `create(EgressResponseSchema)` to create a new message.
  */
 export const EgressResponseSchema: GenMessage<EgressResponse> = /*@__PURE__*/
-  messageDesc(file_sandbox, 11);
+  messageDesc(file_sandbox, 12);
 
 /**
  * @generated from message sandbox.EgressHeader
@@ -498,7 +543,7 @@ export type EgressHeader = Message<"sandbox.EgressHeader"> & {
  * Use `create(EgressHeaderSchema)` to create a new message.
  */
 export const EgressHeaderSchema: GenMessage<EgressHeader> = /*@__PURE__*/
-  messageDesc(file_sandbox, 12);
+  messageDesc(file_sandbox, 13);
 
 /**
  * Raw TCP CONNECT tunnel relayed over SessionChannel. The in-jail runner is the
@@ -530,7 +575,7 @@ export type TunnelOpen = Message<"sandbox.TunnelOpen"> & {
  * Use `create(TunnelOpenSchema)` to create a new message.
  */
 export const TunnelOpenSchema: GenMessage<TunnelOpen> = /*@__PURE__*/
-  messageDesc(file_sandbox, 13);
+  messageDesc(file_sandbox, 14);
 
 /**
  * @generated from message sandbox.TunnelOpenAck
@@ -557,7 +602,7 @@ export type TunnelOpenAck = Message<"sandbox.TunnelOpenAck"> & {
  * Use `create(TunnelOpenAckSchema)` to create a new message.
  */
 export const TunnelOpenAckSchema: GenMessage<TunnelOpenAck> = /*@__PURE__*/
-  messageDesc(file_sandbox, 14);
+  messageDesc(file_sandbox, 15);
 
 /**
  * @generated from message sandbox.TunnelData
@@ -579,7 +624,7 @@ export type TunnelData = Message<"sandbox.TunnelData"> & {
  * Use `create(TunnelDataSchema)` to create a new message.
  */
 export const TunnelDataSchema: GenMessage<TunnelData> = /*@__PURE__*/
-  messageDesc(file_sandbox, 15);
+  messageDesc(file_sandbox, 16);
 
 /**
  * @generated from message sandbox.TunnelClose
@@ -601,7 +646,7 @@ export type TunnelClose = Message<"sandbox.TunnelClose"> & {
  * Use `create(TunnelCloseSchema)` to create a new message.
  */
 export const TunnelCloseSchema: GenMessage<TunnelClose> = /*@__PURE__*/
-  messageDesc(file_sandbox, 16);
+  messageDesc(file_sandbox, 17);
 
 /**
  * @generated from message sandbox.SessionEnded
@@ -618,7 +663,7 @@ export type SessionEnded = Message<"sandbox.SessionEnded"> & {
  * Use `create(SessionEndedSchema)` to create a new message.
  */
 export const SessionEndedSchema: GenMessage<SessionEnded> = /*@__PURE__*/
-  messageDesc(file_sandbox, 17);
+  messageDesc(file_sandbox, 18);
 
 /**
  * gRPC service exposed INSIDE the darwin sandbox. The host daemon is the client.

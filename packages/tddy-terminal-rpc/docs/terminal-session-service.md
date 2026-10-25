@@ -105,8 +105,9 @@ There is no mode prologue frame (the snapshot carries the modes), no raw replay 
 `trigger_redraw`: the application is never sent SIGWINCH. `end_offset` on the snapshot is the anchor
 for `GetTerminalHistory`.
 
-Jailed terminals refuse `SNAPSHOT` until `#term-snapshot` 3/4
-([#762](https://github.com/uppin/tddy-coder/pull/762)) sizes their capture.
+A jailed terminal answers `SNAPSHOT` once its runner has reported a size (see
+[Sandboxed sessions](#sandboxed-sessions-are-ordinary-terminals)); before that, the provided
+`snapshot_and_subscribe` refuses it with `FAILED_PRECONDITION`.
 
 ### Resync at any point
 
@@ -225,9 +226,18 @@ A jailed session's PTY output arrives over the stdio bridge in `tddy-daemon-sand
 in its own `TerminalCapture`. `tddy-daemon`'s `terminal_session_adapter` binds that state to
 `TerminalSession` beside the claude-cli one, and `DaemonTerminalSessionStore` is a composite that
 resolves a sandbox session first and falls back to the CLI manager. So a jailed terminal replays,
-anchors, pages and acknowledges exactly like every other one, through this crate's bridge and nothing
-else — except that its capture is never sized, so it refuses `SNAPSHOT` with `FAILED_PRECONDITION`
-(see [Snapshot opens](#snapshot-opens)).
+anchors, pages, acknowledges and snapshots exactly like every other one, through this crate's bridge
+and nothing else.
+
+Its capture is sized by the jail, not by this crate: `tddy-sandbox-runner` sends a
+`SessionFrame.terminal_resized` (`SandboxTerminalResized { cols, rows }`) after `openpty` and after
+every resize the PTY accepted, in the same poll-gated backlog as `terminal_output`. The daemon's
+host relay opts into `HostRelayConfig::with_terminal_events`, which delivers output and size changes
+as `HostTerminalEvent`s on one ordered channel, and `sandbox_session::forward_jail_terminal_events`
+appends output (broadcasting under the capture lock) and calls `TerminalCapture::resize` at the same
+point in the stream. A jail that has not reported yet has an unsized capture, so the provided
+`snapshot_and_subscribe` refuses `SNAPSHOT` with `FAILED_PRECONDITION` (see
+[Snapshot opens](#snapshot-opens)).
 
 Three of that adapter's answers are synthesised, because a jail's stdio bridge does not supply them:
 the acked-offset watch is dropped immediately, so the bridge emits no ACK frames; `resize` is a no-op
