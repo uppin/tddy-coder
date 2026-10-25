@@ -240,6 +240,7 @@ session whose record carries the `project-home` role may run them; any other cal
 |---|---|---|
 | `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on, and the status the web's session list shows. A host that does not answer is named in `unreachable_hosts`, never silently left out |
 | `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `stack_parent`, `stack_parent_daemon_instance_id`, `stack_node_id`, `pr_stack_base_session_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `semantic_index`, `specialized_agents`, `attachments` (host documents) | `{"start_id", "task_id", "daemon_instance_id"}` at once (see [Asynchronous session start](#asynchronous-session-start)); the start's outcome is a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
+| `DescribeSessionStartOptions` | `daemon_instance_id?`, `session_type?`, `agent?`, `provider_account_id?` | the choices a `StartSession` on that host can make, from the RPCs the New-session form fills its pickers from. See [Start options](#start-options) |
 | `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root), `daemon_instance_id?` | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
 | `DiffSessionWorktree` | `session_id`, `daemon_instance_id?` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
 | `ListWorktrees` | `cursor?`, `limit?` (50 by default, at most 200), `daemon_instance_id?` | `{worktrees, total, next_cursor, has_more, clamped_to?, sizing: {done, total}}`: the project's worktrees on that host as the **Worktrees screen** shows them — each row carries the screen's `WorktreeRow` fields (`disk_bytes` absent when never sized) — in the screen's order: largest first, never-sized last, then by name. Pages resume after the last row by sort position, so a size that changes between pages neither repeats nor skips a row; a cursor the tool did not issue is refused, and a larger `limit` is clamped with `clamped_to` saying so. `sizing` counts the rows not being sized, of all of them. Starts no size calculation |
@@ -260,7 +261,7 @@ session whose record carries the `project-home` role may run them; any other cal
   limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
   lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
   names it is an approximation and may order equal-sized worktrees differently from the screen.
-- **Across hosts.** A target tool call (read, diff, the two worktree tools, every git tool) naming another host is
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
@@ -327,6 +328,41 @@ owns, an invalid option) is the tool's `is_error` result naming why, not a handl
   (`docs/dev/todo/2026-10-03-start-phases-and-code-index-warm-skip-sandboxed-tool-and-split-starts.md`).
 - A cancelled start removes what it created, including the branch it cut; see
   [Background tasks § Session starts run as tasks](background-tasks.md#session-starts-run-as-tasks).
+
+### Start options
+
+Several `StartSession` choices depend on the host and on one another, and the form fetches them live.
+A schema frozen when the agent registers its tools would go stale, so `DescribeSessionStartOptions`
+answers them on demand, each from the RPC the form calls, on the host `daemon_instance_id` names
+(forwarded whole to another host, as the target tools are):
+
+| Field | Source (as the form reads it) |
+|---|---|
+| `daemon_instance_id` | the host that answered |
+| `agents` `[{id, label}]` | `CatalogService.ListAgents` |
+| `models` `{default, choices: [{id, label}]}` | `AccountsService.ListProviderAccountModels` when `provider_account_id` is named (the first preselected); else `CatalogService.ListAgentModels` for `agent`, or for `session_type` when it is a CLI harness |
+| `provider_routes` `[{account_id, label, preset, supported, reason}]` | `AccountsService.ListProviderRoutes` for the harness: the `session_type`, or the `agent` of a `tool` session; `warp-cli` has none |
+| `ssh_config_hosts` | `HostService.ListSshConfigHosts` |
+| `subagents` | `CatalogService.ListSubagents`, each qualified `name@daemon_instance_id` as `specialized_agents` takes them |
+| `branches` | `ProjectService.ListProjectBranches` for the project's checkout on that host |
+| `stack_parents` | the host's `ListSessions`, filtered as the form's `prStackOrchestrators`: a PR-stack recipe, not itself a stack child |
+| `pr_stack_base_candidates` | the same sessions, filtered as the form's `stackBaseSessionCandidates`: owning a branch, in this project, on this host, not already stacked |
+
+- **An unanswerable list says why.** `models`, `provider_routes` and `ssh_config_hosts` that could not
+  be answered are empty, with `models_unavailable`, `provider_routes_unavailable` or
+  `ssh_config_hosts_unavailable` naming the reason: the query names no agent or harness, the caller's
+  vault refused, the host could not list its SSH config, or **the host keeps no credential vaults**
+  and so has no provider accounts to offer. A failure of any other source (the catalogue, the branch
+  listing, the session store) fails the whole answer.
+- **The provider accounts are the host's own.** The daemon serves the tool from the same accounts
+  service instance its Accounts screen RPC serves, attached when the host has credential vaults, and
+  each read is the caller's own vault.
+- **Stack parents are not limited to the project**, exactly as in the form: a PR-stack orchestrator
+  of another project is offered. The daemon's own stack-parent checks still apply at start.
+- **Parity.** The two stack filters are mirrored in Rust
+  (`packages/tddy-tool-engine/src/start_options.rs`) and run, with the form's own TypeScript
+  functions, over one shared fixture
+  (`packages/tddy-web/cypress/support/fixtures/stack-parent-candidates.json`).
 
 ### Git tools
 

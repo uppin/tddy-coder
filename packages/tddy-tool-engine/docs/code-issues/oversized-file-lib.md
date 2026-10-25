@@ -7,7 +7,7 @@ subagent turn-control changeset
 **Metrics:** **816 production lines** · budget 500 · **1.6× over**
 **Thresholds breached:** length 816 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
-**Status:** Open — unclaimed (880 production lines, 2026-10-25)
+**Status:** Open — unclaimed (881 production lines, 2026-10-25)
 
 ## Measurement history
 
@@ -108,3 +108,4 @@ budget to time out on) and green after. Re-grepped the crate for `process::Comma
 `contained_shell.rs` is the only remaining constructor in production code.
 | 2026-09-28 | 777 | +14 in PR #553: `tool_str_replace` reports `matchedOccurrences` on both result paths, plus the shared `ToolOutcome::err_json` constructor the change needed (which took the function from 65 to 58 lines) |
 | 2026-09-28 | 869 | after PR #554's Grep context lines: the `-B`/`-A` argv, the rg event folding (`fold_context_events`, 53 lines, beside `context_line`) and the mirrored context ceiling — the changeset planned this edit in place. Open, unclaimed; restructuring deferred past the `subagent-control` stack |
+| 2026-10-25 | 881 | +1 in `#start-parity` 5/9 (#754): `pub mod start_options;`. Stack-shared, so no split here |
