@@ -7,6 +7,7 @@
 //! | `StartSession` | starts a session in the project with any New-session option, on any eligible host, linked to the caller as its orchestrator ([`crate::start_session_args`]); it returns a handle at once ([`crate::start_ledger`]) |
 //! | `GetSessionStart` | a start's state, step, and on success its session, branch and worktree, or its failure |
 //! | `CancelSessionStart` | cancels a start still running, on whichever host runs it |
+//! | `DescribeSessionStartOptions` | the agents, models, provider routes, SSH hosts, subagents, branches and stack parents a start may choose on a host ([`crate::start_options`]) |
 //! | `ReadSessionWorktree` | reads a file or lists a directory in a target session's worktree |
 //! | `DiffSessionWorktree` | a target worktree's diff against its base |
 //! | `ListWorktrees` | the project's worktrees as the Worktrees screen shows them, a page at a time ([`crate::project_home_worktree_tools`]) |
@@ -49,6 +50,9 @@ use crate::read_only::is_project_home_allowed_tool;
 use crate::start_ledger::{
     StartHandle, StartLedgerRecord, CANCEL_SESSION_START, GET_SESSION_START,
 };
+use crate::start_options::{
+    start_options_tool_def, StartOptions, StartOptionsQuery, DESCRIBE_SESSION_START_OPTIONS,
+};
 use crate::start_session_args::{
     start_session_schema, start_session_schema_without_choices, StartChoices, StartSessionArgs,
     START_SESSION,
@@ -67,6 +71,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | START_SESSION
             | GET_SESSION_START
             | CANCEL_SESSION_START
+            | DESCRIBE_SESSION_START_OPTIONS
             | READ_SESSION_WORKTREE
             | DIFF_SESSION_WORKTREE
             | LIST_WORKTREES
@@ -152,12 +157,17 @@ pub fn target_daemon_instance_id(args_json: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_string())
 }
 
-/// Whether `name` is a project-home tool that acts on a target session, and so takes
-/// [`TARGET_DAEMON_INSTANCE_ID`]: read, diff, the two worktree tools and the seven git tools.
+/// Whether `name` is a project-home tool that acts on a host, and so takes
+/// [`TARGET_DAEMON_INSTANCE_ID`]: read, diff, the two worktree tools, the seven git tools, and
+/// `DescribeSessionStartOptions`, which describes the host it names (`#start-parity` 5/9).
 pub fn is_project_home_target_tool(name: &str) -> bool {
     matches!(
         name,
-        READ_SESSION_WORKTREE | DIFF_SESSION_WORKTREE | LIST_WORKTREES | GET_WORKTREE
+        READ_SESSION_WORKTREE
+            | DIFF_SESSION_WORKTREE
+            | LIST_WORKTREES
+            | GET_WORKTREE
+            | DESCRIBE_SESSION_START_OPTIONS
     ) || is_project_home_git_tool(name)
 }
 
@@ -227,16 +237,13 @@ pub trait ProjectHomePort: Send + Sync {
     /// (`#start-parity` 3/9).
     async fn list_worktrees(&self, project_id: &str) -> anyhow::Result<Vec<WorktreeEntry>>;
 
-    /// The per-host choices behind `StartSession`'s arguments (`#start-parity` 5/9).
+    /// The per-host choices behind `StartSession`'s arguments, as `query` narrows them, for
+    /// `project_id`'s stack and branch pickers (`#start-parity` 5/9).
     async fn start_options(
         &self,
         project_id: &str,
-        query: crate::start_options::StartOptionsQuery,
-    ) -> anyhow::Result<crate::start_options::StartOptions> {
-        // TODO(start-options): implement in the daemon's port
-        let _ = (project_id, query);
-        anyhow::bail!("TODO(start-options): start_options")
-    }
+        query: StartOptionsQuery,
+    ) -> anyhow::Result<StartOptions>;
 }
 
 /// The project-home tools' definitions, as a client registers them before the daemon is asked:
@@ -302,6 +309,7 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
             }),
         ),
     ];
+    defs.extend(start_options_tool_def());
     defs.extend(worktree_tool_defs());
     defs
 }
@@ -337,6 +345,7 @@ pub async fn execute_project_home_tool(
         START_SESSION => start_session(port, home, args).await,
         GET_SESSION_START => get_session_start(port, home, args).await,
         CANCEL_SESSION_START => cancel_session_start(port, home, args).await,
+        DESCRIBE_SESSION_START_OPTIONS => describe_session_start_options(port, home, args).await,
         READ_SESSION_WORKTREE => read_session_worktree(port, home, args).await,
         DIFF_SESSION_WORKTREE => diff_session_worktree(port, home, args).await,
         LIST_WORKTREES => run_list_worktrees(port, home, args).await,
@@ -435,6 +444,29 @@ async fn cancel_session_start(
             json!({ "start_id": args.start_id, "cancel_requested": true }).to_string(),
         ),
         Err(e) => ToolOutcome::err(format!("{CANCEL_SESSION_START}: {e:#}")),
+    }
+}
+
+/// The host's start options, as `args` narrow them.
+async fn describe_session_start_options(
+    port: &dyn ProjectHomePort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let query: StartOptionsQuery = match serde_json::from_value(args) {
+        Ok(query) => query,
+        Err(e) => {
+            return ToolOutcome::err(format!(
+                "{DESCRIBE_SESSION_START_OPTIONS}: invalid arguments: {e}"
+            ))
+        }
+    };
+    match port.start_options(&home.project_id, query).await {
+        Ok(options) => match serde_json::to_string(&options) {
+            Ok(json) => ToolOutcome::ok(json),
+            Err(e) => ToolOutcome::err(format!("{DESCRIBE_SESSION_START_OPTIONS}: {e}")),
+        },
+        Err(e) => ToolOutcome::err(format!("{DESCRIBE_SESSION_START_OPTIONS}: {e:#}")),
     }
 }
 

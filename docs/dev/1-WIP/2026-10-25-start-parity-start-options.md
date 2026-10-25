@@ -143,6 +143,8 @@ Tests are written in the `fluent-tests` style (Given / When / Then).
 ## Decisions & Trade-offs
 
 - **A discovery tool rather than enums** for per-host, per-agent lists. A schema frozen at `ListExecTools` time would go stale, and computing models there would make the catalog call slow.
+- **The provider accounts are late-bound, not a crate dependency** (2026-10-25, developer decision). `tddy-daemon-rpc` does not depend on `tddy-accounts`, so the accounts are a port, `ProviderAccountsPort`, that the composition root attaches with `RpcHandlers::attach_provider_accounts` — as `attach_session_start` late-binds the start path. The composition root attaches it when the host has credential vaults (`runtime/mount_accounts.rs`), serving the same `AccountsServiceImpl` instance the RPC serves. Each call carries the caller's own session token, so the vault read is the caller's.
+- **An unanswerable list is explicit, never silent.** A host with no attached port answers `provider_routes: []` with `provider_routes_unavailable` naming why, rather than offering no accounts silently. The same holds for `models_unavailable` (the query names no agent or provider account, or the account's vault refused) and `ssh_config_hosts_unavailable` (the host could not list its SSH config). A failure with no such field to carry it (a catalog probe, a branch listing, the session store) fails the whole answer.
 
 ## Refactoring Needed
 ### From /red (TDD red phase)
@@ -169,7 +171,7 @@ Tests are written in the `fluent-tests` style (Given / When / Then).
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

@@ -40,7 +40,7 @@ pub use provider_account::{
     ProviderPreset, RouteSupport, WireProtocol, META_DEFAULT_FOR,
 };
 pub use resolver::{resolve_account, AccountResolution};
-pub use service::{build_accounts_entry, AccountsServiceImpl, Clock};
+pub use service::{build_accounts_entry, build_shared_accounts_entry, AccountsServiceImpl, Clock};
 pub use store::{AccountStore, AccountsError};
 pub use sync_status::SyncStatusSource;
 pub use vault_store::{SessionSubjectResolver, SessionVaultAccountStore};

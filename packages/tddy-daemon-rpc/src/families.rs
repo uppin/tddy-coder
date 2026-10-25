@@ -8,15 +8,40 @@
 
 use std::sync::{Arc, OnceLock};
 
+use async_trait::async_trait;
 use tddy_discovery::CatalogServiceImpl;
 use tddy_projects::ProjectServiceImpl;
-use tddy_rpc::ServiceEntry;
+use tddy_rpc::{ServiceEntry, Status};
+use tddy_service::proto::accounts::ProviderRouteOption;
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::{DaemonRpcFamilies, PrStackHandler, PrStackServiceImpl};
 use tddy_tool_engine::ExecToolServiceImpl;
 
 use crate::{CatalogRpcHandler, ExecToolRpcHandler, PrStackRpcHandler, ProjectRpcHandler};
+
+/// What `DescribeSessionStartOptions` reads from a host's credential vaults (`#start-parity` 5/9):
+/// the provider accounts that can run a harness, and the models of one account. Both are answered
+/// from the caller's own vault, by the `session_token` the caller holds and no other.
+///
+/// Attached by [`RpcHandlers::attach_provider_accounts`] when the host has credential vaults. A host
+/// without them never attaches one, and the tool says so rather than offering no accounts silently.
+#[async_trait]
+pub trait ProviderAccountsPort: Send + Sync {
+    /// The provider accounts `harness` can and cannot run on, as `ListProviderRoutes` answers them.
+    async fn provider_routes(
+        &self,
+        session_token: &str,
+        harness: &str,
+    ) -> Result<Vec<ProviderRouteOption>, Status>;
+
+    /// The model ids one provider account serves, as `ListProviderAccountModels` answers them.
+    async fn provider_account_models(
+        &self,
+        session_token: &str,
+        account_id: &str,
+    ) -> Result<Vec<String>, Status>;
+}
 
 /// Every family served from this crate, each built from the same host.
 ///
@@ -30,6 +55,9 @@ pub struct RpcHandlers {
     /// The launch snapshot the exec-tool handler late-binds to, set by
     /// [`DaemonRpcFamilies::attach_session_start`] when the host is given these families.
     session_launch: Arc<OnceLock<LaunchSessions>>,
+    /// The provider accounts the exec-tool handler reads, set by
+    /// [`RpcHandlers::attach_provider_accounts`].
+    provider_accounts: Arc<OnceLock<Arc<dyn ProviderAccountsPort>>>,
 }
 
 impl RpcHandlers {
@@ -38,12 +66,23 @@ impl RpcHandlers {
     pub fn from_host(host: &DaemonSessionHost) -> Self {
         let exec_tool = Arc::new(ExecToolRpcHandler::from_host(host));
         let session_launch = exec_tool.session_launch_cell();
+        let provider_accounts = exec_tool.provider_accounts_cell();
         Self {
             project: Arc::new(ProjectRpcHandler::from_host(host)),
             catalog: Arc::new(CatalogRpcHandler::from_host(host)),
             exec_tool,
             pr_stack: Arc::new(PrStackRpcHandler::from_host(host)),
             session_launch,
+            provider_accounts,
+        }
+    }
+
+    /// Attach the provider accounts `DescribeSessionStartOptions` answers from. The composition root
+    /// calls this once, on a host with credential vaults, with the accounts service that host serves.
+    /// A second attach keeps the first.
+    pub fn attach_provider_accounts(&self, port: Arc<dyn ProviderAccountsPort>) {
+        if self.provider_accounts.set(port).is_err() {
+            log::error!("the provider accounts were attached twice; keeping the first attachment");
         }
     }
 

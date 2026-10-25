@@ -191,7 +191,49 @@ pub fn a_daemon_named(
     sessions_base: &Path,
     peers: Arc<InProcessPeers>,
 ) -> TestDaemon {
-    let mut config = test_config();
+    daemon_over(test_config(), instance_id, sessions_base, peers)
+}
+
+/// [`a_daemon_named`], except that the test user maps to the OS user this process runs as. A probe
+/// that runs as an agent's OS user needs that user to resolve on this machine, which the fixture's
+/// `testdev` does not here.
+pub fn a_daemon_as_current_user(
+    instance_id: &str,
+    sessions_base: &Path,
+    peers: Arc<InProcessPeers>,
+) -> TestDaemon {
+    daemon_over(
+        config_mapping_test_user_to(&current_os_user()),
+        instance_id,
+        sessions_base,
+        peers,
+    )
+}
+
+/// The OS user this test process runs as, which resolves in the passwd database.
+pub fn current_os_user() -> String {
+    let pw = unsafe { libc::getpwuid(libc::getuid()) };
+    assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
+    unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The test config, with [`TEST_USER`] mapped to `os_user` rather than the fixture's `testdev`.
+fn config_mapping_test_user_to(os_user: &str) -> tddy_daemon_kernel::config::DaemonConfig {
+    let dir = tempfile::tempdir().unwrap();
+    let yaml = format!("users:\n  - github_user: \"{TEST_USER}\"\n    os_user: \"{os_user}\"\n");
+    let path = dir.path().join("daemon.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    tddy_daemon_kernel::config::DaemonConfig::load(&path).expect("config must parse")
+}
+
+fn daemon_over(
+    mut config: tddy_daemon_kernel::config::DaemonConfig,
+    instance_id: &str,
+    sessions_base: &Path,
+    peers: Arc<InProcessPeers>,
+) -> TestDaemon {
     config.daemon_instance_id = Some(instance_id.to_string());
     let base = sessions_base.to_path_buf();
     let routing = PeerRouting::new(
@@ -362,6 +404,19 @@ impl Host {
 }
 
 pub fn a_host(instance_id: &str, peers: &Arc<InProcessPeers>) -> Host {
+    host_built_by(instance_id, peers, a_daemon_named)
+}
+
+/// [`a_host`], whose daemon maps the test user to the OS user this process runs as.
+pub fn a_host_as_current_user(instance_id: &str, peers: &Arc<InProcessPeers>) -> Host {
+    host_built_by(instance_id, peers, a_daemon_as_current_user)
+}
+
+fn host_built_by(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    daemon_on: fn(&str, &Path, Arc<InProcessPeers>) -> TestDaemon,
+) -> Host {
     let sessions = tempfile::tempdir().unwrap();
     let this_repo = a_repo_with_origin();
     let other_repo = a_repo_with_origin();
@@ -373,11 +428,7 @@ pub fn a_host(instance_id: &str, peers: &Arc<InProcessPeers>) -> Host {
         ],
     )
     .unwrap();
-    let daemon = Arc::new(a_daemon_named(
-        instance_id,
-        sessions.path(),
-        Arc::clone(peers),
-    ));
+    let daemon = Arc::new(daemon_on(instance_id, sessions.path(), Arc::clone(peers)));
     peers.register(instance_id, Arc::clone(&daemon));
     Host {
         daemon,

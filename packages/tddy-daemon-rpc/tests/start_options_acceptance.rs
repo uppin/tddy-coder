@@ -10,7 +10,10 @@ mod support;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use support::{a_host, a_workspace_in, git, Host, InProcessPeers, HOST_A, HOST_B, THIS_PROJECT};
+use support::{
+    a_host, a_host_as_current_user, a_workspace_in, git, Host, InProcessPeers, HOST_A, HOST_B,
+    THIS_PROJECT,
+};
 use tddy_rpc::Request;
 use tddy_service::proto::catalog::{
     CatalogService, ListAgentModelsRequest, ListAgentsRequest, ListSubagentsRequest,
@@ -29,8 +32,18 @@ struct World {
 }
 
 async fn a_world() -> World {
+    a_world_with(a_host).await
+}
+
+/// The same world, with host A's daemon mapping the test user to the OS user this process runs as,
+/// so that the agent catalogue's model probe runs as a user that resolves on this machine.
+async fn a_world_as_current_user() -> World {
+    a_world_with(a_host_as_current_user).await
+}
+
+async fn a_world_with(host_a: fn(&str, &Arc<InProcessPeers>) -> Host) -> World {
     let peers = Arc::new(InProcessPeers::default());
-    let a = a_host(HOST_A, &peers);
+    let a = host_a(HOST_A, &peers);
     let b = a_host(HOST_B, &peers);
     let home = a_workspace_in(&a.daemon, THIS_PROJECT).await;
     a.make_project_home(&home);
@@ -137,7 +150,7 @@ async fn the_subagents_offered_are_qualified_by_their_host() {
 #[tokio::test]
 async fn the_models_offered_are_the_catalogs_models_for_the_session_types_agent() {
     // Given what the form's model picker is filled from for a claude-cli session
-    let world = a_world().await;
+    let world = a_world_as_current_user().await;
     let catalog = world
         .a
         .daemon
@@ -220,4 +233,37 @@ async fn another_hosts_branches_are_that_hosts_project_checkout() {
         .iter()
         .any(|b| b.ends_with("only-on-b")));
     assert_eq!(on_b["daemon_instance_id"], HOST_B);
+}
+
+#[tokio::test]
+async fn a_host_with_no_accounts_attached_answers_its_provider_routes_as_unavailable() {
+    // Given a host that keeps no credential vaults, so no accounts were attached to it
+    let world = a_world().await;
+
+    // When the home session asks, for a claude-cli session on one provider account, which accounts
+    // can run it and what models the account serves (naming the account keeps the agent catalogue's
+    // probe out of this answer)
+    let options = world
+        .options(serde_json::json!({
+            "session_type": "claude-cli",
+            "provider_account_id": "acct-1"
+        }))
+        .await;
+
+    // Then no account is offered and no model is listed, and the answer names why for each rather
+    // than offering none silently
+    assert_eq!(options["provider_routes"], serde_json::json!([]));
+    assert!(
+        options["provider_routes_unavailable"]
+            .as_str()
+            .is_some_and(|reason| !reason.is_empty()),
+        "{options}"
+    );
+    assert_eq!(options["models"]["choices"], serde_json::json!([]));
+    assert!(
+        options["models_unavailable"]
+            .as_str()
+            .is_some_and(|reason| !reason.is_empty()),
+        "{options}"
+    );
 }
