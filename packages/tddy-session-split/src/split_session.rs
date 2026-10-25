@@ -401,7 +401,9 @@ mod tests {
     use std::time::SystemTime;
 
     use tddy_daemon_auth::{DaemonSigningKey, StandaloneKeyDirectory, SIGNING_KEY_FILE};
-    use tddy_github::{GitHubUser, SessionClaims, SessionTokenVerifier, SESSION_TOKEN_TTL};
+    use tddy_github::{
+        GitHubUser, SessionClaims, SessionTokenVerifier, TokenPrincipal, SESSION_TOKEN_TTL,
+    };
 
     /// The session room as the facilitating daemon's split-room port issued it: the agent's join,
     /// and the identity that daemon serves RPC on inside the room. The two travel together because
@@ -578,6 +580,30 @@ mod tests {
             host.claims_the_codebase_daemon_would_read(&agent_token)
                 .login,
             "uppin"
+        );
+    }
+
+    #[test]
+    fn the_agents_session_token_carries_the_agent_principal_and_the_callers_does_not() {
+        // Given a signed-in operator's own access token
+        let host = an_agent_host();
+        let caller_token = host.a_caller_token();
+
+        // When the agent's credential is minted from it
+        let env = host
+            .split_env_for_caller(&caller_token)
+            .expect("mint split env");
+
+        // Then the agent's says it is the agent, which is how a daemon tells the main agent's call
+        // from the operator's own, and the operator's says nothing of the kind
+        assert_eq!(
+            (
+                host.claims_the_codebase_daemon_would_read(&caller_token)
+                    .principal,
+                host.claims_the_codebase_daemon_would_read(&the_agents_session_token(&env))
+                    .principal
+            ),
+            (None, Some(TokenPrincipal::Agent))
         );
     }
 
