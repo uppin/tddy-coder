@@ -439,7 +439,7 @@ in an earlier round). Watch CI.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived by the developer 2026-10-24: "finish the remaining nodes without stopping")
 - [x] TDD Red — write failing unit/integration tests
-- [x] TDD Green — implement with quality code (open gaps kept as `TODO(web-approvals)`: the status row is not published on the activity hub; the peer-forward cross-daemon test)
+- [x] TDD Green — implement with quality code (one open gap kept as `TODO(web-approvals)` in `conversation_status.rs`: the status row is durable only, not published on the activity hub)
 - [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p tddy-coding-subagent -p tddy-session-agents -p tddy-daemon-rpc -p tddy-tools-cli`; the new Cypress spec) — verify 100% pass
