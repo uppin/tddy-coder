@@ -266,20 +266,28 @@ Not done, and why:
    `packages/tddy-daemon-rpc/tests/approval_round_trip_through_the_tool_client.rs` (committed in
    `c3c75a03e`); it reaches the daemon through the tool client's transport over the daemon's RPC
    dispatch, and `tddy-daemon-rpc` already depends on `tddy-session-tool-client`.
-2. **Pending the user's own confirmation: removing the `TDDY_SOCKET` relay.** Removing it breaks two
-   of this node's own unmerged tests, `tests/tagged_approval_is_decided_by_its_conversation.rs` and
-   `tests/tagged_approval_refusal_is_a_denial.rs` (committed in `e4323686c`). The switch in
-   `server.rs` and their deletion wait for a direct confirmation from the user. Agent messages do not
-   count as that confirmation. Until it lands, `tests/approval_prompt_deny_paths.rs` stays
-   untracked and red (0/3).
+2. **Resolved: the `TDDY_SOCKET` relay is removed for the tagged path** (`44801a74f`). The developer
+   confirmed the deletion of the two obsolete relay tests and of the three hook tests in person
+   (relayed by the orchestrator, pushed as `51f7720b8`). `approval_prompt` with
+   `TDDY_CONVERSATION_ID` now asks the daemon's `RequestApproval` through the session tool client, and
+   answers Claude from the reply. A missing route, a transport error or a daemon refusal is a denial
+   that names its reason. `tests/approval_prompt_deny_paths.rs` is committed and green (3/3).
 2a. **Resolved: no LiveKit cap change.** `MAX_REMOTE_BLOCK_MS` (20 s) applies only to `Await` and
    `Shell` block arguments. Nothing below the crate has a unary deadline, so the approval holds for
    its own 70 s bound. `tests/approval_request_is_not_cut_at_the_remote_block_cap.rs` holds one 25 s
    and sees it answered (committed in `c3c75a03e`).
-3. **The listener hook deletion** removes `ConversationApprovalHandler`, its tagged branch, and
-   their two test files, and restores `packages/tddy-coder/src/tool_host_wiring.rs`. It must come
-   after the `tddy-tools` side, since a tagged approve still on the wire would otherwise reach the
-   presenter untagged.
+3. **Resolved: the unbound listener hook is removed** (`63b5f12df`). `ConversationApprovalHandler`,
+   its listener field, builder and tagged branch, the `conversation_id` wire field, and the
+   `tool_host_wiring.rs` line are gone; the files equal their pre-hook parent. Consequences recorded:
+   - No test covers the untagged approve reaching the presenter any more. It was removed with the
+     other hook tests (`51f7720b8`). A new presenter-path regression test is open work.
+   - `tddy-tools-cli`: `remote_start_session_passes_each_agent` fails at HEAD. Its test predates this
+     node (`4576e5463`, the remote-codebase base), and `remote_cli.rs` does not send the
+     `specializedAgents` field it expects. Pre-existing; untouched.
+   - `tddy-tools --lib`: `spawn_conversation_errors_when_tddy_socket_is_unset` races an env-setting
+     test under `cargo test` parallelism (it passes alone, and 120/120 on a rerun). Pre-existing
+     flake; untouched.
+   - Cross-check: `rpc_handlers_shape` budget is 10 (`9676c1e0f`, confirmed by the developer).
 
 ## Refactoring Needed
 
