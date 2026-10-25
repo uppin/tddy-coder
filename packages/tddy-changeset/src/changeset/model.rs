@@ -93,6 +93,10 @@ pub struct Changeset {
     /// in a DAG may be a sibling node, not the orchestrator).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orchestrator_session_id: Option<String>,
+    /// The daemon that runs `orchestrator_session_id`, when it was started from another host's
+    /// session. Absent = the host that holds this changeset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestrator_daemon_instance_id: Option<String>,
 }
 
 /// A single session entry (plan, acceptance-tests, or impl).
@@ -307,6 +311,7 @@ impl Default for Changeset {
             worktree_integration_base_ref: None,
             stack: None,
             orchestrator_session_id: None,
+            orchestrator_daemon_instance_id: None,
         }
     }
 }

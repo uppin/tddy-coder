@@ -150,6 +150,8 @@ async fn start_session_starts_on_the_branch_it_names_linked_to_the_orchestrator(
         changeset.orchestrator_session_id.as_deref(),
         Some(world.home.as_str())
     );
+    // And names no other host for it: the orchestrator runs where the session does
+    assert_eq!(changeset.orchestrator_daemon_instance_id, None);
 }
 
 #[tokio::test]
@@ -181,6 +183,8 @@ async fn start_session_on_another_host_creates_the_session_there_linked_to_the_o
         changeset.orchestrator_session_id.as_deref(),
         Some(world.home.as_str())
     );
+    // And that record names host-a as the orchestrator's host
+    assert_eq!(changeset.orchestrator_daemon_instance_id.as_deref(), Some(HOST_A));
 }
 
 #[tokio::test]

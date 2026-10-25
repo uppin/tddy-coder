@@ -127,17 +127,18 @@ impl LaunchSessions {
         // refused split is a malformed request, so it is classified before anything is created and
         // before the project is provisioned — a session whose codebase host is wrong should not
         // leave a clone behind on the way to being rejected.
-        let placement = classify_start_placement(&req, local_id, eligible_ids)?;
-        refuse_an_orchestrated_tool_start(&req)?;
-
         // The orchestrator is recorded by this daemon — the one that created the session — so a
         // start forwarded from the orchestrator's host links the session here, where it lives.
         let orchestrator = trim_to_option(&req.orchestrator_session_id);
+        let orchestrator_host =
+            trim_to_option(&req.orchestrator_daemon_instance_id).filter(|host| *host != local_id);
+        let placement = classify_start_placement(&req, local_id, eligible_ids)?;
+        refuse_an_orchestrated_tool_start(&req)?;
         let started = self
             .start_here(req, os_user, agent_def, placement, progress, cancel)
             .await?;
         if let Some(orchestrator) = orchestrator {
-            self.record_orchestrator(os_user, started.get_ref(), &orchestrator)?;
+            self.record_orchestrator(os_user, started.get_ref(), &orchestrator, orchestrator_host)?;
         }
         Ok(started)
     }
@@ -487,8 +488,9 @@ impl LaunchSessions {
         }))
     }
 
-    /// Record `orchestrator` in the changeset of the session `started` names. A start that created
-    /// nothing (a reported branch conflict) records nothing.
+    /// Record `orchestrator` — on `orchestrator_host`, when that is another daemon — in the changeset
+    /// of the session `started` names. A start that created nothing (a reported branch conflict)
+    /// records nothing.
     ///
     /// TODO(start-parity): written once the start has returned, after the session's agent is
     /// running, rather than in the changeset each session type first writes
@@ -499,6 +501,7 @@ impl LaunchSessions {
         os_user: &str,
         started: &StartSessionResponse,
         orchestrator: &str,
+        orchestrator_host: Option<String>,
     ) -> Result<(), Status> {
         if started.session_id.is_empty() {
             return Ok(());
@@ -511,6 +514,7 @@ impl LaunchSessions {
         let session_dir = unified_session_dir_path(&sessions_base, &started.session_id);
         let recorded = tddy_core::read_changeset(&session_dir).and_then(|mut changeset| {
             changeset.orchestrator_session_id = Some(orchestrator.to_string());
+            changeset.orchestrator_daemon_instance_id = orchestrator_host;
             tddy_core::write_changeset(&session_dir, &changeset)
         });
         recorded.map_err(|e| {
