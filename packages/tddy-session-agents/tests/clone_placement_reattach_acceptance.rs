@@ -133,6 +133,12 @@ impl AgentSessions for NotReachedByAttach {
     async fn refuse_departed_owner(&self, _daemon_instance_id: &str) -> Result<(), Status> {
         Ok(())
     }
+
+    fn github_user(&self, _session_token: &str) -> Result<String, Status> {
+        Err(Status::internal(
+            "this test takes no permission answer, so it names no GitHub user",
+        ))
+    }
 }
 
 #[async_trait]
@@ -187,6 +193,19 @@ impl AgentConversationPeers for NotReachedByAttach {
     ) -> Result<(), Status> {
         Err(Status::internal(format!(
             "an attach forwards nothing to '{owner}'"
+        )))
+    }
+
+    async fn answer_permission(
+        &self,
+        _session_token: &str,
+        _session_id: &str,
+        owner: &str,
+        _request: &tddy_service::proto::session_agents_svc::AnswerAgentPermissionRequest,
+    ) -> Result<tddy_service::proto::session_agents_svc::AnswerAgentPermissionResponse, Status>
+    {
+        Err(Status::internal(format!(
+            "this test answers no permission, so none is forwarded to '{owner}'"
         )))
     }
 }
