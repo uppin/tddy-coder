@@ -5,7 +5,7 @@ use tddy_core::{write_session_github_source, SessionGithubSource};
 
 use crate::cli_harness_jail::require_sandbox_hosts;
 use crate::stack_seed_validation::validate_stack_seed_base_session;
-use tddy_core::cli_harness::CliHarness;
+use tddy_core::cli_harness::{cli_harness_requires_model, CliHarness};
 
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_split::service_util;
@@ -82,7 +82,7 @@ pub(crate) fn refuse_an_unsupported_cli_harness_start(
 /// refused before anything is created.
 pub(crate) fn refuse_a_cli_start_without_a_model(req: &StartSessionRequest) -> Result<(), Status> {
     let session_type = req.session_type.trim();
-    if matches!(session_type, "claude-cli" | "cursor-cli") && req.model.trim().is_empty() {
+    if cli_harness_requires_model(session_type) && req.model.trim().is_empty() {
         return Err(Status::invalid_argument(format!(
             "model is required for {session_type} sessions"
         )));

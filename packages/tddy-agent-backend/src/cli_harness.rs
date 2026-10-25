@@ -121,6 +121,13 @@ pub fn cli_harness(session_type: &str) -> Option<&'static CliHarness> {
         .find(|harness| harness.session_type == session_type)
 }
 
+/// Whether a start of `session_type` must name a model: claude-cli and cursor-cli are refused
+/// without one, every other session type picks its own.
+#[must_use]
+pub fn cli_harness_requires_model(session_type: &str) -> bool {
+    matches!(session_type, "claude-cli" | "cursor-cli")
+}
+
 /// The catalogue a harness that lists its own models printed — one `provider/model` per line, as
 /// `opencode models` does. Blank lines are skipped; the first model is the default.
 #[must_use]
