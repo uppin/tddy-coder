@@ -10,6 +10,7 @@
     "agent",
     "attachments",
     "branch_worktree_intent",
+    "clone_placed_agents",
     "codebase_daemon_instance_id",
     "create_remote_branch",
     "daemon_instance_id",

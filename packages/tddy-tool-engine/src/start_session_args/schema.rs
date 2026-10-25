@@ -196,6 +196,14 @@ fn schema_offering(choices: Option<&StartChoices>) -> Value {
             "description": "Specialized subagents to wire into the session, each a builtin or a definition under `<tddyhome>/agents/`. An unknown name refuses the start."
         }),
     );
+    offer(
+        "clone_placed_agents",
+        json!({
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The subset of `specialized_agents` whose conversations each work on a clone of their own; the rest work on the session's worktree. A name not in `specialized_agents` refuses the start."
+        }),
+    );
     offer("attachments", attachments_property());
 
     let mut conditions: Vec<Value> = needing_a_model

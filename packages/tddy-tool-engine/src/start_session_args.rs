@@ -53,6 +53,7 @@ pub struct StartSessionArgs {
     pub ssh_config_host: String,
     pub semantic_index: bool,
     pub specialized_agents: Vec<String>,
+    pub clone_placed_agents: Vec<String>,
     pub attachments: Vec<HostDocumentAttachment>,
 }
 
@@ -231,6 +232,7 @@ impl StartSessionArgs {
             ssh_config_host: self.ssh_config_host,
             semantic_index: self.semantic_index,
             specialized_agents: self.specialized_agents,
+            clone_placed_agents: self.clone_placed_agents,
             attachments: self
                 .attachments
                 .into_iter()

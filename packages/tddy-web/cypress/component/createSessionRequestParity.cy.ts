@@ -65,6 +65,7 @@ function aFormWithEveryOptionSet(
     sandboxedCodebase: false,
     isSplitCodebase: false,
     selectedAgentIds: ["fastcontext@host-a"],
+    clonePlacedAgentIds: ["fastcontext@host-a"],
     semanticIndex: true,
     codebaseDaemonInstanceId: "",
     sshConfigHost: "builder",

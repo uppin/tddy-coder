@@ -179,6 +179,7 @@ fn every_argument_reaches_the_request_under_its_own_name() {
         "ssh_config_host": "builder",
         "semantic_index": true,
         "specialized_agents": ["fastcontext"],
+        "clone_placed_agents": ["fastcontext"],
         "attachments": [],
     }))
     .expect("every argument parses");
@@ -222,6 +223,7 @@ fn every_argument_reaches_the_request_under_its_own_name() {
             ssh_config_host: "builder".to_string(),
             semantic_index: true,
             specialized_agents: vec!["fastcontext".to_string()],
+            clone_placed_agents: vec!["fastcontext".to_string()],
             ..Default::default()
         }
     );
