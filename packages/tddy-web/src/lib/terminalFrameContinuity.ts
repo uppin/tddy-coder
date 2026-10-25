@@ -27,9 +27,19 @@ export type ContinuityVerdict = "paint" | "gap";
  * computed against the screen the client is showing.
  */
 export class TerminalFrameContinuity {
+  /** Where the next delta must start; `undefined` before a snapshot and after a gap. */
+  private nextStart: bigint | undefined;
+
   accept(frame: OffsetStampedFrame): ContinuityVerdict {
-    // TODO(resync): implement
-    void frame;
+    if (frame.snapshot) {
+      this.nextStart = frame.endOffset;
+      return "paint";
+    }
+    if (this.nextStart === undefined || frame.startOffset !== this.nextStart) {
+      this.nextStart = undefined;
+      return "gap";
+    }
+    this.nextStart = frame.endOffset;
     return "paint";
   }
 }

@@ -45,6 +45,9 @@ const ANCHOR = 1000n;
  *  stamped with the session and resolved terminal it came from as the daemon stamps every frame. */
 const REPLAY_FRAME = create(SessionTerminalOutputSchema, {
   data: new TextEncoder().encode("term:main\r\n"),
+  // A snapshot: the terminal opens with SNAPSHOT, and its continuity guard paints nothing that
+  // does not follow one.
+  snapshot: true,
   endOffset: ANCHOR,
   atOldest: false,
   sessionId: SESSION_ID,

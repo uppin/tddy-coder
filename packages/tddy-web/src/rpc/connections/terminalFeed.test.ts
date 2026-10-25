@@ -99,10 +99,15 @@ interface HistoryRequest {
 
 type OutputFrame = ReturnType<typeof create<typeof SessionTerminalOutputSchema>>;
 
-/** A live output frame of this session's bash terminal, stamped as the daemon stamps every frame. */
+/**
+ * An output frame of this session's bash terminal. A snapshot, because the feed opens with
+ * `SNAPSHOT` and its continuity guard paints nothing that does not follow one.
+ */
 function anOutputFrameOf(text: string): OutputFrame {
   return create(SessionTerminalOutputSchema, {
     data: bytesOf(text),
+    snapshot: true,
+    endOffset: BigInt(text.length),
     sessionId: A_SESSION,
     terminalId: A_TERMINAL_ID,
   });
@@ -496,6 +501,8 @@ describe("a daemon-served terminal feed over the bidi stream", () => {
     const daemon = aBidiDaemonAnswering([
       create(SessionTerminalOutputSchema, {
         data: bytesOf("claude> "),
+        snapshot: true,
+        endOffset: 8n,
         sessionId: A_SESSION,
         // The daemon stamps the RESOLVED id back, never the empty one the request carried
         terminalId: MAIN_TERMINAL_ID,

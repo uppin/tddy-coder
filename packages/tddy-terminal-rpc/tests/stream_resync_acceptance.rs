@@ -23,9 +23,11 @@ fn tui_startup() -> Vec<u8> {
     b"\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[1m header \x1b[0m\x1b[2;23r".to_vec()
 }
 
+/// The status line is reverse video, as in `stream_snapshot_acceptance.rs`: a blank cell with no
+/// attributes is indistinguishable from an untouched one, and the two serialize differently.
 fn tui_diff(frame: usize) -> Vec<u8> {
     format!(
-        "\x1b[{};2H\x1b[33mrow {frame:05}\x1b[0m\x1b[24;1H {frame:06} ",
+        "\x1b[{};2H\x1b[33mrow {frame:05}\x1b[0m\x1b[24;1H\x1b[7m {frame:06} \x1b[0m",
         2 + frame % 21
     )
     .into_bytes()

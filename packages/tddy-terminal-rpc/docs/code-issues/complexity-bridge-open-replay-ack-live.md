@@ -6,7 +6,7 @@
 **Metrics:** **135 lines** · **nesting depth 6** · 5 parameters · 8 branch/match lines · 0 early exits
 **Thresholds breached:** length 135 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — regressed 2026-10-25 (135 → 141 lines in #760) — **unclaimed**
+**Status:** Open — regressed 2026-10-25 (135 → 141 lines in #760, 142 in #761) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -15,6 +15,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 135 | 6 | 8 | 0 | first detection |
 | 2026-10-25 | 141 | 6 | 9 | 1 | **worse** by 6 in PR #760 (`#term-snapshot` 1/4): the `SNAPSHOT` mode returns early into its own `open_snapshot` (the new branch is not inline), plus an `unreachable!` arm and the `Result` return. Splitting the TAIL / FROM_OFFSET branches deferred with the developer's consent (code issues may be deferred in this stack; `bridge.rs` is stack-shared with #761–#763). Brace-depth scan, not the original sweep tool |
+| 2026-10-25 | 142 | 6 | 9 | 1 | +1 line in PR #761 (`#term-snapshot` 2/4): the destructuring names the new `resync` field. The resync itself is **not** here: it lives in `LiveOutput::resync` / `send_resync` as the changeset's prerequisite asked, so the open path did not grow. Splitting TAIL / FROM_OFFSET stays deferred (developer consent) |
 
 ## What the tool found
 

@@ -20,8 +20,8 @@
 
 ## Affected Packages
 
-- [ ] `tddy-terminal-rpc`: proto field, the bidi input→output resync channel, lagged → snapshot
-- [ ] `tddy-web`: the continuity guard in the host terminal feed
+- [x] `tddy-terminal-rpc`: proto field, the bidi input→output resync channel, lagged → snapshot
+- [x] `tddy-web`: the continuity guard in the host terminal feed
 
 ## Contract (pass 2, approved 2026-10-25)
 
@@ -152,10 +152,10 @@ painted screen consistent and asks for a resync on the first gap.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
