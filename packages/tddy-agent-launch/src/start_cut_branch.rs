@@ -44,28 +44,26 @@ impl LaunchSessions {
             Some(&self.tddy_data_dir),
         )
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        let session_dir = tddy_core::session_lifecycle::unified_session_dir_path(
-            &sessions_base,
-            session_id,
-        );
+        let session_dir =
+            tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, session_id);
         let changeset = tddy_core::read_changeset(&session_dir).map_err(|e| {
             Status::internal(format!(
                 "the changeset of session {session_id} could not be read: {e}"
             ))
         })?;
-        let intent = changeset.workflow.as_ref().and_then(|w| w.branch_worktree_intent);
+        let intent = changeset
+            .workflow
+            .as_ref()
+            .and_then(|w| w.branch_worktree_intent);
         let branch = changeset
             .branch
             .as_deref()
             .map(str::trim)
             .filter(|b| !b.is_empty());
-        let cut_its_own_worktree = changeset
-            .worktree
-            .as_deref()
-            .is_some_and(|w| tddy_session_activity::session_deletion::is_daemon_managed_worktree(Path::new(w)));
-        if intent != Some(BranchWorktreeIntent::NewBranchFromBase)
-            || !cut_its_own_worktree
-        {
+        let cut_its_own_worktree = changeset.worktree.as_deref().is_some_and(|w| {
+            tddy_session_activity::session_deletion::is_daemon_managed_worktree(Path::new(w))
+        });
+        if intent != Some(BranchWorktreeIntent::NewBranchFromBase) || !cut_its_own_worktree {
             return Ok(None);
         }
         let Some(branch) = branch else {

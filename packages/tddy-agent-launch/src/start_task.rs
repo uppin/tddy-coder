@@ -63,13 +63,9 @@ impl TaskBody for StartTask {
         let cut_project = project_a_start_may_cut_in(&req);
         let started = run_start(&service, req, &tx, &cancel).await;
         let ended = match started {
-            Ok(response) if cancel.is_cancelled() => Err(undo_a_cancelled_start(
-                &service,
-                &response,
-                session_token,
-                cut_project,
-            )
-            .await),
+            Ok(response) if cancel.is_cancelled() => {
+                Err(undo_a_cancelled_start(&service, &response, session_token, cut_project).await)
+            }
             Ok(response) => {
                 let _ = tx.send(Ok(StartSessionEvent {
                     event: Some(StartSessionEventKind::Result(response)),

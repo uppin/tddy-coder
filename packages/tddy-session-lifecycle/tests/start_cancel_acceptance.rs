@@ -356,10 +356,13 @@ async fn cancelling_during_the_worktree_cut_leaves_no_session_directory_or_workt
 }
 
 fn local_branches(repo: &Path) -> Vec<String> {
-    git(repo, &["for-each-ref", "--format=%(refname:short)", "refs/heads/"])
-        .lines()
-        .map(str::to_string)
-        .collect()
+    git(
+        repo,
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+    )
+    .lines()
+    .map(str::to_string)
+    .collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
