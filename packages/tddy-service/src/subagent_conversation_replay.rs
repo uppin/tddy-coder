@@ -15,7 +15,9 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use tddy_core::agent_activity::{AgentActivityRecord, STATUS_COMPLETED, STATUS_ERROR};
+use tddy_core::agent_activity::{
+    AgentActivityRecord, STATUS_COMPLETED, STATUS_ERROR, STATUS_RUNNING,
+};
 
 use crate::acp_replay::{append_acp_frame, read_session_transcript, tool_call_id_of};
 use crate::proto::acp::{acp_agent_message, session_update, AcpAgentMessage, ToolCallStatus};
@@ -25,6 +27,9 @@ pub const SUBAGENT_TOOL_CALL_PREFIX: &str = "subagent:";
 
 /// The main agent's MCP tool names whose calls fold into a conversation's entry.
 pub const SUBAGENT_TOOL_NAME_PREFIX: &str = "mcp__tddy-tools__subagent_";
+
+/// The `result` key a running call carries while its turn waits on a permission request held for the user.
+pub const AWAITING_USER: &str = "awaitingUser";
 
 /// The `stopReason` a `subagent_*` call answers with when its turn paused on a permission request: the
 /// serde spelling of `StopReason::PermissionRequested` in `tddy-discovery`.
@@ -256,8 +261,10 @@ fn prompt_summary(prompt: Option<&serde_json::Value>) -> Option<String> {
     })
 }
 
-/// The entry's status follows the call: running is in progress, a turn paused on a permission request
-/// is pending, a completed call is completed and a failed one failed.
+/// The entry's status follows the call. A call whose turn is waiting on a permission request held for the
+/// user is pending: the user is the one it waits on. A turn that paused on a request the main agent keeps is
+/// still in progress, since the main agent is the one answering it. A completed call is completed and a failed
+/// one failed.
 fn entry_status(record: &AgentActivityRecord) -> ToolCallStatus {
     match record.status.as_str() {
         STATUS_COMPLETED
@@ -267,10 +274,19 @@ fn entry_status(record: &AgentActivityRecord) -> ToolCallStatus {
                 .and_then(serde_json::Value::as_str)
                 == Some(PERMISSION_REQUESTED) =>
         {
-            ToolCallStatus::Pending
+            ToolCallStatus::InProgress
         }
         STATUS_COMPLETED => ToolCallStatus::Completed,
         STATUS_ERROR => ToolCallStatus::Failed,
+        STATUS_RUNNING
+            if record
+                .result
+                .get(AWAITING_USER)
+                .and_then(serde_json::Value::as_bool)
+                == Some(true) =>
+        {
+            ToolCallStatus::Pending
+        }
         // `running` (and any not-yet-terminal state) maps to in-progress.
         _ => ToolCallStatus::InProgress,
     }
