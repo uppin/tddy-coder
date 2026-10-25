@@ -237,6 +237,12 @@ async fn ask_daemon(
         Err(e) => return error_body(format!("conversation worktree rpc call: {e}")),
     };
     match ConversationWorktreeResponse::decode(bytes.as_slice()) {
+        // proto3 cannot tell an absent string from an empty one, and the daemon always answers with a
+        // non-empty JSON document, so an empty `result_json` is a reply with no result: an error, not
+        // an empty result.
+        Ok(response) if response.result_json.is_empty() => {
+            error_body("the reply carries no result_json".to_string())
+        }
         Ok(response) => response.result_json,
         Err(e) => error_body(format!("conversation worktree rpc decode response: {e}")),
     }
@@ -403,6 +409,13 @@ fn conversation_op_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prost::Message;
+
+    /// The request as the daemon decodes it: encoded for the wire, then decoded back.
+    fn as_the_daemon_decodes(request: &ConversationWorktreeRequest) -> ConversationWorktreeRequest {
+        ConversationWorktreeRequest::decode(request.encode_to_vec().as_slice())
+            .expect("the daemon decodes the request")
+    }
 
     fn an_envelope() -> SessionToolEnvelope {
         SessionToolEnvelope {
@@ -530,19 +543,19 @@ mod tests {
         // Given
         let request = conversation_sync_request(&an_envelope(), "explore");
 
-        // When
-        let body = connect_json_body(&request);
+        // When the request is decoded as the daemon decodes it
+        let decoded = as_the_daemon_decodes(&request);
 
-        // Then
+        // Then the sync is its own key, on the session and conversation it names
         assert_eq!(
-            body,
-            serde_json::json!({
-                "session_token": "token-1",
-                "session_id": "sess-1",
-                "daemon_instance_id": "daemon-a",
-                "conversation_id": "explore",
-                "sync": {}
-            })
+            decoded,
+            ConversationWorktreeRequest {
+                session_token: "token-1".into(),
+                session_id: "sess-1".into(),
+                daemon_instance_id: "daemon-a".into(),
+                conversation_id: "explore".into(),
+                op: Some(Op::Sync(SyncOp {})),
+            }
         );
     }
 
@@ -552,19 +565,21 @@ mod tests {
         // Given
         let request = conversation_reset_request(&an_envelope(), "explore", Some("3f9c2ab"));
 
-        // When
-        let body = connect_json_body(&request);
+        // When the request is decoded as the daemon decodes it
+        let decoded = as_the_daemon_decodes(&request);
 
-        // Then
+        // Then the reset is its own key, carrying the commit it was asked to reset to
         assert_eq!(
-            body,
-            serde_json::json!({
-                "session_token": "token-1",
-                "session_id": "sess-1",
-                "daemon_instance_id": "daemon-a",
-                "conversation_id": "explore",
-                "reset": { "commit": "3f9c2ab" }
-            })
+            decoded,
+            ConversationWorktreeRequest {
+                session_token: "token-1".into(),
+                session_id: "sess-1".into(),
+                daemon_instance_id: "daemon-a".into(),
+                conversation_id: "explore".into(),
+                op: Some(Op::Reset(ResetOp {
+                    commit: "3f9c2ab".into()
+                })),
+            }
         );
     }
 }

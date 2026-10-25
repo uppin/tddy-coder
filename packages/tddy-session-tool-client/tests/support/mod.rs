@@ -38,8 +38,10 @@ pub const DAEMON_INSTANCE_ID: &str = "codebase-host";
 pub struct ExecToolsDaemon {
     execute_answer: ExecuteToolResponse,
     tools: Vec<String>,
+    conversation_answer: ConversationWorktreeResponse,
     executed: Mutex<Vec<ExecuteToolRequest>>,
     listed: Mutex<Vec<ListExecToolsRequest>>,
+    conversations: Mutex<Vec<ConversationWorktreeRequest>>,
 }
 
 impl ExecToolsDaemon {
@@ -48,9 +50,17 @@ impl ExecToolsDaemon {
         Self {
             execute_answer,
             tools: tools.iter().map(|tool| tool.to_string()).collect(),
+            conversation_answer: ConversationWorktreeResponse::default(),
             executed: Mutex::new(Vec::new()),
             listed: Mutex::new(Vec::new()),
+            conversations: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The same daemon, answering `ConversationWorktree` with `answer`.
+    pub fn with_conversation_answer(mut self, answer: ConversationWorktreeResponse) -> Self {
+        self.conversation_answer = answer;
+        self
     }
 
     /// The `ExecuteTool` requests the generated handler decoded, in arrival order.
@@ -61,6 +71,14 @@ impl ExecToolsDaemon {
     /// The `ListExecTools` requests the generated handler decoded, in arrival order.
     pub fn decoded_lists(&self) -> Vec<ListExecToolsRequest> {
         self.listed.lock().expect("recorded lists").clone()
+    }
+
+    /// The `ConversationWorktree` requests the generated handler decoded, in arrival order.
+    pub fn decoded_conversations(&self) -> Vec<ConversationWorktreeRequest> {
+        self.conversations
+            .lock()
+            .expect("recorded conversations")
+            .clone()
     }
 }
 
@@ -115,9 +133,13 @@ impl ExecToolService for ExecToolsDaemon {
 
     async fn conversation_worktree(
         &self,
-        _request: Request<ConversationWorktreeRequest>,
+        request: Request<ConversationWorktreeRequest>,
     ) -> Result<Response<ConversationWorktreeResponse>, Status> {
-        Err(Status::unimplemented("not served by this fixture"))
+        self.conversations
+            .lock()
+            .expect("recorded conversations")
+            .push(request.into_inner());
+        Ok(Response::new(self.conversation_answer.clone()))
     }
 }
 
