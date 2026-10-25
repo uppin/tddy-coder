@@ -233,24 +233,48 @@ Not done, and why:
 - **Offering from profiles only.** A profile naming `claude`, `cursor`, `codex` or `oz` is offered;
   a bare `allowed_agents` id is offered only when it is an ACP harness. The PTY-only premise tests
   were narrowed by the orchestrator in `60f0c7269` and are unchanged here.
-- **Headless needs clone placement and the daemon's own OS user.** A shared-placement agent has no
-  conversation id, so it is refused; a privileged daemon refuses a headless agent for another OS
-  user, because `HeadlessDriver` has no argv prefix to wrap the CLI. Both are open for a decision.
 - **Claude confinement stays `CannotWithdraw`** until the headless launcher applies
   `--disallowedTools`, so a managed session still refuses a headless claude.
-- **Listener-side `ConversationApprovalHandler` is kept but unbound.** It answers a tagged `approve`
-  on a session listener and refuses when none is bound. The approval route above does not use it, so
-  it is dead in production; removal is proposed for a decision, not done here.
 
-## Open blocker: the approval route's handler field budget
+## Known limits (developer-decided, kept)
 
-The approval route is written and its four red tests are green in the working tree, but not
-committed. It adds two fields to `ExecToolRpcHandler`, taking it from 9 to 11, and the existing
-guard `packages/tddy-daemon-rpc/tests/rpc_handlers_shape.rs` (`each_handler_holds_no_more_fields_than_its_budget`,
-line 207: `("exec_tool.rs", "ExecToolRpcHandler", 9)`) fails. The handler holds no host reference
-to read routes through, so the routes need a field. The timeout can move onto `ApprovalRoutes`,
-which leaves one new field (10). Recommended: raise the budget at that line from `9` to `10` after
-that move. This edit needs the developer's consent; it is not made.
+- **Clone placement only.** A shared-placement agent has no conversation id, so a headless agent
+  opens only with clone placement; a shared-placement attach is refused.
+- **Same OS user only, on a privileged daemon.** `HeadlessDriver` spawns the CLI as the daemon's own
+  user and has no argv prefix to wrap it, so a privileged daemon refuses a headless agent that would
+  run as another OS user.
+- **Approvals do not reach a dropped client.** A disconnected client's parked approval is released
+  by a drop guard (`7782a5b4c`), not left until the conversation closes.
+- **Route residuals.** A launch whose session open fails leaves an inert route entry until close.
+  Cursor, codex and oz get no MCP config in this slice, so they have no tddy-tools tools and no
+  approval route.
+
+## Approval route: status
+
+- Committed `d8af568d9`: `ExecToolService.RequestApproval` on the ExecuteTool route. The launcher
+  registers (conversation id, session id, minted token) in `ApprovalRoutes`; a request must match
+  both the token and the session. The timeout (60 s) lives on `ApprovalRoutes`, so
+  `ExecToolRpcHandler` holds exactly 10 fields, the budget the developer approved in `9676c1e0f`.
+- Committed `7782a5b4c`: the drop guard, with a targeted `ParkedPermissions::cancel_request`.
+- Not done: the `tddy-tools` side (see the open decisions below) and deleting the unbound
+  listener-side `ConversationApprovalHandler`.
+
+## Open decisions (recorded, not yet made)
+
+1. **`tddy-tools` round trip over the real route needs a new edge.** The daemon handler and
+   `ApprovalRoutes` live in crates `tddy-tools` does not depend on. Options: (A) add `tddy-daemon-rpc`
+   and `tddy-coding-subagent` to `tddy-tools` `[dev-dependencies]`; (B) place the round trip in
+   `tddy-daemon-rpc` with `tddy-tools` as a dev-dependency; (C) keep the `tddy-tools` tests to the
+   client and deny paths (no new edge) and place the daemon round trip in `tddy-daemon-rpc`.
+2. **Removing the `TDDY_SOCKET` relay breaks two of this node's own tests.**
+   `tests/tagged_approval_is_decided_by_its_conversation.rs` and
+   `tests/tagged_approval_refusal_is_a_denial.rs` (committed in `e4323686c`) test the relay being
+   removed. Options: (i) replace them with the three new route tests in the same slice; (ii) defer
+   the relay removal to the slice that deletes the listener hook.
+3. **The listener hook deletion** removes `ConversationApprovalHandler`, its tagged branch, and
+   their two test files, and restores `packages/tddy-coder/src/tool_host_wiring.rs`. It must come
+   after the `tddy-tools` side, since a tagged approve still on the wire would otherwise reach the
+   presenter untagged.
 
 ## Refactoring Needed
 
