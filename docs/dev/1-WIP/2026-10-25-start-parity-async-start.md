@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — concurrency (a background stream consumer), a persisted ledger, multi-daemon cancel; two crates
+**PR**: [#753](https://github.com/uppin/tddy-coder/pull/753)
 **Stack**: `#start-parity` 4/9 — branch `feature/start-parity/async-start`, base `n3` `worktree-list` (`feature/start-parity/worktree-list`)
 **PRD**: [PRD-2026-10-25-start-parity-async-start.md](../../ft/daemon/1-WIP/PRD-2026-10-25-start-parity-async-start.md)
 
@@ -44,11 +45,20 @@ implementing one here collides with the PR that owns it.
 
 The **first push of this PR**, not its deliverable — this PR goes on to implement all of it:
 
-- `StartLedgerRecord` and `StartLedger::{open, record, read}` in
-  `tddy-daemon-rpc/src/exec_tool/start_ledger.rs`.
-- `GET_SESSION_START` and `CANCEL_SESSION_START` defs.
-- `ProjectHomePort::{start_session → StartHandle, session_start, cancel_session_start}`.
-- Failing tests.
+- `tddy-tool-engine::start_ledger` (moved from the planned `tddy-daemon-rpc/src/exec_tool/start_ledger.rs`).
+  It lives in the tool engine because `tddy-agent-launch` (whose spawn path `spawn-conversation`
+  puts on this ledger) depends on it, and cannot depend on `tddy-daemon-rpc`.
+  - `GET_SESSION_START` and `CANCEL_SESSION_START`;
+  - `StartHandle {start_id, task_id, daemon_instance_id}`;
+  - `StartState` (`running`, `succeeded`, `failed`, `cancelled`);
+  - `StartStep {step, status}` and `StartCloneProgress {stage, percent}`;
+  - `StartLedgerRecord {…, session_id, branch, worktree, error, updated_at_unix_ms}`;
+  - `StartLedger::{in_session_dir, read, recover_interrupted}`;
+  - `begin_recorded_start(ledger, events) -> Result<StartHandle, String>`.
+
+  Every body is `TODO(async-start)`. The record lives at `<session dir>/artifacts/session-starts/`.
+- The tool definitions and the daemon wiring (`StartSession` returning a handle, local and
+  forwarded cancel) are this node's private implementation.
 
 ## Green wave
 
@@ -121,15 +131,43 @@ runs.
 
 ### Acceptance Tests
 
-- [ ] **Integration** `packages/tddy-daemon-rpc/tests/async_start_acceptance.rs` — `start_session_returns_a_handle_before_the_worktree_is_cut`: A post-checkout hook blocks until released. The tool returns `start_id` while the hook still blocks.
-- [ ] **Integration** `same file` — `get_session_start_reports_the_running_phase_then_the_session`: Poll until: `running` with the worktree step, then (after release) `succeeded` with session_id, branch and worktree that exist on disk.
-- [ ] **Integration** `same file` — `cancel_session_start_cancels_and_leaves_no_session`: Cancel during the blocked hook. The ledger reads `cancelled`; no session dir and no branch remain.
-- [ ] **Integration** `same file` — `a_failed_start_reads_failed_with_the_start_paths_reason`: claude-cli without a model: `failed`, and the error equals the start path's message.
-- [ ] **Integration** `same file` — `the_ledger_answers_after_the_task_is_evicted`: After registry eviction (an injected clock or a TTL seam), `GetSessionStart` still returns `succeeded`.
-- [ ] **Integration** `packages/tddy-daemon/tests/project_home_start_remote_acceptance.rs` — `a_start_on_another_host_is_polled_and_cancelled_from_the_orchestrator`: The ledger reports the peer's `daemon_instance_id`; a cancel stops the peer's start.
+- [ ] **Unit** `packages/tddy-tool-engine/tests/start_ledger.rs` (a scripted
+  `StreamStartSession` event stream):
+  - `the_handle_names_the_starts_task_and_host_before_the_start_ends`
+  - `the_record_follows_the_starts_step_and_ends_with_its_session`
+  - `a_start_ending_cancelled_reads_cancelled`
+  - `a_start_failing_reads_failed_with_its_reason`
+  - `a_stream_that_ends_without_a_result_reads_failed_saying_so`
+  - `a_start_refused_before_naming_its_task_is_the_callers_error`
+  - `the_record_outlives_the_ledger_that_wrote_it`
+  - `a_record_left_running_by_a_restart_reads_failed_naming_the_restart`
+  - `an_unknown_start_is_refused_naming_it`
+- [ ] **Integration** `packages/tddy-daemon-rpc/tests/async_start_acceptance.rs`. The project
+  repo's `post-checkout` hook blocks until the test releases it.
+  - `start_session_returns_a_handle_while_the_worktree_is_still_being_cut`
+  - `once_released_the_start_reads_succeeded_with_its_session_branch_and_worktree`
+  - `cancelling_a_held_start_leaves_no_session_and_no_branch`
+  - `a_start_the_start_path_refuses_is_the_tools_error_naming_why`
+  - `an_unknown_start_is_refused_naming_it`
 
-Tests are written in the `fluent-tests` style (Given / When / Then). Multi-daemon tests use the
-in-memory peer forwarder if it exists on the base, and the LiveKit testkit otherwise.
+- [ ] **Integration** same file, host-b's checkouts held too (developer, 2026-10-25):
+  - `a_start_on_another_host_is_followed_from_the_orchestrator_until_it_succeeds` — the record
+    reports host-b's worktree step, then `succeeded` with `daemon_instance_id = host-b`; the
+    session exists on host-b only.
+  - `cancelling_a_start_on_another_host_stops_it_there` — `cancelled`, with no session and no
+    branch on host-b.
+
+  **This node's green extends the shared two-host world** (`tests/support/mod.rs`, added by #751).
+  `InProcessPeers` gains `session.SessionService/StreamStartSession` in `call_server_stream` and
+  `tasks.TaskService/CancelTask` in `call_unary`. The change is additive: no existing suite's
+  behaviour changes.
+
+**Unproven until green:** that the blocking `post-checkout` hook holds a workspace start inside its
+worktree step. It is the seam `docs/dev/todo/2026-10-24-streamed-start-keepalive-through-a-slow-worktree-step-untested.md`
+names. If `git worktree add` does not run it for the start path, the hook moves to whatever the
+worktree step runs.
+
+Tests are written in the `fluent-tests` style (Given / When / Then). 
 
 ## Technical Debt & Production Readiness
 
@@ -164,10 +202,10 @@ in-memory peer forwarder if it exists on the base, and the LiveKit testkit other
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
