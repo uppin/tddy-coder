@@ -2847,6 +2847,25 @@ fn subagent_await_schema() -> std::sync::Arc<serde_json::Map<String, serde_json:
     }))
 }
 
+/// The `subagent_cancel` tool as the main agent is offered it. What it says it does is what it does:
+/// a coding agent's conversation is kept, so the description must not promise a close.
+pub(crate) fn subagent_cancel_tool_definition() -> rmcp::model::Tool {
+    rmcp::model::Tool::new(
+        "subagent_cancel",
+        "Cancel an open subagent conversation's running turn (ACP session/cancel). A coding \
+         agent's conversation is kept: its process, context and worktree stay, the reply is \
+         {cancelled: true, kept: true}, and it takes the next subagent_prompt. Any other \
+         conversation is closed and its worktree deleted.",
+        schema_object(serde_json::json!({
+            "type": "object",
+            "required": ["sessionId"],
+            "properties": {
+                "sessionId": {"type": "string"}
+            }
+        })),
+    )
+}
+
 /// Build the `ToolRouter` for the ACP-shaped subagent conversation tools. Merged into
 /// `PermissionServer::new()`'s router only when [`subagent_enabled`].
 fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<PermissionServer> {
@@ -2930,17 +2949,7 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
         Box::pin(subagent_await_tool(args))
     }));
 
-    let cancel_tool = rmcp::model::Tool::new(
-        "subagent_cancel",
-        "Close an open subagent session (ACP session/cancel-shaped).",
-        schema_object(serde_json::json!({
-            "type": "object",
-            "required": ["sessionId"],
-            "properties": {
-                "sessionId": {"type": "string"}
-            }
-        })),
-    );
+    let cancel_tool = subagent_cancel_tool_definition();
     router.add_route(subagent_route(cancel_tool, |args| {
         Box::pin(subagent_cancel_tool(args))
     }));

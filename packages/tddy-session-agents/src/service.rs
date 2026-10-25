@@ -1492,9 +1492,6 @@ impl SessionAgentServiceImpl {
     }
 }
 
-/// Record the permission request a cancelled conversation still holds as answered by `cancelled_by`, the way a
-/// request answered while its turn runs is recorded, and complete the conversation's status row when the request was
-/// held for the user. `Err` names what was not recorded; a cancel whose caller has no login records nothing, so it refuses.
 /// A conversation this host is opening. Dropped before [`Self::opened`] — the open failed, or its
 /// caller went away mid-open — it closes the conversation's id with the host, which removes what a
 /// headless launch planned for it: its approval route and its files.
@@ -1572,6 +1569,9 @@ async fn cancel_local_turn(
         })
 }
 
+/// Record the permission request a cancelled conversation still holds as answered by `cancelled_by`, the way a
+/// request answered while its turn runs is recorded, and complete the conversation's status row when the request was
+/// held for the user. `Err` names what was not recorded; a cancel whose caller has no login records nothing, so it refuses.
 async fn record_cancelled_request(
     recorder: &ConversationRecorder,
     answering: &dyn PermissionAnswering,

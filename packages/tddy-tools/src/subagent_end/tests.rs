@@ -170,3 +170,20 @@ async fn subagent_end_closes_the_conversation_on_the_daemon_rather_than_cancelli
         "the conversation is closed here"
     );
 }
+
+#[test]
+fn subagent_cancel_says_it_keeps_a_coding_agents_conversation_rather_than_closing_every_one() {
+    // Given the advertised cancel
+    let tool = crate::server::subagent_cancel_tool_definition();
+    let description = tool.description.as_deref().unwrap_or_default();
+
+    // Then it tells the main agent a coding agent's conversation survives the cancel
+    assert!(
+        description.contains("coding agent's conversation is kept"),
+        "subagent_cancel keeps a coding agent's conversation open: {description}"
+    );
+    assert!(
+        !description.starts_with("Close"),
+        "subagent_cancel no longer closes every conversation: {description}"
+    );
+}

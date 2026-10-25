@@ -341,8 +341,6 @@ impl CodingAgentSession {
         }
     }
 
-    /// The outcome of a prompt that ended: its stop reason, its text, and the messages it appended
-    /// across every turn it took.
     /// Record a turn a cancel ended in the history, as [`Self::finish`] would have, without an
     /// outcome to hand anyone.
     fn close_cancelled_turn(&mut self, mut ended: InFlightPrompt) {
@@ -358,6 +356,8 @@ impl CodingAgentSession {
         }
     }
 
+    /// The outcome of a prompt that ended: its stop reason, its text, and the messages it appended
+    /// across every turn it took.
     fn finish(
         &mut self,
         prompt: &str,

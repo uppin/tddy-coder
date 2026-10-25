@@ -1,8 +1,9 @@
 //! `subagent_end` — finish a subagent conversation and hand its work to the caller.
 //!
-//! The counterpart of `subagent_cancel`: both can close the conversation and delete its worktree, and
-//! only this one first applies what the conversation committed to the caller's worktree as
-//! uncommitted changes. It always closes; `subagent_cancel` keeps a coding agent's conversation. In its own module because `server.rs` is over the file budget
+//! The counterpart of `subagent_cancel`: both can close the conversation and delete its worktree,
+//! and only this one first applies what the conversation committed to the caller's worktree as
+//! uncommitted changes. It always closes; `subagent_cancel` keeps a coding agent's conversation
+//! and stops only its turn. In its own module because `server.rs` is over the file budget
 //! (`packages/tddy-tools/docs/code-issues/oversized-file-server.md`).
 
 use crate::mcp_primitives::{schema_object, subagent_access_is_managed};
@@ -27,7 +28,8 @@ pub(crate) fn subagent_end_tool_definition() -> rmcp::model::Tool {
          pulled: {commits, skipped, files: {created, updated, removed}, lines: {added, \
          removed}, conflicts}} — `pulled` is null when the conversation never changed a file, and for a `shared` agent, which edits the session's own \
          worktree and has nothing of its own to take. Refused while a turn is \
-         running: await it or cancel. Use subagent_cancel instead to discard the work.",
+         running: await it, or stop it with subagent_cancel. subagent_cancel discards the work of \
+         any conversation but a coding agent's, which it keeps open.",
         schema_object(serde_json::json!({
             "type": "object",
             "required": ["sessionId"],
@@ -43,8 +45,8 @@ pub(crate) fn subagent_end_tool_definition() -> rmcp::model::Tool {
 /// `subagent_end { sessionId, from?, to? }`.
 ///
 /// Pulls what the conversation committed (the range, less what was already pulled) into the
-/// caller's worktree, then closes it as `subagent_cancel` closes one it does not keep — retire, then remove its
-/// worktree. A pull that fails leaves the conversation open and its worktree in place, so the work
+/// caller's worktree, then closes it as `subagent_cancel` closes one it does not keep — retire,
+/// then remove its worktree. A pull that fails leaves the conversation open and its worktree in place, so the work
 /// is neither applied nor lost and the caller can retry or cancel.
 pub(crate) async fn subagent_end_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
@@ -97,7 +99,7 @@ pub(crate) async fn the_host_of(session_id: &str) -> Result<ConversationHost, St
         0 => Ok(host),
         outstanding => Err(format!(
             "subagent session {session_id} has {outstanding} turn(s) still running; await them \
-             or use subagent_cancel to discard the conversation"
+             or stop them with subagent_cancel"
         )),
     }
 }
