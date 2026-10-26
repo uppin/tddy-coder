@@ -232,7 +232,7 @@ an ordinary, still read-only session, and main is set up once more.
 
 ### Project-home tools
 
-Four exec tools give the read-only main its reach over **its own project's** sessions. Only a
+The exec tools below give the read-only main its reach over **its own project's** sessions. Only a
 session whose record carries the `project-home` role may run them; any other caller is refused with
 `PERMISSION_DENIED` naming the role.
 
@@ -242,6 +242,8 @@ session whose record carries the `project-home` role may run them; any other cal
 | `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `stack_parent`, `stack_parent_daemon_instance_id`, `stack_node_id`, `pr_stack_base_session_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `semantic_index`, `specialized_agents`, `attachments` (host documents) | `{"session_id"}`: a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
 | `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root), `daemon_instance_id?` | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
 | `DiffSessionWorktree` | `session_id`, `daemon_instance_id?` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
+| `ListWorktrees` | `cursor?`, `limit?` (50 by default, at most 200), `daemon_instance_id?` | `{worktrees, total, next_cursor, has_more, clamped_to?, sizing: {done, total}}`: the project's worktrees on that host as the **Worktrees screen** shows them — each row carries the screen's `WorktreeRow` fields (`disk_bytes` absent when never sized) — in the screen's order: largest first, never-sized last, then by name. Pages resume after the last row by sort position, so a size that changes between pages neither repeats nor skips a row; a cursor the tool did not issue is refused, and a larger `limit` is clamped with `clamped_to` saying so. `sizing` counts the rows not being sized, of all of them. Starts no size calculation |
+| `GetWorktree` | `path` (as `ListWorktrees` lists it), `daemon_instance_id?` | `{worktree, session_id}`: that row, and the session on that host whose worktree it is (`null` when none). A path that is not one of the project's worktrees is refused naming it |
 
 - **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
   optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
@@ -251,7 +253,14 @@ session whose record carries the `project-home` role may run them; any other cal
   outside it is refused as an `is_error` result naming "outside the worktree". A base ref that git
   would read as an option is refused too.
 - Every call is appended to the home session's tool-call log, as any exec tool is.
-- **Across hosts.** A target tool call (read, diff, every git tool) naming another host is
+- **Worktrees.** `ListWorktrees` and `GetWorktree` read the same snapshot the Worktrees screen's
+  `StreamWorktreeStats` opens with, from the daemon's one size calculator, so the tool and the screen
+  cannot disagree. Clear, Delete and Restore are not offered
+  ([TODO](../../dev/todo/2026-10-25-project-home-worktree-clear-delete-restore.md)). **Known
+  limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
+  lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
+  names it is an approximation and may order equal-sized worktrees differently from the screen.
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible

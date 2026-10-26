@@ -9,12 +9,22 @@ use tddy_tool_engine::project_home_tools::{
     project_home_tool_defs, target_daemon_instance_id, DIFF_SESSION_WORKTREE,
     READ_SESSION_WORKTREE, TARGET_DAEMON_INSTANCE_ID,
 };
+use tddy_tool_engine::project_home_worktree_tools::{GET_WORKTREE, LIST_WORKTREES};
 
-/// The tools that act on a target session: read, diff, and the seven git tools.
+/// The tools that act on a target session: read, diff, the two worktree tools and the seven git
+/// tools.
 fn target_tool_schemas() -> Vec<(String, Value)> {
     project_home_tool_defs()
         .into_iter()
-        .filter(|tool| tool.name == READ_SESSION_WORKTREE || tool.name == DIFF_SESSION_WORKTREE)
+        .filter(|tool| {
+            [
+                READ_SESSION_WORKTREE,
+                DIFF_SESSION_WORKTREE,
+                LIST_WORKTREES,
+                GET_WORKTREE,
+            ]
+            .contains(&tool.name.as_str())
+        })
         .chain(project_home_git_tool_defs())
         .map(|tool| {
             let schema = serde_json::from_str(&tool.input_schema_json).expect("the schema is JSON");
@@ -27,7 +37,11 @@ fn target_tool_schemas() -> Vec<(String, Value)> {
 fn every_target_tool_offers_the_targets_host_as_an_optional_described_string() {
     // Given
     let schemas = target_tool_schemas();
-    assert_eq!(schemas.len(), 9, "read, diff and the seven git tools");
+    assert_eq!(
+        schemas.len(),
+        11,
+        "read, diff, the two worktree tools and the seven git tools"
+    );
 
     for (name, schema) in schemas {
         // When

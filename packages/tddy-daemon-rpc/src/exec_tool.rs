@@ -21,6 +21,7 @@ use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecTools};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;
+use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
 
 /// The exec-tool RPCs: the caller's identity, the peer a split session's tools are forwarded
 /// to, and the three places a tool actually runs — this host's task registry, a workspace sandbox,
@@ -36,12 +37,22 @@ pub struct ExecToolRpcHandler {
     /// to the host (`#project-home` 5/7). Unset on a handler built from a host that was never given
     /// its families, and a project-home tool that needs it then refuses.
     session_launch: Arc<OnceLock<LaunchSessions>>,
-    /// The vaults a project-home git tool reads a target's GitHub identity from (`#project-home` 7/7).
-    credential_vaults: Option<Arc<SessionVaults>>,
-    github_cli: GithubCli,
     /// The routes a headless conversation's permission approval is answered through. `None` on a
     /// host with none wired, which refuses every approval.
     approval_routes: Option<Arc<ApprovalRoutes>>,
+    /// What the project-home tools read from the host beyond the session store.
+    project_home_host: ProjectHomeHost,
+}
+
+/// The host resources only the project-home tools use, held together so the handler stays within
+/// its field budget.
+pub(crate) struct ProjectHomeHost {
+    /// The vaults a project-home git tool reads a target's GitHub identity from (`#project-home` 7/7).
+    pub(crate) credential_vaults: Option<Arc<SessionVaults>>,
+    pub(crate) github_cli: GithubCli,
+    /// The size calculator the Worktrees screen streams from, shared with the host, so a project-home
+    /// `ListWorktrees` call reads the same calculation state (`#start-parity` 3/9).
+    pub(crate) worktree_sizes: Arc<WorktreeSizeCalculator>,
 }
 
 impl ExecToolRpcHandler {
@@ -57,9 +68,12 @@ impl ExecToolRpcHandler {
             rpc_activity: host.rpc_activity(),
             local_exec_tools: host.local_exec_tools(),
             session_launch: Arc::new(OnceLock::new()),
-            credential_vaults: host.credential_vaults(),
-            github_cli: host.github_cli(),
             approval_routes: host.approval_routes(),
+            project_home_host: ProjectHomeHost {
+                credential_vaults: host.credential_vaults(),
+                github_cli: host.github_cli(),
+                worktree_sizes: host.worktree_size_calculator(),
+            },
         }
     }
 

@@ -1,0 +1,12 @@
+{
+  "comment": "Shared by tddy-tool-engine/tests/worktree_tools_parity.rs and cypress/component/worktreeToolParity.cy.ts: the ListWorktrees exec tool must order worktrees exactly as the Worktrees screen's sortWorktreesBySize does. Mixed-case names pin the screen's localeCompare tie-break, which a byte-wise comparison gets wrong.",
+  "input": [
+    { "name": "small", "disk_bytes": 5 },
+    { "name": "Beta", "disk_bytes": null },
+    { "name": "Banana", "disk_bytes": 100 },
+    { "name": "big", "disk_bytes": 300 },
+    { "name": "alpha", "disk_bytes": null },
+    { "name": "apple", "disk_bytes": 100 }
+  ],
+  "sorted": ["big", "apple", "Banana", "small", "alpha", "Beta"]
+}

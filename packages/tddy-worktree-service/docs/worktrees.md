@@ -24,6 +24,8 @@ Library helpers for the Worktrees manager feature: parse **`git worktree list`**
 | **`WorktreeSizeStatus`** | Size lifecycle: **`None`** (never calculated), **`Calculating`**, **`Cached`**. |
 | **`WorktreeSizeState`** / **`WorktreeSizeUpdate`** | Current state / a published transition (`status`, `disk_bytes`, `calculated_at_unix_ms`; the update also carries `path`). |
 | **`WorktreeSizeCalculator`** | **`new(root, permits)`** / **`with_sizer(root, permits, sizer)`**; **`state`**, **`enqueue`**, **`subscribe`**, **`snapshot`**. Lazy, semaphore-bounded per-worktree disk-size lifecycle (see below). |
+| **`project_worktree_snapshot(main_repo, calculator, project)`** → `Vec<WorktreeSnapshotRow {diff, size}>` | Every worktree's diff summary with the size state `calculator` holds now; starts no walk. `StreamWorktreeStats`' first frame and the project-home `ListWorktrees` tool both read it, so they cannot disagree. |
+| **`DAEMON_SIZE_WALK_PERMITS`** | The daemon-wide cap (2) on concurrent size walks. |
 
 ## Lazy per-worktree disk size (`WorktreeSizeCalculator`)
 
@@ -34,7 +36,7 @@ The expensive directory-size walk is computed **lazily, per worktree, and centra
 - **`subscribe(project)`** returns a `tokio::sync::broadcast::Receiver<WorktreeSizeUpdate>`; **`snapshot(project)`** returns every known worktree's state (the stream's first frame). **`state`** reads memory, lazily falling back to the persisted file so a fresh calculator reports `Cached` without re-walking.
 - The `git diff` summary (changed files, ±lines) is unchanged — only the size walk is lazy/status-tracked.
 
-`WorktreeServiceImpl` wires an `Arc<WorktreeSizeCalculator>` and exposes it over the streaming `StreamWorktreeStats` (snapshot + per-worktree `Calculating→Cached` increments, via `MpscWorktreeStatsStream`) and the membership-gated unary `CalculateWorktreeSize`; `ListWorktreesForProject` overlays the size status/timestamp while retaining its eager `disk_bytes` walk as a cache fallback.
+`WorktreeServiceImpl` wires an `Arc<WorktreeSizeCalculator>` (shared with the daemon's session host through `worktree_size_calculator()`, so the project-home worktree tools read the same state; `service::project_main_repo_on_host` is the main-repo resolution both use) and exposes it over the streaming `StreamWorktreeStats` (snapshot + per-worktree `Calculating→Cached` increments, via `MpscWorktreeStatsStream`) and the membership-gated unary `CalculateWorktreeSize`; `ListWorktreesForProject` overlays the size status/timestamp while retaining its eager `disk_bytes` walk as a cache fallback.
 
 ## Persistence layout
 

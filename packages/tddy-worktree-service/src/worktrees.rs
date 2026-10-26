@@ -415,6 +415,9 @@ struct WorktreeSizeInner {
 /// still observes the full `Calculating` -> `Cached` sequence.
 const SIZE_UPDATE_CHANNEL_CAPACITY: usize = 1024;
 
+/// The daemon-wide cap on concurrent size walks, shared by every calculator a daemon builds.
+pub const DAEMON_SIZE_WALK_PERMITS: usize = 2;
+
 /// Lazy, semaphore-bounded per-worktree disk-size calculator.
 ///
 /// Sizes are computed off the async runtime via `spawn_blocking`, capped by a central semaphore so
@@ -843,6 +846,31 @@ pub fn list_worktree_diff_rows(main_repo: &Path) -> Vec<WorktreeDiffRow> {
                 lines_added: numstat.lines_added,
                 lines_removed: numstat.lines_removed,
             }
+        })
+        .collect()
+}
+
+/// What the Worktrees screen's snapshot holds for one worktree: its diff summary and the size state
+/// the daemon's calculator has for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeSnapshotRow {
+    pub diff: WorktreeDiffRow,
+    pub size: WorktreeSizeState,
+}
+
+/// The snapshot of `main_repo`'s worktrees that `StreamWorktreeStats` opens with and the project-home
+/// `ListWorktrees` tool reads: every worktree with its diff summary, and the size state `calculator`
+/// holds for it now. Starts no size walk; that is the caller's to ask for.
+pub fn project_worktree_snapshot(
+    main_repo: &Path,
+    calculator: &WorktreeSizeCalculator,
+    project_id: &str,
+) -> Vec<WorktreeSnapshotRow> {
+    list_worktree_diff_rows(main_repo)
+        .into_iter()
+        .map(|diff| {
+            let size = calculator.state(project_id, &diff.path);
+            WorktreeSnapshotRow { diff, size }
         })
         .collect()
 }

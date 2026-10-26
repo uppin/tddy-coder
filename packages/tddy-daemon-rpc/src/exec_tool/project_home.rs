@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -37,9 +38,12 @@ use tddy_tool_engine::project_home_tools::{
     execute_project_home_tool, is_project_home_tool, session_offered_catalog,
     ListProjectSessionsResult, ListedSession, ProjectHomePort,
 };
+use tddy_tool_engine::project_home_worktree_tools::WorktreeEntry;
 use tddy_tool_engine::start_session_args::{StartContext, StartSessionArgs};
+use tddy_worktree_service::service::project_main_repo_on_host;
 use tddy_worktree_service::session_git_ops::PushIdentity;
 use tddy_worktree_service::session_target::{HomeCaller, SessionTarget, TargetRecord};
+use tddy_worktree_service::worktrees::{project_worktree_snapshot, WorktreeSizeCalculator};
 
 use super::project_home_remote::PeerSessionLists;
 use super::ExecToolRpcHandler;
@@ -94,13 +98,14 @@ impl ExecToolRpcHandler {
             sessions_base: sessions_base.to_path_buf(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             identity: SessionAccountAccess::new(
-                self.credential_vaults.clone(),
+                self.project_home_host.credential_vaults.clone(),
                 self.user_resolver.clone(),
                 &req.session_token,
             )
-            .with_github_cli(self.github_cli.clone()),
+            .with_github_cli(self.project_home_host.github_cli.clone()),
             daemon_instance_id: local_instance_id_for_config(&self.config),
             peers,
+            worktree_sizes: Arc::clone(&self.project_home_host.worktree_sizes),
         })
     }
 
@@ -230,6 +235,8 @@ pub(super) struct DaemonProjectHome {
     /// The other hosts' listings, for a caller held here; `None` for one held elsewhere, whose own
     /// host fans out.
     peers: Option<PeerSessionLists>,
+    /// The daemon's worktree size calculator, the one the Worktrees screen reads.
+    worktree_sizes: Arc<WorktreeSizeCalculator>,
 }
 
 /// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the
@@ -416,6 +423,26 @@ impl ProjectHomePort for DaemonProjectHome {
         .await
         .map_err(|e| anyhow::anyhow!("reading the target's git identity failed: {e}"))?;
         Ok(PushIdentity { env })
+    }
+
+    /// The worktrees of `project_id` on this host, from the snapshot the Worktrees screen's stream
+    /// opens with, so the tool and the screen cannot disagree (`#start-parity` 3/9).
+    async fn list_worktrees(&self, project_id: &str) -> anyhow::Result<Vec<WorktreeEntry>> {
+        let main_repo = project_main_repo_on_host(
+            &self.tddy_data_dir,
+            &self.os_user,
+            &self.daemon_instance_id,
+            project_id,
+        )
+        .map_err(|status| anyhow::anyhow!(status.message().to_string()))?;
+        let calculator = Arc::clone(&self.worktree_sizes);
+        let project_id = project_id.to_string();
+        let rows = tokio::task::spawn_blocking(move || {
+            project_worktree_snapshot(&main_repo, &calculator, &project_id)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("reading the worktrees failed: {e}"))?;
+        Ok(rows.into_iter().map(WorktreeEntry::from).collect())
     }
 
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>> {
