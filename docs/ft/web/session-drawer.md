@@ -647,7 +647,8 @@ and the indicator names why.
 While a start runs, **Cancel** cancels it instead of closing the pane. It is enabled once the start's
 stream names the task the start runs as (its first event, `started`), and it calls `CancelTask` for
 that task on the host that runs it. The button then reads **Cancelling…** until the host ends the
-start. The host stops its work and removes what the start created, on every host involved (see
+start. The host stops its work and removes what the start created, on every host involved — including the branch the start cut for a new-branch
+session (see
 [Background tasks § Session starts run as tasks](../daemon/background-tasks.md#session-starts-run-as-tasks)).
 
 A start that ends cancelled is not shown as an error. The form becomes editable again with its

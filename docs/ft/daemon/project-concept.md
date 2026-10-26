@@ -239,7 +239,7 @@ session whose record carries the `project-home` role may run them; any other cal
 | Tool | Arguments | Answers |
 |---|---|---|
 | `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on, and the status the web's session list shows. A host that does not answer is named in `unreachable_hosts`, never silently left out |
-| `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `stack_parent`, `stack_parent_daemon_instance_id`, `stack_node_id`, `pr_stack_base_session_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `semantic_index`, `specialized_agents`, `attachments` (host documents) | `{"session_id"}`: a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
+| `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `stack_parent`, `stack_parent_daemon_instance_id`, `stack_node_id`, `pr_stack_base_session_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `semantic_index`, `specialized_agents`, `attachments` (host documents) | `{"start_id", "task_id", "daemon_instance_id"}` at once (see [Asynchronous session start](#asynchronous-session-start)); the start's outcome is a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
 | `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root), `daemon_instance_id?` | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
 | `DiffSessionWorktree` | `session_id`, `daemon_instance_id?` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
 | `ListWorktrees` | `cursor?`, `limit?` (50 by default, at most 200), `daemon_instance_id?` | `{worktrees, total, next_cursor, has_more, clamped_to?, sizing: {done, total}}`: the project's worktrees on that host as the **Worktrees screen** shows them — each row carries the screen's `WorktreeRow` fields (`disk_bytes` absent when never sized) — in the screen's order: largest first, never-sized last, then by name. Pages resume after the last row by sort position, so a size that changes between pages neither repeats nor skips a row; a cursor the tool did not issue is refused, and a larger `limit` is clamped with `clamped_to` saying so. `sizing` counts the rows not being sized, of all of them. Starts no size calculation |
@@ -300,6 +300,33 @@ can start any session a person can.
     does not support.
   - The orchestrator is written into the changeset after the start returns, not in the changeset the
     session type first writes.
+
+### Asynchronous session start
+
+`StartSession` returns **at once** with a handle, `{"start_id", "task_id", "daemon_instance_id"}`,
+instead of waiting for the clone, the worktree and the agent. It opens the streamed start
+(`StreamStartSession`, forwarded to the host the arguments name), waits for the start to name its
+task (`StartTaskStarted`), and returns. A start refused before it begins (a branch another session
+owns, an invalid option) is the tool's `is_error` result naming why, not a handle.
+
+| Tool | Arguments | Answers |
+|---|---|---|
+| `GetSessionStart` | `start_id` | the start's record: `state` (`running`, `succeeded`, `failed`, `cancelled`), its current `step` `{step, status}`, `clone_progress` `{stage, percent}`, and once it succeeded its `session_id`, `branch` and `worktree` (as the host running it lists them), or once it failed or was cancelled, `error` |
+| `CancelSessionStart` | `start_id` | returns at once; the start's host is sent `CancelTask` (locally, or forwarded to the peer running it), and the record reads `cancelled` once the stream has ended. A start that is no longer running is refused naming its state |
+
+- **The start ledger.** A background consumer on the orchestrator's host drains the start's stream
+  into a record at `<home session dir>/artifacts/session-starts/<start_id>.json`
+  (`packages/tddy-tool-engine/src/start_ledger.rs`). The record outlives the task registry's
+  five-minute retention, and a start forwarded to another host is followed the same way, since the
+  forwarded stream relays the peer's events.
+- **A restart.** The first time a daemon loads a home session's ledger, a record still `running` —
+  one an earlier daemon was draining when it stopped — is marked `failed: daemon restarted during
+  the start`.
+- Tool, sandboxed and stack-child starts emit no steps, so their record reads `running` with no
+  step until the outcome
+  (`docs/dev/todo/2026-10-03-start-phases-and-code-index-warm-skip-sandboxed-tool-and-split-starts.md`).
+- A cancelled start removes what it created, including the branch it cut; see
+  [Background tasks § Session starts run as tasks](background-tasks.md#session-starts-run-as-tasks).
 
 ### Git tools
 

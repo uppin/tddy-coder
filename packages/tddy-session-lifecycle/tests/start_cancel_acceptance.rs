@@ -354,3 +354,88 @@ async fn cancelling_during_the_worktree_cut_leaves_no_session_directory_or_workt
         git(daemon.repo.path(), &["worktree", "list", "--porcelain"])
     );
 }
+
+fn local_branches(repo: &Path) -> Vec<String> {
+    git(
+        repo,
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+    )
+    .lines()
+    .map(str::to_string)
+    .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_during_the_worktree_cut_deletes_the_branch_it_cut() {
+    // Given — a start whose worktree is being cut for a branch the start creates
+    let daemon = a_daemon_whose_worktree_cut_is_slow();
+    let mut stream = daemon
+        .service
+        .stream_start_session(Request::direct(a_claude_cli_start()))
+        .await
+        .expect("the start is accepted")
+        .into_inner();
+    let task_id = the_task_it_named(&mut stream).await;
+    wait_for(&daemon.cut_began).await;
+
+    // When
+    assert!(
+        daemon
+            .service
+            .task_registry()
+            .cancel_task(&tddy_task::TaskId(task_id))
+            .await,
+        "the start's task is cancellable"
+    );
+    let status = how_it_ended(&mut stream).await;
+
+    // Then — cancelled, and the branch the cut created is gone with its worktree
+    assert_eq!(status.code, Code::Cancelled, "ended CANCELLED: {status:?}");
+    assert_eq!(
+        local_branches(daemon.repo.path()),
+        vec!["main".to_string()],
+        "the cancelled start's branch is deleted"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_start_on_a_selected_branch_keeps_that_branch() {
+    // Given — an existing branch the start is asked to work on, and its worktree cut held
+    let daemon = a_daemon_whose_worktree_cut_is_slow();
+    git(daemon.repo.path(), &["branch", "feature/keep"]);
+    let mut stream = daemon
+        .service
+        .stream_start_session(Request::direct(StartSessionRequest {
+            branch_worktree_intent: "work_on_selected_branch".to_string(),
+            selected_branch_to_work_on: "feature/keep".to_string(),
+            ..a_claude_cli_start()
+        }))
+        .await
+        .expect("the start is accepted")
+        .into_inner();
+    let task_id = the_task_it_named(&mut stream).await;
+    wait_for(&daemon.cut_began).await;
+
+    // When
+    assert!(
+        daemon
+            .service
+            .task_registry()
+            .cancel_task(&tddy_task::TaskId(task_id))
+            .await,
+        "the start's task is cancellable"
+    );
+    let status = how_it_ended(&mut stream).await;
+
+    // Then — cancelled, its session gone, and the branch it worked on is still there
+    assert_eq!(status.code, Code::Cancelled, "ended CANCELLED: {status:?}");
+    assert!(
+        entries_under(&daemon.sessions.path().join("sessions")).is_empty(),
+        "no session directory left behind"
+    );
+    assert_eq!(
+        local_branches(daemon.repo.path()),
+        vec!["feature/keep".to_string(), "main".to_string()],
+        "a branch the start did not cut is never deleted"
+    );
+}

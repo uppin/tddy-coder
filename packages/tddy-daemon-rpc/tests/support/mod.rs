@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use prost::Message;
@@ -25,10 +26,12 @@ use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest};
 use tddy_service::proto::session::{
     ListSessionsRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
+use tddy_service::proto::tasks::{CancelTaskRequest, CancelTaskResponse};
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::test_util::{test_config, TEST_TOKEN, TEST_USER};
 use tddy_session_lifecycle::CliSessionManager;
+use tddy_task::TaskId;
 use tddy_tool_engine::exec_tool_entry::EXEC_TOOL_SERVICE;
 use tokio::sync::mpsc;
 
@@ -38,6 +41,7 @@ pub const HOST_A: &str = "host-a";
 pub const HOST_B: &str = "host-b";
 pub const SILENT_HOST: &str = "host-c";
 pub const SESSION_SERVICE: &str = "session.SessionService";
+pub const TASKS_SERVICE: &str = "tasks.TaskService";
 
 // ── the hosts ────────────────────────────────────────────────────────────────────────────────
 
@@ -117,6 +121,14 @@ impl PeerForwarder for InProcessPeers {
                     .await
                     .map(|r| r.into_inner().encode_to_vec())
             }
+            // A start's cancel, forwarded by the host the orchestrator is on: the peer's own task
+            // registry, which its launch sessions run the start's task in.
+            (TASKS_SERVICE, "CancelTask") => {
+                let req = CancelTaskRequest::decode(body.as_slice()).unwrap();
+                cancel_task_in(&daemon, req)
+                    .await
+                    .map(|r| r.encode_to_vec())
+            }
             other => Err(Status::unimplemented(format!(
                 "the in-process peers do not serve {other:?}"
             ))),
@@ -154,6 +166,23 @@ impl PeerForwarder for InProcessPeers {
                 "the in-process peers serve no stream {other:?}"
             ))),
         }
+    }
+}
+
+/// `CancelTask` as the peer's `TaskService` answers it for a task it runs: the registry the daemon's
+/// launch sessions own, signalled; `NOT_FOUND` when no such task is registered there.
+async fn cancel_task_in(
+    daemon: &TestDaemon,
+    req: CancelTaskRequest,
+) -> Result<CancelTaskResponse, Status> {
+    let registry = daemon.connection().task_registry();
+    if registry.cancel_task(&TaskId(req.task_id)).await {
+        Ok(CancelTaskResponse {
+            ok: true,
+            message: String::new(),
+        })
+    } else {
+        Err(Status::not_found("task not found"))
     }
 }
 
@@ -241,6 +270,48 @@ pub fn a_project(project_id: &str, repo: &Path) -> ProjectData {
         accounts: Vec::new(),
         local_gh: false,
         home_session_id: None,
+    }
+}
+
+/// The session a start the home session began answers to. `started` is the `StartSession` answer's
+/// JSON, which carries the start's handle; the start is polled with `GetSessionStart` until it is no
+/// longer running, and it must have succeeded (`#start-parity` 4/9).
+pub async fn session_started_by(daemon: &TestDaemon, home: &str, started: &str) -> String {
+    let handle: serde_json::Value =
+        serde_json::from_str(started).expect("the start's handle is JSON");
+    let start_id = handle["start_id"].as_str().expect("a start_id").to_string();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let answer = daemon
+            .execute_tool(Request::direct(ExecuteToolRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: home.to_string(),
+                tool_name: "GetSessionStart".to_string(),
+                args_json: serde_json::json!({ "start_id": start_id }).to_string(),
+                daemon_instance_id: String::new(),
+                conversation_id: String::new(),
+            }))
+            .await
+            .expect("GetSessionStart is served to the home session")
+            .into_inner();
+        assert!(!answer.is_error, "{}", answer.error_message);
+        let record: serde_json::Value =
+            serde_json::from_str(&answer.result_json).expect("the record is JSON");
+        match record["state"].as_str() {
+            Some("running") => {}
+            Some("succeeded") => {
+                return record["session_id"]
+                    .as_str()
+                    .expect("a succeeded start names its session")
+                    .to_string()
+            }
+            _ => panic!("start {start_id} did not succeed: {record}"),
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "start {start_id} is still running: {record}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
 

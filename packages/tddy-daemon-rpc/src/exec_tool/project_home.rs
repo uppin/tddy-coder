@@ -13,11 +13,17 @@
 //! A call naming a target on another host, a listing of every host, and a caller held on another
 //! host are `project_home_remote`'s (`#start-parity` 1/9).
 //!
+//! A start is begun as a `StreamStartSession` and answered with its handle at once; its record is
+//! the start ledger in the orchestrator's own session directory, read by `GetSessionStart` and
+//! stopped by `CancelSessionStart` (`#start-parity` 4/9). The ledger is recovered the first time this
+//! daemon process loads a home session's ledger, before any start is begun in it:
+//! [`DaemonProjectHome::start_ledger_of`].
+//!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -26,11 +32,13 @@ use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
-use tddy_service::proto::session::ListSessionsRequest;
+use tddy_service::proto::session::{ListSessionsRequest, ListSessionsResponse};
+use tddy_service::proto::tasks::CancelTaskRequest;
 use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
 use tddy_session_lifecycle::connection_service::start_choices;
+use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 use tddy_tool_engine::catalog::ToolDef;
 use tddy_tool_engine::project_home_git_tools::is_project_home_git_tool;
@@ -39,6 +47,10 @@ use tddy_tool_engine::project_home_tools::{
     ListProjectSessionsResult, ListedSession, ProjectHomePort,
 };
 use tddy_tool_engine::project_home_worktree_tools::WorktreeEntry;
+use tddy_tool_engine::start_ledger::{
+    begin_recorded_start_with, StartHandle, StartLedger, StartLedgerRecord, StartState,
+    StartedSessionDetails,
+};
 use tddy_tool_engine::start_session_args::{StartContext, StartSessionArgs};
 use tddy_worktree_service::service::project_main_repo_on_host;
 use tddy_worktree_service::session_git_ops::PushIdentity;
@@ -47,6 +59,14 @@ use tddy_worktree_service::worktrees::{project_worktree_snapshot, WorktreeSizeCa
 
 use super::project_home_remote::PeerSessionLists;
 use super::ExecToolRpcHandler;
+
+const SESSION_SERVICE: &str = "session.SessionService";
+
+/// The `CancelTask` RPC a start's cancel is forwarded as, to the host that runs it.
+const CANCEL_TASK_RPC: &str = "CancelTask";
+
+/// The start ledgers this daemon process has already recovered, by their session directory.
+static RECOVERED_START_LEDGERS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 
 impl ExecToolRpcHandler {
     /// Run `req`'s tool on this host. The one place the exec-tool handlers reach the local runner,
@@ -104,6 +124,7 @@ impl ExecToolRpcHandler {
             )
             .with_github_cli(self.project_home_host.github_cli.clone()),
             daemon_instance_id: local_instance_id_for_config(&self.config),
+            peer_routing: self.peer_routing.clone(),
             peers,
             worktree_sizes: Arc::clone(&self.project_home_host.worktree_sizes),
         })
@@ -232,6 +253,8 @@ pub(super) struct DaemonProjectHome {
     identity: SessionAccountAccess,
     /// This host, as the eligible-daemon roster names it; every session it lists carries it.
     daemon_instance_id: String,
+    /// Reaches the other hosts: a start's record and its cancel are forwarded to the host running it.
+    peer_routing: PeerRouting,
     /// The other hosts' listings, for a caller held here; `None` for one held elsewhere, whose own
     /// host fans out.
     peers: Option<PeerSessionLists>,
@@ -262,6 +285,31 @@ impl DaemonProjectHome {
             job_id: outcome.job_id,
             job_running: outcome.job_running,
         }
+    }
+
+    /// The start ledger of `home_session_id`. The first time this daemon process loads it, the
+    /// starts it still records as running are recovered: a start is only ever begun in a ledger after
+    /// that, so a record still running is one an earlier daemon was draining when it stopped
+    /// (`#start-parity` 4/9).
+    fn start_ledger_of(&self, home_session_id: &str) -> anyhow::Result<StartLedger> {
+        validate_session_id_segment(home_session_id)
+            .map_err(|e| anyhow::anyhow!("{}", e.message()))?;
+        let session_dir = unified_session_dir_path(&self.sessions_base, home_session_id);
+        let ledger = StartLedger::in_session_dir(&session_dir);
+        let recovered = RECOVERED_START_LEDGERS.get_or_init(Default::default);
+        let mut recovered = recovered
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !recovered.contains(&session_dir) {
+            let count = ledger.recover_interrupted()?;
+            if count > 0 {
+                log::info!(
+                    "start ledger of session {home_session_id}: {count} start(s) left running by an earlier daemon were marked failed"
+                );
+            }
+            recovered.insert(session_dir);
+        }
+        Ok(ledger)
     }
 
     async fn rows(&self) -> anyhow::Result<Vec<SessionRow>> {
@@ -365,27 +413,28 @@ impl ProjectHomePort for DaemonProjectHome {
         }
     }
 
-    /// The start runs on this daemon's start path, which forwards it to the host the arguments
-    /// name; the daemon that creates the session records `home_session_id` as its orchestrator.
+    /// The start is begun on this daemon's streamed start path, which forwards it to the host the
+    /// arguments name, and recorded in the start ledger of `home_session_id`, the orchestrator the
+    /// session is linked to. Answers with the handle once the start has named its task.
     async fn start_session(
         &self,
         project_id: &str,
         home_session_id: &str,
         args: StartSessionArgs,
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<StartHandle> {
         let request = args.into_request(StartContext {
             session_token: self.session_token.clone(),
             project_id: project_id.to_string(),
             orchestrator_session_id: home_session_id.to_string(),
             orchestrator_daemon_instance_id: self.daemon_instance_id.clone(),
         });
-        let started = self
+        // Refused here, not by the start, so the caller gets the refusal in place of a handle.
+        let conflict = self
             .launch
-            .start_session_at_session_coordinate(Request::direct(request))
+            .refuse_a_start_before_it_begins(&request, &self.os_user)
             .await
-            .map_err(|status| anyhow::anyhow!(status.message().to_string()))?
-            .into_inner();
-        if let Some(conflict) = started.branch_conflict {
+            .map_err(status_error)?;
+        if let Some(conflict) = conflict {
             let owner = conflict
                 .owner
                 .map(|owner| format!(" by session {}", owner.session_id))
@@ -395,7 +444,76 @@ impl ProjectHomePort for DaemonProjectHome {
                 conflict.branch
             );
         }
-        Ok(started.session_id)
+        let events = self
+            .launch
+            .stream_start_session_at_session_coordinate(Request::direct(request))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        let ledger = self.start_ledger_of(home_session_id)?;
+        let details: Arc<dyn StartedSessionDetails> = Arc::new(StartedSessionListings {
+            launch: self.launch.clone(),
+            peer_routing: self.peer_routing.clone(),
+            session_token: self.session_token.clone(),
+        });
+        begin_recorded_start_with(ledger, events, Some(details))
+            .await
+            .map_err(anyhow::Error::msg)
+    }
+
+    async fn get_session_start(
+        &self,
+        home_session_id: &str,
+        start_id: &str,
+    ) -> anyhow::Result<StartLedgerRecord> {
+        self.start_ledger_of(home_session_id)?.read(start_id)
+    }
+
+    /// Stop the start on the host its task runs on: this host's task registry, or the peer's
+    /// `CancelTask`. The record reads cancelled once the start's stream has ended.
+    async fn cancel_session_start(
+        &self,
+        home_session_id: &str,
+        start_id: &str,
+    ) -> anyhow::Result<()> {
+        let record = self.start_ledger_of(home_session_id)?.read(start_id)?;
+        if record.state != StartState::Running {
+            anyhow::bail!(
+                "start {start_id} is not running: it has already {}",
+                state_name(record.state)
+            );
+        }
+        if record.daemon_instance_id == self.daemon_instance_id {
+            let found = self.launch.cancel_local_task(&record.task_id).await;
+            anyhow::ensure!(
+                found,
+                "start {start_id}'s task is no longer running on {}",
+                record.daemon_instance_id
+            );
+            return Ok(());
+        }
+        let room = self
+            .peer_routing
+            .common_room_slot(CANCEL_TASK_RPC)
+            .map_err(status_error)?;
+        let answer = tddy_daemon_kernel::peer_calls::forward_cancel_task(
+            room,
+            &record.daemon_instance_id,
+            &CancelTaskRequest {
+                session_token: self.session_token.clone(),
+                task_id: record.task_id.clone(),
+                daemon_instance_id: record.daemon_instance_id.clone(),
+            },
+        )
+        .await
+        .map_err(status_error)?;
+        anyhow::ensure!(
+            answer.ok,
+            "start {start_id} could not be cancelled on {}: {}",
+            record.daemon_instance_id,
+            answer.message
+        );
+        Ok(())
     }
 
     async fn push_identity(&self, target: &SessionTarget) -> anyhow::Result<PushIdentity> {
@@ -461,6 +579,75 @@ impl ProjectHomePort for DaemonProjectHome {
                 is_active: row.entry.is_active,
             })
             .collect())
+    }
+}
+
+/// The branch and worktree of a started session, as the host running it lists it: this host's own
+/// listing, or the peer's over the same forward a project-home listing uses (`#start-parity` 4/9).
+struct StartedSessionListings {
+    launch: LaunchSessions,
+    peer_routing: PeerRouting,
+    session_token: String,
+}
+
+#[async_trait]
+impl StartedSessionDetails for StartedSessionListings {
+    async fn branch_and_worktree(
+        &self,
+        daemon_instance_id: &str,
+        session_id: &str,
+    ) -> Option<(String, String)> {
+        let request = ListSessionsRequest {
+            session_token: self.session_token.clone(),
+        };
+        let listed = match self
+            .peer_routing
+            .rpc_served_by_peer::<_, ListSessionsResponse>(
+                SESSION_SERVICE,
+                "ListSessions",
+                daemon_instance_id,
+                &request,
+            )
+            .await
+        {
+            Ok(Some(listed)) => listed,
+            // Not a peer's: this host's own listing.
+            Ok(None) => match self
+                .launch
+                .list_sessions_at_session_coordinate(Request::direct(request))
+                .await
+            {
+                Ok(listed) => listed.into_inner(),
+                Err(status) => {
+                    log::warn!("start of session {session_id}: this host's sessions could not be listed: {status}");
+                    return None;
+                }
+            },
+            Err(status) => {
+                log::warn!(
+                    "start of session {session_id}: host {daemon_instance_id} could not list its sessions: {status}"
+                );
+                return None;
+            }
+        };
+        listed
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == session_id)
+            .map(|s| (s.branch, s.repo_path))
+    }
+}
+
+fn status_error(status: Status) -> anyhow::Error {
+    anyhow::anyhow!(status.message().to_string())
+}
+
+fn state_name(state: StartState) -> &'static str {
+    match state {
+        StartState::Running => "running",
+        StartState::Succeeded => "succeeded",
+        StartState::Failed => "failed",
+        StartState::Cancelled => "been cancelled",
     }
 }
 

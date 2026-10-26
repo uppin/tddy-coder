@@ -10,7 +10,10 @@ mod support;
 use std::path::Path;
 use std::sync::Arc;
 
-use support::{a_host, a_workspace_in, InProcessPeers, HOST_A, HOST_B, SILENT_HOST, THIS_PROJECT};
+use support::{
+    a_host, a_workspace_in, session_started_by, InProcessPeers, HOST_A, HOST_B, SILENT_HOST,
+    THIS_PROJECT,
+};
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{
     ExecToolService, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
@@ -51,6 +54,13 @@ impl World {
             .into_inner()
     }
 
+    /// The session `started` (a `StartSession` answer) begins: the start is followed on the home's
+    /// host, which holds the start's ledger, until it succeeds.
+    async fn started_session(&self, started: &ExecuteToolResponse) -> String {
+        assert!(!started.is_error, "{}", started.error_message);
+        session_started_by(&self.a.daemon, &self.home, &started.result_json).await
+    }
+
     async fn start_session_schema_offered_to_home(&self) -> serde_json::Value {
         let tools = self
             .a
@@ -75,16 +85,6 @@ impl World {
             });
         serde_json::from_str(&start.input_schema_json).expect("the schema is JSON")
     }
-}
-
-fn started_session_id(response: &ExecuteToolResponse) -> String {
-    assert!(!response.is_error, "{}", response.error_message);
-    let started: serde_json::Value =
-        serde_json::from_str(&response.result_json).expect("JSON result");
-    started["session_id"]
-        .as_str()
-        .expect("the started session's id")
-        .to_string()
 }
 
 fn changeset_of(sessions_base: &Path, session_id: &str) -> tddy_core::Changeset {
@@ -130,18 +130,17 @@ async fn start_session_starts_on_the_branch_it_names_linked_to_the_orchestrator(
     let world = a_world().await;
 
     // When the home session starts a workspace on a branch it names
-    let started = started_session_id(
-        &world
-            .home_calls(
-                START_SESSION,
-                serde_json::json!({
-                    "session_type": "workspace",
-                    "branch_worktree_intent": "new_branch_from_base",
-                    "new_branch_name": "orchestrated/child",
-                }),
-            )
-            .await,
-    );
+    let answer = world
+        .home_calls(
+            START_SESSION,
+            serde_json::json!({
+                "session_type": "workspace",
+                "branch_worktree_intent": "new_branch_from_base",
+                "new_branch_name": "orchestrated/child",
+            }),
+        )
+        .await;
+    let started = world.started_session(&answer).await;
 
     // Then the session is on host-a, on that branch, linked to the home session
     let changeset = changeset_of(world.a.sessions.path(), &started);
@@ -160,19 +159,18 @@ async fn start_session_on_another_host_creates_the_session_there_linked_to_the_o
     let world = a_world().await;
 
     // When the home session starts a workspace naming host-b
-    let started = started_session_id(
-        &world
-            .home_calls(
-                START_SESSION,
-                serde_json::json!({
-                    "session_type": "workspace",
-                    "daemon_instance_id": HOST_B,
-                    "branch_worktree_intent": "new_branch_from_base",
-                    "new_branch_name": "orchestrated/on-b",
-                }),
-            )
-            .await,
-    );
+    let answer = world
+        .home_calls(
+            START_SESSION,
+            serde_json::json!({
+                "session_type": "workspace",
+                "daemon_instance_id": HOST_B,
+                "branch_worktree_intent": "new_branch_from_base",
+                "new_branch_name": "orchestrated/on-b",
+            }),
+        )
+        .await;
+    let started = world.started_session(&answer).await;
 
     // Then it exists on host-b only, linked to the home session in host-b's own record
     assert!(session_dir_exists(world.b.sessions.path(), &started));
@@ -199,7 +197,8 @@ async fn a_branch_another_session_owns_is_reported_not_suffixed() {
         "branch_worktree_intent": "new_branch_from_base",
         "new_branch_name": "orchestrated/taken",
     });
-    started_session_id(&world.home_calls(START_SESSION, args.clone()).await);
+    let first = world.home_calls(START_SESSION, args.clone()).await;
+    world.started_session(&first).await;
 
     // When the home session asks for the same branch again
     let second = world.home_calls(START_SESSION, args).await;

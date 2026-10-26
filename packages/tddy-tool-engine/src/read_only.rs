@@ -88,7 +88,7 @@ mod tests {
         // When
         let names = project_home_allowed_tools();
 
-        // Then exactly the read-only tools, the six project-home tools and the seven git tools, under
+        // Then exactly the read-only tools, the project-home tools and the seven git tools, under
         // their MCP names
         assert_eq!(
             names,
@@ -100,6 +100,8 @@ mod tests {
                 "mcp__tddy-tools__SemanticSearch",
                 "mcp__tddy-tools__ListProjectSessions",
                 "mcp__tddy-tools__StartSession",
+                "mcp__tddy-tools__GetSessionStart",
+                "mcp__tddy-tools__CancelSessionStart",
                 "mcp__tddy-tools__ReadSessionWorktree",
                 "mcp__tddy-tools__DiffSessionWorktree",
                 "mcp__tddy-tools__ListWorktrees",

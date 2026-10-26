@@ -3,6 +3,8 @@
 //!
 //! Feature doc: docs/ft/daemon/project-concept.md § Project-home tools (`#project-home` 5/7).
 
+mod support;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -286,11 +288,8 @@ async fn a_project_home_session_starts_a_session_tagged_with_itself_as_orchestra
 
     // Then
     assert!(!started.is_error, "{}", started.error_message);
-    let new_id = serde_json::from_str::<serde_json::Value>(&started.result_json).unwrap()
-        ["session_id"]
-        .as_str()
-        .expect("the new session id")
-        .to_string();
+    let new_id =
+        support::session_started_by(&world.service, &world.home, &started.result_json).await;
     let listed = world
         .service
         .list_sessions(Request::direct(ListSessionsRequest {
@@ -336,11 +335,8 @@ async fn a_project_home_session_starts_a_claude_cli_session_on_the_model_it_name
     // Then — the start is not refused for a missing model, and the session it started records
     // exactly the model the home session named
     assert!(!started.is_error, "{}", started.error_message);
-    let new_id = serde_json::from_str::<serde_json::Value>(&started.result_json).unwrap()
-        ["session_id"]
-        .as_str()
-        .expect("the new session id")
-        .to_string();
+    let new_id =
+        support::session_started_by(&world.service, &world.home, &started.result_json).await;
     let session_dir =
         tddy_core::session_lifecycle::unified_session_dir_path(world.sessions.path(), &new_id);
     let meta = tddy_core::read_session_metadata(&session_dir).expect("session metadata");
@@ -495,7 +491,7 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
     // When
     let offered = offered_tool_names(&world, &world.home).await;
 
-    // Then exactly the read-only tools, the six project-home tools and the seven git tools
+    // Then exactly the read-only tools, the project-home tools and the seven git tools
     assert_eq!(
         offered,
         sorted_names(&[
@@ -506,6 +502,8 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "SemanticSearch",
             "ListProjectSessions",
             "StartSession",
+            "GetSessionStart",
+            "CancelSessionStart",
             "ReadSessionWorktree",
             "DiffSessionWorktree",
             "ListWorktrees",

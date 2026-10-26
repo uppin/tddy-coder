@@ -45,6 +45,7 @@ pub mod session_worktree_observer;
 pub mod stack_child_spawn;
 pub mod stack_parent;
 pub mod stack_seed_validation;
+mod start_cut_branch;
 pub mod start_keepalive;
 pub mod start_request_checks;
 mod start_task;

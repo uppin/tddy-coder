@@ -4,7 +4,9 @@
 //! | Tool | Does |
 //! |---|---|
 //! | `ListProjectSessions` | every other session of the project on every host, with its host, status and worktree |
-//! | `StartSession` | starts a session in the project with any New-session option, on any eligible host, linked to the caller as its orchestrator ([`crate::start_session_args`]) |
+//! | `StartSession` | starts a session in the project with any New-session option, on any eligible host, linked to the caller as its orchestrator ([`crate::start_session_args`]); it returns a handle at once ([`crate::start_ledger`]) |
+//! | `GetSessionStart` | a start's state, step, and on success its session, branch and worktree, or its failure |
+//! | `CancelSessionStart` | cancels a start still running, on whichever host runs it |
 //! | `ReadSessionWorktree` | reads a file or lists a directory in a target session's worktree |
 //! | `DiffSessionWorktree` | a target worktree's diff against its base |
 //! | `ListWorktrees` | the project's worktrees as the Worktrees screen shows them, a page at a time ([`crate::project_home_worktree_tools`]) |
@@ -44,6 +46,9 @@ use crate::project_home_worktree_tools::{
     LIST_WORKTREES,
 };
 use crate::read_only::is_project_home_allowed_tool;
+use crate::start_ledger::{
+    StartHandle, StartLedgerRecord, CANCEL_SESSION_START, GET_SESSION_START,
+};
 use crate::start_session_args::{
     start_session_schema, start_session_schema_without_choices, StartChoices, StartSessionArgs,
     START_SESSION,
@@ -60,6 +65,8 @@ pub fn is_project_home_tool(name: &str) -> bool {
         name,
         LIST_PROJECT_SESSIONS
             | START_SESSION
+            | GET_SESSION_START
+            | CANCEL_SESSION_START
             | READ_SESSION_WORKTREE
             | DIFF_SESSION_WORKTREE
             | LIST_WORKTREES
@@ -185,14 +192,29 @@ pub trait ProjectHomePort: Send + Sync {
         home_session_id: &str,
     ) -> ListProjectSessionsResult;
 
-    /// Start the session `args` ask for in `project_id`, on the host they name, with
-    /// `home_session_id` as its orchestrator; its id.
+    /// Begin the session `args` ask for in `project_id`, on the host they name, with
+    /// `home_session_id` as its orchestrator. Answers at once with the start's handle; the session
+    /// is the start's outcome, read with [`Self::get_session_start`].
     async fn start_session(
         &self,
         project_id: &str,
         home_session_id: &str,
         args: StartSessionArgs,
-    ) -> anyhow::Result<String>;
+    ) -> anyhow::Result<StartHandle>;
+
+    /// The record of `start_id`, a start `home_session_id` asked for.
+    async fn get_session_start(
+        &self,
+        home_session_id: &str,
+        start_id: &str,
+    ) -> anyhow::Result<StartLedgerRecord>;
+
+    /// Ask the host running `start_id` to stop it; it reads cancelled once it has stopped.
+    async fn cancel_session_start(
+        &self,
+        home_session_id: &str,
+        start_id: &str,
+    ) -> anyhow::Result<()>;
 
     /// Every session on this daemon, as [`tddy_worktree_service::session_target`] resolves them.
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>>;
@@ -222,8 +244,26 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
         ),
         tool_def(
             START_SESSION,
-            "Start a session in this project, with any option the New-session form offers, on this host or another eligible one. It is recorded as started by this project-home session on the host that holds it. A branch another session owns is refused, naming the branch.",
+            "Start a session in this project, with any option the New-session form offers, on this host or another eligible one. It is recorded as started by this project-home session on the host that holds it. It returns at once with start_id, task_id and daemon_instance_id: poll the start with GetSessionStart, stop it with CancelSessionStart. A start the form would refuse outright (a CLI session without a model, a branch another session owns) is refused now, naming why. A start whose session type emits no progress (tool, sandboxed and stack-child starts) reads running until its outcome.",
             start_schema,
+        ),
+        tool_def(
+            GET_SESSION_START,
+            "Read a start by start_id: its state (running, succeeded, failed or cancelled), the step it is in and that step's status, the clone's progress, and once it succeeded its session_id, branch and worktree, or once it failed or was cancelled, why.",
+            json!({
+                "type": "object",
+                "properties": { "start_id": { "type": "string" } },
+                "required": ["start_id"]
+            }),
+        ),
+        tool_def(
+            CANCEL_SESSION_START,
+            "Cancel a start by start_id while it is running, on whichever host runs it. It returns at once; the start reads cancelled once it has stopped, and a session it had already created is removed.",
+            json!({
+                "type": "object",
+                "properties": { "start_id": { "type": "string" } },
+                "required": ["start_id"]
+            }),
         ),
         tool_def(
             READ_SESSION_WORKTREE,
@@ -284,6 +324,8 @@ pub async fn execute_project_home_tool(
     match tool_name {
         LIST_PROJECT_SESSIONS => list_project_sessions(port, home).await,
         START_SESSION => start_session(port, home, args).await,
+        GET_SESSION_START => get_session_start(port, home, args).await,
+        CANCEL_SESSION_START => cancel_session_start(port, home, args).await,
         READ_SESSION_WORKTREE => read_session_worktree(port, home, args).await,
         DIFF_SESSION_WORKTREE => diff_session_worktree(port, home, args).await,
         LIST_WORKTREES => run_list_worktrees(port, home, args).await,
@@ -321,8 +363,67 @@ async fn start_session(port: &dyn ProjectHomePort, home: &HomeCaller, args: Valu
         .start_session(&home.project_id, &home.session_id, args)
         .await
     {
-        Ok(session_id) => ToolOutcome::ok(json!({ "session_id": session_id }).to_string()),
+        Ok(handle) => ToolOutcome::ok(
+            json!({
+                "start_id": handle.start_id,
+                "task_id": handle.task_id,
+                "daemon_instance_id": handle.daemon_instance_id,
+            })
+            .to_string(),
+        ),
         Err(e) => ToolOutcome::err(format!("{START_SESSION}: {e:#}")),
+    }
+}
+
+/// The arguments of the two tools that follow a start.
+#[derive(Deserialize)]
+struct StartIdArgs {
+    start_id: String,
+}
+
+fn parse_start_id_args(tool_name: &str, args: Value) -> Result<StartIdArgs, ToolOutcome> {
+    serde_json::from_value(args)
+        .map_err(|e| ToolOutcome::err(format!("{tool_name}: invalid arguments: {e}")))
+}
+
+async fn get_session_start(
+    port: &dyn ProjectHomePort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args = match parse_start_id_args(GET_SESSION_START, args) {
+        Ok(a) => a,
+        Err(outcome) => return outcome,
+    };
+    match port
+        .get_session_start(&home.session_id, &args.start_id)
+        .await
+    {
+        Ok(record) => match serde_json::to_string(&record) {
+            Ok(json) => ToolOutcome::ok(json),
+            Err(e) => ToolOutcome::err(format!("{GET_SESSION_START}: {e}")),
+        },
+        Err(e) => ToolOutcome::err(format!("{GET_SESSION_START}: {e:#}")),
+    }
+}
+
+async fn cancel_session_start(
+    port: &dyn ProjectHomePort,
+    home: &HomeCaller,
+    args: Value,
+) -> ToolOutcome {
+    let args = match parse_start_id_args(CANCEL_SESSION_START, args) {
+        Ok(a) => a,
+        Err(outcome) => return outcome,
+    };
+    match port
+        .cancel_session_start(&home.session_id, &args.start_id)
+        .await
+    {
+        Ok(()) => ToolOutcome::ok(
+            json!({ "start_id": args.start_id, "cancel_requested": true }).to_string(),
+        ),
+        Err(e) => ToolOutcome::err(format!("{CANCEL_SESSION_START}: {e:#}")),
     }
 }
 

@@ -7,7 +7,8 @@
 //! A cancel that lands while a step past the clone is already running (a worktree being cut, an
 //! agent being spawned) does not interrupt that step: the start finishes it, and the session it
 //! created is then deleted — its agent stopped, its worktree and its directory removed — exactly as
-//! a Delete would, before the stream ends `CANCELLED`.
+//! a Delete would, and the branch the start cut for itself goes with it, before the stream ends
+//! `CANCELLED`.
 //!
 //! TODO(start-cancel): kill an in-flight worktree cut instead of waiting it out —
 //! `docs/dev/todo/2026-10-24-cancelled-start-waits-out-an-in-flight-worktree-cut.md`.
@@ -59,10 +60,11 @@ impl TaskBody for StartTask {
         }));
         let cancel = ctx.cancel_token();
         let session_token = req.session_token.clone();
+        let cut_project = project_a_start_may_cut_in(&req);
         let started = run_start(&service, req, &tx, &cancel).await;
         let ended = match started {
             Ok(response) if cancel.is_cancelled() => {
-                Err(undo_a_cancelled_start(&service, &response, session_token).await)
+                Err(undo_a_cancelled_start(&service, &response, session_token, cut_project).await)
             }
             Ok(response) => {
                 let _ = tx.send(Ok(StartSessionEvent {
@@ -92,33 +94,75 @@ fn task_status_of(ended: &Result<(), Status>) -> TaskStatus {
     }
 }
 
-/// The start finished a step the cancel could not interrupt: delete the session it created, so a
-/// cancelled start leaves no session directory, worktree or agent behind. Returns the status the
-/// stream ends with — `CANCELLED`, unless the session could not be removed.
+/// The project a start cuts its branch in, when the request names one. A start on a client's own
+/// checkout (`repo_path`) cuts no worktree, so it has no branch of its own to remove.
+fn project_a_start_may_cut_in(req: &StartSessionRequest) -> Option<String> {
+    let project_id = req.project_id.trim();
+    (req.repo_path.trim().is_empty() && !project_id.is_empty()).then(|| project_id.to_string())
+}
+
+/// The start finished a step the cancel could not interrupt: delete the session it created, and the
+/// branch it cut for itself, so a cancelled start leaves no session directory, worktree, agent or
+/// branch behind. Returns the status the stream ends with — `CANCELLED`, unless the session or its
+/// branch could not be removed, which the status names.
 async fn undo_a_cancelled_start(
     service: &LaunchSessions,
     created: &StartSessionResponse,
     session_token: String,
+    cut_project: Option<String>,
 ) -> Status {
     if created.session_id.is_empty() {
         return Status::cancelled(START_CANCELLED);
     }
+    // The branch is named by the session's changeset, which goes with the session: read it first.
+    let cut = match cut_project {
+        None => None,
+        Some(project_id) => {
+            match service.branch_a_start_cut(&session_token, &created.session_id, &project_id) {
+                Ok(cut) => cut,
+                Err(status) => {
+                    log::warn!(
+                        "StreamStartSession: the cancelled start's branch could not be read; its session {} is left in place: {status}",
+                        created.session_id
+                    );
+                    return Status::internal(format!(
+                        "start cancelled, but the branch it cut could not be read, so its session {} was left in place: {}",
+                        created.session_id, status.message
+                    ));
+                }
+            }
+        }
+    };
     let deleted = service
         .delete_session_at_session_coordinate(Request::direct(DeleteSessionRequest {
             session_id: created.session_id.clone(),
             session_token,
         }))
         .await;
-    match deleted {
-        Ok(_) => Status::cancelled(START_CANCELLED),
-        Err(status) => {
+    if let Err(status) = deleted {
+        log::warn!(
+            "StreamStartSession: the cancelled start's session {} could not be removed: {status}",
+            created.session_id
+        );
+        return Status::internal(format!(
+            "start cancelled, but its session {} could not be removed: {}",
+            created.session_id, status.message
+        ));
+    }
+    let Some(cut) = cut else {
+        return Status::cancelled(START_CANCELLED);
+    };
+    match cut.delete() {
+        Ok(()) => Status::cancelled(START_CANCELLED),
+        Err(message) => {
             log::warn!(
-                "StreamStartSession: the cancelled start's session {} could not be removed: {status}",
-                created.session_id
+                "StreamStartSession: the cancelled start's session {} was removed, but its branch {} could not be deleted: {message}",
+                created.session_id,
+                cut.branch
             );
             Status::internal(format!(
-                "start cancelled, but its session {} could not be removed: {}",
-                created.session_id, status.message
+                "start cancelled, and its session {} was removed, but the branch it cut ({}) could not be deleted: {message}",
+                created.session_id, cut.branch
             ))
         }
     }
