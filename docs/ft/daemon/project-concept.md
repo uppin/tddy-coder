@@ -247,6 +247,7 @@ session whose record carries the `project-home` role may run them; any other cal
 | `GetWorktree` | `path` (as `ListWorktrees` lists it), `daemon_instance_id?` | `{worktree, session_id}`: that row, and the session on that host whose worktree it is (`null` when none). A path that is not one of the project's worktrees is refused naming it |
 | `ReadSessionActivity` | `session_id`, `daemon_instance_id?`, `cursor?`, `limit?`, `statuses?` (`running`, `completed`, `error`; all when empty) | `{items, next_cursor, has_more, clamped_to?, pending_question}`: the session's tool calls (`agent-activity.jsonl` records, each with its `activity_seq`), oldest first, after `cursor`, and the question it waits on, or `null`. See [Following a session](#following-a-session) |
 | `ReadSessionTranscript` | `session_id`, `daemon_instance_id?`, `cursor?`, `limit?`, `direction?` (`newest_first` (default) or `from_cursor`), `tool_call_id?` | `{items: [{seq, kind, text, tool_call_id, truncated}], next_cursor, has_more, clamped_to?}`: the frames the web's Activities view pages (`GetAcpReplayPage`), each text cut at 4096 bytes and marked `truncated`; with `tool_call_id`, `{tool_call_id, raw_input, raw_output}` whole instead (`GetAcpToolCallDetail`). See [Following a session](#following-a-session) |
+| `TerminateSession` | `session_id`, `daemon_instance_id?` | `{session_id, signal: "SIGTERM"}`: what the web UI's **Terminate** does — `SignalSession` with SIGTERM to the session's process on its host. The session's record, worktree and branch are kept, so it can be resumed; deleting them is the UI's separate Delete, which is not offered. A session whose process has already ended (or that records none) is refused as an `is_error` result saying so. See [Terminating a session](#terminating-a-session) |
 
 - **Targets.** A target is a session id in the caller's project, with a worktree, on the host the
   optional `daemon_instance_id` argument names (as `ListProjectSessions` reports it; empty or absent
@@ -263,7 +264,7 @@ session whose record carries the `project-home` role may run them; any other cal
   limitation:** the name tie-break mirrors the browser's `localeCompare` for ASCII names (case-insensitive,
   lowercase first on a case-only difference, punctuation before digits before letters); for non-ASCII
   names it is an approximation and may order equal-sized worktrees differently from the screen.
-- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, every git tool) naming another host is
+- **Across hosts.** A target tool call (read, diff, the two worktree tools, `DescribeSessionStartOptions`, the two follow tools, `TerminateSession`, every git tool) naming another host is
   forwarded whole to that host over the peer forward and runs there unchanged: that host's path
   containment, activity gate and push identity apply. The host receiving it does not hold the calling
   session, so it confirms the caller **at the daemon that owns it**: it asks every other eligible
@@ -397,6 +398,20 @@ the way a person follows it in the web UI, on any eligible host.
   - the **daemon**, for a **claude-cli session**: the session hook sends the agent's own `message`
     with the `WaitingForInput` status (`ReportSessionStatusRequest.message`), recorded as
     `kind: permission`. The next status — or a wait reported with no message — clears it.
+
+### Terminating a session
+
+`TerminateSession` stops a session of the caller's project, on any eligible host, exactly as the web
+UI's Terminate does: the target's host sends **SIGTERM** to the process its `.session.yaml` records,
+through the same code `SessionService.SignalSession` runs (`signal_session_dir` in
+`tddy-agent-launch`), on the sessions directory the host resolved the target from.
+
+- **Nothing else changes.** The session's record, its worktree and its branch stay; a terminated
+  session can be resumed like any stopped one.
+- **Refusals.** A session whose process is not alive, or that records no pid, is an `is_error` result
+  (`process is not alive`, `session has no PID`); another project's session is refused like every
+  target tool's and its process is left running.
+- **Not offered:** `DeleteSession` (which removes the worktree), SIGINT and SIGKILL.
 
 ### Git tools
 

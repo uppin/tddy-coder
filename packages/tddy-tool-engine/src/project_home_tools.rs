@@ -14,6 +14,7 @@
 //! | `GetWorktree` | one of those worktrees, with the session that owns it |
 //! | `ReadSessionActivity` | a target session's tool calls, paged, with the question it waits on ([`crate::session_follow`]) |
 //! | `ReadSessionTranscript` | a target session's transcript, paged; one tool call whole by id |
+//! | `TerminateSession` | sends a target session's process SIGTERM, as the UI's Terminate does; the record, worktree and branch stay ([`crate::project_home_terminate`]) |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
@@ -43,6 +44,9 @@ use crate::catalog::{tool_catalog, ToolDef};
 use crate::project_home_diff::worktree_diff;
 use crate::project_home_git_tools::{
     execute_project_home_git_tool, is_project_home_git_tool, project_home_git_tool_defs,
+};
+use crate::project_home_terminate::{
+    terminate_session, terminate_session_tool_def, TERMINATE_SESSION,
 };
 use crate::project_home_worktree_tools::{
     run_get_worktree, run_list_worktrees, worktree_tool_defs, WorktreeEntry, GET_WORKTREE,
@@ -84,6 +88,7 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | GET_WORKTREE
             | READ_SESSION_ACTIVITY
             | READ_SESSION_TRANSCRIPT
+            | TERMINATE_SESSION
     )
 }
 
@@ -178,6 +183,7 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | DESCRIBE_SESSION_START_OPTIONS
             | READ_SESSION_ACTIVITY
             | READ_SESSION_TRANSCRIPT
+            | TERMINATE_SESSION
     ) || is_project_home_git_tool(name)
 }
 
@@ -271,6 +277,9 @@ pub trait ProjectHomePort: Send + Sync {
         project_id: &str,
         query: StartOptionsQuery,
     ) -> anyhow::Result<StartOptions>;
+
+    /// Send SIGTERM to `target`'s process, as the web UI's Terminate does (`#start-parity` 7/9).
+    async fn terminate_session(&self, target: &SessionTarget) -> anyhow::Result<()>;
 }
 
 /// The project-home tools' definitions, as a client registers them before the daemon is asked:
@@ -339,6 +348,7 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     defs.push(start_options_tool_def());
     defs.extend(worktree_tool_defs());
     defs.extend(session_follow_tool_defs());
+    defs.extend(terminate_session_tool_def());
     defs
 }
 
@@ -381,6 +391,7 @@ pub async fn execute_project_home_tool(
         READ_SESSION_ACTIVITY | READ_SESSION_TRANSCRIPT => {
             run_session_follow_tool(port, home, tool_name, args).await
         }
+        TERMINATE_SESSION => terminate_session(port, home, args).await,
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }
 }

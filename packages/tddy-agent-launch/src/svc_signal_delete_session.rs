@@ -19,6 +19,8 @@ use tddy_rpc::Response;
 
 use tddy_service::proto::session::SignalSessionRequest;
 
+use std::path::Path;
+
 use crate::launch_ports::LaunchSessions;
 use tddy_rpc::Request;
 
@@ -49,68 +51,8 @@ impl LaunchSessions {
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-        let metadata = read_session_metadata(&session_dir)
-            .map_err(|_| Status::not_found("session not found"))?;
-
-        let pid = metadata
-            .pid
-            .ok_or_else(|| Status::failed_precondition("session has no PID"))?;
-
-        log::debug!(
-            "SignalSession: resolved pid={} for session={}",
-            pid,
-            req.session_id
-        );
-
-        #[cfg(unix)]
-        {
-            use tddy_service::proto::session::Signal;
-
-            let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
-            if !alive {
-                log::debug!("SignalSession: pid={} is not alive", pid);
-                return Err(Status::failed_precondition("process is not alive"));
-            }
-
-            let os_signal = match Signal::try_from(req.signal) {
-                Ok(Signal::Sigint) => libc::SIGINT,
-                Ok(Signal::Sigterm) => libc::SIGTERM,
-                Ok(Signal::Sigkill) => libc::SIGKILL,
-                Err(_) => return Err(Status::invalid_argument("invalid signal value")),
-            };
-
-            log::info!(
-                "SignalSession: sending signal {} to pid={} session={}",
-                os_signal,
-                pid,
-                req.session_id
-            );
-
-            let ret = unsafe { libc::kill(pid as i32, os_signal) };
-            if ret != 0 {
-                let err = std::io::Error::last_os_error();
-                log::error!(
-                    "SignalSession: kill({}, {}) failed: {}",
-                    pid,
-                    os_signal,
-                    err
-                );
-                return Err(Status::internal(format!("failed to send signal: {}", err)));
-            }
-
-            Ok(Response::new(SignalSessionResponse {
-                ok: true,
-                message: format!("signal {} sent to pid {}", os_signal, pid),
-            }))
-        }
-
-        #[cfg(not(unix))]
-        {
-            let _ = pid;
-            Err(Status::unimplemented(
-                "signal delivery is only supported on Unix",
-            ))
-        }
+        let message = signal_session_dir(&session_dir, &req.session_id, req.signal)?;
+        Ok(Response::new(SignalSessionResponse { ok: true, message }))
     }
 
     pub async fn delete_session_at_session_coordinate(
@@ -192,5 +134,74 @@ impl LaunchSessions {
         )?;
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+}
+
+/// Sends `signal` (a `Signal` proto value) to the process the session in `session_dir` records, as
+/// `SignalSession` does: refused when the session records no PID or its process is not alive.
+/// The project-home `TerminateSession` delivers SIGTERM through the same path (`#start-parity` 7/9).
+pub fn signal_session_dir(
+    session_dir: &Path,
+    session_id: &str,
+    signal: i32,
+) -> Result<String, Status> {
+    let metadata =
+        read_session_metadata(session_dir).map_err(|_| Status::not_found("session not found"))?;
+
+    let pid = metadata
+        .pid
+        .ok_or_else(|| Status::failed_precondition("session has no PID"))?;
+
+    log::debug!(
+        "SignalSession: resolved pid={} for session={}",
+        pid,
+        session_id
+    );
+
+    #[cfg(unix)]
+    {
+        use tddy_service::proto::session::Signal;
+
+        let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+        if !alive {
+            log::debug!("SignalSession: pid={} is not alive", pid);
+            return Err(Status::failed_precondition("process is not alive"));
+        }
+
+        let os_signal = match Signal::try_from(signal) {
+            Ok(Signal::Sigint) => libc::SIGINT,
+            Ok(Signal::Sigterm) => libc::SIGTERM,
+            Ok(Signal::Sigkill) => libc::SIGKILL,
+            Err(_) => return Err(Status::invalid_argument("invalid signal value")),
+        };
+
+        log::info!(
+            "SignalSession: sending signal {} to pid={} session={}",
+            os_signal,
+            pid,
+            session_id
+        );
+
+        let ret = unsafe { libc::kill(pid as i32, os_signal) };
+        if ret != 0 {
+            let err = std::io::Error::last_os_error();
+            log::error!(
+                "SignalSession: kill({}, {}) failed: {}",
+                pid,
+                os_signal,
+                err
+            );
+            return Err(Status::internal(format!("failed to send signal: {}", err)));
+        }
+
+        Ok(format!("signal {} sent to pid {}", os_signal, pid))
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, signal, session_id);
+        Err(Status::unimplemented(
+            "signal delivery is only supported on Unix",
+        ))
     }
 }

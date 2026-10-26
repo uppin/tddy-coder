@@ -110,3 +110,4 @@ budget to time out on) and green after. Re-grepped the crate for `process::Comma
 | 2026-09-28 | 869 | after PR #554's Grep context lines: the `-B`/`-A` argv, the rg event folding (`fold_context_events`, 53 lines, beside `context_line`) and the mirrored context ceiling — the changeset planned this edit in place. Open, unclaimed; restructuring deferred past the `subagent-control` stack |
 | 2026-10-25 | 881 | +1 in `#start-parity` 5/9 (#754): `pub mod start_options;`. Stack-shared, so no split here |
 | 2026-10-25 | 882 | +1 in `#start-parity` 6/9 (#755): `pub mod session_follow;`. Stack-shared, so no split here |
+| 2026-10-25 | 883 | +1 in `#start-parity` 7/9 (#756): `pub mod project_home_terminate;`. Stack-shared, so no split here |
