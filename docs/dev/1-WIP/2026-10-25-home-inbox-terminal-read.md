@@ -28,7 +28,7 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 - [ ] [`tddy-task`](../../../packages/tddy-task/README.md): `TerminalCapture::text_grid`, `TextGrid`
 - [ ] [`tddy-session-lifecycle`](../../../packages/tddy-session-lifecycle/README.md): a public terminal-store accessor
 - [ ] [`tddy-tool-engine`](../../../packages/tddy-tool-engine/README.md): `ReadSessionTerminal` (new module), catalog/predicate
-- [ ] [`tddy-daemon-rpc`](../../../packages/tddy-daemon-rpc/README.md): the port over the store; `run_locally` predicate
+- [ ] [`tddy-daemon-rpc`](../../../packages/tddy-daemon-rpc/README.md): the port over the store; `run_locally` predicate; **a new crate edge `tddy-daemon-rpc → tddy-terminal-rpc`** (`TerminalSessionStore` / `TerminalSession`, to resolve and lock the terminal) — added at green, not in the contract commit
 - [ ] [`tddy-tools`](../../../packages/tddy-tools/README.md): advertised-list pin
 - [ ] [`tddy-agent-launch`](../../../packages/tddy-agent-launch/README.md): `project_home_prompt.md`
 
@@ -39,6 +39,8 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
   `end_offset`, and the sniffer's bracketed-paste mode; `None` while the model is unsized.
 - `tddy_session_lifecycle::…::svc_terminal_ports::DaemonSessionHost::terminal_sessions() -> DaemonTerminalSessionStore` (public; the existing `pub(crate) terminal_store` becomes it or delegates).
 - `tddy_tool_engine::project_home_terminal_tools::{READ_SESSION_TERMINAL, is_project_home_terminal_tool, project_home_terminal_tool_defs, ProjectHomeTerminalPort::read_terminal(&SessionTarget) -> anyhow::Result<TextGrid>, execute_project_home_terminal_tool}`.
+  `ProjectHomeTerminalPort` is a **supertrait of `ProjectHomePort`** (pass 2 deviation 1): the dispatcher resolves the target through `ProjectHomePort::target_records` and reads through `read_terminal`, from one `&dyn ProjectHomeTerminalPort` (trait upcasting).
+- The tool answers `{lines, cursor: {row, col, visible}, cols, rows, offset}`. `bracketed_paste` is on `TextGrid` for `#home-inbox 5/8` and is not in the answer.
 - The project-home offered catalog and `is_project_home_allowed_tool` include it.
 - `ReadSessionTerminal` is a **target tool** under `#start-parity 1/9`'s generic forward. It takes the
   optional `daemon_instance_id` (`TARGET_DAEMON_INSTANCE_ID`), so a call naming another host's session
@@ -77,8 +79,21 @@ Each rebase conflicts there mechanically. Resolve it by keeping both sides' tool
 ## Draft PR contract
 
 The first push publishes `TextGrid`/`GridCursor`, `TerminalCapture::text_grid` (`// TODO(terminal-read): implement`),
-the public store accessor, the tool module (constant, def, port trait, dispatch returning the stub),
-the catalog/pin updates, and the failing tests below.
+the public store accessor `DaemonSessionHost::terminal_sessions`, the tool module (constant, predicate, def,
+port trait, dispatch returning an `is_error` stub), the test support change, and the failing tests below.
+
+It deliberately does **not** register the tool. Registration is wiring, and each piece of it satisfies an
+acceptance test on its own (the catalog offer, `PERMISSION_DENIED` for an ordinary caller, the existing
+resolver's refusals), so publishing it in the contract commit would make those tests pass or fail for the
+wrong reason. Left to green, in this order:
+
+- the tool defs in `project_home_tool_defs_with` (and so the offered catalog);
+- `is_project_home_tool`, `is_project_home_target_tool` and `is_project_home_allowed_tool`;
+- the `run_locally` and caller-held-elsewhere predicates in `tddy-daemon-rpc`;
+- the `DaemonProjectHome` port impl, and `ExecToolRpcHandler::from_host` taking `terminal_sessions()`;
+- the pins: `read_only.rs`, `exec_tool_admission.rs`, `project_home_session_tools_acceptance.rs`, `project_home_target_host.rs` (its target-tool list) and `project_home_prompt.md`.
+
+No existing pin test is red on this branch.
 
 ## Green wave
 
@@ -109,6 +124,9 @@ terminal from the daemon store (sandbox first), locks the capture and returns
 - `TextGrid`, `GridCursor`, `TerminalCapture::text_grid` (tddy-task)
 - `project_home_terminal_tools.rs` (tool-engine); the port impl (daemon-rpc)
 ### Modified
+- `tddy-daemon-rpc` gains the dependency `tddy-terminal-rpc` (an internal crate; green)
+- `DaemonSessionHost::terminal_sessions()` (public; was `pub(crate) terminal_store`)
+- `tests/support/mod.rs` (`Host::terminals`; shared with `#start-parity`)
 - `project_home_offered_catalog`, `is_project_home_allowed_tool`, `run_locally` predicate
 - `ExecToolRpcHandler::from_host` takes the terminal store
 - Pins: `read_only.rs` test, `project_home_session_tools_acceptance.rs`, `exec_tool_admission.rs`; `project_home_prompt.md`
@@ -129,7 +147,16 @@ terminal from the daemon store (sandbox first), locks the capture and returns
 
 ### Unit tests
 
-- [ ] `tddy-task` `terminal_capture`: `text_grid` after printable text, CR/LF, cursor moves, alt-screen enter/leave, wide chars, and an unsized model (`None`); `bracketed_paste` follows DECSET/DECRST 2004.
+All written and failing (pass 2, 6f); they go green with the implementation.
+
+- [ ] `tddy-task`, `packages/tddy-task/tests/terminal_capture_text_grid.rs` (14): `text_grid` is `None` until the model is sized and then has the PTY's size; printable text; CR/LF; a bare CR; cursor addressing; row trimming; a hidden cursor; alt-screen enter and leave; a wide character; a character split across chunks; the offset; a resize; `bracketed_paste` follows DECSET/DECRST 2004. Fail with "a sized model reads as a text grid" (the stub returns `None`).
+- [ ] `tddy-tool-engine`, `packages/tddy-tool-engine/tests/project_home_terminal_tools.rs` (2, over a fake port): the answer is `{lines, cursor, cols, rows, offset}` of the grid; a port that cannot read is refused naming the tool and the port's reason. Fail with "ReadSessionTerminal: not implemented".
+
+Not red, so not written here: the tool def (real code) and the resolver's refusals (existing `session_target` code).
+
+**Wording the acceptance tests pin:** a session with no live terminal is refused with a message containing "no live terminal" and the session id. The resolver's own messages ("belongs to another project", "the project-home session is not a target", "no session") are unchanged.
+
+**Test support.** `packages/tddy-daemon-rpc/tests/support/mod.rs` gains `Host::terminals` (the `CliSessionManager` the daemon's terminals live in), so a test can start a session's child in it. `daemon_over` takes the manager and `host_built_by` takes a config instead of a function pointer; `a_daemon_named` and `a_daemon_as_current_user` keep their signatures. **That file is shared with the `#start-parity` stack, whose rebases will conflict there** (resolve by keeping both sides).
 
 ### Test level decisions
 | Aspect | Level | Rationale |
@@ -142,6 +169,9 @@ terminal from the daemon store (sandbox first), locks the capture and returns
 - `text_grid` is a new accessor this node owns, not a change to `ScreenSnapshot` (`#760`'s), so the
   two stacks never edit one symbol.
 - Active buffer via `Vt::view()`, not `Vt::text()` (which returns the primary buffer and scrollback).
+- Pass 2 (2026-10-26): the registration and wiring stay out of the contract commit (see `## Draft PR contract`), so the acceptance tests fail for this node's missing implementation and not for a missing list entry.
+- Pass 2: the answer's field names follow this changeset (`lines`, `rows`), not the PRD's old example (`rows` for the text, `rows_count`); the PRD is corrected.
+- Pass 2: `TextGrid::{rows, cols}` and `GridCursor::{row, col}` are `u16`, as `ScreenSnapshot`'s are.
 
 ## TODO
 
@@ -149,10 +179,10 @@ terminal from the daemon store (sandbox first), locks the capture and returns
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests — reviewed by the orchestrator, developer AFK, 2026-10-26
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

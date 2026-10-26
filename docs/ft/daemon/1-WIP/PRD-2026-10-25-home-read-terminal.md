@@ -15,7 +15,7 @@ The project-home agent can see what another session's TUI is showing right now:
 
 ```
 ReadSessionTerminal(session_id) →
-  { rows: ["…", "…"], cursor: {row, col, visible}, cols, rows_count, offset }
+  { lines: ["…", "…"], cursor: {row, col, visible}, cols, rows, offset }
 ```
 
 The text comes from the daemon-side screen model that `#term-snapshot` introduces. That is the same

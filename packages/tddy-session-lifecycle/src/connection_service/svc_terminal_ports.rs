@@ -32,7 +32,12 @@ impl DaemonSessionHost {
     /// and `StreamTerminalOutput`'s branch carried its own transcription of the bridge's
     /// replay/offset loop — two implementations of the same offsets, in a surface the repo has
     /// already been bitten twice by disagreeing about.
-    pub(crate) fn terminal_store(&self) -> DaemonTerminalSessionStore {
+    ///
+    /// Public so a daemon-side reader that is not a terminal RPC — the project-home agent's
+    /// `ReadSessionTerminal` — resolves a session's `main` terminal through the same store the
+    /// terminal RPCs do, sandbox first, rather than assembling a lookalike (`#home-inbox` 2/8).
+    #[must_use]
+    pub fn terminal_sessions(&self) -> DaemonTerminalSessionStore {
         DaemonTerminalSessionStore::new(
             Arc::clone(&self.claude_cli_manager),
             Arc::clone(&self.sandbox_manager),
@@ -79,7 +84,7 @@ impl DaemonSessionHost {
         TerminalSessionPorts {
             github_users: self.user_resolver.clone(),
             os_users: Arc::new(move |github_user: &str| config.os_user_for_github(github_user)),
-            terminals: Arc::new(self.terminal_store()),
+            terminals: Arc::new(self.terminal_sessions()),
             control: Arc::new(CliManagerTerminalControl::new(Arc::clone(
                 &self.claude_cli_manager,
             ))),

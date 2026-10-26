@@ -127,6 +127,19 @@ impl TerminalCapture {
         })
     }
 
+    /// The active screen buffer's visible rows as text, with the cursor, the grid size, the stream
+    /// offset the text corresponds to and whether the application switched bracketed paste on — all
+    /// read under one borrow, so they describe one moment. Each row has its trailing whitespace
+    /// trimmed. `None` until [`Self::resize`] has told the model the PTY's size: a grid read at a
+    /// guessed size would be wrong, and the caller refuses instead.
+    ///
+    /// The model is read through `Vt::view()`, which is the buffer in use: the alternate screen
+    /// while an application is full-screen, not the primary buffer `Vt::text()` returns.
+    pub fn text_grid(&self) -> Option<TextGrid> {
+        // TODO(terminal-read): implement
+        None
+    }
+
     /// Record freshly produced output, updating the screen model and the mode state and evicting
     /// the oldest bytes.
     pub fn append(&mut self, data: &[u8]) {
@@ -397,6 +410,33 @@ pub struct ScreenSnapshot {
     /// The grid `data` was serialized at.
     pub rows: u16,
     pub cols: u16,
+}
+
+/// The visible text of a terminal's active screen buffer at a sequence point
+/// ([`TerminalCapture::text_grid`]).
+///
+/// Text only: no scrollback, colours or attributes. `lines` holds one entry per row of the grid
+/// (`rows` of them), each trimmed at the end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextGrid {
+    /// The visible rows, top first.
+    pub lines: Vec<String>,
+    pub cursor: GridCursor,
+    pub cols: u16,
+    pub rows: u16,
+    /// The sequence point: every output byte below this absolute offset is reflected in `lines`,
+    /// none at or above it is. The same offset a [`ScreenSnapshot`] taken at that moment carries.
+    pub offset: u64,
+    /// Whether the application has bracketed paste (private mode 2004) switched on.
+    pub bracketed_paste: bool,
+}
+
+/// Where the cursor is on the grid, zero-based from the top-left cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridCursor {
+    pub row: u16,
+    pub col: u16,
+    pub visible: bool,
 }
 
 /// A contiguous slice of the capture ring returned by [`TerminalCapture::replay_last`],
