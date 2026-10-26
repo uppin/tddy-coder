@@ -4,7 +4,7 @@
 //! Changeset: docs/dev/1-WIP/2026-09-09-unbundle-tools-thinning.md § Testing Plan.
 //!
 //! The tools this server advertises are now assembled from six crates — `tddy-tools` itself
-//! (`approval_prompt`, the 14 `pr_*` and 2 `github_*` tools, `spawn_conversation`, the six
+//! (`approval_prompt`, the 14 `pr_*` and 2 `github_*` tools, `spawn_conversation` with its `_status` and `_cancel`, the six
 //! `subagent_*` tools), `tddy-tool-engine` (the ten exec tools), `tddy-lsp-executor` (the five
 //! `Lsp*` tools) and `tddy-core` (the action surface's gate). An omission in any one of them
 //! would otherwise surface as a capability an agent silently no longer has, at that agent's
@@ -16,8 +16,8 @@
 //! every call answered `{"error":"unknown tool: ListActions","is_error":true}`. They are now
 //! merged only where the host claims to serve them, with
 //! `tddy_core::session_actions::SESSION_ACTION_TOOLS_ENV`, which `tddy-sandbox-app`'s spawn path
-//! sets and the daemon path does not. The surface is therefore **47** where they are served and
-//! **44** where they are not, differing in exactly those three.
+//! sets and the daemon path does not. The surface is therefore **49** where they are served and
+//! **46** where they are not, differing in exactly those three.
 
 #[path = "support/exec_catalog.rs"]
 mod exec_catalog;
@@ -35,9 +35,9 @@ const IO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Every tool a session with all four of its optional surfaces present advertises, sorted.
 ///
 /// Held as names rather than a length so that a tool renamed, dropped or re-homed during a crate
-/// move fails here by name. The count is the array's own length — `[&str; 47]` is the "exactly 47"
+/// move fails here by name. The count is the array's own length — `[&str; 49]` is the "exactly 49"
 /// half of the assertion, checked by the compiler.
-const EVERY_ADVERTISED_TOOL: [&str; 47] = [
+const EVERY_ADVERTISED_TOOL: [&str; 49] = [
     "Await",
     "Delete",
     "Glob",
@@ -75,6 +75,8 @@ const EVERY_ADVERTISED_TOOL: [&str; 47] = [
     "pr_update_planned",
     "request_action",
     "spawn_conversation",
+    "spawn_conversation_cancel",
+    "spawn_conversation_status",
     "subagent_await",
     "subagent_cancel",
     "subagent_diff",
@@ -269,9 +271,10 @@ async fn initialize_mcp_session(stdin: &mut ChildStdin, stdout: &mut BufReader<C
 
 /// The headline number of the `tddy-tools` thinning: with the tool bodies now living in six
 /// crates, a session that has every optional surface still advertises the same 44 names it did
-/// when they all lived in one, plus `subagent_end`, `subagent_diff` and `subagent_pull`.
+/// when they all lived in one, plus `subagent_end`, `subagent_diff` and `subagent_pull`, and
+/// `spawn_conversation_status` and `spawn_conversation_cancel` (`#start-parity` 9/9).
 #[tokio::test]
-async fn advertises_all_forty_seven_tool_names_where_the_host_serves_the_action_tools() {
+async fn advertises_all_forty_nine_tool_names_where_the_host_serves_the_action_tools() {
     // Given
     let session = a_fully_configured_session().whose_host_serves_the_action_tools();
 
@@ -282,15 +285,15 @@ async fn advertises_all_forty_seven_tool_names_where_the_host_serves_the_action_
     assert_eq!(
         advertised,
         names(&EVERY_ADVERTISED_TOOL),
-        "the fully configured MCP surface must be exactly these 47 tools"
+        "the fully configured MCP surface must be exactly these 49 tools"
     );
 }
 
-/// The daemon path advertises 44, and the audit records that rather than reconciling it: the
+/// The daemon path advertises 46, and the audit records that rather than reconciling it: the
 /// daemon's tool handler has no arm for any of the three action tools, so advertising them there
 /// was a false advertisement an agent could only discover by calling one.
 #[tokio::test]
-async fn advertises_forty_four_tool_names_on_the_daemon_path_which_serves_no_action_tool() {
+async fn advertises_forty_six_tool_names_on_the_daemon_path_which_serves_no_action_tool() {
     // Given
     let session = a_fully_configured_session();
 

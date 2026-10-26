@@ -7,11 +7,10 @@
 
 use crate::connection_service::daemon_rpc_handler::BoundJailSession;
 use prost::Message as _;
-use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_host_service::peer_routing::PeerRouting;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::{ListExecToolsRequest, ListExecToolsResponse, ToolDef};
-use tddy_tool_engine::project_home_tools::session_offered_catalog;
+use tddy_tool_engine::project_home_tools::session_offered_catalog_for;
 use tddy_tool_engine::start_session_args::{HostChoice, StartChoices};
 
 /// What `StartSession`'s schema offers on this daemon: every eligible host on `routing`'s roster,
@@ -64,8 +63,8 @@ pub(crate) fn list_exec_tools_from_jail(
             bound.session_id
         ))
     })?;
-    let tools = session_offered_catalog(
-        metadata.session_role.as_deref() == Some(PROJECT_HOME_ROLE),
+    let tools = session_offered_catalog_for(
+        tddy_agent_launch::conversation_spawn::session_tool_role(&metadata),
         choices,
     )
     .into_iter()
@@ -81,6 +80,7 @@ pub(crate) fn list_exec_tools_from_jail(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 
     fn jail_of(session_id: &str, role: Option<&str>) -> (tempfile::TempDir, BoundJailSession) {
         let dir = tempfile::tempdir().expect("a temporary session dir");

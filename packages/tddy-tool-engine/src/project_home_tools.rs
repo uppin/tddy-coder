@@ -123,6 +123,45 @@ pub fn session_offered_catalog(is_project_home: bool, choices: &StartChoices) ->
     }
 }
 
+/// What a session's role entitles its agent to among the project-home tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionToolRole {
+    /// The project-home session: every project-home tool, and nothing else that writes.
+    ProjectHome,
+    /// A session that can spawn conversations (grill-me): the daemon-wide catalog and the four
+    /// start tools, for its own project alone (`#start-parity` 9/9).
+    ConversationSpawner,
+    /// Any other session: the daemon-wide catalog.
+    Ordinary,
+}
+
+/// Whether `name` is one of the four start tools a [`SessionToolRole::ConversationSpawner`] is
+/// offered and served: `StartSession`, `GetSessionStart`, `CancelSessionStart` and
+/// `DescribeSessionStartOptions`.
+pub fn is_conversation_spawner_tool(name: &str) -> bool {
+    matches!(
+        name,
+        START_SESSION | GET_SESSION_START | CANCEL_SESSION_START | DESCRIBE_SESSION_START_OPTIONS
+    )
+}
+
+/// [`session_offered_catalog`] by [`SessionToolRole`]: a conversation spawner is offered the
+/// daemon-wide catalog and the four start tools, `StartSession` offering `choices`.
+pub fn session_offered_catalog_for(role: SessionToolRole, choices: &StartChoices) -> Vec<ToolDef> {
+    match role {
+        SessionToolRole::ProjectHome => session_offered_catalog(true, choices),
+        SessionToolRole::Ordinary => session_offered_catalog(false, choices),
+        SessionToolRole::ConversationSpawner => tool_catalog()
+            .into_iter()
+            .chain(
+                project_home_tool_defs_with(start_session_schema(choices))
+                    .into_iter()
+                    .filter(|tool| is_conversation_spawner_tool(&tool.name)),
+            )
+            .collect(),
+    }
+}
+
 fn project_home_catalog_with(start_schema: Value) -> Vec<ToolDef> {
     tool_catalog()
         .into_iter()

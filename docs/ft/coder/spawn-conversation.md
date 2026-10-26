@@ -2,15 +2,18 @@
 
 ## Overview
 
-A managed workflow agent can spawn a **new interactive Claude CLI conversation on a freshly
-created git worktree** by calling the `spawn_conversation` MCP tool. The spawned conversation is a
-full child session (its own worktree, its own `claude` process, its own LiveKit room) tagged with
-`orchestrator_session_id = <parent session id>`. The web renders each such child as a **tab inside
+A managed workflow agent can start a **new session of any type, on any eligible host, with any
+option the New-session form offers** by calling the `spawn_conversation` MCP tool. It takes
+`StartSession`'s arguments and runs the same start a project-home session's `StartSession` runs
+([Conversation spawners](../daemon/project-concept.md#conversation-spawners)), answering at once with a
+start handle the agent follows with `spawn_conversation_status` and stops with
+`spawn_conversation_cancel`. The started session is a full child session (its own worktree, its own
+agent process, its own LiveKit room) tagged with `orchestrator_session_id = <parent session id>`. The web renders each such child as a **tab inside
 the parent session**, next to the reserved "Agent" tab and any bash tabs.
 
 The first consumer is the **grill-me** workflow: after its **Create plan** phase writes the plan
-brief, the agent calls `spawn_conversation` seeded with the brief, handing the plan to a fresh agent
-that starts on a new branch/worktree — surfaced to the user as a new tab in the grill-me session.
+brief, the agent calls `spawn_conversation` with an `initial_prompt` pointing at the brief, handing the
+plan to a fresh agent that starts on a new branch/worktree — surfaced to the user as a new tab in the grill-me session.
 
 ## Technical Context
 
@@ -51,19 +54,34 @@ session's runtime derives its child tabs by filtering the session list on
 
 ### Core Capabilities
 
-- **MCP tool `spawn_conversation`** (`tddy-tools`): input `{ prompt: string, branch?: string,
-  base_ref?: string }`. Relays `{"type":"spawn-conversation", prompt, branch, base_ref}` over
-  `TDDY_SOCKET` and returns the daemon response (`{"status":"ok","session_id":...}` on success).
-  Errors when `TDDY_SOCKET` is unset (not a managed session).
+- **MCP tool `spawn_conversation`** (`tddy-tools`): input is `StartSession`'s arguments
+  (`StartSessionArgs`, advertised under `StartSession`'s schema). Relays
+  `{"type":"start-conversation","args":{…}}` over `TDDY_SOCKET` and returns the start's handle
+  (`{"status":"ok","start_id","task_id","daemon_instance_id"}`). Errors when `TDDY_SOCKET` is unset
+  (not a managed session).
+- **MCP tools `spawn_conversation_status` / `spawn_conversation_cancel`** (`tddy-tools`), and the CLI
+  subcommands `spawn-conversation-status` / `spawn-conversation-cancel`: input `{start_id}`; relay
+  `conversation-start-status` / `conversation-start-cancel`, answering the start ledger's record or
+  `{"start_id","cancel_requested":true}`.
+- **Toolcall verbs `StartConversation`, `ConversationStartStatus`, `ConversationStartCancel`**
+  (`tddy-toolcall`): `StartConversationRequestWire { args }` and `ConversationStartRequestWire
+  { start_id }`, dispatched to `ConversationSpawnHandler::{start_conversation,
+  conversation_start_status, cancel_conversation_start}`; the JSON answer travels as
+  `ToolCallResponse::ConversationStartJson`. The same three methods exist on
+  `HostSessionService` for the tddy-coder stdio relay. The original `SpawnConversation` verb below is
+  kept for an already-running session carrying an older `tddy-tools`; nothing in this tree sends it.
 - **Toolcall verb `SpawnConversation`** (`tddy-core`): `SpawnConversationRequestWire { prompt,
   branch, base_ref }`; dispatched to a per-session `ConversationSpawnHandler`. Reuses the existing
   `ToolCallResponse::SpawnChildOk { session_id }` for the success wire shape. When no handler is
   bound, the verb is rejected with an actionable message (never a silent no-op).
-- **`GrillMeConversationSpawnHandler`** (`tddy-daemon`): resolves the parent session's model +
-  project, derives a branch (from `branch` or a slug of the prompt), and calls
-  `spawn_claude_cli_session_inner(branch_worktree_intent = "new_branch_from_base",
-  stack_parent = Some(parent_session_id), managed_recipe = None)` — a plain interactive claude-cli
-  child on a new worktree. Returns the new child `session_id`.
+- **`GrillMeConversationSpawnHandler`** (`tddy-agent-launch`): `start_conversation` turns the
+  arguments into a `StartSessionRequest` (`StartSessionArgs::into_request`, with the orchestrator's
+  project, session id, host and session token) and runs it through
+  `LaunchSessions::begin_recorded_start` — the start path the project-home `StartSession` tool uses —
+  recording it in the orchestrator's start ledger (`StartLedger::recovered_in_session_dir`). Status
+  reads that ledger; cancel is `LaunchSessions::cancel_recorded_start` (local task registry or the
+  peer's `CancelTask`). The legacy `spawn_conversation(prompt, branch, base_ref)` still calls
+  `spawn_claude_cli_session_inner` directly.
 - **Child-as-tab rendering** (`tddy-web`): the parent `SessionRuntime` derives
   `childSessions = sessions.filter(s => s.orchestratorSessionId === parentSessionId)`, renders a tab
   per child, and attaches the child session's runtime when its tab is active.
@@ -80,9 +98,12 @@ session's runtime derives its child tabs by filtering the session list on
 
 ### API Contract
 
-- **Wire (agent → daemon over `TDDY_SOCKET`)**: request `{"type":"spawn-conversation","prompt":<str>,
-  "branch":<str|null>,"base_ref":<str|null>}`; success response `{"status":"ok","session_id":<str>}`;
-  failure `{"status":"error","message":<str>}`.
+- **Wire (agent → daemon over `TDDY_SOCKET`)**: request `{"type":"start-conversation","args":
+  <StartSessionArgs>}`; success response `{"status":"ok","start_id","task_id","daemon_instance_id"}`;
+  `{"type":"conversation-start-status"|"conversation-start-cancel","start_id":<str>}` for the follow
+  and the cancel; failure `{"status":"error","message":<str>}`. The legacy
+  `{"type":"spawn-conversation","prompt","branch","base_ref"}` → `{"status":"ok","session_id"}` is
+  still served.
 - **Handler contract**: `ConversationSpawnHandler::spawn_conversation(prompt, branch, base_ref) ->
   Result<session_id, message>`. `Ok` maps to `SpawnChildOk`, `Err(message)` maps to `Error{message}`,
   mirroring `handle_spawn_child`.
@@ -92,13 +113,13 @@ session's runtime derives its child tabs by filtering the session list on
 
 ### Child session shape
 
-- **Branch/worktree**: `new_branch_from_base`; the child chains onto the parent (grill-me) branch via
-  the existing `resolve_chain_base_ref` (the parent is a real code session with a branch).
-- **Recipe**: `None` — a plain interactive `claude` conversation. The user drives it; no managed
-  graph auto-runs in the child.
-- **Seed prompt**: references the plan. The grill-me handler passes the agent's `prompt` verbatim; the
-  grill-me **Create plan** prompt is responsible for composing a prompt that points at the plan
-  (absolute session-artifact brief path + the committed `plans/<slug>.md`).
+- **Whatever the arguments say**: session type, host, agent, recipe, model, branch intent and names —
+  every `StartSession` option. Nothing is inherited from the orchestrator: a `claude-cli` conversation
+  names its own `model`, and the link to the orchestrator is `orchestrator_session_id` (not
+  `stack_parent`).
+- **Seed prompt**: `initial_prompt`. The grill-me **Create plan** prompt composes one that points at
+  the plan (absolute session-artifact brief path + the committed `plans/<slug>.md`) and asks for a
+  `claude-cli` conversation on `new_branch_from_base` with this session's own model id.
 
 ### Architecture
 

@@ -1,5 +1,7 @@
 use crate::stack_parent;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_tool_engine::start_ledger::StartLedger;
+use tddy_tool_engine::start_session_args::{StartContext, StartSessionArgs};
 
 use crate::claude_cli_spawn::spawn_claude_cli_session_inner;
 
@@ -94,5 +96,58 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
         .await
         .map_err(|status| status.message().to_string())?;
         Ok(response.into_inner().session_id)
+    }
+
+    async fn start_conversation(&self, args_json: &str) -> Result<String, String> {
+        let args: StartSessionArgs = serde_json::from_str(args_json)
+            .map_err(|e| format!("invalid spawn_conversation arguments: {e}"))?;
+        // The start authenticates as the orchestrator's own session, exactly as the `StartSession`
+        // tool does: a start on another host and its cancel carry that token. A session that holds
+        // none cannot be vouched for, so it starts nothing.
+        let session_token = self.account_access.session_token();
+        if session_token.is_empty() {
+            return Err(
+                "this session holds no start token, so it cannot start a conversation".to_string(),
+            );
+        }
+        let request = args.into_request(StartContext {
+            session_token: session_token.to_string(),
+            project_id: self.project_id.clone(),
+            orchestrator_session_id: self.orchestrator_session_id.clone(),
+            orchestrator_daemon_instance_id: local_instance_id_for_config(&self.config),
+        });
+        let handle = self
+            .service
+            .begin_recorded_start(request, &self.os_user, self.start_ledger()?)
+            .await
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string(&handle).map_err(|e| format!("serialize the start's handle: {e}"))
+    }
+
+    async fn conversation_start_status(&self, start_id: &str) -> Result<String, String> {
+        let record = self
+            .start_ledger()?
+            .read(start_id)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string(&record).map_err(|e| format!("serialize the start's record: {e}"))
+    }
+
+    async fn cancel_conversation_start(&self, start_id: &str) -> Result<(), String> {
+        self.service
+            .cancel_recorded_start(
+                &self.start_ledger()?,
+                start_id,
+                self.account_access.session_token(),
+            )
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+impl GrillMeConversationSpawnHandler {
+    /// The start ledger of the orchestrator this handler serves.
+    fn start_ledger(&self) -> Result<StartLedger, String> {
+        StartLedger::recovered_in_session_dir(&self.orchestrator_session_dir)
+            .map_err(|e| e.to_string())
     }
 }

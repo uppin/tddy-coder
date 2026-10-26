@@ -172,6 +172,7 @@ impl LaunchSessions {
             return None;
         }
         Some(Arc::new(GrillMeConversationSpawnHandler {
+            service: self.clone(),
             stack_parent_host: Arc::new(self.clone()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
@@ -226,6 +227,7 @@ impl LaunchSessions {
             .map(|_| {
                 let sessions_base = self.tddy_data_dir.clone();
                 Arc::new(GrillMeConversationSpawnHandler {
+                    service: self.clone(),
                     stack_parent_host: Arc::new(self.clone()),
                     config: self.config.clone(),
                     tddy_data_dir: self.tddy_data_dir.clone(),

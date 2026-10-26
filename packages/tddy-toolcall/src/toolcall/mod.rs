@@ -9,6 +9,7 @@
 pub mod build;
 mod client;
 mod client_wire;
+mod conversation_wire;
 mod github_token_client;
 mod listener;
 pub mod lsp;
@@ -211,6 +212,11 @@ pub enum ToolCallResponse {
     SpawnChildOk {
         session_id: String,
     },
+    /// A `start-conversation`, `conversation-start-status` or `conversation-start-cancel` relay
+    /// succeeded; carries the start's handle, its ledger record, or the cancel's acknowledgement.
+    ConversationStartJson {
+        value: serde_json::Value,
+    },
     /// A `github-token` relay succeeded; carries the token the session's project account resolved
     /// to. A refusal travels as [`ToolCallResponse::Error`] with the resolver's own message.
     GithubTokenOk {
@@ -310,6 +316,14 @@ impl ToolCallResponse {
             ToolCallResponse::SpawnChildOk { session_id } => {
                 serde_json::json!({"status":"ok","session_id":session_id})
             }
+            ToolCallResponse::ConversationStartJson { value } => {
+                let mut value = value.clone();
+                if let serde_json::Value::Object(map) = &mut value {
+                    map.entry("status".to_string())
+                        .or_insert_with(|| serde_json::Value::String("ok".to_string()));
+                }
+                value
+            }
             ToolCallResponse::GithubTokenOk { token } => {
                 serde_json::json!({"status":"ok","token":token.expose()})
             }
@@ -374,23 +388,9 @@ pub struct SpawnChildRequestWire {
     pub node_id: String,
 }
 
-/// Wire format for `spawn-conversation` request (from tddy-tools, generic managed session).
-///
-/// The generic sibling of [`SpawnChildRequestWire`]: instead of resolving a planned PR-stack node
-/// id, it carries a free-form `prompt` for a brand-new interactive conversation, plus an optional
-/// `branch` name and `base_ref` to root the new worktree on.
-#[derive(Debug, Deserialize)]
-pub struct SpawnConversationRequestWire {
-    pub r#type: String,
-    /// Prompt to seed the new interactive conversation with.
-    pub prompt: String,
-    /// Optional branch name for the new worktree; derived from the prompt when absent.
-    #[serde(default)]
-    pub branch: Option<String>,
-    /// Optional base ref to root the new worktree on; defaults to the session's base when absent.
-    #[serde(default)]
-    pub base_ref: Option<String>,
-}
+pub use crate::toolcall::conversation_wire::{
+    ConversationStartRequestWire, SpawnConversationRequestWire, StartConversationRequestWire,
+};
 
 /// Wire format for `github-token` request (from tddy-tools). It names no session and no project:
 /// the listener is bound per session, so which account answers is decided by who holds the socket.
@@ -406,6 +406,13 @@ pub struct GithubTokenRequestWire {
 pub const HOST_SESSION_SERVICE: &str = "tddy.host.HostSessionService";
 /// Unary method on [`HOST_SESSION_SERVICE`]: spawn a new conversation for the calling session.
 pub const SPAWN_CONVERSATION_METHOD: &str = "SpawnConversation";
+/// Unary method on [`HOST_SESSION_SERVICE`]: start a conversation of any session type from
+/// `StartSession`'s arguments, answering with the start's handle.
+pub const START_CONVERSATION_METHOD: &str = "StartConversation";
+/// Unary method on [`HOST_SESSION_SERVICE`]: the start ledger's record of a conversation's start.
+pub const CONVERSATION_START_STATUS_METHOD: &str = "ConversationStartStatus";
+/// Unary method on [`HOST_SESSION_SERVICE`]: cancel a conversation's start.
+pub const CONVERSATION_START_CANCEL_METHOD: &str = "ConversationStartCancel";
 /// Unary method on [`HOST_SESSION_SERVICE`]: the GitHub token of the account the **named** session's
 /// project acts as. Like every request on that service it carries the caller's `session_id`, because
 /// the socket it arrives on serves every tool session of one OS user.
@@ -579,7 +586,7 @@ mod build_wire_tests {
 
 #[cfg(test)]
 mod spawn_conversation_wire_tests {
-    use super::SpawnConversationRequestWire;
+    use crate::toolcall::conversation_wire::SpawnConversationRequestWire;
     use serde_json::json;
 
     #[test]

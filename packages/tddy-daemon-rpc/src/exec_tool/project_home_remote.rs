@@ -127,6 +127,10 @@ impl ExecToolRpcHandler {
             else {
                 continue;
             };
+            // TODO(start-parity): a conversation spawner (a grill-me session) held on another host
+            // is refused here, though its own host serves it the four start tools. The listing
+            // names the session's role but not its recipe, so this host cannot confirm the
+            // capability. See docs/dev/todo/2026-10-26-forwarded-conversation-spawner-is-refused-the-start-tools.md
             if owned.session_role != PROJECT_HOME_ROLE {
                 return Err(Status::permission_denied(format!(
                     "tool {} is served only to a project-home session, and daemon {peer} reports \

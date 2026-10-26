@@ -13,6 +13,7 @@ pub mod clone_ssh_env;
 mod clone_stopper;
 pub mod conversation_spawn;
 pub mod conversation_spawn_handler;
+pub mod conversation_start;
 pub mod conversation_worktree_op;
 pub mod cursor_cli_spawn;
 pub mod family_proto_bridge;

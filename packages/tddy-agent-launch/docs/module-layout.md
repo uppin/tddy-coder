@@ -307,7 +307,8 @@ forwards a start with `tddy_daemon_kernel::peer_calls`, and measures a checkout 
 |---|---|
 | `stack_parent.rs`, `stack_seed_validation.rs` | `StackParentHost` on the handle; `validate_stack_seed_base_session`, `session_repo_is_in_project` (public) |
 | `stack_child_spawn.rs`, `child_spawn_handler.rs` | the `StackChildSpawnHandler` struct, and its `impl` |
-| `conversation_spawn.rs`, `conversation_spawn_handler.rs` | `recipe_enables_conversation_spawn`, `conversation_branch_slug`, `GrillMeConversationSpawnHandler`, and its `impl` |
+| `conversation_spawn.rs`, `conversation_spawn_handler.rs` | `recipe_enables_conversation_spawn`, `session_tool_role` (a session's project-home tool entitlement: project-home, conversation spawner, ordinary), `conversation_branch_slug`, `GrillMeConversationSpawnHandler`, and its `impl` (the universal start: `start_conversation` / `conversation_start_status` / `cancel_conversation_start` over the orchestrator's start ledger) |
+| `conversation_start.rs` | `LaunchSessions::begin_recorded_start` (refuse-before-begin, the streamed start, recorded in a start ledger) and `cancel_recorded_start` (local task or the peer's `CancelTask`), and `StartedSessionListings` — shared by the project-home `StartSession` tools and the conversation-spawn handler |
 | `svc_pr_status_for_caller.rs` | the managed-workflow helpers and the stack-link half (`resolve_chain_base_ref_status`, `link_stack_node_to_spawned_branch`, `record_spawn_on_stack_node`) |
 | `managed_launch.rs`, `worktree_source.rs` | `ManagedLaunch`, `prepare_managed_workflow_inner`; `WorktreeSource` |
 | `conversation_worktree_op.rs`, `family_proto_bridge.rs` | the conversation-worktree operation a jail relays; the family proto bridge |
