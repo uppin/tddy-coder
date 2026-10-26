@@ -129,7 +129,7 @@ mod tests {
                 "ReadLints",
                 "SemanticSearch",
                 "ListProjectSessions",
-                "StartProjectSession",
+                "StartSession",
                 "ReadSessionWorktree",
                 "DiffSessionWorktree",
                 "CommitSessionWorktree",

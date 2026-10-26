@@ -90,6 +90,23 @@ pub(crate) fn refuse_a_cli_start_without_a_model(req: &StartSessionRequest) -> R
     Ok(())
 }
 
+/// Refuse an orchestrator on a `tool` session: its changeset is written by its own `tddy-coder`
+/// process, not by this daemon, so the link could not be recorded.
+///
+/// TODO(start-parity): pass the orchestrator to the spawned `tddy-coder`, which records it the way
+/// it records `--stack-parent`.
+pub(crate) fn refuse_an_orchestrated_tool_start(req: &StartSessionRequest) -> Result<(), Status> {
+    let session_type = req.session_type.trim();
+    let is_tool = session_type.is_empty() || session_type == "tool";
+    if is_tool && !req.orchestrator_session_id.trim().is_empty() {
+        return Err(Status::failed_precondition(
+            "a `tool` session cannot be started with an orchestrator yet: its changeset is written \
+             by its own tddy-coder process, which does not record one",
+        ));
+    }
+    Ok(())
+}
+
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 impl LaunchSessions {

@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use tddy_projects::project_storage::ProjectData;
 use tddy_service::proto::session::{GithubSource, StartSessionRequest};
 
-use crate::start_request_checks::{forwarded_start_request, record_requested_github_source};
+use crate::start_request_checks::{
+    forwarded_start_request, record_requested_github_source, refuse_an_orchestrated_tool_start,
+};
 
 const PROJECT_ID: &str = "11111111-2222-4333-8444-555555555555";
 
@@ -130,4 +132,44 @@ fn a_start_that_named_no_source_writes_no_github_source_file() {
 
     // Then nothing is written: resumes read this host's row again
     assert!(!scratch.path().join("github-source.yaml").exists());
+}
+
+fn an_orchestrated_start_of(session_type: &str) -> StartSessionRequest {
+    StartSessionRequest {
+        session_type: session_type.to_string(),
+        orchestrator_session_id: "home-1".to_string(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn an_orchestrated_tool_start_is_refused_naming_the_tool_session_type() {
+    for session_type in ["tool", ""] {
+        // When
+        let refused = refuse_an_orchestrated_tool_start(&an_orchestrated_start_of(session_type))
+            .expect_err("a tool session cannot record its orchestrator");
+
+        // Then
+        assert_eq!(refused.code, tddy_rpc::Code::FailedPrecondition);
+        assert!(refused.message.contains("`tool`"), "{}", refused.message);
+    }
+}
+
+#[test]
+fn an_orchestrated_start_of_a_session_the_daemon_records_is_accepted() {
+    for session_type in ["workspace", "claude-cli"] {
+        assert!(
+            refuse_an_orchestrated_tool_start(&an_orchestrated_start_of(session_type)).is_ok(),
+            "{session_type}"
+        );
+    }
+}
+
+#[test]
+fn a_tool_start_with_no_orchestrator_is_accepted() {
+    assert!(refuse_an_orchestrated_tool_start(&StartSessionRequest {
+        session_type: "tool".to_string(),
+        ..Default::default()
+    })
+    .is_ok());
 }

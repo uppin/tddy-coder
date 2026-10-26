@@ -22,7 +22,7 @@ impl LaunchSessions {
     /// a profile is not a def, it stands for a session type or agent on an account.
     ///
     /// This is the start every caller-facing path takes (`StartSession`, `StreamStartSession`, a
-    /// split's workspace start, a project-home `StartProjectSession`), so a request naming a
+    /// split's workspace start, a project-home `StartSession`), so a request naming a
     /// `session_role` is refused here: a role is granted by the daemon, never asked for, since a
     /// project-home role reaches the project's other sessions. Only
     /// [`Self::start_session_with_role`] starts a session with one.

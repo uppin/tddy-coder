@@ -7,7 +7,7 @@ subagent turn-control changeset
 **Metrics:** **816 production lines** · budget 500 · **1.6× over**
 **Thresholds breached:** length 816 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
-**Status:** Open — unclaimed (877 production lines, 2026-10-23)
+**Status:** Open — unclaimed (878 production lines, 2026-10-25)
 
 ## Measurement history
 
@@ -24,6 +24,7 @@ subagent turn-control changeset
 | 2026-10-23 | 876 | **touched by #700** (`#project-home` 5/7): 874 → 876 (+2) — `pub mod project_home_tools;` and `mod project_home_diff;`; the tools live in those modules (359 and 60 production lines). Not split: stack-shared with `#project-home` 6/7 and 7/7 |
 | 2026-10-23 | 877 | **touched by #702** (`#project-home` 7/7): 876 → 877 (+1) — the `pub mod project_home_git_tools;` declaration; the tools live in the new `project_home_git_tools.rs` (238 production lines). Not split: stack-shared (`#project-home` 4/7 and 5/7 edit this module list) |
 | 2026-10-25 | 877 | **unchanged** by PR #726 (`#coagents` 7/8): touched only inside `#[cfg(test)] mod unbundle_exec_tool_entry_tests` (the test double answers `request_approval`) |
+| 2026-10-25 | 878 | **touched by #751** (`#start-parity` 2/9): 877 → 878 (+1) — the `pub mod start_session_args;` declaration; the module lives in `start_session_args.rs` (257 production lines) and `start_session_args/schema.rs` (292). Not split: stack-shared — every later `#start-parity` node edits this module list |
 
 ## What the tool found
 

@@ -217,7 +217,7 @@ an ordinary, still read-only session, and main is set up once more.
 - **Role prompt.** The main is launched with `--append-system-prompt-file` naming a short prompt in
   its session directory: it is the project's main session on a read-only home worktree, it has no
   shell and cannot edit files, and it sees and starts the project's sessions with
-  `ListProjectSessions` / `StartProjectSession`, inspects them with `ReadSessionWorktree` /
+  `ListProjectSessions` / `StartSession`, inspects them with `ReadSessionWorktree` /
   `DiffSessionWorktree`, and manages their worktrees with the [git tools](#git-tools); to change code
   it starts a session.
 - **Hosts.** A request whose `daemon_instance_id` names another daemon is forwarded to it (as
@@ -239,7 +239,7 @@ session whose record carries the `project-home` role may run them; any other cal
 | Tool | Arguments | Answers |
 |---|---|---|
 | `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on, and the status the web's session list shows. A host that does not answer is named in `unreachable_hosts`, never silently left out |
-| `StartProjectSession` | `session_type` (required), `prompt`, `agent`, `new_branch_name` | `{"session_id"}`: a session of any type `StartSession` accepts, started in the project as the caller's user; its changeset records the home session as `orchestrator_session_id`. A role cannot be passed |
+| `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `stack_parent`, `stack_parent_daemon_instance_id`, `stack_node_id`, `pr_stack_base_session_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `semantic_index`, `specialized_agents`, `attachments` (host documents) | `{"session_id"}`: a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
 | `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root), `daemon_instance_id?` | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
 | `DiffSessionWorktree` | `session_id`, `daemon_instance_id?` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
 
@@ -260,6 +260,37 @@ session whose record carries the `project-home` role may run them; any other cal
   addresses a request at another host itself is refused there with `PERMISSION_DENIED`. A forwarded
   call is served for that host only — its listing does not fan out and it cannot name a third host —
   so a call travels at most one hop.
+
+### StartSession
+
+`StartSession` offers what a person can choose in the web UI's New-session form, so an orchestrator
+can start any session a person can.
+
+- **Arguments are the request's own fields.** Every `StartSessionRequest` field is exactly one of: an
+  argument, a field the caller's context fills (`session_token`, `project_id`, `on_branch_conflict`,
+  `orchestrator_session_id`, `orchestrator_daemon_instance_id`), or a field the tool withholds with a
+  stated reason (`repo_path`, `claude_args`, `requested_session_id`, `agent_clone`, `split_agent`,
+  `github_source`, `session_role`). An argument the tool does not offer — a role among them — is
+  refused by name. Two parity tests hold this: one against the compiled-in proto descriptor, one
+  against every key the form's request builder can send.
+- **The schema states the closed choices.** `session_type`, `permission_mode`,
+  `branch_worktree_intent` and an attachment's `scope` are enums; `daemon_instance_id` lists `""`
+  (this host) and every eligible host, and `recipe` every workflow recipe the daemon supports, as the
+  daemon answers `ListExecTools`. `if`/`then` blocks make `model` required for the harnesses that need
+  one and `selected_branch_to_work_on` required with `work_on_selected_branch`.
+- **A branch another session owns is refused**, naming the branch and its owner; it is never
+  suffixed (`on_branch_conflict` is always `reject`).
+- **Across hosts.** A start naming another host takes the daemon's own start path, which forwards it
+  there; that host creates the session and records the orchestrator in it.
+- **Known limitations.**
+  - A `tool` session (or an empty session type) started with an orchestrator is refused with
+    `FAILED_PRECONDITION`: its changeset is written by its own `tddy-coder` process, which does not
+    record one.
+  - The agent's client registers its MCP tools before it asks the daemon, so the schema it sees names
+    hosts and recipes as free strings; the daemon refuses a host it cannot route to and a recipe it
+    does not support.
+  - The orchestrator is written into the changeset after the start returns, not in the changeset the
+    session type first writes.
 
 ### Git tools
 

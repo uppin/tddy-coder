@@ -1,7 +1,7 @@
+mod orchestrator_record;
+
 use tddy_session_split::service_util;
 use tddy_spawn::spawner;
-
-use std::sync::Arc;
 
 use tddy_session_files::attachment_progress::AttachmentMaterialization;
 
@@ -18,9 +18,9 @@ use tddy_session_split::split_start::resolve_split_agent_placement;
 
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
-use crate::placement::classify_placement;
-use crate::placement::PlacementRequest;
-use crate::start_request_checks::refuse_a_cli_start_without_a_model;
+use crate::start_request_checks::{
+    refuse_a_cli_start_without_a_model, refuse_an_orchestrated_tool_start,
+};
 
 use tddy_rpc::Response;
 use tddy_rpc::Status;
@@ -125,8 +125,32 @@ impl LaunchSessions {
         // refused split is a malformed request, so it is classified before anything is created and
         // before the project is provisioned — a session whose codebase host is wrong should not
         // leave a clone behind on the way to being rejected.
+        // The orchestrator is recorded by this daemon — the one that created the session — so a
+        // start forwarded from the orchestrator's host links the session here, where it lives.
+        let orchestrator = trim_to_option(&req.orchestrator_session_id);
+        let orchestrator_host =
+            trim_to_option(&req.orchestrator_daemon_instance_id).filter(|host| *host != local_id);
         let placement = classify_start_placement(&req, local_id, eligible_ids)?;
+        refuse_an_orchestrated_tool_start(&req)?;
+        let started = self
+            .start_here(req, os_user, agent_def, placement, progress, cancel)
+            .await?;
+        if let Some(orchestrator) = orchestrator {
+            self.record_orchestrator(os_user, started.get_ref(), &orchestrator, orchestrator_host)?;
+        }
+        Ok(started)
+    }
 
+    /// Start `req` on this daemon, the route and the placement already decided.
+    async fn start_here(
+        &self,
+        req: StartSessionRequest,
+        os_user: &str,
+        agent_def: Option<tddy_discovery::agent_def::SpecializedAgentDef>,
+        placement: CodebasePlacement,
+        progress: &AttachmentProgressSink,
+        cancel: &CancellationToken,
+    ) -> Result<Response<StartSessionResponse>, Status> {
         // Checked here, alongside the other request-shape decisions, so a session type that does not
         // honour a caller-chosen id refuses it before anything is created rather than generating one
         // and leaving the caller pointing at a session that does not exist.
@@ -463,45 +487,9 @@ impl LaunchSessions {
     }
 }
 
+use crate::placement::classify_start_placement;
+use crate::placement::managed_recipe_for;
 pub use crate::{
     cli_branch_starts, start_request_checks, tool_session_spawn, tool_spawn_plan,
     workspace_branch_start,
 };
-
-fn classify_start_placement(
-    req: &StartSessionRequest,
-    local_id: String,
-    eligible_ids: Vec<String>,
-) -> Result<CodebasePlacement, Status> {
-    let placement = classify_placement(&PlacementRequest {
-        local_instance_id: local_id.clone(),
-        requested_codebase_id: req.codebase_daemon_instance_id.clone(),
-        eligible_ids: eligible_ids.clone(),
-        managed_codebase: req.managed_codebase,
-        sandbox: req.sandbox,
-        sandboxed_codebase: req.sandboxed_codebase,
-        session_type: req.session_type.trim().to_string(),
-        recipe: req.recipe.clone(),
-        dangerously_skip_permissions: req.dangerously_skip_permissions,
-    })
-    .map_err(|msg| {
-        log::info!("StartSession: rejected codebase placement: {msg}");
-        Status::invalid_argument(msg)
-    })?;
-    Ok(placement)
-}
-
-pub(crate) fn managed_recipe_for(
-    req: &StartSessionRequest,
-) -> Result<Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>, Status> {
-    let managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>> =
-        if req.managed_codebase && !req.recipe.trim().is_empty() {
-            Some(
-                tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(req.recipe.trim())
-                    .map_err(Status::invalid_argument)?,
-            )
-        } else {
-            None
-        };
-    Ok(managed_recipe)
-}

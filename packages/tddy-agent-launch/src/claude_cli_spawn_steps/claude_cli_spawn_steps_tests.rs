@@ -393,7 +393,7 @@ fn a_mains_role_prompt_is_written_to_its_session_dir_and_appended() {
     assert!(prompt.contains("main"), "prompt: {prompt}");
     assert!(prompt.contains("no shell"), "prompt: {prompt}");
     assert!(prompt.contains("ListProjectSessions"), "prompt: {prompt}");
-    assert!(prompt.contains("StartProjectSession"), "prompt: {prompt}");
+    assert!(prompt.contains("StartSession"), "prompt: {prompt}");
     assert!(prompt.contains("ReadSessionWorktree"), "prompt: {prompt}");
     assert!(prompt.contains("DiffSessionWorktree"), "prompt: {prompt}");
 }

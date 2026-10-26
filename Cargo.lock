@@ -14255,6 +14255,8 @@ dependencies = [
  "libc",
  "log",
  "pretty_assertions",
+ "prost 0.13.5",
+ "prost-types 0.13.5",
  "serde",
  "serde_json",
  "tddy-core",

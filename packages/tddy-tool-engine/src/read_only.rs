@@ -99,7 +99,7 @@ mod tests {
                 "mcp__tddy-tools__ReadLints",
                 "mcp__tddy-tools__SemanticSearch",
                 "mcp__tddy-tools__ListProjectSessions",
-                "mcp__tddy-tools__StartProjectSession",
+                "mcp__tddy-tools__StartSession",
                 "mcp__tddy-tools__ReadSessionWorktree",
                 "mcp__tddy-tools__DiffSessionWorktree",
                 "mcp__tddy-tools__CommitSessionWorktree",
