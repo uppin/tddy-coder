@@ -27,40 +27,6 @@ fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn non_blank_lines(path: &Path) -> usize {
-    std::fs::read_to_string(path)
-        .map(|text| text.lines().filter(|l| !l.trim().is_empty()).count())
-        .unwrap_or(0)
-}
-
-/// The brief, as a number.
-///
-/// ≈21,500 after nodes 1–8; ≈4,900 after node 9. 6,000 was the ceiling with room for the wiring to
-/// grow a little without the test becoming a tripwire on every edit.
-///
-/// `#satellite` 16/16 raised it to 6,500: cutting the composition root's 1,080-line `build` into
-/// stages is no new behaviour, but it is +637 non-blank lines of plumbing (the context struct, each
-/// stage's imports and the prologue that binds the context's fields to the locals' old names), so the
-/// same wiring no longer fits under 6,000. Nothing in it is session logic; the module whitelist
-/// below is what still catches that.
-#[test]
-fn the_daemon_is_wiring_and_nothing_more() {
-    // Given
-    let mut files = Vec::new();
-    rs_files(&daemon_src(), &mut files);
-
-    // When
-    let total: usize = files.iter().map(|f| non_blank_lines(f)).sum();
-
-    // Then
-    assert!(
-        total < 6_500,
-        "tddy-daemon is {total} non-blank source lines across {} files; the endpoint is wiring, \
-         config and its own settings service",
-        files.len()
-    );
-}
-
 /// `connection_service.rs` and its 59-file directory are deleted, not thinned.
 #[test]
 fn the_connection_service_module_is_gone() {

@@ -36,9 +36,8 @@ and `workflow_spawn` is `TelegramWorkflowSpawn` and its helpers.
 | `types.rs` | 151 | the harness's DTOs |
 | `workflow_launch.rs` | 133 | `spawn_telegram_workflow`: from the session's recorded recipe and chain parent to the "Workflow started" message — the spawn deps, the project lookup, the chain child's integration-base merge, the spawn, following the spawned session's presenter stream, and the announcement |
 
-Production lines are counted to the first `#[cfg(test)]`. No module may exceed **800**, which
-`telegram_extraction_shape`'s `no_control_module_exceeds_eight_hundred_production_lines` enforces.
-The repo's file budget is 500. The three modules over it each have a record in
+Production lines are counted to the first `#[cfg(test)]`. The repo's file budget is 500; no test
+enforces it (line-budget tests were removed 2026-10-26). The three modules over it each have a record in
 [code-issues/](code-issues/) naming its seams. Two of them (`pickers.rs` and the production half of
 `callbacks.rs`) cannot reach 500 by moving items alone, because their size is in long functions such
 as the 177-line `handle_telegram_branch_callback`.

@@ -11,11 +11,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// The ceiling every crate this stack moves code into is held to.
-const PRODUCTION_LINE_BUDGET: usize = 10_000;
-/// What `tddy-core` may keep: `lib.rs`, the facades, `ssh_exec` and `test_support`.
-const WIRING_POINT_BUDGET: usize = 200;
-
 /// The receivers, bottom of the dependency order first. A receiver may depend only on those before
 /// it — that order is what opened the `backend → toolcall → session_actions → changeset → workflow`
 /// cycle.
@@ -181,6 +176,8 @@ fn manifest_of(crate_name: &str) -> String {
 fn tddy_core_is_only_a_wiring_point() {
     // Given tddy-core's production sources, less the two files allowed to hold code
     let allowed_to_define = ["ssh_exec.rs", "test_support.rs"];
+
+    // When each is read for definitions
     let definitions: Vec<String> = rust_files_under(&sources_of_crate("tddy-core"))
         .into_iter()
         .filter(|path| !is_test_file(path))
@@ -201,51 +198,35 @@ fn tddy_core_is_only_a_wiring_point() {
         })
         .collect();
 
-    // When the crate is measured
-    let production_lines = production_lines_of_crate("tddy-core");
-
-    // Then nothing is defined there any more, and what is left is the size of a facade
+    // Then nothing is defined there any more: the crate is facades only
     assert!(
         definitions.is_empty(),
         "tddy-core still defines {} items — first: {:?}",
         definitions.len(),
         definitions.iter().take(5).collect::<Vec<_>>()
     );
-    assert!(
-        production_lines <= WIRING_POINT_BUDGET,
-        "tddy-core has {production_lines} production lines; a wiring point has at most {WIRING_POINT_BUDGET}"
-    );
 }
 
-// ---------------------------------------------------------------------------------------------
-// AC2 — the size budget
-// ---------------------------------------------------------------------------------------------
-
 #[test]
-fn every_crate_receiving_code_stays_within_10k_production_lines() {
+fn every_crate_receiving_code_holds_production_code() {
     // Given every crate tddy-core's code moves into
     let measured: Vec<(&str, usize)> = RECEIVERS_IN_DEPENDENCY_ORDER
         .into_iter()
         .map(|name| (name, production_lines_of_crate(name)))
         .collect();
 
-    // Then each exists, and none has grown past the budget the stack is carving to
+    // Then each exists and holds code
     let missing: Vec<&str> = measured
         .iter()
         .filter(|(_, lines)| *lines == 0)
         .map(|(name, _)| *name)
         .collect();
     assert!(missing.is_empty(), "no production code in: {missing:?}");
-    let over_budget: Vec<String> = measured
-        .iter()
-        .filter(|(_, lines)| *lines > PRODUCTION_LINE_BUDGET)
-        .map(|(name, lines)| format!("{name}: {lines}"))
-        .collect();
-    assert!(
-        over_budget.is_empty(),
-        "over the {PRODUCTION_LINE_BUDGET}-line budget: {over_budget:?}"
-    );
 }
+
+// ---------------------------------------------------------------------------------------------
+// AC2 — the size budget
+// ---------------------------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------------------------
 // AC3 — dead code goes

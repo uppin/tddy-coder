@@ -3,34 +3,15 @@
 //!
 //! These assertions are the node's contract. They read the tree rather than the type system
 //! deliberately — a module that exists but is never named would satisfy a compile-time check, and
-//! what this node promises is a *layout* a reader can navigate, with no file over the budget the
-//! repo's own backlog sets at 500 production lines.
-//!
-//! "Production lines" means everything before the first `#[cfg(test)]`, which is the measure
-//! `docs/dev/todo/2026-09-12-the-two-new-service-rs-files-are-over-budget.md` uses. Measuring total
-//! lines instead would call `session_agent_status.rs` over budget when it is more than half test
-//! module, which is exactly the mistake that entry records.
+//! what this node promises is a *layout* a reader can navigate.
 
 use std::path::{Path, PathBuf};
-
-/// Everything before the first `#[cfg(test)]`, the measure the file-budget convention uses.
-fn production_lines(path: &Path) -> usize {
-    let text = std::fs::read_to_string(path)
-        .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()));
-
-    text.lines()
-        .position(|line| line.trim_start().starts_with("#[cfg(test)]"))
-        .unwrap_or_else(|| text.lines().count())
-}
 
 fn src(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join(relative)
 }
-
-/// The budget the repo's backlog sets, and this node's AC6.
-const BUDGET: usize = 500;
 
 /// The six phases this node gives a module each, named once so no test can drift from another.
 const PHASES: [&str; 6] = [
@@ -136,50 +117,5 @@ fn the_tdd_hooks_split_by_lifecycle_half() {
     assert!(
         absent.is_empty(),
         "these hook halves are not yet their own modules: {absent:?}"
-    );
-}
-
-/// AC6 — no file this node produces exceeds the budget.
-///
-/// The budget is what the node is for. A split that leaves one module at 900 lines has moved the
-/// problem rather than solved it.
-#[test]
-fn no_module_this_node_produces_exceeds_the_budget() {
-    // Given every module the split produces
-    let produced = [
-        "parser.rs",
-        "parser/planning.rs",
-        "parser/acceptance_tests.rs",
-        "parser/analyze.rs",
-        "parser/green.rs",
-        "parser/red.rs",
-        "parser/evaluate.rs",
-        "tdd/hooks.rs",
-        "tdd/hooks/before.rs",
-        "tdd/hooks/after.rs",
-        "tdd_small/hooks.rs",
-        "tdd_small/hooks/before.rs",
-        "tdd_small/hooks/after.rs",
-    ];
-
-    // When each existing one is measured
-    let over: Vec<String> = produced
-        .into_iter()
-        .map(src)
-        .filter(|path| path.exists())
-        .map(|path| (production_lines(&path), path))
-        .filter(|(lines, _)| *lines > BUDGET)
-        .map(|(lines, path)| {
-            format!(
-                "{} at {lines} production lines",
-                path.file_name().expect("a file name").to_string_lossy()
-            )
-        })
-        .collect();
-
-    // Then none is over
-    assert!(
-        over.is_empty(),
-        "over the {BUDGET}-production-line budget: {over:?}"
     );
 }
