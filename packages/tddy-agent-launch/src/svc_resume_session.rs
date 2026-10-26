@@ -75,6 +75,22 @@ impl LaunchSessions {
                 &metadata.project_id,
                 &req.session_token,
             );
+            // The resumed agent is given its notify environment again, from the hook token its
+            // record holds; a record with none is given nothing.
+            let notify_env = metadata
+                .hook_token
+                .as_deref()
+                .filter(|token| !token.is_empty())
+                .map(|token| {
+                    crate::cursor_cli_spawn::cursor_notify_env(
+                        &self.config,
+                        &self.tddy_data_dir,
+                        os_user,
+                        &req.session_id,
+                        token,
+                    )
+                })
+                .unwrap_or_default();
             return bridge_conn_resume_response(
                 crate::cursor_cli_spawn::resume_cursor_cli_session(
                     &self.claude_cli_manager,
@@ -82,7 +98,11 @@ impl LaunchSessions {
                     &req.session_id,
                     &session_dir,
                     metadata,
-                    identity.git_environment,
+                    identity
+                        .git_environment
+                        .into_iter()
+                        .chain(notify_env)
+                        .collect(),
                 )
                 .await,
             );

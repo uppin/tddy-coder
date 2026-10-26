@@ -56,6 +56,28 @@ pub fn install_cursor_hooks_in_worktree(
     hook_token
 }
 
+/// The environment a cursor-cli agent is given so `tddy-tools notify` can reach its operator
+/// (`#home-inbox` 1/8): its session, owner, hook token and the daemon — over the agent-tool socket
+/// on an embedded daemon, which serves no HTTP RPC, and over the hooks' URL otherwise.
+pub fn cursor_notify_env(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    os_user: &str,
+    session_id: &str,
+    hook_token: &str,
+) -> Vec<(String, String)> {
+    let daemon_url = tddy_daemon_kernel::config::resolve_cursor_cli_daemon_url(config)
+        .unwrap_or_else(|| tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config));
+    let daemon_socket = tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir);
+    crate::notify_env::notify_env_pairs(
+        session_id,
+        os_user,
+        hook_token,
+        &daemon_url,
+        daemon_socket.as_deref().map(Path::new),
+    )
+}
+
 /// The chat id printed by `cursor-agent create-chat`, or a description of what came out instead.
 ///
 /// `create-chat` prints a **bare** chat id on stdout and exits 0 ("Create a new empty chat and

@@ -12,6 +12,8 @@
 
 use std::path::Path;
 
+use tddy_service::session_activity::notify_env;
+
 /// The paragraph a claude-cli agent's system prompt is given about `tddy-tools notify`.
 pub const AGENT_NOTIFY_GUIDANCE: &str = include_str!("agent_notify_guidance.md");
 
@@ -29,7 +31,20 @@ pub fn notify_env_pairs(
     daemon_url: &str,
     daemon_socket: Option<&Path>,
 ) -> Vec<(String, String)> {
-    // TODO(agent-notify): implement
-    let _ = (session_id, os_user, hook_token, daemon_url, daemon_socket);
-    Vec::new()
+    let daemon = match daemon_socket {
+        Some(socket) => (
+            notify_env::DAEMON_SOCKET,
+            socket.to_string_lossy().into_owned(),
+        ),
+        None => (notify_env::DAEMON_URL, daemon_url.to_string()),
+    };
+    [
+        (notify_env::SESSION_ID, session_id.to_string()),
+        (notify_env::OS_USER, os_user.to_string()),
+        (notify_env::HOOK_TOKEN, hook_token.to_string()),
+        daemon,
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_string(), value))
+    .collect()
 }

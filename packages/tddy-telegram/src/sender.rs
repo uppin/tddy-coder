@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::*;
 use teloxide::requests::Requester;
-use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 
 use tddy_daemon_kernel::config::DaemonConfig;
 
@@ -105,10 +105,13 @@ impl TelegramSender for TeloxideSender {
         html: &str,
         silent: bool,
     ) -> anyhow::Result<()> {
-        // TODO(agent-notify): implement — `send_message` with `ParseMode::Html` and
-        // `disable_notification(silent)`.
-        let _ = (&self.bot, chat_id, html, silent);
-        anyhow::bail!("TODO(agent-notify): send_html_message is not implemented")
+        self.bot
+            .send_message(ChatId(chat_id), html.to_string())
+            .parse_mode(ParseMode::Html)
+            .disable_notification(silent)
+            .await
+            .map_err(|e| anyhow::anyhow!("telegram send_message (html) failed: {e}"))?;
+        Ok(())
     }
 }
 

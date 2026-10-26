@@ -117,6 +117,23 @@ impl LaunchSessions {
             managed = Some(launch.workflow);
         }
 
+        // A resumed agent is given its notify wiring again; a session that recorded no hook token
+        // has none, and neither has one with a standing role.
+        if meta.session_role.as_deref().unwrap_or("").is_empty() {
+            let notify = crate::claude_cli_spawn_steps::resumed_agent_notify_launch(
+                &self.config,
+                &self.tddy_data_dir,
+                os_user,
+                &session_dir,
+                &meta,
+                append_system_prompt_file.as_deref(),
+            )?;
+            env_extra.extend(notify.env);
+            append_system_prompt_file = notify
+                .append_system_prompt_file
+                .or(append_system_prompt_file);
+        }
+
         let handle = manager
             .resume_with_options(
                 &session_id_owned,

@@ -13,7 +13,20 @@ pub const MAX_BODY_CHARS: usize = 2_000;
 /// `Ok` when `title` is 1–[`MAX_TITLE_CHARS`] characters after trimming and `body` is at most
 /// [`MAX_BODY_CHARS`]; otherwise the reason, worded for the agent that sent it.
 pub fn validate_agent_notification(title: &str, body: &str) -> Result<(), String> {
-    // TODO(agent-notify): implement
-    let _ = (title, body);
-    Err("TODO(agent-notify): validate_agent_notification is not implemented".to_string())
+    let title_chars = title.trim().chars().count();
+    if title_chars == 0 {
+        return Err("the title is empty; give the notification a one-line title".to_string());
+    }
+    if title_chars > MAX_TITLE_CHARS {
+        return Err(format!(
+            "the title is {title_chars} characters; shorten it to at most {MAX_TITLE_CHARS}"
+        ));
+    }
+    let body_chars = body.chars().count();
+    if body_chars > MAX_BODY_CHARS {
+        return Err(format!(
+            "the body is {body_chars} characters; shorten it to at most {MAX_BODY_CHARS}"
+        ));
+    }
+    Ok(())
 }

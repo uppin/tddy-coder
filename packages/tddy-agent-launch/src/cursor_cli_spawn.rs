@@ -257,6 +257,14 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
             .git_environment,
     );
 
+    session_env.extend(chat::cursor_notify_env(
+        config,
+        tddy_data_dir,
+        os_user,
+        session_id,
+        &hook_token,
+    ));
+
     // The Cursor chat this session owns for its whole lifetime: minted here, persisted in
     // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume
     // continues this chat instead of opening a new one.

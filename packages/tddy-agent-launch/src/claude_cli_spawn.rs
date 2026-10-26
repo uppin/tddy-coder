@@ -233,6 +233,27 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         )
         .await?;
 
+    // The agent can notify its operator: its environment carries the credentials `tddy-tools
+    // notify` reads, and its system prompt says when to use it, composed with the recipe's. A
+    // session with a standing role (the project's main has no shell) is not given it.
+    let append_system_prompt_file = if role.name.is_empty() {
+        let notify = claude_cli_spawn_steps::agent_notify_launch(
+            claude_cli_spawn_steps::AgentNotifyLaunch {
+                config,
+                tddy_data_dir,
+                os_user,
+                session_id,
+                hook_token: &hook_token,
+                session_dir: &session_dir,
+                managed_prompt_file: append_system_prompt_file.as_deref(),
+            },
+        )?;
+        env_extra.extend(notify.env);
+        notify.append_system_prompt_file
+    } else {
+        append_system_prompt_file
+    };
+
     env_extra.extend(provider_route.map(|route| route.env).unwrap_or_default());
     env_extra.extend(config.claude_cli_renderer_env());
 

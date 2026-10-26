@@ -212,10 +212,57 @@ pub struct AgentNotifyWiring {
 
 /// What a starting claude-cli agent is given so it can notify its operator.
 pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyWiring, Status> {
-    // TODO(agent-notify): implement
-    let _ = launch;
-    Ok(AgentNotifyWiring::default())
+    let AgentNotifyLaunch {
+        config,
+        tddy_data_dir,
+        os_user,
+        session_id,
+        hook_token,
+        session_dir,
+        managed_prompt_file,
+    } = launch;
+    let daemon_url = daemon_hook_urls::claude_hook_daemon_url(config);
+    // An embedded daemon serves no HTTP RPC; its agents notify over this socket, as its hooks report.
+    let daemon_socket = tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir);
+    let env = crate::notify_env::notify_env_pairs(
+        session_id,
+        os_user,
+        hook_token,
+        &daemon_url,
+        daemon_socket.as_deref().map(Path::new),
+    );
+    let prompt = match managed_prompt_file {
+        Some(file) => {
+            let recipe_prompt = std::fs::read_to_string(file).map_err(|e| {
+                Status::internal(format!(
+                    "failed to read the recipe prompt {}: {e}",
+                    file.display()
+                ))
+            })?;
+            format!(
+                "{}\n\n{recipe_prompt}",
+                crate::notify_env::AGENT_NOTIFY_GUIDANCE.trim_end()
+            )
+        }
+        None => crate::notify_env::AGENT_NOTIFY_GUIDANCE
+            .trim_end()
+            .to_string(),
+    };
+    let prompt_file = session_dir.join(NOTIFY_SYSTEM_PROMPT_FILE);
+    std::fs::write(&prompt_file, prompt).map_err(|e| {
+        Status::internal(format!(
+            "failed to write the system prompt {}: {e}",
+            prompt_file.display()
+        ))
+    })?;
+    Ok(AgentNotifyWiring {
+        env,
+        append_system_prompt_file: Some(prompt_file),
+    })
 }
+
+/// The file in the session directory that holds the system prompt a claude-cli agent appends.
+const NOTIFY_SYSTEM_PROMPT_FILE: &str = "agent-system-prompt.md";
 
 /// What a resumed claude-cli agent is given again: the same wiring as at its start, built from the
 /// hook token its `.session.yaml` recorded. A session that recorded none — a sandboxed one has no
@@ -228,16 +275,18 @@ pub fn resumed_agent_notify_launch(
     meta: &tddy_core::SessionMetadata,
     managed_prompt_file: Option<&Path>,
 ) -> Result<AgentNotifyWiring, Status> {
-    // TODO(agent-notify): implement
-    let _ = (
+    let Some(hook_token) = meta.hook_token.as_deref().filter(|token| !token.is_empty()) else {
+        return Ok(AgentNotifyWiring::default());
+    };
+    agent_notify_launch(AgentNotifyLaunch {
         config,
         tddy_data_dir,
         os_user,
+        session_id: &meta.session_id,
+        hook_token,
         session_dir,
-        meta,
         managed_prompt_file,
-    );
-    Ok(AgentNotifyWiring::default())
+    })
 }
 
 /// What wiring a claude-cli session's managed workflow and semantic index reads.

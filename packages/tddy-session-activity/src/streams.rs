@@ -14,13 +14,16 @@ use prost::Message as _;
 use tddy_core::agent_activity::AgentActivityRecord;
 use tddy_service::proto::acp::AcpAgentMessage;
 use tddy_service::proto::activity::{
-    AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, SessionNotificationEvent,
+    AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord,
+    NotificationLevel as ProtoNotificationLevel, SessionNotificationEvent,
     SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource,
 };
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc::UnboundedSender;
+
+use tddy_daemon_kernel::session_notification::NotificationLevel;
 
 use crate::session_notifications::{
     SessionNotification, SessionNotificationKind, SessionNotificationSource,
@@ -34,6 +37,7 @@ use crate::session_notifications::{
 /// something about the host's other operators that it has no reason to know.
 #[must_use]
 pub fn session_notification_event(notification: SessionNotification) -> SessionNotificationEvent {
+    let agent = notification.agent.as_ref();
     SessionNotificationEvent {
         session_id: notification.session_id,
         label: notification.label,
@@ -55,9 +59,22 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
         } as i32,
         text: notification.text,
         at_unix_ms: notification.at_unix_ms,
-        // TODO(agent-notify): implement — map `notification.agent` onto title, body_markdown,
-        // level, sound and link.
-        ..Default::default()
+        title: agent.map(|a| a.title.clone()).unwrap_or_default(),
+        body_markdown: agent.map(|a| a.body_markdown.clone()).unwrap_or_default(),
+        level: agent.map_or(ProtoNotificationLevel::Unspecified, |a| {
+            proto_level(a.level)
+        }) as i32,
+        sound: agent.is_some_and(|a| a.sound),
+        link: agent.map(|a| a.link.clone()).unwrap_or_default(),
+    }
+}
+
+fn proto_level(level: NotificationLevel) -> ProtoNotificationLevel {
+    match level {
+        NotificationLevel::Info => ProtoNotificationLevel::Info,
+        NotificationLevel::Success => ProtoNotificationLevel::Success,
+        NotificationLevel::Warning => ProtoNotificationLevel::Warning,
+        NotificationLevel::Error => ProtoNotificationLevel::Error,
     }
 }
 
