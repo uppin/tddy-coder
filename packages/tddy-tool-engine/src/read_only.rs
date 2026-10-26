@@ -110,6 +110,7 @@ mod tests {
                 "mcp__tddy-tools__ReadSessionActivity",
                 "mcp__tddy-tools__ReadSessionTranscript",
                 "mcp__tddy-tools__TerminateSession",
+                "mcp__tddy-tools__RefreshWorktreeDiskUsage",
                 "mcp__tddy-tools__CommitSessionWorktree",
                 "mcp__tddy-tools__PushSessionBranch",
                 "mcp__tddy-tools__RebaseSessionBranch",
