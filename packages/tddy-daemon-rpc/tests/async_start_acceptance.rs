@@ -42,13 +42,18 @@ fn project_repo_of(host: &Host) -> PathBuf {
     PathBuf::from(project.main_repo_path)
 }
 
-/// Every checkout in `repo` waits until `release` exists.
+/// Every checkout in `repo` waits until `release` exists — or until the directory holding it is
+/// gone. The world deletes that directory when it is dropped, so a checkout still in flight then (a
+/// test that released and returned before the hook's next look, or one that panicked while held)
+/// is let go instead of holding the git child, and the test process, forever.
 fn hold_checkouts_until(repo: &Path, release: &Path) {
     let hook = repo.join(".git/hooks/post-checkout");
+    let release_dir = release.parent().expect("the release file has a directory");
     std::fs::write(
         &hook,
         format!(
-            "#!/bin/sh\nwhile [ ! -f '{}' ]; do sleep 0.1; done\n",
+            "#!/bin/sh\nwhile [ -d '{}' ] && [ ! -f '{}' ]; do sleep 0.1; done\n",
+            release_dir.display(),
             release.display()
         ),
     )
@@ -158,6 +163,13 @@ impl World {
 
     fn session_ids(&self) -> Vec<String> {
         session_ids_on(&self.a)
+    }
+}
+
+/// A test that ends on any path — a failed assertion included — lets every held checkout go.
+impl Drop for World {
+    fn drop(&mut self) {
+        let _ = std::fs::write(&self.release, "");
     }
 }
 
