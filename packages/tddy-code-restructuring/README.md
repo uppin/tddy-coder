@@ -258,5 +258,4 @@ re-anchor them: that would mean re-deriving each later anchor from the produced 
 closing brace) outside `src/backends/`; test code is not measured. A function the engine could not yet cut is exempted by
 name in `DEFERRED_BY_THE_DEVELOPER`, and the test fails when an exempted function no longer runs past the cap, so the
 list only shrinks. The backend (`src/backends/`) is held to the same cap by its own test in the same file, with its
-exemptions in `DEFERRED_BY_BACKEND_FN_SIZES` under the same only-shrinks rule. The engine's own files are held to 500 production lines by `tests/engine_file_budget_shape.rs`, with
-its own named exceptions.
+exemptions in `DEFERRED_BY_BACKEND_FN_SIZES` under the same only-shrinks rule. The engine's own files follow the repo's 500-production-line file budget; no test enforces it.

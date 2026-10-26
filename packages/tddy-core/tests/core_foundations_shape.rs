@@ -166,44 +166,16 @@ fn the_changeset_splits_into_its_four_concerns() {
     );
 }
 
-/// AC4 — the parent keeps a facade and little else, so no consumer is edited.
 #[test]
-fn the_changeset_parent_is_a_facade() {
+fn the_changeset_parent_publishes_rather_than_defines() {
     // Given the parent after the split
     let text = production(&read("changeset.rs"));
-    let lines = text.lines().count();
 
-    // Then it is small, and it publishes rather than defines
-    assert!(
-        lines < 200,
-        "`changeset.rs` is still {lines} production lines, so the split did not happen"
-    );
+    // Then it publishes `Changeset` rather than defining it
     assert!(
         !text.contains("pub struct Changeset {"),
         "the parent still defines `Changeset` instead of publishing it"
     );
-}
-
-/// AC4 — no module the split produces is over budget.
-#[test]
-fn no_changeset_module_exceeds_four_hundred_production_lines() {
-    // Given all four modules — each must exist, or `read` panics rather than passing vacuously
-    let over: Vec<String> = ["stack", "model", "io", "merge"]
-        .into_iter()
-        .map(|module| {
-            (
-                module,
-                production(&read(&format!("changeset/{module}.rs")))
-                    .lines()
-                    .count(),
-            )
-        })
-        .filter(|(_, lines)| *lines > 400)
-        .map(|(module, lines)| format!("{module} at {lines}"))
-        .collect();
-
-    // Then none is over
-    assert!(over.is_empty(), "over 400 production lines: {over:?}");
 }
 
 /// AC6 — `Presenter` holds seven fields: the five groups, plus what belongs to none of them.

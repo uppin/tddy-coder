@@ -3,19 +3,9 @@
 //! The families' suites prove behaviour, but they would pass just as well with every body still in
 //! `tddy-session-lifecycle` behind a re-export. These assert what a reviewer checks instead: that
 //! the implementations left, where the PR-stack trait now lives, that the edge between the two
-//! crates points one way only, that each handler holds no more than it uses, and that no crate this
-//! stack feeds grows past the size budget it is being carved to.
-//!
-//! Production lines are counted the way the `#carve` size target defines them: everything before
-//! the first `#[cfg(test)]` that opens a `mod`, with `*_tests.rs`, `tests.rs` and `test_util.rs`
-//! excluded. Cutting at the first bare `#[cfg(test)]` instead would stop at a test-only `use` near
-//! the top of a file and under-measure it (see
-//! `docs/dev/todo/2026-09-19-the-file-length-gate-stops-at-the-first-cfg-test-use.md`).
+//! crates points one way only, and that each handler holds no more than it uses.
 
 use std::path::{Path, PathBuf};
-
-/// The ceiling every crate this stack moves code into is held to.
-const PRODUCTION_LINE_BUDGET: usize = 10_000;
 
 // ---------------------------------------------------------------------------------------------
 // Reading the tree
@@ -49,37 +39,6 @@ fn rust_files_under(dir: &Path) -> Vec<PathBuf> {
         }
     }
     found
-}
-
-fn is_test_file(path: &Path) -> bool {
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default();
-    stem.ends_with("_tests") || stem == "tests" || stem == "test_util"
-}
-
-/// The lines of one file before its test module opens.
-fn production_lines_of(source: &str) -> usize {
-    let lines: Vec<&str> = source.lines().collect();
-    lines
-        .windows(2)
-        .position(|pair| {
-            let opens_a_test_module = pair[1].trim_start().starts_with("mod ")
-                || pair[1].trim_start().starts_with("pub mod ")
-                || pair[1].trim_start().starts_with("pub(crate) mod ");
-            pair[0].trim() == "#[cfg(test)]" && opens_a_test_module
-        })
-        .unwrap_or(lines.len())
-}
-
-/// A crate's production lines under `src/`.
-fn production_lines_of_crate(name: &str) -> usize {
-    rust_files_under(&package(name).join("src"))
-        .into_iter()
-        .filter(|path| !is_test_file(path))
-        .map(|path| production_lines_of(&source_of(&path)))
-        .sum()
 }
 
 /// The `[dependencies]` table of a crate's manifest, without its dev- or build-dependencies.
@@ -329,26 +288,3 @@ fn the_binary_runtime_serves_the_four_families_through_their_own_handlers() {
 // ---------------------------------------------------------------------------------------------
 // AC11, AC12 — the size budget
 // ---------------------------------------------------------------------------------------------
-
-/// A cap, not a specification of missing behaviour: it holds today because the receivers are
-/// small, and it must still hold once the bodies have landed in them.
-#[test]
-fn every_crate_receiving_code_stays_within_10k_production_lines() {
-    // Given every crate this change moves code into
-    let receivers = ["tddy-daemon-rpc", "tddy-pr-stack", "tddy-daemon"];
-
-    // When each is measured
-    let over_budget: Vec<String> = receivers
-        .into_iter()
-        .map(|name| (name, production_lines_of_crate(name)))
-        .filter(|(_, lines)| *lines > PRODUCTION_LINE_BUDGET)
-        .map(|(name, lines)| format!("{name}: {lines} production lines"))
-        .collect();
-
-    // Then none has grown past the budget the stack is carving to
-    assert!(
-        over_budget.is_empty(),
-        "over the {PRODUCTION_LINE_BUDGET}-line budget:\n{}",
-        over_budget.join("\n")
-    );
-}

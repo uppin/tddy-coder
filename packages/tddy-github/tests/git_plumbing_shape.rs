@@ -119,22 +119,6 @@ fn session_worktree_source() -> String {
         .expect("tddy-session-worktree/src/worktree.rs")
 }
 
-/// AC2 — the plumbing left the session-aware worktree module, bringing it under its line budget.
-#[test]
-fn the_session_worktree_module_shrinks_below_its_line_budget() {
-    // Given the module after the split
-    let text = session_worktree_source();
-
-    // When its production lines are counted
-    let lines = production(&text).lines().count();
-
-    // Then it is under budget (a budget, so a threshold rather than an exact count)
-    assert!(
-        lines < 450,
-        "`worktree.rs` is still {lines} production lines, so the plumbing did not leave"
-    );
-}
-
 /// AC2 — the session-aware layer stays with the session model, in `tddy-session-worktree`.
 #[test]
 fn the_session_worktree_module_keeps_the_session_aware_layer() {

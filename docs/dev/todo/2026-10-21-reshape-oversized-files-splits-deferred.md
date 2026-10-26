@@ -29,8 +29,8 @@ Order that the plans need: Plan A's `lexical` before its `source_names` (both re
 
 ## What the deferral leaves in the code
 
-- `packages/tddy-code-restructuring/tests/engine_file_budget_shape.rs`: `NOT_YET_SPLIT` lists the five files. Remove
-  each line when its split lands.
+- `packages/tddy-code-restructuring/tests/engine_file_budget_shape.rs`, which listed the five files in `NOT_YET_SPLIT`,
+  was removed on 2026-10-26 with the repo's other line-budget tests.
 - `packages/tddy-code-restructuring/tests/engine_module_edges_shape.rs`: the six edge tests are `#[ignore]`d with a
   pointer here. They read files the splits create (`src/lexical.rs`, `source_names.rs`, `item_move/moving.rs`,
   `item_move/visibility.rs`, `runner/tidy/fixes.rs`) or check edges those splits remove. Un-ignore each test when the

@@ -17,7 +17,8 @@ Both files are shared with the stack's other nodes, so neither is split in this 
 
 ## What stands in for the split
 
-`engine_file_budget_shape`: `NOT_YET_SPLIT` lists both by path, with a pointer to this entry. Remove a line when its split lands.
+Nothing: `engine_file_budget_shape`, which listed both in `NOT_YET_SPLIT`, was removed on 2026-10-26 with the repo's
+other line-budget tests.
 
 ## Wanted
 
