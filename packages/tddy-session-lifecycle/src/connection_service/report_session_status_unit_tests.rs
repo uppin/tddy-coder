@@ -104,6 +104,7 @@ async fn report_session_status_writes_activity_status_to_session_yaml() {
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
+        message: String::new(),
     });
     let response = service
         .activity_service()
@@ -130,6 +131,7 @@ async fn report_session_status_rejects_unknown_session() {
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
+        message: String::new(),
     });
     let err = service
         .activity_service()
@@ -155,6 +157,7 @@ async fn report_session_status_rejects_bad_hook_token() {
         hook_token: "wrong-token".to_string(),
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
+        message: String::new(),
     });
     let err = service
         .activity_service()
@@ -214,6 +217,7 @@ async fn report_session_status_rejects_non_claude_cli_session() {
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
+        message: String::new(),
     });
     let err = service
         .activity_service()
@@ -239,6 +243,7 @@ async fn report_session_status_rejects_unknown_status_string() {
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),
         status: "UnknownBadStatus".to_string(),
+        message: String::new(),
     });
     let err = service
         .activity_service()
@@ -258,6 +263,7 @@ async fn report_session_status_rejects_session_id_path_traversal() {
         hook_token: TEST_HOOK_TOKEN.to_string(),
         os_user: TEST_OS_USER.to_string(),
         status: "Running".to_string(),
+        message: String::new(),
     });
     let err = service
         .activity_service()
@@ -265,4 +271,78 @@ async fn report_session_status_rejects_session_id_path_traversal() {
         .await
         .unwrap_err();
     assert_eq!(err.code, tddy_rpc::Code::InvalidArgument);
+}
+
+fn reporting(session_id: &str, status: &str, message: &str) -> Request<ReportSessionStatusRequest> {
+    Request::direct(ReportSessionStatusRequest {
+        session_id: session_id.to_string(),
+        hook_token: TEST_HOOK_TOKEN.to_string(),
+        os_user: TEST_OS_USER.to_string(),
+        status: status.to_string(),
+        message: message.to_string(),
+    })
+}
+
+/// A claude-cli session reported waiting is recorded as waiting on the agent's own message, so a
+/// reader that is not watching the session live can see the question (`#start-parity` 6/9).
+#[tokio::test]
+async fn waiting_for_input_records_the_agents_message_as_the_pending_question() {
+    // Given
+    let temp = tempfile::tempdir().unwrap();
+    let session_id = "hook-pending-question-1";
+    let session_dir = unified_session_dir_path(temp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+    let service = make_unit_service(temp.path().to_path_buf());
+
+    // When
+    service
+        .activity_service()
+        .report_session_status(reporting(
+            session_id,
+            "WaitingForInput",
+            "Claude needs your permission to use Bash",
+        ))
+        .await
+        .unwrap();
+
+    // Then
+    let question = tddy_core::pending_question::read_pending_question(&session_dir)
+        .unwrap()
+        .expect("the session waits on a question");
+    assert_eq!(question.kind, "permission");
+    assert_eq!(
+        question.question,
+        "Claude needs your permission to use Bash"
+    );
+}
+
+/// Any status after `WaitingForInput` means the session stopped waiting.
+#[tokio::test]
+async fn the_next_status_clears_the_pending_question() {
+    // Given a session waiting on a question
+    let temp = tempfile::tempdir().unwrap();
+    let session_id = "hook-pending-question-2";
+    let session_dir = unified_session_dir_path(temp.path(), session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    write_claude_cli_session(&session_dir, TEST_HOOK_TOKEN);
+    let service = make_unit_service(temp.path().to_path_buf());
+    service
+        .activity_service()
+        .report_session_status(reporting(session_id, "WaitingForInput", "Pick one"))
+        .await
+        .unwrap();
+
+    // When it is reported running again
+    service
+        .activity_service()
+        .report_session_status(reporting(session_id, "Running", ""))
+        .await
+        .unwrap();
+
+    // Then
+    assert_eq!(
+        tddy_core::pending_question::read_pending_question(&session_dir).unwrap(),
+        None
+    );
 }

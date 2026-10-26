@@ -263,6 +263,16 @@ fn lexically_normalized(path: &Path) -> PathBuf {
 /// Returns an empty `Vec` when the file does not exist (no activity recorded yet). Malformed
 /// lines are skipped with a warning; valid lines after them are still returned.
 pub fn read_agent_activity(session_dir: &Path) -> io::Result<Vec<AgentActivityRecord>> {
+    let mut records = read_all_agent_activity(session_dir)?;
+    let skip = records.len().saturating_sub(AGENT_ACTIVITY_READ_CAP);
+    records.drain(..skip);
+    Ok(records)
+}
+
+/// [`read_agent_activity`] without the cap: every call of the session, coalesced by `call_id`, in
+/// first-seen order. For a reader that pages through the whole history rather than showing its tail
+/// (`ReadSessionActivity`).
+pub fn read_all_agent_activity(session_dir: &Path) -> io::Result<Vec<AgentActivityRecord>> {
     let path = session_dir.join(AGENT_ACTIVITY_FILENAME);
     if !path.exists() {
         return Ok(Vec::new());
@@ -296,11 +306,8 @@ pub fn read_agent_activity(session_dir: &Path) -> io::Result<Vec<AgentActivityRe
         }
     }
 
-    // Tail cap: keep only the newest AGENT_ACTIVITY_READ_CAP calls by first-seen order.
-    let skip = order.len().saturating_sub(AGENT_ACTIVITY_READ_CAP);
     let records = order
         .into_iter()
-        .skip(skip)
         .filter_map(|call_id| by_call.remove(&call_id))
         .collect();
     Ok(records)

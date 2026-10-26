@@ -17,6 +17,7 @@ pub mod read_only;
 pub(crate) mod read_window;
 pub(crate) mod restructure_tools;
 pub(crate) mod search_window;
+pub mod session_follow;
 pub mod shell;
 pub mod start_ledger;
 pub mod start_options;

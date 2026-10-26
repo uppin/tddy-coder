@@ -19,7 +19,7 @@ use clap::Args;
 use prost::Message as _;
 use serde::Deserialize;
 use std::io::Read;
-use tddy_core::{activity_status_from_hook, parse_hook_event};
+use tddy_core::{activity_status_from_hook, parse_hook_event, SessionActivityStatus};
 use tddy_service::proto::activity::{ReportAgentActivityRequest, ReportSessionStatusRequest};
 
 /// The coordinate both reports are served at, read from `tddy-service` so this hook and the daemon
@@ -63,6 +63,36 @@ pub struct SessionHookArgs {
     pub event: String,
 }
 
+/// The `ReportSessionStatus` request the hook event in `stdin_json` becomes, or `None` for an
+/// event that maps to no status. A `WaitingForInput` report carries the event's own `message` — the
+/// question the agent is waiting on — which the daemon records as the session's pending question
+/// (`#start-parity` 6/9).
+pub fn session_status_request(
+    args: &SessionHookArgs,
+    stdin_json: &str,
+) -> Option<ReportSessionStatusRequest> {
+    let parsed = parse_hook_event(stdin_json).ok();
+    let notification_type = parsed.as_ref().and_then(|ev| ev.notification_type.clone());
+    let hook_event_name = parsed
+        .as_ref()
+        .map(|ev| ev.hook_event_name.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(args.event.as_str());
+    let status = activity_status_from_hook(hook_event_name, notification_type.as_deref())?;
+    let message = match status {
+        SessionActivityStatus::WaitingForInput => parsed.as_ref().and_then(|ev| ev.message.clone()),
+        _ => None,
+    }
+    .unwrap_or_default();
+    Some(ReportSessionStatusRequest {
+        session_id: args.session.clone(),
+        hook_token: args.hook_token.clone(),
+        os_user: args.os_user.clone(),
+        status: status.as_wire().to_string(),
+        message,
+    })
+}
+
 pub async fn run_session_hook(args: SessionHookArgs) {
     if let Err(e) = try_run_session_hook(args).await {
         eprintln!("[session-hook] error (ignored, fail-quiet): {e}");
@@ -85,7 +115,6 @@ async fn try_run_session_hook(args: SessionHookArgs) -> anyhow::Result<()> {
     // Parse the hook event from stdin. Primary mapping uses `hook_event_name`; `--event` is a
     // backward-compat fallback for Claude hooks that still bake the flag into the command.
     let parsed = parse_hook_event(&stdin_buf).ok();
-    let notification_type = parsed.as_ref().and_then(|ev| ev.notification_type.clone());
     let hook_event_name = parsed
         .as_ref()
         .map(|ev| ev.hook_event_name.as_str())
@@ -98,27 +127,15 @@ async fn try_run_session_hook(args: SessionHookArgs) -> anyhow::Result<()> {
         eprintln!("[session-hook] agent-activity report failed (ignored, fail-quiet): {e}");
     }
 
-    report_session_status(&args, hook_event_name, notification_type.as_deref()).await
+    report_session_status(&args, &stdin_buf).await
 }
 
-/// Send a `ReportSessionStatus` RPC for the mapped activity status.
+/// Send a `ReportSessionStatus` RPC for the status the hook event in `stdin_json` maps to.
 ///
 /// Returns `Ok(())` without contacting the daemon when the event maps to no status (no-op event).
-async fn report_session_status(
-    args: &SessionHookArgs,
-    hook_event_name: &str,
-    notification_type: Option<&str>,
-) -> anyhow::Result<()> {
-    // Map event → activity status. None = no-op, return without calling the daemon.
-    let Some(status) = activity_status_from_hook(hook_event_name, notification_type) else {
+async fn report_session_status(args: &SessionHookArgs, stdin_json: &str) -> anyhow::Result<()> {
+    let Some(req) = session_status_request(args, stdin_json) else {
         return Ok(());
-    };
-
-    let req = ReportSessionStatusRequest {
-        session_id: args.session.clone(),
-        hook_token: args.hook_token.clone(),
-        os_user: args.os_user.clone(),
-        status: status.as_wire().to_string(),
     };
 
     deliver(args, "ReportSessionStatus", req.encode_to_vec()).await

@@ -2194,6 +2194,12 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
                     metadata_tx,
                     metadata_seed,
                 );
+                // Keep the question the workflow is waiting on where `ReadSessionActivity` reads it.
+                let _pending_question_handle =
+                    crate::session_participant::pending_question::spawn_pending_question_recorder(
+                        event_tx.subscribe(),
+                        session_artifact_dir.clone(),
+                    );
                 // Persist the coder's presenter events into this session's own ACP transcript
                 // (`acp-transcript.jsonl`), served read-only by `StreamAcpReplay`.
                 let _acp_transcript_handle =

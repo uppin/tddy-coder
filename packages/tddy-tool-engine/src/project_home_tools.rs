@@ -12,6 +12,8 @@
 //! | `DiffSessionWorktree` | a target worktree's diff against its base |
 //! | `ListWorktrees` | the project's worktrees as the Worktrees screen shows them, a page at a time ([`crate::project_home_worktree_tools`]) |
 //! | `GetWorktree` | one of those worktrees, with the session that owns it |
+//! | `ReadSessionActivity` | a target session's tool calls, paged, with the question it waits on ([`crate::session_follow`]) |
+//! | `ReadSessionTranscript` | a target session's transcript, paged; one tool call whole by id |
 //!
 //! Targets resolve through `tddy_worktree_service::session_target`. Listing and starting need the
 //! daemon's session store and start path, which reach this crate through [`ProjectHomePort`].
@@ -47,6 +49,10 @@ use crate::project_home_worktree_tools::{
     LIST_WORKTREES,
 };
 use crate::read_only::is_project_home_allowed_tool;
+use crate::session_follow::{
+    run_session_follow_tool, session_follow_tool_defs, SessionActivity, ToolCallBodies,
+    TranscriptItem, READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT,
+};
 use crate::start_ledger::{
     StartHandle, StartLedgerRecord, CANCEL_SESSION_START, GET_SESSION_START,
 };
@@ -76,6 +82,8 @@ pub fn is_project_home_tool(name: &str) -> bool {
             | DIFF_SESSION_WORKTREE
             | LIST_WORKTREES
             | GET_WORKTREE
+            | READ_SESSION_ACTIVITY
+            | READ_SESSION_TRANSCRIPT
     )
 }
 
@@ -168,6 +176,8 @@ pub fn is_project_home_target_tool(name: &str) -> bool {
             | LIST_WORKTREES
             | GET_WORKTREE
             | DESCRIBE_SESSION_START_OPTIONS
+            | READ_SESSION_ACTIVITY
+            | READ_SESSION_TRANSCRIPT
     ) || is_project_home_git_tool(name)
 }
 
@@ -236,6 +246,23 @@ pub trait ProjectHomePort: Send + Sync {
     /// Every worktree of `project_id` on this host, as the Worktrees screen's snapshot has them
     /// (`#start-parity` 3/9).
     async fn list_worktrees(&self, project_id: &str) -> anyhow::Result<Vec<WorktreeEntry>>;
+
+    /// Every call `target` has made and the question it waits on (`#start-parity` 6/9).
+    async fn session_activity(&self, target: &SessionTarget) -> anyhow::Result<SessionActivity>;
+
+    /// `target`'s transcript as the Activities view reads it, oldest first, tool bodies stripped;
+    /// an item's index is its `seq`.
+    async fn session_transcript(
+        &self,
+        target: &SessionTarget,
+    ) -> anyhow::Result<Vec<TranscriptItem>>;
+
+    /// One tool call's whole input and output, or `None` for an id the session never made.
+    async fn session_tool_call(
+        &self,
+        target: &SessionTarget,
+        tool_call_id: &str,
+    ) -> anyhow::Result<Option<ToolCallBodies>>;
 
     /// The per-host choices behind `StartSession`'s arguments, as `query` narrows them, for
     /// `project_id`'s stack and branch pickers (`#start-parity` 5/9).
@@ -311,6 +338,7 @@ fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     ];
     defs.push(start_options_tool_def());
     defs.extend(worktree_tool_defs());
+    defs.extend(session_follow_tool_defs());
     defs
 }
 
@@ -350,6 +378,9 @@ pub async fn execute_project_home_tool(
         DIFF_SESSION_WORKTREE => diff_session_worktree(port, home, args).await,
         LIST_WORKTREES => run_list_worktrees(port, home, args).await,
         GET_WORKTREE => run_get_worktree(port, home, args).await,
+        READ_SESSION_ACTIVITY | READ_SESSION_TRANSCRIPT => {
+            run_session_follow_tool(port, home, tool_name, args).await
+        }
         other => ToolOutcome::err(format!("unknown project-home tool: {other}")),
     }
 }

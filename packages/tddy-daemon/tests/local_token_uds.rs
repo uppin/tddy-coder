@@ -730,6 +730,7 @@ async fn carries_an_activity_refusal_out_of_the_handler_behind_the_adapter() {
             hook_token: "tok-over-the-socket".to_string(),
             os_user: current_username(),
             status: "NotAStatusAnyHookRaises".to_string(),
+            message: String::new(),
         })
         .await
         .expect_err("an unknown activity status must be refused");

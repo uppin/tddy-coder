@@ -48,6 +48,7 @@ use tddy_tool_engine::project_home_tools::{
     ListProjectSessionsResult, ListedSession, ProjectHomePort,
 };
 use tddy_tool_engine::project_home_worktree_tools::WorktreeEntry;
+use tddy_tool_engine::session_follow::{SessionActivity, ToolCallBodies, TranscriptItem};
 use tddy_tool_engine::start_ledger::{
     begin_recorded_start_with, StartHandle, StartLedger, StartLedgerRecord, StartState,
     StartedSessionDetails,
@@ -60,6 +61,7 @@ use tddy_worktree_service::session_target::{HomeCaller, SessionTarget, TargetRec
 use tddy_worktree_service::worktrees::{project_worktree_snapshot, WorktreeSizeCalculator};
 
 use super::project_home_remote::PeerSessionLists;
+use super::project_home_session_follow;
 use super::project_home_start_options::{describe_start_options, StartOptionsSources};
 use super::ExecToolRpcHandler;
 use crate::families::ProviderAccountsPort;
@@ -604,6 +606,26 @@ impl ProjectHomePort for DaemonProjectHome {
         .await
         .map_err(|e| anyhow::anyhow!("reading the worktrees failed: {e}"))?;
         Ok(rows.into_iter().map(WorktreeEntry::from).collect())
+    }
+
+    async fn session_activity(&self, target: &SessionTarget) -> anyhow::Result<SessionActivity> {
+        project_home_session_follow::session_activity(&self.sessions_base, target).await
+    }
+
+    async fn session_transcript(
+        &self,
+        target: &SessionTarget,
+    ) -> anyhow::Result<Vec<TranscriptItem>> {
+        project_home_session_follow::session_transcript(&self.sessions_base, target).await
+    }
+
+    async fn session_tool_call(
+        &self,
+        target: &SessionTarget,
+        tool_call_id: &str,
+    ) -> anyhow::Result<Option<ToolCallBodies>> {
+        project_home_session_follow::session_tool_call(&self.sessions_base, target, tool_call_id)
+            .await
     }
 
     async fn target_records(&self) -> anyhow::Result<Vec<TargetRecord>> {

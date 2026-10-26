@@ -22,6 +22,7 @@ pub mod activity_service;
 pub mod connection_service_participant;
 pub mod exec_tool_service;
 pub mod metadata_publisher;
+pub mod pending_question;
 pub mod terminal_manager;
 pub mod terminal_session_adapter;
 pub mod terminal_session_service;
