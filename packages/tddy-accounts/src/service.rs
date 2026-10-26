@@ -757,9 +757,9 @@ fn status_for(refusal: AccountsError) -> Status {
     }
 }
 
-/// The registry entry a daemon pushes so a client can address this service by name.
+/// The registry entry serving `service` by name; the caller may keep its own handle on the service.
 #[must_use]
-pub fn build_accounts_entry<S>(service: AccountsServiceImpl<S>) -> tddy_rpc::ServiceEntry
+pub fn build_accounts_entry<S>(service: Arc<AccountsServiceImpl<S>>) -> tddy_rpc::ServiceEntry
 where
     S: AccountStore + 'static,
 {
@@ -767,6 +767,6 @@ where
 
     tddy_rpc::ServiceEntry {
         name: "accounts.AccountsService",
-        service: Arc::new(AccountsServiceServer::new(service)) as Arc<dyn tddy_rpc::RpcService>,
+        service: Arc::new(AccountsServiceServer::from_arc(service)),
     }
 }

@@ -4,6 +4,7 @@ mod path_guard;
 mod ports;
 mod project_home;
 mod project_home_remote;
+mod project_home_start_options;
 mod result_frames;
 mod role_guard;
 
@@ -16,12 +17,15 @@ use tddy_coding_subagent::ApprovalRoutes;
 use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
-use tddy_host_service::GithubCli;
+use tddy_host_service::{GithubCli, HostServiceImpl};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::{DaemonSessionHost, LocalExecTools};
 use tddy_session_lifecycle::peer_routing::PeerRouting;
 use tddy_session_lifecycle::relay_idle::RpcActivity;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
+
+use crate::families::ProviderAccountsPort;
+use crate::{CatalogRpcHandler, ProjectRpcHandler};
 
 /// The exec-tool RPCs: the caller's identity, the peer a split session's tools are forwarded
 /// to, and the three places a tool actually runs — this host's task registry, a workspace sandbox,
@@ -53,6 +57,14 @@ pub(crate) struct ProjectHomeHost {
     /// The size calculator the Worktrees screen streams from, shared with the host, so a project-home
     /// `ListWorktrees` call reads the same calculation state (`#start-parity` 3/9).
     pub(crate) worktree_sizes: Arc<WorktreeSizeCalculator>,
+    /// The catalogue, project and host RPCs `DescribeSessionStartOptions` answers its lists from,
+    /// called in-process on this host (`#start-parity` 5/9).
+    pub(crate) catalog: Arc<CatalogRpcHandler>,
+    pub(crate) projects: Arc<ProjectRpcHandler>,
+    pub(crate) host_service: Arc<HostServiceImpl>,
+    /// The provider accounts this host's vaults hold, late-bound by
+    /// [`RpcHandlers::attach_provider_accounts`](crate::RpcHandlers::attach_provider_accounts).
+    pub(crate) provider_accounts: Arc<OnceLock<Arc<dyn ProviderAccountsPort>>>,
 }
 
 impl ExecToolRpcHandler {
@@ -73,6 +85,17 @@ impl ExecToolRpcHandler {
                 credential_vaults: host.credential_vaults(),
                 github_cli: host.github_cli(),
                 worktree_sizes: host.worktree_size_calculator(),
+                catalog: Arc::new(CatalogRpcHandler::from_host(host)),
+                projects: Arc::new(ProjectRpcHandler::from_host(host)),
+                // Only its `ListSshConfigHosts` is answered from this instance, which reads the host's
+                // SSH config and no peer's, so the registry and prompt state it is built without are
+                // never reached from here.
+                host_service: Arc::new(HostServiceImpl::new(
+                    host.config().clone(),
+                    host.tddy_data_dir(),
+                    host.user_resolver(),
+                )),
+                provider_accounts: Arc::new(OnceLock::new()),
             },
         }
     }
@@ -87,5 +110,10 @@ impl ExecToolRpcHandler {
     /// The late-bound launch cell, shared with the families that attach it.
     pub(crate) fn session_launch_cell(&self) -> Arc<OnceLock<LaunchSessions>> {
         Arc::clone(&self.session_launch)
+    }
+
+    /// The late-bound provider-account cell, shared with the families that attach it.
+    pub(crate) fn provider_accounts_cell(&self) -> Arc<OnceLock<Arc<dyn ProviderAccountsPort>>> {
+        Arc::clone(&self.project_home_host.provider_accounts)
     }
 }

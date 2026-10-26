@@ -65,9 +65,14 @@ impl BuildContext {
                 &self.identity.keys.auth_config,
             );
             accounts_service = self.wire_credential_sync(&vaults, accounts_service);
+            // One instance, served over the RPC and read by `DescribeSessionStartOptions` (`#start-parity`
+            // 5/9), so the tool and the Accounts screen answer from the same vault and route matrix. A host
+            // without vaults attaches neither, and the tool says it has no provider accounts.
+            let accounts = Arc::new(accounts_service);
             self.identity
                 .rpc_entries
-                .push(tddy_accounts::build_accounts_entry(accounts_service));
+                .push(tddy_accounts::build_accounts_entry(Arc::clone(&accounts)));
+            m.hosted.rpc_handlers.attach_provider_accounts(accounts);
         }
     }
 

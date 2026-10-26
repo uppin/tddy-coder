@@ -19,6 +19,7 @@ pub(crate) mod restructure_tools;
 pub(crate) mod search_window;
 pub mod shell;
 pub mod start_ledger;
+pub mod start_options;
 pub mod start_session_args;
 
 pub use catalog::{tool_catalog, ToolDef};

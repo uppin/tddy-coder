@@ -132,6 +132,7 @@ mod tests {
                 "StartSession",
                 "GetSessionStart",
                 "CancelSessionStart",
+                "DescribeSessionStartOptions",
                 "ReadSessionWorktree",
                 "DiffSessionWorktree",
                 "ListWorktrees",

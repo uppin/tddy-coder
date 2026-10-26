@@ -104,6 +104,7 @@ mod tests {
                 "mcp__tddy-tools__CancelSessionStart",
                 "mcp__tddy-tools__ReadSessionWorktree",
                 "mcp__tddy-tools__DiffSessionWorktree",
+                "mcp__tddy-tools__DescribeSessionStartOptions",
                 "mcp__tddy-tools__ListWorktrees",
                 "mcp__tddy-tools__GetWorktree",
                 "mcp__tddy-tools__CommitSessionWorktree",

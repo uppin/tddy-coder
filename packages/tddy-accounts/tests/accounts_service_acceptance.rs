@@ -633,7 +633,7 @@ fn the_registry_entry_names_the_service_a_client_addresses() {
     let service = a_service(an_account_store());
 
     // When
-    let entry = build_accounts_entry(service);
+    let entry = build_accounts_entry(std::sync::Arc::new(service));
 
     // Then
     assert_eq!(entry.name, "accounts.AccountsService");

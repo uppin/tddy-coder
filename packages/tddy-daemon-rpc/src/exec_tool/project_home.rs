@@ -30,6 +30,7 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_core::session_metadata::PROJECT_HOME_ROLE;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
+use tddy_host_service::HostServiceImpl;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{ListSessionsRequest, ListSessionsResponse};
@@ -51,6 +52,7 @@ use tddy_tool_engine::start_ledger::{
     begin_recorded_start_with, StartHandle, StartLedger, StartLedgerRecord, StartState,
     StartedSessionDetails,
 };
+use tddy_tool_engine::start_options::{StartOptions, StartOptionsQuery};
 use tddy_tool_engine::start_session_args::{StartContext, StartSessionArgs};
 use tddy_worktree_service::service::project_main_repo_on_host;
 use tddy_worktree_service::session_git_ops::PushIdentity;
@@ -58,7 +60,10 @@ use tddy_worktree_service::session_target::{HomeCaller, SessionTarget, TargetRec
 use tddy_worktree_service::worktrees::{project_worktree_snapshot, WorktreeSizeCalculator};
 
 use super::project_home_remote::PeerSessionLists;
+use super::project_home_start_options::{describe_start_options, StartOptionsSources};
 use super::ExecToolRpcHandler;
+use crate::families::ProviderAccountsPort;
+use crate::{CatalogRpcHandler, ProjectRpcHandler};
 
 const SESSION_SERVICE: &str = "session.SessionService";
 
@@ -127,6 +132,14 @@ impl ExecToolRpcHandler {
             peer_routing: self.peer_routing.clone(),
             peers,
             worktree_sizes: Arc::clone(&self.project_home_host.worktree_sizes),
+            catalog: Arc::clone(&self.project_home_host.catalog),
+            projects: Arc::clone(&self.project_home_host.projects),
+            host_service: Arc::clone(&self.project_home_host.host_service),
+            provider_accounts: self
+                .project_home_host
+                .provider_accounts
+                .get()
+                .map(Arc::clone),
         })
     }
 
@@ -260,6 +273,13 @@ pub(super) struct DaemonProjectHome {
     peers: Option<PeerSessionLists>,
     /// The daemon's worktree size calculator, the one the Worktrees screen reads.
     worktree_sizes: Arc<WorktreeSizeCalculator>,
+    /// The host's catalogue, project and host RPCs, which `DescribeSessionStartOptions` answers its
+    /// lists from in-process (`#start-parity` 5/9).
+    catalog: Arc<CatalogRpcHandler>,
+    projects: Arc<ProjectRpcHandler>,
+    host_service: Arc<HostServiceImpl>,
+    /// The provider accounts this host's vaults hold; `None` on a host with no credential vaults.
+    provider_accounts: Option<Arc<dyn ProviderAccountsPort>>,
 }
 
 /// One session as the target resolver reads it: its `.session.yaml`, its changeset's branch, and the
@@ -366,6 +386,29 @@ fn session_rows(
 
 #[async_trait]
 impl ProjectHomePort for DaemonProjectHome {
+    /// The host's choices for a start, answered from this host's own RPCs and sessions. A remote
+    /// host's answer is the one it gives for itself: the tool forwards a call that names it.
+    async fn start_options(
+        &self,
+        project_id: &str,
+        query: StartOptionsQuery,
+    ) -> anyhow::Result<StartOptions> {
+        describe_start_options(
+            StartOptionsSources {
+                session_token: &self.session_token,
+                daemon_instance_id: &self.daemon_instance_id,
+                launch: &self.launch,
+                catalog: &self.catalog,
+                projects: &self.projects,
+                host_service: &self.host_service,
+                provider_accounts: self.provider_accounts.as_deref(),
+            },
+            project_id,
+            query,
+        )
+        .await
+    }
+
     async fn list_sessions(
         &self,
         project_id: &str,
@@ -638,7 +681,7 @@ impl StartedSessionDetails for StartedSessionListings {
     }
 }
 
-fn status_error(status: Status) -> anyhow::Error {
+pub(super) fn status_error(status: Status) -> anyhow::Error {
     anyhow::anyhow!(status.message().to_string())
 }
 
