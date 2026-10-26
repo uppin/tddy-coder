@@ -17,7 +17,8 @@ is not limited to the project, exactly as in the form. Across:
   host whose test user maps to the current OS user.
 - `tddy-accounts` — `build_accounts_entry` takes an `Arc`, so the daemon keeps a handle on the
   instance the RPC serves.
-- `tddy-daemon` — `runtime/mount_accounts.rs` attaches that instance as the port.
+- `tddy-daemon` — `runtime/mount_accounts.rs` attaches that instance as the port; the port's
+  implementation for `AccountsServiceImpl` lives in `tddy-daemon-rpc` `families.rs`.
 - `tddy-web` — `stackParentsParity.cy.ts` and the shared fixture.
 
 Code issues (split deferred, stack-shared): `tddy-tool-engine/src/project_home_tools.rs` 558 → 601,

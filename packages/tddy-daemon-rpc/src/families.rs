@@ -9,10 +9,14 @@
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
+use tddy_accounts::{AccountStore, AccountsServiceImpl};
 use tddy_discovery::CatalogServiceImpl;
 use tddy_projects::ProjectServiceImpl;
-use tddy_rpc::{ServiceEntry, Status};
-use tddy_service::proto::accounts::ProviderRouteOption;
+use tddy_rpc::{Request, ServiceEntry, Status};
+use tddy_service::proto::accounts::{
+    AccountsService as _, ListProviderAccountModelsRequest, ListProviderRoutesRequest,
+    ProviderRouteOption,
+};
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::{DaemonRpcFamilies, PrStackHandler, PrStackServiceImpl};
@@ -24,7 +28,8 @@ use crate::{CatalogRpcHandler, ExecToolRpcHandler, PrStackRpcHandler, ProjectRpc
 /// the provider accounts that can run a harness, and the models of one account. Both are answered
 /// from the caller's own vault, by the `session_token` the caller holds and no other.
 ///
-/// Attached by [`RpcHandlers::attach_provider_accounts`] when the host has credential vaults. A host
+/// Attached by [`RpcHandlers::attach_provider_accounts`] when the host has credential vaults —
+/// implemented below by `tddy_accounts::AccountsServiceImpl` itself. A host
 /// without them never attaches one, and the tool says so rather than offering no accounts silently.
 #[async_trait]
 pub trait ProviderAccountsPort: Send + Sync {
@@ -41,6 +46,41 @@ pub trait ProviderAccountsPort: Send + Sync {
         session_token: &str,
         account_id: &str,
     ) -> Result<Vec<String>, Status>;
+}
+
+/// The accounts service a host's `accounts.AccountsService` RPC serves is itself the port: the two
+/// answers are that service's own `ListProviderRoutes` / `ListProviderAccountModels`, called in
+/// process with the caller's token, so the tool and the Accounts screen read the same vault and route
+/// matrix. Attach the very instance the RPC serves.
+#[async_trait]
+impl<S: AccountStore + 'static> ProviderAccountsPort for AccountsServiceImpl<S> {
+    async fn provider_routes(
+        &self,
+        session_token: &str,
+        harness: &str,
+    ) -> Result<Vec<ProviderRouteOption>, Status> {
+        let answer = self
+            .list_provider_routes(Request::direct(ListProviderRoutesRequest {
+                session_token: session_token.to_string(),
+                harness: harness.to_string(),
+            }))
+            .await?;
+        Ok(answer.into_inner().options)
+    }
+
+    async fn provider_account_models(
+        &self,
+        session_token: &str,
+        account_id: &str,
+    ) -> Result<Vec<String>, Status> {
+        let answer = self
+            .list_provider_account_models(Request::direct(ListProviderAccountModelsRequest {
+                session_token: session_token.to_string(),
+                account_id: account_id.to_string(),
+            }))
+            .await?;
+        Ok(answer.into_inner().model_ids)
+    }
 }
 
 /// Every family served from this crate, each built from the same host.

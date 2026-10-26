@@ -8,49 +8,6 @@ use tddy_daemon_auth::SessionVaults;
 
 type AccountsService = tddy_accounts::AccountsServiceImpl<tddy_accounts::SessionVaultAccountStore>;
 
-/// The two accounts answers `DescribeSessionStartOptions` reads, from the instance the accounts RPC
-/// serves. Each call carries the caller's own session token, so the vault read is the caller's.
-struct AccountsProviderPort(Arc<AccountsService>);
-
-#[async_trait::async_trait]
-impl tddy_daemon_rpc::families::ProviderAccountsPort for AccountsProviderPort {
-    async fn provider_routes(
-        &self,
-        session_token: &str,
-        harness: &str,
-    ) -> Result<Vec<tddy_service::proto::accounts::ProviderRouteOption>, tddy_rpc::Status> {
-        use tddy_service::proto::accounts::AccountsService as _;
-        let answer = self
-            .0
-            .list_provider_routes(tddy_rpc::Request::direct(
-                tddy_service::proto::accounts::ListProviderRoutesRequest {
-                    session_token: session_token.to_string(),
-                    harness: harness.to_string(),
-                },
-            ))
-            .await?;
-        Ok(answer.into_inner().options)
-    }
-
-    async fn provider_account_models(
-        &self,
-        session_token: &str,
-        account_id: &str,
-    ) -> Result<Vec<String>, tddy_rpc::Status> {
-        use tddy_service::proto::accounts::AccountsService as _;
-        let answer = self
-            .0
-            .list_provider_account_models(tddy_rpc::Request::direct(
-                tddy_service::proto::accounts::ListProviderAccountModelsRequest {
-                    session_token: session_token.to_string(),
-                    account_id: account_id.to_string(),
-                },
-            ))
-            .await?;
-        Ok(answer.into_inner().model_ids)
-    }
-}
-
 impl BuildContext {
     pub(super) fn mount_screen_sharing_entry(&mut self, m: &Mounted) {
         let tddy_data_dir = &self.identity.keys.tddy_data_dir;
@@ -115,9 +72,7 @@ impl BuildContext {
             self.identity
                 .rpc_entries
                 .push(tddy_accounts::build_accounts_entry(Arc::clone(&accounts)));
-            m.hosted
-                .rpc_handlers
-                .attach_provider_accounts(Arc::new(AccountsProviderPort(accounts)));
+            m.hosted.rpc_handlers.attach_provider_accounts(accounts);
         }
     }
 
