@@ -18,6 +18,7 @@ use tddy_core::pending_question::{write_pending_question, PendingQuestion};
 use tddy_rpc::Request;
 use tddy_service::proto::activity::{
     ActivityService as _, GetAcpReplayPageRequest, GetAcpToolCallDetailRequest,
+    ReportSessionStatusRequest,
 };
 use tddy_service::proto::exec_tools::{ExecToolService, ExecuteToolRequest, ExecuteToolResponse};
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
@@ -219,6 +220,60 @@ async fn the_question_a_session_waits_on_comes_with_its_activity() {
         "Claude needs your permission to use Bash"
     );
     assert_eq!(page["pending_question"]["kind"], "permission");
+}
+
+const CLAUDE_CLI_HOOK_TOKEN: &str = "tok-claude-cli-permission";
+
+/// `session_id` on `host` is a claude-cli session, whose hooks present [`CLAUDE_CLI_HOOK_TOKEN`].
+fn make_claude_cli(host: &Host, session_id: &str) {
+    let dir = session_dir(host, session_id);
+    let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+    meta.session_type = Some("claude-cli".to_string());
+    meta.hook_token = Some(CLAUDE_CLI_HOOK_TOKEN.to_string());
+    tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+}
+
+#[tokio::test]
+async fn read_session_activity_shows_a_claude_cli_permissions_tool_and_input() {
+    // Given a claude-cli session of the project
+    let world = a_world().await;
+    make_claude_cli(&world.a, &world.on_a);
+
+    // When its PermissionRequest hook reports a permission to run `cargo publish`
+    let report = world
+        .a
+        .daemon
+        .activity_service()
+        .report_session_status(Request::direct(ReportSessionStatusRequest {
+            session_id: world.on_a.clone(),
+            hook_token: CLAUDE_CLI_HOOK_TOKEN.to_string(),
+            os_user: "testdev".to_string(),
+            status: "WaitingForInput".to_string(),
+            hook_event_name: "PermissionRequest".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_input_json: r#"{"command":"cargo publish"}"#.to_string(),
+            ..Default::default()
+        }))
+        .await
+        .expect("the permission request is accepted")
+        .into_inner();
+    let page = world
+        .read(
+            "ReadSessionActivity",
+            serde_json::json!({ "session_id": world.on_a }),
+        )
+        .await;
+
+    // Then the home session reads the question the daemon recorded, with its tool and input
+    let question = &page["pending_question"];
+    assert_eq!(question["request_id"], report.request_id.as_str());
+    assert_eq!(question["kind"], "permission");
+    assert_eq!(question["tool_name"], "Bash");
+    assert_eq!(
+        question["tool_input_json"],
+        r#"{"command":"cargo publish"}"#
+    );
+    assert_eq!(question["question"], "Run Bash: cargo publish");
 }
 
 #[tokio::test]

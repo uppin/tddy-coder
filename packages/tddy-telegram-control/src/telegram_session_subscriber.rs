@@ -167,6 +167,9 @@ impl OperatorChannel for TelegramDaemonHooks {
     ///   through [`Self::on_presenter_event`], with their inline keyboards, per-chat FIFO and
     ///   tracked-session gate. Taking them here as well would send each one twice.
     fn wants_notification(&self, notification: &SessionNotification) -> bool {
+        // TODO(elicit-content): implement — admit `PendingQuestion` (sent once per `request_id`
+        // through `crate::question_alert::QuestionAlert`), and decline an `ActivityStatus`
+        // notification whose `question` is set: that prompt is already told.
         self.enabled()
             && notification.kind == SessionNotificationKind::AttentionRequired
             && matches!(

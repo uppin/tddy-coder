@@ -56,6 +56,9 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
             }
             SessionNotificationSource::Presenter => ProtoSessionNotificationSource::Presenter,
             SessionNotificationSource::Agent => ProtoSessionNotificationSource::Agent,
+            SessionNotificationSource::PendingQuestion => {
+                ProtoSessionNotificationSource::PendingQuestion
+            }
         } as i32,
         text: notification.text,
         at_unix_ms: notification.at_unix_ms,
@@ -66,6 +69,8 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
         }) as i32,
         sound: agent.is_some_and(|a| a.sound),
         link: agent.map(|a| a.link.clone()).unwrap_or_default(),
+        // TODO(elicit-content): implement — map `notification.question` onto `question`.
+        ..Default::default()
     }
 }
 

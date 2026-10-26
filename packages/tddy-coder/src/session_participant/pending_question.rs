@@ -36,6 +36,7 @@ fn clarification_question(kind: &str, question: &ClarificationQuestion) -> Pendi
         question: question.question.clone(),
         options: question.options.iter().map(|o| o.label.clone()).collect(),
         allow_other: question.allow_other,
+        ..Default::default()
     }
 }
 

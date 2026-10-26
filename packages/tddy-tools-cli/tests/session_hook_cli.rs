@@ -566,3 +566,98 @@ async fn a_hook_given_a_dead_agent_tool_socket_still_exits_zero_promptly() {
         "a hook on a dead socket must return within {A_PROMPT_HOOK:?}; took {took:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// What the agent asks (`#home-inbox` 3/8)
+//
+// `PermissionRequest` and `PreToolUse` of `AskUserQuestion` are hooks Claude waits on, and their
+// stdout is Claude's contract: a hook that prints a decision answers the prompt for the person. So
+// these run the real binary and assert on exactly the exit code and the stdout, and on what the
+// daemon was sent.
+// ---------------------------------------------------------------------------
+
+/// Run `session-hook` against `daemon`, feeding it `stdin_json`, and return what it printed on
+/// stdout. Blocking, so it runs off the reactor: the endpoint under test is served by this same
+/// runtime.
+async fn stdout_of_session_hook_against(daemon: &str, session: &str, stdin_json: &str) -> Vec<u8> {
+    let daemon = daemon.to_string();
+    let session = session.to_string();
+    let stdin_json = stdin_json.to_string();
+    tokio::task::spawn_blocking(move || {
+        tddy_tools_bin()
+            .args(["session-hook", "--session", &session, "--daemon", &daemon])
+            .args(["--os-user", "testuser", "--hook-token", "tok-coordinate"])
+            .write_stdin(stdin_json)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    })
+    .await
+    .expect("the session-hook subprocess ran to completion")
+}
+
+/// The `ReportSessionStatus` request `endpoint` was sent.
+fn the_status_report_sent_to(endpoint: &AnActivityEndpoint) -> ReportSessionStatusRequest {
+    let body = endpoint.body_of("ReportSessionStatus").unwrap_or_else(|| {
+        panic!(
+            "ReportSessionStatus never reached the endpoint; it was asked for {:?}",
+            endpoint.methods()
+        )
+    });
+    ReportSessionStatusRequest::decode(&body[..]).expect("decode the ReportSessionStatusRequest")
+}
+
+#[tokio::test]
+async fn the_permission_request_hook_sends_the_tool_and_input_and_exits_zero_with_empty_stdout() {
+    // Given a daemon serving the activity service
+    let endpoint = AnActivityEndpoint::start().await;
+
+    // When Claude's PermissionRequest hook fires for `cargo publish`
+    let stdout = stdout_of_session_hook_against(
+        &endpoint.base_url,
+        "question-session-1",
+        r#"{"hook_event_name":"PermissionRequest","session_id":"question-session-1","tool_name":"Bash","tool_input":{"command":"cargo publish"}}"#,
+    )
+    .await;
+
+    // Then it printed nothing, so Claude's own prompt still appears (and it exited 0: asserted by
+    // the runner)
+    assert_eq!(String::from_utf8_lossy(&stdout), "");
+    // And the daemon was told what is asked
+    let report = the_status_report_sent_to(&endpoint);
+    assert_eq!(report.session_id, "question-session-1");
+    assert_eq!(report.status, "WaitingForInput");
+    assert_eq!(report.hook_event_name, "PermissionRequest");
+    assert_eq!(report.tool_name, "Bash");
+    assert_eq!(report.tool_input_json, r#"{"command":"cargo publish"}"#);
+}
+
+#[tokio::test]
+async fn the_ask_user_question_hook_sends_the_tool_and_input_and_exits_zero_with_empty_stdout() {
+    // Given a daemon serving the activity service
+    let endpoint = AnActivityEndpoint::start().await;
+
+    // When Claude's PreToolUse hook fires for AskUserQuestion
+    let stdout = stdout_of_session_hook_against(
+        &endpoint.base_url,
+        "question-session-2",
+        r#"{"hook_event_name":"PreToolUse","session_id":"question-session-2","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which language?","header":"Language","multiSelect":false,"options":[{"label":"Rust","description":"fast"}]}]}}"#,
+    )
+    .await;
+
+    // Then it printed nothing, so Claude asks its question as it always did
+    assert_eq!(String::from_utf8_lossy(&stdout), "");
+    // And the daemon was told what is asked
+    let report = the_status_report_sent_to(&endpoint);
+    assert_eq!(report.status, "WaitingForInput");
+    assert_eq!(report.hook_event_name, "PreToolUse");
+    assert_eq!(report.tool_name, "AskUserQuestion");
+    let input: serde_json::Value =
+        serde_json::from_str(&report.tool_input_json).expect("the input is JSON");
+    assert_eq!(
+        input["questions"][0]["question"],
+        serde_json::json!("Which language?")
+    );
+}

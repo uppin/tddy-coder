@@ -18,6 +18,7 @@
 //! the crate that stamps the ticks.
 
 pub mod pending_elicitation;
+pub mod pending_question_notice;
 pub mod presenter_intent_client;
 pub mod presenter_observer_spawn;
 pub mod presenter_observer_task;

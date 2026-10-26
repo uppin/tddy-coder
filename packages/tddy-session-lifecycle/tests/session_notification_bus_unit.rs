@@ -39,6 +39,7 @@ fn a_notification() -> SessionNotification {
         text: format!("Session {LABEL}: agent is working"),
         agent: None,
         at_unix_ms: AT,
+        question: None,
     }
 }
 

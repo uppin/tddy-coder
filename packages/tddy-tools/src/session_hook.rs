@@ -90,6 +90,11 @@ pub fn session_status_request(
         os_user: args.os_user.clone(),
         status: status.as_wire().to_string(),
         message,
+        // TODO(elicit-content): implement — for `PermissionRequest` and `PreToolUse` of
+        // `AskUserQuestion`, send the event name, the tool name and its input as JSON.
+        hook_event_name: String::new(),
+        tool_name: String::new(),
+        tool_input_json: String::new(),
     })
 }
 

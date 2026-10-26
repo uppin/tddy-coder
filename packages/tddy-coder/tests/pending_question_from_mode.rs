@@ -48,6 +48,7 @@ fn a_select_mode_is_a_select_question_with_its_options() {
             question: "Which packages does this touch?".to_string(),
             options: vec!["core".to_string(), "web".to_string()],
             allow_other: false,
+            ..Default::default()
         })
     );
 }

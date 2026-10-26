@@ -38,7 +38,8 @@ pub use changeset::{
 };
 pub use elapsed_format::format_elapsed_compact;
 pub use session_activity::{
-    activity_status_from_hook, parse_hook_event, HookEvent, SessionActivityStatus,
+    activity_status_from_hook, activity_status_from_hook_with_tool, parse_hook_event, HookEvent,
+    SessionActivityStatus,
 };
 pub use session_agent::{
     AgentId, AgentIdError, AgentKindRecord, AgentPlacementRecord, SessionAgentRecord,

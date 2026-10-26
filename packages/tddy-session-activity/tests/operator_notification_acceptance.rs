@@ -214,6 +214,7 @@ fn the_agents_notification_at(at_unix_ms: u64) -> SessionNotification {
             link: format!("#/sessions/{SESSION_ID}?host={THIS_HOST}"),
         }),
         at_unix_ms,
+        question: None,
     }
 }
 

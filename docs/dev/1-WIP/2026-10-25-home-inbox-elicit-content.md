@@ -171,7 +171,12 @@ An `AskUserQuestion` call does the same, as `select` or `multi_select` with ever
 - [ ] `a_wrong_hook_token_is_refused_and_records_nothing`
 
 **`tddy-tools`**: `packages/tddy-tools/tests/session_hook_pending_question.rs` (#755's suite)
-- [ ] `the_permission_and_question_hooks_send_the_tool_and_input_and_exit_zero_with_empty_stdout`
+- [ ] `a_permission_request_reports_waiting_with_the_tool_and_its_input`
+- [ ] `an_ask_user_question_reports_waiting_with_every_question_as_the_tool_input`
+
+**`tddy-tools-cli`**: `packages/tddy-tools-cli/tests/session_hook_cli.rs` (process level; **moved here from `tddy-tools`** — that package has no binary to spawn)
+- [ ] `the_permission_request_hook_sends_the_tool_and_input_and_exits_zero_with_empty_stdout`
+- [ ] `the_ask_user_question_hook_sends_the_tool_and_input_and_exits_zero_with_empty_stdout`
 
 **`tddy-daemon-rpc`**: `packages/tddy-daemon-rpc/tests/session_follow_acceptance.rs` (#755's suite)
 - [ ] `read_session_activity_shows_a_claude_cli_permissions_tool_and_input`
@@ -184,6 +189,15 @@ An `AskUserQuestion` call does the same, as `select` or `multi_select` with ever
 **`tddy-agent-backend`**: tests in `packages/tddy-agent-backend/src/claude_hooks.rs`
 - [ ] `build_claude_hooks_settings_emits_all_eight_events` (replaces the six-event test)
 - [ ] `the_pre_tool_use_hook_matches_ask_user_question_only`
+
+### Unit tests (6f)
+
+| Surface | File | Pins |
+|---|---|---|
+| `PendingQuestion::summary` | `packages/tddy-changeset/tests/pending_question_summary.rs` | Bash → its `command`; Edit/Write/Read → `file_path`; any other tool → its input as compact JSON; a question → its first question's text; a record naming neither → `""` |
+| `activity_status_from_hook_with_tool`, `HookEvent` | `packages/tddy-changeset/src/session_activity.rs` (`mod tests`) | `PermissionRequest` and `PreToolUse(AskUserQuestion)` → `WaitingForInput`; `tool_name` and `tool_input` parsed. Guards that already hold: `PreToolUse` of any other tool, and `PostToolUse` with a tool name, are unchanged |
+| `question_notice_for` | `packages/tddy-session-activity/tests/pending_question_notice.rs` | field mapping for a permission and for a two-question record |
+| `QuestionAlert::render` | `packages/tddy-telegram-control/tests/question_alert_render.rs` | permission and question layouts, no header line, multi-select hint, several questions, HTML escaping (`<`, `>`, `&`; quotes untouched) |
 
 ### Test level decisions
 
@@ -203,16 +217,70 @@ An `AskUserQuestion` call does the same, as `select` or `multi_select` with ever
 - **The question alert supersedes `WaitingForInput`'s alert** for the same prompt, so the operator is
   told once.
 
+### Pinned by the acceptance tests (reviewed 2026-10-26)
+
+- **One notification per question.** A report carrying a question publishes a single
+  `SessionNotificationSource::PendingQuestion` notification, and no separate `ActivityStatus` one.
+- **The follow-up carries the notice.** The `Notification` hook that follows the same prompt keeps the
+  record and publishes an `ActivityStatus` notification whose `question` is the pending notice.
+  Telegram declines an `ActivityStatus` notification whose `question` is set, so the operator is told
+  once. This is stateless: `TelegramDaemonHooks` keeps no per-session memory.
+- **`summary()`.** For a permission it is the input summary (`cargo publish`); the record's `question`
+  is `Run <tool>: <summary>`. For an `AskUserQuestion` it is the first question's text.
+- **Alert HTML.** Sent loud (`silent: false`), one message per `request_id`. Only `<`, `>` and `&` are
+  escaped; quotes are left alone.
+  - Permission: `<i>Session {label} wants to run</i> <code>{tool}</code>: <code>{summary}</code>`
+  - Question: `<i>Session {label} asks</i>`, then per question a blank line, `<b>{header}</b>` (omitted
+    when the header is empty), the question text (with ` (choose several)` appended when
+    multi-select), a blank line, and one `• {label}: {description}` line per option (`• {label}` when
+    the description is empty). A second question starts after a blank line.
+  - Example: `<i>Session my-branch asks</i>\n\n<b>Language</b>\nWhich language?\n\n• Rust: Memory safe\n• Go`
+
+### Deviations from the draft contract (found at 6d, approved 2026-10-26)
+
+1. `ReportSessionStatusResponse.request_id` is field **2**: `ok` already holds 1 on the wire.
+2. `From<&PendingQuestion> for QuestionNotice` is the free function
+   `tddy_session_activity::pending_question_notice::question_notice_for`: both types are foreign to
+   `tddy-session-activity`, so the orphan rule refuses the impl.
+3. `HookEvent` loses `Eq` (`tool_input` is a `serde_json::Value`); `PartialEq` stays.
+4. The tool-aware mapping is a new `activity_status_from_hook_with_tool`; `activity_status_from_hook`
+   keeps its signature and delegates to it.
+5. Adding fields forced mechanical edits to existing literals:
+   - `..Default::default()` on `PendingQuestion` in `tddy-coder` (`src/session_participant/pending_question.rs`,
+     `tests/pending_question_from_mode.rs`) and `tddy-changeset/tests/pending_question.rs` (#755's);
+   - `..Default::default()` on `ReportSessionStatusRequest` in tests of `tddy-session-lifecycle`,
+     `tddy-daemon` and `tddy-telegram-control`;
+   - `question: None` on about 14 `SessionNotification` literals across 7 files, **including #766's
+     test files** — #766's green rebase may conflict there.
+6. `each_event_has_one_matcher_group_with_one_command_hook` no longer asserts `matcher == ""` for every
+   event, because `PreToolUse` carries `AskUserQuestion`. The matchers are pinned whole by
+   `the_pre_tool_use_hook_matches_ask_user_question_only`.
+7. The process-level hook test moved from `tddy-tools` to `tddy-tools-cli/tests/session_hook_cli.rs`,
+   and is two tests (one per hook).
+
+## Risks for green
+
+- **A stale pending call id.** `session-hook` also sends `ReportAgentActivity` for every `PreToolUse`.
+  Until now no claude-cli session had a `PreToolUse` hook; with this node's `AskUserQuestion` one,
+  `report_agent_activity_impl` pushes a pending `call_id` that only a `PostToolUse` pops. If the
+  operator denies the question, no `PostToolUse` follows, and the next unrelated tool's `PostToolUse`
+  pairs with the stale id.
+  - **Green decision, open:** either (a) do not push a pending call for a `PreToolUse` of
+    `AskUserQuestion` (it reports a question, not a tool call), or (b) clear it when the question
+    resolves. (a) is the smaller change and keeps the activity log to real tool calls, but drops the
+    `running` row for the question; (b) keeps the row and needs a clear at every status that ends the
+    wait. Green picks one, and a test pins it.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-25-home-inbox-elicit-content-initial-discovery.md`)
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (reviewed by the orchestrator, developer AFK, 2026-10-26)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

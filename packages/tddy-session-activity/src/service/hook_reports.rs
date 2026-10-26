@@ -98,7 +98,11 @@ impl ActivityServiceImpl {
         })
         .await;
 
-        Ok(Response::new(ReportSessionStatusResponse { ok: true }))
+        Ok(Response::new(ReportSessionStatusResponse {
+            ok: true,
+            // TODO(elicit-content): implement — the id of the question this report recorded.
+            request_id: String::new(),
+        }))
     }
 
     /// The per-worktree hook reporting one of its agent's tool calls, before and after it runs.

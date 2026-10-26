@@ -275,6 +275,7 @@ pub fn notification_for_activity_status(
         text,
         agent: None,
         at_unix_ms,
+        question: None,
     })
 }
 
@@ -296,6 +297,7 @@ pub fn notification_for_agent_tool_call(
         text: format!("Session {label}: {tool_name}"),
         agent: None,
         at_unix_ms,
+        question: None,
     }
 }
 
@@ -355,6 +357,7 @@ pub fn notification_for_presenter_event(
         text,
         agent: None,
         at_unix_ms,
+        question: None,
     })
 }
 

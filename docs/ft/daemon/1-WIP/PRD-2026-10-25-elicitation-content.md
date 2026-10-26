@@ -59,6 +59,14 @@ claude-cli session.
   - A question gives the question text and lists its options.
   - Each alert is sent once per `request_id`.
 
+- **Alert layout.** Sent audibly, one message per `request_id`, in Telegram's HTML subset. The
+  session's own words are escaped (`<`, `>`, `&`).
+  - Permission: *Session X wants to run* `Bash`: `cargo publish`.
+  - Question: *Session X asks*, then for each question its header in bold (when it has one), its text
+    (with "(choose several)" when several can be chosen) and one bullet per option, as
+    "• Rust: Memory safe" or "• Go" when the option has no description. Questions are separated by a
+    blank line.
+
 ### What's Staying the Same
 
 - Claude's own terminal prompt remains the only place a person answers in this node.

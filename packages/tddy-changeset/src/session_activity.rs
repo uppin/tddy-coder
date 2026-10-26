@@ -78,6 +78,22 @@ pub fn activity_status_from_hook(
     hook_event_name: &str,
     notification_type: Option<&str>,
 ) -> Option<SessionActivityStatus> {
+    activity_status_from_hook_with_tool(hook_event_name, notification_type, None)
+}
+
+/// [`activity_status_from_hook`] for an event that may name a tool: `PermissionRequest`, and
+/// `PreToolUse` of `AskUserQuestion`, map to `WaitingForInput` (`#home-inbox` 3/8). Every other
+/// `PreToolUse` maps to `None`, as it always has.
+///
+/// `tool_name` is the `tool_name` field of the hook stdin JSON, present on tool events.
+pub fn activity_status_from_hook_with_tool(
+    hook_event_name: &str,
+    notification_type: Option<&str>,
+    tool_name: Option<&str>,
+) -> Option<SessionActivityStatus> {
+    // TODO(elicit-content): implement — `PermissionRequest`, and `PreToolUse` with
+    // `tool_name == "AskUserQuestion"`, map to `WaitingForInput`.
+    let _ = tool_name;
     match hook_event_name {
         // Claude Code CLI (PascalCase)
         "SessionStart" | "sessionStart" => Some(SessionActivityStatus::Started),
@@ -101,9 +117,11 @@ pub fn activity_status_from_hook(
 
 /// Parsed subset of the Claude Code hook stdin JSON payload.
 ///
-/// Unknown fields (e.g. `transcript_path`, `message`, `tool_name`, `tool_input`) are ignored by
-/// serde — safe because Claude Code may add fields per event type.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// Unknown fields (e.g. `transcript_path`) are ignored by serde — safe because Claude Code may add
+/// fields per event type.
+///
+/// Not `Eq`: `tool_input` is a `serde_json::Value`, which is not (`#home-inbox` 3/8).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct HookEvent {
     pub hook_event_name: String,
     #[serde(default)]
@@ -118,12 +136,22 @@ pub struct HookEvent {
     /// waiting on.
     #[serde(default)]
     pub message: Option<String>,
+    /// The tool a `PreToolUse`, `PostToolUse` or `PermissionRequest` event is about.
+    #[serde(default)]
+    pub tool_name: Option<String>,
+    /// That tool's input, as the hook sent it.
+    #[serde(default)]
+    pub tool_input: Option<serde_json::Value>,
 }
 
 impl HookEvent {
     /// Convenience: derive the activity status for this event.
     pub fn activity_status(&self) -> Option<SessionActivityStatus> {
-        activity_status_from_hook(&self.hook_event_name, self.notification_type.as_deref())
+        activity_status_from_hook_with_tool(
+            &self.hook_event_name,
+            self.notification_type.as_deref(),
+            self.tool_name.as_deref(),
+        )
     }
 }
 
@@ -354,6 +382,94 @@ mod tests {
             ev.activity_status(),
             Some(SessionActivityStatus::WaitingForInput)
         );
+    }
+
+    // --- Hooks that carry a question (`#home-inbox` 3/8) ----------------------
+
+    /// `PermissionRequest` → `WaitingForInput`, whatever tool it is for.
+    #[test]
+    fn permission_request_maps_to_waiting_for_input() {
+        // When
+        let status = activity_status_from_hook_with_tool("PermissionRequest", None, Some("Bash"));
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));
+    }
+
+    /// The tool-less mapping answers `PermissionRequest` the same way: it needs no tool name.
+    #[test]
+    fn permission_request_maps_to_waiting_for_input_without_a_tool_name() {
+        // When
+        let status = activity_status_from_hook("PermissionRequest", None);
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));
+    }
+
+    /// `PreToolUse` of `AskUserQuestion` → `WaitingForInput`.
+    #[test]
+    fn pre_tool_use_of_ask_user_question_maps_to_waiting_for_input() {
+        // When
+        let status =
+            activity_status_from_hook_with_tool("PreToolUse", None, Some("AskUserQuestion"));
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::WaitingForInput));
+    }
+
+    /// `PreToolUse` of any other tool stays a no-op, as it always has.
+    #[rstest]
+    #[case::bash(Some("Bash"))]
+    #[case::no_tool_name(None)]
+    fn pre_tool_use_of_any_other_tool_is_noop(#[case] tool_name: Option<&str>) {
+        // When
+        let status = activity_status_from_hook_with_tool("PreToolUse", None, tool_name);
+
+        // Then
+        assert_eq!(status, None);
+    }
+
+    /// A tool name changes nothing for the events that already mapped.
+    #[test]
+    fn a_tool_name_does_not_change_the_post_tool_use_mapping() {
+        // When
+        let status = activity_status_from_hook_with_tool("PostToolUse", None, Some("Bash"));
+
+        // Then
+        assert_eq!(status, Some(SessionActivityStatus::ExecutingTool));
+    }
+
+    /// The hook's `tool_name` and `tool_input` are kept, and `HookEvent::activity_status` uses the
+    /// name: parse → map for an `AskUserQuestion` call.
+    #[test]
+    fn a_parsed_ask_user_question_event_maps_to_waiting_for_input() {
+        // Given
+        let json = r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_input":{"questions":[]}}"#;
+
+        // When
+        let ev = parse_hook_event(json).expect("must parse a PreToolUse event");
+
+        // Then
+        assert_eq!(ev.tool_name.as_deref(), Some("AskUserQuestion"));
+        assert_eq!(ev.tool_input, Some(serde_json::json!({ "questions": [] })));
+        assert_eq!(
+            ev.activity_status(),
+            Some(SessionActivityStatus::WaitingForInput)
+        );
+    }
+
+    /// A parsed `PreToolUse` of another tool maps to nothing.
+    #[test]
+    fn a_parsed_bash_pre_tool_use_event_maps_to_no_status() {
+        // Given
+        let json =
+            r#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}"#;
+
+        // When
+        let ev = parse_hook_event(json).expect("must parse a PreToolUse event");
+
+        // Then
+        assert_eq!(ev.activity_status(), None);
     }
 
     /// `parse_hook_event` rejects JSON that is missing the required `hook_event_name` field.

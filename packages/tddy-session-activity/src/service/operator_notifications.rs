@@ -96,6 +96,7 @@ fn notification_for_agent(
             sound: req.sound,
             link,
         }),
+        question: None,
         at_unix_ms,
     }
 }
