@@ -1402,9 +1402,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         style={{
           width: "100%",
           height: "100%",
-          minWidth: fixedViewportGrid ? 0 : undefined,
+          // The canvas has a fixed pixel width. Without these, the container's
+          // min-content width is the canvas' fitted width — a flex-hosted pane
+          // (a `flex: 1` ancestor without min-width: 0) then refuses to shrink
+          // below it when the window collapses, the FitAddon's ResizeObserver
+          // sees no change, and the grid goes stale, clipping text at the old
+          // edge. Clipping overflow here is the desired behavior: the pane
+          // shrinks, the observer fires, and the grid re-fits to the parent.
+          minWidth: 0,
+          overflow: "hidden",
           minHeight: containerMinHeightPx !== undefined ? containerMinHeightPx : 200,
-          overflow: fixedViewportGrid ? "hidden" : undefined,
           ...(sessionActive
             ? {}
             : { opacity: 0.55, pointerEvents: "none" as const }),
