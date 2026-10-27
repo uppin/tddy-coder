@@ -109,6 +109,12 @@ export function SessionRuntime({
     [buildSessionTerminalClient],
   );
 
+  // Whether the focused terminal shows another screen's lease: the panes stay mounted and visible
+  // but greyed out, and the "Claim terminal" toast floats over them (see `TerminalControlOverlay`).
+  // Input is gated regardless — until the claim resolves there is no lease token to send with — so
+  // the grey-out is honest signalling, not the lock the old blocking overlay was.
+  const controlledElsewhere = focused && terminalClient != null && !controlState.isController;
+
   const {
     terminals,
     activeTerminalId,
@@ -223,7 +229,9 @@ export function SessionRuntime({
   });
 
   // A terminal pane (Agent/bash) is visible only when its tab is active AND nothing else holds the
-  // pane — a selected child or agent conversation overlays the terminal stack.
+  // pane — a selected child or agent conversation overlays the terminal stack. While another screen
+  // holds the control lease, the visible pane is greyed out rather than covered: the terminal stays
+  // readable, and the claim toast above it carries the explanation.
   const paneClass = (terminalId: string) =>
     cn(
       "absolute inset-0 h-full w-full",
@@ -232,6 +240,7 @@ export function SessionRuntime({
         activeTerminalId === terminalId
         ? ""
         : "hidden",
+      controlledElsewhere && "opacity-60 grayscale",
     );
 
   return (
@@ -405,21 +414,21 @@ export function SessionRuntime({
         ))}
 
         {focused && (
-          // The focused runtime carries the terminal-control mutex overlay and the
-          // `sessions-detail-terminal-container` marker (existing acceptance contract). The overlay
-          // is only rendered when a terminal-control client is available — without one the lease is
-          // not being managed, so the terminal stays interactive (no spurious "Claim terminal" CTA).
-          // `pointer-events-none` lets clicks reach the terminal below when no overlay is showing;
-          // the overlay itself re-enables pointer events.
+          // The focused runtime carries the `sessions-detail-terminal-container` marker (existing
+          // acceptance contract) and the terminal-control toast. The toast is only rendered when a
+          // terminal-control client is available — without one the lease is not being managed, so
+          // the terminal stays plain (no spurious "Claim terminal" CTA, no grey-out).
+          // `pointer-events-none` on this container lets clicks reach the terminal below; only the
+          // toast itself re-enables pointer events.
           //
           // Its position and stacking are stated inline for the same reason the conversation panes
           // state theirs: `terminal-live-pane` claims `position: absolute; z-index: 2` inline, so a
-          // mutex CTA that only claimed them through utility classes would be painted over by the
-          // very terminal canvas it is meant to cover — leaving a session another screen controls
-          // looking interactive while swallowing every key.
+          // toast that only claimed them through utility classes would be painted over by the very
+          // terminal canvas it floats over.
           //
-          // The ladder in this stack, bottom up: terminal panes (2), this mutex overlay (3), an
-          // open agent conversation (4). Each covers what it is about and nothing else.
+          // The ladder in this stack, bottom up: terminal panes (2, greyed out while controlled
+          // elsewhere), this toast (3), an open agent conversation (4). Each covers what it is
+          // about and nothing else — the toast no longer blocks the terminal, it explains it.
           <div
             data-testid="sessions-detail-terminal-container"
             className="absolute inset-0 pointer-events-none"
