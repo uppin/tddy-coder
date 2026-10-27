@@ -154,7 +154,7 @@ export function SessionMainPane({
   // switching focus back is instant and background sessions keep streaming. Each runtime owns its
   // own terminal-control lease (see `SessionRuntime`), so the focused one carries the
   // `sessions-detail-terminal-container` marker (existing acceptance contract) and the
-  // terminal-control mutex overlay. Extracted into a variable because a dormant session renders the
+  // terminal-control claim toast. Extracted into a variable because a dormant session renders the
   // Activities view *over* this layer rather than instead of it.
   //
   // A dormant session never foregrounds a terminal: there is no live process behind it, so

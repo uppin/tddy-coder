@@ -1,12 +1,12 @@
 /**
- * Acceptance tests: when the session pane puts a terminal-control overlay on screen.
+ * Acceptance tests: when the session pane puts a terminal-control toast on screen.
  *
  * PRD: docs/ft/daemon/terminal-sessions.md (control section) and
  *      docs/ft/web/session-drawer.md (Claim terminal CTA section).
  *
  * A session can be selected and attached before any runtime has registered itself, and the pane
  * shows its transition placeholder for that gap. Nothing holds a control lease yet, so there is
- * nothing to claim — the overlay must stay away until a runtime is there. What the overlay itself
+ * nothing to claim — the toast must stay away until a runtime is there. What the toast itself
  * renders once the pane does mount one is `TerminalControlAcceptance.cy.tsx`'s subject.
  */
 
@@ -51,7 +51,7 @@ const noopHandlers = {
 // When no runtime is attached yet (session selected but not connected), no overlay renders.
 // ---------------------------------------------------------------------------
 
-it("does not render the Claim terminal overlay when no runtime is attached yet", () => {
+it("does not render the Claim terminal toast when no runtime is attached yet", () => {
   // Given — session selected and connected, but the runtime layer has not registered a runtime yet
   cy.mount(
     <SessionMainPane
@@ -66,7 +66,7 @@ it("does not render the Claim terminal overlay when no runtime is attached yet",
     />,
   );
 
-  // Then — the transition placeholder container exists, but no control overlay is rendered
+  // Then — the transition placeholder container exists, but no control toast is rendered
   page.detailTerminalContainer().should("exist");
   page.terminalControlOverlay().should("not.exist");
 });

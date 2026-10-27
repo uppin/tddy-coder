@@ -18,7 +18,7 @@ export type TerminalClient = Client<typeof TerminalSessionService>;
 export interface SessionRuntimeProps {
   /** This runtime's attached-session state (connection params + status). */
   runtime: SessionRuntimeState;
-  /** True when this runtime is the focused (CSS-visible) one. Drives the control overlay + mobile
+  /** True when this runtime is the focused (CSS-visible) one. Drives the control toast + mobile
    *  shortcut overlay; backgrounded runtimes stay mounted but `display:none`. */
   focused: boolean;
   sessionToken: string;

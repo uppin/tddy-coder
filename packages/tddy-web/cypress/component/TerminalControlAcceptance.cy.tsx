@@ -1,14 +1,16 @@
 /**
- * Acceptance tests: single-screen terminal control mutex — the "Claim terminal" overlay.
+ * Acceptance tests: single-screen terminal control mutex — the "Claim terminal" toast.
  *
  * PRD: docs/ft/daemon/terminal-sessions.md (control section) and
  *      docs/ft/web/session-drawer.md (Claim terminal CTA section).
  *
- * The overlay is pure presentation (`TerminalControlOverlay`); the lease state and steal-claim
+ * The toast is pure presentation (`TerminalControlOverlay`); the lease state and steal-claim
  * action are owned per-session by `SessionRuntime` via `useTerminalControl` (see
  * `SessionParticipantRpcRouting.cy.tsx` for the end-to-end claim-routing contract). These tests
- * exercise the overlay's presentation contract directly, and mount nothing else — whether the pane
- * puts an overlay on screen at all is `SessionMainPaneTerminalControl.cy.tsx`'s subject.
+ * exercise the toast's presentation contract directly, and mount nothing else — whether the pane
+ * puts a toast on screen at all is `SessionMainPaneTerminalControl.cy.tsx`'s subject. The grey-out
+ * of the panes under the toast is the runtime's own doing (`SessionRuntime`'s `paneClass`), not
+ * this component's.
  */
 
 import React from "react";
@@ -16,10 +18,10 @@ import { TerminalControlOverlay } from "../../src/components/sessions/TerminalCo
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
-// AC1: When this screen is not the controller, the "Claim terminal" overlay is visible.
+// AC1: When this screen is not the controller, the "Claim terminal" toast is visible.
 // ---------------------------------------------------------------------------
 
-it("shows the Claim terminal overlay when this screen does not hold the control lease", () => {
+it("shows the Claim terminal toast when this screen does not hold the control lease", () => {
   // Given — another screen holds control
   const onClaim = cy.stub();
 
@@ -53,10 +55,10 @@ it("calls onClaim when the Claim terminal button is clicked", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC3: When this screen IS the controller, the overlay is not present.
+// AC3: When this screen IS the controller, the toast is not present.
 // ---------------------------------------------------------------------------
 
-it("does not render the Claim terminal overlay when this screen holds the control lease", () => {
+it("does not render the Claim terminal toast when this screen holds the control lease", () => {
   // Given — this screen is the controller
   cy.mount(
     <TerminalControlOverlay isController={true} holderScreenId="this-screen-id" onClaim={cy.stub()} />,

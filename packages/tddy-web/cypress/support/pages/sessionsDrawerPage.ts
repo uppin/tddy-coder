@@ -440,11 +440,11 @@ export const sessionsDrawerPage = {
   // Terminal control mutex — "Claim terminal" CTA
   // ---------------------------------------------------------------------------
 
-  /** The overlay that appears when this screen is not the terminal controller. */
+  /** The toast that appears when this screen is not the terminal controller. */
   terminalControlOverlay: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.terminalControlOverlay, { timeout: 5000, ...options }),
 
-  /** The "Claim terminal" button inside the control overlay. */
+  /** The "Claim terminal" button inside the control toast. */
   terminalClaimBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.terminalClaimBtn, { timeout: 5000, ...options }),
 
