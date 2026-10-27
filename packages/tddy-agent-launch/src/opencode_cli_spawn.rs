@@ -75,11 +75,19 @@ pub(crate) struct CliHarnessStart<'a> {
 
 /// The binary `harness` is run as: its environment variable, then
 /// `cli_harnesses.<session type>.binary_path` in the daemon config, then the registry's default.
+/// A bare default name is resolved on the host — `~/.local/bin/<name>`, then `$PATH` — because the
+/// daemon runs under systemd with a minimal `PATH` that never holds the user-local install dirs
+/// (and the impersonated child would otherwise fail the same way). A name that resolves nowhere is
+/// left bare, so the spawner's error is the familiar "not found on PATH".
 pub(crate) fn harness_binary(config: &DaemonConfig, harness: &CliHarness) -> String {
-    config.cli_harness_binary(
+    let binary = config.cli_harness_binary(
         harness.session_type,
         harness.default_binary,
         harness.binary_env,
+    );
+    tddy_daemon_kernel::config::resolve_harness_binary_name(
+        binary,
+        tddy_daemon_kernel::config::find_real_harness_on_host,
     )
 }
 
@@ -219,6 +227,7 @@ pub(crate) async fn start_cli_harness_session(
             ..CliLaunch::default()
         },
         launch_extras(route.unwrap_or_default(), env, token_recorder),
+        Some(os_user),
     )
     .await?;
     progress.end_phase(StartStep::Agent);
@@ -290,6 +299,7 @@ impl crate::launch_ports::LaunchSessions {
                 session_dir,
                 meta: metadata,
                 git_environment: identity.git_environment,
+                os_user,
             },
         )
         .await
@@ -304,6 +314,8 @@ struct ResumedSession<'a> {
     /// The project's account identity pairs the resumed agent's commits carry (empty keeps the
     /// checkout's own).
     git_environment: Vec<(String, String)>,
+    /// The OS user the session runs as, for the child's `HOME`/`PATH` overrides.
+    os_user: &'a str,
 }
 
 /// Resume a CLI harness session: the harness's resume argv (`--continue`) in its worktree, with its
@@ -321,6 +333,7 @@ async fn resume_cli_harness_session(
         session_dir,
         meta,
         git_environment,
+        os_user,
     } = session;
     let worktree_path = meta
         .repo_path
@@ -349,6 +362,7 @@ async fn resume_cli_harness_session(
             ..CliLaunch::default()
         },
         launch_extras(route, git_environment, token_recorder),
+        Some(os_user),
     )
     .await?;
 
@@ -384,7 +398,9 @@ fn launch_extras(
     }
 }
 
-/// Spawn `harness` with `launch`, followed by `extras`.
+/// Spawn `harness` with `launch`, followed by `extras`, as `os_user` — the session owner, whose
+/// `HOME` and configured `PATH` extra the child must run under, or its user-local binary and
+/// credentials are never found (a systemd daemon's own `PATH` is minimal).
 async fn launch(
     cli_manager: &Arc<CliSessionManager>,
     harness: &CliHarness,
@@ -392,6 +408,7 @@ async fn launch(
     worktree_path: &Path,
     launch: &CliLaunch<'_>,
     extras: HarnessLaunchExtras,
+    os_user: Option<&str>,
 ) -> Result<Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>, Status> {
     cli_manager
         .launch_cli_harness(
@@ -400,6 +417,7 @@ async fn launch(
             worktree_path.to_path_buf(),
             launch,
             extras,
+            os_user,
         )
         .await
         .map_err(|e| Status::internal(format!("failed to spawn {}: {e}", harness.session_type)))

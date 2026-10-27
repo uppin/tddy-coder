@@ -68,6 +68,7 @@ async fn a_resume_waits_for_the_exit_hook_of_the_run_before() {
                 on_exit: Some(hook),
                 ..HarnessLaunchExtras::default()
             },
+            None,
         )
         .await
         .expect("harness spawned");
@@ -128,6 +129,7 @@ async fn a_resume_does_not_wait_for_a_run_that_is_still_going() {
                 on_exit: Some(hook),
                 ..HarnessLaunchExtras::default()
             },
+            None,
         )
         .await
         .expect("harness spawned");

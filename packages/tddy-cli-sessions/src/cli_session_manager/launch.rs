@@ -31,6 +31,9 @@ impl CliSessionManager {
     ///
     /// `extras` adds to that launch: arguments after the harness's own argv, environment on top of
     /// the daemon's, and the work to finish once the process exits (see [`HarnessLaunchExtras`]).
+    ///
+    /// `os_user` — the session owner, whose `HOME` and configured `PATH` extra the child must run
+    /// under (the same overrides a claude-cli launch applies); `None` runs the child as the daemon.
     pub async fn launch_cli_harness(
         &self,
         harness: &CliHarness,
@@ -38,6 +41,7 @@ impl CliSessionManager {
         worktree_path: PathBuf,
         launch: &CliLaunch<'_>,
         extras: HarnessLaunchExtras,
+        os_user: Option<&str>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let mut argv = (harness.argv)(launch);
         argv.extend(extras.args);
@@ -49,7 +53,7 @@ impl CliSessionManager {
             launch.model,
             argv,
             extras.env,
-            None,
+            os_user,
             extras.on_exit,
         )
         .await
