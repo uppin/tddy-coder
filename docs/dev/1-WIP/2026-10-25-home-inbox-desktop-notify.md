@@ -145,6 +145,16 @@ session route.
 - **Contract deviations from this document's first draft.** A `DashboardWindow` port and a `SessionRoute` type were added (suppression and click both need the window, which does not exist when the runtime is built); `DesktopNotice.route` is a `SessionRoute`. Green's `mount_host.rs` append needs a small forwarding adapter, because `SessionNotificationBus::with_subscriber` is generic over a sized subscriber and cannot take `Arc<dyn …>`.
 - **Acceptance-test review (orchestrator, developer AFK, 2026-10-26)** approved the six acceptance tests.
 - Body cut to 300 plain-text characters — operating-system centres truncate further anyway.
+- **Green (orchestrator, developer AFK, 2026-10-28).** The fixed text of a daemon-worded notification is shown whole, not cut to 300: the changeset's rule names the fixed text as the body, and the daemon's fixed sentences are short. A pending question's text is the one that can run long; a cut there is a follow-up if it shows in practice.
+- **Green (orchestrator, developer AFK, 2026-10-28).** Suppression: the window must have focus *and* its page must be on the session's exact route (`SessionRoute::fragment`). A notice is recorded as "last shown" only when it is actually shown, so a notice the focused window swallowed is not treated as the previous one.
+- **Green (orchestrator, developer AFK, 2026-10-28).** `wants` and `deliver` share one rule, `desktop_notice_for`, so the subscriber's filter and its notice cannot disagree. A poisoned suppression map is recovered rather than dropping the subscriber.
+- **Green (orchestrator, developer AFK, 2026-10-28).** The route's host is `tddy_daemon_kernel::daemon_identity::local_instance_id_for_config` of the desktop's config, the id the daemon itself answers to. Route fragments are built and parsed by `url` (`path_segments_mut`, `query_pairs_mut`), so encoding matches the test's `dev+box%261`.
+- **Green (orchestrator, developer AFK, 2026-10-28).** The desktop's OS user is `username_for_uid(getuid())`, the same resolution the daemon uses for enrolment. An unresolvable user fails the desktop's start rather than showing notifications for everyone or for no one. Tddy Desktop is unix-only, so the non-unix arm is a bail, not a fallback.
+- **Green (orchestrator, developer AFK, 2026-10-28).** `start_daemon` registers the subscriber and the notification plugin is initialised in `run()`. Both are in this changeset's Delta and the PRD's State B; no TODO marker names them, so they were not in the stub list.
+- **Green (orchestrator, developer AFK, 2026-10-28).** The default sound is the operating system's `default` alert, set only when `DesktopNotice.sound` is true. On Linux the freedesktop theme may not carry that name; the sound is unverified there.
+- **Green (orchestrator, developer AFK, 2026-10-28), finding.** `tauri-plugin-notification` 2.4 shows a desktop notification on a task it spawns and drops that task's error, so a failure inside the OS centre is not reported to the subscriber. Only a failure before the task starts reaches `show`'s caller. Recorded in `TauriNotifier`'s doc.
+- **Green (orchestrator, developer AFK, 2026-10-28), open question for the developer.** A pending question can produce a second attention notification for the same prompt: a status report that follows an already-recorded question is published with the question attached and different text, so the identical-text rule does not catch it. The kernel's `QuestionNotice.request_id` could. Not implemented: it is a third suppression rule the approved acceptance tests do not cover.
+- **Green (orchestrator, developer AFK, 2026-10-28).** `tddy-daemon/tests/test_placement.rs` keeps an allowlist of suites that belong in that package. The contract's `runtime_notification_subscriber_acceptance.rs` was not on it, so the tripwire failed. The suite mounts `runtime::build` on the daemon, so it is registered (the array goes from 31 to 32), not moved.
 
 ## TODO
 
@@ -156,7 +166,7 @@ session route.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (orchestrator, developer AFK, 2026-10-26)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (`/green`, 2026-10-28)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass

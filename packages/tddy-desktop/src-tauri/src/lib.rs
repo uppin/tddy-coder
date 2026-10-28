@@ -19,6 +19,9 @@ mod oauth_callback;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::native_notifications::{
+    DesktopContext, DesktopNotificationSubscriber, TauriDashboardWindow, TauriNotifier,
+};
 use tauri::webview::{PageLoadEvent, PageLoadPayload};
 use tauri::{
     DragDropEvent, Emitter, EventTarget, Manager, RunEvent, Url, Webview, WebviewUrl,
@@ -86,7 +89,9 @@ pub fn run() -> anyhow::Result<()> {
 
     let dashboard = dashboard_url()?;
     let config_path = source.config_path;
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init());
 
     // Only in a `--features wdio` build, which is the e2e suite's. The plugin serves WebDriver
     // from inside this process — a listening socket that can drive the UI and invoke commands —
@@ -281,6 +286,19 @@ fn start_daemon(
         }
         None => None,
     };
+    // The operator's native notifications: this process's own sessions, addressed on this daemon. Read
+    // before `config` moves into the runtime, and an unresolvable user is a startup error rather than
+    // notifications for everyone or for no one.
+    let notifications = DesktopNotificationSubscriber::new(
+        DesktopContext {
+            os_user: this_process_os_user()?,
+            daemon_instance_id: tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(
+                &config,
+            ),
+        },
+        Arc::new(TauriNotifier::new(handle.clone())),
+        Arc::new(TauriDashboardWindow::new(handle.clone())),
+    );
     // `build` is assembly, `spawn` needs a runtime context, and so does the signal listener, so all
     // three run on Tauri's — the same runtime the two IPC commands are dispatched on, which is what
     // lets a response the daemon produces reach the sink a command registered.
@@ -292,7 +310,8 @@ fn start_daemon(
                 // Reaches the auth services and stops there — never the configuration a settings
                 // update writes back.
                 .with_oauth_redirect(callback_url)
-                .with_spawn_worker(spawn_client),
+                .with_spawn_worker(spawn_client)
+                .with_notification_subscriber(Arc::new(notifications)),
         )
         .await?;
         log::info!(
@@ -318,6 +337,25 @@ fn start_daemon(
     app.manage(state);
     app.manage(shutdown);
     Ok(())
+}
+
+/// The OS user this process runs as: the operator whose sessions this desktop shows notifications for.
+#[cfg(unix)]
+fn this_process_os_user() -> anyhow::Result<String> {
+    // SAFETY: `getuid` has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    tddy_session_lifecycle::user_sessions_path::username_for_uid(uid).ok_or_else(|| {
+        anyhow::anyhow!(
+            "cannot resolve the OS user this desktop runs as, which its native notifications are for"
+        )
+    })
+}
+
+/// Tddy Desktop is unix-only (the daemon's local socket is), so no other platform reaches a user to
+/// resolve.
+#[cfg(not(unix))]
+fn this_process_os_user() -> anyhow::Result<String> {
+    anyhow::bail!("Tddy Desktop's native notifications need a unix OS user")
 }
 
 /// Ask the application to exit when a service manager (or a logout) sends `SIGTERM`, so the window

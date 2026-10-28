@@ -5,19 +5,20 @@
 //! verified by hand (the changeset's manual verification); what decides *whether* and *what* to
 //! show is tested against the ports' fakes in `tests/native_notifications_acceptance.rs`.
 
-use tauri::{AppHandle, Url};
+use tauri::{AppHandle, Manager, Url, WebviewWindow};
+use tauri_plugin_notification::NotificationExt;
 
 use super::{DashboardWindow, DesktopNotice, NativeNotifier};
+use crate::MAIN_WINDOW_LABEL;
 
 /// Shows a [`DesktopNotice`] through `tauri-plugin-notification`, with the label folded into the body
 /// ([`DesktopNotice::body_with_label`]) because the plugin's desktop notification has no subtitle.
 ///
 /// The plugin's desktop permission API always answers "granted" without asking, so a refusal by
 /// the operating system is not observable here; macOS asks on the first notification and silently
-/// drops it when refused.
+/// drops it when refused. The plugin also shows the notification on a task of its own and drops that
+/// task's error, so only a failure before the task starts reaches the caller.
 pub struct TauriNotifier {
-    // TODO(desktop-notify): read by `show`
-    #[allow(dead_code)]
     app: AppHandle,
 }
 
@@ -29,19 +30,24 @@ impl TauriNotifier {
 
 impl NativeNotifier for TauriNotifier {
     fn show(&self, notice: &DesktopNotice) -> anyhow::Result<()> {
-        // TODO(desktop-notify): implement
-        let _ = notice;
-        Err(anyhow::anyhow!(
-            "TODO(desktop-notify): TauriNotifier::show is not implemented"
-        ))
+        let mut builder = self
+            .app
+            .notification()
+            .builder()
+            .title(&notice.title)
+            .body(notice.body_with_label());
+        if notice.sound {
+            // The operating system's own default alert, the one an agent asks for by name.
+            builder = builder.sound("default");
+        }
+        builder.show()?;
+        Ok(())
     }
 }
 
 /// The dashboard window, looked up by label on every call: it is created after the daemon — and so
 /// after the subscriber that holds this — and may be closed and reopened.
 pub struct TauriDashboardWindow {
-    // TODO(desktop-notify): read by every method
-    #[allow(dead_code)]
     app: AppHandle,
 }
 
@@ -49,31 +55,39 @@ impl TauriDashboardWindow {
     pub fn new(app: AppHandle) -> Self {
         Self { app }
     }
+
+    /// The dashboard window, if it is open.
+    fn window(&self) -> Option<WebviewWindow> {
+        self.app.get_webview_window(MAIN_WINDOW_LABEL)
+    }
+
+    fn open_window(&self) -> anyhow::Result<WebviewWindow> {
+        self.window()
+            .ok_or_else(|| anyhow::anyhow!("the dashboard window is not open"))
+    }
 }
 
 impl DashboardWindow for TauriDashboardWindow {
     fn is_focused(&self) -> bool {
-        // TODO(desktop-notify): implement
-        false
+        // A window whose focus cannot be read is taken as not focused, so the operator is told.
+        self.window()
+            .is_some_and(|window| window.is_focused().unwrap_or(false))
     }
 
     fn location(&self) -> Option<Url> {
-        // TODO(desktop-notify): implement
-        None
+        self.window()?.url().ok()
     }
 
     fn bring_to_front(&self) -> anyhow::Result<()> {
-        // TODO(desktop-notify): implement
-        Err(anyhow::anyhow!(
-            "TODO(desktop-notify): TauriDashboardWindow::bring_to_front is not implemented"
-        ))
+        let window = self.open_window()?;
+        window.unminimize()?;
+        window.show()?;
+        window.set_focus()?;
+        Ok(())
     }
 
     fn navigate(&self, url: Url) -> anyhow::Result<()> {
-        // TODO(desktop-notify): implement
-        let _ = url;
-        Err(anyhow::anyhow!(
-            "TODO(desktop-notify): TauriDashboardWindow::navigate is not implemented"
-        ))
+        self.open_window()?.navigate(url)?;
+        Ok(())
     }
 }

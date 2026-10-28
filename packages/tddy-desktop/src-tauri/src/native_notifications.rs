@@ -36,8 +36,10 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use tauri::Url;
+use tddy_daemon_kernel::notification_markdown::to_plain_text;
 use tddy_session_lifecycle::session_notifications::{
-    SessionNotification, SessionNotificationSubscriber,
+    SessionNotification, SessionNotificationKind, SessionNotificationSource,
+    SessionNotificationSubscriber,
 };
 
 mod tauri_host;
@@ -69,16 +71,36 @@ impl SessionRoute {
     /// The dashboard's hash route to this session: `/sessions/<id>?host=<instance>` (without the
     /// `#`).
     pub fn fragment(&self) -> String {
-        // TODO(desktop-notify): implement
-        String::new()
+        // Built by `Url` rather than by hand, so the ids are encoded the way the dashboard reads them
+        // back: a space in the host is `+` and an `&` is `%26`, as a query string has it.
+        let mut addressed = Url::parse("tddy:///").expect("a constant URL parses");
+        addressed
+            .path_segments_mut()
+            .expect("a URL with an empty host has path segments")
+            .extend(["sessions", self.session_id.as_str()]);
+        addressed.query_pairs_mut().append_pair("host", &self.host);
+        format!(
+            "{}?{}",
+            addressed.path(),
+            addressed.query().unwrap_or_default()
+        )
     }
 
     /// `dashboard` — whatever page the dashboard is on, carrying whatever path and query — moved to
     /// this session's route: the same origin, the app's root page and [`Self::fragment`] as the
     /// hash.
     pub fn url_within(&self, dashboard: &Url) -> Url {
-        // TODO(desktop-notify): implement
-        dashboard.clone()
+        let mut url = dashboard.clone();
+        url.set_path("/");
+        url.set_query(None);
+        url.set_fragment(Some(&self.fragment()));
+        url
+    }
+
+    /// Whether a dashboard page at `location` is on this session's route. The dashboard writes its
+    /// own session routes the same way [`Self::fragment`] does, so an exact match is the session.
+    fn is_shown_at(&self, location: &Url) -> bool {
+        location.fragment() == Some(self.fragment().as_str())
     }
 }
 
@@ -103,8 +125,11 @@ impl DesktopNotice {
     /// The body as a notification centre that has no subtitle shows it: the session label as the
     /// first line, then the body — the label alone when the body is empty.
     pub fn body_with_label(&self) -> String {
-        // TODO(desktop-notify): implement
-        String::new()
+        if self.body.is_empty() {
+            self.subtitle.clone()
+        } else {
+            format!("{}\n{}", self.subtitle, self.body)
+        }
     }
 }
 
@@ -138,9 +163,34 @@ pub fn desktop_notice_for(
     notification: &SessionNotification,
     context: &DesktopContext,
 ) -> Option<DesktopNotice> {
-    // TODO(desktop-notify): implement
-    let _ = (notification, context);
-    None
+    if notification.kind != SessionNotificationKind::AttentionRequired
+        || notification.os_user != context.os_user
+    {
+        return None;
+    }
+    let pending_question = notification.source == SessionNotificationSource::PendingQuestion;
+    let (title, body, agent_asked_for_sound) = match &notification.agent {
+        Some(agent) => (
+            agent.title.clone(),
+            to_plain_text(&agent.body_markdown, BODY_LIMIT),
+            agent.sound,
+        ),
+        None => (
+            format!("{} needs you", notification.label),
+            notification.text.clone(),
+            false,
+        ),
+    };
+    Some(DesktopNotice {
+        title,
+        subtitle: notification.label.clone(),
+        body,
+        sound: agent_asked_for_sound || pending_question,
+        route: SessionRoute {
+            session_id: notification.session_id.clone(),
+            host: context.daemon_instance_id.clone(),
+        },
+    })
 }
 
 /// The click handler: bring the dashboard window to the front and open `route` in it.
@@ -148,24 +198,22 @@ pub fn open_session_route(
     window: &dyn DashboardWindow,
     route: &SessionRoute,
 ) -> anyhow::Result<()> {
-    // TODO(desktop-notify): implement
-    let _ = (window, route);
-    Err(anyhow::anyhow!(
-        "TODO(desktop-notify): open_session_route is not implemented"
-    ))
+    let location = window
+        .location()
+        .ok_or_else(|| anyhow::anyhow!("the dashboard window has no page to open a session in"))?;
+    let target = route.url_within(&location);
+    // Brought forward before it navigates: a window still hidden would leave the operator looking at
+    // whatever it showed before the click.
+    window.bring_to_front()?;
+    window.navigate(target)
 }
 
 /// Shows the daemon's attention notifications for the desktop operator's sessions natively.
 pub struct DesktopNotificationSubscriber {
-    // TODO(desktop-notify): read by `deliver`
-    #[allow(dead_code)]
     context: DesktopContext,
-    #[allow(dead_code)]
     notifier: Arc<dyn NativeNotifier>,
-    #[allow(dead_code)]
     window: Arc<dyn DashboardWindow>,
     /// The notice last shown per session, so an identical one is not shown twice in a row.
-    #[allow(dead_code)]
     last_shown: Mutex<HashMap<String, DesktopNotice>>,
 }
 
@@ -191,14 +239,39 @@ impl SessionNotificationSubscriber for DesktopNotificationSubscriber {
     }
 
     fn wants(&self, notification: &SessionNotification) -> bool {
-        // TODO(desktop-notify): implement
-        let _ = notification;
-        false
+        desktop_notice_for(notification, &self.context).is_some()
     }
 
     async fn deliver(&self, notification: &SessionNotification) -> anyhow::Result<()> {
-        // TODO(desktop-notify): implement
-        let _ = notification;
+        let Some(notice) = desktop_notice_for(notification, &self.context) else {
+            return Ok(());
+        };
+        if self.operator_is_looking_at(&notice.route) {
+            return Ok(());
+        }
+        // A poisoned map still holds every notice it recorded, and losing one repeat check costs at
+        // most one repeated notification, so the guard is recovered rather than the subscriber dropped.
+        let mut last_shown = self
+            .last_shown
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if last_shown.get(&notice.route.session_id) == Some(&notice) {
+            return Ok(());
+        }
+        self.notifier.show(&notice)?;
+        last_shown.insert(notice.route.session_id.clone(), notice);
         Ok(())
+    }
+}
+
+impl DesktopNotificationSubscriber {
+    /// Whether the operator already has `route` in front of them: the dashboard window has focus and
+    /// its page is on that session.
+    fn operator_is_looking_at(&self, route: &SessionRoute) -> bool {
+        self.window.is_focused()
+            && self
+                .window
+                .location()
+                .is_some_and(|location| route.is_shown_at(&location))
     }
 }
