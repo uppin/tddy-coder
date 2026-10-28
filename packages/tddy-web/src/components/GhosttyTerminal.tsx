@@ -244,6 +244,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       text: string;
     } | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
+    const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    // Frame handle of the re-fit retry loop — at component scope because the effect's cleanup
+    // must be able to cancel a loop armed inside `setup()` (which runs asynchronously, so the
+    // cleanup can fire before setup's own locals exist).
+    const refitRafRef = useRef(0);
     const [ready, setReady] = useState(false);
     const [displayFontSize, setDisplayFontSize] = useState(fontSize);
 
@@ -398,6 +403,43 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         } else {
           fitAddon.fit();
           fitAddon.observeResize();
+          // Belt-and-braces re-fit, watched on the container we render — and deliberately NOT
+          // going through `fit()`: the addon's own observer debounces its fit through
+          // `setTimeout`, and `fit()` itself clears its private `_isResizing` latch through
+          // another one. A page the window manager treats as hidden (headless CI runs the AUT
+          // in an occluded Electron window) throttles those timers indefinitely, so the latch
+          // set by the mount-time fit never clears and every later fit() returns immediately —
+          // the GhosttyTerminalShrink CI failure: container shrank to 300px, canvas frozen at
+          // its fitted width, every fit() a no-op. Proposing the dimensions and resizing
+          // through the public API sidesteps the latch; both self-guard on unchanged dims.
+          // ResizeObserver callbacks run in the rendering steps, not on timers, so this fires
+          // where the addon's timer-based path does not.
+          const refit = (): boolean => {
+            const addon = fitAddonRef.current;
+            const term = termRef.current;
+            if (!addon || !term) return true;
+            const proposed = addon.proposeDimensions();
+            // `getMetrics()` can transiently return nothing (it measures the live canvas) —
+            // report false so the frame retry picks it up; the RO only fires while the size
+            // actually changes, so a skipped proposal would otherwise be dropped for good.
+            if (!proposed) return false;
+            if (proposed.cols !== term.cols || proposed.rows !== term.rows) {
+              term.resize(proposed.cols, proposed.rows);
+            }
+            return true;
+          };
+          let refitFrames = 0;
+          const refitWithRetry = () => {
+            if (refit() || refitFrames >= 30) return;
+            refitFrames++;
+            refitRafRef.current = requestAnimationFrame(refitWithRetry);
+          };
+          resizeObserverRef.current = new ResizeObserver(() => {
+            cancelAnimationFrame(refitRafRef.current);
+            refitFrames = 0;
+            refitWithRetry();
+          });
+          resizeObserverRef.current.observe(containerRef.current);
         }
 
         // Proactively report the size on mount so the PTY is resized to match the screen
@@ -428,6 +470,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
       return () => {
         isMounted = false;
+        cancelAnimationFrame(refitRafRef.current);
+        resizeObserverRef.current?.disconnect();
+        resizeObserverRef.current = null;
         fitAddonRef.current?.dispose();
         fitAddonRef.current = null;
         disposablesRef.current.forEach((d) => d.dispose());

@@ -50,17 +50,7 @@ fn is_executable_file(p: &Path) -> bool {
 /// Locate the real host `claude` as an absolute path: prefer `~/.local/bin/claude` (the canonical
 /// Claude Code install), then scan `$PATH` skipping wrapper-shim dirs. `None` if none is found.
 fn find_real_claude_on_host() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("HOME") {
-        let candidate = PathBuf::from(home).join(".local/bin/claude");
-        if is_executable_file(&candidate) {
-            return Some(candidate);
-        }
-    }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .filter(|d| !d.as_os_str().is_empty() && !is_wrapper_shim_dir(d))
-        .map(|d| d.join("claude"))
-        .find(|c| is_executable_file(c))
+    find_real_harness_on_host("claude")
 }
 
 /// Whether the `claude` binary is taken from an explicit override or must be auto-resolved.
@@ -126,6 +116,21 @@ pub fn resolve_claude_binary_path(config: &DaemonConfig) -> String {
             None => configured.to_string(),
         },
     }
+}
+
+/// A configured harness binary taken as named when it is already a path (contains `/`); a bare
+/// name resolved on the host through `find`, falling back to the name itself when nothing is found
+/// (the spawner's error then names it). Pure apart from `find`, so the precedence is unit-testable.
+pub fn resolve_harness_binary_name(
+    configured: String,
+    find: impl Fn(&str) -> Option<PathBuf>,
+) -> String {
+    if configured.contains('/') {
+        return configured;
+    }
+    find(&configured)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(configured)
 }
 
 /// Claude Code CLI session configuration. Loaded from daemon YAML under `claude_cli:`.
@@ -235,13 +240,18 @@ pub struct CursorCliConfig {
 /// Environment variable that overrides the resolved cursor `agent` binary path (highest priority).
 pub const CURSOR_BINARY_ENV: &str = "TDDY_CURSOR_AGENT";
 
-/// Locate the real cursor `agent` binary as an absolute path, mirroring [`find_real_claude_on_host`]
-/// but injectable: prefer `<home>/.local/bin/agent`, then scan `path_dirs` skipping wrapper-shim
-/// dirs. `None` if none is found. The home and search dirs are parameters (not read from env) so the
-/// resolution logic is unit-testable.
-pub(crate) fn find_real_agent_in(home: Option<&Path>, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+/// Locate a harness binary as an absolute path, injectable: prefer `<home>/.local/bin/<name>` (the
+/// common user-local install), then scan `path_dirs` skipping wrapper-shim dirs. `None` if none is
+/// found. The home and search dirs are parameters (not read from env) so the resolution logic is
+/// unit-testable. `find_real_claude_on_host` and the cursor resolver delegate to this with their
+/// own binary names.
+pub(crate) fn find_real_harness_in(
+    name: &str,
+    home: Option<&Path>,
+    path_dirs: &[PathBuf],
+) -> Option<PathBuf> {
     if let Some(home) = home {
-        let candidate = home.join(".local/bin/agent");
+        let candidate = home.join(".local/bin").join(name);
         if is_executable_file(&candidate) {
             return Some(candidate);
         }
@@ -249,19 +259,20 @@ pub(crate) fn find_real_agent_in(home: Option<&Path>, path_dirs: &[PathBuf]) -> 
     path_dirs
         .iter()
         .filter(|d| !d.as_os_str().is_empty() && !is_wrapper_shim_dir(d))
-        .map(|d| d.join("agent"))
+        .map(|d| d.join(name))
         .find(|c| is_executable_file(c))
 }
 
-/// Locate the real host cursor `agent` as an absolute path: prefer `~/.local/bin/agent`, then scan
-/// `$PATH` skipping wrapper-shim dirs. `None` if none is found. Env-reading wrapper around
-/// [`find_real_agent_in`], mirroring [`find_real_claude_on_host`].
-fn find_real_agent_on_host() -> Option<PathBuf> {
+/// Locate a registered CLI harness's binary (e.g. `muse`, `opencode`) on the host as an absolute
+/// path: prefer `~/.local/bin/<name>`, then scan `$PATH` skipping wrapper-shim dirs. `None` if none
+/// is found. This is the resolution a bare harness name needs on a systemd daemon, whose own `PATH`
+/// is minimal and never holds the user-local install dirs.
+pub fn find_real_harness_on_host(name: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
-    find_real_agent_in(home.as_deref(), &path_dirs)
+    find_real_harness_in(name, home.as_deref(), &path_dirs)
 }
 
 /// Whether the cursor `agent` binary is taken from an explicit override or must be auto-resolved.
@@ -308,7 +319,7 @@ pub fn resolve_cursor_binary_path(config: &DaemonConfig) -> String {
     let env_override = std::env::var(CURSOR_BINARY_ENV).ok();
     match choose_cursor_binary(env_override.as_deref(), configured) {
         CursorBinaryChoice::Explicit(p) => canonicalize_if_path(&p),
-        CursorBinaryChoice::Auto => match find_real_agent_on_host() {
+        CursorBinaryChoice::Auto => match find_real_harness_on_host("agent") {
             Some(real) => canonicalize_if_path(&real.to_string_lossy()),
             None => configured.to_string(),
         },

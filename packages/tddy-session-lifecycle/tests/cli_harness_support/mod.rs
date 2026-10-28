@@ -14,17 +14,30 @@ use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-/// The session token the host accepts, as the user `testuser`.
+/// The session token the host accepts, as the current OS user.
 pub const VALID_TOKEN: &str = "valid-token";
+
+/// The OS user the test process runs as — a real, resolvable user (same-user, so the harness spawn
+/// needs no privilege drop). Fixtures use this rather than a fabricated name so impersonation
+/// resolves during the spawn, as the claude-cli acceptance suite has always done: a generic CLI
+/// harness launch resolves the session's OS user for the child's `HOME`/`PATH`.
+pub fn current_os_user() -> String {
+    let pw = unsafe { libc::getpwuid(libc::getuid()) };
+    assert!(!pw.is_null(), "current uid must resolve to a passwd entry");
+    unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }
+        .to_string_lossy()
+        .into_owned()
+}
 
 /// A daemon config whose `session_type` harness runs `binary`.
 pub fn daemon_config_with_cli_harness_binary(session_type: &str, binary: &Path) -> DaemonConfig {
     let dir = tempfile::tempdir().unwrap();
+    let user = current_os_user();
     let yaml = format!(
         r#"
 users:
-  - github_user: "testuser"
-    os_user: "testuser"
+  - github_user: "{user}"
+    os_user: "{user}"
 allowed_tools:
   - path: /bin/true
     label: true
@@ -48,8 +61,9 @@ pub fn session_host(
     let tddy_data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
+    let resolved_user = current_os_user();
     let user_resolver: UserResolver =
-        Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
+        Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
     DaemonSessionHost::new(
         config.clone(),
         sessions_base_resolver,

@@ -305,14 +305,14 @@ mod sections;
 mod timings;
 #[cfg(test)]
 use agent_cli::{
-    choose_claude_binary, choose_cursor_binary, is_wrapper_shim_dir, ClaudeBinaryChoice,
-    CursorBinaryChoice,
+    choose_claude_binary, choose_cursor_binary, find_real_harness_in, is_wrapper_shim_dir,
+    ClaudeBinaryChoice, CursorBinaryChoice,
 };
 pub use agent_cli::{
-    resolve_claude_binary_path, resolve_claude_home_dir, resolve_cursor_binary_path,
-    resolve_cursor_cli_daemon_url, resolve_cursor_cli_tddy_tools_path, resolve_cursor_home_dir,
-    ClaudeCliConfig, CursorCliConfig, CLAUDE_BINARY_ENV, CLAUDE_FULLSCREEN_ENV, CLAUDE_HOME_ENV,
-    CURSOR_BINARY_ENV, CURSOR_HOME_ENV,
+    find_real_harness_on_host, resolve_claude_binary_path, resolve_claude_home_dir,
+    resolve_cursor_binary_path, resolve_cursor_cli_daemon_url, resolve_cursor_cli_tddy_tools_path,
+    resolve_cursor_home_dir, resolve_harness_binary_name, ClaudeCliConfig, CursorCliConfig,
+    CLAUDE_BINARY_ENV, CLAUDE_FULLSCREEN_ENV, CLAUDE_HOME_ENV, CURSOR_BINARY_ENV, CURSOR_HOME_ENV,
 };
 
 use crate::config::access::AllowedTool;
@@ -1211,7 +1211,7 @@ mod cursor_cli_config_tests {
         }
 
         // When — resolving the real host agent for that home, with no extra PATH dirs
-        let resolved = agent_cli::find_real_agent_in(Some(home.path()), &[]);
+        let resolved = agent_cli::find_real_harness_in("agent", Some(home.path()), &[]);
 
         // Then — it is located there, as the absolute path under ~/.local/bin
         assert_eq!(resolved.as_deref(), Some(agent.as_path()));
@@ -1233,11 +1233,63 @@ mod cursor_cli_config_tests {
         }
 
         // When — resolving with that dir on the search path
-        let resolved =
-            agent_cli::find_real_agent_in(Some(home.path()), &[path_dir.path().to_path_buf()]);
+        let resolved = agent_cli::find_real_harness_in(
+            "agent",
+            Some(home.path()),
+            &[path_dir.path().to_path_buf()],
+        );
 
         // Then — the PATH-dir binary is returned as an absolute path
         assert_eq!(resolved.as_deref(), Some(agent.as_path()));
+    }
+
+    /// A harness binary that is neither `agent` nor `claude` (e.g. `muse`) resolves the same way:
+    /// the user's `~/.local/bin` first, then the supplied PATH dirs — the resolution a bare
+    /// default name needs on a systemd daemon, whose own `PATH` never holds the user-local dirs.
+    #[test]
+    fn find_real_harness_resolves_any_bare_harness_name() {
+        // Given — a home directory whose ~/.local/bin holds an executable `muse`
+        let home = tempfile::tempdir().unwrap();
+        let bin_dir = home.path().join(".local/bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let muse = bin_dir.join("muse");
+        std::fs::write(&muse, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&muse, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // When — resolving the harness by its bare name for that home
+        let resolved = find_real_harness_in("muse", Some(home.path()), &[]);
+
+        // Then — it is located there, as the absolute path under ~/.local/bin
+        assert_eq!(resolved.as_deref(), Some(muse.as_path()));
+    }
+
+    /// A configured binary that already names a path is taken verbatim; a bare name goes through
+    /// the host lookup, and a name nothing finds is left bare so the spawner's error names it.
+    #[test]
+    fn harness_binary_resolution_takes_a_path_verbatim_and_resolves_a_bare_name() {
+        // Given — a lookup that finds the bare name under a user's local bin dir
+        let find = |name: &str| Some(PathBuf::from("/home/u/.local/bin").join(name));
+
+        // When — resolving a configured path and a bare name
+        // Then — the path passes through; the bare name resolves
+        assert_eq!(
+            resolve_harness_binary_name("/opt/muse/bin/muse".to_string(), find),
+            "/opt/muse/bin/muse"
+        );
+        assert_eq!(
+            resolve_harness_binary_name("muse".to_string(), find),
+            "/home/u/.local/bin/muse"
+        );
+
+        // And a bare name nothing finds is left as it is named
+        assert_eq!(
+            resolve_harness_binary_name("muse".to_string(), |_| None),
+            "muse"
+        );
     }
 }
 
